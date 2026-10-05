@@ -1,3 +1,4 @@
+import { collectBoundedText, limitBytes } from "@knpkv/bounded-io"
 import { Effect, Fiber, Schema, Stream } from "effect"
 import type * as Duration from "effect/Duration"
 import type * as FileSystem from "effect/FileSystem"
@@ -12,11 +13,6 @@ import {
   sanitizeDiagnostic,
   transportToAiError
 } from "./errors.js"
-
-interface ByteAccumulator {
-  readonly bytes: number
-  readonly chunks: ReadonlyArray<Uint8Array>
-}
 
 interface RunCodexOptions {
   readonly args: ReadonlyArray<string>
@@ -42,26 +38,8 @@ const collectBounded = (
   maximumBytes: number,
   streamName: "stderr" | "stdout"
 ): Effect.Effect<string, PlatformError.PlatformError | CodexTransportError> =>
-  Stream.runFoldEffect(
-    stream,
-    (): ByteAccumulator => ({ bytes: 0, chunks: [] }),
-    (accumulator, chunk) => {
-      const bytes = accumulator.bytes + chunk.byteLength
-      if (bytes > maximumBytes) {
-        return Effect.fail(outputLimitError(maximumBytes, streamName))
-      }
-      return Effect.succeed({
-        bytes,
-        chunks: [...accumulator.chunks, chunk]
-      })
-    }
-  ).pipe(
-    Effect.flatMap((accumulator) =>
-      Stream.fromIterable(accumulator.chunks).pipe(
-        Stream.decodeText(),
-        Stream.mkString
-      )
-    )
+  collectBoundedText(stream, maximumBytes).pipe(
+    Effect.catchTag("ByteLimitExceeded", () => Effect.fail(outputLimitError(maximumBytes, streamName)))
   )
 
 const transportError = (
@@ -174,16 +152,8 @@ const boundedStdout = (
   stdout: Stream.Stream<Uint8Array, PlatformError.PlatformError>,
   maximumBytes: number
 ): Stream.Stream<Uint8Array, PlatformError.PlatformError | CodexTransportError> =>
-  stdout.pipe(
-    Stream.mapAccumEffect(
-      () => 0,
-      (bytes, chunk) => {
-        const nextBytes = bytes + chunk.byteLength
-        if (nextBytes > maximumBytes) return Effect.fail(outputLimitError(maximumBytes, "stdout"))
-        const result: readonly [state: number, values: ReadonlyArray<Uint8Array>] = [nextBytes, [chunk]]
-        return Effect.succeed(result)
-      }
-    )
+  limitBytes(stdout, maximumBytes).pipe(
+    Stream.catchTag("ByteLimitExceeded", () => Stream.fail(outputLimitError(maximumBytes, "stdout")))
   )
 
 const processError = (cause: unknown): CodexTransportError =>

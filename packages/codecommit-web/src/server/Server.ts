@@ -19,8 +19,7 @@ import {
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
 import { Config, Deferred, Effect, Fiber, Layer, Option, Predicate, Ref, Stream } from "effect"
-import * as FileSystem from "effect/FileSystem"
-import { Etag, FetchHttpClient, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import * as Path from "effect/Path"
 import * as Stdio from "effect/Stdio"
@@ -43,80 +42,11 @@ import { autoRefreshLayer, sandboxStartupLayer } from "./internal/BackgroundWork
 import { makeOwnerSession, ownerSessionAuthLayer } from "./internal/OwnerSession.js"
 import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
 import { resolveCodeCommitPublicOriginForBind } from "./internal/PublicOrigin.js"
+import { staticClient } from "./internal/StaticClient.js"
 import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
 
 export { loopbackOrigin, requireLoopbackHostname } from "@knpkv/browser-pairing/owner-session"
 export { makeOwnerSession } from "./internal/OwnerSession.js"
-
-// MIME types for common files
-interface MimeTypeLookup extends Readonly<Record<string, string>> {}
-
-const mimeTypes: MimeTypeLookup = {
-  ".html": "text/html",
-  ".js": "application/javascript",
-  ".css": "text/css",
-  ".json": "application/json",
-  ".png": "image/png",
-  ".jpg": "image/jpeg",
-  ".svg": "image/svg+xml",
-  ".ico": "image/x-icon",
-  ".wasm": "application/wasm",
-  ".map": "application/json",
-  ".woff2": "font/woff2",
-  ".ttf": "font/ttf"
-}
-
-// Static file serving — async Effect FileSystem, no sync node:fs
-const serveStatic = Effect.gen(function*() {
-  const req = yield* HttpServerRequest.HttpServerRequest
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
-
-  const url = new URL(req.url, "http://localhost")
-  let filePath = decodeURIComponent(url.pathname)
-
-  // Remove leading slash
-  if (filePath.startsWith("/")) {
-    filePath = filePath.slice(1)
-  }
-  if (filePath === "") {
-    filePath = "index.html"
-  }
-
-  const __dirname = yield* path.fromFileUrl(new URL(".", import.meta.url))
-  const staticDir = path.resolve(__dirname, "../../dist/client")
-  const fullPath = path.resolve(staticDir, filePath)
-
-  // Path traversal guard — resolved path must stay within staticDir
-  if (!fullPath.startsWith(staticDir)) {
-    return HttpServerResponse.text("Forbidden", { status: 403 })
-  }
-
-  if (yield* fileSystem.exists(fullPath)) {
-    const stat = yield* fileSystem.stat(fullPath)
-    if (stat.type === "File") {
-      const content = yield* fileSystem.readFile(fullPath)
-      const ext = path.extname(fullPath)
-      const contentType = mimeTypes[ext] || "application/octet-stream"
-      return HttpServerResponse.uint8Array(content, {
-        status: 200,
-        headers: { "content-type": contentType }
-      })
-    }
-  }
-
-  // SPA Fallback
-  const index = path.join(staticDir, "index.html")
-  if (yield* fileSystem.exists(index)) {
-    const content = yield* fileSystem.readFile(index)
-    return HttpServerResponse.uint8Array(content, {
-      status: 200,
-      headers: { "content-type": "text/html" }
-    })
-  }
-
-  return HttpServerResponse.text("Not Found", { status: 404 })
-})
 
 // API handlers layer
 const HandlersLive = Layer.mergeAll(
@@ -296,8 +226,11 @@ const ApiLive = Layer.mergeAll(
   Layer.provide(FetchHttpClient.layer)
 )
 
-// Static file router - catches all non-API routes
-const StaticRouter = HttpRouter.use((router) => router.add("GET", "/*", serveStatic))
+/** The client `vite build` writes next to the compiled server. */
+const StaticRouter = Layer.unwrap(Effect.gen(function*() {
+  const path = yield* Path.Path
+  return staticClient(yield* path.fromFileUrl(new URL("../../dist/client", import.meta.url)))
+}))
 
 const AllowedOrigins = Config.String("ALLOWED_ORIGINS").pipe(
   Config.map((s) => s.split(",")),

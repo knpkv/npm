@@ -101,33 +101,22 @@ Every handler gets its services through layers — no global state, no singleton
 
 ## Static File Serving
 
-Uses `@effect/platform FileSystem` (async, no sync `node:fs`):
+Effect's `HttpStaticServer` mounts the built client; it owns the traversal guard, MIME types,
+ETag/304 and byte ranges:
 
 ```typescript
-const serveStatic = Effect.gen(function* () {
-  const req = yield* HttpServerRequest.HttpServerRequest
-  const fileSystem = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
+export const staticClient = (root: string) => HttpStaticServer.layer({ cacheControl: "no-cache", root, spa: true })
 
-  const url = new URL(req.url, "http://localhost")
-  let filePath = url.pathname
-  if (filePath.includes("..")) return HttpServerResponse.text("Forbidden", { status: 403 })
-
-  const fullPath = path.join(staticDir, filePath)
-  if (yield* fileSystem.exists(fullPath)) {
-    const content = yield* fileSystem.readFile(fullPath)
-    const ext = path.extname(fullPath)
-    return HttpServerResponse.uint8Array(content, { status: 200, headers: { "content-type": mimeTypes[ext] } })
-  }
-  // SPA fallback → index.html
-  const index = path.join(staticDir, "index.html")
-  if (yield* fileSystem.exists(index)) {
-    const content = yield* fileSystem.readFile(index)
-    return HttpServerResponse.uint8Array(content, { status: 200, headers: { "content-type": "text/html" } })
-  }
-  return HttpServerResponse.text("Not Found", { status: 404 })
-})
+const StaticRouter = Layer.unwrap(
+  Effect.gen(function* () {
+    const path = yield* Path.Path
+    return staticClient(yield* path.fromFileUrl(new URL("../../dist/client", import.meta.url)))
+  })
+)
 ```
+
+`spa: true` falls back to `index.html` only for extensionless HTML navigations; `no-cache` makes the
+browser revalidate `index.html` after a rebuild instead of trusting a heuristic freshness window.
 
 ## Server-Sent Events (SSE)
 

@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/jcf-web",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Week view over Jira and Clockify that fills the gaps a Coding Agent's sessions evidence",
   "license": "MIT",
   "author": "knpkv",

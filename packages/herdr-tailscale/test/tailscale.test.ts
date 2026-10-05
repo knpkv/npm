@@ -23,6 +23,23 @@ const node = (
 })
 
 describe("Tailscale fleet boundary", () => {
+  it.effect("refuses output over 1 MiB with an output_limit error", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-tailscale-overflow-test-"))
+    const command = join(root, "tailscale-test")
+    writeFileSync(command, "#!/bin/sh\nhead -c 1048577 /dev/zero\n", { mode: 0o700 })
+    return Effect.gen(function*() {
+      const client = yield* make(command)
+      const result = yield* Effect.result(client.ipv4)
+      expect(result).toMatchObject({
+        failure: { _tag: "HerdrTailscale.CommandError", operation: expect.stringMatching(/\.output_limit$/) }
+      })
+      if (Result.isFailure(result)) expect(result.failure.cause).toBeGreaterThan(1024 * 1024)
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("normalizes a valid null peer map to an empty fleet", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-tailscale-no-peers-test-"))
     const command = join(root, "tailscale-test")

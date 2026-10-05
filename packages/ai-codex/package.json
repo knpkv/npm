@@ -55,5 +55,8 @@
     "codex",
     "agent",
     "cli"
-  ]
+  ],
+  "dependencies": {
+    "@knpkv/bounded-io": "workspace:^"
+  }
 }

@@ -1,3 +1,4 @@
+import { limitBytes } from "@knpkv/bounded-io"
 import { Effect, Schema, Stream } from "effect"
 import { ClaudeFailureCause, invalidOutput, transportFailure } from "./errors.js"
 
@@ -29,23 +30,20 @@ export const collectActivity = Effect.fn("ClaudeCli.collectActivity")(function*(
   method: string,
   report: (activity: ClaudeActivity) => Effect.Effect<void>
 ) {
-  let bytes = 0
   let result = ""
   const structuredBlocks = new Set<number>()
-  yield* source.pipe(
-    Stream.mapError((cause) => transportFailure("process", "Failed reading Claude CLI stdout", cause)),
-    Stream.mapEffect((chunk) => {
-      bytes += chunk.byteLength
-      return bytes > maximumBytes
-        ? Effect.fail(
-          transportFailure(
-            "process",
-            `Claude CLI stdout exceeded ${maximumBytes} bytes for ${method}`,
-            new ClaudeFailureCause({ reason: "stdout-limit-exceeded" })
-          )
+  yield* limitBytes(
+    source.pipe(Stream.mapError((cause) => transportFailure("process", "Failed reading Claude CLI stdout", cause))),
+    maximumBytes
+  ).pipe(
+    Stream.catchTag("ByteLimitExceeded", () =>
+      Stream.fail(
+        transportFailure(
+          "process",
+          `Claude CLI stdout exceeded ${maximumBytes} bytes for ${method}`,
+          new ClaudeFailureCause({ reason: "stdout-limit-exceeded" })
         )
-        : Effect.succeed(chunk)
-    }),
+      )),
     Stream.decodeText(),
     Stream.splitLines,
     Stream.filter((line) => line.trim().length > 0),

@@ -54,5 +54,8 @@
     "ai",
     "claude",
     "cli"
-  ]
+  ],
+  "dependencies": {
+    "@knpkv/bounded-io": "workspace:^"
+  }
 }

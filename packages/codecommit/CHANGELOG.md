@@ -1,5 +1,16 @@
 # @knpkv/codecommit
 
+## 0.13.1
+
+### Patch Changes
+
+- [#466](https://github.com/knpkv/npm/pull/466) [`f93ed3f`](https://github.com/knpkv/npm/commit/f93ed3f800ff7633c58389b27d3d6e99ff553fd0) Thanks [@konopkov](https://github.com/konopkov)! - Use the shared `@knpkv/browser-pairing/owner-session`. `makeOwnerSessionSecrets`, `ownerSessionOrigin`, `ownerSessionUrl`, `ownerSessionUrlForOrigin`, `requireLoopbackOrigin` and the secrets contract are replaced by `makeOwnerSession`, `loopbackOrigin` and `requireLoopbackHostname`; `makeServer` takes an optional `publicOrigin` and its `ready` resolves with the bootstrap URL.
+
+  BEHAVIOUR: API reads now apply Fetch Metadata, as jcf-web and agent-usage already did — a browser read marked cross-site, or same-site/`none` without the bound Origin, gets 403. Same-origin page requests and explicit clients without Fetch Metadata are unaffected.
+
+- Updated dependencies [[`f93ed3f`](https://github.com/knpkv/npm/commit/f93ed3f800ff7633c58389b27d3d6e99ff553fd0)]:
+  - @knpkv/codecommit-web@0.18.0
+
 ## 0.13.0
 
 ### Minor Changes

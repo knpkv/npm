@@ -1,3 +1,4 @@
+import { collectBoundedText } from "@knpkv/bounded-io"
 import { Cause, Effect, Predicate, Stream } from "effect"
 import type { Duration } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -22,43 +23,26 @@ interface RunOptions {
   readonly timeout: Duration.Input
 }
 
-interface CollectedBytes {
-  readonly chunks: ReadonlyArray<Uint8Array>
-  readonly size: number
-}
-
 const collectBounded = (
   source: Stream.Stream<Uint8Array, unknown>,
   maximumBytes: number,
   label: string,
   method: string
 ): Effect.Effect<string, ClaudeTransportError> =>
-  source.pipe(
-    Stream.mapError((cause) =>
-      transportFailure("process", `Failed while reading Claude CLI ${label} for ${method}`, cause)
-    ),
-    Stream.runFoldEffect(
-      (): CollectedBytes => ({ chunks: [], size: 0 }),
-      (collected, chunk) => {
-        const size = collected.size + chunk.byteLength
-        return size > maximumBytes
-          ? Effect.fail(transportFailure(
-            "process",
-            `Claude CLI ${label} exceeded ${maximumBytes} bytes for ${method}`,
-            new ClaudeFailureCause({ reason: `${label}-limit-exceeded` })
-          ))
-          : Effect.succeed({ chunks: [...collected.chunks, chunk], size })
-      }
-    ),
-    Effect.flatMap((collected) =>
-      Stream.fromIterable(collected.chunks).pipe(
-        Stream.decodeText(),
-        Stream.mkString,
-        Effect.mapError((cause) =>
-          transportFailure("process", `Claude CLI ${label} was not valid UTF-8 for ${method}`, cause)
-        )
+  collectBoundedText(
+    source.pipe(
+      Stream.mapError((cause) =>
+        transportFailure("process", `Failed while reading Claude CLI ${label} for ${method}`, cause)
       )
-    )
+    ),
+    maximumBytes
+  ).pipe(
+    Effect.catchTag("ByteLimitExceeded", () =>
+      Effect.fail(transportFailure(
+        "process",
+        `Claude CLI ${label} exceeded ${maximumBytes} bytes for ${method}`,
+        new ClaudeFailureCause({ reason: `${label}-limit-exceeded` })
+      )))
   )
 
 const redactDiagnostic = (diagnostic: string, cwd: string): string => {

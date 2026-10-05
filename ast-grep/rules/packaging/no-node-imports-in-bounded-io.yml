@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-node-imports-in-bounded-io
+language: tsx
+severity: error
+message: "@knpkv/bounded-io runs in browser bundles; it must not import Node built-in modules"
+
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^["'']node:|^["''](assert|async_hooks|buffer|child_process|cluster|console|constants|crypto|dgram|diagnostics_channel|dns|domain|events|fs|http|http2|https|inspector|module|net|os|path|perf_hooks|process|punycode|querystring|readline|repl|stream|string_decoder|sys|timers|tls|trace_events|tty|url|util|v8|vm|wasi|worker_threads|zlib)(/[^"'']*)?["'']$'
+    - kind: export_statement
+      has:
+        field: source
+        regex: '^["'']node:|^["''](assert|async_hooks|buffer|child_process|cluster|console|constants|crypto|dgram|diagnostics_channel|dns|domain|events|fs|http|http2|https|inspector|module|net|os|path|perf_hooks|process|punycode|querystring|readline|repl|stream|string_decoder|sys|timers|tls|trace_events|tty|url|util|v8|vm|wasi|worker_threads|zlib)(/[^"'']*)?["'']$'
+    - pattern: import($SOURCE)
+      has:
+        stopBy: end
+        kind: string
+        regex: '^["'']node:|^["''](assert|async_hooks|buffer|child_process|cluster|console|constants|crypto|dgram|diagnostics_channel|dns|domain|events|fs|http|http2|https|inspector|module|net|os|path|perf_hooks|process|punycode|querystring|readline|repl|stream|string_decoder|sys|timers|tls|trace_events|tty|url|util|v8|vm|wasi|worker_threads|zlib)(/[^"'']*)?["'']$'
+    - pattern: require($SOURCE)
+      has:
+        stopBy: end
+        kind: string
+        regex: '^["'']node:|^["''](assert|async_hooks|buffer|child_process|cluster|console|constants|crypto|dgram|diagnostics_channel|dns|domain|events|fs|http|http2|https|inspector|module|net|os|path|perf_hooks|process|punycode|querystring|readline|repl|stream|string_decoder|sys|timers|tls|trace_events|tty|url|util|v8|vm|wasi|worker_threads|zlib)(/[^"'']*)?["'']$'
+
+files:
+  - "packages/bounded-io/src/**/*.ts"
+  - "packages/bounded-io/src/**/*.tsx"
+
+note: |
+  herdr-fleet/response, which reads HTTP bodies through bounded-io, is bundled
+  into the herdr-connect and herdr-approvals browser clients.
