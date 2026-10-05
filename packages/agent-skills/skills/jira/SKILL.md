@@ -21,6 +21,7 @@ Use the `jira` binary for Jira Cloud issue export and release-version workflows.
 ```bash
 jira auth status
 jira auth create
+jira auth manage
 jira auth configure --client-id <id> --client-secret <secret>
 jira auth login
 jira auth login --site https://example.atlassian.net

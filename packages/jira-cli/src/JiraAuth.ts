@@ -17,7 +17,7 @@
  * @module
  */
 import type { OAuthError } from "@knpkv/atlassian-common/auth"
-import { makeAtlassianCliAuth, NodeCliAuthLive } from "@knpkv/atlassian-common/cli-auth"
+import { type AtlassianCliDescriptor, makeAtlassianCliAuth, NodeCliAuthLive } from "@knpkv/atlassian-common/cli-auth"
 import type {
   AuthProfile,
   FileSystemError,
@@ -165,6 +165,13 @@ export class JiraAuth extends Context.Service<
   JiraAuthService
 >()("@knpkv/jira-cli/JiraAuth") {}
 
+/** Who the Jira CLI is: shared by its auth and its `auth` commands, so both name the same scopes. */
+export const jiraCliDescriptor: AtlassianCliDescriptor = {
+  commandName: "jira",
+  productName: "Jira",
+  scopes: JIRA_CLI_SCOPES
+}
+
 /**
  * Layer for JiraAuth service.
  *
@@ -173,10 +180,8 @@ export class JiraAuth extends Context.Service<
 export const layer = Layer.effect(
   JiraAuth,
   makeAtlassianCliAuth({
+    ...jiraCliDescriptor,
     toolName: "jira-cli",
-    commandName: "jira",
-    productName: "Jira",
-    scopes: JIRA_CLI_SCOPES,
     authMissing
   })
 ).pipe(Layer.provide(NodeCliAuthLive))

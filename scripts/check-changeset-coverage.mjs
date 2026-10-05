@@ -4689,7 +4689,12 @@ const releaseBearingPackages = (paths, records) =>
   records.filter(
     ({ changedReleaseManifest, directory, publishable }) =>
       publishable &&
-      (changedReleaseManifest || [...paths].some((changedPath) => changedPath.startsWith(`${directory}/src/`)))
+      (changedReleaseManifest ||
+        [...paths].some(
+          (changedPath) =>
+            changedPath.startsWith(`${directory}/src/`) ||
+            (changedPath.startsWith(`${directory}/skills/`) && !isExcludedSourcePath(changedPath))
+        ))
   )
 
 const validateCoverage = ({ changedChangesetNames, paths, records }) =>
@@ -4738,6 +4743,35 @@ const runSelfTest = () => {
       records
     }),
     ["@fixture/public"]
+  )
+  assert.deepEqual(
+    validateCoverage({
+      changedChangesetNames: new Set(),
+      paths: new Set(["packages/public/skills/jira/SKILL.md"]),
+      records
+    }),
+    ["@fixture/public"]
+  )
+  assert.deepEqual(
+    validateCoverage({
+      changedChangesetNames: new Set(["@fixture/public"]),
+      paths: new Set(["packages/public/skills/jira/SKILL.md"]),
+      records
+    }),
+    []
+  )
+  assert.deepEqual(
+    validateCoverage({
+      changedChangesetNames: new Set(),
+      paths: new Set([
+        "packages/private/skills/jira/SKILL.md",
+        "packages/public/skills/generated/jira/SKILL.md",
+        "packages/public/skills/vendor/jira/SKILL.md",
+        "packages/public/skills/node_modules/jira/SKILL.md"
+      ]),
+      records
+    }),
+    []
   )
   // The path set deliberately carries deleted paths too; a deleted public source
   // file in a surviving package must still be covered.

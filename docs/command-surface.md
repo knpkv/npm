@@ -37,6 +37,7 @@ jira issue search --by-version "1.0.0" --project PROJ
 jira issue attachment upload PROJ-123 ./evidence.svg --document ./PROJ-123.md
 
 jira auth status
+jira auth manage
 jira auth profiles
 jira auth use <profile>
 jira auth remove <profile>
@@ -63,6 +64,7 @@ Key changes:
 confluence workspace clone --root-page-id <page-id> --base-url https://example.atlassian.net
 
 confluence auth status
+confluence auth manage
 confluence auth profiles
 confluence auth use <profile>
 confluence auth remove <profile>

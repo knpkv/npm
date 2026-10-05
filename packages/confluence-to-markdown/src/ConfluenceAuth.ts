@@ -12,7 +12,7 @@
  * @module
  */
 import { CONFLUENCE_FOLDER_SCOPES, CONFLUENCE_SCOPES, type OAuthError } from "@knpkv/atlassian-common/auth"
-import { makeAtlassianCliAuth, NodeCliAuthLive } from "@knpkv/atlassian-common/cli-auth"
+import { type AtlassianCliDescriptor, makeAtlassianCliAuth, NodeCliAuthLive } from "@knpkv/atlassian-common/cli-auth"
 import {
   type AuthProfile,
   FileSystemError,
@@ -202,6 +202,13 @@ export class ConfluenceAuth extends Context.Service<
   ConfluenceAuthService
 >()("@knpkv/confluence-to-markdown/ConfluenceAuth") {}
 
+/** Who the Confluence CLI is: shared by its auth and its `auth` commands, so both name the same scopes. */
+export const confluenceCliDescriptor: AtlassianCliDescriptor = {
+  commandName: "confluence",
+  productName: "Confluence",
+  scopes: CLI_LOGIN_SCOPES
+}
+
 /**
  * Layer for ConfluenceAuth service.
  *
@@ -215,10 +222,8 @@ export const layer: Layer.Layer<
   ConfluenceAuth,
   Effect.map(
     makeAtlassianCliAuth({
+      ...confluenceCliDescriptor,
       toolName: "confluence-to-markdown",
-      commandName: "confluence",
-      productName: "Confluence",
-      scopes: CLI_LOGIN_SCOPES,
       authMissing: () => new AuthMissingError(),
       legacyOAuthConfig: loadLegacyOAuthConfig()
     }),
