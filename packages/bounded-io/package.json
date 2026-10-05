@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/bounded-io",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Byte-capped Effect streams: fail fast when a stream exceeds its byte budget",
   "license": "MIT",
   "repository": {

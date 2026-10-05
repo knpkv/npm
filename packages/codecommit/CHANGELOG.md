@@ -1,5 +1,16 @@
 # @knpkv/codecommit
 
+## 0.13.2
+
+### Patch Changes
+
+- [#471](https://github.com/knpkv/npm/pull/471) [`b71c28e`](https://github.com/knpkv/npm/commit/b71c28ed11ecd61a9670fc7c9e5121b5fbda0ecf) Thanks [@konopkov](https://github.com/konopkov)! - The remaining byte-capped readers (request bodies, CodePipeline artifacts, PR review source and sandbox output, local Git blobs and Relay patches) now use `@knpkv/bounded-io`. Limits and errors are unchanged; collection is linear instead of quadratic where it was not already.
+- Updated dependencies [[`d12c336`](https://github.com/knpkv/npm/commit/d12c3364e56abb7cfd32aa693c5406788a67e3f5), [`0fd9544`](https://github.com/knpkv/npm/commit/0fd95449194e83de61109d432224acc043f57964), [`0fef7fb`](https://github.com/knpkv/npm/commit/0fef7fb84162380cf1f713ed40e98a5ccbdde804)]:
+  - @knpkv/agent-skills@0.3.3
+  - @knpkv/bounded-io@0.2.0
+  - @knpkv/ai-codex@0.5.1
+  - @knpkv/codecommit-web@0.19.0
+
 ## 0.13.1
 
 ### Patch Changes
