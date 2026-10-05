@@ -4,7 +4,8 @@ import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { Effect, Layer, Ref } from "effect"
 import { Etag, HttpClient, HttpPlatform, HttpRouter, HttpServer } from "effect/http"
 import { createServer } from "node:http"
-import { type MachineRange, type SessionGroup, UsageStore } from "../src/core/Store.js"
+import { type MachineRange, type SessionGroup, type SessionRange, UsageStore } from "../src/core/Store.js"
+import { MAX_SESSION_RANGE_DAYS } from "../src/server/Handlers.js"
 import { application } from "../src/server/HttpApplication.js"
 import { makeOwnerSession } from "../src/server/OwnerSession.js"
 import { RuntimeState } from "../src/server/Runtime.js"
@@ -12,7 +13,7 @@ import { cookieOf } from "./ownerSessionFixture.js"
 
 /** A store that answers empty and records the ranges it was asked for. */
 const recorded = Ref.makeUnsafe<ReadonlyArray<MachineRange>>([])
-const sessionRanges = Ref.makeUnsafe<ReadonlyArray<MachineRange>>([])
+const sessionRanges = Ref.makeUnsafe<ReadonlyArray<SessionRange>>([])
 const at = Date.parse("2026-09-01T10:00:00Z")
 const sessionGroup = (sessionId: string, agent: "claude" | "codex"): SessionGroup => ({
   sessionId,
@@ -34,10 +35,12 @@ const RecordingStore = Layer.succeed(
     recordObservations: () => Effect.die("unused"),
     usageGroups: () => Effect.succeed([]),
     sessionGroups: (range) =>
-      Effect.as(Ref.update(sessionRanges, (all) => [...all, range]), [
-        sessionGroup("claude-1", "claude"),
-        sessionGroup("codex-1", "codex")
-      ]),
+      Effect.as(
+        Ref.update(sessionRanges, (all) => [...all, range]),
+        [sessionGroup("claude-1", "claude"), sessionGroup("codex-1", "codex")].filter((group) =>
+          range.agent === "all" || group.agent === range.agent
+        )
+      ),
     places: () => Effect.succeed([]),
     limitSnapshots: (range) => Effect.as(Ref.update(recorded, (all) => [...all, range]), []),
     latestBalances: () => Effect.succeed([]),
@@ -97,7 +100,32 @@ describe("sessions handler", () => {
           sessions: [{ agent: "codex", sessionId: "codex-1" }]
         })
         expect(body).toHaveProperty("sessions.length", 1)
-        expect(yield* Ref.get(sessionRanges)).toEqual([{ from: at, to: at + 3_600_000, machine: "host-a" }])
+        expect(yield* Ref.get(sessionRanges)).toEqual([{
+          from: at,
+          to: at + 3_600_000,
+          machine: "host-a",
+          agent: "codex"
+        }])
+      }))
+
+    it.effect("refuses a range longer than the cap before reading the store", () =>
+      Effect.gen(function*() {
+        const client = yield* HttpClient.HttpClient
+        const security = yield* OwnerSession.OwnerSession
+        const day = 86_400_000
+        const before = (yield* Ref.get(sessionRanges)).length
+        const tooLong = yield* client.get(
+          `/api/sessions?from=${at}&to=${at + (MAX_SESSION_RANGE_DAYS + 1) * day}&booking=repo%3Aapp&agent=all`,
+          { headers: { cookie: cookieOf(security) } }
+        )
+        expect(tooLong.status).toBe(400)
+        expect(yield* tooLong.json).toMatchObject({ _tag: "ApiError" })
+        expect((yield* Ref.get(sessionRanges)).length).toBe(before)
+        const longest = yield* client.get(
+          `/api/sessions?from=${at}&to=${at + MAX_SESSION_RANGE_DAYS * day}&booking=repo%3Aapp&agent=all`,
+          { headers: { cookie: cookieOf(security) } }
+        )
+        expect(longest.status).toBe(200)
       }))
   })
 })

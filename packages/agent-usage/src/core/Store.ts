@@ -76,6 +76,11 @@ export interface MachineRange extends Range {
   readonly machine: string
 }
 
+/** A Machine's range, narrowed to one agent's sessions or all of them. */
+export interface SessionRange extends MachineRange {
+  readonly agent: Agent | "all"
+}
+
 /** Usage summed over one 15-minute bucket and every dimension that prices or books it. */
 export const UsageGroup = Schema.Struct({
   bucketStart: Schema.Int,
@@ -265,7 +270,7 @@ export class UsageStore extends Context.Service<UsageStore, {
   ) => Effect.Effect<void, StoreError>
   readonly usageGroups: (range: MachineRange) => Effect.Effect<ReadonlyArray<UsageGroup>, StoreError>
   /** Usage per session in a range, priced and attributed like `usageGroups`. */
-  readonly sessionGroups: (range: MachineRange) => Effect.Effect<ReadonlyArray<SessionGroup>, StoreError>
+  readonly sessionGroups: (range: SessionRange) => Effect.Effect<ReadonlyArray<SessionGroup>, StoreError>
   /** Every distinct branch and working directory ever recorded: what vouches for Known Projects. */
   readonly places: (
     machine: string
@@ -439,7 +444,7 @@ export class UsageStore extends Context.Service<UsageStore, {
         )
       )
 
-      const sessionGroups = Effect.fn("UsageStore.sessionGroups")((range: MachineRange) =>
+      const sessionGroups = Effect.fn("UsageStore.sessionGroups")((range: SessionRange) =>
         sql`
           SELECT
             session_id, min(occurred_at) AS first_at, max(occurred_at) AS last_at,
@@ -451,6 +456,7 @@ export class UsageStore extends Context.Service<UsageStore, {
             sum(cache_read) AS cache_read, sum(cache_write_5m) AS cache_write_5m, sum(cache_write_1h) AS cache_write_1h
           FROM usage_events
           WHERE machine = ${range.machine} AND occurred_at >= ${range.from} AND occurred_at < ${range.to}
+            AND (${range.agent} = 'all' OR agent = ${range.agent})
           -- Grouped exactly like usageGroups, so a session prices and books the same way.
           GROUP BY session_id, agent, model, fast, long_prompt, cache_read > 0,
             cache_write_5m + cache_write_1h > 0, cwd, branch, active_ticket

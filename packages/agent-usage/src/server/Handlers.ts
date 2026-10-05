@@ -17,6 +17,12 @@ import { currentKnownProjects, RuntimeState } from "./Runtime.js"
 /** More periods than any chart can draw legibly; a range that needs more wants a coarser bucket. */
 export const MAX_PERIODS = 2_500
 
+/**
+ * The longest range a sessions read aggregates: a quarter, well past any span the page selects.
+ * Bounding the range bounds the store's work before any group is read.
+ */
+export const MAX_SESSION_RANGE_DAYS = 92
+
 const storeUnavailable = (error: StoreError) =>
   new ApiError({ message: `The usage store could not be read (${error.operation})` })
 
@@ -65,8 +71,17 @@ export const UsageLive = HttpApiBuilder.group(AgentUsageApi, "usage", (handlers)
       .handle("sessions", ({ query }) =>
         Effect.gen(function*() {
           yield* checkRange(query.from, query.to)
-          const groups = (yield* store.sessionGroups({ from: query.from, to: query.to, machine: state.machine }))
-            .filter((group) => query.agent === "all" || group.agent === query.agent)
+          if (query.to - query.from > MAX_SESSION_RANGE_DAYS * 86_400_000) {
+            return yield* new ApiError({
+              message: `Sessions cover at most ${MAX_SESSION_RANGE_DAYS} days: choose a shorter range`
+            })
+          }
+          const groups = yield* store.sessionGroups({
+            from: query.from,
+            to: query.to,
+            machine: state.machine,
+            agent: query.agent
+          })
           const projects = yield* currentKnownProjects.pipe(
             Effect.provideService(UsageStore, store),
             Effect.provideService(RuntimeState, state)

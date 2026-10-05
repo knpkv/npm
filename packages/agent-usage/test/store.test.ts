@@ -257,7 +257,9 @@ describe("UsageStore", () => {
           snapshots: [],
           balances: []
         })
-        const groups = yield* store.sessionGroups({ from: at, to: at + 3_600_000, machine: "sessions" })
+        const groups = yield* store.sessionGroups({ from: at, to: at + 3_600_000, machine: "sessions", agent: "all" })
+        expect(yield* store.sessionGroups({ from: at, to: at + 3_600_000, machine: "sessions", agent: "codex" }))
+          .toEqual([])
         expect(groups.map(({ firstAt, lastAt, requests, sessionId }) => ({ sessionId, firstAt, lastAt, requests })))
           .toEqual([
             { sessionId: "a", firstAt: at, lastAt: at + 40 * 60_000, requests: 2 },
