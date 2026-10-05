@@ -11,6 +11,7 @@ Authenticate once per Atlassian account/site, then switch profiles when needed:
 
 ```bash
 jira auth create
+jira auth manage
 jira auth configure --client-id <id> --client-secret <secret>
 jira auth login
 jira auth login --site https://example.atlassian.net
@@ -105,11 +106,15 @@ The command writes hidden attachment metadata next to the rendered image/link so
 
 | Command                               | Class        | Important args and flags                                                                    | Output                                                             |
 | ------------------------------------- | ------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `jira auth create`                    | Local write  | Opens OAuth app creation page.                                                              | Human instructions.                                                |
+| `jira auth create`                    | Local write  | Prints and opens the OAuth app creation page; fails if no browser opens.                    | Instructions with every login scope.                               |
+| `jira auth manage`                    | Local write  | Prints and opens the console app list; fails if no browser opens.                           | Scope and callback checklist.                                      |
 | `jira auth configure`                 | Local write  | `--client-id`, `--client-secret` or prompts.                                                | Stores OAuth credentials.                                          |
 | `jira auth login`                     | Local write  | Optional `--site <url>`.                                                                    | Stores access/refresh tokens.                                      |
 | `jira auth logout`                    | Local write  | None.                                                                                       | Clears local auth state.                                           |
-| `jira auth status`                    | Read-only    | None.                                                                                       | Human login status.                                                |
+| `jira auth status`                    | Read-only    | None.                                                                                       | Active profile, account, site and profile ID.                      |
+| `jira auth profiles`                  | Read-only    | None.                                                                                       | Stored profiles, active marked `*`.                                |
+| `jira auth use <profile>`             | Local write  | Profile ID, name, site URL, cloud ID, or account ID.                                        | Switches the active profile.                                       |
+| `jira auth remove <profile>`          | Local write  | Profile ID, name, site URL, cloud ID, or account ID.                                        | Removes one stored profile.                                        |
 | `jira issue get <key>`                | Local write  | `--output-dir`, default `./jira-tickets`.                                                   | Markdown file for one issue.                                       |
 | `jira issue search [jql]`             | Local write  | `--by-version`, `--project`, `--format multi\|single`, `--max-results`, `--output-dir`.     | Markdown issue exports.                                            |
 | `jira issue attachment upload`        | Remote write | `<issue> <file>`, `--document`, `--no-insert`, `--dry-run`, `--json`.                       | Uploads an issue attachment and optionally rewrites a placeholder. |

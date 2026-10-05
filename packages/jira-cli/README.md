@@ -22,7 +22,9 @@ cd packages/jira-cli && pnpm link --global
 jira auth create
 ```
 
-Opens Atlassian Developer Console. Create a new OAuth 2.0 (3LO) app with:
+Prints the URL and opens the Atlassian Developer Console (the command fails if no browser
+opens; finish from the printed URL). Create a new OAuth 2.0 (3LO) app with the scopes it
+prints, which are exactly the ones `jira auth login` requests:
 
 **Permissions:**
 
@@ -252,6 +254,7 @@ set, including surplus copies of a URL that _is_ desired. Other categories are n
 
 ```bash
 jira auth create     # Open Atlassian console to create OAuth app
+jira auth manage     # Open the console to edit the app's scopes
 jira auth configure  # Set client ID and secret
 jira auth login      # Authenticate via OAuth
 jira auth profiles   # List stored accounts/sites

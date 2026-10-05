@@ -132,25 +132,29 @@ Images and SVGs are inserted as Markdown image previews with hidden ADF media me
 
 ## Command Reference
 
-| Command                             | Class        | Important args and flags                                                | Output                                                           |
-| ----------------------------------- | ------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| `confluence auth create`            | Local write  | Opens OAuth app creation page.                                          | Human instructions.                                              |
-| `confluence auth configure`         | Local write  | `--client-id`, `--client-secret` or prompts.                            | Stores OAuth credentials.                                        |
-| `confluence auth login`             | Local write  | Optional `--site <url>`.                                                | Stores OAuth tokens.                                             |
-| `confluence auth logout`            | Local write  | None.                                                                   | Clears local auth state.                                         |
-| `confluence auth status`            | Read-only    | None.                                                                   | Human login status.                                              |
-| `confluence workspace clone`        | Local write  | `--url` or `--root-page-id` plus `--base-url`.                          | Local Markdown workspace.                                        |
-| `confluence sync status`            | Read-only    | None.                                                                   | Local/remote change summary.                                     |
-| `confluence sync diff`              | Read-only    | `--staged`, `--commit`, optional file.                                  | Git-style diff.                                                  |
-| `confluence sync pull`              | Local write  | `--force`, `--replay-history`.                                          | Updates local workspace.                                         |
-| `confluence sync push`              | Remote write | `--dry-run` / `-n`.                                                     | Updates Confluence pages.                                        |
-| `confluence sync commit`            | Local write  | `--message` / `-m`.                                                     | Git commit in workspace.                                         |
-| `confluence sync log`               | Read-only    | `--limit`, `--oneline`, `--since`, optional file.                       | Git history.                                                     |
-| `confluence page get`               | Read-only    | `--url` or `--page-id` plus `--base-url`, `--clean-markdown`.           | Markdown on stdout.                                              |
-| `confluence page attachment upload` | Remote write | `<page-id> <file>`, `--document`, `--no-insert`, `--dry-run`, `--json`. | Uploads a page attachment and optionally rewrites a placeholder. |
-| `confluence page new`               | Remote write | Interactive prompts.                                                    | Creates a page.                                                  |
-| `confluence page delete`            | Remote write | Interactive prompts.                                                    | Deletes a page.                                                  |
-| `confluence skills install`         | Local write  | Shared installer flags.                                                 | Installs the Confluence agent skill.                             |
+| Command                             | Class        | Important args and flags                                                 | Output                                                           |
+| ----------------------------------- | ------------ | ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
+| `confluence auth create`            | Local write  | Prints and opens the OAuth app creation page; fails if no browser opens. | Instructions with every login scope.                             |
+| `confluence auth manage`            | Local write  | Prints and opens the console app list; fails if no browser opens.        | Scope and callback checklist.                                    |
+| `confluence auth configure`         | Local write  | `--client-id`, `--client-secret` or prompts.                             | Stores OAuth credentials.                                        |
+| `confluence auth login`             | Local write  | Optional `--site <url>`.                                                 | Stores OAuth tokens.                                             |
+| `confluence auth logout`            | Local write  | None.                                                                    | Clears local auth state.                                         |
+| `confluence auth status`            | Read-only    | None.                                                                    | Active profile, account, site and profile ID.                    |
+| `confluence auth profiles`          | Read-only    | None.                                                                    | Stored profiles, active marked `*`.                              |
+| `confluence auth use <profile>`     | Local write  | Profile ID, name, site URL, cloud ID, or account ID.                     | Switches the active profile.                                     |
+| `confluence auth remove <profile>`  | Local write  | Profile ID, name, site URL, cloud ID, or account ID.                     | Removes one stored profile.                                      |
+| `confluence workspace clone`        | Local write  | `--url` or `--root-page-id` plus `--base-url`.                           | Local Markdown workspace.                                        |
+| `confluence sync status`            | Read-only    | None.                                                                    | Local/remote change summary.                                     |
+| `confluence sync diff`              | Read-only    | `--staged`, `--commit`, optional file.                                   | Git-style diff.                                                  |
+| `confluence sync pull`              | Local write  | `--force`, `--replay-history`.                                           | Updates local workspace.                                         |
+| `confluence sync push`              | Remote write | `--dry-run` / `-n`.                                                      | Updates Confluence pages.                                        |
+| `confluence sync commit`            | Local write  | `--message` / `-m`.                                                      | Git commit in workspace.                                         |
+| `confluence sync log`               | Read-only    | `--limit`, `--oneline`, `--since`, optional file.                        | Git history.                                                     |
+| `confluence page get`               | Read-only    | `--url` or `--page-id` plus `--base-url`, `--clean-markdown`.            | Markdown on stdout.                                              |
+| `confluence page attachment upload` | Remote write | `<page-id> <file>`, `--document`, `--no-insert`, `--dry-run`, `--json`.  | Uploads a page attachment and optionally rewrites a placeholder. |
+| `confluence page new`               | Remote write | Interactive prompts.                                                     | Creates a page.                                                  |
+| `confluence page delete`            | Remote write | Interactive prompts.                                                     | Deletes a page.                                                  |
+| `confluence skills install`         | Local write  | Shared installer flags.                                                  | Installs the Confluence agent skill.                             |
 
 ## Agent Guidance
 

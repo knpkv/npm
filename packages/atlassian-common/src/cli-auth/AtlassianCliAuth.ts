@@ -116,6 +116,15 @@ export interface AccessibleSite {
 }
 
 /**
+ * Who an Atlassian CLI is: the part of {@link AtlassianCliAuthOptions} its `auth` commands also read.
+ * A CLI defines it once and passes the same value to both, so the setup text lists exactly the
+ * scopes `login` requests.
+ *
+ * @category Types
+ */
+export type AtlassianCliDescriptor = Pick<AtlassianCliAuthOptions<never>, "commandName" | "productName" | "scopes">
+
+/**
  * The auth operations an Atlassian CLI exposes.
  *
  * @category Types
