@@ -129,7 +129,10 @@ const exportEntries = (manifest: Manifest): ReadonlyArray<readonly [string, Expo
     ? []
     : Predicate.isString(manifest.exports)
     ? [[".", manifest.exports]]
-    : Object.entries(manifest.exports)
+    // Without "./" subpath keys the map is the root export's conditions.
+    : Object.keys(manifest.exports).some((key) => key.startsWith("."))
+    ? Object.entries(manifest.exports)
+    : [[".", manifest.exports]]
 
 const aliasesFor = (directory: string): ReadonlyArray<SourceAlias> => {
   const manifest = decodeManifest(readFileSync(join(directory, "package.json"), "utf8"))

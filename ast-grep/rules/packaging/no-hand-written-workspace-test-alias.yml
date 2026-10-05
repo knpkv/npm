@@ -24,6 +24,7 @@ rule:
 
 files:
   - "packages/*/vitest*.ts"
+  - "vitest.shared.ts"
 
 ignores:
   # Review's guide-hydration test server-renders the built export and hydrates it
