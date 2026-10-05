@@ -6,6 +6,9 @@ import { layer as savedLayer, type RecordedEntry, SavedEntries } from "../src/se
 import { type LedgerFile, SourceLedger, SourceLedgerError } from "../src/services/SourceLedger.js"
 import { FAKE_HOME, FAKE_USER_ID, FAKE_WORKSPACE_ID, makeFakeHeadless } from "../src/testing/fakeHeadless.js"
 
+// Each case composes an isolated runtime around its own fake world, like the other service suites.
+// @effect-diagnostics strictEffectProvide:off
+
 const startMs = new Date("2026-06-23T10:00:00Z").getTime()
 const endMs = startMs + 300_000
 const period = { from: new Date("2026-06-22T00:00:00Z"), to: new Date("2026-06-26T00:00:00Z") }
