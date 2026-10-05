@@ -1,5 +1,11 @@
 # @knpkv/rly
 
+## 0.6.1
+
+### Patch Changes
+
+- [#457](https://github.com/knpkv/npm/pull/457) [`a2527be`](https://github.com/knpkv/npm/commit/a2527be3ddd1f52645fce763df11ecae4868e599) Thanks [@konopkov](https://github.com/konopkov)! - Small cost axis ticks keep distinct labels, a focused chart column keeps its breakdown when the pointer leaves, and `ToggleGroup` no longer reports a change when an arrow key lands on the option already chosen.
+
 ## 0.6.0
 
 ### Minor Changes

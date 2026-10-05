@@ -1,5 +1,16 @@
 # @knpkv/confluence-to-markdown
 
+## 2.3.1
+
+### Patch Changes
+
+- [#462](https://github.com/knpkv/npm/pull/462) [`a5490aa`](https://github.com/knpkv/npm/commit/a5490aad738507f2a3a7d7cb4babf3545d287087) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/atlassian-common/cli-auth` now holds the browser login and rotating refresh-token flow that `jira` and `confluence` each carried a copy of; both CLIs bind it with `makeAtlassianCliAuth`. Login no longer gives up when no browser opens — it says so on stderr and keeps waiting, since the URL is already printed (`jira` used to treat a launcher that ran but failed as success; `confluence` aborted the login). `jira` login also reports the provider's error code when its description is empty, and reports callback-server failures as `OAuthError`.
+
+  Jira Clockify's timeout documentation now points to the shared refresh implementation.
+
+- Updated dependencies [[`a5490aa`](https://github.com/knpkv/npm/commit/a5490aad738507f2a3a7d7cb4babf3545d287087)]:
+  - @knpkv/atlassian-common@1.6.0
+
 ## 2.3.0
 
 ### Minor Changes

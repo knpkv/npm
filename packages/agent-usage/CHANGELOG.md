@@ -1,5 +1,19 @@
 # @knpkv/agent-usage
 
+## 0.2.0
+
+### Minor Changes
+
+- [#460](https://github.com/knpkv/npm/pull/460) [`7d6fdbe`](https://github.com/knpkv/npm/commit/7d6fdbe736fcf59feb282165126fc4c39ed8ae45) Thanks [@konopkov](https://github.com/konopkov)! - Read claude-statusline's limit log (`AGENT_USAGE_CLAUDE_LIMITS`) as Claude limit readings next to the polls; keep every failed poll's typed reason and detail and show it on the gap and in the readings table; read Claude Code's own macOS Keychain item when a custom config directory is set; and keep the page current over an authenticated WebSocket instead of polling.
+
+- [#461](https://github.com/knpkv/npm/pull/461) [`42f6a66`](https://github.com/knpkv/npm/commit/42f6a663bc27ac9865e6a9e4977b555ad33f9a0a) Thanks [@konopkov](https://github.com/konopkov)! - `agent-usage login [--open]` asks the running server for a fresh one-time link over an owner-only Unix socket in the store directory, so a server running as a service can be reached without restarting it. A second `serve` on the same store now refuses to start.
+
+### Patch Changes
+
+- [#457](https://github.com/knpkv/npm/pull/457) [`a2527be`](https://github.com/knpkv/npm/commit/a2527be3ddd1f52645fce763df11ecae4868e599) Thanks [@konopkov](https://github.com/konopkov)! - Small cost axis ticks keep distinct labels, a focused chart column keeps its breakdown when the pointer leaves, and `ToggleGroup` no longer reports a change when an arrow key lands on the option already chosen.
+- Updated dependencies [[`a2527be`](https://github.com/knpkv/npm/commit/a2527be3ddd1f52645fce763df11ecae4868e599)]:
+  - @knpkv/rly@0.6.1
+
 ## 0.1.0
 
 ### Minor Changes
