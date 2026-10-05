@@ -158,6 +158,8 @@ export const readRecordedWeekPlan = Effect.fn("WeekRead.recordedOnly")(function*
   const settings = yield* config.get
   const result = yield* reconcile.refreshRecordedTime(period, {
     attributed: [],
+    ignored: [],
+    ignoredTickets: settings.sessionIgnoredTickets,
     proposals: [],
     recorded: [],
     unlinkedClockify: [],

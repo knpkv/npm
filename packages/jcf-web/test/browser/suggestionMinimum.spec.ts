@@ -3,13 +3,13 @@ import { Schema } from "effect"
 import { fixtureWeek } from "../fixture.js"
 
 // Restored evidence can predate the minimum. Filter suggestions immediately while preserving saved seconds.
-test("restored plans hide sub-quarter-hour suggestions and tiny selected-provider remainders", async ({ page }) => {
+test("restored plans show writable minutes and hide tiny selected-provider remainders", async ({ page }) => {
   const plan = fixtureWeek()
   const row = plan.rows[0]!
   const start = new Date(`${plan.monday}T11:00:00`).getTime()
   const updated = {
     ...plan,
-    rows: [16, 899, 900].map((seconds, index) => ({
+    rows: [16, 59, 60].map((seconds, index) => ({
       ...row,
       rowId: `minimum-${index}`,
       ticketKey: `PROJ-${100 + index}`,
@@ -53,5 +53,5 @@ test("restored plans hide sub-quarter-hour suggestions and tiny selected-provide
   await page.getByRole("button", { name: "Clockify entries", exact: true }).click()
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator(".jcf-agenda-entry[data-kind=\"proposable\"]")).toHaveCount(1)
-  await expect(page.locator(".jcf-agenda-entry[data-kind=\"proposable\"]")).toContainText("15m 0s suggested")
+  await expect(page.locator(".jcf-agenda-entry[data-kind=\"proposable\"]")).toContainText("1m 0s suggested")
 })

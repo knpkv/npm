@@ -25,6 +25,7 @@ import { EditorFrame } from "./EditorFrame.js"
 import { duration, formatClock, formatDuration, shiftWeek, weekLabel } from "./format.js"
 import { ConfirmPanel, ManualPanel } from "./panels.js"
 import { weekTotals } from "./calendarProjection.js"
+import { heldWriteProviders, ignoredTicketTotals } from "./writeHolds.js"
 import { WeekGrid } from "./WeekGrid.js"
 import { makeRowDescriptions } from "./rowDescriptions.js"
 import { SavedEntryPanel } from "./SavedEntryPanel.js"
@@ -110,6 +111,8 @@ export const App = () => {
   )
 
   const totals = useMemo(() => weekTotals(plan), [plan])
+  const heldProviders = useMemo(() => heldWriteProviders(plan), [plan])
+  const ignoredTotals = useMemo(() => ignoredTicketTotals(plan), [plan])
 
   const closeAfter = async (result: Promise<boolean>) => {
     if (await result) setOpen(null)
@@ -333,6 +336,13 @@ export const App = () => {
               : "Jira could not say who owns these tickets, so nothing was withheld on ownership this week."}
           </p>
         ) : null}
+        {heldProviders.length > 0 ? (
+          <p className="jcf-note" data-tone="warning" role="status">
+            {heldProviders.join(" and ")} writes are held for this week: an earlier entry carries a session marker that
+            needs manual review. Suggestions for {heldProviders.length === 1 ? "that system" : "those systems"} stay
+            readable here but cannot be logged.
+          </p>
+        ) : null}
         {plan !== null && !plan.attributorAvailable ? (
           <p className="jcf-note" data-tone="warning">
             A Coding Agent could not be reached. Sessions without a branch or path match have no suggestions.
@@ -481,6 +491,16 @@ export const App = () => {
                   unavailable={unavailable}
                   descriptionDisabled={agentSettingsSaving}
                   onSave={(request) => closeAfter(actions.updateSaved({ entry: open.entry, request }))}
+                  onDelete={() =>
+                    closeAfter(
+                      actions.deleteSaved({
+                        planId: plan.planId,
+                        source: open.entry.source,
+                        entryId: open.entry.id,
+                        revision: open.entry.revision
+                      })
+                    )
+                  }
                   onCancel={() => setOpen(null)}
                 />
               ) : null}
@@ -520,6 +540,7 @@ export const App = () => {
                   key={`${openRow.rowId}:${open.blockIndex}`}
                   onCancel={() => setOpen(null)}
                   onConfirm={(submission) => confirm(submission, openRow.rowId)}
+                  onIgnore={() => closeAfter(actions.setIgnored({ ticketKey: openRow.ticketKey, ignored: true }))}
                   row={openRow}
                   scopeTargets={state.writeTargets}
                 />
@@ -543,6 +564,63 @@ export const App = () => {
 
         {plan === null ? null : (
           <div className="jcf-lanes">
+            {plan.withheld.length === 0 ? null : (
+              <section className="jcf-lane">
+                <h2>Low-confidence matches</h2>
+                <p className="jcf-muted">
+                  The agent's pick for these sessions fell below your confidence floor, so they are not suggested.
+                </p>
+                <ul>
+                  {plan.withheld.map((row) => (
+                    <li key={`${row.day}:${row.ticketKey}`}>
+                      <strong>{row.day}</strong>
+                      <span>{row.ticketKey}</span>
+                      <span>{duration(row.seconds)}</span>
+                      <span className="jcf-muted">
+                        {row.confidence === null ? "no confidence" : `confidence ${row.confidence.toFixed(2)}`}
+                        {row.ticketTitle === null ? "" : ` · ${row.ticketTitle}`}
+                      </span>
+                      <Button
+                        disabled={unavailable}
+                        onClick={() =>
+                          void actions.promoteWithheld({ planId: plan.planId, ticketKey: row.ticketKey, day: row.day })
+                        }
+                        size="compact"
+                        variant="quiet"
+                      >
+                        {`Log as ${row.ticketKey}`}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+            {ignoredTotals.length === 0 ? null : (
+              <section className="jcf-lane">
+                <h2>Ignored tickets</h2>
+                <p className="jcf-muted">
+                  Not suggested in any week. Where they ran alongside other tickets, those tickets took the time.
+                </p>
+                <ul>
+                  {ignoredTotals.map((ignored) => (
+                    <li key={ignored.ticketKey}>
+                      <strong>{ignored.ticketKey}</strong>
+                      <span>
+                        {ignored.seconds === 0 ? "no time this week" : `${duration(ignored.seconds)} this week`}
+                      </span>
+                      <Button
+                        disabled={unavailable}
+                        onClick={() => void actions.setIgnored({ ticketKey: ignored.ticketKey, ignored: false })}
+                        size="compact"
+                        variant="quiet"
+                      >
+                        Restore
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
             {plan.notMine.length === 0 ? null : (
               <section className="jcf-lane">
                 <h2>Assigned to somebody else</h2>

@@ -1,7 +1,7 @@
 import { expect, it } from "@effect/vitest"
 import { AtomRegistry } from "effect/reactivity"
 import { makeWeekAtoms, previewWrite, type QueuedConfirmation, settleEntries } from "../src/client/weekAtoms.js"
-import type { WeekPlanResponse } from "../src/shared/contracts.js"
+import type { WeekPlanResponse, WriteHolds } from "../src/shared/contracts.js"
 import { fixtureWeek } from "./fixture.js"
 
 // Invalid selections and unavailable targets cannot produce apparently writable preview intervals.
@@ -39,6 +39,31 @@ it("previews exact sub-minute Clockify time without inventing a Jira write", () 
     expect(entries[0]?.source).toBe("clockify")
     expect(entries[0]!.endMs - entries[0]!.startMs).toBe(59_000)
   }
+})
+
+it("does not preview held providers even when the request explicitly selects them", () => {
+  const original = fixtureWeek()
+  const held: typeof WriteHolds.Type = { clockify: "review-required" }
+  const plan = {
+    ...original,
+    rows: original.rows.map((row) => ({
+      ...row,
+      proposal: row.proposal === undefined ? undefined : {
+        ...row.proposal,
+        writeBlocked: held
+      }
+    }))
+  }
+  const entries = previewWrite({ plan, entries: [] }, {
+    kind: "confirm",
+    request: { planId: plan.planId, rowId: "row-one", targets: { clockify: true, jira: true } }
+  })
+  expect(entries.length).toBeGreaterThan(0)
+  expect(entries.every((entry) => entry.source === "jira")).toBe(true)
+  expect(previewWrite({ plan, entries: [] }, {
+    kind: "confirm",
+    request: { planId: plan.planId, rowId: "row-one", targets: { clockify: true, jira: false } }
+  })).toEqual([])
 })
 
 // Previously held morning time must not shift a specifically selected afternoon block.

@@ -172,6 +172,89 @@
   outline-offset: 1px;
 }
 
+/* A packed stretch: one card over its real time, one row per ticket. Its drawn height is a floor;
+   hover or focus shows every row above the neighbouring cards. */
+.jcf-stretch {
+  position: absolute;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  height: var(--jcf-stretch-height);
+  overflow: hidden;
+  padding: 2px var(--rly-space-4);
+  background: var(--rly-color-surface-1);
+  border: 1px dashed var(--rly-color-action-background);
+  border-radius: var(--rly-radius-tag);
+  font-size: var(--rly-type-meta-size);
+  line-height: var(--rly-type-meta-line-height);
+}
+
+.jcf-stretch:hover,
+.jcf-stretch:focus-within {
+  height: auto;
+  min-height: var(--jcf-stretch-height);
+  overflow: visible;
+  z-index: 5;
+  border-style: solid;
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
+}
+
+.jcf-stretch-head {
+  color: var(--rly-color-text-2);
+  white-space: nowrap;
+}
+
+.jcf-stretch ul {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jcf-stretch-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: center;
+  gap: 2px;
+}
+
+.jcf-stretch-entry {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--rly-space-4);
+  min-width: 0;
+  padding: 0 var(--rly-space-4);
+  color: var(--rly-color-text-1);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--rly-radius-tag);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jcf-stretch-entry:hover,
+.jcf-stretch-entry[data-selected="true"] {
+  border-color: var(--rly-color-action-background);
+}
+
+.jcf-stretch-entry[data-overlap="true"] {
+  border-style: dashed;
+  border-color: var(--rly-color-held-ink);
+}
+
+.jcf-stretch-entry:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 1px;
+}
+
+.jcf-stretch-duration {
+  color: var(--rly-color-text-2);
+  white-space: nowrap;
+}
+
 /* Both actions stay inside their collision slot without covering adjacent cards. */
 .jcf-block-actions {
   position: absolute;
@@ -380,7 +463,8 @@ body,
   flex-direction: column;
   gap: var(--rly-space-16);
   margin-inline: auto;
-  max-width: 1600px;
+  /* A week of parallel work needs every column it can get; the page gutters still bound it. */
+  max-width: none;
   width: 100%;
 }
 
@@ -435,7 +519,11 @@ body,
   display: grid;
   gap: var(--rly-space-20);
   min-width: 0;
-  /* Keep controls at the same width when saving removes the editor. */
+  grid-template-columns: minmax(0, 1fr);
+}
+
+/* A side panel takes its column only while one is open; otherwise the calendar has the width. */
+.jcf-workspace:has(> :nth-child(2)) {
   grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
 }
 
@@ -816,7 +904,8 @@ body,
 }
 
 @media (max-width: 1100px) {
-  .jcf-workspace {
+  .jcf-workspace,
+  .jcf-workspace:has(> :nth-child(2)) {
     grid-template-columns: minmax(0, 1fr);
   }
 
