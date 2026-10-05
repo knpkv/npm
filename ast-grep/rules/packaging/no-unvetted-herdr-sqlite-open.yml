@@ -1,0 +1,27 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-unvetted-herdr-sqlite-open
+language: tsx
+severity: error
+message: "Open Herdr databases through @knpkv/herdr-fleet/sqlite instead of opening or vetting the path directly"
+
+rule:
+  any:
+    # A raw connection skips the directory/file refusal and the 0600 files.
+    - pattern: new DatabaseSync($$$)
+    # A local symlink/identity check is a second copy of the security-critical part.
+    - pattern: $FS.readLink($$$)
+
+files:
+  - "packages/herdr-*/src/**/*.ts"
+  - "packages/herdr-*/src/**/*.tsx"
+ignores:
+  - "packages/herdr-fleet/src/sqlite.ts"
+
+note: |
+  Six Herdr stores each carried their own copy of "create the state directory,
+  open SQLite, chmod the files", and they drifted: one refused a writable
+  directory, the others repaired it first, and two never secured their files.
+  openPrivateSqlite (node:sqlite) and preparePrivateDatabasePath /
+  securePrivateDatabaseFiles / verifyPrivatePathIdentity (any client) are the one
+  implementation.

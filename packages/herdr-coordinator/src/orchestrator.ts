@@ -1,5 +1,6 @@
 import { NodeCrypto, NodeFileSystem, NodePath } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
+import { securePrivateDatabaseFiles, verifyPrivatePathIdentity } from "@knpkv/herdr-fleet/sqlite"
 import { makeSqliteWorkBridge } from "@knpkv/herdr-work/sql"
 import {
   Clock,
@@ -108,45 +109,18 @@ const recoveryPageSize = 256
 
 const storageError = (operation: string) => (cause: unknown) => new OrchestratorStorageError({ cause, operation })
 
+// The shared private-database checks report their own step names; prefixing keeps
+// this module's established `sqlite.*` operation names.
 const verifyPathIdentity = (
   path: string,
   fileSystem: FileSystem.FileSystem,
   paths: Path.Path,
   operation: string
 ): Effect.Effect<void, OrchestratorStorageError> =>
-  fileSystem.readLink(path).pipe(
-    Effect.matchEffect({
-      onFailure: (cause) =>
-        cause.reason._tag === "NotFound" || cause.reason._tag === "Unknown"
-          ? Effect.void
-          : Effect.fail(new OrchestratorStorageError({ cause, operation: `${operation}.readlink` })),
-      onSuccess: (target) => Effect.fail(new OrchestratorStorageError({ cause: { path, target }, operation }))
-    }),
-    Effect.andThen(
-      fileSystem.exists(path).pipe(
-        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: `${operation}.exists` }))
-      )
-    ),
-    Effect.flatMap((exists) => {
-      if (!exists) {
-        const parent = paths.dirname(path)
-        return parent === path ? Effect.void : verifyPathIdentity(parent, fileSystem, paths, operation)
-      }
-      const parent = paths.dirname(path)
-      return Effect.all({
-        realPath: fileSystem.realPath(path).pipe(
-          Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: `${operation}.realpath` }))
-        ),
-        realParentPath: fileSystem.realPath(parent).pipe(
-          Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: `${operation}.parent-realpath` }))
-        )
-      }).pipe(Effect.flatMap(({ realParentPath, realPath }) => {
-        const expectedPath = paths.join(realParentPath, paths.basename(path))
-        return realPath === expectedPath
-          ? Effect.void
-          : Effect.fail(new OrchestratorStorageError({ cause: { expectedPath, path, realPath }, operation }))
-      }))
-    })
+  verifyPrivatePathIdentity(path, operation).pipe(
+    Effect.provideService(FileSystem.FileSystem, fileSystem),
+    Effect.provideService(Path.Path, paths),
+    Effect.mapError((error) => new OrchestratorStorageError({ cause: error.cause, operation: error.operation }))
   )
 
 const decodeCommand = (text: string) =>
@@ -307,28 +281,14 @@ const secureSqliteFiles = (
   filename: string,
   fileSystem: FileSystem.FileSystem,
   paths: Path.Path
-) => {
-  const files = [filename, `${filename}-wal`, `${filename}-shm`]
-  return Effect.forEach(
-    files,
-    (path) =>
-      verifyPathIdentity(path, fileSystem, paths, "sqlite.secure.path-identity").pipe(
-        Effect.flatMap(() =>
-          fileSystem.exists(path).pipe(
-            Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.exists" }))
-          )
-        ),
-        Effect.flatMap((exists) =>
-          exists
-            ? fileSystem.chmod(path, 0o600).pipe(
-              Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.chmod" }))
-            )
-            : Effect.void
-        )
-      ),
-    { discard: true }
+) =>
+  securePrivateDatabaseFiles(filename).pipe(
+    Effect.provideService(FileSystem.FileSystem, fileSystem),
+    Effect.provideService(Path.Path, paths),
+    Effect.mapError((error) =>
+      new OrchestratorStorageError({ cause: error.cause, operation: `sqlite.${error.operation}` })
+    )
   )
-}
 
 const makeOrchestrator: Effect.Effect<
   OrchestratorService,

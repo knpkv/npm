@@ -1,5 +1,6 @@
-import { Effect, FileSystem, Path, Schema } from "effect"
-import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
+import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
+import { Effect, Schema } from "effect"
+import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ApprovalAppStoreError } from "./errors.js"
 import {
   PushSubscriptionRecord,
@@ -7,6 +8,9 @@ import {
   VapidKeyPair,
   type VapidKeyPair as VapidKeyPairType
 } from "./model.js"
+
+const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
+  new ApprovalAppStoreError({ operation: error.operation, detail: String(error.cause), cause: error.cause })
 
 const storeError = (operation: string) => (cause: unknown) =>
   new ApprovalAppStoreError({ operation, detail: String(cause), cause })
@@ -116,16 +120,19 @@ const decodeRow = <A>(
 
 export class ApprovalAppStore {
   readonly #database: DatabaseSync
-  readonly #fileSystem: FileSystem.FileSystem
+  readonly #secureFiles: Effect.Effect<void, ApprovalAppStoreError>
   readonly path: string
 
-  private constructor(path: string, fileSystem: FileSystem.FileSystem) {
+  private constructor(path: string, opened: PrivateSqlite) {
     this.path = path
-    this.#fileSystem = fileSystem
-    this.#database = new DatabaseSync(path)
-    try {
-      this.#database.exec(`
-        PRAGMA journal_mode = WAL;
+    this.#database = opened.database
+    this.#secureFiles = opened.secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
+  }
+
+  static readonly open = Effect.fn("ApprovalAppStore.open")(function*(path: string) {
+    const opened = yield* openPrivateSqlite(path, {
+      initialize: (database) => {
+        database.exec(`
         CREATE TABLE IF NOT EXISTS vapid_keys (
           id INTEGER PRIMARY KEY CHECK (id = 1),
           record TEXT NOT NULL
@@ -143,40 +150,21 @@ export class ApprovalAppStore {
           PRIMARY KEY (host, job_id, endpoint)
         );
       `)
-      const { count } = Schema.decodeUnknownSync(StoredCountRow)(
-        this.#database
-          .prepare(
-            "SELECT count(*) AS count FROM pragma_table_info('push_deliveries') WHERE name = 'count_complete'"
-          )
-          .get()
-      )
-      if (count === 0) {
-        this.#database.exec(
-          "ALTER TABLE push_deliveries ADD COLUMN count_complete INTEGER NOT NULL DEFAULT 1"
+        const { count } = Schema.decodeUnknownSync(StoredCountRow)(
+          database
+            .prepare(
+              "SELECT count(*) AS count FROM pragma_table_info('push_deliveries') WHERE name = 'count_complete'"
+            )
+            .get()
         )
+        if (count === 0) {
+          database.exec(
+            "ALTER TABLE push_deliveries ADD COLUMN count_complete INTEGER NOT NULL DEFAULT 1"
+          )
+        }
       }
-    } catch (error) {
-      this.#database.close()
-      throw error
-    }
-  }
-
-  static readonly open = Effect.fn("ApprovalAppStore.open")(function*(path: string) {
-    const fileSystem = yield* FileSystem.FileSystem
-    const paths = yield* Path.Path
-    const directory = paths.dirname(path)
-    yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
-      Effect.mapError(storeError("open.makeDirectory"))
-    )
-    yield* fileSystem.chmod(directory, 0o700).pipe(
-      Effect.mapError(storeError("open.secureDirectory"))
-    )
-    const store = yield* Effect.try({
-      try: () => new ApprovalAppStore(path, fileSystem),
-      catch: storeError("open.database")
-    })
-    yield* store.secureFiles()
-    return store
+    }).pipe(Effect.mapError(fromPrivateDatabaseError))
+    return new ApprovalAppStore(path, opened)
   })
 
   readonly getOrCreateVapidKeys = Effect.fn("ApprovalAppStore.getOrCreateVapidKeys")(function*(
@@ -440,23 +428,7 @@ export class ApprovalAppStore {
   })
 
   private secureFiles() {
-    const fileSystem = this.#fileSystem
-    const files = [this.path, `${this.path}-wal`, `${this.path}-shm`]
-    return Effect.forEach(
-      files,
-      (path) =>
-        fileSystem.exists(path).pipe(
-          Effect.mapError(storeError("secure.exists")),
-          Effect.flatMap((exists) =>
-            exists
-              ? fileSystem.chmod(path, 0o600).pipe(
-                Effect.mapError(storeError("secure.chmod"))
-              )
-              : Effect.void
-          )
-        ),
-      { discard: true }
-    )
+    return this.#secureFiles
   }
 
   close(): void {

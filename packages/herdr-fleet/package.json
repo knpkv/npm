@@ -25,6 +25,10 @@
     "./response": {
       "types": "./dist/response.d.ts",
       "import": "./dist/response.js"
+    },
+    "./sqlite": {
+      "types": "./dist/sqlite.d.ts",
+      "import": "./dist/sqlite.js"
     }
   },
   "files": [
