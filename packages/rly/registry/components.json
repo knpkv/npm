@@ -4769,6 +4769,10 @@
         },
         {
           "kind": "value",
+          "name": "useDocumentTheme"
+        },
+        {
+          "kind": "value",
           "name": "useStoredTheme"
         }
       ],
@@ -4862,7 +4866,9 @@
       "files": {
         "source": "src/primitives/ThemeSelect.tsx",
         "story": "stories/primitives/ThemeSelect.stories.tsx",
-        "styles": [],
+        "styles": [
+          "src/primitives/ThemeSelect.module.css"
+        ],
         "tests": [
           "test/primitives/ThemeSelect.test.tsx"
         ]

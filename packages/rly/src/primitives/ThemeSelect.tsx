@@ -1,7 +1,9 @@
 import type { ReactElement } from "react"
 import { decodeRlyTheme, RLY_THEME_NAMES, type RlyTheme } from "../foundations/ThemeProvider.js"
 import { Field } from "./Field.js"
+import { classNames, cssClass } from "../internal/component.js"
 import { type RlySelectOption, type RlySelectSize, Select } from "./Select.js"
+import styles from "./ThemeSelect.module.css"
 
 const themeLabels = {
   system: "System",
@@ -30,8 +32,9 @@ export interface ThemeSelectProps {
  * `useStoredTheme` to remember the choice. Built on rly `Select` so every dropdown in
  * a product looks and behaves the same.
  *
- * Settings pages show the label. Compact headers pass `labelVisibility="hidden"`, which
- * keeps the name for assistive technology through `aria-label`.
+ * Settings pages show the label and fill the field width. Compact headers pass
+ * `labelVisibility="hidden"`, which keeps the name for assistive technology through
+ * `aria-label` and sizes the trigger to its longest option.
  *
  * @example
  * const [theme, setTheme] = useStoredTheme("jcf_theme", browserStorage)
@@ -55,7 +58,7 @@ export const ThemeSelect = ({
     return (
       <Select
         aria-label={label}
-        {...(className === undefined ? {} : { className })}
+        className={classNames(cssClass(styles, "intrinsic"), className)}
         onValueChange={onChange}
         options={themeOptions}
         size={size}

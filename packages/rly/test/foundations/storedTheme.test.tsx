@@ -4,7 +4,7 @@ import { act, type ReactElement } from "react"
 import { createRoot, hydrateRoot, type Root } from "react-dom/client"
 import { renderToString } from "react-dom/server"
 import { afterEach, describe, expect, it } from "vitest"
-import { decodeRlyTheme, ThemeProvider, useStoredTheme } from "../../src/foundations/ThemeProvider.js"
+import { decodeRlyTheme, ThemeProvider, useDocumentTheme, useStoredTheme } from "../../src/foundations/ThemeProvider.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -150,3 +150,26 @@ const StoredWithKey = ({ storageKey }: { readonly storageKey: string }): ReactEl
   const [theme] = useStoredTheme(storageKey, browserStorage)
   return <ThemeProvider theme={theme}>x</ThemeProvider>
 }
+
+describe("useDocumentTheme", () => {
+  const DocumentThemed = ({ theme }: { readonly theme: "system" | "light" | "dark" }): ReactElement => {
+    useDocumentTheme(theme)
+    return <p>content</p>
+  }
+
+  it("themes the document root so the viewport canvas and scrollbars follow the choice", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => root.render(<DocumentThemed theme="light" />))
+    expect(document.documentElement.dataset.theme).toBe("light")
+    await act(async () => root.render(<DocumentThemed theme="dark" />))
+    expect(document.documentElement.dataset.theme).toBe("dark")
+    await act(async () => root.unmount())
+    expect(document.documentElement.dataset.theme).toBeUndefined()
+  })
+
+  it("renders on the server without touching the document", () => {
+    expect(renderToString(<DocumentThemed theme="dark" />)).toContain("content")
+  })
+})

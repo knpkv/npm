@@ -885,7 +885,9 @@
       "paths": {
         "source": "packages/rly/src/primitives/ThemeSelect.tsx",
         "story": "packages/rly/stories/primitives/ThemeSelect.stories.tsx",
-        "styles": [],
+        "styles": [
+          "packages/rly/src/primitives/ThemeSelect.module.css"
+        ],
         "tests": [
           "packages/rly/test/primitives/ThemeSelect.test.tsx"
         ]

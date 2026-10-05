@@ -117,3 +117,19 @@ export const useStoredTheme = (
 
   return [theme, setTheme]
 }
+
+/**
+ * Apply the theme to the document root as well as the rly boundary, so the viewport
+ * canvas, overscroll area, and page scrollbars follow the viewer's choice. Call it once,
+ * next to `useStoredTheme`, in the application that owns the whole page; embedded rly
+ * surfaces should not. The attribute is removed on unmount.
+ */
+export const useDocumentTheme = (theme: RlyTheme): void => {
+  useEffect(() => {
+    const root = document.documentElement
+    root.dataset.theme = theme
+    return () => {
+      root.removeAttribute("data-theme")
+    }
+  }, [theme])
+}

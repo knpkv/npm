@@ -17,6 +17,7 @@ describe("public entries", () => {
       "decodeRlyTheme",
       "RLY_THEME_NAMES",
       "ThemeProvider",
+      "useDocumentTheme",
       "useStoredTheme",
       "AgentContextButton",
       "AgentDrawer",

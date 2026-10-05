@@ -514,6 +514,7 @@ export const componentManifest = {
         { kind: "value", name: "RLY_THEME_NAMES" },
         { kind: "value", name: "ThemeProvider" },
         { kind: "value", name: "decodeRlyTheme" },
+        { kind: "value", name: "useDocumentTheme" },
         { kind: "value", name: "useStoredTheme" },
         { kind: "type", name: "RlyPreferenceStorage" },
         { kind: "type", name: "RlyTheme" },
@@ -951,7 +952,7 @@ export const componentManifest = {
       registry: true,
       source: "src/primitives/ThemeSelect.tsx",
       status: "stable",
-      styles: [],
+      styles: ["src/primitives/ThemeSelect.module.css"],
       variants: [{ defaultValue: "visible", name: "labelVisibility", values: ["visible", "hidden"] }],
       visual: {
         story: "stories/primitives/ThemeSelect.stories.tsx",

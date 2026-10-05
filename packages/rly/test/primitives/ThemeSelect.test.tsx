@@ -24,6 +24,7 @@ describe("ThemeSelect", () => {
     expect(markup).toContain(">Appearance</label>")
     expect(markup).toContain('role="combobox"')
     expect(markup).toContain("aria-labelledby=")
+    expect(markup).toContain(">System<")
   })
 
   it("names a hidden-label control through aria-label for compact headers", () => {
@@ -32,6 +33,7 @@ describe("ThemeSelect", () => {
     )
     expect(markup).not.toContain("<label")
     expect(markup).toContain('aria-label="Theme"')
+    expect(markup).toContain(">Dark<")
   })
 
   it("reports the chosen theme by name", async () => {
