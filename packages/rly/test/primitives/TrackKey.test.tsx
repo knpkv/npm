@@ -34,4 +34,18 @@ describe("TrackKey", () => {
     expect(() => render(<TrackKey items={[]} label="Marks" />)).toThrow()
     expect(() => render(<TrackKey items={[{ label: " ", mark: "near" }]} label="Marks" />)).toThrow()
   })
+
+  it("refuses repeated marks before React reconciles the key", () => {
+    expect(() =>
+      render(
+        <TrackKey
+          items={[
+            { label: "80%, near the limit", mark: "near" },
+            { label: "Also near", mark: "near" }
+          ]}
+          label="Marks"
+        />
+      )
+    ).toThrow("TrackKey marks must be unique: near")
+  })
 })

@@ -24,6 +24,11 @@ export type TrackKeyProps = TrackKeyBaseProps & {
 /** One line under a set of LimitTracks explaining their marks; each mark sits before its own words. */
 export const TrackKey = ({ className, items, label, ...props }: TrackKeyProps): ReactElement => {
   if (items.length === 0) throw new Error("TrackKey needs at least one mark to explain")
+  const marks = new Set<RlyTrackKeyMark>()
+  for (const item of items) {
+    if (marks.has(item.mark)) throw new Error(`TrackKey marks must be unique: ${item.mark}`)
+    marks.add(item.mark)
+  }
   return (
     <ul {...props} aria-label={requireText(label, "TrackKey label")} className={classNames(style("root"), className)}>
       {items.map((item) => (

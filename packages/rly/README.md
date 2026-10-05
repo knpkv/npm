@@ -185,7 +185,8 @@ a dotted extension shows a `projected` level the application computed, and a
 `stale` reading is hatched. Rly derives only the tone (`limitTrackTone`); it never
 estimates a projection. The track is decorative by default because the number sits
 beside it. Pass `decorative={false}` with a `label` and the caller's `valueText`
-to expose it as a meter instead.
+to expose it as a meter instead. With `value={null}`, it is a named image whose
+accessible label combines `label` and `valueText`, without a numeric range.
 
 `TrackKey` explains the marks the tracks draw, listing only the marks in use.
 `ChartLegend` says which colour is which series, with the swatch before each label.

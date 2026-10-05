@@ -114,3 +114,17 @@ export const Meter: Story = {
     </main>
   )
 }
+
+/** Without a reading, expose the caller's explanation rather than an indeterminate meter. */
+export const Unknown: Story = {
+  args: { decorative: false, label: "Weekly", value: null, valueText: "No reading yet" },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole("img", { name: "Weekly: No reading yet" })).toBeVisible()
+    await expect(canvas.queryByRole("meter")).toBeNull()
+  },
+  render: (args) => (
+    <main style={pageStyle}>
+      <LimitTrack {...args} />
+    </main>
+  )
+}

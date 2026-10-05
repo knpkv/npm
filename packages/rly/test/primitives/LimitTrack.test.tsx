@@ -50,12 +50,26 @@ describe("LimitTrack", () => {
     const meter = render(<LimitTrack decorative={false} label="5-hour window" value={62} valueText="62% used" />)
     expect(meter.getAttribute("role")).toBe("meter")
     expect(meter.getAttribute("aria-label")).toBe("5-hour window")
+    expect(meter.getAttribute("aria-valuemin")).toBe("0")
+    expect(meter.getAttribute("aria-valuemax")).toBe("100")
     expect(meter.getAttribute("aria-valuenow")).toBe("62")
     expect(meter.getAttribute("aria-valuetext")).toBe("62% used")
     expect(meter.getAttribute("aria-hidden")).toBeNull()
-    const unknown = render(<LimitTrack decorative={false} label="Weekly" value={null} valueText="No reading yet" />)
-    expect(unknown.getAttribute("aria-valuenow")).toBeNull()
-    expect(unknown.getAttribute("aria-valuetext")).toBe("No reading yet")
     expect(() => render(<LimitTrack decorative={false} label=" " value={1} valueText="1%" />)).toThrow()
+  })
+
+  it("describes an unknown reading without claiming a numeric meter value", () => {
+    const unknown = render(<LimitTrack decorative={false} label="Weekly" value={null} valueText="No reading yet" />)
+    expect(unknown.getAttribute("role")).toBe("img")
+    expect(unknown.getAttribute("aria-label")).toBe("Weekly: No reading yet")
+    for (const attribute of ["aria-hidden", "aria-valuenow", "aria-valuemin", "aria-valuemax", "aria-valuetext"]) {
+      expect(unknown.getAttribute(attribute)).toBeNull()
+    }
+  })
+
+  it("refuses blank value descriptions for known and unknown accessible readings", () => {
+    for (const value of [62, null]) {
+      expect(() => render(<LimitTrack decorative={false} label="Weekly" value={value} valueText=" " />)).toThrow()
+    }
   })
 })

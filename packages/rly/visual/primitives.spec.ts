@@ -50,3 +50,26 @@ test("keeps state explanations readable without horizontal overflow at 320 pixel
   }))
   expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
 })
+
+test("preserves stale readings and their key in forced colours", async ({ page }) => {
+  await page.goto(story("primitives-limittrack--gallery"))
+  const stale = page.locator("[data-limit=\"Codex weekly\"] [data-part=\"fill\"]")
+  const fresh = page.locator("[data-limit=\"5-hour window\"] [data-part=\"fill\"]")
+  const staleKey = page.locator("[data-mark=\"stale\"]")
+  const unknown = page.locator("[data-limit=\"Codex 5-hour\"] [data-part=\"fill\"]")
+  await expect(stale).toBeVisible()
+  await expect(staleKey).toBeVisible()
+  await expect(stale).not.toHaveCSS("background-image", "none")
+  await expect(fresh).toHaveCSS("background-image", "none")
+  await expect(unknown).toHaveCount(0)
+  const normalWidth = (await stale.boundingBox())?.width
+
+  await page.emulateMedia({ forcedColors: "active" })
+  await expect(stale).toHaveCSS("forced-color-adjust", "none")
+  await expect(staleKey).toHaveCSS("forced-color-adjust", "none")
+  await expect(stale).not.toHaveCSS("background-image", "none")
+  await expect(staleKey).not.toHaveCSS("background-image", "none")
+  await expect(fresh).toHaveCSS("background-image", "none")
+  await expect(unknown).toHaveCount(0)
+  expect((await stale.boundingBox())?.width).toBe(normalWidth)
+})

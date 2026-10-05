@@ -42,4 +42,24 @@ describe("ChartLegend", () => {
     expect(renderToStaticMarkup(<ChartLegend items={[]} label="Bookings" />)).toBe("")
     expect(() => render(<ChartLegend items={[{ id: "a", label: "", series: 1 }]} label="Bookings" />)).toThrow()
   })
+
+  it("refuses blank series identities", () => {
+    expect(() => render(<ChartLegend items={[{ id: " ", label: "Booking", series: 1 }]} label="Bookings" />)).toThrow(
+      "ChartLegend item id must contain visible text"
+    )
+  })
+
+  it("refuses duplicate series identities before React reconciles the rows", () => {
+    expect(() =>
+      render(
+        <ChartLegend
+          items={[
+            { id: "a", label: "RLY-142", series: 1 },
+            { id: "a", label: "RLY-150", series: 2 }
+          ]}
+          label="Bookings"
+        />
+      )
+    ).toThrow("ChartLegend item ids must be unique: a")
+  })
 })

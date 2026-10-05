@@ -47,4 +47,11 @@
     inset-block: 0;
     position: absolute;
   }
+  @media (forced-colors: active) {
+    /* Preserve the age cue with the user's palette when the browser removes background images. */
+    .root[data-stale="true"] .fill {
+      background: repeating-linear-gradient(135deg, CanvasText 0 3px, Canvas 3px 6px);
+      forced-color-adjust: none;
+    }
+  }
 }

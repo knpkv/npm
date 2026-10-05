@@ -25,9 +25,19 @@ export type ChartLegendProps = ChartLegendBaseProps & {
   readonly items: ReadonlyArray<RlyChartLegendItem>
 }
 
+const validateItems = (items: ReadonlyArray<RlyChartLegendItem>): void => {
+  const ids = new Set<string>()
+  for (const item of items) {
+    const id = requireText(item.id, "ChartLegend item id")
+    if (ids.has(id)) throw new Error(`ChartLegend item ids must be unique: ${id}`)
+    ids.add(id)
+  }
+}
+
 /** Which colour is which series. Shown with every multi-series chart; renders nothing without series. */
-export const ChartLegend = ({ className, items, label, ...props }: ChartLegendProps): ReactElement | null =>
-  items.length === 0 ? null : (
+export const ChartLegend = ({ className, items, label, ...props }: ChartLegendProps): ReactElement | null => {
+  validateItems(items)
+  return items.length === 0 ? null : (
     <ul
       {...props}
       aria-label={requireText(label, "ChartLegend label")}
@@ -46,3 +56,4 @@ export const ChartLegend = ({ className, items, label, ...props }: ChartLegendPr
       ))}
     </ul>
   )
+}

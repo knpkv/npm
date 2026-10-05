@@ -45,6 +45,7 @@ export type LimitTrackProps = LimitTrackBaseProps & {
  * level the caller computed, and a hairline marks the near threshold. A stale reading is hatched.
  * Decorative by default, because the caller prints the number beside it; pass `decorative={false}`
  * with a label and the caller's own words for the value to expose it as a meter instead.
+ * An unknown reading is a named image with the label and value description, without a numeric range.
  */
 export const LimitTrack = ({
   className,
@@ -58,8 +59,10 @@ export const LimitTrack = ({
   valueText,
   ...props
 }: LimitTrackProps): ReactElement => {
-  const meter = !decorative && label !== undefined && valueText !== undefined
-  const accessibleLabel = meter ? requireText(label, "LimitTrack label") : undefined
+  const accessible = !decorative && label !== undefined && valueText !== undefined
+  const accessibleLabel = accessible ? requireText(label, "LimitTrack label") : undefined
+  const accessibleValueText = accessible ? requireText(valueText, "LimitTrack valueText") : undefined
+  const meter = accessible && value !== null
   const projection =
     value !== null && projected !== undefined && projected > value
       ? { start: percent(value), length: percent(projected) - percent(value) }
@@ -67,16 +70,16 @@ export const LimitTrack = ({
   return (
     <span
       {...props}
-      aria-hidden={meter ? undefined : "true"}
-      aria-label={accessibleLabel}
+      aria-hidden={accessible ? undefined : "true"}
+      aria-label={accessible && !meter ? `${accessibleLabel}: ${accessibleValueText}` : accessibleLabel}
       aria-valuemax={meter ? 100 : undefined}
       aria-valuemin={meter ? 0 : undefined}
       aria-valuenow={meter && value !== null ? percent(value) : undefined}
-      aria-valuetext={meter ? valueText : undefined}
+      aria-valuetext={meter ? accessibleValueText : undefined}
       className={classNames(style("root"), RLY_LIMIT_TRACK_VARIANTS.size[size].className, className)}
       data-stale={stale ? "true" : undefined}
       data-tone={limitTrackTone(value, near)}
-      role={meter ? "meter" : undefined}
+      role={accessible ? (meter ? "meter" : "img") : undefined}
     >
       {value === null ? null : (
         <span className={style("fill")} data-part="fill" style={{ inlineSize: `${percent(value)}%` }} />

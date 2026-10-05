@@ -32,13 +32,13 @@
     --rly-color-service-clockify: light-dark(#0087C7, #64CCF2);
     --rly-color-series-1: light-dark(#2A78D6, #3987E5);
     --rly-color-series-2: light-dark(#008300, #2E9E2E);
-    --rly-color-series-3: light-dark(#E87BA4, #D55181);
-    --rly-color-series-4: light-dark(#EDA100, #C98500);
-    --rly-color-series-5: light-dark(#1BAF7A, #199E70);
-    --rly-color-series-6: light-dark(#EB6834, #D95926);
+    --rly-color-series-3: light-dark(#C24F7C, #D55181);
+    --rly-color-series-4: light-dark(#9C6A00, #C98500);
+    --rly-color-series-5: light-dark(#118259, #199E70);
+    --rly-color-series-6: light-dark(#C4501E, #D95926);
     --rly-color-series-7: light-dark(#4A3AA7, #9085E9);
-    --rly-color-series-8: light-dark(#E34948, #E66767);
-    --rly-color-series-other: light-dark(#9B9A96, #6E6D69);
+    --rly-color-series-8: light-dark(#D23D3C, #E66767);
+    --rly-color-series-other: light-dark(#777672, #7E7D79);
     --rly-space-0: 0;
     --rly-space-2: 2px;
     --rly-space-4: 4px;
@@ -160,13 +160,13 @@
     --rly-color-service-clockify: light-dark(#0087C7, #64CCF2);
     --rly-color-series-1: light-dark(#2A78D6, #3987E5);
     --rly-color-series-2: light-dark(#008300, #2E9E2E);
-    --rly-color-series-3: light-dark(#E87BA4, #D55181);
-    --rly-color-series-4: light-dark(#EDA100, #C98500);
-    --rly-color-series-5: light-dark(#1BAF7A, #199E70);
-    --rly-color-series-6: light-dark(#EB6834, #D95926);
+    --rly-color-series-3: light-dark(#C24F7C, #D55181);
+    --rly-color-series-4: light-dark(#9C6A00, #C98500);
+    --rly-color-series-5: light-dark(#118259, #199E70);
+    --rly-color-series-6: light-dark(#C4501E, #D95926);
     --rly-color-series-7: light-dark(#4A3AA7, #9085E9);
-    --rly-color-series-8: light-dark(#E34948, #E66767);
-    --rly-color-series-other: light-dark(#9B9A96, #6E6D69);
+    --rly-color-series-8: light-dark(#D23D3C, #E66767);
+    --rly-color-series-other: light-dark(#777672, #7E7D79);
   }
 
   @media (forced-colors: active) {
