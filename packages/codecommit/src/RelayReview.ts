@@ -1,7 +1,8 @@
 /** Read-only local agent reviews for exact CodeCommit PR revisions. */
 import { streamEvents } from "@knpkv/ai-codex"
+import { collectBoundedText } from "@knpkv/bounded-io"
 import type { Domain, ReadClient } from "@knpkv/codecommit-core"
-import { Effect, Option, Schema, Stream } from "effect"
+import { Effect, Option, Predicate, Schema, Stream } from "effect"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as GitEnvironment from "./GitEnvironment.js"
@@ -324,11 +325,6 @@ export const MAX_RELAY_PROMPT_BYTES = 1_048_576
 export const MAX_RELAY_TURN_STATE_BYTES = 98_304
 const textEncoder = new TextEncoder()
 
-interface PatchAccumulator {
-  readonly bytes: number
-  readonly chunks: ReadonlyArray<Uint8Array>
-}
-
 const focusByKind = {
   review: "Find correctness, security, reliability, and maintainability defects. Prioritize actionable findings.",
   security: "Perform a security-focused review. Trace trust boundaries, authorization, secrets, and unsafe inputs.",
@@ -515,22 +511,13 @@ export const collectRelayPatch = (request: RelayReviewRequest) =>
             (cause) => new WorktreeError({ operation: "relay-diff", message: "Unable to start git diff", cause })
           )
         )
-      const accumulator = yield* Stream.runFoldEffect(
-        handle.stdout,
-        (): PatchAccumulator => ({ bytes: 0, chunks: [] }),
-        (current, chunk) => {
-          const bytes = current.bytes + chunk.byteLength
-          return bytes > MAX_RELAY_PATCH_BYTES
+      const patch = yield* collectBoundedText(handle.stdout, MAX_RELAY_PATCH_BYTES).pipe(
+        Effect.mapError((cause) =>
+          Predicate.isTagged(cause, "ByteLimitExceeded")
             ? new WorktreeError({
               operation: "relay-diff",
               message: `Exact patch exceeds the ${MAX_RELAY_PATCH_BYTES}-byte Relay review limit`
             })
-            : Effect.succeed({ bytes, chunks: [...current.chunks, chunk] })
-        }
-      ).pipe(
-        Effect.mapError((cause) =>
-          isWorktreeError(cause)
-            ? cause
             : new WorktreeError({ operation: "relay-diff", message: "Unable to read git diff", cause })
         )
       )
@@ -542,7 +529,6 @@ export const collectRelayPatch = (request: RelayReviewRequest) =>
       if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
         return yield* new WorktreeError({ operation: "relay-diff", message: `git diff exited with code ${exitCode}` })
       }
-      const patch = yield* Stream.fromIterable(accumulator.chunks).pipe(Stream.decodeText(), Stream.mkString)
       const promptBytes = textEncoder.encode(makeRelayReviewPrompt(request, patch)).byteLength
       if (promptBytes > MAX_RELAY_PROMPT_BYTES) {
         return yield* new WorktreeError({

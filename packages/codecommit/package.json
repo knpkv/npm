@@ -36,6 +36,7 @@
     "@effect/platform-node": "4.0.0",
     "@knpkv/agent-skills": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
+    "@knpkv/bounded-io": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/codecommit-web": "workspace:^",
     "@opentui/core": "0.5.14",

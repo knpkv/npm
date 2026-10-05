@@ -23,14 +23,8 @@ files:
   - "packages/*/src/**/*.tsx"
 ignores:
   - "packages/bounded-io/src/**"
-  # Not yet migrated (C2); remove each entry as its caller moves to bounded-io.
-  - "packages/codecommit/src/tui/file-diff.ts"
-  - "packages/codecommit/src/RelayReview.ts"
+  # Caps the encoded size of assistant text while folding agent events, not a byte stream.
   - "packages/control-center/src/server/agent/internal/PrReviewTaskExecutor.ts"
-  - "packages/control-center/src/server/agent/internal/PrReviewSourceWorkspace.ts"
-  - "packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts"
-  - "packages/control-center/src/server/http/security/RequestPolicy.ts"
-  - "packages/control-center/src/server/plugins/codepipeline/CodePipelineReadProvider.ts"
 
 note: |
   The same "fold chunks, add byteLength, fail past a cap" step was hand-copied

@@ -15,6 +15,7 @@ import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import * as s3 from "@distilled.cloud/aws/s3"
 import * as sts from "@distilled.cloud/aws/sts"
+import { collectBounded } from "@knpkv/bounded-io"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -37,11 +38,6 @@ import {
 import { decodeCodePipelineStateProviderOutput } from "./CodePipelineStateDecoder.js"
 
 const RETRY_DELAY_SECONDS = 30
-
-interface ArtifactBodyCollection {
-  readonly chunks: Array<Uint8Array>
-  readonly total: number
-}
 
 /** Plan a satisfiable S3 byte range or the canonical exhausted-range response. @internal */
 export const planCodePipelineArtifactRange = (
@@ -77,28 +73,16 @@ export const collectBoundedArtifactBody = Effect.fn("CodePipelineReadProvider.co
     Uint8Array,
     Error | PluginMalformedResponseFailure
   > {
-    const collected = yield* Stream.runFoldEffect(
-      body,
-      (): ArtifactBodyCollection => ({ chunks: [], total: 0 }),
-      (state, chunk) => {
-        const total = state.total + chunk.byteLength
-        return total > maximumBytes
-          ? Effect.fail(
-            new PluginMalformedResponseFailure({
-              operation: "codepipeline-get-artifact",
-              diagnosticCode: "codepipeline-artifact-range-exceeded"
-            })
-          )
-          : Effect.succeed({ chunks: [...state.chunks, chunk], total })
-      }
+    return yield* collectBounded(body, maximumBytes).pipe(
+      Effect.mapError((error) =>
+        Predicate.isTagged(error, "ByteLimitExceeded")
+          ? new PluginMalformedResponseFailure({
+            operation: "codepipeline-get-artifact",
+            diagnosticCode: "codepipeline-artifact-range-exceeded"
+          })
+          : error
+      )
     )
-    const bytes = new Uint8Array(collected.total)
-    let offset = 0
-    for (const chunk of collected.chunks) {
-      bytes.set(chunk, offset)
-      offset += chunk.byteLength
-    }
-    return bytes
   }
 )
 

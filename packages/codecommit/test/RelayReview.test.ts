@@ -22,6 +22,10 @@ import {
   relayReviewSupportsFollowUps
 } from "../src/RelayReview.js"
 
+// Each test effect is an application boundary that owns its Node services.
+// @effect-diagnostics-next-line strictEffectProvide:off
+const provideNodeServices = Effect.provide(NodeServices.layer)
+
 const relayRequest: RelayReviewRequest = {
   baseCommit: ReadClient.CodeCommitCommitId.make("a".repeat(40)),
   headCommit: ReadClient.CodeCommitCommitId.make("b".repeat(40)),
@@ -287,6 +291,51 @@ describe("RelayReview", () => {
         expect(command.options.env?.GIT_INDEX_FILE).toBeUndefined()
       }
     }))
+
+  it.live("refuses a patch over the Relay review byte limit", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const root = yield* fs.makeTempDirectoryScoped({ prefix: "codecommit-relay-limit-" })
+      const runGit = (args: ReadonlyArray<string>) =>
+        spawner.string(ChildProcess.make("git", args, {
+          cwd: root,
+          env: GitEnvironment.isolated(),
+          extendEnv: true,
+          stderr: "pipe",
+          stdout: "pipe"
+        })).pipe(Effect.map((output) => output.trim()))
+
+      yield* runGit(["init", "-b", "main"])
+      yield* runGit(["config", "user.email", "relay@example.invalid"])
+      yield* runGit(["config", "user.name", "Relay Test"])
+      yield* fs.writeFileString(path.join(root, "review.txt"), "before\n")
+      yield* runGit(["add", "review.txt"])
+      yield* runGit(["commit", "-m", "base"])
+      const baseCommit = yield* runGit(["rev-parse", "HEAD"])
+      // ~1 MiB of added lines: well over the 786,432-byte patch budget.
+      yield* fs.writeFileString(path.join(root, "review.txt"), `${"x".repeat(99)}\n`.repeat(10_500))
+      yield* runGit(["add", "review.txt"])
+      yield* runGit(["commit", "-m", "head"])
+      const headCommit = yield* runGit(["rev-parse", "HEAD"])
+
+      const error = yield* collectRelayPatch({
+        baseCommit: ReadClient.CodeCommitCommitId.make(baseCommit),
+        headCommit: ReadClient.CodeCommitCommitId.make(headCommit),
+        kind: "security",
+        pullRequestId: Domain.PullRequestId.make("42"),
+        repositoryName: Domain.RepositoryName.make("payments"),
+        skills: ["pr-review-diff"],
+        worktreePath: root
+      }).pipe(Effect.flip)
+
+      expect(error).toMatchObject({
+        _tag: "WorktreeError",
+        operation: "relay-diff",
+        message: "Exact patch exceeds the 786432-byte Relay review limit"
+      })
+    }).pipe(Effect.scoped, provideNodeServices))
 
   it.live("includes text hidden by repository diff attributes", () =>
     Effect.gen(function*() {

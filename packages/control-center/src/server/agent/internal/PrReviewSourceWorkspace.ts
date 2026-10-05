@@ -1,4 +1,5 @@
 /** Materialize one immutable CodeCommit review source into a private, scoped workspace. @module */
+import { collectBounded as collectBoundedBytes } from "@knpkv/bounded-io"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
@@ -222,29 +223,12 @@ interface ProcessResult {
   readonly stdout: Uint8Array
 }
 
+// Any failure, overflow included, reports the source as unavailable.
 const collectBounded = (
   stream: Stream.Stream<Uint8Array, unknown>,
   maximumBytes: number
 ): Effect.Effect<Uint8Array, PrReviewSourceError> =>
-  stream.pipe(
-    Stream.runFoldEffect(
-      () => ({ chunks: new Array<Uint8Array>(), length: 0 }),
-      (state, chunk) => {
-        const length = state.length + chunk.byteLength
-        if (length > maximumBytes) return Effect.fail(sourceError("source-unavailable"))
-        state.chunks.push(chunk)
-        return Effect.succeed({ chunks: state.chunks, length })
-      }
-    ),
-    Effect.map(({ chunks, length }) => {
-      const output = new Uint8Array(length)
-      let offset = 0
-      for (const chunk of chunks) {
-        output.set(chunk, offset)
-        offset += chunk.byteLength
-      }
-      return output
-    }),
+  collectBoundedBytes(stream, maximumBytes).pipe(
     Effect.mapError(() => sourceError("source-unavailable"))
   )
 
