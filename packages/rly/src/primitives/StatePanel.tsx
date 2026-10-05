@@ -56,7 +56,13 @@ export type StatePanelProps = Omit<ComponentPropsWithRef<"section">, "aria-live"
   readonly tone?: RlyStatePanelTone
 }
 
-/** Explain an outcome with redundant word, icon, rail, ink, and tint cues. */
+/**
+ * Explain an outcome with redundant word, icon, rail, ink, and tint cues.
+ *
+ * `announce` makes the panel a live region. Screen readers announce changes
+ * inside a region that is already mounted, not the region appearing: mount it
+ * persistently and swap its content, or keep `announce="off"` for static states.
+ */
 export const StatePanel = ({
   action,
   announce = "off",

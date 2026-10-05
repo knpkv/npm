@@ -165,6 +165,13 @@ export const COMPONENT_REGISTRY_METADATA = {
   LinkProvider: registryMetadata("Bridge rly links to an application router without coupling packages", [
     "framework-bridge"
   ], ["navigate"]),
+  Notice: registryMetadata("Say one sentence of context or outcome inline, with tone and an optional action", [
+    "caution",
+    "critical",
+    "neutral",
+    "positive",
+    "progress"
+  ], ["message", "status"]),
   PeopleStrip: registryMetadata("Show a compact named collaborator list with explicit overflow", [
     "compact",
     "overflow"

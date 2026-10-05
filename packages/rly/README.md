@@ -114,6 +114,14 @@ consumer-owned input, textarea, or `Select` through its render callback, so it
 can connect visible labels, descriptions, required state, and announced errors
 without cloning a framework-specific control.
 
+`Notice` says one sentence of context or outcome inline, between controls and
+content, with the same `tone` vocabulary as `StatePanel` and an optional
+`action`. Neutral notices carry no glyph; other tones add a decorative icon, so
+the sentence itself must name the tone ("Sync failed: …"). Use `StatePanel`
+when the state needs a title and replaces a region. With `announce`, keep the
+notice mounted and swap its children: live regions announce changes, not the
+region appearing.
+
 `ToggleGroup` chooses one of a few peer options, such as a range or a measure,
 and is always controlled: exactly one option is on, pressing it again changes
 nothing, and arrow keys move to the next option and choose it. It renders a
