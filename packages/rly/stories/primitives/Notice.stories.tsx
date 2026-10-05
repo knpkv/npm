@@ -1,5 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { expect } from "storybook/test"
+import { GlobalStyles } from "../../src/foundations/GlobalStyles.js"
+import { ThemeProvider } from "../../src/foundations/ThemeProvider.js"
 import { Button } from "../../src/primitives/Button.js"
 import { Notice } from "../../src/primitives/Notice.js"
 import { Text } from "../../src/primitives/Text.js"
@@ -75,6 +77,31 @@ export const Hidden: Story = {
     await expect(hidden === undefined ? "missing" : getComputedStyle(hidden).display).toBe("none")
     // Unlayered application CSS still wins, as a print rule revealing inactive panels needs.
     await expect(revealed === undefined ? "missing" : getComputedStyle(revealed).display).toBe("block")
+
+    const roots = Array.from(canvasElement.querySelectorAll<HTMLElement>("main > [data-rly-root]"))
+    await expect(roots).toHaveLength(3)
+    // Remove the outer catalog scope so it cannot hide a broken asChild root selector.
+    const catalog = canvasElement.querySelector<HTMLElement>("[data-rly-catalog]")
+    const catalogValue = catalog?.getAttribute("data-rly-catalog") ?? ""
+    catalog?.removeAttribute("data-rly-catalog")
+    try {
+      for (const root of roots) {
+        if (root.hidden === true) {
+          await expect(getComputedStyle(root).display).toBe("none")
+          await expect(root.getBoundingClientRect().height).toBe(0)
+        } else {
+          await expect(root.getBoundingClientRect().height).toBeGreaterThan(0)
+          root.setAttribute("hidden", "until-found")
+          try {
+            await expect(getComputedStyle(root).display).toBe("flex")
+          } finally {
+            root.removeAttribute("hidden")
+          }
+        }
+      }
+    } finally {
+      catalog?.setAttribute("data-rly-catalog", catalogValue)
+    }
   },
   render: () => (
     <main style={pageStyle}>
@@ -86,6 +113,17 @@ export const Hidden: Story = {
       <Notice className="app-reveal" hidden>
         Revealed by application CSS.
       </Notice>
+      <GlobalStyles asChild>
+        <Notice>Shown scope root.</Notice>
+      </GlobalStyles>
+      <GlobalStyles asChild>
+        <Notice action={<Button size="compact">Retry hidden root</Button>} hidden tone="critical">
+          Hidden scope root.
+        </Notice>
+      </GlobalStyles>
+      <ThemeProvider asChild theme="light">
+        <Notice hidden>Hidden theme root.</Notice>
+      </ThemeProvider>
     </main>
   )
 }
