@@ -70,6 +70,12 @@ describe("workbenchQueue", () => {
     expect(queue.rows).toHaveLength(2)
   })
 
+  it("never presents an unknown identity's pull requests as needing review", () => {
+    const pool = [rule("Approvals", 1, ["andrey"], false)]
+    const queue = workbenchQueue([make({ approvalRules: pool, id: "1" }), make({ author: "andrey", id: "2" })], "", NOW)
+    expect(queue.rows.map((row) => row.group)).toEqual(["unsorted", "unsorted"])
+  })
+
   it("is Clear when nothing waits on the user, naming the user's oldest own PR next", () => {
     const queue = workbenchQueue(
       [
@@ -107,6 +113,16 @@ describe("workbenchQueue", () => {
     expect(stuck({ id: "q", lastModifiedDate: new Date(NOW.getTime() - 9 * DAY) })).toBe("quiet")
     expect(stuck({ approvalRules: [rule("Approvals", 2, ["ana", "jonas"], false)], id: "a" })).toBe("approvals")
     expect(stuck({ approvalRules: [rule("Approvals", 1, ["ana"], true)], id: "r", isApproved: true })).toBe("ready")
+    expect(stuck({ id: "n" })).toBe("ready")
+  })
+
+  it("does not claim missing approvals when every rule is satisfied but approval was not evaluated", () => {
+    const row = workbenchQueue(
+      [make({ approvalRules: [rule("Approvals", 1, ["ana"], true)], author: "andrey", id: "u", isApproved: false })],
+      "andrey",
+      NOW
+    ).rows[0]
+    expect(row?.stuck).toBe("unverified")
   })
 })
 
@@ -121,6 +137,17 @@ describe("ruleProgress", () => {
       id: "1"
     })
     expect(ruleProgress(pullRequest)).toEqual({ approved: 1, name: "Two maintainers", required: 2 })
+  })
+
+  it("breaks equal shares by the number of approvals still missing", () => {
+    const pullRequest = make({
+      approvalRules: [
+        rule("Security", 1, ["sec-review"], false),
+        rule("Two maintainers", 2, ["andrey", "jonas"], false)
+      ],
+      id: "1"
+    })
+    expect(ruleProgress(pullRequest)).toEqual({ approved: 0, name: "Two maintainers", required: 2 })
   })
 
   it("is undefined when the PR has no approval rules", () => {

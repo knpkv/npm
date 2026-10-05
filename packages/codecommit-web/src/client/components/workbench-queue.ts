@@ -16,10 +16,17 @@ const DAY_MS = 86_400_000
 /** A pull request counts as quiet after this long without any modification. */
 export const QUIET_AFTER_MS = 7 * DAY_MS
 
-export type WorkbenchGroup = "review" | "yours" | "watching"
+/**
+ * `unsorted` holds every open pull request when no caller identity resolved: membership cannot
+ * be decided, so nothing is presented as needing the user's review.
+ */
+export type WorkbenchGroup = "review" | "yours" | "watching" | "unsorted"
 
-/** Why one of your own pull requests is not merged yet; the worst reason only. */
-export type StuckReason = "conflicts" | "quiet" | "approvals" | "ready"
+/**
+ * Why one of your own pull requests is not merged yet; the worst reason only. `unverified` means
+ * every rule reads satisfied but the approval state itself could not be evaluated.
+ */
+export type StuckReason = "conflicts" | "quiet" | "approvals" | "unverified" | "ready"
 
 /** Approvals on the least-satisfied unsatisfied rule (or the first rule when all are met). */
 export interface RuleProgress {
@@ -51,7 +58,10 @@ const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule)
   pullRequest.approvedBy.filter((approver) => rule.poolMembers.some((member) => identityMatches(approver, member)))
     .length
 
-/** The rule furthest from being met, so "0/2 two maintainers" outranks "1/1 security". */
+/**
+ * The rule furthest from being met: lowest share approved, then most approvals still missing, so
+ * "0/2 two maintainers" outranks "0/1 security" and "1/2" outranks "1/1".
+ */
 export const ruleProgress = (pullRequest: Domain.PullRequest): RuleProgress | undefined => {
   const progress = pullRequest.approvalRules.map((rule) => ({
     approved: Math.min(approvalsOn(pullRequest, rule), rule.requiredApprovals),
@@ -61,7 +71,10 @@ export const ruleProgress = (pullRequest: Domain.PullRequest): RuleProgress | un
   }))
   const unsatisfied = progress
     .filter((rule) => !rule.satisfied)
-    .sort((a, b) => a.approved / Math.max(1, a.required) - b.approved / Math.max(1, b.required))
+    .sort((a, b) =>
+      a.approved / Math.max(1, a.required) - b.approved / Math.max(1, b.required) ||
+      (b.required - b.approved) - (a.required - a.approved)
+    )
   const chosen = unsatisfied[0] ?? progress[0]
   return chosen === undefined ? undefined : { approved: chosen.approved, name: chosen.name, required: chosen.required }
 }
@@ -69,7 +82,9 @@ export const ruleProgress = (pullRequest: Domain.PullRequest): RuleProgress | un
 const stuckReason = (pullRequest: Domain.PullRequest, quietMs: number): StuckReason => {
   if (!pullRequest.isMergeable) return "conflicts"
   if (quietMs > QUIET_AFTER_MS) return "quiet"
-  return pullRequest.approvalRules.every((rule) => rule.satisfied) && pullRequest.isApproved ? "ready" : "approvals"
+  if (pullRequest.approvalRules.length === 0) return "ready"
+  if (!pullRequest.approvalRules.every((rule) => rule.satisfied)) return "approvals"
+  return pullRequest.isApproved ? "ready" : "unverified"
 }
 
 const groupOf = (pullRequest: Domain.PullRequest, currentUser: string): WorkbenchGroup | undefined => {
@@ -79,11 +94,11 @@ const groupOf = (pullRequest: Domain.PullRequest, currentUser: string): Workbenc
   return undefined
 }
 
-const groupOrder = { review: 0, yours: 1, watching: 2 } satisfies Readonly<Record<WorkbenchGroup, number>>
+const groupOrder = { review: 0, yours: 1, watching: 2, unsorted: 3 } satisfies Readonly<Record<WorkbenchGroup, number>>
 
 /**
  * Builds the queue for one user. Only open pull requests take part; within a group the longest
- * open comes first. With no identity, every open pull request is listed under "review" and the
+ * open comes first. With no identity, every open pull request is listed under `unsorted` and the
  * summary is `Unknown`, because membership cannot be decided.
  */
 export const workbenchQueue = (
@@ -95,7 +110,7 @@ export const workbenchQueue = (
   const rows = pullRequests
     .filter((pullRequest) => pullRequest.status === "OPEN")
     .flatMap((pullRequest): ReadonlyArray<WorkbenchRow> => {
-      const group = known ? groupOf(pullRequest, currentUser) : "review"
+      const group = known ? groupOf(pullRequest, currentUser) : "unsorted"
       if (group === undefined) return []
       const quietMs = Math.max(0, now.getTime() - pullRequest.lastModifiedDate.getTime())
       return [{
