@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 
-import { act, type ReactElement, useState } from "react"
+import { act, type ReactElement, type ReactNode, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
-import type { RlyTheme } from "../../src/foundations/ThemeProvider.js"
+import { type RlyTheme, ThemeProvider, useStoredTheme } from "../../src/foundations/ThemeProvider.js"
 import { ThemeSelect } from "../../src/primitives/ThemeSelect.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -75,5 +75,33 @@ describe("ThemeSelect", () => {
     await act(async () => dark?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" })))
     expect(chosen).toEqual(["dark"])
     expect(trigger?.textContent).toContain("Dark")
+  })
+
+  it("opens with every theme in the README's Shell wiring, which owns its portal target", async () => {
+    Reflect.set(HTMLElement.prototype, "scrollIntoView", vi.fn())
+    const browserStorage = (): Storage => window.localStorage
+    // Mirrors the Shell example in packages/rly/README.md.
+    const Shell = ({ children }: { readonly children: ReactNode }): ReactElement => {
+      const [theme, setTheme] = useStoredTheme("readme_theme", browserStorage)
+      return (
+        <ThemeProvider theme={theme}>
+          <PortalProvider>
+            <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} value={theme} />
+            {children}
+          </PortalProvider>
+        </ThemeProvider>
+      )
+    }
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    await act(async () => root.render(<Shell>page</Shell>))
+    const trigger = host.querySelector<HTMLButtonElement>('[role="combobox"]')
+    trigger?.focus()
+    await act(async () => trigger?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" })))
+    const options = Array.from(host.querySelectorAll('[role="option"]'), (option) => option.textContent)
+    expect(options).toEqual(["System", "Light", "Dark"])
+    localStorage.clear()
   })
 })

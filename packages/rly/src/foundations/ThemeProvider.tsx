@@ -4,6 +4,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useInsertionEffect,
   useRef,
   useSyncExternalStore
 } from "react"
@@ -38,16 +39,35 @@ export const decodeRlyTheme = (value: string | null | undefined): RlyTheme | und
 /** The storage operations `useStoredTheme` needs; the browser's local storage satisfies it. */
 export type RlyPreferenceStorage = Pick<Storage, "getItem" | "setItem">
 
-// Same-tab writers notify here; the `storage` event only reaches other tabs.
-const sameTabListeners = new Set<(key: string) => void>()
-// Holds a choice for this page lifetime when storage writes are refused.
-const unsavedThemes = new Map<string, RlyTheme>()
+type PreferenceStorageIdentity = RlyPreferenceStorage | (() => RlyPreferenceStorage)
 
-const readStoredTheme = (key: string, storage: () => RlyPreferenceStorage): RlyTheme => {
-  const unsaved = unsavedThemes.get(key)
-  if (unsaved !== undefined) return unsaved
+// Same-tab writers notify here; the `storage` event only reaches other tabs.
+const sameTabListeners = new Set<(storage: PreferenceStorageIdentity, key: string) => void>()
+// Holds a choice for this page lifetime when storage writes are refused.
+const unsavedThemes = new WeakMap<PreferenceStorageIdentity, Map<string, RlyTheme>>()
+
+/** Which store a hook talks to: its identity for fallbacks and sync, and the store when readable. */
+interface StorageAccess {
+  readonly identity: PreferenceStorageIdentity
+  readonly readable: RlyPreferenceStorage | null
+}
+
+/** Use the storage object as identity, or the stable supplier when access is refused. */
+const storageAccess = (storage: () => RlyPreferenceStorage, unavailable: () => RlyPreferenceStorage): StorageAccess => {
   try {
-    return decodeRlyTheme(storage().getItem(key)) ?? "system"
+    const readable = storage()
+    return { identity: readable, readable }
+  } catch {
+    return { identity: unavailable, readable: null }
+  }
+}
+
+const readStoredTheme = (key: string, access: StorageAccess): RlyTheme => {
+  const unsaved = unsavedThemes.get(access.identity)?.get(key)
+  if (unsaved !== undefined) return unsaved
+  if (access.readable === null) return "system"
+  try {
+    return decodeRlyTheme(access.readable.getItem(key)) ?? "system"
   } catch {
     return "system"
   }
@@ -62,8 +82,11 @@ const serverTheme = (): RlyTheme => "system"
  * a browser that refuses access falls back to `system`.
  *
  * The server snapshot is always `system`, so server-rendered pages hydrate and then
- * switch to the stored theme. Consumers in the same tab and in other tabs stay in sync.
- * When storage refuses the write, the choice lasts until the page unloads.
+ * switch to the stored theme. Consumers sharing a storage object and key stay in sync;
+ * native storage events sync other tabs using the same storage area. When storage
+ * refuses the write, the choice lasts until unload or a matching storage update.
+ * If access itself is refused, consumers share fallback choices only through the
+ * same stable storage supplier. Inline suppliers keep their fallback across renders.
  *
  * @example
  * // browserStorage is an application function returning the browser's local storage.
@@ -76,13 +99,30 @@ export const useStoredTheme = (
 ): readonly [RlyTheme, (theme: RlyTheme) => void] => {
   const key = requireText(storageKey, "useStoredTheme storage key")
 
+  const unavailableStorage = useRef(storage)
+  // Callers usually pass an inline thunk; a ref keeps setTheme stable across renders. Insertion
+  // effects run before any layout or passive effect, so a descendant's effect calling setTheme
+  // already writes to the storage this render supplied.
+  const storageRef = useRef(storage)
+  useInsertionEffect(() => {
+    storageRef.current = storage
+  })
+
   const subscribe = useCallback(
     (notify: () => void): (() => void) => {
       const onStorage = (event: StorageEvent): void => {
-        if (event.key === key || event.key === null) notify()
+        if (event.key !== key && event.key !== null) return
+        const current = storageAccess(storageRef.current, unavailableStorage.current).identity
+        if (event.storageArea !== current) return
+        unsavedThemes.get(current)?.delete(key)
+        notify()
       }
-      const onSameTab = (changed: string): void => {
-        if (changed === key) notify()
+      const onSameTab = (changedStorage: PreferenceStorageIdentity, changed: string): void => {
+        if (
+          changed === key &&
+          changedStorage === storageAccess(storageRef.current, unavailableStorage.current).identity
+        )
+          notify()
       }
       window.addEventListener("storage", onStorage)
       sameTabListeners.add(onSameTab)
@@ -94,23 +134,26 @@ export const useStoredTheme = (
     [key]
   )
 
-  const theme = useSyncExternalStore(subscribe, () => readStoredTheme(key, storage), serverTheme)
-
-  // Callers usually pass an inline thunk; a ref keeps setTheme stable across renders.
-  const storageRef = useRef(storage)
-  useEffect(() => {
-    storageRef.current = storage
-  })
+  const theme = useSyncExternalStore(
+    subscribe,
+    () => readStoredTheme(key, storageAccess(storage, unavailableStorage.current)),
+    serverTheme
+  )
 
   const setTheme = useCallback(
     (next: RlyTheme): void => {
+      let identity: PreferenceStorageIdentity = unavailableStorage.current
       try {
-        storageRef.current().setItem(key, next)
-        unsavedThemes.delete(key)
+        const current = storageRef.current()
+        identity = current
+        current.setItem(key, next)
+        unsavedThemes.get(identity)?.delete(key)
       } catch {
-        unsavedThemes.set(key, next)
+        const themes = unsavedThemes.get(identity) ?? new Map<string, RlyTheme>()
+        themes.set(key, next)
+        unsavedThemes.set(identity, themes)
       }
-      for (const listener of sameTabListeners) listener(key)
+      for (const listener of sameTabListeners) listener(identity, key)
     },
     [key]
   )

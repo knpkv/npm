@@ -72,7 +72,7 @@ export const PicksTheme: Story = {
       if (previous === null) window.localStorage.removeItem(STORY_KEY)
       else window.localStorage.setItem(STORY_KEY, previous)
       // A direct write skips the hook; a storage event makes it re-read so the page ends consistent.
-      window.dispatchEvent(new StorageEvent("storage", { key: STORY_KEY }))
+      window.dispatchEvent(new StorageEvent("storage", { key: STORY_KEY, storageArea: window.localStorage }))
     }
   },
   render: () => <ThemeSelectGallery />

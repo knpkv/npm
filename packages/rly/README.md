@@ -76,18 +76,22 @@ export const App = () => (
 To remember the viewer's choice, pair it with `useStoredTheme` and `ThemeSelect`:
 
 ```tsx
-import { ThemeProvider, useDocumentTheme, useStoredTheme } from "@knpkv/rly/foundations"
+import { PortalProvider, ThemeProvider, useDocumentTheme, useStoredTheme } from "@knpkv/rly/foundations"
 import { ThemeSelect } from "@knpkv/rly/primitives"
+import type { ReactNode } from "react"
 
 const browserStorage = () => window.localStorage
 
+// PortalProvider gives the select's menu somewhere to open; without one it has no options.
 export const Shell = ({ children }: { readonly children: ReactNode }) => {
   const [theme, setTheme] = useStoredTheme("my_app_theme", browserStorage)
   useDocumentTheme(theme)
   return (
     <ThemeProvider theme={theme}>
-      <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} value={theme} />
-      {children}
+      <PortalProvider>
+        <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} value={theme} />
+        {children}
+      </PortalProvider>
     </ThemeProvider>
   )
 }
@@ -96,8 +100,11 @@ export const Shell = ({ children }: { readonly children: ReactNode }) => {
 The storage key is required, because composed apps share an origin. Storage is
 passed lazily: server rendering uses `system` and never touches it, hydration
 then switches to the stored theme, and a browser that refuses storage keeps
-the choice for the page lifetime. Consumers in the same tab and in other tabs
-stay in sync. `ThemeProvider` themes only its own boundary, so the page that
+the choice until unload or a matching storage update. Consumers sharing the
+same storage object and key stay in sync; native storage events sync other tabs
+using that storage area. If storage access itself is refused, share a stable
+storage supplier to share fallback choices; inline suppliers keep their own
+fallback across renders. `ThemeProvider` themes only its own boundary, so the page that
 owns the whole document also calls `useDocumentTheme`; it sets `data-theme` on
 `<html>` so the viewport canvas, overscroll area, and page scrollbars match.
 Embedded surfaces skip it. `decodeRlyTheme` validates a stored value for apps that keep
