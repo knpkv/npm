@@ -1,4 +1,5 @@
 /** Bounded discovery of local CLI implementation metadata. @module */
+import { collectBoundedText } from "@knpkv/bounded-io"
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
 import * as ChildProcess from "effect/process/ChildProcess"
@@ -90,36 +91,11 @@ export interface LocalCliRuntimeMetadataOptions {
   readonly versionArguments?: ReadonlyArray<string>
 }
 
-interface CollectedOutput {
-  readonly bytes: number
-  readonly chunks: ReadonlyArray<Uint8Array>
-}
-
 const collectBounded = (
   implementation: string,
   stream: Stream.Stream<Uint8Array, unknown>
 ): Effect.Effect<string, AgentRuntimeMetadataError> =>
-  stream.pipe(
-    Stream.runFoldEffect(
-      (): CollectedOutput => ({ bytes: 0, chunks: [] }),
-      (collected, chunk) => {
-        const bytes = collected.bytes + chunk.byteLength
-        return bytes > MAXIMUM_VERSION_OUTPUT_BYTES
-          ? Effect.fail(
-            new AgentRuntimeMetadataError({
-              implementation,
-              reason: "invalid-output"
-            })
-          )
-          : Effect.succeed({ bytes, chunks: [...collected.chunks, chunk] })
-      }
-    ),
-    Effect.flatMap(({ chunks }) =>
-      Stream.fromIterable(chunks).pipe(
-        Stream.decodeText(),
-        Stream.mkString
-      )
-    ),
+  collectBoundedText(stream, MAXIMUM_VERSION_OUTPUT_BYTES).pipe(
     Effect.mapError(() =>
       new AgentRuntimeMetadataError({
         implementation,

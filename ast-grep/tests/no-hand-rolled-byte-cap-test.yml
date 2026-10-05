@@ -1,0 +1,18 @@
+id: no-hand-rolled-byte-cap
+valid:
+  - |
+    const text = yield* collectBoundedText(handle.stdout, limit)
+  - |
+    stream.pipe(Stream.mapEffect((line) => decode(line)))
+  - |
+    stream.pipe(Stream.runFoldEffect(() => 0, (count, _chunk) => Effect.succeed(count + 1)))
+invalid:
+  - |
+    stream.pipe(Stream.runFoldEffect(() => ({ bytes: 0, chunks: [] }), (output, chunk) => {
+      const bytes = output.bytes + chunk.byteLength
+      return bytes > max ? Effect.fail(new TooLarge()) : Effect.succeed({ bytes, chunks: [...output.chunks, chunk] })
+    }))
+  - |
+    stdout.pipe(Stream.mapAccumEffect(() => 0, (bytes, chunk) => Effect.succeed([bytes + chunk.byteLength, [chunk]])))
+  - |
+    handle.stdout.pipe(Stream.mapEffect((chunk) => Ref.updateAndGet(seen, (bytes) => bytes + chunk.byteLength)))

@@ -50,6 +50,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@knpkv/bounded-io": "workspace:^",
     "effect": "4.0.0"
   },
   "devDependencies": {

@@ -63,6 +63,7 @@
     "@effect/atom-react": "4.0.0",
     "@effect/platform-browser": "4.0.0",
     "@effect/platform-node": "4.0.0",
+    "@knpkv/bounded-io": "workspace:^",
     "@knpkv/herdr-connect": "workspace:^",
     "@knpkv/herdr-coordinator": "workspace:^",
     "@knpkv/herdr-fleet": "workspace:^",
