@@ -70,4 +70,15 @@ describe("collectBoundedText", () => {
       )
       expect(text).toBe("aé😀")
     }))
+
+  // Same result as Stream.decodeText + Stream.mkString, which the migrated
+  // readers used: a truncated trailing sequence is dropped, a bad one in the
+  // middle becomes U+FFFD.
+  it.effect("decodes like Stream.decodeText for malformed and truncated input", () =>
+    Effect.gen(function*() {
+      const chunks = [bytes(0x31, 0xff, 0x32), bytes(0x33, 0xc3)]
+      const expected = yield* Stream.fromIterable(chunks).pipe(Stream.decodeText(), Stream.mkString)
+      expect(yield* collectBoundedText(Stream.fromIterable(chunks), 16)).toBe(expected)
+      expect(expected).toBe("1\uFFFD23")
+    }))
 })

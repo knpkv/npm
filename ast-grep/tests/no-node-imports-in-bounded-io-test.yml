@@ -2,8 +2,20 @@ id: no-node-imports-in-bounded-io
 valid:
   - |
     import { Effect, Stream } from "effect"
+  - |
+    export { collectBounded } from "./collect.js"
+  - |
+    import { fsLike } from "fs-extra-browser"
 invalid:
   - |
     import { Buffer } from "node:buffer"
   - |
     const fs = await import("node:fs")
+  - |
+    import { readFile } from "fs"
+  - |
+    export * from "node:fs"
+  - |
+    export { join } from "path"
+  - |
+    import { pipeline } from "stream/promises"

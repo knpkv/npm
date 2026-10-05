@@ -16,6 +16,6 @@ const stdout =
 
 - `limitBytes(stream, limit)` passes chunks through and fails once the running total exceeds `limit`.
 - `collectBounded(stream, limit)` collects into one `Uint8Array`.
-- `collectBoundedText(stream, limit)` collects and decodes UTF-8.
+- `collectBoundedText(stream, limit)` collects and decodes UTF-8 exactly like `Stream.decodeText` + `Stream.mkString`: invalid sequences become U+FFFD and a truncated sequence at the very end is dropped.
 
 `limit` is inclusive: exactly `limit` bytes succeed. `observedBytes` is the running total at the chunk that crossed it. The package has no Node imports and runs in browsers.

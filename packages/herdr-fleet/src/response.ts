@@ -1,4 +1,4 @@
-import { collectBoundedText } from "@knpkv/bounded-io"
+import { collectBounded } from "@knpkv/bounded-io"
 import { Effect, Predicate, Schema } from "effect"
 import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { FleetResponseBodyError } from "./errors.js"
@@ -10,7 +10,8 @@ export const boundedResponseText = Effect.fn("FleetResponse.boundedText")(functi
   response: HttpClientResponse.HttpClientResponse,
   maximumBytes = fleetResponseBodyMaxBytes
 ) {
-  return yield* collectBoundedText(response.stream, maximumBytes).pipe(
+  // A whole-body decode, as before: a truncated trailing sequence becomes U+FFFD.
+  const body = yield* collectBounded(response.stream, maximumBytes).pipe(
     Effect.mapError((cause) =>
       Predicate.isTagged(cause, "ByteLimitExceeded")
         ? new FleetResponseBodyError({
@@ -25,6 +26,7 @@ export const boundedResponseText = Effect.fn("FleetResponse.boundedText")(functi
         })
     )
   )
+  return new TextDecoder().decode(body)
 })
 
 export const decodeBoundedResponseJson = Effect.fn("FleetResponse.decodeJson")(function*<A>(

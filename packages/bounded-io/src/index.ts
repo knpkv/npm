@@ -68,9 +68,14 @@ export const collectBounded = <E, R>(
     )
   })
 
-/** {@link collectBounded}, decoded as UTF-8 (invalid sequences become U+FFFD). */
+/**
+ * {@link collectBounded}, decoded as UTF-8 exactly as `Stream.decodeText` +
+ * `Stream.mkString` would: invalid sequences become U+FFFD, and an incomplete
+ * sequence at the very end is dropped rather than replaced, because
+ * `decodeText` decodes in streaming mode and never flushes.
+ */
 export const collectBoundedText = <E, R>(
   stream: Stream.Stream<Uint8Array, E, R>,
   limit: number
 ): Effect.Effect<string, E | ByteLimitExceeded, R> =>
-  collectBounded(stream, limit).pipe(Effect.map((body) => new TextDecoder().decode(body)))
+  collectBounded(stream, limit).pipe(Effect.map((body) => new TextDecoder().decode(body, { stream: true })))
