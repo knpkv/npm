@@ -472,3 +472,11 @@ contentHash: "7a8b9c..."
 ## License
 
 MIT
+
+## Troubleshooting
+
+A failed command prints the error message. Add `--verbose` (or set `DEBUG=1`) to print the full cause with stack traces:
+
+```bash
+confluence --verbose auth status
+```

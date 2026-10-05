@@ -299,3 +299,11 @@ const direct = Effect.gen(function* () {
 ## License
 
 MIT
+
+## Troubleshooting
+
+A failed command prints the error message. Add `--verbose` (or set `DEBUG=1`) to print the full cause with stack traces:
+
+```bash
+jira --verbose auth status
+```
