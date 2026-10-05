@@ -325,10 +325,6 @@ const boundarySource = await readFile(
 if (!boundarySource.includes("this.getModuleIds()") || !boundarySource.includes("prototypes/")) {
   failures.push("prototype graph boundary does not inspect resolved production modules")
 }
-const fixture = await stat(
-  resolve(workspaceRoot, "packages/codecommit-web/src/client/prototypes/control-center/control-center-prototype.tsx")
-).catch(() => undefined)
-if (!fixture?.isFile()) failures.push("approved Control Center visual fixture was not retained")
 const staticRule = await readFile(
   resolve(workspaceRoot, "ast-grep/rules/typescript/no-production-prototype-import.yml"),
   "utf8"
@@ -336,7 +332,7 @@ const staticRule = await readFile(
 if (!staticRule.includes("id: no-production-prototype-import") || !staticRule.includes("**/prototypes/**")) {
   failures.push("prototype import static-analysis boundary is missing")
 }
-if (!/prototype is retired from production routing/u.test(overview)) {
+if (!/prototype is retired and its files were removed/u.test(overview)) {
   failures.push("prototype retirement is not explicit in Control Center docs")
 }
 
@@ -358,5 +354,5 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `validated Control Center docs against ${expectedEntries.length} public exports, ${configuredVariables.size} server variables, and retired prototype boundaries${sourceOnly ? "" : " plus built links"}`
+  `validated Control Center docs against ${expectedEntries.length} public exports, ${configuredVariables.size} server variables, and prototype import boundaries${sourceOnly ? "" : " plus built links"}`
 )
