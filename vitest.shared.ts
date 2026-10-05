@@ -1,12 +1,10 @@
 import type { ViteUserConfig } from "vitest/config"
+import { workspaceSourceAlias } from "./vitest.workspace-sources.ts"
 
 const config: ViteUserConfig = {
   resolve: {
     tsconfigPaths: true,
-    alias: {
-      "@knpkv/clockify-api-client": new URL("./packages/clockify-api-client/src/index.ts", import.meta.url).pathname,
-      "@knpkv/jira-api-client": new URL("./packages/jira-api-client/src/index.ts", import.meta.url).pathname
-    }
+    alias: [...workspaceSourceAlias]
   },
   optimizeDeps: {
     exclude: ["bun:sqlite"]

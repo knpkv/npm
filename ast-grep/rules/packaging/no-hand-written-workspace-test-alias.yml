@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-hand-written-workspace-test-alias
+language: tsx
+severity: error
+message: "Resolve @knpkv/* in tests through workspaceSourceAlias (vitest.workspace-sources.ts), not a hand-written alias"
+
+rule:
+  any:
+    # alias: { "@knpkv/x": "..." }
+    - kind: pair
+      has:
+        field: key
+        regex: '^["'']@knpkv/'
+    # alias: [{ find: "@knpkv/x", replacement: "..." }]
+    - kind: pair
+      all:
+        - has:
+            field: key
+            regex: "^find$"
+        - has:
+            field: value
+            regex: '^["'']@knpkv/'
+
+files:
+  - "packages/*/vitest*.ts"
+
+ignores:
+  # Review's guide-hydration test server-renders the built export and hydrates it
+  # with an esbuild client bundle; both sides must resolve the same rly build, so
+  # this config deliberately stays on dist/ and has no workspace alias.
+  - "packages/review/vitest.config*.ts"
+
+note: |
+  Hand-written aliases drift: a new package subpath is missing until someone
+  adds it to every consumer's list, and packages without one silently test the
+  last dist/ build. workspaceSourceAlias derives every @knpkv/* export from the
+  package manifests and fails config loading when a dist export has no source.

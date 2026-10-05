@@ -6,7 +6,7 @@
     "lib": ["ES2022"],
     "noEmit": true,
     "resolveJsonModule": true,
-    "rootDir": ".",
+    "rootDir": "../..",
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.node.tsbuildinfo",
     "types": ["node", "vitest/globals"]
   },
@@ -21,7 +21,8 @@
     "src/server/persistence/schema.json",
     "test",
     "vite.config.ts",
-    "vitest.config.ts"
+    "vitest.config.ts",
+    "../../vitest.workspace-sources.ts"
   ],
   "exclude": ["dist", "node_modules", "test/client"],
   "references": [{ "path": "../ai-runtime/tsconfig.json" }, { "path": "../control-center-sql/tsconfig.build.json" }]

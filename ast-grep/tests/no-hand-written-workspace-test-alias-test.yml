@@ -1,0 +1,17 @@
+id: no-hand-written-workspace-test-alias
+valid:
+  - |
+    export default defineConfig({ resolve: { alias: [...workspaceSourceAlias] } })
+  - |
+    export default defineConfig({ resolve: { alias: [...workspaceSourceAlias, { find: "@", replacement: "src/client" }] } })
+invalid:
+  - |
+    export default defineConfig({
+      resolve: {
+        alias: {
+          "@knpkv/atlassian-common/auth": new URL("../atlassian-common/src/auth/index.ts", import.meta.url).pathname
+        }
+      }
+    })
+  - |
+    export default defineConfig({ resolve: { alias: [{ find: "@knpkv/rly/primitives", replacement: "../rly/src/primitives/index.ts" }] } })

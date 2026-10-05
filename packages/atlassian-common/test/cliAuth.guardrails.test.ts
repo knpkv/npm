@@ -4,6 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
@@ -19,10 +20,11 @@ const Findings = Schema.fromJsonString(Schema.Array(Schema.Struct({ file: Schema
 describe("CLI auth guardrails", () => {
   for (const [name, config] of Object.entries(configs)) {
     it(`${name} resolves CLI auth from source rather than stale build output`, () => {
-      expect(config.resolve?.alias).toHaveProperty(
-        "@knpkv/atlassian-common/cli-auth",
-        new URL("../src/cli-auth/index.ts", import.meta.url).pathname
-      )
+      const aliases = config.resolve?.alias
+      const entries = Array.isArray(aliases) ? aliases : []
+      const specifier = "@knpkv/atlassian-common/cli-auth"
+      const cliAuth = entries.find(({ find }) => Predicate.isString(find) ? find === specifier : find.test(specifier))
+      expect(cliAuth?.replacement).toBe(new URL("../src/cli-auth/index.ts", import.meta.url).pathname)
     })
   }
 

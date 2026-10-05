@@ -1,13 +1,9 @@
-import { fileURLToPath } from "node:url"
 import { defineConfig } from "vitest/config"
+import { workspaceSourceAlias } from "../../vitest.workspace-sources.ts"
 
 export default defineConfig({
   resolve: {
-    alias: {
-      "@knpkv/rly/foundations": fileURLToPath(new URL("../rly/src/foundations/index.ts", import.meta.url)),
-      "@knpkv/rly/patterns": fileURLToPath(new URL("../rly/src/patterns/index.ts", import.meta.url)),
-      "@knpkv/rly/primitives": fileURLToPath(new URL("../rly/src/primitives/index.ts", import.meta.url))
-    }
+    alias: [...workspaceSourceAlias]
   },
   test: {
     environment: "happy-dom",
