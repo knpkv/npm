@@ -1,11 +1,10 @@
 import path from "node:path"
 import { defineConfig } from "vitest/config"
+import { workspaceSourceAlias } from "../../vitest.workspace-sources.ts"
 
 export default defineConfig({
   resolve: {
-    alias: {
-      "@": path.resolve(import.meta.dirname, "src/client")
-    }
+    alias: [...workspaceSourceAlias, { find: "@", replacement: path.resolve(import.meta.dirname, "src/client") }]
   },
   test: {
     environment: "node",

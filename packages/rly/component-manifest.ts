@@ -685,6 +685,35 @@ export const componentManifest = {
     {
       category: "primitive",
       exports: [
+        { kind: "value", name: "Notice" },
+        { kind: "value", name: "RLY_NOTICE_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_NOTICE_VARIANTS" },
+        { kind: "type", name: "NoticeProps" },
+        { kind: "type", name: "RlyNoticeAnnouncement" },
+        { kind: "type", name: "RlyNoticeTone" }
+      ],
+      name: "Notice",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/Notice.tsx",
+      status: "stable",
+      styles: ["src/primitives/Notice.module.css"],
+      variants: [
+        {
+          defaultValue: "neutral",
+          name: "tone",
+          values: ["neutral", "positive", "critical", "caution", "progress"]
+        }
+      ],
+      visual: {
+        story: "stories/primitives/Notice.stories.tsx",
+        storyId: "primitives-notice--gallery",
+        tests: ["test/primitives/Notice.test.tsx"]
+      }
+    },
+    {
+      category: "primitive",
+      exports: [
         { kind: "value", name: "RLY_SELECT_DEFAULT_VARIANTS" },
         { kind: "value", name: "RLY_SELECT_VARIANTS" },
         { kind: "value", name: "Select" },

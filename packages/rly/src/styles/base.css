@@ -34,3 +34,13 @@
     outline-offset: 2px;
   }
 }
+
+/* After rly.components, so a component's own display cannot defeat the native hidden
+   attribute. Not !important and layered: unlayered application CSS (for example a print
+   rule revealing inactive tab panels) still wins. until-found keeps its browser behaviour. */
+@layer rly.state {
+  :where([data-rly-root], [data-rly-catalog])[hidden]:not([hidden="until-found"]),
+  :where([data-rly-root], [data-rly-catalog]) [hidden]:not([hidden="until-found"]) {
+    display: none;
+  }
+}

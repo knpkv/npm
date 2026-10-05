@@ -489,6 +489,23 @@
       ]
     },
     {
+      "name": "Notice",
+      "paths": {
+        "source": "packages/rly/src/primitives/Notice.tsx",
+        "story": "packages/rly/stories/primitives/Notice.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/Notice.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/Notice.test.tsx"
+        ]
+      },
+      "storyId": "primitives-notice--gallery",
+      "storyIds": [
+        "primitives-notice--gallery"
+      ]
+    },
+    {
       "name": "PatchDiffView",
       "paths": {
         "source": "packages/rly/src/diff/patch/PatchDiffView.tsx",

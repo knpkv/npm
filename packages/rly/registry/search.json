@@ -683,6 +683,35 @@
     },
     {
       "capabilities": [
+        "message",
+        "status"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "Notice",
+      "states": [
+        "caution",
+        "critical",
+        "default",
+        "neutral",
+        "positive",
+        "progress"
+      ],
+      "terms": [
+        "caution",
+        "critical",
+        "message",
+        "neutral",
+        "notice",
+        "positive",
+        "primitive",
+        "progress",
+        "status",
+        "tone"
+      ]
+    },
+    {
+      "capabilities": [
         "people"
       ],
       "category": "pattern",

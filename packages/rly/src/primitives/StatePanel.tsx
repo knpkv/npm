@@ -56,7 +56,14 @@ export type StatePanelProps = Omit<ComponentPropsWithRef<"section">, "aria-live"
   readonly tone?: RlyStatePanelTone
 }
 
-/** Explain an outcome with redundant word, icon, rail, ink, and tint cues. */
+/**
+ * Explain an outcome with redundant word, icon, rail, ink, and tint cues.
+ *
+ * `announce` makes the panel a live region. A polite status region reliably announces
+ * changes only once it is already mounted: mount it persistently and swap its content.
+ * An assertive alert may announce as soon as it is inserted. Keep `announce="off"`
+ * for static states.
+ */
 export const StatePanel = ({
   action,
   announce = "off",
@@ -67,7 +74,8 @@ export const StatePanel = ({
   tone = "neutral",
   ...props
 }: StatePanelProps): ReactElement => {
-  const role = announce === "assertive" ? "alert" : announce === "polite" ? "status" : undefined
+  // An announcing region owns its role; otherwise the caller's role (for example "note") stands.
+  const role = announce === "assertive" ? "alert" : announce === "polite" ? "status" : props.role
 
   return (
     <section
