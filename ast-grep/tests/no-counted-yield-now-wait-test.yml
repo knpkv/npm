@@ -10,6 +10,8 @@ valid:
     yield* Deferred.await(entered)
 invalid:
   - |
+    for (let schedulerYield = 0; schedulerYield < 100; schedulerYield += 1) yield* Effect.yieldNow
+  - |
     for (let index = 0; index < 200; index++) {
       yield* Effect.yieldNow
     }

@@ -392,8 +392,13 @@ esac
           }
           yield* store.put(prooflessPending)
           let failApproval = true
+          // Completes once the host runner has finished the approved job and
+          // persisted its final status, so the test waits on that transition
+          // instead of guessing how many scheduler turns it takes.
+          const jobSettled = yield* Deferred.make<void>()
           const retryableFleet: FleetService = {
             ...fleet,
+            run: (jobId) => fleet.run(jobId).pipe(Effect.onExit(() => Deferred.succeed(jobSettled, undefined))),
             approve: (jobId, approval, actor) => {
               if (failApproval) {
                 failApproval = false
@@ -526,15 +531,8 @@ esac
           expect(replay.status).toBe(409)
           yield* Effect.promise(() => replay.text())
 
-          let terminal = yield* fleet.get(pending.id)
-          for (
-            let attempt = 0;
-            attempt < 100 && (terminal.status === "queued" || terminal.status === "running");
-            attempt += 1
-          ) {
-            yield* Effect.yieldNow
-            terminal = yield* fleet.get(pending.id)
-          }
+          yield* Deferred.await(jobSettled)
+          const terminal = yield* fleet.get(pending.id)
           expect(terminal.status).toBe("succeeded")
           const history = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/`, { headers }).then((response) => response.text())

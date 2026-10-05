@@ -137,9 +137,17 @@ const observedServerFactory = (stopped: Ref.Ref<boolean>) =>
     )
   )
 
-const captureConsole = (lines: Array<string>): Console.Console =>
+const captureConsole = (lines: Array<string>, waiting?: Deferred.Deferred<void>): Console.Console =>
   Object.assign(Object.create(console), {
-    log: (...args: ReadonlyArray<unknown>) => lines.push(args.join(" ")),
+    log: (...args: ReadonlyArray<unknown>) => {
+      const line = args.join(" ")
+      lines.push(line)
+      // Login prints this right before it starts its authorization deadline,
+      // without suspending in between.
+      if (waiting !== undefined && line.startsWith("Waiting for authorization")) {
+        Deferred.doneUnsafe(waiting, Effect.void)
+      }
+    },
     error: (...args: ReadonlyArray<unknown>) => lines.push(`stderr: ${args.join(" ")}`)
   })
 
@@ -235,6 +243,7 @@ describe("Atlassian CLI login", () => {
       const attempts = yield* Ref.make<ReadonlyArray<string>>([])
       const lines: Array<string> = []
       const stopped = yield* Ref.make(false)
+      const waiting = yield* Deferred.make<void>()
 
       const login = yield* makeAtlassianCliAuth(authOptions).pipe(
         Effect.flatMap((auth) => auth.login()),
@@ -245,18 +254,14 @@ describe("Atlassian CLI login", () => {
           failingLaunchers(launched, attempts),
           observedServerFactory(stopped)
         )),
-        Effect.provideService(Console.Console, captureConsole(lines)),
+        Effect.provideService(Console.Console, captureConsole(lines, waiting)),
         Effect.flip,
         Effect.forkChild({ startImmediately: true })
       )
 
-      yield* Deferred.await(launched)
-      // The deadline is registered just after the launch; step the clock past it
-      // in increments so it fires wherever in that window it was set.
-      for (let minute = 0; minute < 10; minute++) {
-        yield* TestClock.adjust("1 minute")
-        yield* Effect.yieldNow
-      }
+      // The login fiber has started its five-minute deadline by the time this resumes.
+      yield* Deferred.await(waiting)
+      yield* TestClock.adjust("5 minutes")
       const error = yield* Fiber.join(login)
 
       expect(error._tag).toBe("OAuthError")
