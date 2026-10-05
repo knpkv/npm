@@ -1,5 +1,11 @@
 # @knpkv/atlassian-common
 
+## 1.8.0
+
+### Minor Changes
+
+- [#475](https://github.com/knpkv/npm/pull/475) [`08c62b7`](https://github.com/knpkv/npm/commit/08c62b787c649d8f78753515be6faf317791d62b) Thanks [@konopkov](https://github.com/konopkov)! - `auth use <profile>` and `auth remove <profile>` now fail with a typed `ProfileNotFoundError` (exported from `@knpkv/atlassian-common/cli-auth`) and exit non-zero when no stored profile matches. The failure names the profile (`Profile not found: <profile>`, on stderr through each CLI's error handler); previously the line went to stdout and the command exited 0, so a script could not tell a typo from a switch.
+
 ## 1.7.0
 
 ### Minor Changes
