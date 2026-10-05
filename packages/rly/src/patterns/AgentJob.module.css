@@ -129,7 +129,8 @@
   }
 
   .outcome {
-    border-inline-start: var(--rly-space-4) solid var(--rly-color-agent);
+    border: 1px solid color-mix(in oklab, var(--rly-color-agent) 40%, transparent);
+    border-radius: var(--rly-radius-field);
   }
 
   .footer {

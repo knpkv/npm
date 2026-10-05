@@ -291,7 +291,7 @@ const SetupForm = ({
 
   return (
     <form className={styles.setupForm} onSubmit={submit}>
-      <Field label="Connection name" required size="compact">
+      <Field label="Connection name" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -302,13 +302,7 @@ const SetupForm = ({
         )}
       </Field>
       {catalog.configurationFields.map((field) => (
-        <Field
-          description={field.description}
-          key={field.key}
-          label={field.label}
-          required={field.required}
-          size="compact"
-        >
+        <Field description={field.description} key={field.key} label={field.label} required={field.required}>
           {(controlProps) => (
             <input
               {...controlProps}

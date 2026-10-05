@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest"
 import { contrastRatio, measureContrastPairs } from "../../scripts/tokens/contrast.js"
 import { renderTokenContract, renderTokenCss } from "../../scripts/tokens/token-contract.js"
 import { colorTokenSource, contrastPairSource } from "../../src/tokens/colors.js"
+import { controlHeightTokenSource } from "../../src/tokens/control.js"
 import { motionTokenSource } from "../../src/tokens/motion.js"
 import {
   RLY_COLOR_TOKEN_NAMES,
+  RLY_CONTROL_HEIGHT_TOKEN_NAMES,
   RLY_MOTION_TOKEN_NAMES,
   RLY_RADIUS_TOKEN_NAMES,
   RLY_SPACE_TOKEN_NAMES,
@@ -25,6 +27,17 @@ describe("semantic token contract", () => {
     expect(RLY_RADIUS_TOKEN_NAMES).toEqual(radiusTokenSource.map(({ name }) => name))
     expect(RLY_TYPE_TOKEN_NAMES).toEqual(typeTokenSource.map(({ name }) => name))
     expect(RLY_MOTION_TOKEN_NAMES).toEqual(motionTokenSource.map(({ name }) => name))
+    expect(RLY_CONTROL_HEIGHT_TOKEN_NAMES).toEqual(controlHeightTokenSource.map(({ name }) => name))
+  })
+
+  it("gives every control one shared height per size, with 44px touch targets on coarse pointers", () => {
+    const css = renderTokenCss()
+    expect(RLY_CONTROL_HEIGHT_TOKEN_NAMES).toEqual(["dense", "compact", "default", "principal"])
+    expect(css).toContain("--rly-control-height-dense: 32px;")
+    expect(css).toContain("--rly-control-height-default: 48px;")
+    const coarse = css.slice(css.indexOf("@media (pointer: coarse)"))
+    expect(coarse).toContain("--rly-control-height-dense: 44px;")
+    expect(coarse).toContain("--rly-control-height-compact: 44px;")
   })
 
   it("uses known WCAG contrast vectors", () => {

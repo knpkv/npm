@@ -177,7 +177,7 @@ const ResourcePicker = ({
         </Text>
       ) : (
         <>
-          <Field label={`Search ${label.toLocaleLowerCase()}`} size="compact">
+          <Field label={`Search ${label.toLocaleLowerCase()}`}>
             {(controlProps) => (
               <input
                 {...controlProps}
@@ -355,7 +355,7 @@ export const AwsAccountSetupForm = ({
           {profileDiscoveryMessage(awsProfiles.length, awsProfilesState)}
         </Text>
       </div>
-      <Field label="Account name" required size="compact">
+      <Field label="Account name" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -365,7 +365,7 @@ export const AwsAccountSetupForm = ({
           />
         )}
       </Field>
-      <Field label="AWS profile" required size="compact">
+      <Field label="AWS profile" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -382,7 +382,7 @@ export const AwsAccountSetupForm = ({
           />
         )}
       </Field>
-      <Field label="AWS region" required size="compact">
+      <Field label="AWS region" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -436,11 +436,7 @@ export const AwsAccountSetupForm = ({
       </div>
       {isManualEntryOpen ? (
         <div className={styles.resources}>
-          <Field
-            description="Comma or line separated. Maximum 20 including selected names."
-            label="Repository names"
-            size="compact"
-          >
+          <Field description="Comma or line separated. Maximum 20 including selected names." label="Repository names">
             {(controlProps) => (
               <textarea
                 {...controlProps}
@@ -451,11 +447,7 @@ export const AwsAccountSetupForm = ({
               />
             )}
           </Field>
-          <Field
-            description="Comma or line separated. Maximum 20 including selected names."
-            label="Pipeline names"
-            size="compact"
-          >
+          <Field description="Comma or line separated. Maximum 20 including selected names." label="Pipeline names">
             {(controlProps) => (
               <textarea
                 {...controlProps}

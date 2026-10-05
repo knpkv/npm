@@ -142,9 +142,10 @@
   }
 
   .evidence {
-    border-inline-start: var(--rly-space-2) solid var(--rly-color-border-2);
+    background: var(--rly-color-surface-2);
+    border-radius: var(--rly-radius-tag);
     min-inline-size: var(--rly-space-0);
-    padding-inline-start: var(--rly-space-12);
+    padding: var(--rly-space-8) var(--rly-space-12);
   }
 
   .actions {

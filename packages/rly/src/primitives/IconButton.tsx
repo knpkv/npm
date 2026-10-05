@@ -23,6 +23,11 @@ export const RLY_ICON_BUTTON_VARIANTS = defineVariants({
     }
   },
   size: {
+    dense: {
+      className: style("dense"),
+      purpose: "Tool-density icon target; the default",
+      tokens: ["control-height-dense", "radius-tag"]
+    },
     compact: {
       className: style("compact"),
       purpose: "Minimum accessible icon target",
@@ -32,7 +37,7 @@ export const RLY_ICON_BUTTON_VARIANTS = defineVariants({
     principal: { className: style("principal"), purpose: "Prominent icon target", tokens: ["space-48", "space-8"] }
   }
 })
-export const RLY_ICON_BUTTON_DEFAULT_VARIANTS = defineVariants({ variant: "secondary", size: "default" })
+export const RLY_ICON_BUTTON_DEFAULT_VARIANTS = defineVariants({ variant: "secondary", size: "dense" })
 export type RlyIconButtonVariant = keyof typeof RLY_ICON_BUTTON_VARIANTS.variant
 export type RlyIconButtonSize = keyof typeof RLY_ICON_BUTTON_VARIANTS.size
 export type IconButtonProps = Omit<ComponentPropsWithRef<"button">, "aria-label" | "children"> & {
@@ -50,7 +55,7 @@ export const IconButton = ({
   icon,
   label,
   loading = false,
-  size = "default",
+  size = RLY_ICON_BUTTON_DEFAULT_VARIANTS.size,
   type,
   variant = "secondary",
   ...props

@@ -16,6 +16,7 @@ import { RLY_TABS_VARIANTS } from "../../src/primitives/Tabs.js"
 import { RLY_TEXT_VARIANTS } from "../../src/primitives/Text.js"
 import {
   RLY_COLOR_TOKEN_NAMES,
+  RLY_CONTROL_HEIGHT_TOKEN_NAMES,
   RLY_MOTION_TOKEN_NAMES,
   RLY_RADIUS_TOKEN_NAMES,
   RLY_SPACE_TOKEN_NAMES,
@@ -24,6 +25,7 @@ import {
 
 const semanticTokens = new Set<string>([
   ...RLY_COLOR_TOKEN_NAMES.map((name) => `color-${name}`),
+  ...RLY_CONTROL_HEIGHT_TOKEN_NAMES.map((name) => `control-height-${name}`),
   ...RLY_MOTION_TOKEN_NAMES.map((name) => `motion-${name}`),
   ...RLY_RADIUS_TOKEN_NAMES.map((name) => `radius-${name}`),
   ...RLY_SPACE_TOKEN_NAMES.map((name) => `space-${name}`),

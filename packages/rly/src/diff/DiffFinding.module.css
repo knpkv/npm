@@ -254,10 +254,11 @@
   }
 
   .stale {
-    border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink);
+    background: var(--rly-color-held-tint);
+    border-radius: var(--rly-radius-tag);
     display: grid;
     gap: var(--rly-space-2);
-    padding-inline-start: var(--rly-space-12);
+    padding: var(--rly-space-8) var(--rly-space-12);
   }
 
   .stale strong {

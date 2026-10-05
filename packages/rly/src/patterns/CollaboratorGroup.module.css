@@ -37,7 +37,7 @@
 
   .lane {
     align-content: start;
-    border-inline-start: 2px solid var(--rly-color-border-1);
+    border-inline-start: 1px solid var(--rly-color-border-1);
     display: grid;
     gap: var(--rly-space-12);
     min-inline-size: var(--rly-space-0);

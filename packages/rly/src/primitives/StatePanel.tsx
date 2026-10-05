@@ -39,13 +39,14 @@ export const RLY_STATE_PANEL_DEFAULT_VARIANTS = defineVariants({ tone: "neutral"
 export type RlyStatePanelTone = keyof typeof RLY_STATE_PANEL_VARIANTS.tone
 export type RlyStatePanelAnnouncement = "off" | "polite" | "assertive"
 
+// Neutral has no glyph by default: a dash read as a stray mark, and the word already carries it.
 const toneIcons = {
-  neutral: "minus",
+  neutral: undefined,
   positive: "check",
   critical: "alert",
   caution: "clock",
   progress: "loader"
-} satisfies Readonly<Record<RlyStatePanelTone, RlyIconName>>
+} satisfies Readonly<Record<RlyStatePanelTone, RlyIconName | undefined>>
 
 export type StatePanelProps = Omit<ComponentPropsWithRef<"section">, "aria-live" | "children" | "title"> & {
   readonly action?: ReactNode
@@ -57,7 +58,8 @@ export type StatePanelProps = Omit<ComponentPropsWithRef<"section">, "aria-live"
 }
 
 /**
- * Explain an outcome with redundant word, icon, rail, ink, and tint cues.
+ * Explain an outcome with redundant word, icon, ink, and tint cues. A neutral panel shows no
+ * icon unless `icon` names one.
  *
  * `announce` makes the panel a live region. A polite status region reliably announces
  * changes only once it is already mounted: mount it persistently and swap its content.
@@ -76,18 +78,21 @@ export const StatePanel = ({
 }: StatePanelProps): ReactElement => {
   // An announcing region owns its role; otherwise the caller's role (for example "note") stands.
   const role = announce === "assertive" ? "alert" : announce === "polite" ? "status" : props.role
+  const glyph = icon ?? toneIcons[tone]
 
   return (
     <section
       {...props}
       aria-live={announce === "off" ? undefined : announce}
       className={classNames(style("root"), RLY_STATE_PANEL_VARIANTS.tone[tone].className, className)}
+      data-icon={glyph === undefined ? "none" : undefined}
       role={role}
     >
-      <span aria-hidden="true" className={style("rail")} />
-      <span aria-hidden="true" className={style("icon")}>
-        <Icon decorative name={icon ?? toneIcons[tone]} />
-      </span>
+      {glyph === undefined ? null : (
+        <span aria-hidden="true" className={style("icon")}>
+          <Icon decorative name={glyph} />
+        </span>
+      )}
       <div className={style("content")}>
         <strong className={style("title")}>{requireText(title, "StatePanel title")}</strong>
         {description === undefined ? null : <div className={style("description")}>{description}</div>}

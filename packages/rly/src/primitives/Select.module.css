@@ -44,13 +44,20 @@
     border-color: var(--rly-color-blocked-ink);
   }
 
+  .dense {
+    border-radius: var(--rly-radius-tag);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    min-block-size: var(--rly-control-height-dense);
+    padding-block: var(--rly-space-4);
+  }
   .compact {
-    min-block-size: var(--rly-space-40);
+    min-block-size: var(--rly-control-height-compact);
     padding-block: var(--rly-space-6);
   }
 
   .defaultSize {
-    min-block-size: var(--rly-space-48);
+    min-block-size: var(--rly-control-height-default);
   }
 
   .triggerIcon {

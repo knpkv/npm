@@ -35,14 +35,24 @@
     border-color: var(--rly-color-surface-2);
     color: var(--rly-color-text-1);
   }
+  /* Tool density: as tall as its text needs, a small radius, not a pill. Touch targets come from the token. */
+  .dense {
+    border-radius: var(--rly-radius-tag);
+    min-block-size: var(--rly-control-height-dense);
+    min-inline-size: var(--rly-control-height-dense);
+    padding-inline: var(--rly-space-12);
+  }
+  .dense .content {
+    padding-block: var(--rly-space-4);
+  }
   .compact {
-    min-block-size: var(--rly-space-40);
+    min-block-size: var(--rly-control-height-compact);
   }
   .defaultSize {
-    min-block-size: var(--rly-space-48);
+    min-block-size: var(--rly-control-height-default);
   }
   .principal {
-    min-block-size: calc(var(--rly-space-48) + var(--rly-space-8));
+    min-block-size: var(--rly-control-height-principal);
     padding-inline: var(--rly-space-24);
   }
   .stretch {

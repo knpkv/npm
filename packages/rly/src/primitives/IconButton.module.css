@@ -28,17 +28,22 @@
     border-color: var(--rly-color-surface-2);
     color: var(--rly-color-text-1);
   }
+  .dense {
+    block-size: var(--rly-control-height-dense);
+    border-radius: var(--rly-radius-tag);
+    inline-size: var(--rly-control-height-dense);
+  }
   .compact {
     block-size: calc(var(--rly-space-40) + var(--rly-space-4));
     inline-size: calc(var(--rly-space-40) + var(--rly-space-4));
   }
   .defaultSize {
-    block-size: var(--rly-space-48);
-    inline-size: var(--rly-space-48);
+    block-size: var(--rly-control-height-default);
+    inline-size: var(--rly-control-height-default);
   }
   .principal {
-    block-size: calc(var(--rly-space-48) + var(--rly-space-8));
-    inline-size: calc(var(--rly-space-48) + var(--rly-space-8));
+    block-size: var(--rly-control-height-principal);
+    inline-size: var(--rly-control-height-principal);
   }
 
   @media (hover: hover) {

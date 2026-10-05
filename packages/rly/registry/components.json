@@ -3630,6 +3630,10 @@
         },
         {
           "kind": "value",
+          "name": "RLY_CONTROL_HEIGHT_TOKEN_NAMES"
+        },
+        {
+          "kind": "value",
           "name": "RLY_MOTION_TOKEN_NAMES"
         },
         {
@@ -3647,6 +3651,10 @@
         {
           "kind": "type",
           "name": "RlyColorToken"
+        },
+        {
+          "kind": "type",
+          "name": "RlyControlHeightToken"
         },
         {
           "kind": "type",

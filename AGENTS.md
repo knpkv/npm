@@ -313,12 +313,17 @@ When writing Effect code:
   `Schedule`, and `effect/process` instead. Framework/UI boundaries
   may use host APIs only where the framework requires them.
 - In `packages/*/src/client/**/*.css`, use Rly service-color tokens only for
-  provider-owned provenance (such as a CodeCommit revision rail or provider
-  mark), never for arbitrary user-authored links or content. Use generic
+  provider-owned provenance (such as a provider mark or a revision label),
+  never for arbitrary user-authored links or content. Use generic
   action/text tokens for those links. A `.prRow:hover .prTitle` rule using a
-  service token is invalid because the title is user-authored; a revision-rail
-  rule using that provider's service token remains valid. Generated and vendor
+  service token is invalid because the title is user-authored; a provider mark
+  using that provider's service token remains valid. Generated and vendor
   styles are excluded, and ambiguous selector provenance requires judgment.
+- No one-sided accent stripes on cards, rows, notices, or panels (a thick or
+  coloured `border-left`/`border-inline-start`, or an inset `box-shadow` bar).
+  State and severity go in words, an even 1px border, or a flat tint.
+  `pnpm --filter @knpkv/rly lint:stripes` enforces this for rly stylesheets;
+  1px neutral column dividers stay allowed.
 - The sole raw Node filesystem exception is
   `packages/codecommit-core/src/CacheService/internal/PrivateDatabasePathNode.ts`:
   it is an audited descriptor boundary that must retain `O_NOFOLLOW` directory

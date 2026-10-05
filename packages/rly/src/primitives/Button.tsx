@@ -24,6 +24,11 @@ export const RLY_BUTTON_VARIANTS = defineVariants({
     }
   },
   size: {
+    dense: {
+      className: style("dense"),
+      purpose: "Tool-density action sized to its text; the default",
+      tokens: ["control-height-dense", "radius-tag"]
+    },
     compact: { className: style("compact"), purpose: "Dense text action", tokens: ["space-40"] },
     default: { className: style("defaultSize"), purpose: "Standard action", tokens: ["space-48"] },
     principal: {
@@ -33,7 +38,7 @@ export const RLY_BUTTON_VARIANTS = defineVariants({
     }
   }
 })
-export const RLY_BUTTON_DEFAULT_VARIANTS = defineVariants({ variant: "secondary", size: "default" })
+export const RLY_BUTTON_DEFAULT_VARIANTS = defineVariants({ variant: "secondary", size: "dense" })
 export type RlyButtonVariant = keyof typeof RLY_BUTTON_VARIANTS.variant
 export type RlyButtonSize = keyof typeof RLY_BUTTON_VARIANTS.size
 export type ButtonProps = Omit<ComponentPropsWithRef<"button">, "children"> & {
@@ -56,7 +61,7 @@ export const Button = ({
   disabled,
   leadingIcon,
   loading = false,
-  size = "default",
+  size = RLY_BUTTON_DEFAULT_VARIANTS.size,
   stretch = false,
   trailingIcon,
   type,

@@ -10,6 +10,11 @@ const style = (name: string): string => cssClass(styles, name)
 
 export const RLY_SELECT_VARIANTS = defineVariants({
   size: {
+    dense: {
+      className: style("dense"),
+      purpose: "Tool-density selection control; the default",
+      tokens: ["control-height-dense", "radius-tag"]
+    },
     compact: { className: style("compact"), purpose: "Dense form rows", tokens: ["space-40", "type-meta"] },
     default: {
       className: style("defaultSize"),
@@ -19,7 +24,7 @@ export const RLY_SELECT_VARIANTS = defineVariants({
   }
 })
 
-export const RLY_SELECT_DEFAULT_VARIANTS = defineVariants({ size: "default" })
+export const RLY_SELECT_DEFAULT_VARIANTS = defineVariants({ size: "dense" })
 export type RlySelectSize = keyof typeof RLY_SELECT_VARIANTS.size
 
 export interface RlySelectOption {

@@ -243,7 +243,7 @@ export const ProviderAccountCard = ({
       {canConfigure ? (
         isEditing ? (
           <form className={styles.accountEdit} onSubmit={rename}>
-            <Field label="Account display name" required size="compact">
+            <Field label="Account display name" required>
               {(controlProps) => (
                 <input
                   {...controlProps}

@@ -7,9 +7,13 @@
     color: var(--rly-color-text-2);
     display: grid;
     gap: var(--rly-space-16);
-    grid-template-columns: var(--rly-space-4) auto minmax(var(--rly-space-0), 1fr);
+    grid-template-columns: auto minmax(var(--rly-space-0), 1fr);
     max-inline-size: 100%;
     padding: var(--rly-space-24);
+  }
+
+  .root[data-icon="none"] {
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
   }
 
   .neutral {
@@ -32,11 +36,7 @@
     background: var(--rly-color-deploying-tint);
     color: var(--rly-color-deploying-ink);
   }
-  .rail {
-    align-self: stretch;
-    background: currentcolor;
-    border-radius: var(--rly-radius-round);
-  }
+
   .icon {
     display: inline-flex;
     padding-block-start: var(--rly-space-2);

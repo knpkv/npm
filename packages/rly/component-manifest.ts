@@ -245,11 +245,13 @@ export const componentManifest = {
       exports: [
         { kind: "value", name: "RLY_COLOR_TOKEN_NAMES" },
         { kind: "value", name: "RLY_MOTION_TOKEN_NAMES" },
+        { kind: "value", name: "RLY_CONTROL_HEIGHT_TOKEN_NAMES" },
         { kind: "value", name: "RLY_RADIUS_TOKEN_NAMES" },
         { kind: "value", name: "RLY_SPACE_TOKEN_NAMES" },
         { kind: "value", name: "RLY_TYPE_TOKEN_NAMES" },
         { kind: "type", name: "RlyColorToken" },
         { kind: "type", name: "RlyMotionToken" },
+        { kind: "type", name: "RlyControlHeightToken" },
         { kind: "type", name: "RlyRadiusToken" },
         { kind: "type", name: "RlySpaceToken" },
         { kind: "type", name: "RlyTypeToken" }

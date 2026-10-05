@@ -51,6 +51,10 @@
     --rly-radius-group: 20px;
     --rly-radius-overlay: 28px;
     --rly-radius-round: 999px;
+    --rly-control-height-dense: 32px;
+    --rly-control-height-compact: 40px;
+    --rly-control-height-default: 48px;
+    --rly-control-height-principal: 56px;
     --rly-type-verdict-font: var(--rly-font-ui);
     --rly-type-verdict-size: clamp(3rem, 7vw, 7rem);
     --rly-type-verdict-line-height: .88;
@@ -223,6 +227,15 @@
     --rly-motion-standard-duration: 0ms;
     --rly-motion-deliberate-duration: 0ms;
     --rly-motion-slow-duration: 0ms;
+    }
+  }
+
+  @media (pointer: coarse) {
+    :root {
+    --rly-control-height-dense: 44px;
+    --rly-control-height-compact: 44px;
+    --rly-control-height-default: 48px;
+    --rly-control-height-principal: 56px;
     }
   }
 

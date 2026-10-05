@@ -87,13 +87,14 @@
   justify-self: end;
 }
 
+/* Header actions sit beside rly's dense Search button, so they share its height and radius. */
 .agent {
   display: inline-flex;
-  min-block-size: 3rem;
+  min-block-size: var(--rly-control-height-dense);
   align-items: center;
-  padding-inline: 1rem;
+  padding-inline: var(--rly-space-12);
   border: 1px solid var(--rly-color-border-2);
-  border-radius: var(--rly-radius-control);
+  border-radius: var(--rly-radius-tag);
   background: var(--rly-color-surface-1);
   color: var(--rly-color-text-1);
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
@@ -117,11 +118,6 @@
 
 .root[data-workspace-density="compact"] .navLink {
   padding: 0.4rem 0.75rem;
-}
-
-.root[data-workspace-density="compact"] .agent {
-  min-block-size: 2.5rem;
-  padding-inline: 0.75rem;
 }
 
 .root[data-workspace-density="compact"] .main {

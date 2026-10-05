@@ -62,7 +62,7 @@
   }
 
   .error {
-    border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink);
+    background: var(--rly-color-held-tint);
     display: grid;
     gap: var(--rly-space-2);
   }
@@ -146,8 +146,9 @@
 
   .chevron {
     block-size: var(--rly-space-8);
-    border-block-end: 1.5px solid currentcolor;
-    border-inline-end: 1.5px solid currentcolor;
+    /* A drawn chevron, not an accent: two edges of a rotated square. */
+    border: solid currentcolor;
+    border-width: 0 1.5px 1.5px 0;
     inline-size: var(--rly-space-8);
     justify-self: center;
     transform: rotate(45deg) translate(-1px, -1px);
