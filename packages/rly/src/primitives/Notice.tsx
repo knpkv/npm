@@ -95,12 +95,15 @@ export const Notice = ({
       className={classNames(style("root"), RLY_NOTICE_VARIANTS.tone[tone].className, className)}
       role={role}
     >
-      {glyph === undefined ? null : (
-        <span aria-hidden="true" className={style("icon")}>
-          <Icon decorative name={glyph} size="small" />
-        </span>
-      )}
-      <div className={style("message")}>{children}</div>
+      {/* Icon and message never separate; only the action wraps below them. */}
+      <div className={style("lead")}>
+        {glyph === undefined ? null : (
+          <span aria-hidden="true" className={style("icon")}>
+            <Icon decorative name={glyph} size="small" />
+          </span>
+        )}
+        <div className={style("message")}>{children}</div>
+      </div>
       {action === undefined ? null : <div className={style("action")}>{action}</div>}
     </div>
   )

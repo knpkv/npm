@@ -45,8 +45,16 @@
     padding-block-start: calc((1lh - 16px) / 2);
   }
 
-  .message {
+  .lead {
+    align-items: flex-start;
+    display: flex;
     flex: 1 1 20ch;
+    gap: var(--rly-space-12);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .message {
+    flex: 1 1 0;
     min-inline-size: var(--rly-space-0);
     overflow-wrap: anywhere;
   }
