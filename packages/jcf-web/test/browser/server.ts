@@ -1,18 +1,13 @@
 /** Isolated application over real engine logic and fake providers. Controls never encode API replies. */
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node"
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { ReconcileService } from "@knpkv/jira-clockify"
 import { FAKE_HOME, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
 import { Effect, Layer, Queue, Ref, Schema } from "effect"
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createServer } from "node:http"
 import { application } from "../../src/server/HttpApplication.js"
-import {
-  activateOwnerSessionBootstrap,
-  makeOwnerSessionSecrets,
-  ownerSessionCookie,
-  OwnerSessionSecrets,
-  ownerSessionUrl
-} from "../../src/server/OwnerSession.js"
+import { makeOwnerSession } from "../../src/server/OwnerSession.js"
 
 // This executable composes isolated engine services and a real loopback HTTP listener.
 // @effect-diagnostics strictEffectProvide:off
@@ -58,7 +53,7 @@ const makeFixture = Effect.fn("BrowserFixture.make")(function*(
 ) {
   const next = yield* Ref.make<Hold>(null)
   const pending = yield* Ref.make<Queue.Queue<Command> | null>(null)
-  const security = yield* makeOwnerSessionSecrets(origin)
+  const security = yield* makeOwnerSession(origin)
   const fake = makeFakeHeadless({
     config: { sessionRoots: [`${FAKE_HOME}/dev/work`], sessionOwnership: "any" },
     describer: () => "Improved weekly time review and tested approval behavior",
@@ -164,7 +159,7 @@ const makeFixture = Effect.fn("BrowserFixture.make")(function*(
   ).pipe(Layer.provideMerge(fake.layer))
   const app = application.pipe(
     Layer.provide(engine),
-    Layer.provideMerge(Layer.succeed(OwnerSessionSecrets, security)),
+    Layer.provideMerge(Layer.succeed(OwnerSession.OwnerSession, security)),
     Layer.provide(Etag.layer),
     Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))),
     Layer.provideMerge(NodeServices.layer)
@@ -178,7 +173,7 @@ const makeFixture = Effect.fn("BrowserFixture.make")(function*(
         Effect.promise(async () => {
           const response = await web.handler(
             new Request(`${origin}/api/week/?monday=${monday}&only=${scope}`, {
-              headers: { cookie: ownerSessionCookie(security) }
+              headers: { cookie: security.sessionCookie }
             })
           )
           const body = await response.text()
@@ -186,10 +181,10 @@ const makeFixture = Effect.fn("BrowserFixture.make")(function*(
           return null
         }).pipe(Effect.flatMap((failure) => failure === null ? Effect.void : Effect.die(failure))))
   ).pipe(Effect.onError(() => Effect.promise(() => web.dispose())))
-  yield* activateOwnerSessionBootstrap(security)
+  const code = yield* security.mintBootstrapCode
   return {
     web,
-    url: ownerSessionUrl(origin, security),
+    url: OwnerSession.bootstrapUrl(origin, code),
     observations: Effect.sync(() => ({
       clockifyWrites: fake.world.createdClockifyEntries.length,
       jiraWrites: fake.world.jiraWorklogs.length,

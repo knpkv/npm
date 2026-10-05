@@ -11,6 +11,7 @@
  * @module
  */
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { Config, Deferred, Effect, Layer, Schema } from "effect"
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http"
 import * as Reactivity from "effect/reactivity/Reactivity"
@@ -21,7 +22,7 @@ import { acliTicketSearch } from "../core/Tickets.js"
 import type { AgentUsageConfig } from "./Config.js"
 import { controlSocket } from "./ControlSocket.js"
 import { application } from "./HttpApplication.js"
-import { mintBootstrapUrl, OwnerSessionSecrets, type OwnerSessionSecretsContract } from "./OwnerSession.js"
+import { mintBootstrapUrl } from "./OwnerSession.js"
 import { backgroundLayer, RuntimeState } from "./Runtime.js"
 
 const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))
@@ -32,7 +33,7 @@ export interface AgentUsageServerOptions {
   readonly hostname?: string
   readonly port: number
   readonly ready?: Deferred.Deferred<string>
-  readonly security: OwnerSessionSecretsContract
+  readonly security: OwnerSession.OwnerSessionService
 }
 
 /** The background ingest and polling, with their live dependencies. */
@@ -73,7 +74,7 @@ export const makeServer = (options: AgentUsageServerOptions) =>
         Layer.provide(HttpPlatformLive),
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(NodeServices.layer),
-        Layer.provide(Layer.succeed(OwnerSessionSecrets, options.security)),
+        Layer.provide(Layer.succeed(OwnerSession.OwnerSession, options.security)),
         Layer.tap(() =>
           // The startup link: minted only once the server is listening, handed to whoever prints it.
           mintBootstrapUrl(options.security).pipe(

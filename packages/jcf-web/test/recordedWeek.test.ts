@@ -1,14 +1,16 @@
 import { NodeCrypto, NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { AgentSessionReader, IssueFacts, ReconcileService } from "@knpkv/jira-clockify"
 import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
-import { Deferred, Effect, Layer, Redacted } from "effect"
+import { Deferred, Effect, Layer } from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/http"
 import { readWeekStream } from "../src/client/api.js"
 import { decodeSavedWeek } from "../src/client/decoding.js"
 import { application } from "../src/server/HttpApplication.js"
-import { makeOwnerSessionSecrets, ownerSessionCookie, OwnerSessionSecrets } from "../src/server/OwnerSession.js"
+import { makeOwnerSession } from "../src/server/OwnerSession.js"
 import type { ReadProgress, WeekScopeName } from "../src/shared/contracts.js"
+import { csrfOf } from "./ownerSessionFixture.js"
 
 // These are HTTP application entry points over isolated provider fixtures.
 // @effect-diagnostics strictEffectProvide:off
@@ -33,7 +35,7 @@ const makeApplication = async (
   options: FakeHeadlessOptions = {},
   beforeRecordedRead: () => Effect.Effect<void> = () => Effect.void
 ) => {
-  const secrets = await Effect.runPromise(makeOwnerSessionSecrets(origin).pipe(Effect.provide(NodeCrypto.layer)))
+  const secrets = await Effect.runPromise(makeOwnerSession(origin).pipe(Effect.provide(NodeCrypto.layer)))
   const fake = makeFakeHeadless({
     config: { sessionRoots: [`${FAKE_HOME}/dev/work`], sessionOwnership: "assigned" },
     clockifyEntries: [
@@ -84,7 +86,7 @@ const makeApplication = async (
     Layer.provide(recorded),
     Layer.provide(ownership),
     Layer.provide(fake.layer),
-    Layer.provideMerge(Layer.succeed(OwnerSessionSecrets, secrets)),
+    Layer.provideMerge(Layer.succeed(OwnerSession.OwnerSession, secrets)),
     Layer.provide(Etag.layer),
     Layer.provideMerge(NodeServices.layer),
     Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer)))
@@ -93,7 +95,7 @@ const makeApplication = async (
   const get = (path: string) =>
     web.handler(
       new Request(`${origin}${path}`, {
-        headers: { cookie: ownerSessionCookie(secrets) }
+        headers: { cookie: secrets.sessionCookie }
       })
     )
   const read = async (path: string, progress: Array<ReadProgress> = []) =>
@@ -166,7 +168,7 @@ it("allows a manual write then refreshes its provider totals while retaining the
       note: "Manual work",
       targets: { jira: true, clockify: true }
     })
-    const headers = { cookie: ownerSessionCookie(app.secrets), "content-type": "application/json" }
+    const headers = { cookie: app.secrets.sessionCookie, "content-type": "application/json" }
     expect(
       (await app.web.handler(
         new Request(`${origin}/api/rows/manual`, {
@@ -180,7 +182,7 @@ it("allows a manual write then refreshes its provider totals while retaining the
       new Request(`${origin}/api/rows/manual`, {
         method: "POST",
         body,
-        headers: { ...headers, origin, "x-csrf-token": Redacted.value(app.secrets.csrfToken) }
+        headers: { ...headers, origin, "x-csrf-token": csrfOf(app.secrets) }
       })
     )
     expect(written.status).toBe(200)

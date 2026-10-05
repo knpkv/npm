@@ -1,15 +1,17 @@
 import { NodeCrypto, NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { ConfigService, IssueFacts, ReconcileService } from "@knpkv/jira-clockify"
 import type { SessionAgentSettings } from "@knpkv/jira-clockify/agent/agentSettings.js"
 import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
-import { Deferred, Effect, Layer, Redacted, Schema } from "effect"
+import { Deferred, Effect, Layer, Schema } from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/http"
 import { readWeekStream } from "../src/client/api.js"
 import { application } from "../src/server/HttpApplication.js"
-import { makeOwnerSessionSecrets, ownerSessionCookie, OwnerSessionSecrets } from "../src/server/OwnerSession.js"
+import { makeOwnerSession } from "../src/server/OwnerSession.js"
 import { DescribeRowResponse, WeekPlan } from "../src/shared/contracts.js"
 import type { ConfirmPayload, DescribeRowRequest, ManualPayload } from "../src/shared/contracts.js"
+import { csrfOf } from "./ownerSessionFixture.js"
 
 // HTTP composition boundary over isolated engine fixtures; no real agent or provider calls.
 // @effect-diagnostics strictEffectProvide:off
@@ -33,7 +35,7 @@ const makeApplication = async (
   beforeRefresh: () => Effect.Effect<void> = () => Effect.void,
   delayConfigReads = false
 ) => {
-  const secrets = await Effect.runPromise(makeOwnerSessionSecrets(origin).pipe(Effect.provide(NodeCrypto.layer)))
+  const secrets = await Effect.runPromise(makeOwnerSession(origin).pipe(Effect.provide(NodeCrypto.layer)))
   const fake = makeFakeHeadless({
     config: { sessionRoots: [`${FAKE_HOME}/dev/work`], sessionOwnership: "any" },
     delayConfigReads,
@@ -90,22 +92,22 @@ const makeApplication = async (
     Layer.provide(engine),
     Layer.provide(issues),
     Layer.provide(fake.layer),
-    Layer.provideMerge(Layer.succeed(OwnerSessionSecrets, secrets)),
+    Layer.provideMerge(Layer.succeed(OwnerSession.OwnerSession, secrets)),
     Layer.provide(Etag.layer),
     Layer.provideMerge(NodeServices.layer),
     Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer)))
   )
   const web = HttpRouter.toWebHandler(app, { disableLogger: true })
   const get = (path: string) =>
-    web.handler(new Request(`${origin}${path}`, { headers: { cookie: ownerSessionCookie(secrets) } }))
+    web.handler(new Request(`${origin}${path}`, { headers: { cookie: secrets.sessionCookie } }))
   const post = (path: string, body: RoutePayload, auth: "owner" | "no-csrf" | "none" = "owner") =>
     web.handler(
       new Request(`${origin}${path}`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
-          ...(auth !== "none" && { cookie: ownerSessionCookie(secrets) }),
-          ...(auth === "owner" && { origin, "x-csrf-token": Redacted.value(secrets.csrfToken) })
+          ...(auth !== "none" && { cookie: secrets.sessionCookie }),
+          ...(auth === "owner" && { origin, "x-csrf-token": csrfOf(secrets) })
         },
         body: JSON.stringify(body)
       })

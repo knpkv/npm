@@ -4,14 +4,16 @@
  */
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Clock, Effect, Layer, Redacted, SubscriptionRef } from "effect"
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
+import { Clock, Effect, Layer, SubscriptionRef } from "effect"
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createServer } from "node:http"
 import type { UsageEvent } from "../../src/core/Model.js"
 import { UsageStore } from "../../src/core/Store.js"
 import { application } from "../../src/server/HttpApplication.js"
-import { makeOwnerSessionSecrets, mintBootstrapUrl, OwnerSessionSecrets } from "../../src/server/OwnerSession.js"
+import { makeOwnerSession, mintBootstrapUrl } from "../../src/server/OwnerSession.js"
 import { RuntimeState } from "../../src/server/Runtime.js"
+import { ownerTokenOf } from "../ownerSessionFixture.js"
 
 // This executable composes a seeded store and a real loopback HTTP listener.
 // @effect-diagnostics strictEffectProvide:off
@@ -96,7 +98,7 @@ const seed = Effect.gen(function*() {
 })
 
 const run = Effect.gen(function*() {
-  const security = yield* makeOwnerSessionSecrets(origin)
+  const security = yield* makeOwnerSession(origin)
   const testRoutes = HttpRouter.use((router) =>
     Effect.gen(function*() {
       yield* router.add(
@@ -108,7 +110,7 @@ const run = Effect.gen(function*() {
       yield* router.add(
         "GET",
         "/__test/session",
-        Effect.succeed(HttpServerResponse.text(Redacted.value(security.ownerToken)))
+        Effect.succeed(HttpServerResponse.text(ownerTokenOf(security)))
       )
       // Stands in for a Claude poll some minutes ago: failed, or read again, then announced.
       yield* router.add(
@@ -183,7 +185,7 @@ const run = Effect.gen(function*() {
     HttpRouter.serve(Layer.mergeAll(testRoutes, application)).pipe(
       Layer.provide(store),
       Layer.provide(RuntimeState.layer("fixture")),
-      Layer.provide(Layer.succeed(OwnerSessionSecrets, security)),
+      Layer.provide(Layer.succeed(OwnerSession.OwnerSession, security)),
       Layer.provide(NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port: 4180 })),
       Layer.provide(Etag.layer),
       Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))),

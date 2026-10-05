@@ -4,7 +4,7 @@ import { Deferred, Effect, FileSystem, Layer, Path } from "effect"
 import * as Reactivity from "effect/reactivity/Reactivity"
 import type { AgentUsageConfig } from "../src/server/Config.js"
 import { controlSocket, ServerAlreadyRunning } from "../src/server/ControlSocket.js"
-import { makeOwnerSessionSecrets } from "../src/server/OwnerSession.js"
+import { makeOwnerSession } from "../src/server/OwnerSession.js"
 import { makeServer } from "../src/server/Server.js"
 
 const origin = "http://127.0.0.1:3112"
@@ -17,7 +17,7 @@ describe("server startup", () => {
         const path = yield* Path.Path
         const directory = yield* fs.makeTempDirectoryScoped()
         yield* fs.chmod(directory, 0o700)
-        const secrets = yield* makeOwnerSessionSecrets(origin)
+        const secrets = yield* makeOwnerSession(origin)
         // The running server: it holds the store's lock.
         yield* controlSocket(directory, secrets, Effect.void)
         // Not a database: opening or migrating it would fail with a store error, or rewrite it.

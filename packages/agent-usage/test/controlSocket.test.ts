@@ -15,7 +15,7 @@ import {
   SocketPathUnsafe,
   SocketRefused
 } from "../src/server/ControlSocket.js"
-import { authorizeBootstrapRequest, makeOwnerSessionSecrets } from "../src/server/OwnerSession.js"
+import { makeOwnerSession } from "../src/server/OwnerSession.js"
 
 const origin = "http://127.0.0.1:3112"
 
@@ -54,7 +54,7 @@ describe("control socket", () => {
     it.effect("login trusts only a socket owned by the user it runs as", () =>
       Effect.gen(function*() {
         const directory = yield* store
-        const secrets = yield* makeOwnerSessionSecrets(origin)
+        const secrets = yield* makeOwnerSession(origin)
         yield* controlSocket(directory, secrets, Effect.void)
         expect(yield* Effect.flip(requestLoginUrl(directory, self + 1))).toBeInstanceOf(SocketPathUnsafe)
         expect(yield* requestLoginUrl(directory, self)).toContain("#bootstrap_token=")
@@ -63,7 +63,12 @@ describe("control socket", () => {
     it.effect("mints nothing until the server is listening", () =>
       Effect.gen(function*() {
         const directory = yield* store
-        const secrets = yield* makeOwnerSessionSecrets(origin)
+        const session = yield* makeOwnerSession(origin)
+        const minted = yield* Ref.make(0)
+        const secrets = {
+          ...session,
+          mintBootstrapCode: Effect.tap(session.mintBootstrapCode, () => Ref.update(minted, (n) => n + 1))
+        }
         const listening = yield* Deferred.make<void>()
         const arrived = yield* Deferred.make<void>()
         // The gate reports when a request reaches it, then waits for the listener.
@@ -75,11 +80,11 @@ describe("control socket", () => {
         const request = yield* Effect.forkChild(requestLoginUrl(directory, self))
         yield* Deferred.await(arrived)
         expect(request.pollUnsafe()).toBeUndefined()
-        expect(yield* Ref.get(secrets.bootstrap)).toBeUndefined()
+        expect(yield* Ref.get(minted)).toBe(0)
         yield* Deferred.succeed(listening, undefined)
         const url = yield* Fiber.join(request)
         const spent = yield* Effect.result(
-          authorizeBootstrapRequest({ authorization: `Bearer ${codeOf(url)}`, origin }, secrets)
+          secrets.authorizeBootstrap({ authorization: `Bearer ${codeOf(url)}`, origin })
         )
         expect(spent._tag).toBe("Success")
       }))
@@ -89,14 +94,14 @@ describe("control socket", () => {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const directory = yield* store
-        const secrets = yield* makeOwnerSessionSecrets(origin)
+        const secrets = yield* makeOwnerSession(origin)
         yield* controlSocket(directory, secrets, Effect.void)
         const info = yield* fs.stat(path.join(directory, "serve.sock"))
         expect(info.type).toBe("Socket")
         expect(info.mode & 0o777).toBe(0o600)
         const url = yield* requestLoginUrl(directory, self)
         const spend = Effect.result(
-          authorizeBootstrapRequest({ authorization: `Bearer ${codeOf(url)}`, origin }, secrets)
+          secrets.authorizeBootstrap({ authorization: `Bearer ${codeOf(url)}`, origin })
         )
         expect((yield* spend)._tag).toBe("Success")
         expect((yield* spend)._tag).toBe("Failure")
@@ -124,7 +129,7 @@ describe("control socket", () => {
         )
         expect(yield* Effect.flip(requestLoginUrl(directory, self))).toBeInstanceOf(ServerNotRunning)
         // A new server replaces the stale socket.
-        const secrets = yield* makeOwnerSessionSecrets(origin)
+        const secrets = yield* makeOwnerSession(origin)
         yield* controlSocket(directory, secrets, Effect.void)
         expect(yield* requestLoginUrl(directory, self)).toContain("#bootstrap_token=")
       }))
@@ -134,7 +139,7 @@ describe("control socket", () => {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const directory = yield* store
-        const secrets = yield* makeOwnerSessionSecrets(origin)
+        const secrets = yield* makeOwnerSession(origin)
         const socketPath = path.join(directory, "serve.sock")
         yield* fs.symlink(path.join(directory, "elsewhere"), socketPath)
         expect(yield* Effect.flip(Effect.scoped(controlSocket(directory, secrets, Effect.void)))).toBeInstanceOf(
@@ -154,7 +159,7 @@ describe("control socket", () => {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const directory = yield* store
-        const secrets = yield* makeOwnerSessionSecrets(origin)
+        const secrets = yield* makeOwnerSession(origin)
         const scope = yield* Scope.make()
         yield* controlSocket(directory, secrets, Effect.void).pipe(Scope.provide(scope))
         expect(yield* Effect.flip(controlSocket(directory, secrets, Effect.void))).toBeInstanceOf(ServerAlreadyRunning)
@@ -167,7 +172,7 @@ describe("control socket", () => {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const directory = yield* store
-        const secrets = yield* makeOwnerSessionSecrets(origin)
+        const secrets = yield* makeOwnerSession(origin)
         const socketPath = path.join(directory, "serve.sock")
         yield* controlSocket(directory, secrets, Effect.void)
         yield* fs.chmod(socketPath, 0o000)
@@ -199,7 +204,7 @@ describe("control socket", () => {
                 })
               })
             )
-            const secrets = yield* makeOwnerSessionSecrets(origin)
+            const secrets = yield* makeOwnerSession(origin)
             const [first, second] = [yield* Scope.make(), yield* Scope.make()]
             const outcomes = yield* Effect.all([
               Effect.exit(controlSocket(directory, secrets, Effect.void).pipe(Scope.provide(first))),
@@ -223,7 +228,7 @@ describe("control socket", () => {
         const base = yield* store
         const directory = path.join(base, "d".repeat(60), "e".repeat(60))
         yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 })
-        const secrets = yield* makeOwnerSessionSecrets(origin)
+        const secrets = yield* makeOwnerSession(origin)
         expect(yield* controlSocket(directory, secrets, Effect.void)).toBeUndefined()
         expect(yield* Effect.flip(requestLoginUrl(directory, self))).toBeInstanceOf(SocketPathTooLong)
         // Still one server per store.

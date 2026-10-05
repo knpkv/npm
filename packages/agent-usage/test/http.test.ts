@@ -1,16 +1,18 @@
 import { NodeHttpClient, NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Queue, Redacted, SubscriptionRef } from "effect"
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
+import { Effect, Layer, Queue, SubscriptionRef } from "effect"
 import { Etag, HttpClient, HttpPlatform, HttpRouter, HttpServer } from "effect/http"
 import { createServer, request } from "node:http"
 import type { Socket } from "node:net"
 import { UsageStore } from "../src/core/Store.js"
 import { application } from "../src/server/HttpApplication.js"
-import { makeOwnerSessionSecrets, OwnerSessionSecrets } from "../src/server/OwnerSession.js"
+import { makeOwnerSession } from "../src/server/OwnerSession.js"
 import { RuntimeState } from "../src/server/Runtime.js"
+import { cookieOf } from "./ownerSessionFixture.js"
 
-const secrets = makeOwnerSessionSecrets("http://127.0.0.1:3112")
+const secrets = makeOwnerSession("http://127.0.0.1:3112")
 
 const TestApp = Layer.unwrap(Effect.map(secrets, (security) =>
   HttpRouter.serve(application).pipe(
@@ -18,7 +20,7 @@ const TestApp = Layer.unwrap(Effect.map(secrets, (security) =>
     Layer.provideMerge(RuntimeState.layer("host-a")),
     Layer.provide(Etag.layer),
     Layer.provide(HttpPlatform.layer),
-    Layer.provideMerge(Layer.succeed(OwnerSessionSecrets, security))
+    Layer.provideMerge(Layer.succeed(OwnerSession.OwnerSession, security))
   ))).pipe(
     Layer.provideMerge(HttpServer.layerTestClient),
     Layer.provide(NodeHttpClient.layerNodeHttp),
@@ -85,9 +87,9 @@ describe("HTTP boundary", () => {
     it.effect("serves an empty week to the owner, one period per local day", () =>
       Effect.gen(function*() {
         const client = yield* HttpClient.HttpClient
-        const security = yield* OwnerSessionSecrets
+        const security = yield* OwnerSession.OwnerSession
         const response = yield* client.get(usagePath("Europe/Berlin"), {
-          headers: { cookie: `agent_usage_owner=${Redacted.value(security.ownerToken)}` }
+          headers: { cookie: cookieOf(security) }
         })
         expect(response.status).toBe(200)
         const body = yield* response.json
@@ -98,9 +100,9 @@ describe("HTTP boundary", () => {
     it.effect("rejects an unknown time zone as a typed API error", () =>
       Effect.gen(function*() {
         const client = yield* HttpClient.HttpClient
-        const security = yield* OwnerSessionSecrets
+        const security = yield* OwnerSession.OwnerSession
         const response = yield* client.get(usagePath("Mars/Olympus"), {
-          headers: { cookie: `agent_usage_owner=${Redacted.value(security.ownerToken)}` }
+          headers: { cookie: cookieOf(security) }
         })
         expect(response.status).toBe(400)
         expect(yield* response.json).toMatchObject({ _tag: "ApiError" })
@@ -109,12 +111,12 @@ describe("HTTP boundary", () => {
     it.effect("marks every API response private and uncacheable, refusals included", () =>
       Effect.gen(function*() {
         const client = yield* HttpClient.HttpClient
-        const security = yield* OwnerSessionSecrets
+        const security = yield* OwnerSession.OwnerSession
         const refused = yield* client.get("/api/status")
         expect(refused.status).toBe(401)
         expect(refused.headers["cache-control"]).toBe("private, no-store")
         const served = yield* client.get("/api/status", {
-          headers: { cookie: `agent_usage_owner=${Redacted.value(security.ownerToken)}` }
+          headers: { cookie: cookieOf(security) }
         })
         expect(served.status).toBe(200)
         expect(served.headers["cache-control"]).toBe("private, no-store")
@@ -132,10 +134,10 @@ describe("HTTP boundary", () => {
     it.effect("refuses a browser read started by another site", () =>
       Effect.gen(function*() {
         const client = yield* HttpClient.HttpClient
-        const security = yield* OwnerSessionSecrets
+        const security = yield* OwnerSession.OwnerSession
         const response = yield* client.get("/api/status", {
           headers: {
-            cookie: `agent_usage_owner=${Redacted.value(security.ownerToken)}`,
+            cookie: cookieOf(security),
             "sec-fetch-site": "cross-site"
           }
         })
@@ -149,7 +151,7 @@ describe("live updates socket", () => {
     it.effect("refuses an upgrade without the owner session, and one from another origin", () =>
       Effect.gen(function*() {
         const client = yield* HttpClient.HttpClient
-        const security = yield* OwnerSessionSecrets
+        const security = yield* OwnerSession.OwnerSession
         const upgrade = {
           connection: "Upgrade",
           upgrade: "websocket",
@@ -160,7 +162,7 @@ describe("live updates socket", () => {
         const foreign = yield* client.get("/api/live", {
           headers: {
             ...upgrade,
-            cookie: `agent_usage_owner=${Redacted.value(security.ownerToken)}`,
+            cookie: cookieOf(security),
             origin: "http://evil.example"
           }
         })
@@ -169,11 +171,11 @@ describe("live updates socket", () => {
 
     it.effect("tells the owner the current versions, then each change", () =>
       Effect.gen(function*() {
-        const security = yield* OwnerSessionSecrets
+        const security = yield* OwnerSession.OwnerSession
         const server = yield* HttpServer.HttpServer
         const state = yield* RuntimeState
         const port = server.address._tag === "UnixPathAddress" ? 0 : server.address.port
-        const messages = yield* openLive(port, `agent_usage_owner=${Redacted.value(security.ownerToken)}`)
+        const messages = yield* openLive(port, cookieOf(security))
         expect(JSON.parse(yield* Queue.take(messages))).toEqual({ usage: 0, limits: 0, status: 0 })
         yield* SubscriptionRef.update(state.versions, (versions) => ({ ...versions, limits: versions.limits + 1 }))
         expect(JSON.parse(yield* Queue.take(messages))).toEqual({ usage: 0, limits: 1, status: 0 })

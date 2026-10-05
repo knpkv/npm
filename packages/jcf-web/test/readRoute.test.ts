@@ -1,24 +1,21 @@
 import { NodeCrypto, NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { FAKE_HOME, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
 import { Effect, Layer, Redacted } from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/http"
 import { readWeekStream } from "../src/client/api.js"
 import { decodeSavedWeek } from "../src/client/decoding.js"
 import { application } from "../src/server/HttpApplication.js"
-import {
-  activateOwnerSessionBootstrap,
-  makeOwnerSessionSecrets,
-  ownerSessionCookie,
-  OwnerSessionSecrets
-} from "../src/server/OwnerSession.js"
+import { makeOwnerSession } from "../src/server/OwnerSession.js"
 import type { ReadProgress } from "../src/shared/contracts.js"
+import { csrfOf } from "./ownerSessionFixture.js"
 
 // This test is an HTTP application entry point over isolated provider fixtures.
 // @effect-diagnostics strictEffectProvide:off
 it("authenticates streamed reads and sends real engine stages before the retained plan", async () => {
   const secrets = await Effect.runPromise(
-    makeOwnerSessionSecrets("http://127.0.0.1:4179").pipe(Effect.provide(NodeCrypto.layer))
+    makeOwnerSession("http://127.0.0.1:4179").pipe(Effect.provide(NodeCrypto.layer))
   )
   const fake = makeFakeHeadless({
     config: { sessionRoots: [`${FAKE_HOME}/dev/work`] },
@@ -52,31 +49,31 @@ it("authenticates streamed reads and sends real engine stages before the retaine
   })
   const app = application.pipe(
     Layer.provide(fake.layer),
-    Layer.provideMerge(Layer.succeed(OwnerSessionSecrets, secrets)),
+    Layer.provideMerge(Layer.succeed(OwnerSession.OwnerSession, secrets)),
     Layer.provide(Etag.layer),
     Layer.provideMerge(NodeServices.layer),
     Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer)))
   )
   const web = HttpRouter.toWebHandler(app, { disableLogger: true })
   try {
-    // Bootstrap stays inactive until the composed application has successfully handled a request.
-    const bootstrapRequest = () =>
+    // No code exists until one is minted, which the server does only once it is listening.
+    const bootstrapRequest = (code: string) =>
       new Request("http://127.0.0.1:4179/auth/bootstrap", {
         method: "POST",
-        headers: { origin: secrets.authorityOrigin, authorization: `Bearer ${Redacted.value(secrets.bootstrapToken)}` }
+        headers: { origin: secrets.authorityOrigin, authorization: `Bearer ${code}` }
       })
-    expect((await web.handler(bootstrapRequest())).status).toBe(401)
-    await Effect.runPromise(activateOwnerSessionBootstrap(secrets))
-    const bootstrap = await web.handler(bootstrapRequest())
+    expect((await web.handler(bootstrapRequest("ab".repeat(32)))).status).toBe(401)
+    const code = Redacted.value(await Effect.runPromise(secrets.mintBootstrapCode))
+    const bootstrap = await web.handler(bootstrapRequest(code))
     expect(bootstrap.status).toBe(200)
-    expect(bootstrap.headers.get("set-cookie")).toBe(ownerSessionCookie(secrets))
-    expect(await bootstrap.json()).toEqual({ csrfToken: Redacted.value(secrets.csrfToken) })
-    expect((await web.handler(bootstrapRequest())).status).toBe(401)
+    expect(bootstrap.headers.get("set-cookie")).toBe(secrets.sessionCookie)
+    expect(await bootstrap.json()).toEqual({ csrfToken: csrfOf(secrets) })
+    expect((await web.handler(bootstrapRequest(code))).status).toBe(401)
     const url = "http://127.0.0.1:4179/api/week/stream?monday=2026-09-07&only=clockify"
     expect((await web.handler(new Request(url))).status).toBe(401)
     const crossOrigin = await web.handler(
       new Request(url, {
-        headers: { cookie: ownerSessionCookie(secrets), "sec-fetch-site": "same-site" }
+        headers: { cookie: secrets.sessionCookie, "sec-fetch-site": "same-site" }
       })
     )
     expect(crossOrigin.status).toBe(403)
@@ -86,7 +83,7 @@ it("authenticates streamed reads and sends real engine stages before the retaine
     const response = await web.handler(
       new Request(url, {
         headers: {
-          cookie: ownerSessionCookie(secrets),
+          cookie: secrets.sessionCookie,
           origin: secrets.browserOrigin,
           "sec-fetch-site": "same-origin"
         }
@@ -142,12 +139,12 @@ it("authenticates streamed reads and sends real engine stages before the retaine
     expect(progress.find((event) => event.stage === "recorded")?.message).not.toContain("Jira")
     const savedUrl = "http://127.0.0.1:4179/api/week/saved?monday=2026-09-07&only=clockify"
     expect((await web.handler(new Request(savedUrl))).status).toBe(401)
-    const saved = await web.handler(new Request(savedUrl, { headers: { cookie: ownerSessionCookie(secrets) } }))
+    const saved = await web.handler(new Request(savedUrl, { headers: { cookie: secrets.sessionCookie } }))
     expect(saved.status).toBe(200)
     expect(await saved.json()).toMatchObject({ monday: plan.monday, scope: "clockify", plan: { planId: plan.planId } })
     const missingScope = await web.handler(
       new Request(savedUrl.replace("only=clockify", "only=jira"), {
-        headers: { cookie: ownerSessionCookie(secrets) }
+        headers: { cookie: secrets.sessionCookie }
       })
     )
     expect(await missingScope.json()).toMatchObject({ plan: null, scope: "jira" })
@@ -156,7 +153,7 @@ it("authenticates streamed reads and sends real engine stages before the retaine
     const confirmed = await web.handler(
       new Request("http://127.0.0.1:4179/api/rows/confirm", {
         method: "POST",
-        headers: { cookie: ownerSessionCookie(secrets), "content-type": "application/json" },
+        headers: { cookie: secrets.sessionCookie, "content-type": "application/json" },
         body: JSON.stringify({ planId: plan.planId, rowId: "no-row" })
       })
     )
@@ -165,10 +162,10 @@ it("authenticates streamed reads and sends real engine stages before the retaine
       new Request("http://127.0.0.1:4179/api/rows/confirm", {
         method: "POST",
         headers: {
-          cookie: ownerSessionCookie(secrets),
+          cookie: secrets.sessionCookie,
           "content-type": "application/json",
           origin: "http://127.0.0.1:4179",
-          "x-csrf-token": Redacted.value(secrets.csrfToken)
+          "x-csrf-token": csrfOf(secrets)
         },
         body: JSON.stringify({ planId: plan.planId, rowId: "no-row" })
       })
@@ -184,10 +181,10 @@ it("authenticates streamed reads and sends real engine stages before the retaine
       new Request("http://127.0.0.1:4179/api/rows/confirm", {
         method: "POST",
         headers: {
-          cookie: ownerSessionCookie(secrets),
+          cookie: secrets.sessionCookie,
           "content-type": "application/json",
           origin: "http://127.0.0.1:4179",
-          "x-csrf-token": Redacted.value(secrets.csrfToken)
+          "x-csrf-token": csrfOf(secrets)
         },
         body: JSON.stringify({ planId: plan.planId, rowId: row?.rowId })
       })
@@ -200,7 +197,7 @@ it("authenticates streamed reads and sends real engine stages before the retaine
     const refreshed = await readWeekStream(
       await web.handler(
         new Request(refreshUrl, {
-          headers: { cookie: ownerSessionCookie(secrets) }
+          headers: { cookie: secrets.sessionCookie }
         })
       ),
       (event) => updates.push(event)
@@ -216,7 +213,7 @@ it("authenticates streamed reads and sends real engine stages before the retaine
     expect(fake.world.transcriptReads).toHaveLength(1)
     // HttpApi encodes an absent proposal as null. Restore must use its JSON codec too.
     const restoredResponse = await web.handler(
-      new Request(savedUrl, { headers: { cookie: ownerSessionCookie(secrets) } })
+      new Request(savedUrl, { headers: { cookie: secrets.sessionCookie } })
     )
     const restored = await decodeSavedWeek(await restoredResponse.json())
     expect(restored.plan).toEqual(refreshed)
@@ -225,13 +222,13 @@ it("authenticates streamed reads and sends real engine stages before the retaine
     expect(JSON.stringify(refreshed)).not.toContain("Implement PROJ-5662")
     const missing = await web.handler(
       new Request("http://127.0.0.1:4179/api/week/recorded?planId=missing", {
-        headers: { cookie: ownerSessionCookie(secrets) }
+        headers: { cookie: secrets.sessionCookie }
       })
     )
     await expect(readWeekStream(missing, () => {})).rejects.toThrow("Use Rescan sessions")
     expect(fake.world.transcriptReads).toHaveLength(1)
     await readWeekStream(
-      await web.handler(new Request(url, { headers: { cookie: ownerSessionCookie(secrets) } })),
+      await web.handler(new Request(url, { headers: { cookie: secrets.sessionCookie } })),
       () => {}
     )
     expect(fake.world.attributorBatches).toHaveLength(2)
