@@ -1,5 +1,11 @@
 # @knpkv/browser-pairing
 
+## 0.3.0
+
+### Minor Changes
+
+- [#466](https://github.com/knpkv/npm/pull/466) [`f93ed3f`](https://github.com/knpkv/npm/commit/f93ed3f800ff7633c58389b27d3d6e99ff553fd0) Thanks [@konopkov](https://github.com/konopkov)! - Add `@knpkv/browser-pairing/owner-session`: the shared Owner Session for single-operator loopback web apps — session, CSRF and one-time bootstrap credentials, request authorization by cookie, Origin, Fetch Metadata and CSRF token (or read-only), loopback origin helpers, and the `POST /auth/bootstrap` route.
+
 ## 0.2.0
 
 ### Minor Changes
