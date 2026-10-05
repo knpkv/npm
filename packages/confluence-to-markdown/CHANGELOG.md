@@ -1,5 +1,15 @@
 # @knpkv/confluence-to-markdown
 
+## 2.4.1
+
+### Patch Changes
+
+- [#477](https://github.com/knpkv/npm/pull/477) [`b4a69a0`](https://github.com/knpkv/npm/commit/b4a69a056ce3e2575df70d7aaea1a202f49b6a56) Thanks [@konopkov](https://github.com/konopkov)! - `JiraAuthService` and `ConfluenceAuthService` are now derived from atlassian-common's `AtlassianCliAuth` instead of re-spelling it, and `LoginOptions` / `AccessibleSite` are re-exported from there. The types are unchanged: a type-equality check against the previous hand-written interfaces passed before the switch. `ConfluenceAuthService` keeps its one real difference, a string access token and no `getSiteUrl`.
+
+- [#475](https://github.com/knpkv/npm/pull/475) [`08c62b7`](https://github.com/knpkv/npm/commit/08c62b787c649d8f78753515be6faf317791d62b) Thanks [@konopkov](https://github.com/konopkov)! - `auth use <profile>` and `auth remove <profile>` now fail with a typed `ProfileNotFoundError` (exported from `@knpkv/atlassian-common/cli-auth`) and exit non-zero when no stored profile matches. The failure names the profile (`Profile not found: <profile>`, on stderr through each CLI's error handler); previously the line went to stdout and the command exited 0, so a script could not tell a typo from a switch.
+- Updated dependencies [[`08c62b7`](https://github.com/knpkv/npm/commit/08c62b787c649d8f78753515be6faf317791d62b)]:
+  - @knpkv/atlassian-common@1.8.0
+
 ## 2.4.0
 
 ### Minor Changes
