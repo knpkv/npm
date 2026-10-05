@@ -15,6 +15,8 @@ import { Command, Flag } from "effect/cli"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { hostname, platform, userInfo } from "node:os"
+// Read at run time from the package.json this file ships next to (`dist/../package.json`).
+import pkg from "../package.json" with { type: "json" }
 import { databaseLayer } from "./core/Database.js"
 import { ingestOnce, type IngestStatus } from "./core/Ingest.js"
 import { loadConfig } from "./server/Config.js"
@@ -93,7 +95,7 @@ const login = Command.make(
 const cli = Command.make("agent-usage").pipe(
   Command.withDescription("Claude and Codex subscription usage over time, per ticket and against limits"),
   Command.withSubcommands([serve, login, ingest]),
-  Command.run({ version: "0.1.0" })
+  Command.run({ version: pkg.version })
 )
 
 // Executable entry point: the host platform is provided once for this process.
