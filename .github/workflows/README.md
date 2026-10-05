@@ -165,10 +165,10 @@ selected ref. Both jobs pin checkout to the event's exact `github.sha`.
 **Pipeline**:
 
 1. Regenerate from the current upstream document; operational failures fail the job.
-2. Continue only when the raw spec or generated client differs from the repository.
+2. Continue only when the raw spec differs from the repository; a regenerated-client-only diff (generator churn) exits without a pull request.
 3. Build both `clockify-api-client` and its `jira-clockify` consumer.
 4. Run both packages' test suites.
-5. Add a patch changeset and create/update `chore/clockify-api-spec-update`.
+5. Add a minor changeset and create/update `chore/clockify-api-spec-update`.
 
 The regeneration contract and local review commands are documented in
 `packages/clockify-api-client/README.md`.
@@ -182,7 +182,7 @@ The regeneration contract and local review commands are documented in
 **Pipeline**:
 
 1. Regenerate from the complete upstream document; operational failures fail the job.
-2. Continue only when the raw spec or generated client differs from the repository.
+2. Continue only when the raw spec differs from the repository; a regenerated-client-only diff (generator churn) exits without a pull request.
 3. Build and test `jira-api-client`, `jira-cli`, and `jira-clockify`.
 4. Add release changesets and create/update `chore/jira-api-spec-update`.
 
@@ -199,7 +199,7 @@ patch policy are documented in `packages/jira-api-client/README.md`.
 **Pipeline**:
 
 1. Regenerate from both complete upstream documents; operational failures fail the job.
-2. Continue only when a raw spec or generated client differs from the repository.
+2. Continue only when a raw spec differs from the repository; a regenerated-client-only diff (generator churn) exits without a pull request.
 3. Build and test `confluence-api-client` and `confluence-to-markdown`.
 4. Add release changesets and create/update `chore/confluence-api-spec-update`.
 
