@@ -1,5 +1,23 @@
 # @knpkv/confluence-to-markdown
 
+## 2.4.0
+
+### Minor Changes
+
+- [#472](https://github.com/knpkv/npm/pull/472) [`d12c336`](https://github.com/knpkv/npm/commit/d12c3364e56abb7cfd32aa693c5406788a67e3f5) Thanks [@konopkov](https://github.com/konopkov)! - One shared `auth` command group for jira and confluence: `makeAuthCommand(service, descriptor, options)` in `@knpkv/atlassian-common/cli-auth`. Each CLI exports one descriptor (`jiraCliDescriptor`, `confluenceCliDescriptor`: command name, product name, login scopes) that feeds both its auth and its `auth` commands.
+
+  - `jira auth create` lists every scope `jira auth login` requests. It previously listed three of five (missing `write:jira-work` and `manage:jira-project`), so an app set up from its instructions could not log in.
+  - `jira auth manage` is new: it opens the developer console with the scope and callback checklist.
+  - `confluence auth profiles`, `auth use <profile>` and `auth remove <profile>` are new; the docs already described them.
+  - `confluence auth status` prints the active profile, account, site and profile ID.
+  - `auth create` and `auth manage` print the URL first and exit non-zero when no browser opens (jira's `create` used to ignore that).
+
+### Patch Changes
+
+- Updated dependencies [[`d12c336`](https://github.com/knpkv/npm/commit/d12c3364e56abb7cfd32aa693c5406788a67e3f5)]:
+  - @knpkv/atlassian-common@1.7.0
+  - @knpkv/agent-skills@0.3.3
+
 ## 2.3.1
 
 ### Patch Changes
