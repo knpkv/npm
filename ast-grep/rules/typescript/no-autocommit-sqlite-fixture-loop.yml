@@ -1,0 +1,51 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-autocommit-sqlite-fixture-loop
+language: tsx
+severity: error
+message: "Seed SQLite fixture rows in one transaction: a per-row autocommit write inside a loop fsyncs every row"
+rule:
+  kind: call_expression
+  any:
+    - pattern: $DB.prepare($$$).run($$$)
+    # A statement prepared earlier in the same block, e.g. `const insert = db.prepare(...)`.
+    - all:
+        - pattern: $STATEMENT.run($$$)
+        - inside:
+            any:
+              - kind: statement_block
+              - kind: program
+            stopBy: end
+            has:
+              pattern: const $STATEMENT = $DB.prepare($$$)
+              stopBy: end
+  inside:
+    kind: for_statement
+    stopBy: end
+    not:
+      follows:
+        kind: expression_statement
+        has:
+          kind: call_expression
+          regex: "\\.exec\\(\\s*.BEGIN"
+        stopBy: end
+  not:
+    inside:
+      kind: call_expression
+      has:
+        field: function
+        regex: "[Tt]ransaction"
+      stopBy: end
+
+files:
+  - "packages/*/test/**/*.ts"
+  - "packages/*/test/**/*.tsx"
+
+note: |
+  Each autocommit write to a file-backed SQLite database waits for its own
+  fsync, so a few hundred seeded rows can cost seconds and the test's runtime
+  follows disk latency instead of the code under test (herdr-work and
+  herdr-coordinator migration tests timed out in CI this way). Wrap the loop in
+  `database.exec("BEGIN")` ... `database.exec("COMMIT")`, or in a transaction
+  helper. Source code is out of scope: a per-row durable commit there may be
+  intentional.

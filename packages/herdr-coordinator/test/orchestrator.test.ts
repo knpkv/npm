@@ -34,6 +34,17 @@ import {
   sqliteLayer
 } from "../src/index.js"
 
+/**
+ * Opens a fixture connection that skips fsync on its own writes, so seeding and
+ * editing test files does not wait on disk. The store under test opens its own
+ * connection and keeps its own durability settings.
+ */
+const fixtureDatabase = (path: string): DatabaseSync => {
+  const database = new DatabaseSync(path)
+  database.exec("PRAGMA synchronous = OFF")
+  return database
+}
+
 // @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
@@ -504,7 +515,7 @@ describe("durable coordinator orchestrator", () => {
       const submission = makeSolSubmission(null, "dispatch:worker-start-schema")
       return Effect.gen(function*() {
         const lane = yield* recordWorkAuthority(path, submission.workLink)
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.exec(`
           DROP TRIGGER work_lane_operations_after_insert;
           DROP TABLE work_lane_operation_totals;
@@ -616,7 +627,7 @@ describe("durable coordinator orchestrator", () => {
             })
           })
         )
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare("DELETE FROM work_lane_operations WHERE operation_id = ?")
           .run(activation.binding.lane.operationId)
         database.prepare("DELETE FROM orchestrator_events WHERE dispatch_request_id = ? AND type = 'running'")
@@ -634,7 +645,7 @@ describe("durable coordinator orchestrator", () => {
             })
           ))
         ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
-        const readback = new DatabaseSync(path)
+        const readback = fixtureDatabase(path)
         expect(
           readback.prepare("SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
             .get(activation.event.dispatchRequestId)
@@ -687,7 +698,7 @@ describe("durable coordinator orchestrator", () => {
             })
           ))
         ).toMatchObject({ failure: { _tag: "OrchestratorStorageError", operation: "initialize.work" } })
-        const readback = new DatabaseSync(path)
+        const readback = fixtureDatabase(path)
         expect(
           readback.prepare("SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
             .get(receipt.dispatchRequestId)
@@ -797,7 +808,7 @@ describe("durable coordinator orchestrator", () => {
             return accepted
           })
         )
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         const state = database.prepare(
           `SELECT d.status,
              (SELECT COUNT(*) FROM orchestrator_events WHERE dispatch_request_id = ?) AS events,
@@ -821,7 +832,7 @@ describe("durable coordinator orchestrator", () => {
       const submission = makeSolSubmission(null, "dispatch:worker-start-future-work")
       return Effect.gen(function*() {
         const lane = yield* recordWorkAuthority(path, submission.workLink)
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         const row = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           database.prepare("SELECT record FROM work_goal_events WHERE goal_id = ?").get(lane.goalId)
         )
@@ -859,7 +870,7 @@ describe("durable coordinator orchestrator", () => {
             })
           ))
         ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
-        const readback = new DatabaseSync(path)
+        const readback = fixtureDatabase(path)
         expect(
           readback.prepare("SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
             .get(receipt.dispatchRequestId)
@@ -903,7 +914,7 @@ describe("durable coordinator orchestrator", () => {
               return accepted
             })
           )
-          const database = new DatabaseSync(path)
+          const database = fixtureDatabase(path)
           tamper.mutate(database, receipt.dispatchRequestId)
           database.close()
 
@@ -922,7 +933,7 @@ describe("durable coordinator orchestrator", () => {
               })
             ))
           ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
-          const readback = new DatabaseSync(path)
+          const readback = fixtureDatabase(path)
           expect(
             readback.prepare(
               "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
@@ -959,7 +970,7 @@ describe("durable coordinator orchestrator", () => {
           operationId: "operation:hidden-conflict",
           revision: 1
         }
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare(
           `INSERT INTO work_lane_claims
              (lane_id, goal_id, operation_id, phase, revision, record)
@@ -1005,7 +1016,7 @@ describe("durable coordinator orchestrator", () => {
           phase: "shipped",
           revision: 1
         } satisfies typeof lane
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare(
           `INSERT INTO work_lane_claims
              (lane_id, goal_id, operation_id, phase, revision, record)
@@ -1053,7 +1064,7 @@ describe("durable coordinator orchestrator", () => {
             return accepted
           })
         )
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         const row = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           database.prepare("SELECT record FROM work_goal_events WHERE goal_id = ?").get(lane.goalId)
         )
@@ -1078,7 +1089,7 @@ describe("durable coordinator orchestrator", () => {
             })
           ))
         ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
-        const readback = new DatabaseSync(path)
+        const readback = fixtureDatabase(path)
         expect(
           readback.prepare("SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
             .get(receipt.dispatchRequestId)
@@ -1114,7 +1125,7 @@ describe("durable coordinator orchestrator", () => {
               return accepted
             })
           )
-          const database = new DatabaseSync(path)
+          const database = fixtureDatabase(path)
           database.exec(capacity.update)
           database.close()
           expect(
@@ -1132,7 +1143,7 @@ describe("durable coordinator orchestrator", () => {
               })
             ))
           ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
-          const readback = new DatabaseSync(path)
+          const readback = fixtureDatabase(path)
           expect(
             readback.prepare(
               "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
@@ -1158,7 +1169,7 @@ describe("durable coordinator orchestrator", () => {
             return accepted
           })
         )
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         const insert = database.prepare(
           "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
         )
@@ -1203,7 +1214,7 @@ describe("durable coordinator orchestrator", () => {
             })
           ))
         ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
-        const readback = new DatabaseSync(path)
+        const readback = fixtureDatabase(path)
         expect(
           readback.prepare(
             "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
@@ -1377,7 +1388,7 @@ describe("durable coordinator orchestrator", () => {
             const orchestrator = yield* Orchestrator
             const receipt = yield* orchestrator.submitRouted(submission)
             yield* orchestrator.queue(receipt.dispatchRequestId)
-            const database = new DatabaseSync(path)
+            const database = fixtureDatabase(path)
             database.prepare(
               `UPDATE orchestrator_dispatches
                SET command = json_set(command, '$.payload.mode', 'transition_summary')
@@ -1460,7 +1471,7 @@ describe("durable coordinator orchestrator", () => {
           laneId: "lane:escalation"
         })
 
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         const counts = database.prepare(
           `SELECT
              (SELECT COUNT(*) FROM orchestrator_dispatches) AS dispatches,
@@ -1527,7 +1538,7 @@ describe("durable coordinator orchestrator", () => {
                 workLink: makeWorkLink([luna.dispatchRequestId])
               }
             })
-            const database = new DatabaseSync(path)
+            const database = fixtureDatabase(path)
             database.prepare(
               "UPDATE orchestrator_dispatches SET command = json_set(command, '$.payload.mode', 'work') WHERE dispatch_request_id = ?"
             ).run(luna.dispatchRequestId)
@@ -1560,7 +1571,7 @@ describe("durable coordinator orchestrator", () => {
             const sol = yield* orchestrator.submitRouted(
               makeSolSubmission(luna.dispatchRequestId, "dispatch:readback-sol")
             )
-            const database = new DatabaseSync(path)
+            const database = fixtureDatabase(path)
             database.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
               .run(sol.dispatchRequestId)
             database.close()
@@ -1579,7 +1590,7 @@ describe("durable coordinator orchestrator", () => {
         expect(result.queue).toMatchObject({
           failure: { _tag: "OrchestratorStorageError", operation: "transition.work-link" }
         })
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         expect(
           database.prepare(
             `SELECT status,
@@ -1665,7 +1676,7 @@ describe("durable coordinator orchestrator", () => {
           }
         })
 
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         const counts = Schema.decodeUnknownSync(Schema.Struct({
           accepted: Schema.Number,
           dispatches: Schema.Number,
@@ -1757,7 +1768,7 @@ describe("durable coordinator orchestrator", () => {
             })
           })
         )
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare("DELETE FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?")
           .run(receipt.dispatchRequestId)
         database.close()
@@ -1777,7 +1788,7 @@ describe("durable coordinator orchestrator", () => {
     withTemporaryRoot("herdr-orchestrator-route-migration-", (root) => {
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.exec(`
           PRAGMA foreign_keys = ON;
           CREATE TABLE orchestrator_dispatches (
@@ -1833,7 +1844,7 @@ describe("durable coordinator orchestrator", () => {
           })
         )
         expect(request.route).toEqual(lunaRoute)
-        const reopened = new DatabaseSync(path)
+        const reopened = fixtureDatabase(path)
         const routed = reopened.prepare(
           "SELECT is_routed AS isRouted FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
         ).get("dispatch:migrated-route")
@@ -1867,7 +1878,7 @@ describe("durable coordinator orchestrator", () => {
           summary: "Legacy coordinator handoff",
           version: "herdr.work.decision.v1"
         }
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.exec("PRAGMA journal_mode = WAL")
         database.exec(`
           CREATE TABLE work_lane_claims (
@@ -1984,7 +1995,7 @@ describe("durable coordinator orchestrator", () => {
 
         const rewoundLegacyPath = join(root, "rewound-legacy-lane.sqlite")
         copyFileSync(path, rewoundLegacyPath)
-        const rewoundLegacy = new DatabaseSync(rewoundLegacyPath)
+        const rewoundLegacy = fixtureDatabase(rewoundLegacyPath)
         const rewoundBinding = migrationBinding(
           "dispatch:legacy-sol",
           Schema.decodeUnknownSync(WorkLaneClaimed)({
@@ -2028,7 +2039,7 @@ describe("durable coordinator orchestrator", () => {
             operation: "initialize.work"
           }
         })
-        const rewoundLegacyRolledBack = new DatabaseSync(rewoundLegacyPath)
+        const rewoundLegacyRolledBack = fixtureDatabase(rewoundLegacyPath)
         expect(
           rewoundLegacyRolledBack.prepare("PRAGMA table_info(work_decision_handoffs)").all()
             .some((column) =>
@@ -2039,7 +2050,7 @@ describe("durable coordinator orchestrator", () => {
 
         const duplicateMetadataPath = join(root, "duplicate-legacy-metadata.sqlite")
         copyFileSync(path, duplicateMetadataPath)
-        const duplicateMetadata = new DatabaseSync(duplicateMetadataPath)
+        const duplicateMetadata = fixtureDatabase(duplicateMetadataPath)
         duplicateMetadata.exec(`
           ALTER TABLE orchestrator_dispatch_metadata RENAME TO orchestrator_dispatch_metadata_unique;
           CREATE TABLE orchestrator_dispatch_metadata (
@@ -2059,7 +2070,7 @@ describe("durable coordinator orchestrator", () => {
             operation: "initialize.work"
           }
         })
-        const duplicateMetadataRolledBack = new DatabaseSync(duplicateMetadataPath)
+        const duplicateMetadataRolledBack = fixtureDatabase(duplicateMetadataPath)
         expect(
           duplicateMetadataRolledBack.prepare(
             `SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata
@@ -2070,7 +2081,7 @@ describe("durable coordinator orchestrator", () => {
 
         const missingMetadataLegacyPath = join(root, "missing-metadata-legacy.sqlite")
         copyFileSync(path, missingMetadataLegacyPath)
-        const missingMetadataLegacy = new DatabaseSync(missingMetadataLegacyPath)
+        const missingMetadataLegacy = fixtureDatabase(missingMetadataLegacyPath)
         missingMetadataLegacy.exec("DROP TABLE orchestrator_dispatch_metadata")
         missingMetadataLegacy.close()
         expect(yield* Effect.result(withDatabase(missingMetadataLegacyPath, Effect.void))).toMatchObject({
@@ -2082,7 +2093,7 @@ describe("durable coordinator orchestrator", () => {
 
         const unroutedLegacyPath = join(root, "unrouted-legacy.sqlite")
         copyFileSync(path, unroutedLegacyPath)
-        const unroutedLegacy = new DatabaseSync(unroutedLegacyPath)
+        const unroutedLegacy = fixtureDatabase(unroutedLegacyPath)
         unroutedLegacy.prepare("UPDATE orchestrator_dispatches SET is_routed = 0").run()
         unroutedLegacy.close()
         expect(yield* Effect.result(withDatabase(unroutedLegacyPath, Effect.void))).toMatchObject({
@@ -2092,7 +2103,7 @@ describe("durable coordinator orchestrator", () => {
             operation: "initialize.work"
           }
         })
-        const unroutedLegacyRolledBack = new DatabaseSync(unroutedLegacyPath)
+        const unroutedLegacyRolledBack = fixtureDatabase(unroutedLegacyPath)
         const unroutedLegacyColumns = unroutedLegacyRolledBack.prepare(
           "PRAGMA table_info(work_decision_handoffs)"
         ).all()
@@ -2105,7 +2116,7 @@ describe("durable coordinator orchestrator", () => {
 
         const missingParentLegacyPath = join(root, "missing-parent-legacy.sqlite")
         copyFileSync(path, missingParentLegacyPath)
-        const missingParentLegacy = new DatabaseSync(missingParentLegacyPath)
+        const missingParentLegacy = fixtureDatabase(missingParentLegacyPath)
         missingParentLegacy.prepare(
           "UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?"
         ).run(
@@ -2128,7 +2139,7 @@ describe("durable coordinator orchestrator", () => {
 
         const failedParentLegacyPath = join(root, "failed-parent-legacy.sqlite")
         copyFileSync(path, failedParentLegacyPath)
-        const failedParentLegacy = new DatabaseSync(failedParentLegacyPath)
+        const failedParentLegacy = fixtureDatabase(failedParentLegacyPath)
         persistMigrationLifecycle(failedParentLegacy, parentDispatchRequestId, 10, "task_failed", "consult")
         failedParentLegacy.prepare(
           "UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?"
@@ -2148,7 +2159,7 @@ describe("durable coordinator orchestrator", () => {
 
         const queuedLegacyPath = join(root, "queued-legacy-lifecycle.sqlite")
         copyFileSync(path, queuedLegacyPath)
-        const queuedLegacy = new DatabaseSync(queuedLegacyPath)
+        const queuedLegacy = fixtureDatabase(queuedLegacyPath)
         queuedLegacy.prepare("DELETE FROM orchestrator_events WHERE type = 'running'").run()
         queuedLegacy.prepare("UPDATE orchestrator_dispatches SET status = 'queued'").run()
         queuedLegacy.close()
@@ -2162,7 +2173,7 @@ describe("durable coordinator orchestrator", () => {
             operation: "initialize.work"
           }
         })
-        const queuedLegacyRolledBack = new DatabaseSync(queuedLegacyPath)
+        const queuedLegacyRolledBack = fixtureDatabase(queuedLegacyPath)
         const retainedQueuedLegacyColumns = queuedLegacyRolledBack.prepare(
           "PRAGMA table_info(work_decision_handoffs)"
         ).all()
@@ -2175,7 +2186,7 @@ describe("durable coordinator orchestrator", () => {
 
         const duplicateLegacyPath = join(root, "duplicate-legacy-dispatch.sqlite")
         copyFileSync(path, duplicateLegacyPath)
-        const duplicateLegacy = new DatabaseSync(duplicateLegacyPath)
+        const duplicateLegacy = fixtureDatabase(duplicateLegacyPath)
         duplicateLegacy.exec(`
           ALTER TABLE work_dispatch_handoffs RENAME TO unique_work_dispatch_handoffs;
           CREATE TABLE work_dispatch_handoffs (
@@ -2203,7 +2214,7 @@ describe("durable coordinator orchestrator", () => {
           _tag: "WorkStoreError",
           operation: "sql-work.migrate.legacy-dispatch-cardinality"
         })
-        const duplicateLegacyRolledBack = new DatabaseSync(duplicateLegacyPath)
+        const duplicateLegacyRolledBack = fixtureDatabase(duplicateLegacyPath)
         const retainedDuplicateLegacy = duplicateLegacyRolledBack.prepare(
           "SELECT record FROM work_dispatch_handoffs WHERE handoff_id = ?"
         ).all(legacy.id)
@@ -2212,7 +2223,10 @@ describe("durable coordinator orchestrator", () => {
 
         const oversizedLegacyPath = join(root, "oversized-legacy.sqlite")
         copyFileSync(path, oversizedLegacyPath)
-        const oversizedLegacy = new DatabaseSync(oversizedLegacyPath)
+        const oversizedLegacy = fixtureDatabase(oversizedLegacyPath)
+        // One transaction: 260 autocommit rows would fsync each insert and make
+        // this fixture's cost depend on disk latency rather than the migration.
+        oversizedLegacy.exec("BEGIN")
         for (let index = 0; index < 260; index++) {
           const occurredAt = index + 10
           const handoff = {
@@ -2274,6 +2288,7 @@ describe("durable coordinator orchestrator", () => {
             "work"
           )
         }
+        oversizedLegacy.exec("COMMIT")
         oversizedLegacy.close()
         expect(yield* Effect.result(withDatabase(oversizedLegacyPath, Effect.void))).toMatchObject({
           failure: {
@@ -2282,7 +2297,7 @@ describe("durable coordinator orchestrator", () => {
             operation: "initialize.work"
           }
         })
-        const oversizedRolledBack = new DatabaseSync(oversizedLegacyPath)
+        const oversizedRolledBack = fixtureDatabase(oversizedLegacyPath)
         const oversizedColumns = oversizedRolledBack.prepare("PRAGMA table_info(work_decision_handoffs)").all()
         const oversizedRetained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           oversizedRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
@@ -2386,7 +2401,7 @@ database.close()`,
         })
 
         yield* withDatabase(path, Effect.void)
-        const migrated = new DatabaseSync(path)
+        const migrated = fixtureDatabase(path)
         const decision = migrated.prepare(
           "SELECT session_id AS sessionId, record FROM work_decision_handoffs WHERE handoff_id = ?"
         ).get(legacy.id)
@@ -2430,7 +2445,7 @@ database.close()`,
     withTemporaryRoot("herdr-orchestrator-partial-schema-preflight-", (root) => {
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.exec("CREATE TABLE orchestrator_dispatches (id TEXT)")
         database.close()
 
@@ -2441,7 +2456,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const unchanged = new DatabaseSync(path)
+        const unchanged = fixtureDatabase(path)
         const workTables = Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(
           unchanged.prepare(
             "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'work_%'"
@@ -2456,7 +2471,7 @@ database.close()`,
     withTemporaryRoot("herdr-orchestrator-work-ddl-rollback-", (root) => {
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.exec(`
           CREATE TABLE work_lane_claims (
             lane_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record TEXT NOT NULL
@@ -2482,7 +2497,7 @@ database.close()`,
         expect(yield* Effect.result(withDatabase(path, Effect.void))).toMatchObject({
           failure: { _tag: "OrchestratorStorageError", operation: "initialize.work" }
         })
-        const unchanged = new DatabaseSync(path)
+        const unchanged = fixtureDatabase(path)
         expect(
           Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
             unchanged.prepare(
@@ -2534,7 +2549,7 @@ database.close()`,
           summary: workLink.handoff.summary,
           version: "herdr.work.decision.v1"
         }
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(JSON.stringify(previousHandoff), previousHandoff.id)
         database.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
@@ -2548,7 +2563,7 @@ database.close()`,
 
         const standalonePath = join(root, "standalone-v1.sqlite")
         copyFileSync(path, standalonePath)
-        const standalone = new DatabaseSync(standalonePath)
+        const standalone = fixtureDatabase(standalonePath)
         standalone.exec(`
           DROP TABLE orchestrator_dispatch_metadata;
           DROP TABLE orchestrator_events;
@@ -2556,7 +2571,7 @@ database.close()`,
         `)
         standalone.close()
         yield* initializeStandaloneWork(standalonePath)
-        const standaloneMigrated = new DatabaseSync(standalonePath)
+        const standaloneMigrated = fixtureDatabase(standalonePath)
         const standaloneRecord = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           standaloneMigrated.prepare(
             "SELECT record FROM work_decision_handoffs WHERE handoff_id = ?"
@@ -2570,7 +2585,7 @@ database.close()`,
 
         const rewoundLanePath = join(root, "rewound-v1-lane.sqlite")
         copyFileSync(path, rewoundLanePath)
-        const rewoundLane = new DatabaseSync(rewoundLanePath)
+        const rewoundLane = fixtureDatabase(rewoundLanePath)
         rewoundLane.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?").run(
           activation.binding.lane.revision - 1,
           JSON.stringify({
@@ -2603,7 +2618,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const rewoundLaneRolledBack = new DatabaseSync(rewoundLanePath)
+        const rewoundLaneRolledBack = fixtureDatabase(rewoundLanePath)
         expect(
           rewoundLaneRolledBack.prepare(
             "SELECT revision FROM work_lane_claims WHERE lane_id = ?"
@@ -2613,7 +2628,7 @@ database.close()`,
 
         const advancedLanePath = join(root, "advanced-v1-lane.sqlite")
         copyFileSync(path, advancedLanePath)
-        const advancedLaneDatabase = new DatabaseSync(advancedLanePath)
+        const advancedLaneDatabase = fixtureDatabase(advancedLanePath)
         const forwardLane = {
           ...activation.binding.lane,
           expectedRevision: activation.binding.lane.revision,
@@ -2630,7 +2645,7 @@ database.close()`,
             return yield* orchestrator.request(activation.event.dispatchRequestId)
           })
         )
-        const advancedLaneMigrated = new DatabaseSync(advancedLanePath)
+        const advancedLaneMigrated = fixtureDatabase(advancedLanePath)
         expect(
           advancedLaneMigrated.prepare(
             "SELECT revision FROM work_lane_claims WHERE lane_id = ?"
@@ -2653,14 +2668,14 @@ database.close()`,
 
         const exactCurrentLanePath = join(root, "exact-current-v2-lane.sqlite")
         copyFileSync(path, exactCurrentLanePath)
-        const exactCurrentLane = new DatabaseSync(exactCurrentLanePath)
+        const exactCurrentLane = fixtureDatabase(exactCurrentLanePath)
         persistCurrentHandoff(exactCurrentLane)
         exactCurrentLane.close()
         yield* withDatabase(exactCurrentLanePath, Orchestrator)
 
         const rewoundCurrentLanePath = join(root, "rewound-current-v2-lane.sqlite")
         copyFileSync(path, rewoundCurrentLanePath)
-        const rewoundCurrentLane = new DatabaseSync(rewoundCurrentLanePath)
+        const rewoundCurrentLane = fixtureDatabase(rewoundCurrentLanePath)
         persistCurrentHandoff(rewoundCurrentLane)
         rewoundCurrentLane.prepare(
           "UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?"
@@ -2687,7 +2702,7 @@ database.close()`,
 
         const advancedCurrentLanePath = join(root, "advanced-current-v2-lane.sqlite")
         copyFileSync(path, advancedCurrentLanePath)
-        const advancedCurrentLane = new DatabaseSync(advancedCurrentLanePath)
+        const advancedCurrentLane = fixtureDatabase(advancedCurrentLanePath)
         persistCurrentHandoff(advancedCurrentLane)
         const advancedCurrentClaim = {
           ...activation.binding.lane,
@@ -2728,7 +2743,7 @@ database.close()`,
         ) {
           const invalidCurrentLanePath = join(root, `${name}-current-v2-lane.sqlite`)
           copyFileSync(path, invalidCurrentLanePath)
-          const invalidCurrentLane = new DatabaseSync(invalidCurrentLanePath)
+          const invalidCurrentLane = fixtureDatabase(invalidCurrentLanePath)
           persistCurrentHandoff(invalidCurrentLane)
           invalidCurrentLane.prepare(
             `UPDATE work_lane_claims
@@ -2753,7 +2768,7 @@ database.close()`,
           })
         }
 
-        const mixedDuplicateMetadata = new DatabaseSync(mixedDuplicateMetadataPath)
+        const mixedDuplicateMetadata = fixtureDatabase(mixedDuplicateMetadataPath)
         mixedDuplicateMetadata.exec(`
           ALTER TABLE orchestrator_dispatch_metadata RENAME TO orchestrator_dispatch_metadata_unique;
           CREATE TABLE orchestrator_dispatch_metadata (
@@ -2773,7 +2788,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const mixedDuplicateMetadataRolledBack = new DatabaseSync(mixedDuplicateMetadataPath)
+        const mixedDuplicateMetadataRolledBack = fixtureDatabase(mixedDuplicateMetadataPath)
         expect(
           mixedDuplicateMetadataRolledBack.prepare(
             "SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata"
@@ -2783,7 +2798,7 @@ database.close()`,
 
         const missingSolWorkLinkPath = join(root, "missing-sol-work-link.sqlite")
         copyFileSync(mixedDuplicateMetadataPath, missingSolWorkLinkPath)
-        const missingSolWorkLink = new DatabaseSync(missingSolWorkLinkPath)
+        const missingSolWorkLink = fixtureDatabase(missingSolWorkLinkPath)
         missingSolWorkLink.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
           .run(activation.event.dispatchRequestId)
         missingSolWorkLink.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
@@ -2807,7 +2822,7 @@ database.close()`,
 
         const lunaNullWorkLinkPath = join(root, "luna-null-work-link.sqlite")
         copyFileSync(path, lunaNullWorkLinkPath)
-        const lunaNullWorkLink = new DatabaseSync(lunaNullWorkLinkPath)
+        const lunaNullWorkLink = fixtureDatabase(lunaNullWorkLinkPath)
         persistMigrationLifecycle(lunaNullWorkLink, "dispatch:luna-null-work-link", 20, "queued", "consult")
         lunaNullWorkLink.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
           .run("dispatch:luna-null-work-link", JSON.stringify(lunaRoute))
@@ -2839,7 +2854,7 @@ database.close()`,
         ) {
           const invalidRoutePath = join(root, `${name}.sqlite`)
           copyFileSync(lunaNullWorkLinkPath, invalidRoutePath)
-          const invalidRoute = new DatabaseSync(invalidRoutePath)
+          const invalidRoute = fixtureDatabase(invalidRoutePath)
           invalidRoute.prepare(
             "UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?"
           ).run(route, "dispatch:luna-null-work-link")
@@ -2858,7 +2873,7 @@ database.close()`,
 
         const mismatchedLunaCommandPath = join(root, "mismatched-luna-command.sqlite")
         copyFileSync(lunaNullWorkLinkPath, mismatchedLunaCommandPath)
-        const mismatchedLunaCommand = new DatabaseSync(mismatchedLunaCommandPath)
+        const mismatchedLunaCommand = fixtureDatabase(mismatchedLunaCommandPath)
         mismatchedLunaCommand.prepare(
           "UPDATE orchestrator_dispatches SET command = ? WHERE dispatch_request_id = ?"
         ).run(
@@ -2881,7 +2896,7 @@ database.close()`,
 
         const orphanLunaMetadataPath = join(root, "orphan-luna-metadata.sqlite")
         copyFileSync(lunaNullWorkLinkPath, orphanLunaMetadataPath)
-        const orphanLunaMetadata = new DatabaseSync(orphanLunaMetadataPath)
+        const orphanLunaMetadata = fixtureDatabase(orphanLunaMetadataPath)
         orphanLunaMetadata.exec("PRAGMA foreign_keys = OFF")
         orphanLunaMetadata.prepare("DELETE FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
           .run("dispatch:luna-null-work-link")
@@ -2902,7 +2917,7 @@ database.close()`,
         ) {
           const malformedLunaWorkLinkPath = join(root, `luna-${name}-work-link.sqlite`)
           copyFileSync(lunaNullWorkLinkPath, malformedLunaWorkLinkPath)
-          const malformedLunaWorkLink = new DatabaseSync(malformedLunaWorkLinkPath)
+          const malformedLunaWorkLink = fixtureDatabase(malformedLunaWorkLinkPath)
           malformedLunaWorkLink.prepare(
             "UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?"
           ).run(workLink, "dispatch:luna-null-work-link")
@@ -2918,7 +2933,7 @@ database.close()`,
 
         const lunaHistoryPath = join(root, "luna-history-above-work-cap.sqlite")
         copyFileSync(path, lunaHistoryPath)
-        const lunaHistory = new DatabaseSync(lunaHistoryPath)
+        const lunaHistory = fixtureDatabase(lunaHistoryPath)
         lunaHistory.prepare(
           `WITH RECURSIVE history(value) AS (
              VALUES(1) UNION ALL SELECT value + 1 FROM history WHERE value < 16385
@@ -2950,7 +2965,7 @@ database.close()`,
 
         const routedWithoutMetadataPath = join(root, "routed-without-metadata.sqlite")
         copyFileSync(path, routedWithoutMetadataPath)
-        const routedWithoutMetadata = new DatabaseSync(routedWithoutMetadataPath)
+        const routedWithoutMetadata = fixtureDatabase(routedWithoutMetadataPath)
         routedWithoutMetadata.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
           .run(activation.event.dispatchRequestId)
         routedWithoutMetadata.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
@@ -2971,7 +2986,7 @@ database.close()`,
         const v2OnlyPartialSchemaPath = join(root, "v2-only-partial-coordinator-schema.sqlite")
         copyFileSync(path, v2OnlyPartialSchemaPath)
         yield* withDatabase(v2OnlyPartialSchemaPath, Effect.void)
-        const v2OnlyPartialSchema = new DatabaseSync(v2OnlyPartialSchemaPath)
+        const v2OnlyPartialSchema = fixtureDatabase(v2OnlyPartialSchemaPath)
         v2OnlyPartialSchema.exec("DROP TABLE orchestrator_dispatch_metadata")
         v2OnlyPartialSchema.close()
         expect(yield* Effect.result(withDatabase(v2OnlyPartialSchemaPath, Effect.void))).toMatchObject({
@@ -2984,7 +2999,7 @@ database.close()`,
 
         const v2OnlyMissingMetadataPath = join(root, "v2-only-missing-metadata.sqlite")
         copyFileSync(v2OnlyPartialSchemaPath, v2OnlyMissingMetadataPath)
-        const v2OnlyMissingMetadata = new DatabaseSync(v2OnlyMissingMetadataPath)
+        const v2OnlyMissingMetadata = fixtureDatabase(v2OnlyMissingMetadataPath)
         v2OnlyMissingMetadata.exec(`
           CREATE TABLE orchestrator_dispatch_metadata (
             dispatch_request_id TEXT PRIMARY KEY,
@@ -3003,7 +3018,7 @@ database.close()`,
 
         const missingAuthorityMetadataPath = join(root, "missing-metadata-current.sqlite")
         copyFileSync(path, missingAuthorityMetadataPath)
-        const missingAuthorityMetadata = new DatabaseSync(missingAuthorityMetadataPath)
+        const missingAuthorityMetadata = fixtureDatabase(missingAuthorityMetadataPath)
         missingAuthorityMetadata.exec("DROP TABLE orchestrator_dispatch_metadata")
         missingAuthorityMetadata.close()
         expect(yield* Effect.result(withDatabase(missingAuthorityMetadataPath, Effect.void))).toMatchObject({
@@ -3016,7 +3031,7 @@ database.close()`,
 
         const unroutedPath = join(root, "unrouted-current.sqlite")
         copyFileSync(path, unroutedPath)
-        const unrouted = new DatabaseSync(unroutedPath)
+        const unrouted = fixtureDatabase(unroutedPath)
         unrouted.prepare("UPDATE orchestrator_dispatches SET is_routed = 0").run()
         unrouted.close()
         expect(yield* Effect.result(withDatabase(unroutedPath, Effect.void))).toMatchObject({
@@ -3026,7 +3041,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const unroutedRolledBack = new DatabaseSync(unroutedPath)
+        const unroutedRolledBack = fixtureDatabase(unroutedPath)
         const unroutedDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           unroutedRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3036,7 +3051,7 @@ database.close()`,
 
         const missingParentPath = join(root, "missing-parent-current.sqlite")
         copyFileSync(path, missingParentPath)
-        const missingParent = new DatabaseSync(missingParentPath)
+        const missingParent = fixtureDatabase(missingParentPath)
         missingParent.prepare("UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?")
           .run(
             JSON.stringify({ ...submission.route, linkedRequestId: parentDispatchRequestId }),
@@ -3053,7 +3068,7 @@ database.close()`,
 
         const failedParentPath = join(root, "failed-parent-current.sqlite")
         copyFileSync(path, failedParentPath)
-        const failedParent = new DatabaseSync(failedParentPath)
+        const failedParent = fixtureDatabase(failedParentPath)
         persistMigrationLifecycle(failedParent, parentDispatchRequestId, 10, "delivery_failed", "consult")
         failedParent.prepare("UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?")
           .run(
@@ -3067,7 +3082,7 @@ database.close()`,
 
         const queuedBindingPath = join(root, "queued-binding-current-handoff.sqlite")
         copyFileSync(path, queuedBindingPath)
-        const queuedBinding = new DatabaseSync(queuedBindingPath)
+        const queuedBinding = fixtureDatabase(queuedBindingPath)
         queuedBinding.prepare("DELETE FROM orchestrator_events WHERE dispatch_request_id = ? AND type = 'running'")
           .run(activation.event.dispatchRequestId)
         queuedBinding.prepare("UPDATE orchestrator_dispatches SET status = 'queued' WHERE dispatch_request_id = ?")
@@ -3080,7 +3095,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const queuedBindingRolledBack = new DatabaseSync(queuedBindingPath)
+        const queuedBindingRolledBack = fixtureDatabase(queuedBindingPath)
         const retainedQueuedBinding = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           queuedBindingRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3090,7 +3105,7 @@ database.close()`,
 
         const incompleteTerminalPath = join(root, "incomplete-terminal-current-handoff.sqlite")
         copyFileSync(path, incompleteTerminalPath)
-        const incompleteTerminal = new DatabaseSync(incompleteTerminalPath)
+        const incompleteTerminal = fixtureDatabase(incompleteTerminalPath)
         incompleteTerminal.prepare("UPDATE orchestrator_dispatches SET status = 'settled'").run()
         incompleteTerminal.close()
         expect(yield* Effect.result(withDatabase(incompleteTerminalPath, Effect.void))).toMatchObject({
@@ -3100,7 +3115,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const incompleteTerminalRolledBack = new DatabaseSync(incompleteTerminalPath)
+        const incompleteTerminalRolledBack = fixtureDatabase(incompleteTerminalPath)
         const retainedIncompleteTerminal = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           incompleteTerminalRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3110,7 +3125,7 @@ database.close()`,
 
         const completeTerminalPath = join(root, "complete-terminal-current-handoff.sqlite")
         copyFileSync(path, completeTerminalPath)
-        const completeTerminal = new DatabaseSync(completeTerminalPath)
+        const completeTerminal = fixtureDatabase(completeTerminalPath)
         completeTerminal.prepare(
           `INSERT INTO orchestrator_events
              (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
@@ -3123,7 +3138,7 @@ database.close()`,
 
         const mismatchedGoalPath = join(root, "mismatched-binding-goal-current-handoff.sqlite")
         copyFileSync(path, mismatchedGoalPath)
-        const mismatchedGoal = new DatabaseSync(mismatchedGoalPath)
+        const mismatchedGoal = fixtureDatabase(mismatchedGoalPath)
         const otherGoalHandoff = { ...previousHandoff, goalId: "goal:other" }
         mismatchedGoal.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(JSON.stringify(otherGoalHandoff), previousHandoff.id)
@@ -3159,7 +3174,7 @@ database.close()`,
         ) {
           const invalidRoutePath = join(root, `${invalidRoute.name}.sqlite`)
           copyFileSync(path, invalidRoutePath)
-          const candidate = new DatabaseSync(invalidRoutePath)
+          const candidate = fixtureDatabase(invalidRoutePath)
           candidate.prepare("UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?")
             .run(JSON.stringify(invalidRoute.route), activation.event.dispatchRequestId)
           candidate.close()
@@ -3191,7 +3206,7 @@ database.close()`,
 
         const multipleDispatchPath = join(root, "multiple-dispatches.sqlite")
         copyFileSync(path, multipleDispatchPath)
-        const multipleDispatches = new DatabaseSync(multipleDispatchPath)
+        const multipleDispatches = fixtureDatabase(multipleDispatchPath)
         multipleDispatches.exec(`
           ALTER TABLE work_dispatch_handoffs RENAME TO previous_work_dispatch_handoffs;
           CREATE TABLE work_dispatch_handoffs (
@@ -3244,7 +3259,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const multipleRolledBack = new DatabaseSync(multipleDispatchPath)
+        const multipleRolledBack = fixtureDatabase(multipleDispatchPath)
         const retainedMultipleDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           multipleRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3269,14 +3284,14 @@ database.close()`,
           expectedRevision: activation.binding.request.expectedRevision,
           version: "herdr.work.decision.v2"
         }
-        const current = new DatabaseSync(path)
+        const current = fixtureDatabase(path)
         const retainedBeforeReopen = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           current.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
         )
         current.close()
         yield* withDatabase(path, Effect.void)
-        const reopened = new DatabaseSync(path)
+        const reopened = fixtureDatabase(path)
         const retainedAfterReopen = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           reopened.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3286,7 +3301,7 @@ database.close()`,
 
         const currentCommandModeMismatchPath = join(root, "current-command-mode-mismatch.sqlite")
         copyFileSync(path, currentCommandModeMismatchPath)
-        const currentCommandModeMismatch = new DatabaseSync(currentCommandModeMismatchPath)
+        const currentCommandModeMismatch = fixtureDatabase(currentCommandModeMismatchPath)
         currentCommandModeMismatch.prepare(
           `UPDATE orchestrator_dispatches
            SET command = json_set(command, '$.payload.mode', 'transition_summary')
@@ -3312,7 +3327,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const currentCommandModeMismatchRolledBack = new DatabaseSync(currentCommandModeMismatchPath)
+        const currentCommandModeMismatchRolledBack = fixtureDatabase(currentCommandModeMismatchPath)
         const currentCommandModeMismatchAfter = Schema.decodeUnknownSync(Schema.Struct({
           command: Schema.String,
           record: Schema.String
@@ -3370,7 +3385,7 @@ database.close()`,
         ) {
           const integrityPath = join(root, `${integrityCase.name}.sqlite`)
           copyFileSync(path, integrityPath)
-          const candidate = new DatabaseSync(integrityPath)
+          const candidate = fixtureDatabase(integrityPath)
           integrityCase.mutate(candidate)
           candidate.close()
           expect(yield* Effect.result(withDatabase(integrityPath, Effect.void))).toMatchObject({
@@ -3388,7 +3403,7 @@ database.close()`,
           currentOrphanMetadataPath,
           Orchestrator
         )
-        const currentOrphanMetadata = new DatabaseSync(currentOrphanMetadataPath)
+        const currentOrphanMetadata = fixtureDatabase(currentOrphanMetadataPath)
         currentOrphanMetadata.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
           .run(activation.event.dispatchRequestId)
         currentOrphanMetadata.prepare("DELETE FROM work_decision_handoffs WHERE handoff_id = ?")
@@ -3414,7 +3429,7 @@ database.close()`,
         ) {
           const bindingFreePath = join(root, `current-binding-free-${terminal}.sqlite`)
           copyFileSync(path, bindingFreePath)
-          const bindingFree = new DatabaseSync(bindingFreePath)
+          const bindingFree = fixtureDatabase(bindingFreePath)
           bindingFree.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
             .run(activation.event.dispatchRequestId)
           bindingFree.prepare("DELETE FROM orchestrator_events WHERE type = 'running'").run()
@@ -3452,7 +3467,7 @@ database.close()`,
         ) {
           const invalidPath = join(root, `${invalid.name}.sqlite`)
           copyFileSync(path, invalidPath)
-          const candidate = new DatabaseSync(invalidPath)
+          const candidate = fixtureDatabase(invalidPath)
           candidate.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
             .run(invalid.record, previousHandoff.id)
           candidate.close()
@@ -3464,7 +3479,7 @@ database.close()`,
               operation: "initialize.work"
             }
           })
-          const rolledBack = new DatabaseSync(invalidPath)
+          const rolledBack = fixtureDatabase(invalidPath)
           const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
             rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
               .get(previousHandoff.id)
@@ -3475,7 +3490,7 @@ database.close()`,
 
         const malformedPath = join(root, "malformed-v1-handoff.sqlite")
         copyFileSync(path, malformedPath)
-        const malformed = new DatabaseSync(malformedPath)
+        const malformed = fixtureDatabase(malformedPath)
         malformed.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(JSON.stringify({ ...previousHandoff, dispatchIds: "not-an-array" }), previousHandoff.id)
         malformed.close()
@@ -3486,7 +3501,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const malformedRolledBack = new DatabaseSync(malformedPath)
+        const malformedRolledBack = fixtureDatabase(malformedPath)
         const retainedMalformed = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           malformedRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3499,7 +3514,7 @@ database.close()`,
 
         const outsiderPath = join(root, "outsider-lineage.sqlite")
         copyFileSync(path, outsiderPath)
-        const outsider = new DatabaseSync(outsiderPath)
+        const outsider = fixtureDatabase(outsiderPath)
         outsider.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(JSON.stringify(previousHandoff), previousHandoff.id)
         outsider.prepare("UPDATE work_dispatch_handoffs SET lineage = ?, record = ? WHERE dispatch_request_id = ?")
@@ -3521,7 +3536,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const outsiderRolledBack = new DatabaseSync(outsiderPath)
+        const outsiderRolledBack = fixtureDatabase(outsiderPath)
         const retainedOutsider = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           outsiderRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3531,7 +3546,7 @@ database.close()`,
 
         const corruptBindingPath = join(root, "corrupt-binding.sqlite")
         copyFileSync(path, corruptBindingPath)
-        const corruptBinding = new DatabaseSync(corruptBindingPath)
+        const corruptBinding = fixtureDatabase(corruptBindingPath)
         corruptBinding.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(JSON.stringify(previousHandoff), previousHandoff.id)
         corruptBinding.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
@@ -3551,7 +3566,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const corruptBindingRolledBack = new DatabaseSync(corruptBindingPath)
+        const corruptBindingRolledBack = fixtureDatabase(corruptBindingPath)
         const retainedCorruptBinding = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           corruptBindingRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3579,7 +3594,7 @@ database.close()`,
         ) {
           const companionPath = join(root, `${companion.name}.sqlite`)
           copyFileSync(path, companionPath)
-          const candidate = new DatabaseSync(companionPath)
+          const candidate = fixtureDatabase(companionPath)
           candidate.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
             .run(JSON.stringify(previousHandoff), previousHandoff.id)
           candidate.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
@@ -3599,7 +3614,7 @@ database.close()`,
               operation: "initialize.work"
             }
           })
-          const rolledBack = new DatabaseSync(companionPath)
+          const rolledBack = fixtureDatabase(companionPath)
           const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
             rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
               .get(previousHandoff.id)
@@ -3610,7 +3625,7 @@ database.close()`,
 
         const missingMetadataPath = join(root, "missing-metadata.sqlite")
         copyFileSync(path, missingMetadataPath)
-        const missingMetadata = new DatabaseSync(missingMetadataPath)
+        const missingMetadata = fixtureDatabase(missingMetadataPath)
         missingMetadata.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(JSON.stringify(previousHandoff), previousHandoff.id)
         missingMetadata.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
@@ -3625,7 +3640,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const missingMetadataRolledBack = new DatabaseSync(missingMetadataPath)
+        const missingMetadataRolledBack = fixtureDatabase(missingMetadataPath)
         const retainedMissingMetadata = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           missingMetadataRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3635,7 +3650,7 @@ database.close()`,
 
         const unboundDecisionPath = join(root, "unbound-decision.sqlite")
         copyFileSync(path, unboundDecisionPath)
-        const unboundDecision = new DatabaseSync(unboundDecisionPath)
+        const unboundDecision = fixtureDatabase(unboundDecisionPath)
         const advancedLane = {
           ...activation.binding.lane,
           expectedRevision: activation.binding.lane.revision,
@@ -3659,7 +3674,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const unboundDecisionRolledBack = new DatabaseSync(unboundDecisionPath)
+        const unboundDecisionRolledBack = fixtureDatabase(unboundDecisionPath)
         const retainedUnboundDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           unboundDecisionRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3669,7 +3684,7 @@ database.close()`,
 
         const orphanMetadataPath = join(root, "orphan-metadata.sqlite")
         copyFileSync(path, orphanMetadataPath)
-        const orphanMetadata = new DatabaseSync(orphanMetadataPath)
+        const orphanMetadata = fixtureDatabase(orphanMetadataPath)
         orphanMetadata.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(JSON.stringify(previousHandoff), previousHandoff.id)
         orphanMetadata.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
@@ -3694,7 +3709,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const orphanMetadataRolledBack = new DatabaseSync(orphanMetadataPath)
+        const orphanMetadataRolledBack = fixtureDatabase(orphanMetadataPath)
         const retainedOrphanMetadata = Schema.decodeUnknownSync(Schema.Struct({
           record: Schema.String,
           workLink: Schema.String
@@ -3712,7 +3727,7 @@ database.close()`,
           handoff: { version: "herdr.work.decision.v1" }
         })
 
-        const divergent = new DatabaseSync(path)
+        const divergent = fixtureDatabase(path)
         divergent.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(JSON.stringify(previousHandoff), previousHandoff.id)
         divergent.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
@@ -3733,7 +3748,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const rolledBack = new DatabaseSync(path)
+        const rolledBack = fixtureDatabase(path)
         const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3781,7 +3796,7 @@ database.close()`,
           expectedRevision: lane.revision,
           revision: lane.revision + 1
         }
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?")
           .run(advancedLane.revision, JSON.stringify(advancedLane), advancedLane.laneId)
         database.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
@@ -3802,7 +3817,7 @@ database.close()`,
             operation: "initialize.work"
           }
         })
-        const rolledBack = new DatabaseSync(path)
+        const rolledBack = fixtureDatabase(path)
         const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -3833,7 +3848,7 @@ database.close()`,
             return yield* orchestrator.submitRouted(makeSolSubmission(luna.dispatchRequestId, "dispatch:readback-sol"))
           })
         )
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare(
           `UPDATE work_decision_handoffs
            SET record = replace(record, 'Escalate the failed Luna request to Sol', 'Changed durable decision')
@@ -3915,7 +3930,7 @@ database.close()`,
         )
         expect(result).toMatchObject({ failure: { _tag: "OrchestratorValidationError" } })
 
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         const dispatchCount = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_dispatches").get()
         const metadataCount = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata").get()
         database.close()
@@ -3944,7 +3959,7 @@ database.close()`,
           })
         )
         expect(result).toMatchObject({ failure: { _tag: "OrchestratorValidationError" } })
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         const count = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_dispatches").get()
         database.close()
         expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(count).count).toBe(0)
@@ -3975,7 +3990,7 @@ database.close()`,
           })
         )
         expect(result).toMatchObject({ failure: { _tag: "SchemaError" } })
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         const count = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_dispatches").get()
         database.close()
         expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(count).count).toBe(0)
@@ -4002,7 +4017,7 @@ database.close()`,
             return yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
           })
         )
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare(`
           WITH RECURSIVE capacity(value) AS (
             VALUES(1)
@@ -4030,7 +4045,7 @@ database.close()`,
         )
         expect(result).toMatchObject({ failure: { _tag: "OrchestratorStorageError", operation: "submit.work-link" } })
 
-        const remaining = new DatabaseSync(path)
+        const remaining = fixtureDatabase(path)
         const counts = remaining.prepare(
           `SELECT
              (SELECT COUNT(*) FROM orchestrator_dispatches) AS dispatches,
@@ -4094,7 +4109,7 @@ database.close()`,
           failure: { _tag: "OrchestratorStorageError", operation: "submit.work-link" }
         })
 
-        const remaining = new DatabaseSync(path)
+        const remaining = fixtureDatabase(path)
         const counts = remaining.prepare(
           `SELECT
              (SELECT COUNT(*) FROM orchestrator_dispatches) AS dispatches,
@@ -4135,7 +4150,7 @@ database.close()`,
             yield* orchestrator.queue(luna.dispatchRequestId)
             yield* orchestrator.run(luna.dispatchRequestId)
             const failedLuna = yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
-            const database = new DatabaseSync(path)
+            const database = fixtureDatabase(path)
             database.exec("DROP INDEX work_lane_claims_one_active_goal")
             database.prepare(
               `INSERT INTO work_lane_claims
@@ -4172,7 +4187,7 @@ database.close()`,
           failure: { _tag: "OrchestratorStorageError", operation: "submit.work-link" }
         })
 
-        const remaining = new DatabaseSync(path)
+        const remaining = fixtureDatabase(path)
         const counts = remaining.prepare(
           `SELECT
              (SELECT COUNT(*) FROM orchestrator_dispatches) AS dispatches,
@@ -4212,7 +4227,7 @@ database.close()`,
         const receipts = yield* Effect.all([submission, submission], { concurrency: 2 })
         expect(receipts[0]).toEqual(receipts[1])
 
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         const dispatchCount = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_dispatches").get()
         const eventCount = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_events").get()
         database.close()
@@ -4254,7 +4269,7 @@ database.close()`,
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
         yield* withDatabase(path, Effect.void)
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare(
           `INSERT INTO orchestrator_dispatches
              (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
@@ -4295,7 +4310,7 @@ database.close()`,
           failure: { _tag: "OrchestratorStorageError", operation: "transition.status-event-mismatch" }
         })
 
-        const remaining = new DatabaseSync(path)
+        const remaining = fixtureDatabase(path)
         const dispatch = remaining.prepare(
           "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
         ).get("dispatch:status-mismatch")
@@ -4313,7 +4328,7 @@ database.close()`,
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
         yield* withDatabase(path, Effect.void)
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare(
           `INSERT INTO orchestrator_dispatches
              (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
@@ -4357,7 +4372,7 @@ database.close()`,
           failure: { _tag: "OrchestratorStorageError", operation: "transition.activity-idempotency-mismatch" }
         })
 
-        const remaining = new DatabaseSync(path)
+        const remaining = fixtureDatabase(path)
         const dispatch = remaining.prepare(
           "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
         ).get("dispatch:activity-mismatch")
@@ -4387,7 +4402,7 @@ database.close()`,
             return receipt
           })
         )
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare(
           "UPDATE orchestrator_events SET type = 'running' WHERE dispatch_request_id = ? AND sequence = 1"
         ).run(receipt.dispatchRequestId)
@@ -4415,7 +4430,7 @@ database.close()`,
           failure: { _tag: "OrchestratorStorageError", operation: "transition.lifecycle-chain-mismatch" }
         })
 
-        const remaining = new DatabaseSync(path)
+        const remaining = fixtureDatabase(path)
         const status = remaining.prepare(
           "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
         ).get(receipt.dispatchRequestId)
@@ -4524,7 +4539,7 @@ database.close()`,
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
         yield* withDatabase(path, Effect.void)
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare(
           `INSERT INTO orchestrator_dispatches
              (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
@@ -4573,7 +4588,7 @@ database.close()`,
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
         yield* withDatabase(path, Effect.void)
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare(
           `INSERT INTO orchestrator_dispatches
              (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
@@ -4601,7 +4616,7 @@ database.close()`,
           failure: { _tag: "OrchestratorStorageError", operation: "submit.accepted-event-mismatch" }
         })
 
-        const acceptedDatabase = new DatabaseSync(path)
+        const acceptedDatabase = fixtureDatabase(path)
         acceptedDatabase.prepare(
           `INSERT INTO orchestrator_events
              (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
@@ -4626,7 +4641,7 @@ database.close()`,
           status: "accepted"
         })
 
-        const trailingDatabase = new DatabaseSync(path)
+        const trailingDatabase = fixtureDatabase(path)
         trailingDatabase.prepare(
           `INSERT INTO orchestrator_events
              (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
@@ -4647,7 +4662,7 @@ database.close()`,
           failure: { _tag: "OrchestratorStorageError", operation: "submit.accepted-event-mismatch" }
         })
 
-        const malformedDatabase = new DatabaseSync(path)
+        const malformedDatabase = fixtureDatabase(path)
         malformedDatabase.prepare(
           "UPDATE orchestrator_events SET activity_idempotency_key = ? WHERE dispatch_request_id = ?"
         ).run("activity:receipt-mismatch", "dispatch:receipt-valid")
@@ -4766,7 +4781,7 @@ database.close()`,
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
         yield* withDatabase(path, Effect.void)
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare(
           `INSERT INTO orchestrator_dispatches
              (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
@@ -4804,7 +4819,7 @@ database.close()`,
       const total = 257
       return Effect.gen(function*() {
         yield* withDatabase(path, Effect.void)
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.exec("BEGIN IMMEDIATE")
         const insertDispatch = database.prepare(
           `INSERT INTO orchestrator_dispatches
@@ -4844,7 +4859,7 @@ database.close()`,
         )
         expect(recovered).toHaveLength(total)
         expect(recovered.every(({ type }) => type === "delivery_failed")).toBe(true)
-        const remaining = new DatabaseSync(path)
+        const remaining = fixtureDatabase(path)
         const runningRow = remaining.prepare(
           "SELECT COUNT(*) AS count FROM orchestrator_dispatches WHERE status = 'running'"
         ).get()
@@ -4887,7 +4902,7 @@ database.close()`,
         expect(recoveryEvents).toHaveLength(2)
         expect(recoveryEvents.every(({ type }) => type === "delivery_failed")).toBe(true)
 
-        const remaining = new DatabaseSync(path)
+        const remaining = fixtureDatabase(path)
         const runningRow = remaining.prepare(
           "SELECT COUNT(*) AS count FROM orchestrator_dispatches WHERE status = 'running'"
         ).get()
@@ -4927,7 +4942,7 @@ database.close()`,
               )
               .map(({ dispatchRequestId }) => dispatchRequestId)
           )
-          const database = new DatabaseSync(join(root, "orchestrator.sqlite"))
+          const database = fixtureDatabase(join(root, "orchestrator.sqlite"))
           const pendingPlans = [
             database.prepare(
               `EXPLAIN QUERY PLAN

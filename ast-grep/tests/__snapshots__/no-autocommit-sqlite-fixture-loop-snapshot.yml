@@ -1,0 +1,49 @@
+id: no-autocommit-sqlite-fixture-loop
+snapshots:
+  ? |
+    const insert = database.prepare("INSERT INTO rows VALUES (?)")
+    for (let index = 0; index < 500; index++) {
+      insert.run(index)
+    }
+  : labels:
+      - source: insert.run(index)
+        style: primary
+        start: 109
+        end: 126
+      - source: const insert = database.prepare("INSERT INTO rows VALUES (?)")
+        style: secondary
+        start: 0
+        end: 62
+      - source: |
+          const insert = database.prepare("INSERT INTO rows VALUES (?)")
+          for (let index = 0; index < 500; index++) {
+            insert.run(index)
+          }
+        style: secondary
+        start: 0
+        end: 129
+      - source: |-
+          for (let index = 0; index < 500; index++) {
+            insert.run(index)
+          }
+        style: secondary
+        start: 63
+        end: 128
+  ? |
+    const oversizedLegacy = new DatabaseSync(oversizedLegacyPath)
+    for (let index = 0; index < 260; index++) {
+      oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)").run(index, index, index, index)
+    }
+    oversizedLegacy.close()
+  : labels:
+      - source: oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)").run(index, index, index, index)
+        style: primary
+        start: 108
+        end: 221
+      - source: |-
+          for (let index = 0; index < 260; index++) {
+            oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)").run(index, index, index, index)
+          }
+        style: secondary
+        start: 62
+        end: 223

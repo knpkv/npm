@@ -1849,10 +1849,14 @@ export class WorkStore implements WorkStoreService {
       busyTimeoutMillis: workStoreBusyTimeoutMillis,
       initialize: (database) => {
         migrateLegacyAuthorityTables(database)
-        const hadLaneOperationLedger = database.prepare(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_lane_operations'"
-        ).get() !== undefined
-        database.exec(`
+        // One transaction: the schema is created or completed atomically, and the
+        // statements share one commit instead of syncing the file once each.
+        database.exec("BEGIN IMMEDIATE")
+        try {
+          const hadLaneOperationLedger = database.prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_lane_operations'"
+          ).get() !== undefined
+          database.exec(`
         CREATE TABLE IF NOT EXISTS work_goal_events (
           event_id TEXT PRIMARY KEY,
           goal_id TEXT NOT NULL,
@@ -1958,21 +1962,21 @@ export class WorkStore implements WorkStoreService {
         CREATE INDEX IF NOT EXISTS work_decision_handoffs_session
           ON work_decision_handoffs (session_id);
       `)
-        const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
-          database.prepare("PRAGMA table_info(work_goal_events)").all()
-        )
-        if (!columns.some(({ name }) => name === "transaction_id")) {
-          database.exec("ALTER TABLE work_goal_events ADD COLUMN transaction_id TEXT")
-        }
-        if (!hadLaneOperationLedger) {
-          database.exec(`
+          const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
+            database.prepare("PRAGMA table_info(work_goal_events)").all()
+          )
+          if (!columns.some(({ name }) => name === "transaction_id")) {
+            database.exec("ALTER TABLE work_goal_events ADD COLUMN transaction_id TEXT")
+          }
+          if (!hadLaneOperationLedger) {
+            database.exec(`
           INSERT OR IGNORE INTO work_lane_operations
             (operation_id, lane_id, goal_id, phase, revision, record)
           SELECT operation_id, lane_id, goal_id, phase, revision, record
           FROM work_lane_claims
         `)
-        }
-        database.exec(`
+          }
+          database.exec(`
         INSERT OR IGNORE INTO work_lane_operation_totals
           (singleton, operation_count, operation_bytes)
         SELECT 1, COUNT(*), COALESCE(SUM(
@@ -1980,7 +1984,7 @@ export class WorkStore implements WorkStoreService {
         ), 0)
         FROM work_lane_operations
       `)
-        database.exec(`
+          database.exec(`
         INSERT OR IGNORE INTO work_goal_transaction_totals
           (singleton, transaction_count, transaction_bytes)
         SELECT 1, COUNT(*), COALESCE(SUM(
@@ -1988,7 +1992,7 @@ export class WorkStore implements WorkStoreService {
         ), 0)
         FROM work_goal_transactions
       `)
-        database.exec(`
+          database.exec(`
         INSERT OR REPLACE INTO work_decision_totals
           (singleton, decision_count, decision_bytes)
         SELECT 1, COUNT(*), COALESCE(SUM(
@@ -1996,6 +2000,11 @@ export class WorkStore implements WorkStoreService {
         ), 0)
         FROM work_decision_handoffs
       `)
+          database.exec("COMMIT")
+        } catch (error) {
+          database.exec("ROLLBACK")
+          throw error
+        }
       }
     }).pipe(Effect.mapError(fromPrivateDatabaseError))
     return new WorkStore(path, opened, cryptoService)

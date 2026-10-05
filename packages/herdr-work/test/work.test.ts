@@ -37,6 +37,17 @@ import {
   __herdrWorkSnapshotEnvelopeMaxBytesForTest
 } from "../src/store.js"
 
+/**
+ * Opens a fixture connection that skips fsync on its own writes, so seeding and
+ * editing test files does not wait on disk. The store under test opens its own
+ * connection and keeps its own durability settings.
+ */
+const fixtureDatabase = (path: string): DatabaseSync => {
+  const database = new DatabaseSync(path)
+  database.exec("PRAGMA synchronous = OFF")
+  return database
+}
+
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
 // @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
@@ -186,7 +197,7 @@ const seedWorkDatabase = (
   path: string,
   events: ReadonlyArray<WorkGoalCheckpointType>
 ): void => {
-  const database = new DatabaseSync(path)
+  const database = fixtureDatabase(path)
   database.exec(`
     CREATE TABLE work_goal_events (
       event_id TEXT PRIMARY KEY,
@@ -567,7 +578,7 @@ describe("durable Work projection", () => {
           ...laneClaim("lane:duplicate-authority", history[0].goal.id),
           revision: 1
         })
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.exec("DROP INDEX work_lane_claims_one_active_goal")
         database.prepare(
           `INSERT INTO work_lane_claims
@@ -629,7 +640,7 @@ describe("durable Work projection", () => {
           ...laneClaim("lane:duplicate-decision-authority", lane.goalId),
           revision: 1
         })
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.exec("DROP INDEX work_lane_claims_one_active_goal")
         database.prepare(
           `INSERT INTO work_lane_claims
@@ -720,7 +731,7 @@ describe("durable Work projection", () => {
           yield* service.bindAgent(request)
           first.close()
 
-          const database = new DatabaseSync(path)
+          const database = fixtureDatabase(path)
           tamper.mutate(database, request.dispatchRequestId)
           database.close()
 
@@ -754,7 +765,7 @@ describe("durable Work projection", () => {
           version: "herdr.work.agent-binding-request.v1",
           worker: startedWorker
         })
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         database.prepare("UPDATE work_goal_events SET record = ? WHERE event_id = ?").run(
           JSON.stringify({ ...history[0], eventId: request.dispatchRequestId }),
           history[0].eventId
@@ -865,7 +876,7 @@ describe("durable Work projection", () => {
         yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
         chmodSync(root, 0o700)
         const unsafePath = join(root, "unsafe.sqlite")
-        const unsafe = new DatabaseSync(unsafePath)
+        const unsafe = fixtureDatabase(unsafePath)
         unsafe.exec("CREATE TABLE preserved (id TEXT PRIMARY KEY)")
         unsafe.close()
         chmodSync(unsafePath, 0o660)
@@ -880,7 +891,7 @@ describe("durable Work projection", () => {
         unchanged.close()
 
         const safePath = join(root, "safe.sqlite")
-        const safe = new DatabaseSync(safePath)
+        const safe = fixtureDatabase(safePath)
         safe.close()
         chmodSync(safePath, 0o600)
         const opened = yield* openScopedStore(safePath)
@@ -1135,7 +1146,7 @@ describe("durable Work projection", () => {
       store.close()
 
       const legacyEvents = history.slice(0, 2)
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       database.prepare(
         "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
       ).run("transaction-legacy", JSON.stringify(legacyEvents))
@@ -1149,7 +1160,7 @@ describe("durable Work projection", () => {
       expect(yield* missingStore.store.list()).toEqual([])
       missingStore.close()
 
-      const repaired = new DatabaseSync(path)
+      const repaired = fixtureDatabase(path)
       const insert = repaired.prepare(
         `INSERT INTO work_goal_events
            (event_id, goal_id, occurred_at, record, transaction_id)
@@ -1162,7 +1173,7 @@ describe("durable Work projection", () => {
 
       const driftedEvent = legacyEvents[1]
       if (driftedEvent === undefined) return yield* Effect.die("legacy fixture missing its second event")
-      const corrupted = new DatabaseSync(path)
+      const corrupted = fixtureDatabase(path)
       corrupted.prepare(
         "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
       ).run("goal-denormalized-drift", 99, driftedEvent.eventId)
@@ -1175,7 +1186,7 @@ describe("durable Work projection", () => {
       })
       corruptedStore.close()
 
-      const restored = new DatabaseSync(path)
+      const restored = fixtureDatabase(path)
       restored.prepare(
         "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
       ).run(driftedEvent.goal.id, driftedEvent.occurredAt, driftedEvent.eventId)
@@ -1208,7 +1219,7 @@ describe("durable Work projection", () => {
       const legacyEvents = history.slice(0, 2)
       const secondEvent = legacyEvents[1]
       if (secondEvent === undefined) return yield* Effect.die("legacy fixture missing its second event")
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       const insertEvent = database.prepare(
         `INSERT INTO work_goal_events
            (event_id, goal_id, occurred_at, record, transaction_id)
@@ -1245,7 +1256,7 @@ describe("durable Work projection", () => {
         })
       corrupted.close()
 
-      const restored = new DatabaseSync(path)
+      const restored = fixtureDatabase(path)
       restored.prepare(
         "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
       ).run(secondEvent.goal.id, secondEvent.occurredAt, secondEvent.eventId)
@@ -1279,7 +1290,7 @@ describe("durable Work projection", () => {
       expect(collisionReplay).toMatchObject({ failure: { _tag: "WorkCheckpointConflictError" } })
       opened.close()
 
-      const recordDrift = new DatabaseSync(path)
+      const recordDrift = fixtureDatabase(path)
       const changedRecord = {
         ...secondEvent,
         goal: { ...secondEvent.goal, summary: "Changed persisted checkpoint content" }
@@ -1297,13 +1308,13 @@ describe("durable Work projection", () => {
         })
       recordDriftStore.close()
 
-      const recordRestored = new DatabaseSync(path)
+      const recordRestored = fixtureDatabase(path)
       recordRestored.prepare(
         "UPDATE work_goal_events SET record = ? WHERE event_id = ?"
       ).run(JSON.stringify(secondEvent), secondEvent.eventId)
       recordRestored.close()
 
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       database.prepare(
         "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
       ).run("goal-denormalized-drift", 99, secondEvent.eventId)
@@ -1316,7 +1327,7 @@ describe("durable Work projection", () => {
       })
       corrupted.close()
 
-      const restored = new DatabaseSync(path)
+      const restored = fixtureDatabase(path)
       restored.prepare(
         "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
       ).run(secondEvent.goal.id, secondEvent.occurredAt, secondEvent.eventId)
@@ -1327,7 +1338,7 @@ describe("durable Work projection", () => {
       expect(yield* completeService.recordMany("transaction-compact", events)).toEqual(events)
 
       complete.close()
-      const aliasDatabase = new DatabaseSync(path)
+      const aliasDatabase = fixtureDatabase(path)
       aliasDatabase.prepare(
         "UPDATE work_goal_events SET goal_id = ? WHERE event_id = ?"
       ).run("goal-denormalized-drift", secondEvent.eventId)
@@ -1341,7 +1352,7 @@ describe("durable Work projection", () => {
         }
       )
       aliasCorrupted.close()
-      const aliasLedger = new DatabaseSync(path)
+      const aliasLedger = fixtureDatabase(path)
       expect(
         aliasLedger.prepare(
           "SELECT record FROM work_goal_transactions WHERE transaction_id = ?"
@@ -1349,13 +1360,13 @@ describe("durable Work projection", () => {
       ).toBeUndefined()
       aliasLedger.close()
 
-      const aliasRestored = new DatabaseSync(path)
+      const aliasRestored = fixtureDatabase(path)
       aliasRestored.prepare(
         "UPDATE work_goal_events SET goal_id = ? WHERE event_id = ?"
       ).run(secondEvent.goal.id, secondEvent.eventId)
       aliasRestored.close()
 
-      const eventIdDatabase = new DatabaseSync(path)
+      const eventIdDatabase = fixtureDatabase(path)
       eventIdDatabase.prepare(
         "UPDATE work_goal_events SET event_id = ? WHERE event_id = ?"
       ).run("event-denormalized-drift", secondEvent.eventId)
@@ -1368,7 +1379,7 @@ describe("durable Work projection", () => {
       })
       eventIdDrift.close()
 
-      const eventIdRestored = new DatabaseSync(path)
+      const eventIdRestored = fixtureDatabase(path)
       eventIdRestored.prepare(
         "UPDATE work_goal_events SET event_id = ? WHERE event_id = ?"
       ).run(secondEvent.eventId, "event-denormalized-drift")
@@ -1556,7 +1567,7 @@ database.close()`,
         (store) => Effect.sync(() => store.close())
       )
 
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       database.exec("BEGIN IMMEDIATE")
       const insert = database.prepare(
         "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
@@ -1586,7 +1597,7 @@ database.close()`,
       const first = history.slice(0, 2)
       yield* service.recordMany("transaction-ledger-1", first)
 
-      const database = new DatabaseSync(store.path)
+      const database = fixtureDatabase(store.path)
       const totalsAfterInsert = database.prepare(
         `SELECT transaction_count AS transactionCount, transaction_bytes AS transactionBytes
          FROM work_goal_transaction_totals WHERE singleton = 1`
@@ -1601,7 +1612,7 @@ database.close()`,
       })
 
       yield* service.recordMany("transaction-ledger-1", first)
-      const databaseAfterReplay = new DatabaseSync(store.path)
+      const databaseAfterReplay = fixtureDatabase(store.path)
       const totalsAfterReplay = databaseAfterReplay.prepare(
         `SELECT transaction_count AS transactionCount, transaction_bytes AS transactionBytes
          FROM work_goal_transaction_totals WHERE singleton = 1`
@@ -1640,7 +1651,7 @@ database.close()`,
         summary: "x".repeat(4_096),
         version: "herdr.work.decision.v2"
       }
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       database.exec("BEGIN IMMEDIATE")
       const insert = database.prepare(
         `INSERT INTO work_decision_handoffs
@@ -1820,7 +1831,7 @@ database.close()`,
       })
       expect(yield* service.decisions("goal-packages")).toEqual([handoff])
 
-      const database = new DatabaseSync(store.path)
+      const database = fixtureDatabase(store.path)
       const totals = database.prepare(
         `SELECT decision_count AS decisionCount, decision_bytes AS decisionBytes
          FROM work_decision_totals WHERE singleton = 1`
@@ -1831,7 +1842,7 @@ database.close()`,
         decisionBytes: utf8ByteLength(handoff.id) + utf8ByteLength(JSON.stringify(handoff))
       })
 
-      const queryPlanDatabase = new DatabaseSync(store.path)
+      const queryPlanDatabase = fixtureDatabase(store.path)
       const queryPlan = queryPlanDatabase.prepare(
         `EXPLAIN QUERY PLAN
          SELECT record FROM work_decision_handoffs
@@ -2077,7 +2088,7 @@ database.close()`,
         summary: "First handoff",
         version: "herdr.work.decision.v2"
       }
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       database.prepare(
         `INSERT INTO work_decision_handoffs
            (handoff_id, session_id, lane_id, occurred_at, record)
@@ -2092,7 +2103,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const repairedFirst = new DatabaseSync(path)
+      const repairedFirst = fixtureDatabase(path)
       repairedFirst.prepare(
         "UPDATE work_decision_handoffs SET handoff_id = ?, occurred_at = ? WHERE handoff_id = ?"
       ).run(first.id, first.occurredAt, "handoff-row-1")
@@ -2106,7 +2117,7 @@ database.close()`,
         occurredAt: 3,
         sessionId: "session-replay"
       }
-      const replaySeed = new DatabaseSync(path)
+      const replaySeed = fixtureDatabase(path)
       replaySeed.prepare(
         `INSERT INTO work_decision_handoffs
            (handoff_id, session_id, lane_id, occurred_at, record)
@@ -2121,7 +2132,7 @@ database.close()`,
         }
       })
 
-      const repairedReplay = new DatabaseSync(path)
+      const repairedReplay = fixtureDatabase(path)
       repairedReplay.prepare(
         "UPDATE work_decision_handoffs SET lane_id = ?, occurred_at = ? WHERE handoff_id = ?"
       ).run(replay.laneId, replay.occurredAt, replay.id)
@@ -2131,7 +2142,7 @@ database.close()`,
       const replayedService = yield* makeWorkService(replayedStore)
       expect(yield* replayedService.handoff(replay)).toEqual(replay)
 
-      const repaired = new DatabaseSync(path)
+      const repaired = fixtureDatabase(path)
       const second = {
         ...first,
         id: "handoff-record-2",
@@ -2179,17 +2190,21 @@ database.close()`,
         (store) => Effect.sync(() => store.close())
       )
 
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       const insert = database.prepare(
         `INSERT INTO work_lane_claims
            (lane_id, goal_id, operation_id, phase, revision, record)
          VALUES (?, ?, ?, ?, ?, ?)`
       )
+      // One transaction: autocommit seeding would fsync each row and make this
+      // fixture's cost depend on disk latency rather than the bound under test.
+      database.exec("BEGIN")
       for (let index = 0; index < workSnapshotMaxGoals - 1; index++) {
         const laneId = `goal-lane-seed-${index}`
         const seeded = { ...claim, goalId: laneId, laneId, operationId: `operation-lane-seed-${index}`, revision: 1 }
         insert.run(laneId, seeded.goalId, seeded.operationId, seeded.phase, 1, JSON.stringify(seeded))
       }
+      database.exec("COMMIT")
       database.close()
 
       yield* Effect.acquireUseRelease(
@@ -2223,7 +2238,7 @@ database.close()`,
         (store) => Effect.sync(() => store.close())
       )
 
-      const countDatabase = new DatabaseSync(path)
+      const countDatabase = fixtureDatabase(path)
       const count = Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(
         countDatabase.prepare("SELECT COUNT(*) AS count FROM work_lane_claims").get()
       ).count
@@ -2238,13 +2253,16 @@ database.close()`,
         () => Effect.void,
         (store) => Effect.sync(() => store.close())
       )
-      const bytesDatabase = new DatabaseSync(bytesPath)
+      const bytesDatabase = fixtureDatabase(bytesPath)
       const bytesInsert = bytesDatabase.prepare(
         `INSERT INTO work_lane_claims
            (lane_id, goal_id, operation_id, phase, revision, record)
          VALUES (?, ?, ?, ?, ?, ?)`
       )
       const largeOwner = { id: "owner-packages", name: "x".repeat(4_096) }
+      // One transaction: autocommit seeding would fsync each row and make this
+      // fixture's cost depend on disk latency rather than the bound under test.
+      bytesDatabase.exec("BEGIN")
       for (let index = 0; index < 500; index++) {
         const laneId = `goal-lane-bytes-${index}`
         const seeded = {
@@ -2264,6 +2282,7 @@ database.close()`,
           JSON.stringify(seeded)
         )
       }
+      bytesDatabase.exec("COMMIT")
       bytesDatabase.close()
 
       yield* Effect.acquireUseRelease(
@@ -2310,7 +2329,7 @@ database.close()`,
       yield* firstService.claim(claim)
       first.close()
 
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       const insert = database.prepare(
         `INSERT INTO work_lane_operations
            (operation_id, lane_id, goal_id, phase, revision, record)
@@ -2326,6 +2345,9 @@ database.close()`,
           ).get()
         ).operationBytes
       let operationBytes = totals()
+      // One transaction: autocommit seeding would fsync each row and make this
+      // fixture's cost depend on disk latency rather than the bound under test.
+      database.exec("BEGIN")
       for (let index = 0;; index += 1) {
         const operationId = `operation-cap-seed-${index}`
         const laneId = `lane-cap-seed-${index}`
@@ -2344,6 +2366,7 @@ database.close()`,
         insert.run(operationId, laneId, seeded.goalId, seeded.phase, seeded.revision, record)
         operationBytes += entryBytes
       }
+      database.exec("COMMIT")
       database.close()
 
       const reopened = yield* openScopedStore(path)
@@ -2414,7 +2437,7 @@ database.close()`,
       )
       expect(Option.isNone(unknown)).toBe(true)
 
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       const insertClaim = database.prepare(
         `INSERT INTO work_lane_claims
            (lane_id, goal_id, operation_id, phase, revision, record)
@@ -2517,7 +2540,7 @@ database.close()`,
       ]
       for (let mask = 1; mask < 7; mask += 1) {
         const path = join(directory, `partial-${mask}.sqlite`)
-        const database = new DatabaseSync(path)
+        const database = fixtureDatabase(path)
         for (const [index, table] of coordinatorTables.entries()) {
           if ((mask & (1 << index)) !== 0) database.exec(`CREATE TABLE ${table} (id TEXT)`)
         }
@@ -2530,13 +2553,33 @@ database.close()`,
             operation: "open.database"
           }
         })
-        const unchanged = new DatabaseSync(path)
+        const unchanged = fixtureDatabase(path)
         const createdWorkTable = unchanged.prepare(
           "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'work_decision_handoffs'"
         ).get()
         unchanged.close()
         expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(createdWorkTable).count).toBe(0)
       }
+    }).pipe(provideNodeServices))
+
+  it.effect("creates the Work schema atomically and leaves nothing behind when a step fails", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-atomic-schema-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      // A totals table without the expected columns makes the last schema statement fail.
+      const database = fixtureDatabase(path)
+      database.exec("CREATE TABLE work_decision_totals (singleton INTEGER PRIMARY KEY)")
+      database.close()
+      expect(yield* safelyOpenResult(path)).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "open.database" }
+      })
+      const reopened = fixtureDatabase(path)
+      const tables = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
+        reopened.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()
+      ).map(({ name }) => name)
+      reopened.close()
+      expect(tables).toEqual(["work_decision_totals"])
     }).pipe(provideNodeServices))
 
   it.effect("transactionally migrates the previous lane and handoff schema", () =>
@@ -2565,7 +2608,7 @@ database.close()`,
         summary: "Legacy decision",
         version: "herdr.work.decision.v1"
       }
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       database.exec(`
         CREATE TABLE work_lane_claims (
           lane_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record TEXT NOT NULL
@@ -2649,7 +2692,7 @@ database.close()`,
 
       const rewoundLegacyPath = join(directory, "rewound-legacy-lane.sqlite")
       copyFileSync(path, rewoundLegacyPath)
-      const rewoundLegacy = new DatabaseSync(rewoundLegacyPath)
+      const rewoundLegacy = fixtureDatabase(rewoundLegacyPath)
       const rewoundBinding = migrationBinding(
         "dispatch:legacy-sol",
         Schema.decodeUnknownSync(WorkLaneClaimed)({
@@ -2693,7 +2736,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const rewoundLegacyRolledBack = new DatabaseSync(rewoundLegacyPath)
+      const rewoundLegacyRolledBack = fixtureDatabase(rewoundLegacyPath)
       expect(
         rewoundLegacyRolledBack.prepare("PRAGMA table_info(work_decision_handoffs)").all()
           .some((column) =>
@@ -2704,7 +2747,7 @@ database.close()`,
 
       const duplicateMetadataPath = join(directory, "duplicate-legacy-metadata.sqlite")
       copyFileSync(path, duplicateMetadataPath)
-      const duplicateMetadata = new DatabaseSync(duplicateMetadataPath)
+      const duplicateMetadata = fixtureDatabase(duplicateMetadataPath)
       duplicateMetadata.exec(`
         ALTER TABLE orchestrator_dispatch_metadata RENAME TO orchestrator_dispatch_metadata_unique;
           CREATE TABLE orchestrator_dispatch_metadata (
@@ -2724,7 +2767,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const duplicateMetadataRolledBack = new DatabaseSync(duplicateMetadataPath)
+      const duplicateMetadataRolledBack = fixtureDatabase(duplicateMetadataPath)
       expect(
         duplicateMetadataRolledBack.prepare(
           `SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata
@@ -2735,7 +2778,7 @@ database.close()`,
 
       const queuedLegacyPath = join(directory, "queued-legacy-lifecycle.sqlite")
       copyFileSync(path, queuedLegacyPath)
-      const queuedLegacy = new DatabaseSync(queuedLegacyPath)
+      const queuedLegacy = fixtureDatabase(queuedLegacyPath)
       queuedLegacy.prepare("DELETE FROM orchestrator_events WHERE type = 'running'").run()
       queuedLegacy.prepare("UPDATE orchestrator_dispatches SET status = 'queued'").run()
       queuedLegacy.close()
@@ -2746,7 +2789,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const queuedLegacyRolledBack = new DatabaseSync(queuedLegacyPath)
+      const queuedLegacyRolledBack = fixtureDatabase(queuedLegacyPath)
       const retainedQueuedLegacyColumns = queuedLegacyRolledBack.prepare(
         "PRAGMA table_info(work_decision_handoffs)"
       ).all()
@@ -2764,7 +2807,7 @@ database.close()`,
 
       const missingMetadataLegacyPath = join(directory, "missing-metadata-legacy.sqlite")
       copyFileSync(path, missingMetadataLegacyPath)
-      const missingMetadataLegacy = new DatabaseSync(missingMetadataLegacyPath)
+      const missingMetadataLegacy = fixtureDatabase(missingMetadataLegacyPath)
       missingMetadataLegacy.exec("DROP TABLE orchestrator_dispatch_metadata")
       missingMetadataLegacy.close()
       expect(yield* safelyOpenResult(missingMetadataLegacyPath)).toMatchObject({
@@ -2777,7 +2820,7 @@ database.close()`,
 
       const unroutedLegacyPath = join(directory, "unrouted-legacy.sqlite")
       copyFileSync(path, unroutedLegacyPath)
-      const unroutedLegacy = new DatabaseSync(unroutedLegacyPath)
+      const unroutedLegacy = fixtureDatabase(unroutedLegacyPath)
       unroutedLegacy.prepare("UPDATE orchestrator_dispatches SET is_routed = 0").run()
       unroutedLegacy.close()
       expect(yield* safelyOpenResult(unroutedLegacyPath)).toMatchObject({
@@ -2787,7 +2830,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const unroutedLegacyRolledBack = new DatabaseSync(unroutedLegacyPath)
+      const unroutedLegacyRolledBack = fixtureDatabase(unroutedLegacyPath)
       const unroutedLegacyColumns = unroutedLegacyRolledBack.prepare(
         "PRAGMA table_info(work_decision_handoffs)"
       ).all()
@@ -2800,7 +2843,7 @@ database.close()`,
 
       const missingParentLegacyPath = join(directory, "missing-parent-legacy.sqlite")
       copyFileSync(path, missingParentLegacyPath)
-      const missingParentLegacy = new DatabaseSync(missingParentLegacyPath)
+      const missingParentLegacy = fixtureDatabase(missingParentLegacyPath)
       missingParentLegacy.prepare(
         "UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?"
       ).run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)), "dispatch:legacy-sol")
@@ -2815,7 +2858,7 @@ database.close()`,
 
       const failedParentLegacyPath = join(directory, "failed-parent-legacy.sqlite")
       copyFileSync(path, failedParentLegacyPath)
-      const failedParentLegacy = new DatabaseSync(failedParentLegacyPath)
+      const failedParentLegacy = fixtureDatabase(failedParentLegacyPath)
       persistCoordinatorLifecycle(failedParentLegacy, parentDispatchRequestId, 10, "task_failed", "consult")
       failedParentLegacy.prepare(
         "UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?"
@@ -2828,7 +2871,7 @@ database.close()`,
 
       const duplicateLegacyPath = join(directory, "duplicate-legacy-dispatch.sqlite")
       copyFileSync(path, duplicateLegacyPath)
-      const duplicateLegacy = new DatabaseSync(duplicateLegacyPath)
+      const duplicateLegacy = fixtureDatabase(duplicateLegacyPath)
       duplicateLegacy.exec(`
         ALTER TABLE work_dispatch_handoffs RENAME TO unique_work_dispatch_handoffs;
         CREATE TABLE work_dispatch_handoffs (
@@ -2854,7 +2897,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const duplicateLegacyRolledBack = new DatabaseSync(duplicateLegacyPath)
+      const duplicateLegacyRolledBack = fixtureDatabase(duplicateLegacyPath)
       const retainedDuplicateLegacy = duplicateLegacyRolledBack.prepare(
         "SELECT record FROM work_dispatch_handoffs WHERE handoff_id = ?"
       ).all(legacyHandoff.id)
@@ -2863,7 +2906,10 @@ database.close()`,
 
       const oversizedLegacyPath = join(directory, "oversized-legacy.sqlite")
       copyFileSync(path, oversizedLegacyPath)
-      const oversizedLegacy = new DatabaseSync(oversizedLegacyPath)
+      const oversizedLegacy = fixtureDatabase(oversizedLegacyPath)
+      // One transaction: 260 autocommit rows would fsync each insert and make
+      // this fixture's cost depend on disk latency rather than the migration.
+      oversizedLegacy.exec("BEGIN")
       for (let index = 0; index < 260; index++) {
         const occurredAt = index + 10
         const handoff = {
@@ -2913,6 +2959,7 @@ database.close()`,
             JSON.stringify({ handoff, lineage: dispatchLineage })
           )
       }
+      oversizedLegacy.exec("COMMIT")
       oversizedLegacy.exec(`
         DROP TABLE orchestrator_dispatch_metadata;
         DROP TABLE orchestrator_events;
@@ -2926,7 +2973,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const oversizedRolledBack = new DatabaseSync(oversizedLegacyPath)
+      const oversizedRolledBack = fixtureDatabase(oversizedLegacyPath)
       const oversizedColumns = oversizedRolledBack.prepare("PRAGMA table_info(work_decision_handoffs)").all()
       const oversizedRetained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         oversizedRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
@@ -2942,7 +2989,7 @@ database.close()`,
 
       const unboundLegacyPath = join(directory, "unbound-legacy.sqlite")
       copyFileSync(path, unboundLegacyPath)
-      const unboundLegacy = new DatabaseSync(unboundLegacyPath)
+      const unboundLegacy = fixtureDatabase(unboundLegacyPath)
       const advancedLegacyClaim = {
         ...legacyClaim,
         expectedRevision: legacyClaim.revision,
@@ -3065,7 +3112,7 @@ database.close()`,
         value: { id: concurrentHandoff.id, sessionId: concurrentHandoff.id }
       })
       opened.close()
-      const migrated = new DatabaseSync(path)
+      const migrated = fixtureDatabase(path)
       const dispatchRecord = migrated.prepare(
         "SELECT record FROM work_dispatch_handoffs WHERE dispatch_request_id = ?"
       ).get("dispatch:legacy-sol")
@@ -3085,7 +3132,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const unboundLegacyRolledBack = new DatabaseSync(unboundLegacyPath)
+      const unboundLegacyRolledBack = fixtureDatabase(unboundLegacyPath)
       const retainedLegacy = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         unboundLegacyRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(legacyHandoff.id)
@@ -3102,12 +3149,12 @@ database.close()`,
       ).toBe(false)
 
       const corruptedPath = join(directory, "corrupted.sqlite")
-      const corrupted = new DatabaseSync(corruptedPath)
+      const corrupted = fixtureDatabase(corruptedPath)
       corrupted.exec("CREATE TABLE work_lane_claims (lane_id TEXT PRIMARY KEY, revision INTEGER, record TEXT)")
       corrupted.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?)").run("goal:corrupt", 1, "not-json")
       corrupted.close()
       expect(yield* safelyOpenResult(corruptedPath)).toMatchObject({ failure: { _tag: "WorkStoreError" } })
-      const unchanged = new DatabaseSync(corruptedPath)
+      const unchanged = fixtureDatabase(corruptedPath)
       const columns = unchanged.prepare("PRAGMA table_info(work_lane_claims)").all()
       unchanged.close()
       expect(
@@ -3160,7 +3207,7 @@ database.close()`,
         sessionId: "session:already-current",
         version: "herdr.work.decision.v2"
       }
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       database.exec(`
         CREATE TABLE work_lane_claims (
           lane_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE,
@@ -3242,7 +3289,7 @@ database.close()`,
 
       const standalonePath = join(directory, "standalone-v1.sqlite")
       copyFileSync(path, standalonePath)
-      const standalone = new DatabaseSync(standalonePath)
+      const standalone = fixtureDatabase(standalonePath)
       standalone.exec(`
         DROP TABLE orchestrator_dispatch_metadata;
         DROP TABLE orchestrator_events;
@@ -3258,7 +3305,7 @@ database.close()`,
 
       const rewoundLanePath = join(directory, "rewound-v1-lane.sqlite")
       copyFileSync(path, rewoundLanePath)
-      const rewoundLane = new DatabaseSync(rewoundLanePath)
+      const rewoundLane = fixtureDatabase(rewoundLanePath)
       rewoundLane.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?").run(
         lane.revision - 1,
         JSON.stringify({ ...lane, expectedRevision: lane.expectedRevision - 1, revision: lane.revision - 1 }),
@@ -3272,7 +3319,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const rewoundLaneRolledBack = new DatabaseSync(rewoundLanePath)
+      const rewoundLaneRolledBack = fixtureDatabase(rewoundLanePath)
       expect(
         rewoundLaneRolledBack.prepare(
           "SELECT revision FROM work_lane_claims WHERE lane_id = ?"
@@ -3282,7 +3329,7 @@ database.close()`,
 
       const advancedLanePath = join(directory, "advanced-v1-lane.sqlite")
       copyFileSync(path, advancedLanePath)
-      const advancedLaneDatabase = new DatabaseSync(advancedLanePath)
+      const advancedLaneDatabase = fixtureDatabase(advancedLanePath)
       const forwardLane = { ...lane, expectedRevision: lane.revision, revision: lane.revision + 1 }
       advancedLaneDatabase.prepare(
         "UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?"
@@ -3300,7 +3347,7 @@ database.close()`,
 
       const queuedLifecyclePath = join(directory, "queued-lifecycle.sqlite")
       copyFileSync(path, queuedLifecyclePath)
-      const queuedLifecycle = new DatabaseSync(queuedLifecyclePath)
+      const queuedLifecycle = fixtureDatabase(queuedLifecyclePath)
       queuedLifecycle.prepare("DELETE FROM orchestrator_events WHERE type = 'running'").run()
       queuedLifecycle.prepare("UPDATE orchestrator_dispatches SET status = 'queued'").run()
       queuedLifecycle.close()
@@ -3311,7 +3358,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const queuedLifecycleRolledBack = new DatabaseSync(queuedLifecyclePath)
+      const queuedLifecycleRolledBack = fixtureDatabase(queuedLifecyclePath)
       const retainedQueuedLifecycle = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         queuedLifecycleRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(previousHandoff.id)
@@ -3330,7 +3377,7 @@ database.close()`,
 
       const rewoundCurrentLanePath = join(directory, "rewound-current-v2-lane.sqlite")
       copyFileSync(runningLifecyclePath, rewoundCurrentLanePath)
-      const rewoundCurrentLane = new DatabaseSync(rewoundCurrentLanePath)
+      const rewoundCurrentLane = fixtureDatabase(rewoundCurrentLanePath)
       rewoundCurrentLane.prepare(
         "UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?"
       ).run(
@@ -3352,7 +3399,7 @@ database.close()`,
 
       const advancedCurrentLanePath = join(directory, "advanced-current-v2-lane.sqlite")
       copyFileSync(runningLifecyclePath, advancedCurrentLanePath)
-      const advancedCurrentLane = new DatabaseSync(advancedCurrentLanePath)
+      const advancedCurrentLane = fixtureDatabase(advancedCurrentLanePath)
       const advancedCurrentClaim = {
         ...lane,
         expectedRevision: lane.revision,
@@ -3390,7 +3437,7 @@ database.close()`,
       ) {
         const invalidCurrentLanePath = join(directory, `${name}-current-v2-lane.sqlite`)
         copyFileSync(runningLifecyclePath, invalidCurrentLanePath)
-        const invalidCurrentLane = new DatabaseSync(invalidCurrentLanePath)
+        const invalidCurrentLane = fixtureDatabase(invalidCurrentLanePath)
         invalidCurrentLane.prepare(
           `UPDATE work_lane_claims
            SET goal_id = ?, operation_id = ?, record = ? WHERE lane_id = ?`
@@ -3416,7 +3463,7 @@ database.close()`,
 
       const mixedDuplicateMetadataPath = join(directory, "mixed-duplicate-current-metadata.sqlite")
       copyFileSync(runningLifecyclePath, mixedDuplicateMetadataPath)
-      const mixedDuplicateMetadata = new DatabaseSync(mixedDuplicateMetadataPath)
+      const mixedDuplicateMetadata = fixtureDatabase(mixedDuplicateMetadataPath)
       mixedDuplicateMetadata.exec(`
         ALTER TABLE orchestrator_dispatch_metadata RENAME TO orchestrator_dispatch_metadata_unique;
         CREATE TABLE orchestrator_dispatch_metadata (
@@ -3436,7 +3483,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const mixedDuplicateMetadataRolledBack = new DatabaseSync(mixedDuplicateMetadataPath)
+      const mixedDuplicateMetadataRolledBack = fixtureDatabase(mixedDuplicateMetadataPath)
       expect(
         mixedDuplicateMetadataRolledBack.prepare(
           "SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata"
@@ -3446,7 +3493,7 @@ database.close()`,
 
       const missingSolWorkLinkPath = join(directory, "missing-sol-work-link.sqlite")
       copyFileSync(runningLifecyclePath, missingSolWorkLinkPath)
-      const missingSolWorkLink = new DatabaseSync(missingSolWorkLinkPath)
+      const missingSolWorkLink = fixtureDatabase(missingSolWorkLinkPath)
       missingSolWorkLink.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
         .run("dispatch:current-migration")
       missingSolWorkLink.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
@@ -3467,7 +3514,7 @@ database.close()`,
 
       const lunaNullWorkLinkPath = join(directory, "luna-null-work-link.sqlite")
       copyFileSync(runningLifecyclePath, lunaNullWorkLinkPath)
-      const lunaNullWorkLink = new DatabaseSync(lunaNullWorkLinkPath)
+      const lunaNullWorkLink = fixtureDatabase(lunaNullWorkLinkPath)
       persistCoordinatorLifecycle(lunaNullWorkLink, "dispatch:luna-null-work-link", 20, "queued", "consult")
       lunaNullWorkLink.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
         .run("dispatch:luna-null-work-link", JSON.stringify(migrationLunaRoute))
@@ -3500,7 +3547,7 @@ database.close()`,
       ) {
         const invalidRoutePath = join(directory, `${name}.sqlite`)
         copyFileSync(lunaNullWorkLinkPath, invalidRoutePath)
-        const invalidRoute = new DatabaseSync(invalidRoutePath)
+        const invalidRoute = fixtureDatabase(invalidRoutePath)
         invalidRoute.prepare(
           "UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?"
         ).run(route, "dispatch:luna-null-work-link")
@@ -3519,7 +3566,7 @@ database.close()`,
 
       const mismatchedLunaCommandPath = join(directory, "mismatched-luna-command.sqlite")
       copyFileSync(lunaNullWorkLinkPath, mismatchedLunaCommandPath)
-      const mismatchedLunaCommand = new DatabaseSync(mismatchedLunaCommandPath)
+      const mismatchedLunaCommand = fixtureDatabase(mismatchedLunaCommandPath)
       mismatchedLunaCommand.prepare(
         "UPDATE orchestrator_dispatches SET command = ? WHERE dispatch_request_id = ?"
       ).run(
@@ -3542,7 +3589,7 @@ database.close()`,
 
       const orphanLunaMetadataPath = join(directory, "orphan-luna-metadata.sqlite")
       copyFileSync(lunaNullWorkLinkPath, orphanLunaMetadataPath)
-      const orphanLunaMetadata = new DatabaseSync(orphanLunaMetadataPath)
+      const orphanLunaMetadata = fixtureDatabase(orphanLunaMetadataPath)
       orphanLunaMetadata.exec("PRAGMA foreign_keys = OFF")
       orphanLunaMetadata.prepare("DELETE FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
         .run("dispatch:luna-null-work-link")
@@ -3557,7 +3604,7 @@ database.close()`,
 
       const coordinatorOnlyRoutePath = join(directory, "coordinator-only-malformed-route.sqlite")
       copyFileSync(lunaNullWorkLinkPath, coordinatorOnlyRoutePath)
-      const coordinatorOnlyRoute = new DatabaseSync(coordinatorOnlyRoutePath)
+      const coordinatorOnlyRoute = fixtureDatabase(coordinatorOnlyRoutePath)
       coordinatorOnlyRoute.exec(`
         DELETE FROM work_agent_bindings;
         DELETE FROM work_dispatch_handoffs;
@@ -3588,7 +3635,7 @@ database.close()`,
       ) {
         const malformedLunaWorkLinkPath = join(directory, `luna-${name}-work-link.sqlite`)
         copyFileSync(lunaNullWorkLinkPath, malformedLunaWorkLinkPath)
-        const malformedLunaWorkLink = new DatabaseSync(malformedLunaWorkLinkPath)
+        const malformedLunaWorkLink = fixtureDatabase(malformedLunaWorkLinkPath)
         malformedLunaWorkLink.prepare(
           "UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?"
         ).run(workLink, "dispatch:luna-null-work-link")
@@ -3604,7 +3651,7 @@ database.close()`,
 
       const lunaHistoryPath = join(directory, "luna-history-above-work-cap.sqlite")
       copyFileSync(runningLifecyclePath, lunaHistoryPath)
-      const lunaHistory = new DatabaseSync(lunaHistoryPath)
+      const lunaHistory = fixtureDatabase(lunaHistoryPath)
       lunaHistory.prepare(
         `WITH RECURSIVE history(value) AS (
            VALUES(1) UNION ALL SELECT value + 1 FROM history WHERE value < 16385
@@ -3637,7 +3684,7 @@ database.close()`,
 
       const routedWithoutMetadataPath = join(directory, "routed-without-metadata.sqlite")
       copyFileSync(runningLifecyclePath, routedWithoutMetadataPath)
-      const routedWithoutMetadata = new DatabaseSync(routedWithoutMetadataPath)
+      const routedWithoutMetadata = fixtureDatabase(routedWithoutMetadataPath)
       routedWithoutMetadata.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
         .run("dispatch:current-migration")
       routedWithoutMetadata.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
@@ -3658,7 +3705,7 @@ database.close()`,
 
       const v2OnlyPartialSchemaPath = join(directory, "v2-only-partial-coordinator-schema.sqlite")
       copyFileSync(runningLifecyclePath, v2OnlyPartialSchemaPath)
-      const v2OnlyPartialSchema = new DatabaseSync(v2OnlyPartialSchemaPath)
+      const v2OnlyPartialSchema = fixtureDatabase(v2OnlyPartialSchemaPath)
       v2OnlyPartialSchema.exec("DROP TABLE orchestrator_dispatch_metadata")
       v2OnlyPartialSchema.close()
       expect(yield* safelyOpenResult(v2OnlyPartialSchemaPath)).toMatchObject({
@@ -3671,7 +3718,7 @@ database.close()`,
 
       const v2OnlyMissingMetadataPath = join(directory, "v2-only-missing-metadata.sqlite")
       copyFileSync(runningLifecyclePath, v2OnlyMissingMetadataPath)
-      const v2OnlyMissingMetadata = new DatabaseSync(v2OnlyMissingMetadataPath)
+      const v2OnlyMissingMetadata = fixtureDatabase(v2OnlyMissingMetadataPath)
       v2OnlyMissingMetadata.prepare(
         "DELETE FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?"
       ).run("dispatch:current-migration")
@@ -3686,7 +3733,7 @@ database.close()`,
 
       const v2CommandModeMismatchPath = join(directory, "v2-command-mode-mismatch.sqlite")
       copyFileSync(runningLifecyclePath, v2CommandModeMismatchPath)
-      const v2CommandModeMismatch = new DatabaseSync(v2CommandModeMismatchPath)
+      const v2CommandModeMismatch = fixtureDatabase(v2CommandModeMismatchPath)
       v2CommandModeMismatch.prepare(
         `UPDATE orchestrator_dispatches
          SET command = json_set(command, '$.payload.mode', 'transition_summary')
@@ -3712,7 +3759,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const v2CommandModeMismatchRolledBack = new DatabaseSync(v2CommandModeMismatchPath)
+      const v2CommandModeMismatchRolledBack = fixtureDatabase(v2CommandModeMismatchPath)
       const mismatchedCommandAfter = Schema.decodeUnknownSync(Schema.Struct({
         command: Schema.String,
         record: Schema.String
@@ -3778,7 +3825,7 @@ database.close()`,
       ) {
         const integrityPath = join(directory, `${integrityCase.name}.sqlite`)
         copyFileSync(runningLifecyclePath, integrityPath)
-        const candidate = new DatabaseSync(integrityPath)
+        const candidate = fixtureDatabase(integrityPath)
         integrityCase.mutate(candidate)
         candidate.close()
         expect(yield* safelyOpenResult(integrityPath)).toMatchObject({
@@ -3797,7 +3844,7 @@ database.close()`,
       ) {
         const bindingFreePath = join(directory, `v2-binding-free-${terminal}.sqlite`)
         copyFileSync(runningLifecyclePath, bindingFreePath)
-        const bindingFree = new DatabaseSync(bindingFreePath)
+        const bindingFree = fixtureDatabase(bindingFreePath)
         bindingFree.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
           .run("dispatch:current-migration")
         bindingFree.prepare("DELETE FROM orchestrator_events WHERE type = 'running'").run()
@@ -3817,7 +3864,7 @@ database.close()`,
 
       const missingMetadataPath = join(directory, "missing-metadata-current.sqlite")
       copyFileSync(path, missingMetadataPath)
-      const missingMetadata = new DatabaseSync(missingMetadataPath)
+      const missingMetadata = fixtureDatabase(missingMetadataPath)
       missingMetadata.exec("DROP TABLE orchestrator_dispatch_metadata")
       missingMetadata.close()
       expect(yield* safelyOpenResult(missingMetadataPath)).toMatchObject({
@@ -3830,7 +3877,7 @@ database.close()`,
 
       const unroutedPath = join(directory, "unrouted-current.sqlite")
       copyFileSync(path, unroutedPath)
-      const unrouted = new DatabaseSync(unroutedPath)
+      const unrouted = fixtureDatabase(unroutedPath)
       unrouted.prepare("UPDATE orchestrator_dispatches SET is_routed = 0").run()
       unrouted.close()
       expect(yield* safelyOpenResult(unroutedPath)).toMatchObject({
@@ -3840,7 +3887,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const unroutedRolledBack = new DatabaseSync(unroutedPath)
+      const unroutedRolledBack = fixtureDatabase(unroutedPath)
       const unroutedDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         unroutedRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(previousHandoff.id)
@@ -3850,7 +3897,7 @@ database.close()`,
 
       const missingParentPath = join(directory, "missing-parent-current.sqlite")
       copyFileSync(path, missingParentPath)
-      const missingParent = new DatabaseSync(missingParentPath)
+      const missingParent = fixtureDatabase(missingParentPath)
       missingParent.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
         .run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)))
       missingParent.close()
@@ -3864,7 +3911,7 @@ database.close()`,
 
       const failedParentPath = join(directory, "failed-parent-current.sqlite")
       copyFileSync(path, failedParentPath)
-      const failedParent = new DatabaseSync(failedParentPath)
+      const failedParent = fixtureDatabase(failedParentPath)
       persistCoordinatorLifecycle(failedParent, parentDispatchRequestId, 10, "delivery_failed", "consult")
       failedParent.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
         .run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)))
@@ -3876,7 +3923,7 @@ database.close()`,
 
       const incompleteTerminalPath = join(directory, "incomplete-terminal-lifecycle.sqlite")
       copyFileSync(path, incompleteTerminalPath)
-      const incompleteTerminal = new DatabaseSync(incompleteTerminalPath)
+      const incompleteTerminal = fixtureDatabase(incompleteTerminalPath)
       incompleteTerminal.prepare("UPDATE orchestrator_dispatches SET status = 'settled'").run()
       incompleteTerminal.close()
       expect(yield* safelyOpenResult(incompleteTerminalPath)).toMatchObject({
@@ -3886,7 +3933,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const incompleteTerminalRolledBack = new DatabaseSync(incompleteTerminalPath)
+      const incompleteTerminalRolledBack = fixtureDatabase(incompleteTerminalPath)
       const retainedIncompleteTerminal = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         incompleteTerminalRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(previousHandoff.id)
@@ -3896,7 +3943,7 @@ database.close()`,
 
       const completeTerminalPath = join(directory, "complete-terminal-lifecycle.sqlite")
       copyFileSync(path, completeTerminalPath)
-      const completeTerminal = new DatabaseSync(completeTerminalPath)
+      const completeTerminal = fixtureDatabase(completeTerminalPath)
       completeTerminal.prepare(
         `INSERT INTO orchestrator_events
            (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
@@ -3910,7 +3957,7 @@ database.close()`,
 
       const mismatchedGoalPath = join(directory, "mismatched-binding-goal.sqlite")
       copyFileSync(path, mismatchedGoalPath)
-      const mismatchedGoal = new DatabaseSync(mismatchedGoalPath)
+      const mismatchedGoal = fixtureDatabase(mismatchedGoalPath)
       const otherGoalHandoff = { ...previousHandoff, goalId: "goal:other" }
       mismatchedGoal.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
         .run(JSON.stringify(otherGoalHandoff), previousHandoff.id)
@@ -3950,7 +3997,7 @@ database.close()`,
       ) {
         const invalidRoutePath = join(directory, `${invalidRoute.name}.sqlite`)
         copyFileSync(path, invalidRoutePath)
-        const candidate = new DatabaseSync(invalidRoutePath)
+        const candidate = fixtureDatabase(invalidRoutePath)
         candidate.prepare("UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?")
           .run(JSON.stringify(invalidRoute.route), "dispatch:current-migration")
         candidate.close()
@@ -3965,7 +4012,7 @@ database.close()`,
 
       const multipleDispatchPath = join(directory, "multiple-dispatches.sqlite")
       copyFileSync(path, multipleDispatchPath)
-      const multipleDispatches = new DatabaseSync(multipleDispatchPath)
+      const multipleDispatches = fixtureDatabase(multipleDispatchPath)
       multipleDispatches.exec(`
         ALTER TABLE work_dispatch_handoffs RENAME TO previous_work_dispatch_handoffs;
         CREATE TABLE work_dispatch_handoffs (
@@ -4007,7 +4054,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const multipleRolledBack = new DatabaseSync(multipleDispatchPath)
+      const multipleRolledBack = fixtureDatabase(multipleDispatchPath)
       const retainedMultipleDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         multipleRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(previousHandoff.id)
@@ -4038,7 +4085,7 @@ database.close()`,
       expect(yield* service.coordinatorHandoff(currentHandoff.sessionId)).toMatchObject({ value: currentHandoff })
       opened.close()
 
-      const migrated = new DatabaseSync(path)
+      const migrated = fixtureDatabase(path)
       const copies = Schema.decodeUnknownSync(Schema.Struct({
         record: Schema.String,
         workLink: Schema.String
@@ -4083,7 +4130,7 @@ database.close()`,
       ) {
         const invalidPath = join(directory, `${invalid.name}.sqlite`)
         copyFileSync(path, invalidPath)
-        const candidate = new DatabaseSync(invalidPath)
+        const candidate = fixtureDatabase(invalidPath)
         candidate.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(invalid.record, currentHandoff.id)
         candidate.close()
@@ -4095,7 +4142,7 @@ database.close()`,
             operation: "open.database"
           }
         })
-        const rolledBack = new DatabaseSync(invalidPath)
+        const rolledBack = fixtureDatabase(invalidPath)
         const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(currentHandoff.id)
@@ -4106,7 +4153,7 @@ database.close()`,
 
       const malformedPath = join(directory, "malformed-v1-handoff.sqlite")
       copyFileSync(path, malformedPath)
-      const malformedV1 = new DatabaseSync(malformedPath)
+      const malformedV1 = fixtureDatabase(malformedPath)
       malformedV1.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
         .run(JSON.stringify({ ...previousHandoff, dispatchIds: "not-an-array" }), previousHandoff.id)
       malformedV1.close()
@@ -4117,7 +4164,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const malformedRolledBack = new DatabaseSync(malformedPath)
+      const malformedRolledBack = fixtureDatabase(malformedPath)
       const retainedMalformed = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         malformedRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(previousHandoff.id)
@@ -4130,7 +4177,7 @@ database.close()`,
 
       const outsiderPath = join(directory, "outsider-lineage.sqlite")
       copyFileSync(path, outsiderPath)
-      const outsider = new DatabaseSync(outsiderPath)
+      const outsider = fixtureDatabase(outsiderPath)
       outsider.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
         .run(JSON.stringify(previousHandoff), previousHandoff.id)
       outsider.prepare("UPDATE work_dispatch_handoffs SET lineage = ?, record = ? WHERE dispatch_request_id = ?")
@@ -4148,7 +4195,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const outsiderRolledBack = new DatabaseSync(outsiderPath)
+      const outsiderRolledBack = fixtureDatabase(outsiderPath)
       const retainedOutsider = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         outsiderRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(previousHandoff.id)
@@ -4158,7 +4205,7 @@ database.close()`,
 
       const corruptBindingPath = join(directory, "corrupt-binding.sqlite")
       copyFileSync(path, corruptBindingPath)
-      const corruptBinding = new DatabaseSync(corruptBindingPath)
+      const corruptBinding = fixtureDatabase(corruptBindingPath)
       corruptBinding.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
         .run(JSON.stringify(previousHandoff), previousHandoff.id)
       corruptBinding.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
@@ -4175,7 +4222,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const corruptBindingRolledBack = new DatabaseSync(corruptBindingPath)
+      const corruptBindingRolledBack = fixtureDatabase(corruptBindingPath)
       const retainedCorruptBinding = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         corruptBindingRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(previousHandoff.id)
@@ -4203,7 +4250,7 @@ database.close()`,
       ) {
         const companionPath = join(directory, `${companion.name}.sqlite`)
         copyFileSync(path, companionPath)
-        const candidate = new DatabaseSync(companionPath)
+        const candidate = fixtureDatabase(companionPath)
         candidate.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(JSON.stringify(previousHandoff), previousHandoff.id)
         candidate.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
@@ -4220,7 +4267,7 @@ database.close()`,
             operation: "open.database"
           }
         })
-        const rolledBack = new DatabaseSync(companionPath)
+        const rolledBack = fixtureDatabase(companionPath)
         const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
           rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
             .get(previousHandoff.id)
@@ -4231,7 +4278,7 @@ database.close()`,
 
       const unboundDecisionPath = join(directory, "unbound-decision.sqlite")
       copyFileSync(path, unboundDecisionPath)
-      const unboundDecision = new DatabaseSync(unboundDecisionPath)
+      const unboundDecision = fixtureDatabase(unboundDecisionPath)
       const advancedLane = {
         ...lane,
         expectedRevision: lane.revision,
@@ -4255,7 +4302,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const unboundDecisionRolledBack = new DatabaseSync(unboundDecisionPath)
+      const unboundDecisionRolledBack = fixtureDatabase(unboundDecisionPath)
       const retainedUnboundDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         unboundDecisionRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(previousHandoff.id)
@@ -4265,7 +4312,7 @@ database.close()`,
 
       const divergentPath = join(directory, "divergent.sqlite")
       copyFileSync(path, divergentPath)
-      const divergent = new DatabaseSync(divergentPath)
+      const divergent = fixtureDatabase(divergentPath)
       divergent.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
         .run(JSON.stringify(previousHandoff), previousHandoff.id)
       divergent.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
@@ -4280,7 +4327,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const divergentRolledBack = new DatabaseSync(divergentPath)
+      const divergentRolledBack = fixtureDatabase(divergentPath)
       const retainedReplicas = Schema.decodeUnknownSync(Schema.Struct({
         decision: Schema.String,
         dispatch: Schema.String,
@@ -4310,7 +4357,7 @@ database.close()`,
 
       const unboundPath = join(directory, "unbound.sqlite")
       copyFileSync(path, unboundPath)
-      const unbound = new DatabaseSync(unboundPath)
+      const unbound = fixtureDatabase(unboundPath)
       unbound.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
         .run("dispatch:current-migration")
       unbound.prepare("UPDATE work_lane_claims SET revision = ? WHERE lane_id = ?")
@@ -4329,7 +4376,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const unboundRolledBack = new DatabaseSync(unboundPath)
+      const unboundRolledBack = fixtureDatabase(unboundPath)
       const retainedUnbound = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         unboundRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(previousHandoff.id)
@@ -4339,7 +4386,7 @@ database.close()`,
 
       const nullMetadataPath = join(directory, "null-metadata.sqlite")
       copyFileSync(path, nullMetadataPath)
-      const nullMetadata = new DatabaseSync(nullMetadataPath)
+      const nullMetadata = fixtureDatabase(nullMetadataPath)
       nullMetadata.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
         .run(JSON.stringify(previousHandoff), previousHandoff.id)
       nullMetadata.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
@@ -4354,7 +4401,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const nullMetadataRolledBack = new DatabaseSync(nullMetadataPath)
+      const nullMetadataRolledBack = fixtureDatabase(nullMetadataPath)
       const retainedNullMetadata = Schema.decodeUnknownSync(Schema.Struct({
         record: Schema.String,
         workLink: Schema.Null
@@ -4373,7 +4420,7 @@ database.close()`,
 
       const orphanMetadataPath = join(directory, "orphan-metadata.sqlite")
       copyFileSync(path, orphanMetadataPath)
-      const orphanMetadata = new DatabaseSync(orphanMetadataPath)
+      const orphanMetadata = fixtureDatabase(orphanMetadataPath)
       orphanMetadata.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
         .run(JSON.stringify(previousHandoff), previousHandoff.id)
       orphanMetadata.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
@@ -4388,7 +4435,7 @@ database.close()`,
           operation: "open.database"
         }
       })
-      const orphanMetadataRolledBack = new DatabaseSync(orphanMetadataPath)
+      const orphanMetadataRolledBack = fixtureDatabase(orphanMetadataPath)
       const retainedOrphanMetadata = Schema.decodeUnknownSync(Schema.Struct({
         record: Schema.String,
         workLink: Schema.String
@@ -4406,14 +4453,14 @@ database.close()`,
         handoff: { version: "herdr.work.decision.v1" }
       })
 
-      const malformed = new DatabaseSync(path)
+      const malformed = fixtureDatabase(path)
       malformed.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
         .run(JSON.stringify(previousHandoff), previousHandoff.id)
       malformed.prepare("UPDATE work_dispatch_handoffs SET lineage = '{}' WHERE dispatch_request_id = ?")
         .run("dispatch:current-migration")
       malformed.close()
       expect(yield* safelyOpenResult(path)).toMatchObject({ failure: { _tag: "WorkStoreError" } })
-      const rolledBack = new DatabaseSync(path)
+      const rolledBack = fixtureDatabase(path)
       const rolledBackDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
           .get(previousHandoff.id)
@@ -4422,7 +4469,7 @@ database.close()`,
       expect(JSON.parse(rolledBackDecision.record)).toMatchObject({ version: "herdr.work.decision.v1" })
 
       const oversizedPath = join(directory, "oversized.sqlite")
-      const oversized = new DatabaseSync(oversizedPath)
+      const oversized = fixtureDatabase(oversizedPath)
       oversized.exec(`
         CREATE TABLE work_lane_claims (
           lane_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE,
@@ -4442,6 +4489,9 @@ database.close()`,
         JSON.stringify(lane)
       )
       const insertOversized = oversized.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?, ?)")
+      // One transaction: autocommit seeding would fsync each row and make this
+      // fixture's cost depend on disk latency rather than the migration.
+      oversized.exec("BEGIN")
       for (let index = 0; index < 400; index += 1) {
         const handoff = {
           ...previousHandoff,
@@ -4453,9 +4503,10 @@ database.close()`,
         }
         insertOversized.run(handoff.id, handoff.sessionId, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
       }
+      oversized.exec("COMMIT")
       oversized.close()
       expect(yield* safelyOpenResult(oversizedPath)).toMatchObject({ failure: { _tag: "WorkStoreError" } })
-      const overflowRolledBack = new DatabaseSync(oversizedPath)
+      const overflowRolledBack = fixtureDatabase(oversizedPath)
       const retainedV1 = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
         overflowRolledBack.prepare("SELECT record FROM work_decision_handoffs LIMIT 1").get()
       )
@@ -4474,7 +4525,7 @@ database.close()`,
       yield* firstService.claim(claim)
       first.close()
 
-      const database = new DatabaseSync(path)
+      const database = fixtureDatabase(path)
       database.prepare(
         "UPDATE work_lane_claims SET goal_id = ?, phase = 'shipped' WHERE lane_id = ?"
       ).run("goal-hidden", claim.laneId)
@@ -4493,7 +4544,7 @@ database.close()`,
       ).toMatchObject({
         failure: { _tag: "WorkStoreError", operation: "claim.write.identity-mismatch" }
       })
-      const count = new DatabaseSync(path)
+      const count = fixtureDatabase(path)
       expect(count.prepare("SELECT COUNT(*) AS count FROM work_lane_claims").get()).toEqual({ count: 1 })
       count.close()
     }).pipe(provideNodeServices))

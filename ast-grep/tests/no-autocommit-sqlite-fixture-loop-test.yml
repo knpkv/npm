@@ -1,0 +1,40 @@
+id: no-autocommit-sqlite-fixture-loop
+valid:
+  - |
+    const database = new DatabaseSync(path)
+    database.exec("BEGIN")
+    for (let index = 0; index < 260; index++) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index)
+    }
+    database.exec("COMMIT")
+  - |
+    database.exec("BEGIN IMMEDIATE")
+    const insert = database.prepare("INSERT INTO rows VALUES (?)")
+    for (let index = 0; index < 500; index++) {
+      insert.run(index)
+    }
+    database.exec("COMMIT")
+  - |
+    withTransaction(database, () => {
+      for (let index = 0; index < 260; index++) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(index)
+      }
+    })
+  - |
+    database.prepare("INSERT INTO rows VALUES (?)").run(1)
+  - |
+    for (let index = 0; index < 2; index++) {
+      orchestrator.run(index)
+    }
+invalid:
+  - |
+    const oversizedLegacy = new DatabaseSync(oversizedLegacyPath)
+    for (let index = 0; index < 260; index++) {
+      oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)").run(index, index, index, index)
+    }
+    oversizedLegacy.close()
+  - |
+    const insert = database.prepare("INSERT INTO rows VALUES (?)")
+    for (let index = 0; index < 500; index++) {
+      insert.run(index)
+    }
