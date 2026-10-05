@@ -89,6 +89,21 @@ export const UsageGroup = Schema.Struct({
 })
 export type UsageGroup = typeof UsageGroup.Type
 
+/** Usage grouped like `UsageGroup`, but per session instead of per bucket, with its first and last request. */
+export const SessionGroup = Schema.Struct({
+  sessionId: Schema.String,
+  firstAt: Schema.Int,
+  lastAt: Schema.Int,
+  agent: Agent,
+  model: Schema.String,
+  fast: Schema.Boolean,
+  longPrompt: Schema.Boolean,
+  attribution: AttributionInputs,
+  requests: Count,
+  tokens: Tokens
+})
+export type SessionGroup = typeof SessionGroup.Type
+
 export const TicketTitle = Schema.Struct({
   key: Schema.String,
   /** Null when the lookup ran and found no title. */
@@ -112,6 +127,26 @@ const seriesOf = (table: string): string =>
 
 const GroupRow = Schema.Struct({
   bucket_start: Schema.Int,
+  agent: Agent,
+  model: Schema.String,
+  fast: Schema.Literals([0, 1]),
+  long_prompt: Schema.Literals([0, 1]),
+  cwd: Schema.String,
+  branch: Schema.String,
+  active_ticket: Schema.NullOr(Schema.String),
+  requests: Count,
+  input: Count,
+  output: Count,
+  reasoning: Count,
+  cache_read: Count,
+  cache_write_5m: Count,
+  cache_write_1h: Count
+})
+
+const SessionRow = Schema.Struct({
+  session_id: Schema.String,
+  first_at: Schema.Int,
+  last_at: Schema.Int,
   agent: Agent,
   model: Schema.String,
   fast: Schema.Literals([0, 1]),
@@ -229,6 +264,8 @@ export class UsageStore extends Context.Service<UsageStore, {
     balances: ReadonlyArray<BalanceReading>
   ) => Effect.Effect<void, StoreError>
   readonly usageGroups: (range: MachineRange) => Effect.Effect<ReadonlyArray<UsageGroup>, StoreError>
+  /** Usage per session in a range, priced and attributed like `usageGroups`. */
+  readonly sessionGroups: (range: MachineRange) => Effect.Effect<ReadonlyArray<SessionGroup>, StoreError>
   /** Every distinct branch and working directory ever recorded: what vouches for Known Projects. */
   readonly places: (
     machine: string
@@ -402,6 +439,49 @@ export class UsageStore extends Context.Service<UsageStore, {
         )
       )
 
+      const sessionGroups = Effect.fn("UsageStore.sessionGroups")((range: MachineRange) =>
+        sql`
+          SELECT
+            session_id, min(occurred_at) AS first_at, max(occurred_at) AS last_at,
+            agent, model, fast,
+            (input + cache_read + cache_write_5m + cache_write_1h) > ${LONG_PROMPT_TOKENS} AS long_prompt,
+            cwd, branch, active_ticket,
+            count(*) AS requests,
+            sum(input) AS input, sum(output) AS output, sum(reasoning) AS reasoning,
+            sum(cache_read) AS cache_read, sum(cache_write_5m) AS cache_write_5m, sum(cache_write_1h) AS cache_write_1h
+          FROM usage_events
+          WHERE machine = ${range.machine} AND occurred_at >= ${range.from} AND occurred_at < ${range.to}
+          -- Grouped exactly like usageGroups, so a session prices and books the same way.
+          GROUP BY session_id, agent, model, fast, long_prompt, cache_read > 0,
+            cache_write_5m + cache_write_1h > 0, cwd, branch, active_ticket
+          ORDER BY session_id, agent, model
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SessionRow))),
+          Effect.map((rows) =>
+            rows.map((row): SessionGroup => ({
+              sessionId: row.session_id,
+              firstAt: row.first_at,
+              lastAt: row.last_at,
+              agent: row.agent,
+              model: row.model,
+              fast: row.fast === 1,
+              longPrompt: row.long_prompt === 1,
+              attribution: { cwd: row.cwd, branch: row.branch, activeTicket: row.active_ticket },
+              requests: row.requests,
+              tokens: {
+                input: row.input,
+                output: row.output,
+                reasoning: row.reasoning,
+                cacheRead: row.cache_read,
+                cacheWrite5m: row.cache_write_5m,
+                cacheWrite1h: row.cache_write_1h
+              }
+            }))
+          ),
+          Effect.mapError(storeError("session-groups"))
+        )
+      )
+
       const places = Effect.fn("UsageStore.places")((machine: string) =>
         sql`SELECT DISTINCT branch, cwd FROM usage_events WHERE machine = ${machine}`.pipe(
           Effect.flatMap(
@@ -513,6 +593,7 @@ export class UsageStore extends Context.Service<UsageStore, {
         commitChunk,
         recordObservations,
         usageGroups,
+        sessionGroups,
         places,
         limitSnapshots,
         latestBalances,
