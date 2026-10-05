@@ -21,7 +21,7 @@ files:
 ignores:
   - "packages/bounded-io/src/**"
   # Caps each line, not the running total: a different budget.
-  - "packages/herdr-connect/src/terminal.ts"
+  - "packages/herdr-connect/src/internal/terminal-lines.ts"
   # Not yet migrated (C2); remove each entry as its caller moves to bounded-io.
   - "packages/codecommit/src/tui/file-diff.ts"
   - "packages/codecommit/src/RelayReview.ts"
