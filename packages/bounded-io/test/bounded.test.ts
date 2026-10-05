@@ -4,7 +4,7 @@
  * with the limit and the running total, and nothing after it is pulled.
  */
 import { describe, expect, it } from "@effect/vitest"
-import { Data, Effect, Ref, Stream } from "effect"
+import { Cause, Data, Effect, Exit, Predicate, Ref, Stream } from "effect"
 import { collectBounded, collectBoundedText, limitBytes } from "../src/index.js"
 
 const bytes = (...values: ReadonlyArray<number>) => new Uint8Array(values)
@@ -38,6 +38,18 @@ describe("limitBytes", () => {
         Effect.flip
       )
       expect(error).toEqual(new UpstreamError({ reason: "eof" }))
+    }))
+
+  // An invalid limit must not quietly turn a bounded read into an unbounded one.
+  it.effect("dies before pulling when the limit is not a non-negative safe integer", () =>
+    Effect.gen(function*() {
+      for (const limit of [Number.NaN, Number.POSITIVE_INFINITY, -1, 1.5]) {
+        const pulled = yield* Ref.make(0)
+        const source = Stream.make(bytes(1)).pipe(Stream.tap(() => Ref.update(pulled, (n) => n + 1)))
+        const exit = yield* collectBounded(source, limit).pipe(Effect.exit)
+        expect(Exit.isFailure(exit) && Predicate.isTagged(Cause.squash(exit.cause), "InvalidByteLimit")).toBe(true)
+        expect(yield* Ref.get(pulled)).toBe(0)
+      }
     }))
 })
 

@@ -7,9 +7,9 @@ snapshots:
         style: primary
         start: 19
         end: 107
-      - source: byteLength
+      - source: bytes + chunk.byteLength
         style: secondary
-        start: 95
+        start: 81
         end: 105
   ? |
     stdout.pipe(Stream.mapAccumEffect(() => 0, (bytes, chunk) => Effect.succeed([bytes + chunk.byteLength, [chunk]])))
@@ -18,9 +18,9 @@ snapshots:
         style: primary
         start: 12
         end: 113
-      - source: byteLength
+      - source: bytes + chunk.byteLength
         style: secondary
-        start: 91
+        start: 77
         end: 101
   ? |
     stream.pipe(Stream.runFoldEffect(() => ({ bytes: 0, chunks: [] }), (output, chunk) => {
@@ -36,7 +36,7 @@ snapshots:
         style: primary
         start: 12
         end: 252
-      - source: byteLength
+      - source: output.bytes + chunk.byteLength
         style: secondary
-        start: 125
+        start: 104
         end: 135

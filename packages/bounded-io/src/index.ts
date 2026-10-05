@@ -9,12 +9,15 @@
  * - Failing is the only overflow behaviour; nothing is truncated.
  * - Upstream failures pass through unchanged, so a caller maps
  *   `ByteLimitExceeded` to its own error and leaves the rest alone.
+ * - `limit` must be a non-negative safe integer. An invalid one (`NaN`,
+ *   `Infinity`, negative, fractional) is a programming error and dies with
+ *   {@link InvalidByteLimit} instead of silently reading without a cap.
  * - Interrupting or failing a collection inside the caller's scope is what stops a
  *   child process; this module never spawns or kills anything itself.
  *
  * @module
  */
-import { Effect, Schema, Stream } from "effect"
+import { Data, Effect, Schema, Stream } from "effect"
 
 /** A stream produced more than `limit` bytes; `observedBytes` is the total at the crossing chunk. */
 export class ByteLimitExceeded extends Schema.TaggedError<ByteLimitExceeded>()("ByteLimitExceeded", {
@@ -22,8 +25,26 @@ export class ByteLimitExceeded extends Schema.TaggedError<ByteLimitExceeded>()("
   observedBytes: Schema.Number
 }) {}
 
-/** Pass chunks through unchanged; fail once the running total exceeds `limit`. */
+/**
+ * A limit that is not a non-negative safe integer. Raised as a defect, before the
+ * stream is pulled: a `NaN` or `Infinity` limit would otherwise disable the cap.
+ */
+export class InvalidByteLimit extends Data.TaggedError("InvalidByteLimit")<{ readonly limit: number }> {}
+
+const isValidLimit = (limit: number): boolean => Number.isSafeInteger(limit) && limit >= 0
+
+/**
+ * Pass chunks through unchanged; fail once the running total exceeds `limit`.
+ * `limit` must be a non-negative safe integer; anything else dies with
+ * {@link InvalidByteLimit} before the stream is pulled.
+ */
 export const limitBytes = <E, R>(
+  stream: Stream.Stream<Uint8Array, E, R>,
+  limit: number
+): Stream.Stream<Uint8Array, E | ByteLimitExceeded, R> =>
+  isValidLimit(limit) ? capped(stream, limit) : Stream.die(new InvalidByteLimit({ limit }))
+
+const capped = <E, R>(
   stream: Stream.Stream<Uint8Array, E, R>,
   limit: number
 ): Stream.Stream<Uint8Array, E | ByteLimitExceeded, R> =>

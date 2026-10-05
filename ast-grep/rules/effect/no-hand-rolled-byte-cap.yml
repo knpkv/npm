@@ -10,18 +10,19 @@ rule:
     - pattern: Stream.runFoldEffect($$$)
     - pattern: Stream.mapAccumEffect($$$)
     - pattern: Stream.mapEffect($$$)
+  # A running total: something added to a chunk's byteLength. Reading one
+  # chunk's size on its own is fine.
   has:
     stopBy: end
-    kind: property_identifier
-    regex: "^byteLength$"
+    any:
+      - pattern: $TOTAL + $CHUNK.byteLength
+      - pattern: $TOTAL += $CHUNK.byteLength
 
 files:
   - "packages/*/src/**/*.ts"
   - "packages/*/src/**/*.tsx"
 ignores:
   - "packages/bounded-io/src/**"
-  # Caps each line, not the running total: a different budget.
-  - "packages/herdr-connect/src/internal/terminal-lines.ts"
   # Not yet migrated (C2); remove each entry as its caller moves to bounded-io.
   - "packages/codecommit/src/tui/file-diff.ts"
   - "packages/codecommit/src/RelayReview.ts"
