@@ -550,3 +550,15 @@ snapshots:
         style: primary
         start: 0
         end: 82
+  ? |
+    const login = (options?: LoginOptions) => Effect.gen(function*() {
+      return yield* authorize(options)
+    })
+  : labels:
+      - source: |-
+          const login = (options?: LoginOptions) => Effect.gen(function*() {
+            return yield* authorize(options)
+          })
+        style: primary
+        start: 0
+        end: 104

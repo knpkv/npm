@@ -8,11 +8,11 @@
  *
  * @internal
  */
+import { openBrowser } from "@knpkv/atlassian-common/cli-auth"
 import { Argument as Args, Command, Flag as Options, Prompt } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import { openBrowser } from "../internal/openBrowser.js"
 import { JiraAuth } from "../JiraAuth.js"
 
 // === Auth create command ===

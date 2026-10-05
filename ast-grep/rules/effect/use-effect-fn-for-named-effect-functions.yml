@@ -128,6 +128,7 @@ rule:
               - pattern: "{ return Effect.uninterruptibleMask($$$BODY).pipe($$$OPERATORS) }"
 
 files:
+  - "packages/atlassian-common/src/cli-auth/AtlassianCliAuth.ts"
   - "packages/control-center/src/**/*.ts"
   - "packages/control-center/src/**/*.tsx"
   - "packages/codecommit-core/src/ConfigService/load.ts"

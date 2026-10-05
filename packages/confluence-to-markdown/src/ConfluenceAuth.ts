@@ -3,71 +3,38 @@
  *
  * **Mental model**
  *
- * - OAuth endpoint work is delegated to `@knpkv/atlassian-common/auth`.
- * - Multi-account/site profile storage is delegated to `@knpkv/atlassian-common/config`.
+ * - The flow — refresh lock, rotating-token persistence, browser login, profiles —
+ *   is `@knpkv/atlassian-common/cli-auth`'s, bound to the `"confluence-to-markdown"`
+ *   storage namespace, Confluence's scopes and Confluence's names.
+ * - A config left in the pre-profiles `~/.confluence/config.json` is migrated on first read.
  * - The public service keeps Confluence's plain-string access token return type.
  *
  * @module
  */
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
-import * as NodePath from "@effect/platform-node/NodePath"
-import {
-  buildAuthUrl,
-  buildOAuthTokenAt,
-  computeCodeChallenge,
-  CONFLUENCE_FOLDER_SCOPES,
-  CONFLUENCE_SCOPES,
-  exchangeCodeForTokens,
-  generateCodeVerifier,
-  generateUUID,
-  getAccessibleResources,
-  getUserInfo,
-  OAuthError,
-  refreshToken,
-  revokeToken
-} from "@knpkv/atlassian-common/auth"
+import { CONFLUENCE_FOLDER_SCOPES, CONFLUENCE_SCOPES, type OAuthError } from "@knpkv/atlassian-common/auth"
+import { makeAtlassianCliAuth, NodeCliAuthLive } from "@knpkv/atlassian-common/cli-auth"
 import {
   type AuthProfile,
-  deleteActiveProfile,
-  deleteProfileBySelector,
   FileSystemError,
   type HomeDirectoryError,
-  HomeDirectoryLive,
   HomeDirectoryTag,
-  isTokenExpiredAt,
-  loadActiveProfile,
-  loadActiveProfileToken,
-  loadOAuthConfig,
-  loadProfiles,
   type OAuthConfig,
   OAuthConfigSchema,
-  type OAuthToken,
-  type OAuthUser,
-  saveOAuthConfig,
-  saveProfileToken,
-  setActiveProfileBySelector
+  type OAuthUser
 } from "@knpkv/atlassian-common/config"
-import * as Clock from "effect/Clock"
-import * as Console from "effect/Console"
 import * as Context from "effect/Context"
-import * as Crypto from "effect/Crypto"
-import * as Deferred from "effect/Deferred"
+import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
-import { HttpClient } from "effect/http"
+import type { HttpClient } from "effect/http"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
-import { ChildProcessSpawner } from "effect/process"
-import * as Ref from "effect/Ref"
+import type { ChildProcessSpawner } from "effect/process"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import { AuthMissingError } from "./ConfluenceError.js"
-import { HttpServerFactoryLive } from "./internal/NodeLayers.js"
-import { callbackUrl, startCallbackServer } from "./internal/oauthServer.js"
-import { openBrowser } from "./internal/openBrowser.js"
 
-const TOOL_NAME = "confluence-to-markdown"
 const LEGACY_CONFIG_DIR_NAME = ".confluence"
 
 /**
@@ -87,12 +54,6 @@ const LEGACY_CONFIG_DIR_NAME = ".confluence"
  * @category Scopes
  */
 export const CLI_LOGIN_SCOPES = [...CONFLUENCE_SCOPES, ...CONFLUENCE_FOLDER_SCOPES]
-
-const TokenStorageLive = Layer.mergeAll(
-  NodeFileSystem.layer,
-  NodePath.layer,
-  HomeDirectoryLive
-)
 
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
@@ -149,29 +110,6 @@ const loadLegacyOAuthConfig = (): Effect.Effect<
       Effect.catch(() => Effect.succeed(null))
     )
   })
-
-const loadTokenOp = () => loadActiveProfileToken(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
-const saveTokenOp = (token: OAuthToken) => saveProfileToken(TOOL_NAME, token).pipe(Effect.provide(TokenStorageLive))
-const deleteTokenOp = () => deleteActiveProfile(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
-const loadOAuthConfigOp = () =>
-  Effect.gen(function*() {
-    const config = yield* loadOAuthConfig(TOOL_NAME)
-    if (config !== null) return config
-    const legacyConfig = yield* loadLegacyOAuthConfig()
-    if (legacyConfig !== null) {
-      yield* saveOAuthConfig(TOOL_NAME, legacyConfig)
-    }
-    return legacyConfig
-  }).pipe(Effect.provide(TokenStorageLive))
-const saveOAuthConfigOp = (config: OAuthConfig) =>
-  saveOAuthConfig(TOOL_NAME, config).pipe(Effect.provide(TokenStorageLive))
-const loadActiveProfileOp = () => loadActiveProfile(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
-const listProfilesOp = () =>
-  loadProfiles(TOOL_NAME).pipe(Effect.map((store) => store.profiles), Effect.provide(TokenStorageLive))
-const switchProfileOp = (selector: string) =>
-  setActiveProfileBySelector(TOOL_NAME, selector).pipe(Effect.provide(TokenStorageLive))
-const removeProfileOp = (selector: string) =>
-  deleteProfileBySelector(TOOL_NAME, selector).pipe(Effect.provide(TokenStorageLive))
 
 /**
  * Options for the login method.
@@ -264,314 +202,6 @@ export class ConfluenceAuth extends Context.Service<
   ConfluenceAuthService
 >()("@knpkv/confluence-to-markdown/ConfluenceAuth") {}
 
-type RefreshError = OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-type RefreshDeferred = Deferred.Deferred<OAuthToken, RefreshError>
-
-const make = Effect.gen(function*() {
-  const httpClient = yield* HttpClient.HttpClient
-  const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const cryptoService = yield* Crypto.Crypto
-
-  const refreshLock = yield* Ref.make<Option.Option<RefreshDeferred>>(
-    Option.none()
-  )
-
-  const openBrowserImpl = (url: string): Effect.Effect<void, OAuthError> =>
-    openBrowser(url).pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
-      Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
-    )
-
-  const getConfig = (): Effect.Effect<
-    OAuthConfig,
-    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  > =>
-    Effect.gen(function*() {
-      const config = yield* loadOAuthConfigOp()
-      if (config === null) {
-        return yield* new OAuthError({
-          step: "authorize",
-          cause: "OAuth not configured. Run 'confluence auth configure' first."
-        })
-      }
-      return config
-    })
-
-  // Mirrors `@knpkv/jira-cli`'s JiraAuth, deliberately: same shared
-  // `refreshToken`, same rotating-credential hazard. Atlassian consumes the
-  // token we send and returns its replacement, so an interrupt between the
-  // grant and the persist spends the credential with nothing saved and silently
-  // logs the user out. Grant and persist are therefore atomic.
-  //
-  // The deadline sits inside the region because an uninterruptible region with
-  // no bound of its own absorbs SIGINT/SIGTERM entirely — `runMain`'s handlers
-  // only interrupt the main fiber — which would leave a `confluence` command
-  // ignoring Ctrl-C against a stalled token endpoint. A deadline forked inside
-  // the region is still interruptible, so it does bound this.
-  const REFRESH_TIMEOUT = "30 seconds"
-
-  const refreshTokenImpl = (
-    token: OAuthToken,
-    config: OAuthConfig
-  ): Effect.Effect<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
-    Effect.uninterruptible(
-      Effect.gen(function*() {
-        const updated = yield* refreshToken(token, config).pipe(
-          Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
-          Effect.timeout(REFRESH_TIMEOUT),
-          Effect.catchTag(
-            "TimeoutError",
-            () => Effect.fail(new OAuthError({ step: "refresh", cause: `no response within ${REFRESH_TIMEOUT}` }))
-          )
-        )
-        yield* saveTokenOp(updated)
-        return updated
-      })
-    )
-
-  const revokeTokenImpl = (
-    token: OAuthToken,
-    config: OAuthConfig
-  ): Effect.Effect<void, OAuthError> =>
-    revokeToken(token, config).pipe(
-      Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-    )
-
-  const configure: ConfluenceAuthService["configure"] = (config) => saveOAuthConfigOp(config)
-
-  const isConfigured: ConfluenceAuthService["isConfigured"] = () =>
-    Effect.gen(function*() {
-      const config = yield* loadOAuthConfigOp()
-      return config !== null
-    })
-
-  const login: ConfluenceAuthService["login"] = (options) =>
-    Effect.gen(function*() {
-      const config = yield* getConfig()
-      const state = yield* generateUUID().pipe(Effect.provideService(Crypto.Crypto, cryptoService))
-      const codeVerifier = yield* generateCodeVerifier().pipe(Effect.provideService(Crypto.Crypto, cryptoService))
-      const codeChallenge = yield* computeCodeChallenge(codeVerifier).pipe(
-        Effect.provideService(Crypto.Crypto, cryptoService)
-      )
-
-      const { code, port } = yield* Effect.scoped(
-        Effect.gen(function*() {
-          const { codePromise, port } = yield* startCallbackServer(state).pipe(
-            Effect.provide(HttpServerFactoryLive),
-            Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
-          )
-          const authUrl = buildAuthUrl({
-            clientId: config.clientId,
-            state,
-            port,
-            redirectUri: callbackUrl(port),
-            scopes: CLI_LOGIN_SCOPES,
-            codeChallenge
-          })
-
-          yield* Console.log(`Opening browser for Atlassian login (callback on port ${port})...`)
-          yield* Console.log(`If browser doesn't open, visit: ${authUrl}`)
-          yield* openBrowserImpl(authUrl)
-          yield* Console.log("Waiting for authorization (press Ctrl+C to cancel)...")
-
-          const code = yield* codePromise.pipe(
-            Effect.mapError((cause) => new OAuthError({ step: "authorize", cause })),
-            Effect.timeout("5 minutes"),
-            Effect.catchTag(
-              "TimeoutError",
-              () => Effect.fail(new OAuthError({ step: "authorize", cause: "Authorization timed out" }))
-            )
-          )
-          return { code, port }
-        })
-      )
-
-      yield* Console.log("Exchanging code for tokens...")
-      const tokens = yield* exchangeCodeForTokens(code, config, {
-        port,
-        redirectUri: callbackUrl(port),
-        codeVerifier
-      }).pipe(
-        Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-      )
-
-      yield* Console.log("Fetching accessible sites...")
-      const sites = yield* getAccessibleResources(tokens.access_token).pipe(
-        Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-      )
-
-      if (sites.length === 0) {
-        return yield* new OAuthError({
-          step: "authorize",
-          cause: "No Confluence sites found for this account"
-        })
-      }
-
-      let site: (typeof sites)[number]
-
-      if (sites.length > 1) {
-        if (options?.siteUrl) {
-          const matched = sites.find((s) => s.url === options.siteUrl)
-          if (!matched) {
-            const available = sites.map((s) => `  - ${s.name}: ${s.url}`).join("\n")
-            return yield* new OAuthError({
-              step: "authorize",
-              cause: `Site '${options.siteUrl}' not found. Available sites:\n${available}`
-            })
-          }
-          site = matched
-        } else {
-          yield* Console.log("Multiple Confluence sites found. Please select one:")
-          for (const s of sites) {
-            yield* Console.log(`  - ${s.name}: ${s.url}`)
-          }
-          yield* Console.log("\nRun 'confluence auth login --site <url>' to select a site")
-          return sites.map((s) => ({ id: s.id, name: s.name, url: s.url }))
-        }
-      } else {
-        site = sites[0]!
-      }
-
-      yield* Console.log("Fetching user info...")
-      const user = yield* getUserInfo(tokens.access_token).pipe(
-        Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-      )
-
-      const nowMs = yield* Clock.currentTimeMillis
-      const tokenData = buildOAuthTokenAt(tokens, site, user, nowMs)
-
-      yield* saveTokenOp(tokenData)
-      yield* Console.log(`Logged in as ${user.name} (${user.email})`)
-      return undefined
-    })
-
-  const logout: ConfluenceAuthService["logout"] = () =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      if (token === null) {
-        yield* Console.log("Not logged in")
-        return
-      }
-
-      const config = yield* loadOAuthConfigOp()
-      if (config !== null) {
-        yield* revokeTokenImpl(token, config).pipe(
-          Effect.tap(() => Effect.log("Token revoked with Atlassian")),
-          Effect.catch((error) => Effect.log(`Warning: Failed to revoke token: ${error.message}`))
-        )
-      }
-
-      yield* deleteTokenOp()
-    })
-
-  const getAccessToken: ConfluenceAuthService["getAccessToken"] = () =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      if (token === null) {
-        return yield* new AuthMissingError()
-      }
-
-      const nowMs = yield* Clock.currentTimeMillis
-      if (!isTokenExpiredAt(token, nowMs)) {
-        return token.access_token
-      }
-
-      const deferred = yield* Deferred.make<OAuthToken, RefreshError>()
-      const existing = yield* Ref.modify(refreshLock, (current) =>
-        Option.isSome(current)
-          ? ([current.value, current] satisfies readonly [RefreshDeferred, Option.Option<RefreshDeferred>])
-          : ([deferred, Option.some(deferred)] satisfies readonly [RefreshDeferred, Option.Option<RefreshDeferred>]))
-
-      if (existing !== deferred) {
-        const refreshed = yield* Deferred.await(existing)
-        return refreshed.access_token
-      }
-
-      const refresh = Effect.gen(function*() {
-        const config = yield* getConfig()
-        // stderr: stdout carries machine-readable payloads (`page get --format adf`,
-        // `--json`), and a progress line there corrupts them.
-        yield* Console.error("Token expired, refreshing...")
-        return yield* refreshTokenImpl(token, config)
-      }).pipe(
-        Effect.catchTag("OAuthError", (error) => {
-          // Same rule as JiraAuth: only Atlassian explicitly saying the grant
-          // itself is spent ends the session. A timeout, a transport error, a
-          // `429` from a burst of concurrent commands, a `400 invalid_client`
-          // from a rotated client secret, or a bare `403` from a proxy are none
-          // of them evidence about the token, and deleting it is unrecoverable.
-          const { errorCode, status } = error
-          const rejected = errorCode === "invalid_grant" && (status === 400 || status === 403)
-          if (error.step === "refresh" && rejected) {
-            return Effect.gen(function*() {
-              yield* deleteTokenOp()
-              return yield* new OAuthError({
-                step: "refresh",
-                cause: "Refresh token expired. Please run 'confluence auth login' to re-authenticate.",
-                status,
-                errorCode
-              })
-            })
-          }
-          return Effect.fail(error)
-        })
-      )
-
-      const exit = yield* refresh.pipe(
-        Effect.exit,
-        Effect.ensuring(Ref.set(refreshLock, Option.none()))
-      )
-      yield* Deferred.done(deferred, exit)
-      const result = yield* Deferred.await(deferred)
-
-      return result.access_token
-    })
-
-  const getCloudId: ConfluenceAuthService["getCloudId"] = () =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      if (token === null) {
-        return yield* new AuthMissingError()
-      }
-      return token.cloud_id
-    })
-
-  const getCurrentUser: ConfluenceAuthService["getCurrentUser"] = () =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      return token?.user ?? null
-    })
-
-  const getActiveProfile: ConfluenceAuthService["getActiveProfile"] = () => loadActiveProfileOp()
-
-  const listProfiles: ConfluenceAuthService["listProfiles"] = () => listProfilesOp()
-
-  const switchProfile: ConfluenceAuthService["switchProfile"] = (selector) => switchProfileOp(selector)
-
-  const removeProfile: ConfluenceAuthService["removeProfile"] = (selector) => removeProfileOp(selector)
-
-  const isLoggedIn: ConfluenceAuthService["isLoggedIn"] = () =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      return token !== null
-    })
-
-  return ConfluenceAuth.of({
-    configure,
-    isConfigured,
-    login,
-    logout,
-    getAccessToken,
-    getCloudId,
-    getCurrentUser,
-    getActiveProfile,
-    listProfiles,
-    switchProfile,
-    removeProfile,
-    isLoggedIn
-  })
-})
-
 /**
  * Layer for ConfluenceAuth service.
  *
@@ -581,4 +211,32 @@ export const layer: Layer.Layer<
   ConfluenceAuth,
   never,
   HttpClient.HttpClient | ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto
-> = Layer.effect(ConfluenceAuth, make)
+> = Layer.effect(
+  ConfluenceAuth,
+  Effect.map(
+    makeAtlassianCliAuth({
+      toolName: "confluence-to-markdown",
+      commandName: "confluence",
+      productName: "Confluence",
+      scopes: CLI_LOGIN_SCOPES,
+      authMissing: () => new AuthMissingError(),
+      legacyOAuthConfig: loadLegacyOAuthConfig()
+    }),
+    (auth) =>
+      ConfluenceAuth.of({
+        configure: auth.configure,
+        isConfigured: auth.isConfigured,
+        login: auth.login,
+        logout: auth.logout,
+        // The public type is a plain string for compatibility; unwrap here only.
+        getAccessToken: () => auth.getAccessToken().pipe(Effect.map(Redacted.value)),
+        getCloudId: auth.getCloudId,
+        getCurrentUser: auth.getCurrentUser,
+        getActiveProfile: auth.getActiveProfile,
+        listProfiles: auth.listProfiles,
+        switchProfile: auth.switchProfile,
+        removeProfile: auth.removeProfile,
+        isLoggedIn: auth.isLoggedIn
+      })
+  )
+).pipe(Layer.provide(NodeCliAuthLive))

@@ -81,7 +81,7 @@ export const ClockifyApiLive = ClockifyApiClient.layer.pipe(
 // refreshes an expired OAuth token over the network, hangs the process the way
 // bounding the Clockify calls in `timer/status.ts` was meant to prevent.
 //
-// The bound for that lives in `JiraAuth.refreshTokenImpl` (30s), not here: a
+// The bound lives in shared Atlassian CLI auth's `refreshAndPersist` (30s): a
 // timeout on this call would be inert, because the rotation is uninterruptible,
 // `Effect.timeout` is a race, and racing an uninterruptible loser means waiting
 // for it anyway.
