@@ -73,7 +73,8 @@ export const StatePanel = ({
   tone = "neutral",
   ...props
 }: StatePanelProps): ReactElement => {
-  const role = announce === "assertive" ? "alert" : announce === "polite" ? "status" : undefined
+  // An announcing region owns its role; otherwise the caller's role (for example "note") stands.
+  const role = announce === "assertive" ? "alert" : announce === "polite" ? "status" : props.role
 
   return (
     <section

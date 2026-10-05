@@ -43,6 +43,17 @@ describe("Notice", () => {
     expect(assertive?.querySelector("button")?.textContent).toBe("Retry")
   })
 
+  it("keeps a caller-supplied role unless it announces", () => {
+    expect(render(<Notice role="note">Context.</Notice>)?.getAttribute("role")).toBe("note")
+    expect(
+      render(
+        <Notice announce="polite" role="note">
+          Saving
+        </Notice>
+      )?.getAttribute("role")
+    ).toBe("status")
+  })
+
   it("covers every state tone", () => {
     expect(Object.keys(RLY_NOTICE_VARIANTS.tone)).toEqual(["neutral", "positive", "critical", "caution", "progress"])
   })
