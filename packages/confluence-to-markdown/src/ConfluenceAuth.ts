@@ -11,16 +11,19 @@
  *
  * @module
  */
-import { CONFLUENCE_FOLDER_SCOPES, CONFLUENCE_SCOPES, type OAuthError } from "@knpkv/atlassian-common/auth"
-import { type AtlassianCliDescriptor, makeAtlassianCliAuth, NodeCliAuthLive } from "@knpkv/atlassian-common/cli-auth"
+import { CONFLUENCE_FOLDER_SCOPES, CONFLUENCE_SCOPES } from "@knpkv/atlassian-common/auth"
 import {
-  type AuthProfile,
+  type AtlassianCliAuth,
+  type AtlassianCliDescriptor,
+  makeAtlassianCliAuth,
+  NodeCliAuthLive
+} from "@knpkv/atlassian-common/cli-auth"
+import {
   FileSystemError,
   type HomeDirectoryError,
   HomeDirectoryTag,
   type OAuthConfig,
-  OAuthConfigSchema,
-  type OAuthUser
+  OAuthConfigSchema
 } from "@knpkv/atlassian-common/config"
 import * as Context from "effect/Context"
 import type * as Crypto from "effect/Crypto"
@@ -29,7 +32,6 @@ import * as FileSystem from "effect/FileSystem"
 import type { HttpClient } from "effect/http"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
-import type * as PlatformError from "effect/PlatformError"
 import type { ChildProcessSpawner } from "effect/process"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -111,85 +113,20 @@ const loadLegacyOAuthConfig = (): Effect.Effect<
     )
   })
 
-/**
- * Options for the login method.
- */
-export interface LoginOptions {
-  /** Site URL to select (for accounts with multiple sites) */
-  readonly siteUrl?: string
-}
+export type { AccessibleSite, LoginOptions } from "@knpkv/atlassian-common/cli-auth"
+
+type SharedAuth = AtlassianCliAuth<AuthMissingError>
 
 /**
- * Information about an accessible Confluence site.
- */
-export interface AccessibleSite {
-  readonly id: string
-  readonly name: string
-  readonly url: string
-}
-
-/**
- * ConfluenceAuth service interface.
+ * ConfluenceAuth service interface: the shared Atlassian CLI auth, adapted. The Confluence client
+ * takes the access token as a plain string, so `getAccessToken` unwraps it here, and nothing in this
+ * CLI reads the site URL from auth, so `getSiteUrl` is not exposed.
  *
  * @category Services
  */
-export interface ConfluenceAuthService {
-  /** Configure OAuth client credentials */
-  readonly configure: (
-    config: OAuthConfig
-  ) => Effect.Effect<void, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
-  /** Check if OAuth is configured */
-  readonly isConfigured: () => Effect.Effect<
-    boolean,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Start OAuth login flow. Returns list of sites if multiple are available. */
-  readonly login: (
-    options?: LoginOptions
-  ) => Effect.Effect<
-    ReadonlyArray<AccessibleSite> | void,
-    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Remove stored authentication */
-  readonly logout: () => Effect.Effect<
-    void,
-    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Get access token, refreshing if needed */
-  readonly getAccessToken: () => Effect.Effect<
-    string,
-    AuthMissingError | OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Get cloud ID from stored token */
-  readonly getCloudId: () => Effect.Effect<
-    string,
-    AuthMissingError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Get current user info from stored token */
-  readonly getCurrentUser: () => Effect.Effect<
-    OAuthUser | null,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Get active auth profile */
-  readonly getActiveProfile: () => Effect.Effect<
-    AuthProfile | null,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** List stored auth profiles */
-  readonly listProfiles: () => Effect.Effect<
-    ReadonlyArray<AuthProfile>,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Switch active profile by ID, name, site URL, cloud ID, or account ID */
-  readonly switchProfile: (
-    selector: string
-  ) => Effect.Effect<AuthProfile | null, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
-  /** Remove stored profile by ID, name, site URL, cloud ID, or account ID */
-  readonly removeProfile: (
-    selector: string
-  ) => Effect.Effect<AuthProfile | null, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
-  /** Check if user is logged in */
-  readonly isLoggedIn: () => Effect.Effect<boolean, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
+export interface ConfluenceAuthService extends Omit<SharedAuth, "getAccessToken" | "getSiteUrl"> {
+  /** Get access token, refreshing if needed, unwrapped for the Confluence client. */
+  readonly getAccessToken: () => Effect.Effect<string, Effect.Error<ReturnType<SharedAuth["getAccessToken"]>>>
 }
 
 /**
