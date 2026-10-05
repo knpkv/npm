@@ -2002,7 +2002,9 @@ export class WorkStore implements WorkStoreService {
       `)
           database.exec("COMMIT")
         } catch (error) {
-          database.exec("ROLLBACK")
+          // SQLite may already have rolled back (SQLITE_FULL, IOERR); a second
+          // ROLLBACK would throw and replace the real error.
+          if (database.isTransaction) database.exec("ROLLBACK")
           throw error
         }
       }
