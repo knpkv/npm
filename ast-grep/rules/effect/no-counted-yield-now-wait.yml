@@ -16,8 +16,8 @@ rule:
         stopBy: end
 
 files:
-  - "packages/jira-clockify/test/**/*.ts"
-  - "packages/jira-clockify/test/**/*.tsx"
+  - "packages/*/test/**/*.ts"
+  - "packages/*/test/**/*.tsx"
 
 ignores:
   - "**/generated/**"
