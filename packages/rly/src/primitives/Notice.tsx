@@ -64,9 +64,10 @@ export type NoticeProps = Omit<ComponentPropsWithRef<"div">, "aria-live" | "chil
  * The tone icon is decorative, so `children` must state the tone in words
  * ("Sync failed: …"), not rely on color and glyph.
  *
- * `announce` makes the notice a live region. Screen readers announce changes
- * inside a region that is already mounted, not the region appearing: mount it
- * persistently and swap its children, or keep `announce="off"` for static text.
+ * `announce` makes the notice a live region. A polite status region reliably announces
+ * changes only once it is already mounted: mount it persistently and swap its children.
+ * An assertive alert may announce as soon as it is inserted. Keep `announce="off"`
+ * for static text.
  *
  * @example
  * <Notice tone="caution">Jira is read-only for this week.</Notice>

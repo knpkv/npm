@@ -59,9 +59,10 @@ export type StatePanelProps = Omit<ComponentPropsWithRef<"section">, "aria-live"
 /**
  * Explain an outcome with redundant word, icon, rail, ink, and tint cues.
  *
- * `announce` makes the panel a live region. Screen readers announce changes
- * inside a region that is already mounted, not the region appearing: mount it
- * persistently and swap its content, or keep `announce="off"` for static states.
+ * `announce` makes the panel a live region. A polite status region reliably announces
+ * changes only once it is already mounted: mount it persistently and swap its content.
+ * An assertive alert may announce as soon as it is inserted. Keep `announce="off"`
+ * for static states.
  */
 export const StatePanel = ({
   action,

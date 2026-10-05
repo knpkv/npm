@@ -118,9 +118,10 @@ without cloning a framework-specific control.
 content, with the same `tone` vocabulary as `StatePanel` and an optional
 `action`. Neutral notices carry no glyph; other tones add a decorative icon, so
 the sentence itself must name the tone ("Sync failed: …"). Use `StatePanel`
-when the state needs a title and replaces a region. With `announce`, keep the
-notice mounted and swap its children: live regions announce changes, not the
-region appearing.
+when the state needs a title and replaces a region. With `announce="polite"`,
+keep the notice mounted and swap its children, because a status region reliably
+announces changes, not its own appearance. An `announce="assertive"` alert may
+announce as soon as it is inserted.
 
 `ToggleGroup` chooses one of a few peer options, such as a range or a measure,
 and is always controlled: exactly one option is on, pressing it again changes

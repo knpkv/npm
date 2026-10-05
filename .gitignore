@@ -21,6 +21,8 @@ packages/docs/dist/
 packages/docs/node_modules/
 playwright-report/
 test-results/
+# Vitest browser-mode traces and screenshots from failed runs.
+.vitest/
 storybook-static/
 
 .DS_Store

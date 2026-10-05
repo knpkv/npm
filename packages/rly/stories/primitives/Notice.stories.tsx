@@ -63,3 +63,29 @@ export const NarrowWithAction: Story = {
   },
   render: () => <NarrowAction />
 }
+
+/** The native `hidden` attribute hides a notice and its action, even though the notice sets its own display. */
+export const Hidden: Story = {
+  args: { children: "Hidden notice." },
+  play: async ({ canvasElement }) => {
+    // toBeVisible trusts the hidden attribute; only the computed box proves the cascade honours it.
+    const [shown, hidden, revealed] = Array.from(canvasElement.querySelectorAll<HTMLElement>("main > div"))
+    await expect(shown?.getBoundingClientRect().height).toBeGreaterThan(0)
+    await expect(hidden?.hasAttribute("hidden")).toBe(true)
+    await expect(hidden === undefined ? "missing" : getComputedStyle(hidden).display).toBe("none")
+    // Unlayered application CSS still wins, as a print rule revealing inactive panels needs.
+    await expect(revealed === undefined ? "missing" : getComputedStyle(revealed).display).toBe("block")
+  },
+  render: () => (
+    <main style={pageStyle}>
+      <Notice>Shown notice.</Notice>
+      <Notice action={<Button size="compact">Retry hidden</Button>} hidden tone="critical">
+        Hidden notice.
+      </Notice>
+      <style>{".app-reveal { display: block; }"}</style>
+      <Notice className="app-reveal" hidden>
+        Revealed by application CSS.
+      </Notice>
+    </main>
+  )
+}
