@@ -7,6 +7,9 @@ import {
   authenticatedDevServerOptions,
   makeAuthenticatedDevProxyConfig
 } from "./src/tooling/authenticated-dev-proxy.js"
+import { productionPrototypeBoundary } from "./src/tooling/production-prototype-boundary.js"
+
+const clientRoot = path.resolve(import.meta.dirname, "src/client")
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, ".", "")
@@ -15,7 +18,7 @@ export default defineConfig(({ mode }) => {
     : `http://127.0.0.1:${env.PORT}`
 
   return {
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), productionPrototypeBoundary(clientRoot)],
     root: "src/client",
     build: {
       // The authenticated application shell includes the review workspace and syntax tooling.
