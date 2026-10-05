@@ -296,6 +296,10 @@ export const COMPONENT_REGISTRY_METADATA = {
   ThemeProvider: registryMetadata("Control the light, dark, or system rly theme", ["dark", "light", "system"], [
     "theme"
   ]),
+  ThemeSelect: registryMetadata("Let the viewer choose the system, light, or dark theme", [
+    "hidden",
+    "visible"
+  ], ["preference", "theme"]),
   TimelineRow: registryMetadata("Present one attributable human, agent, system, or service event", [
     "agent",
     "human",

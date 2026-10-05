@@ -513,6 +513,10 @@ export const componentManifest = {
       exports: [
         { kind: "value", name: "RLY_THEME_NAMES" },
         { kind: "value", name: "ThemeProvider" },
+        { kind: "value", name: "decodeRlyTheme" },
+        { kind: "value", name: "useDocumentTheme" },
+        { kind: "value", name: "useStoredTheme" },
+        { kind: "type", name: "RlyPreferenceStorage" },
         { kind: "type", name: "RlyTheme" },
         { kind: "type", name: "ThemeProviderProps" }
       ],
@@ -934,6 +938,26 @@ export const componentManifest = {
         story: "stories/primitives/Text.stories.tsx",
         storyId: "primitives-text--gallery",
         tests: ["test/primitives/Text.test.tsx"]
+      }
+    },
+    {
+      category: "primitive",
+      exports: [
+        { kind: "value", name: "ThemeSelect" },
+        { kind: "type", name: "RlyThemeSelectLabelVisibility" },
+        { kind: "type", name: "ThemeSelectProps" }
+      ],
+      name: "ThemeSelect",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/ThemeSelect.tsx",
+      status: "stable",
+      styles: ["src/primitives/ThemeSelect.module.css"],
+      variants: [{ defaultValue: "visible", name: "labelVisibility", values: ["visible", "hidden"] }],
+      visual: {
+        story: "stories/primitives/ThemeSelect.stories.tsx",
+        storyId: "primitives-themeselect--gallery",
+        tests: ["test/primitives/ThemeSelect.test.tsx"]
       }
     },
     {

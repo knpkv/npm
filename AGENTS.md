@@ -112,6 +112,10 @@ row may cover several flows only when each is named, and a checklist cannot pass
 `PENDING`, failed, or unresolved. Capability-boundary decisions must stay synchronized across the
 owning plugin/barrels, runtime documentation, package README, source requirements, and governing ADR;
 an alternate authorization path must not contradict a provider-enforced prerequisite.
+For rly viewer-preference persistence, keep `packages/rly/README.md`,
+`packages/rly/src/foundations/ThemeProvider.tsx` and its `index.ts` barrel,
+`.specs/control-center/{requirements,design}.md`, and any governing ADR aligned on
+the opt-in, application-supplied storage boundary. Generated/vendor files are excluded.
 
 Keep Herdr worker-relationship behavior synchronized across
 `packages/herdr-fleet/README.md`, `packages/herdr-coordinator/README.md`, and
