@@ -12,19 +12,19 @@ rule:
       all:
         - has:
             field: source
-            regex: '^["'']@knpkv/atlassian-common/auth["'']$'
+            regex: '^["'']@knpkv/atlassian-common(/auth)?["'']$'
         - has:
             stopBy: end
             kind: import_specifier
             has:
               field: name
               regex: "^refreshToken$"
-    # A namespace import would reach refreshToken without naming it.
+    # A namespace import (of ./auth or the root barrel, which re-exports it) would reach refreshToken without naming it.
     - kind: import_statement
       all:
         - has:
             field: source
-            regex: '^["'']@knpkv/atlassian-common/auth["'']$'
+            regex: '^["'']@knpkv/atlassian-common(/auth)?["'']$'
         - has:
             stopBy: end
             kind: namespace_import

@@ -23,6 +23,21 @@ snapshots:
         start: 9
         end: 28
   ? |
+    import * as AtlassianCommon from "@knpkv/atlassian-common"
+  : labels:
+      - source: import * as AtlassianCommon from "@knpkv/atlassian-common"
+        style: primary
+        start: 0
+        end: 58
+      - source: '"@knpkv/atlassian-common"'
+        style: secondary
+        start: 33
+        end: 58
+      - source: "* as AtlassianCommon"
+        style: secondary
+        start: 7
+        end: 27
+  ? |
     import * as Auth from "@knpkv/atlassian-common/auth"
   : labels:
       - source: import * as Auth from "@knpkv/atlassian-common/auth"
@@ -37,6 +52,25 @@ snapshots:
         style: secondary
         start: 7
         end: 16
+  ? |
+    import { IssueKey, refreshToken } from "@knpkv/atlassian-common"
+  : labels:
+      - source: import { IssueKey, refreshToken } from "@knpkv/atlassian-common"
+        style: primary
+        start: 0
+        end: 64
+      - source: '"@knpkv/atlassian-common"'
+        style: secondary
+        start: 39
+        end: 64
+      - source: refreshToken
+        style: secondary
+        start: 19
+        end: 31
+      - source: refreshToken
+        style: secondary
+        start: 19
+        end: 31
   ? |
     import { OAuthError, refreshToken } from "@knpkv/atlassian-common/auth"
   : labels:

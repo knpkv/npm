@@ -6,7 +6,13 @@ valid:
     import { makeAtlassianCliAuth } from "@knpkv/atlassian-common/cli-auth"
   - |
     import type { OAuthError } from "@knpkv/atlassian-common/auth"
+  - |
+    import { IssueKey } from "@knpkv/atlassian-common"
 invalid:
+  - |
+    import { IssueKey, refreshToken } from "@knpkv/atlassian-common"
+  - |
+    import * as AtlassianCommon from "@knpkv/atlassian-common"
   - |
     import { OAuthError, refreshToken } from "@knpkv/atlassian-common/auth"
   - |
