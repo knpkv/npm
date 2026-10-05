@@ -16,20 +16,14 @@
  *
  * @module
  */
-import type { OAuthError } from "@knpkv/atlassian-common/auth"
-import { type AtlassianCliDescriptor, makeAtlassianCliAuth, NodeCliAuthLive } from "@knpkv/atlassian-common/cli-auth"
-import type {
-  AuthProfile,
-  FileSystemError,
-  HomeDirectoryError,
-  OAuthConfig,
-  OAuthUser
-} from "@knpkv/atlassian-common/config"
+import {
+  type AtlassianCliAuth,
+  type AtlassianCliDescriptor,
+  makeAtlassianCliAuth,
+  NodeCliAuthLive
+} from "@knpkv/atlassian-common/cli-auth"
 import * as Context from "effect/Context"
-import type * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import type * as PlatformError from "effect/PlatformError"
-import type * as Redacted from "effect/Redacted"
 import type { AuthMissingError } from "./JiraCliError.js"
 import { authMissing } from "./JiraCliError.js"
 
@@ -51,95 +45,15 @@ const JIRA_CLI_SCOPES = [
   "offline_access"
 ]
 
-/**
- * Options for the login method.
- *
- * @category Types
- */
-export interface LoginOptions {
-  /** Site URL to select (for accounts with multiple sites) */
-  readonly siteUrl?: string
-}
+export type { AccessibleSite, LoginOptions } from "@knpkv/atlassian-common/cli-auth"
 
 /**
- * Information about an accessible Jira site.
- *
- * @category Types
- */
-export interface AccessibleSite {
-  readonly id: string
-  readonly name: string
-  readonly url: string
-}
-
-/**
- * JiraAuth service interface.
+ * JiraAuth service interface: the shared Atlassian CLI auth, failing with Jira's own
+ * {@link AuthMissingError} when nobody is logged in.
  *
  * @category Services
  */
-export interface JiraAuthService {
-  /** Configure OAuth client credentials */
-  readonly configure: (
-    config: OAuthConfig
-  ) => Effect.Effect<void, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
-  /** Check if OAuth is configured */
-  readonly isConfigured: () => Effect.Effect<
-    boolean,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Start OAuth login flow. Returns list of sites if multiple are available. */
-  readonly login: (
-    options?: LoginOptions
-  ) => Effect.Effect<
-    ReadonlyArray<AccessibleSite> | void,
-    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Remove stored authentication */
-  readonly logout: () => Effect.Effect<
-    void,
-    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Get access token, refreshing if needed */
-  readonly getAccessToken: () => Effect.Effect<
-    Redacted.Redacted<string>,
-    AuthMissingError | OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Get cloud ID from stored token */
-  readonly getCloudId: () => Effect.Effect<
-    string,
-    AuthMissingError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Get site URL from stored token */
-  readonly getSiteUrl: () => Effect.Effect<
-    string,
-    AuthMissingError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Get current user info from stored token */
-  readonly getCurrentUser: () => Effect.Effect<
-    OAuthUser | null,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Get active auth profile */
-  readonly getActiveProfile: () => Effect.Effect<
-    AuthProfile | null,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** List stored auth profiles */
-  readonly listProfiles: () => Effect.Effect<
-    ReadonlyArray<AuthProfile>,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  >
-  /** Switch active profile by ID, name, site URL, cloud ID, or account ID */
-  readonly switchProfile: (
-    selector: string
-  ) => Effect.Effect<AuthProfile | null, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
-  /** Remove stored profile by ID, name, site URL, cloud ID, or account ID */
-  readonly removeProfile: (
-    selector: string
-  ) => Effect.Effect<AuthProfile | null, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
-  /** Check if user is logged in */
-  readonly isLoggedIn: () => Effect.Effect<boolean, FileSystemError | HomeDirectoryError | PlatformError.PlatformError>
-}
+export interface JiraAuthService extends AtlassianCliAuth<AuthMissingError> {}
 
 /**
  * JiraAuth service tag.
