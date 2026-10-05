@@ -1,5 +1,11 @@
 # @knpkv/agent-usage
 
+## 0.2.1
+
+### Patch Changes
+
+- [#464](https://github.com/knpkv/npm/pull/464) [`f693080`](https://github.com/knpkv/npm/commit/f69308082ab1f73c1ae43037d01c60385dee06b7) Thanks [@konopkov](https://github.com/konopkov)! - `agent-usage --version` prints the installed package's version instead of a hardcoded `0.1.0`.
+
 ## 0.2.0
 
 ### Minor Changes
