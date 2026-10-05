@@ -2,7 +2,7 @@
 
 `rly` is the release-oriented design system for `@knpkv/control-center`. It provides browser-safe presentation contracts for delivery decisions, service provenance, collaborators, governed agents, and complete pull-request diffs.
 
-The package is intentionally application-independent: it contains no vendor clients, persistence, authorization, release hashing, or server runtime.
+The package is intentionally application-independent: it contains no vendor clients, persistence, authorization, release hashing, or server runtime. The one exception is viewer-local presentation preferences, such as the theme, remembered through opt-in hooks in storage the application hands in. It never stores application data.
 
 ## Status
 
@@ -73,6 +73,32 @@ export const App = () => (
 ```
 
 `ThemeProvider` is controlled and performs no storage or preference reads.
+To remember the viewer's choice, pair it with `useStoredTheme` and `ThemeSelect`:
+
+```tsx
+import { ThemeProvider, useStoredTheme } from "@knpkv/rly/foundations"
+import { ThemeSelect } from "@knpkv/rly/primitives"
+
+const browserStorage = () => window.localStorage
+
+export const Shell = ({ children }: { readonly children: ReactNode }) => {
+  const [theme, setTheme] = useStoredTheme("my_app_theme", browserStorage)
+  return (
+    <ThemeProvider theme={theme}>
+      <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} value={theme} />
+      {children}
+    </ThemeProvider>
+  )
+}
+```
+
+The storage key is required, because composed apps share an origin. Storage is
+passed lazily: server rendering uses `system` and never touches it, hydration
+then switches to the stored theme, and a browser that refuses storage keeps
+the choice for the page lifetime. Consumers in the same tab and in other tabs
+stay in sync. `decodeRlyTheme` validates a stored value for apps that keep
+their own storage. `ThemeSelect` builds on `Select`; settings pages show its
+"Appearance" label, compact headers hide it with `labelVisibility="hidden"`.
 `LinkProvider` accepts an application-owned anchor bridge without importing a
 router. `PortalProvider` owns an in-tree target unless a custom target is
 supplied; explicit `null` never falls back to the global document body. `Icon`
