@@ -37,6 +37,13 @@ one-time code in its fragment; opening it exchanges the code for a session cooki
 the address bar. The code works once and expires a minute after it was printed. The server only
 listens on loopback and only answers reads.
 
+Besides usage per period (`/api/usage`), limits (`/api/limits`) and status (`/api/status`), the
+server answers one Booking's sessions in a range: `/api/sessions?from&to&booking&agent`, with
+`booking` as the usage report names it (`ticket:RLY-142`, `repo:app`). Each session row carries its
+first and last request in the range, requests, tokens and API-equivalent cost on that Booking only:
+a session that worked on two Bookings appears under each with its part. A range covers at most 92
+days. The list is capped at 200 rows, most cost first, with a count of the rest. Sessions are never given a share of a limit.
+
 ### Getting back in
 
 `agent-usage login` asks the running server for a fresh link and prints it; `agent-usage login

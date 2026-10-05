@@ -110,9 +110,9 @@ const periodIndex = (periods: ReadonlyArray<Period>, bucketStart: number, end: n
   return low
 }
 
-const zeroTokens: Tokens = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 }
+export const zeroTokens: Tokens = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 }
 
-const addTokens = (left: Tokens, right: Tokens): Tokens => ({
+export const addTokens = (left: Tokens, right: Tokens): Tokens => ({
   input: left.input + right.input,
   output: left.output + right.output,
   reasoning: left.reasoning + right.reasoning,
