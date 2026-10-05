@@ -2,6 +2,7 @@
  * Root CLI command composition.
  */
 import { makeInstallCommand } from "@knpkv/agent-skills"
+import { Verbose } from "@knpkv/atlassian-common/cli"
 import { Command } from "effect/cli"
 import * as Console from "effect/Console"
 import {
@@ -89,6 +90,7 @@ const pageCommand = (pageGet: typeof pageGetCommand) =>
 export const makeConfluenceCommand = (options: ConfluenceCommandOptions = {}) =>
   Command.make("confluence").pipe(
     Command.withDescription("Sync Confluence pages to local markdown"),
+    Command.withGlobalFlags([Verbose]),
     Command.withSubcommands([
       authCommand,
       workspaceCommand,

@@ -3,12 +3,12 @@
  * CLI entry point for confluence-to-markdown.
  */
 import { NodeRuntime, NodeStdio, NodeTerminal } from "@effect/platform-node"
+import { commandArgs, withCliErrorHandling } from "@knpkv/atlassian-common/cli"
 import { Command } from "effect/cli"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stdio from "effect/Stdio"
 import pkg from "../package.json" with { type: "json" }
-import { handleError } from "./commands/errorHandler.js"
 import { AppLayer, AuthOnlyLayer, CloneLayer, FetchLayer, getLayerType, MinimalLayer } from "./commands/layers.js"
 import { confluenceCommand } from "./commands/root.js"
 
@@ -32,7 +32,7 @@ const cli = Command.runWith(confluenceCommand, {
  * site can see it.
  */
 const runCli = (args: ReadonlyArray<string>) => {
-  switch (getLayerType(args)) {
+  switch (getLayerType(commandArgs(args))) {
     case "full":
       return cli(args).pipe(Effect.provide(AppLayer))
     case "auth":
@@ -52,7 +52,7 @@ Effect.gen(function*() {
   const args = yield* stdio.args
   return yield* runCli(args)
 }).pipe(
+  withCliErrorHandling,
   Effect.provide(Layer.mergeAll(NodeTerminal.layer, NodeStdio.layer)),
-  Effect.catchCause((cause) => handleError(cause).pipe(Effect.andThen(Effect.failCause(cause)))),
   NodeRuntime.runMain({ disableErrorReporting: true })
 )

@@ -8,6 +8,7 @@
  */
 import { NodeRuntime, NodeStdio } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
+import { commandArgs, Verbose, withCliErrorHandling } from "@knpkv/atlassian-common/cli"
 import { Command } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
@@ -18,7 +19,6 @@ import {
   authCommand,
   AuthOnlyLayer,
   getLayerType,
-  handleError,
   issueCommand,
   MinimalLayer,
   versionCommand
@@ -38,6 +38,7 @@ const skillsCommand = Command.make("skills", {}, () => Console.log("Usage: jira 
 // === Main command ===
 const jira = Command.make("jira").pipe(
   Command.withDescription("Jira CLI commands"),
+  Command.withGlobalFlags([Verbose]),
   Command.withSubcommands([
     authCommand,
     issueCommand,
@@ -54,7 +55,7 @@ const cli = Command.runWith(jira, {
 const program = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
   const args = yield* stdio.args
-  const layerType = getLayerType(args)
+  const layerType = getLayerType(commandArgs(args))
   const layer = layerType === "full"
     ? AppLayer
     : layerType === "auth"
@@ -65,8 +66,10 @@ const program = Effect.gen(function*() {
     Effect.provide(layer)
   )
 }).pipe(
-  Effect.provide(NodeStdio.layer),
-  Effect.catchCause((cause) => handleError(cause).pipe(Effect.andThen(Effect.failCause(cause))))
+  withCliErrorHandling,
+  // Executable entry point: the host's stdio is provided once for this process.
+  // @effect-diagnostics-next-line strictEffectProvide:off
+  Effect.provide(NodeStdio.layer)
 )
 
 NodeRuntime.runMain(program, { disableErrorReporting: true })
