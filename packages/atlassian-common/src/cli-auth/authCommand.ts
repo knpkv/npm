@@ -137,7 +137,7 @@ After adding scopes, run: ${loginHint}
     "login",
     {
       site: Flag.String("site").pipe(
-        Flag.withDescription("Site URL to use (for accounts with multiple sites)"),
+        Flag.withDescription(`${descriptor.productName} site URL to use (for accounts with multiple sites)`),
         Flag.optional
       )
     },

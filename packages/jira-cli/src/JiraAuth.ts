@@ -165,11 +165,6 @@ export class JiraAuth extends Context.Service<
   JiraAuthService
 >()("@knpkv/jira-cli/JiraAuth") {}
 
-/**
- * Layer for JiraAuth service.
- *
- * @category Layers
- */
 /** Who the Jira CLI is: shared by its auth and its `auth` commands, so both name the same scopes. */
 export const jiraCliDescriptor: AtlassianCliDescriptor = {
   commandName: "jira",
@@ -177,6 +172,11 @@ export const jiraCliDescriptor: AtlassianCliDescriptor = {
   scopes: JIRA_CLI_SCOPES
 }
 
+/**
+ * Layer for JiraAuth service.
+ *
+ * @category Layers
+ */
 export const layer = Layer.effect(
   JiraAuth,
   makeAtlassianCliAuth({
