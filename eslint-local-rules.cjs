@@ -1742,7 +1742,7 @@ module.exports = {
       const isProtectedAcquisition = (node) => {
         let child = node
         let parent = node.parent
-        while (parent !== undefined && parent.type !== "YieldExpression") {
+        while (parent !== undefined && parent !== null && parent.type !== "YieldExpression") {
           if (
             parent.type === "CallExpression" &&
             (isEffectFunction(context, parent.callee, "acquireRelease") ||
