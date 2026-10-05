@@ -1,5 +1,11 @@
 # @knpkv/rly
 
+## 0.7.0
+
+### Minor Changes
+
+- [#478](https://github.com/knpkv/npm/pull/478) [`d5ee299`](https://github.com/knpkv/npm/commit/d5ee299ce3fa5584f2f54051009828af4a26fe4b) Thanks [@konopkov](https://github.com/konopkov)! - Add `Notice`, an inline one-sentence message with a state tone, optional action, and opt-in live-region announcement. Use it where packages hand-rolled tinted note paragraphs; `StatePanel` stays for titled, region-level states. `StatePanel` docs now explain that a polite status region must already be mounted to announce reliably, while an assertive alert may announce on insertion. Components that set their own `display` now still honour the native `hidden` attribute, through a new last `rly.state` layer that unlayered application CSS can still override. The open `RelayDock` trigger keeps its layout box and is `inert` instead of `hidden`. `StatePanel` no longer drops a caller-supplied `role` when it is not announcing.
+
 ## 0.6.1
 
 ### Patch Changes
