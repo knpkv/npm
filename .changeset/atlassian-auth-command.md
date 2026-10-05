@@ -2,6 +2,7 @@
 "@knpkv/atlassian-common": minor
 "@knpkv/jira-cli": minor
 "@knpkv/confluence-to-markdown": minor
+"@knpkv/agent-skills": patch
 ---
 
 One shared `auth` command group for jira and confluence: `makeAuthCommand(service, descriptor, options)` in `@knpkv/atlassian-common/cli-auth`. Each CLI exports one descriptor (`jiraCliDescriptor`, `confluenceCliDescriptor`: command name, product name, login scopes) that feeds both its auth and its `auth` commands.

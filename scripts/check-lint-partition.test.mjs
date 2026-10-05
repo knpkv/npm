@@ -62,6 +62,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "node scripts/check-package-script-portability.mjs",
     "node scripts/check-workflow-action-pins.mjs",
     "node scripts/check-workflow-secret-boundaries.mjs",
+    "pnpm skills:check",
     "node --test scripts/check-lint-partition.test.mjs"
   ])
   assert.deepEqual(expandedScript("lint"), [...staticCommands, ...coverageCommands])
@@ -82,6 +83,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "check-package-script-portability.mjs",
     "check-workflow-action-pins.mjs",
     "check-workflow-secret-boundaries.mjs",
+    "pnpm skills:check",
     "check-security-doc-examples.mjs",
     "check-control-center-live-aws.mjs",
     "bootstrap.test.sh",
