@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { ChildEnv, Domain, ReadClient } from "@knpkv/codecommit-core"
-import { ConfigProvider, Effect, Exit, Fiber, Layer, Option, Sink, Stream } from "effect"
+import { ConfigProvider, Deferred, Effect, Exit, Fiber, Layer, Option, Sink, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/process/ChildProcess"
@@ -531,8 +531,26 @@ describe("WorktreeService", () => {
         )
         const holderReady = yield* holder.stdout.pipe(Stream.decodeText(), Stream.splitLines, Stream.runHead)
         expect(Option.getOrUndefined(holderReady)).toBe("test-lock-ready")
-        const waitingCheckout = yield* secondService.checkout(plan).pipe(Effect.forkChild({ startImmediately: true }))
-        for (let schedulerYield = 0; schedulerYield < 100; schedulerYield += 1) yield* Effect.yieldNow
+        const lockReadStarted = yield* Deferred.make<void>()
+        const observedSpawner = ChildProcessSpawner.make((command) =>
+          spawner.spawn(command).pipe(Effect.map((handle) =>
+            ChildProcess.isStandardCommand(command) &&
+              (command.command === "lockf" || command.command === "flock")
+              ? ChildProcessSpawner.makeHandle({
+                ...handle,
+                stdout: handle.stdout.pipe(Stream.onStart(Deferred.succeed(lockReadStarted, undefined)))
+              })
+              : handle
+          ))
+        )
+        const contendedService = yield* makeWorktreeService(() => Effect.succeed(origin)).pipe(
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, observedSpawner)
+        )
+        const waitingCheckout = yield* contendedService.checkout(plan).pipe(
+          Effect.forkChild({ startImmediately: true })
+        )
+        // Checkout has reached the lock readiness read while the external holder owns the lock.
+        yield* Deferred.await(lockReadStarted)
         expect(waitingCheckout.pollUnsafe()).toBeUndefined()
         yield* holder.kill({ killSignal: "SIGKILL" })
         expect((yield* Fiber.join(waitingCheckout)).reused).toBe(true)

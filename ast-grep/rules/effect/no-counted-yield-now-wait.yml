@@ -6,14 +6,16 @@ severity: error
 message: "Synchronize concurrent tests with Deferred, Queue, Latch, or Ref; do not guess a yield count"
 
 rule:
-  all:
-    - pattern: |
-        for (let $INDEX = $START; $COND; $UPDATE) {
-          $$$BODY
-        }
-    - has:
-        pattern: yield* Effect.yieldNow
-        stopBy: end
+  any:
+    - all:
+        - pattern: |
+            for (let $INDEX = $START; $COND; $UPDATE) {
+              $$$BODY
+            }
+        - has:
+            pattern: yield* Effect.yieldNow
+            stopBy: end
+    - pattern: for (let $INDEX = $START; $COND; $UPDATE) yield* Effect.yieldNow
 
 files:
   - "packages/*/test/**/*.ts"
