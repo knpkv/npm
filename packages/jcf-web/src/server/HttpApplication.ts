@@ -1,70 +1,25 @@
 /** The same authenticated routes, bootstrap exchange and static client in production and tests. */
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
-import { Effect, FileSystem, Layer, Path } from "effect"
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { Effect, Layer, Path } from "effect"
+import { HttpStaticServer } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import { JcfWebApi } from "./Api.js"
 import { ConfigLive, EntriesLive, RowsLive, WeekLive } from "./Handlers.js"
 import { ownerSessionAuthLayer } from "./OwnerSession.js"
 import { layer as weekPlansLayer } from "./WeekPlans.js"
 
-const mimeTypes = new Map([
-  [".css", "text/css"],
-  [".html", "text/html"],
-  [".ico", "image/x-icon"],
-  [".js", "application/javascript"],
-  [".json", "application/json"],
-  [".map", "application/json"],
-  [".svg", "image/svg+xml"],
-  [".woff2", "font/woff2"]
-])
+/**
+ * Serves the built client at `root`, from the same origin as the API so the session cookie applies to
+ * both. Extensionless HTML navigations fall back to `index.html`; `no-cache` makes the browser
+ * revalidate, so a rebuilt `index.html` never points at hashed assets that no longer exist.
+ */
+export const staticClient = (root: string) => HttpStaticServer.layer({ cacheControl: "no-cache", root, spa: true })
 
-/** True only when `candidate` is `root` itself or one of its path-segment descendants. */
-export const isWithinDirectory = (path: Path.Path, root: string, candidate: string): boolean => {
-  const relative = path.relative(root, candidate)
-  return relative === "" || (!path.isAbsolute(relative) && relative !== ".." &&
-    !relative.startsWith(`..${path.sep}`))
-}
-
-/** The built client, served from the same origin so the session cookie applies to both. */
-const serveStatic = Effect.gen(function*() {
-  const request = yield* HttpServerRequest.HttpServerRequest
-  const fileSystem = yield* FileSystem.FileSystem
+/** The client `vite build` writes next to the compiled server. */
+const StaticRouter = Layer.unwrap(Effect.gen(function*() {
   const path = yield* Path.Path
-
-  const requested = decodeURIComponent(new URL(request.url, "http://localhost").pathname).replace(/^\/+/u, "")
-  const here = yield* path.fromFileUrl(new URL(".", import.meta.url))
-  const staticDirectory = path.resolve(here, "../../dist/client")
-  const resolved = path.resolve(staticDirectory, requested === "" ? "index.html" : requested)
-
-  // A resolved path that escaped the directory is a traversal attempt, not a missing file.
-  if (!isWithinDirectory(path, staticDirectory, resolved)) {
-    return HttpServerResponse.text("Forbidden", { status: 403 })
-  }
-
-  if (yield* fileSystem.exists(resolved)) {
-    const info = yield* fileSystem.stat(resolved)
-    if (info.type === "File") {
-      return HttpServerResponse.uint8Array(yield* fileSystem.readFile(resolved), {
-        headers: { "content-type": mimeTypes.get(path.extname(resolved)) ?? "application/octet-stream" },
-        status: 200
-      })
-    }
-  }
-
-  const index = path.join(staticDirectory, "index.html")
-  if (yield* fileSystem.exists(index)) {
-    return HttpServerResponse.uint8Array(yield* fileSystem.readFile(index), {
-      headers: { "content-type": "text/html" },
-      status: 200
-    })
-  }
-  return HttpServerResponse.text("The client has not been built. Run: pnpm --filter @knpkv/jcf-web build", {
-    status: 404
-  })
-})
-
-const StaticRouter = HttpRouter.use((router) => router.add("GET", "/*", serveStatic))
+  return staticClient(yield* path.fromFileUrl(new URL("../../dist/client", import.meta.url)))
+}))
 
 const ApiRoutes = HttpApiBuilder.layer(JcfWebApi).pipe(
   Layer.provide(Layer.mergeAll(WeekLive, RowsLive, ConfigLive, EntriesLive)),
