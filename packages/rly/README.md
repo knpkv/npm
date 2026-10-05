@@ -191,6 +191,14 @@ never reads as 0%. Under forced colours the track keeps a `CanvasText` edge. Pas
 to expose it as a meter instead. With `value={null}`, it is a named image whose
 accessible label combines `label` and `valueText`, without a numeric range.
 
+`StackedBars` stacks values per period on a time axis, with optional `bands` of
+limit levels above the bars on the same axis. Narrow containers bin periods so every
+bar stays at least 6px wide. The plot is one tab stop: ←/→ move and select, Shift
+extends, Home/End jump and Escape clears. Click selects, and Shift+click or a second
+tap elsewhere extends the span. The caller owns `selection` and words it through
+`describeSelection`, which is announced politely once the selection settles. Charts
+are presentation only: the application computes columns, bands and any projection.
+
 `TrackKey` explains the marks the tracks draw, listing only the marks in use.
 `ChartLegend` says which colour is which series, with the swatch before each label.
 Series colours are the tokens `--rly-color-series-1` to `-8` plus

@@ -48,6 +48,10 @@ export const COMPONENT_REGISTRY_METADATA = {
     "series",
     "other"
   ], ["present", "explain"]),
+  StackedBars: registryMetadata("Stack values per period on a time axis with limit bands and a keyboard span selection", [
+    "near",
+    "selected"
+  ], ["present", "measure"]),
   LimitTrack: registryMetadata("Show how full a limit is, with a near mark, a projection, and a stale hatch", [
     "near",
     "full",

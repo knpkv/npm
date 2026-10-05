@@ -288,6 +288,30 @@ export const componentManifest = {
       }
     },
     {
+      category: "primitive",
+      exports: [
+        { kind: "value", name: "StackedBars" },
+        { kind: "type", name: "StackedBarsProps" },
+        { kind: "type", name: "RlyStepBand" },
+        { kind: "type", name: "RlyChartBin" },
+        { kind: "type", name: "RlyChartColumn" },
+        { kind: "type", name: "RlyChartSegment" },
+        { kind: "type", name: "RlyChartSelection" }
+      ],
+      name: "StackedBars",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/StackedBars.tsx",
+      status: "experimental",
+      styles: ["src/primitives/StackedBars.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/primitives/StackedBars.stories.tsx",
+        storyId: "primitives-stackedbars--week",
+        tests: ["test/primitives/StackedBars.test.tsx", "test/primitives/chart.test.ts"]
+      }
+    },
+    {
       category: "diff",
       exports: [
         { kind: "value", name: "PatchDiffView" },

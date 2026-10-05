@@ -849,6 +849,24 @@
       ]
     },
     {
+      "name": "StackedBars",
+      "paths": {
+        "source": "packages/rly/src/primitives/StackedBars.tsx",
+        "story": "packages/rly/stories/primitives/StackedBars.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/StackedBars.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/StackedBars.test.tsx",
+          "packages/rly/test/primitives/chart.test.ts"
+        ]
+      },
+      "storyId": "primitives-stackedbars--week",
+      "storyIds": [
+        "primitives-stackedbars--week"
+      ]
+    },
+    {
       "name": "StageRail",
       "paths": {
         "source": "packages/rly/src/patterns/StageRail.tsx",

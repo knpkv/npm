@@ -1196,6 +1196,28 @@
     },
     {
       "capabilities": [
+        "measure",
+        "present"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "StackedBars",
+      "states": [
+        "default",
+        "near",
+        "selected"
+      ],
+      "terms": [
+        "measure",
+        "near",
+        "present",
+        "primitive",
+        "selected",
+        "stackedbars"
+      ]
+    },
+    {
+      "capabilities": [
         "delivery",
         "progress"
       ],
