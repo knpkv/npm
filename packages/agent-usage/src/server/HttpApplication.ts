@@ -1,7 +1,7 @@
 /** The same authenticated routes, bootstrap exchange and static client in production and tests. */
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { Effect, Layer, Path } from "effect"
-import { HttpPlatform, HttpRouter, HttpServerRespondable, HttpServerResponse, HttpStaticServer } from "effect/http"
+import { HttpRouter, HttpServerResponse, HttpStaticServer } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import { AgentUsageApi } from "./Api.js"
 import { UsageLive } from "./Handlers.js"
@@ -13,20 +13,7 @@ import { ownerSessionAuthLayer } from "./OwnerSession.js"
  * both. Extensionless HTML navigations fall back to `index.html`; `no-cache` makes the browser
  * revalidate, so a rebuilt `index.html` never points at hashed assets that no longer exist.
  */
-export const staticClient = (root: string) =>
-  Layer.effectDiscard(Effect.gen(function*() {
-    const router = yield* HttpRouter.HttpRouter
-    const platform = yield* HttpPlatform.HttpPlatform
-    // FileSystem and Path resolve per request, from the server rather than from whatever an engine
-    // layer provides to the application (the jcf-web fixtures provide an in-memory FileSystem).
-    const serve = HttpStaticServer.make({ cacheControl: "no-cache", root, spa: true }).pipe(
-      Effect.provideService(HttpPlatform.HttpPlatform, platform),
-      Effect.orDie,
-      Effect.flatten,
-      Effect.catchTag("HttpServerError", HttpServerRespondable.toResponse)
-    )
-    yield* router.add("GET", "/*", serve)
-  }))
+export const staticClient = (root: string) => HttpStaticServer.layer({ cacheControl: "no-cache", root, spa: true })
 
 /** The client `vite build` writes next to the compiled server. */
 const StaticRouter = Layer.unwrap(Effect.gen(function*() {

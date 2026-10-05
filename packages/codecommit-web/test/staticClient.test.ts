@@ -6,7 +6,7 @@ import { staticClient } from "../src/server/internal/StaticClient.js"
 
 // The guard itself is Effect's HttpStaticServer; this pins the options codecommit-web mounts it with.
 it.layer(NodeServices.layer)("static client", (it) => {
-  it.effect("serves the client from the server FileSystem, falls back for navigations, and never leaves its root", () =>
+  it.effect("serves the client, falls back for navigations, and never leaves its root", () =>
     Effect.gen(function*() {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
@@ -18,13 +18,10 @@ it.layer(NodeServices.layer)("static client", (it) => {
       yield* fs.makeDirectory(path.join(parent, "client-secret"))
       yield* fs.writeFileString(path.join(parent, "client-secret", "index.html"), "secret")
       const web = HttpRouter.toWebHandler(
-        // The in-memory FileSystem stands in for an engine layer provided to the whole application:
-        // static files must still come from the server's FileSystem, resolved per request.
         staticClient(root).pipe(
-          Layer.provide(FileSystem.layerNoop({})),
           Layer.provide(HttpPlatform.layer),
           Layer.provide(Etag.layer),
-          Layer.provideMerge(NodeServices.layer)
+          Layer.provide(NodeServices.layer)
         ),
         { disableLogger: true }
       )
