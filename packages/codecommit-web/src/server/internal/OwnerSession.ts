@@ -8,7 +8,7 @@
  *
  * @module
  */
-import type { BrowserPairingError } from "@knpkv/browser-pairing"
+import type { BrowserPairingError, CredentialCookieError } from "@knpkv/browser-pairing"
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { type Crypto, Effect, Layer, Redacted } from "effect"
 import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "../Api.js"
@@ -17,7 +17,7 @@ import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "../Ap
 export const makeOwnerSession = Effect.fn("CodeCommitWeb.makeOwnerSession")(
   function*(authorityOrigin: string): Effect.fn.Return<
     OwnerSession.OwnerSessionService,
-    OwnerSession.UnsafeLoopbackAddressError | BrowserPairingError,
+    OwnerSession.UnsafeLoopbackAddressError | BrowserPairingError | CredentialCookieError,
     Crypto.Crypto
   > {
     return yield* OwnerSession.make({

@@ -337,7 +337,9 @@ export const makeServer = (options: CodeCommitServerOptions) => {
   const hostname = options.hostname ?? "127.0.0.1"
   return Layer.unwrap(
     OwnerSession.requireLoopbackHostname(hostname).pipe(
-      Effect.map(() => {
+      // The printed URL carries the bootstrap code, so its origin must be the server or its dev proxy.
+      Effect.andThen(OwnerSession.resolvePublicOrigin(options.publicOrigin, options.security.authorityOrigin)),
+      Effect.map((publicOrigin) => {
         const server = HttpRouter.serve(AllRoutes, {
           // Coordinate tokens include provider-valid repository names up to 100
           // characters; keep one bounded segment for the review route.
@@ -353,9 +355,7 @@ export const makeServer = (options: CodeCommitServerOptions) => {
           Layer.tap(() =>
             // Minted only once the server is listening, so the printed code is one that can be spent.
             options.security.mintBootstrapCode.pipe(
-              Effect.map((code) =>
-                OwnerSession.bootstrapUrl(options.publicOrigin ?? options.security.authorityOrigin, code)
-              ),
+              Effect.map((code) => OwnerSession.bootstrapUrl(publicOrigin, code)),
               Effect.flatMap((url) => options.ready === undefined ? Effect.void : Deferred.succeed(options.ready, url))
             )
           )

@@ -1,11 +1,25 @@
 import { NodeCrypto } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigService, Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
+import * as ChildEnv from "@knpkv/codecommit-core/ChildEnv.js"
 import { AwsApiError, PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
-import { Cause, Crypto, Deferred, Effect, Exit, Fiber, Redacted, Ref, Result, Stream, SubscriptionRef } from "effect"
+import {
+  Cause,
+  Crypto,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Redacted,
+  Ref,
+  Result,
+  Stream,
+  SubscriptionRef
+} from "effect"
 import { HttpServerResponse } from "effect/http"
 import { CodeCommitApi, OwnerSessionAuth, type PullRequestDiffContentResponse } from "../src/server/Api.js"
 import { commitConfigMutation } from "../src/server/handlers/config-live.js"
@@ -18,6 +32,7 @@ import {
   resolveCodeCommitPublicOriginForBind
 } from "../src/server/internal/PublicOrigin.js"
 import { makeRelayFindingPublisher } from "../src/server/review/RelayFindingPublisher.js"
+import { makeServer } from "../src/server/Server.js"
 
 const authorityOrigin = "http://127.0.0.1:3000"
 
@@ -426,6 +441,19 @@ describe("CodeCommit web security boundary", () => {
           })
         expect(Result.isFailure(yield* spend("http://localhost:5173"))).toBe(true)
         expect(Result.isSuccess(yield* spend(authorityOrigin))).toBe(true)
+      }))
+
+    it.effect("refuses to print a bootstrap URL on a foreign origin before binding", () =>
+      Effect.gen(function*() {
+        const security = yield* makeOwnerSession(authorityOrigin)
+        for (const publicOrigin of ["https://example.com", "http://localhost:4173", `${authorityOrigin}/app`]) {
+          // Fails before any service is used; the host environment only satisfies the layer's type.
+          const built = yield* Effect.exit(Effect.scoped(Layer.build(makeServer({ port: 0, publicOrigin, security }))))
+            .pipe(Effect.provideService(ChildEnv.HostEnvironment, ChildEnv.HostEnvironment.of({ variables: {} })))
+          expect(Exit.isFailure(built) && Cause.squash(built.cause)).toMatchObject({
+            _tag: "UnsafeLoopbackAddressError"
+          })
+        }
       }))
 
     it.effect("refuses browser-marked cross-site reads of the API", () =>

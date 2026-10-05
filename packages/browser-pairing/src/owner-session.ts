@@ -26,7 +26,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { credentialValuesEqual, expiresAt, issueCsrfToken, issuePairingCode, issueSessionToken } from "./crypto.js"
 import type { BrowserPairingError } from "./crypto.js"
 import type { CsrfToken, OneTimeCredentialDecision, PairingCode, SessionToken } from "./schema.js"
-import { decideOneTimeCredential, serializeCredentialCookie } from "./schema.js"
+import { CredentialCookieError, decideOneTimeCredential, serializeCredentialCookie } from "./schema.js"
 
 /** How long a minted bootstrap URL stays usable. Long enough to click, short enough to forget. */
 const BOOTSTRAP_LIFETIME_MILLIS = 60_000
@@ -219,6 +219,8 @@ interface AttemptState {
 
 type Admission = "unavailable" | "invalid" | "accepted"
 
+const isCredentialCookieError = Schema.is(CredentialCookieError)
+
 const bearerToken = (authorization: string | undefined): string | undefined =>
   authorization !== undefined && authorization.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length)
@@ -235,6 +237,7 @@ const requestFromHttp = (request: HttpServerRequest.HttpServerRequest, credentia
 const makeService = (
   options: OwnerSessionOptions,
   ownerToken: Redacted.Redacted<SessionToken>,
+  sessionCookie: string,
   writes: WritePolicy,
   cryptoService: Crypto.Crypto,
   bootstrap: Ref.Ref<BootstrapCode | undefined>,
@@ -353,13 +356,7 @@ const makeService = (
     browserOrigin,
     cookieName: options.cookieName,
     mintBootstrapCode,
-    sessionCookie: serializeCredentialCookie(ownerToken, {
-      httpOnly: true,
-      name: options.cookieName,
-      path: "/api",
-      sameSite: "strict",
-      secure: false
-    }),
+    sessionCookie,
     writes
   }
 }
@@ -376,9 +373,23 @@ export const make = Effect.fn("OwnerSession.make")(function*(options: OwnerSessi
   const writes: WritePolicy = options.writes === "csrf"
     ? { _tag: "Csrf", token: yield* issueCsrfToken() }
     : { _tag: "ReadOnly" }
+  // A cookie name is caller configuration: an invalid one fails here, typed, rather than as a defect.
+  const sessionCookie = yield* Effect.try({
+    try: () =>
+      serializeCredentialCookie(ownerToken, {
+        httpOnly: true,
+        name: options.cookieName,
+        path: "/api",
+        sameSite: "strict",
+        secure: false
+      }),
+    catch: (cause) =>
+      isCredentialCookieError(cause) ? cause : new CredentialCookieError({ reason: "invalid-attribute" })
+  })
   return OwnerSession.of(makeService(
     { ...options, authorityOrigin, browserOrigin },
     ownerToken,
+    sessionCookie,
     writes,
     cryptoService,
     yield* Ref.make<BootstrapCode | undefined>(undefined),

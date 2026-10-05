@@ -1,9 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Clock, Crypto, Deferred, Duration, Effect, Fiber, Layer, Redacted, Result } from "effect"
+import { Cause, Clock, Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Redacted, Result } from "effect"
 import { HttpRouter } from "effect/http"
 import { TestClock } from "effect/testing"
 import * as OwnerSession from "../src/owner-session.js"
-import { PairingCode, readBootstrapToken } from "../src/schema.js"
+import { CredentialCookieError, PairingCode, readBootstrapToken } from "../src/schema.js"
 
 const AUTHORITY = "http://127.0.0.1:3111"
 const DEV_PROXY = "http://localhost:5173"
@@ -113,6 +113,14 @@ describe("construction", () => {
       expect(failureTag(authority)).toBe("UnsafeLoopbackAddressError")
       const browser = yield* Effect.result(make({ browserOrigin: "https://127.0.0.1:3000" }))
       expect(failureTag(browser)).toBe("UnsafeLoopbackAddressError")
+    }))
+
+  it.effect("fails typed, not as a defect, on an invalid cookie name", () =>
+    Effect.gen(function*() {
+      const exit = yield* Effect.exit(make({ cookieName: "bad;name" }))
+      expect(Exit.isFailure(exit) && Cause.hasDies(exit.cause)).toBe(false)
+      expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBeInstanceOf(CredentialCookieError)
+      expect((yield* make({ cookieName: "custom_owner" })).sessionCookie).toMatch(/^custom_owner=/u)
     }))
 
   it.effect("issues a host-only, HttpOnly, strict cookie scoped to the API", () =>
