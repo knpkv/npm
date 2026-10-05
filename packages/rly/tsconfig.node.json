@@ -4,7 +4,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "noEmit": true,
-    "rootDir": ".",
+    "rootDir": "../..",
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.node.tsbuildinfo",
     "types": ["node", "vite/client", "vitest/globals", "@vitest/browser-playwright"]
   },
@@ -21,6 +21,7 @@
     "visual",
     "vite.config.ts",
     "vitest.config.ts",
+    "../../vitest.workspace-sources.ts",
     "vitest.storybook.config.ts"
   ],
   "exclude": ["dist", "node_modules"]

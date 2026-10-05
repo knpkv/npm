@@ -1,6 +1,7 @@
 import { tmpdir } from "node:os"
 
 import { configDefaults, defineConfig } from "vitest/config"
+import { workspaceSourceAlias } from "../../vitest.workspace-sources.ts"
 
 const temporaryDirectory = tmpdir()
 const canonicalTemporaryDirectory = temporaryDirectory.startsWith("/var/folders/")
@@ -8,6 +9,7 @@ const canonicalTemporaryDirectory = temporaryDirectory.startsWith("/var/folders/
   : temporaryDirectory
 
 export default defineConfig({
+  resolve: { alias: [...workspaceSourceAlias] },
   test: {
     // Node 26 enables process-global Web Storage by default. Browser tests must
     // use jsdom's origin-scoped storage instead of Node's file-backed globals.
