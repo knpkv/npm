@@ -202,7 +202,10 @@ describe("RelayDock", () => {
     expect(rail.querySelectorAll('[role="combobox"]')).toHaveLength(2)
     expect(rail.querySelector('[aria-labelledby*="rly-relay-dock-profile-"]')).not.toBeNull()
     expect(rail.querySelector('[aria-labelledby*="rly-relay-dock-model-"]')).not.toBeNull()
-    expect(host.querySelector<HTMLButtonElement>("[data-rly-relay-dock-trigger]")?.hidden).toBe(true)
+    const openTrigger = host.querySelector<HTMLButtonElement>("[data-rly-relay-dock-trigger]")
+    // The open trigger keeps its layout box (no hidden attribute) but leaves focus and the a11y tree.
+    expect(openTrigger?.hidden).toBe(false)
+    expect(openTrigger?.inert).toBe(true)
     expect(rail.querySelectorAll('[aria-label="Close Relay"]')).toHaveLength(1)
     expect(rail.parentElement?.hasAttribute("data-rly-modal-layer")).toBe(false)
   })
@@ -556,7 +559,7 @@ describe("RelayDock", () => {
     if (trigger === null) throw new Error("RelayDock trigger did not render")
 
     await act(async () => trigger.click())
-    expect(trigger.hidden).toBe(false)
+    expect(trigger.inert).toBe(false)
     expect(trigger.getAttribute("aria-expanded")).toBe("false")
     expect(host.querySelector("[data-rly-relay-dock-presentation]")).toBeNull()
   })

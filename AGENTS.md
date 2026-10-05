@@ -175,6 +175,11 @@ its `codecommit.sandbox.id` label and block readiness until all discovered and
 persisted containers are stopped. Activate the owner bootstrap token's expiry and advertise or open its
 URL only after the authenticated listener layer has built successfully.
 
+Public component documentation that describes announcement timing must distinguish
+updates inside an already-mounted status/live region from dynamically inserted
+alerts, which may announce immediately; never claim every live region is silent on
+insertion.
+
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 
 Security-sensitive canonical-payload documentation and code examples must name the persisted representation and every identity input. Raw provider secrets must not be described as durable payload fields, and idempotency examples must include every identity component used by production.

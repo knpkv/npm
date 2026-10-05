@@ -978,7 +978,8 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
         aria-haspopup={modal ? "dialog" : undefined}
         className={style("trigger")}
         data-rly-relay-dock-trigger=""
-        hidden={resolvedOpen}
+        // While open the trigger stays in layout (visibility: hidden) so the dock does not shift; inert keeps it out of focus.
+        inert={resolvedOpen}
         onClick={(event) => {
           event.currentTarget.focus()
           requestOpenChange(true)

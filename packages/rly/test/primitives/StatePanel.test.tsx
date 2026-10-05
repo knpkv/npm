@@ -34,6 +34,11 @@ describe("StatePanel", () => {
     expect(assertive?.querySelector("button")?.textContent).toBe("Review")
   })
 
+  it("keeps a caller-supplied role unless it announces", () => {
+    expect(render(<StatePanel aria-label="Sync" role="region" title="Synced" />)?.getAttribute("role")).toBe("region")
+    expect(render(<StatePanel announce="assertive" role="region" title="Failed" />)?.getAttribute("role")).toBe("alert")
+  })
+
   it("rejects blank titles", () => {
     expect(() => renderToStaticMarkup(<StatePanel title=" " />)).toThrow("visible text")
   })

@@ -19,6 +19,8 @@ export { Field, RLY_FIELD_DEFAULT_VARIANTS, RLY_FIELD_VARIANTS } from "./Field.j
 export type { FieldControlProps, FieldProps, RlyFieldSize } from "./Field.js"
 export { IconButton, RLY_ICON_BUTTON_DEFAULT_VARIANTS, RLY_ICON_BUTTON_VARIANTS } from "./IconButton.js"
 export type { IconButtonProps, RlyIconButtonSize, RlyIconButtonVariant } from "./IconButton.js"
+export { Notice, RLY_NOTICE_DEFAULT_VARIANTS, RLY_NOTICE_VARIANTS } from "./Notice.js"
+export type { NoticeProps, RlyNoticeAnnouncement, RlyNoticeTone } from "./Notice.js"
 export { RLY_SELECT_DEFAULT_VARIANTS, RLY_SELECT_VARIANTS, Select } from "./Select.js"
 export type { RlySelectOption, RlySelectSize, SelectProps } from "./Select.js"
 export { RLY_SHEET_DEFAULT_VARIANTS, RLY_SHEET_VARIANTS, Sheet } from "./Sheet.js"

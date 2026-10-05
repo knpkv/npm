@@ -5,6 +5,7 @@ import { RLY_DIALOG_VARIANTS } from "../../src/primitives/Dialog.js"
 import { RLY_DIVIDER_VARIANTS } from "../../src/primitives/Divider.js"
 import { RLY_FIELD_VARIANTS } from "../../src/primitives/Field.js"
 import { RLY_ICON_BUTTON_VARIANTS } from "../../src/primitives/IconButton.js"
+import { RLY_NOTICE_VARIANTS } from "../../src/primitives/Notice.js"
 import { RLY_SELECT_VARIANTS } from "../../src/primitives/Select.js"
 import { RLY_SHEET_VARIANTS } from "../../src/primitives/Sheet.js"
 import { RLY_SKELETON_VARIANTS } from "../../src/primitives/Skeleton.js"
@@ -49,6 +50,7 @@ const catalogs: ReadonlyArray<
   RLY_DIVIDER_VARIANTS,
   RLY_FIELD_VARIANTS,
   RLY_ICON_BUTTON_VARIANTS,
+  RLY_NOTICE_VARIANTS,
   RLY_SELECT_VARIANTS,
   RLY_SHEET_VARIANTS,
   RLY_SKELETON_VARIANTS,
