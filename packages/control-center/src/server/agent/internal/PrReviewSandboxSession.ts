@@ -1,4 +1,5 @@
 /** Writable sbx session without raw credentials for one exact pull-request revision. @module */
+import { collectBounded as collectBoundedBytes } from "@knpkv/bounded-io"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
 import * as Cause from "effect/Cause"
@@ -372,39 +373,13 @@ interface ProcessResult {
   readonly stdout: Uint8Array
 }
 
-interface ByteAccumulator {
-  readonly chunks: Array<Uint8Array>
-  readonly length: number
-}
-
-const concatenate = ({ chunks, length }: ByteAccumulator): Uint8Array => {
-  const output = new Uint8Array(length)
-  let offset = 0
-  for (const chunk of chunks) {
-    output.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return output
-}
-
+// Any failure, overflow included, is reported as `reason`.
 const collectBounded = (
   stream: Stream.Stream<Uint8Array, unknown>,
   maximumBytes: number,
   reason: PrReviewSandboxSessionError["reason"]
 ): Effect.Effect<Uint8Array, PrReviewSandboxSessionError> =>
-  stream.pipe(
-    Stream.runFoldEffect(
-      (): ByteAccumulator => ({ chunks: [], length: 0 }),
-      (accumulator, chunk) => {
-        const length = accumulator.length + chunk.byteLength
-        if (length > maximumBytes) return Effect.fail(sessionError(reason))
-        accumulator.chunks.push(Uint8Array.from(chunk))
-        return Effect.succeed({ chunks: accumulator.chunks, length })
-      }
-    ),
-    Effect.map(concatenate),
-    Effect.mapError(() => sessionError(reason))
-  )
+  collectBoundedBytes(stream, maximumBytes).pipe(Effect.mapError(() => sessionError(reason)))
 
 const successful = (result: ProcessResult): boolean => result.exitCode === ChildProcessSpawner.ExitCode(0)
 

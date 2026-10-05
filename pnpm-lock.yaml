@@ -420,6 +420,9 @@ importers:
       '@knpkv/ai-codex':
         specifier: workspace:^
         version: link:../ai-codex
+      '@knpkv/bounded-io':
+        specifier: workspace:^
+        version: link:../bounded-io
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core
@@ -767,6 +770,9 @@ importers:
       '@knpkv/atlassian-common':
         specifier: workspace:^
         version: link:../atlassian-common
+      '@knpkv/bounded-io':
+        specifier: workspace:^
+        version: link:../bounded-io
       '@knpkv/browser-pairing':
         specifier: workspace:^
         version: link:../browser-pairing

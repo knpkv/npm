@@ -1,4 +1,5 @@
-import { Effect, Result, Schema, Stream } from "effect"
+import { limitBytes } from "@knpkv/bounded-io"
+import { Effect, Predicate, Result, Schema, Stream } from "effect"
 
 import { DEFAULT_HTTP_SECURITY_LIMITS, HttpByteLimit } from "./HttpLimits.js"
 
@@ -94,24 +95,15 @@ export const authorizeRequestBody = Effect.fn("RequestPolicy.authorizeRequestBod
   return { declaredBytes: metadata.contentLength, maximumBytes }
 })
 
-const countedChunk = (
-  totalBytes: number,
-  chunk: Uint8Array
-): readonly [state: number, values: ReadonlyArray<Uint8Array>] => [totalBytes, [chunk]]
-
 /** Count actual streamed bytes so chunked and dishonest-length bodies cannot bypass limits. */
 export const limitRequestBodyStream = <Error, Requirements>(
   stream: Stream.Stream<Uint8Array, Error, Requirements>,
   maximumBytes: HttpByteLimit
 ): Stream.Stream<Uint8Array, Error | RequestBodyPolicyError, Requirements> =>
-  stream.pipe(
-    Stream.mapAccumEffect(
-      () => 0,
-      (totalBytes, chunk) => {
-        const nextTotal = totalBytes + chunk.byteLength
-        return nextTotal <= maximumBytes
-          ? Effect.succeed(countedChunk(nextTotal, chunk))
-          : Effect.fail(new RequestBodyPolicyError({ reason: "body-too-large", maximumBytes }))
-      }
+  limitBytes(stream, maximumBytes).pipe(
+    Stream.mapError((error) =>
+      Predicate.isTagged(error, "ByteLimitExceeded")
+        ? new RequestBodyPolicyError({ reason: "body-too-large", maximumBytes })
+        : error
     )
   )

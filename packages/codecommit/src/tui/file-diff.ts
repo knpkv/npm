@@ -1,6 +1,7 @@
 /** Lossless, bounded changed-file loading for the exact-revision workspace. */
+import { collectBounded } from "@knpkv/bounded-io"
 import { type Domain, ReadClient } from "@knpkv/codecommit-core"
-import { Effect, Schema, Stream } from "effect"
+import { Effect, Predicate, Schema, Stream } from "effect"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as GitEnvironment from "../GitEnvironment.js"
@@ -73,11 +74,6 @@ const decodeBlob = (bytes: Uint8Array) => Stream.make(bytes).pipe(Stream.decodeT
 
 const LocalGitBlobId = Schema.String.check(Schema.isPattern(/^[0-9a-fA-F]{40}$/u))
 
-interface LocalBlobAccumulator {
-  readonly bytes: number
-  readonly chunks: ReadonlyArray<Uint8Array>
-}
-
 /** Reads one immutable raw blob from a prepared local Git object database without materializing repository paths. */
 export const loadLocalGitBlob = Effect.fn("loadLocalGitBlob")(function*(
   spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
@@ -100,24 +96,15 @@ export const loadLocalGitBlob = Effect.fn("loadLocalGitBlob")(function*(
         new WorktreeError({ operation: "read-local-blob", message: "Unable to start local Git blob read", cause })
       )
     )
-    const accumulator = yield* Stream.runFoldEffect(
-      handle.stdout,
-      (): LocalBlobAccumulator => ({ bytes: 0, chunks: [] }),
-      (current, chunk) => {
-        const bytes = current.bytes + chunk.byteLength
-        return bytes > ReadClient.CODECOMMIT_BLOB_MAXIMUM_BYTES
+    const bytes = yield* collectBounded(handle.stdout, ReadClient.CODECOMMIT_BLOB_MAXIMUM_BYTES).pipe(
+      Effect.mapError((cause) =>
+        Predicate.isTagged(cause, "ByteLimitExceeded")
           ? new ReadClient.CodeCommitBlobTooLargeError({
-            actualBytes: bytes,
+            actualBytes: cause.observedBytes,
             maximumBytes: ReadClient.CODECOMMIT_BLOB_MAXIMUM_BYTES,
             operation: "read-local-blob",
             source: "read-client"
           })
-          : Effect.succeed({ bytes, chunks: [...current.chunks, chunk] })
-      }
-    ).pipe(
-      Effect.mapError((cause) =>
-        Schema.is(ReadClient.CodeCommitBlobTooLargeError)(cause)
-          ? cause
           : new WorktreeError({ operation: "read-local-blob", message: "Unable to read local Git blob", cause })
       )
     )
@@ -131,12 +118,6 @@ export const loadLocalGitBlob = Effect.fn("loadLocalGitBlob")(function*(
         operation: "read-local-blob",
         message: `git cat-file exited with code ${exitCode}`
       })
-    }
-    const bytes = new Uint8Array(accumulator.bytes)
-    let offset = 0
-    for (const chunk of accumulator.chunks) {
-      bytes.set(chunk, offset)
-      offset += chunk.byteLength
     }
     return new ReadClient.CodeCommitBlobContent({
       blobId: ReadClient.CodeCommitBlobId.make(blobId),
