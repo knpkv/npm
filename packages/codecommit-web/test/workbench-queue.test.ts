@@ -29,12 +29,13 @@ const make = (overrides: Partial<Parameters<typeof decode>[0]> & { readonly id: 
   })
 const decode = Schema.decodeSync(PullRequest)
 
-const rule = (ruleName: string, requiredApprovals: number, poolMembers: ReadonlyArray<string>, satisfied: boolean) => ({
-  poolMembers,
-  requiredApprovals,
-  ruleName,
-  satisfied
-})
+const rule = (
+  ruleName: string,
+  requiredApprovals: number,
+  poolMembers: ReadonlyArray<string>,
+  satisfied: boolean,
+  poolMemberArns: ReadonlyArray<string> = []
+) => ({ poolMemberArns, poolMembers, requiredApprovals, ruleName, satisfied })
 
 describe("workbenchQueue", () => {
   it("puts a PR in Needs your review when the user is in an unsatisfied pool and has not approved", () => {
@@ -66,7 +67,7 @@ describe("workbenchQueue", () => {
 
   it("reports Unknown, not an empty queue, when no caller identity resolved", () => {
     const queue = workbenchQueue([make({ id: "1" }), make({ id: "2" })], undefined, NOW)
-    expect(queue.summary).toEqual({ _tag: "Unknown" })
+    expect(queue.summary._tag).toBe("Unknown")
     expect(queue.rows).toHaveLength(2)
   })
 
@@ -148,6 +149,31 @@ describe("ruleProgress", () => {
       id: "1"
     })
     expect(ruleProgress(pullRequest)).toEqual({ approved: 0, name: "Two maintainers", required: 2 })
+  })
+
+  it("counts every approver toward a rule without a pool", () => {
+    const pullRequest = make({ approvalRules: [rule("Any two", 3, [], false)], approvedBy: ["ana", "jonas"], id: "1" })
+    expect(ruleProgress(pullRequest)).toEqual({ approved: 2, name: "Any two", required: 3 })
+  })
+
+  it("matches wildcard pool ARNs against approver ARNs and ignores approvers from other roles", () => {
+    const reviewers = "arn:aws:sts::111122223333:assumed-role/CodeCommitReview/*"
+    const pullRequest = make({
+      approvalRules: [rule("Reviewers", 3, ["*"], false, [reviewers])],
+      approvedBy: ["ana", "jonas", "ops"],
+      approvedByArns: [
+        "arn:aws:sts::111122223333:assumed-role/CodeCommitReview/ana",
+        "arn:aws:sts::111122223333:assumed-role/CodeCommitReview/jonas",
+        "arn:aws:sts::111122223333:assumed-role/Operations/ops"
+      ],
+      id: "1"
+    })
+    expect(ruleProgress(pullRequest)).toEqual({ approved: 2, name: "Reviewers", required: 3 })
+  })
+
+  it("reports a satisfied rule as complete", () => {
+    const pullRequest = make({ approvalRules: [rule("Reviewers", 2, ["*"], true)], id: "1" })
+    expect(ruleProgress(pullRequest)).toEqual({ approved: 2, name: "Reviewers", required: 2 })
   })
 
   it("is undefined when the PR has no approval rules", () => {

@@ -10,6 +10,7 @@
  */
 import { identityMatches, needsMyReview } from "@knpkv/codecommit-core/Domain.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import { Data } from "effect"
 
 const DAY_MS = 86_400_000
 
@@ -44,19 +45,41 @@ export interface WorkbenchRow {
   readonly stuck: StuckReason | undefined
 }
 
-export type WorkbenchSummary =
-  | { readonly _tag: "Unknown" }
-  | { readonly _tag: "Waiting"; readonly count: number; readonly oldest: WorkbenchRow }
-  | { readonly _tag: "Clear"; readonly next: WorkbenchRow | undefined }
+/** The one-line summary above the queue. */
+export type WorkbenchSummary = Data.TaggedEnum<{
+  Unknown: {}
+  Waiting: { readonly count: number; readonly oldest: WorkbenchRow }
+  Clear: { readonly next: WorkbenchRow | undefined }
+}>
+
+/** Constructors and exhaustive `$match` for {@link WorkbenchSummary}. */
+export const WorkbenchSummary = Data.taggedEnum<WorkbenchSummary>()
 
 export interface WorkbenchQueue {
   readonly summary: WorkbenchSummary
   readonly rows: ReadonlyArray<WorkbenchRow>
 }
 
-const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule): number =>
-  pullRequest.approvedBy.filter((approver) => rule.poolMembers.some((member) => identityMatches(approver, member)))
-    .length
+/** CodeCommit pool entries may end in `*` (e.g. `…:assumed-role/Reviewers/*`); match them as prefixes. */
+const arnMatches = (pattern: string, arn: string): boolean =>
+  pattern.endsWith("*") ? arn.startsWith(pattern.slice(0, -1)) : pattern === arn
+
+/**
+ * Approvals that count toward one rule. A satisfied rule is complete by definition; a rule with
+ * no pool accepts any approver; otherwise an approver counts when their ARN matches a pool ARN
+ * (wildcards included) or, for exact names, when the normalized identities match.
+ */
+const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule): number => {
+  if (rule.satisfied) return rule.requiredApprovals
+  if (rule.poolMembers.length === 0 && rule.poolMemberArns.length === 0) return pullRequest.approvedBy.length
+  const byArn =
+    pullRequest.approvedByArns.filter((arn) => rule.poolMemberArns.some((pattern) => arnMatches(pattern, arn)))
+      .length
+  const exactMembers = rule.poolMembers.filter((member) => !member.includes("*"))
+  const byName =
+    pullRequest.approvedBy.filter((approver) => exactMembers.some((member) => identityMatches(approver, member))).length
+  return Math.max(byArn, byName)
+}
 
 /**
  * The rule furthest from being met: lowest share approved, then most approvals still missing, so
@@ -123,14 +146,14 @@ export const workbenchQueue = (
       }]
     })
     .sort((a, b) => groupOrder[a.group] - groupOrder[b.group] || b.openMs - a.openMs)
-  if (!known) return { rows, summary: { _tag: "Unknown" } }
+  if (!known) return { rows, summary: WorkbenchSummary.Unknown() }
   const waiting = rows.filter((row) => row.group === "review")
   const oldest = waiting[0]
   return {
     rows,
     summary: oldest === undefined
-      ? { _tag: "Clear", next: rows.find((row) => row.group === "yours") }
-      : { _tag: "Waiting", count: waiting.length, oldest }
+      ? WorkbenchSummary.Clear({ next: rows.find((row) => row.group === "yours") })
+      : WorkbenchSummary.Waiting({ count: waiting.length, oldest })
   }
 }
 
