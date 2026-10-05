@@ -69,17 +69,21 @@ describe("bounded collection around a child process", () => {
       const fs = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const pidFile = path.join(yield* fs.makeTempDirectoryScoped(), "pid")
-      const slowWriter = Effect.scoped(
+      // The deadline starts once the child is running, so a slow start cannot
+      // eat the budget before any output is collected.
+      const pid = yield* Effect.scoped(
         Effect.gen(function*() {
           const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
           const handle = yield* spawner.spawn(endlessWriter(pidFile))
-          return yield* collectBounded(handle.stdout, Number.MAX_SAFE_INTEGER)
+          const pid = yield* waitForPid(pidFile)
+          const result = yield* collectBounded(handle.stdout, Number.MAX_SAFE_INTEGER).pipe(
+            Effect.timeoutOption("300 millis")
+          )
+          expect(result._tag).toBe("None")
+          return pid
         })
       )
 
-      const result = yield* slowWriter.pipe(Effect.timeoutOption("300 millis"))
-
-      expect(result._tag).toBe("None")
-      yield* waitUntilDead(yield* waitForPid(pidFile))
+      yield* waitUntilDead(pid)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 })
