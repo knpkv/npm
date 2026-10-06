@@ -32,13 +32,13 @@
     "dist"
   ],
   "scripts": {
-    "start": "node dist/main.js",
+    "start": "tsx src/main.ts",
     "dev": "JCF_WEB_PUBLIC_ORIGIN=http://localhost:5173 tsx watch src/main.ts & vite --clearScreen false",
     "build": "tsc -b && vite build",
     "prepack": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest",
-    "test:pack": "tsx scripts/test-packed-package.ts",
+    "test:pack": "tsx scripts/test-packed-package.ts && tsx scripts/test-workspace-start.ts",
     "lint": "eslint \"{scripts,src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts playwright.config.ts",
     "test:browser": "pnpm --filter '@knpkv/jcf-web^...' --sort run build && vite build && playwright test"
   },

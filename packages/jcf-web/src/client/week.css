@@ -1306,3 +1306,15 @@ body,
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* Totals for a system jcf cannot read: muted, never a zero. */
+.jcf-not-connected {
+  color: var(--rly-color-text-2);
+}
+.jcf-signed-out {
+  display: grid;
+  gap: var(--rly-space-24);
+  max-width: 40rem;
+  margin-inline: auto;
+  padding: var(--rly-space-48) var(--rly-space-16);
+}

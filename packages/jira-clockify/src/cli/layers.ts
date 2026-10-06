@@ -209,6 +209,7 @@ export const ReconcileServiceLive = ReconcileServiceLayer.pipe(
  * still reach `ConfigService` directly.
  */
 const FoundationLayer = Layer.mergeAll(
+  HomeDirectoryLive,
   ConfigLive,
   StateWriterLive,
   SourceLedgerLive,

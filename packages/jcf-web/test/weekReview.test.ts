@@ -80,7 +80,8 @@ const setup = (overrides: Partial<WeekTransport> = {}, delay?: (milliseconds: nu
     ),
     markTicketMine: vi.fn<WeekTransport["markTicketMine"]>(
       overrides.markTicketMine ?? (async () => ({ ownershipOverrides: [] }))
-    )
+    ),
+    ...(overrides.readSources !== undefined && { readSources: overrides.readSources })
   } satisfies WeekTransport
   const registry = AtomRegistry.make()
   cleanups.push(() => registry.dispose())
@@ -218,6 +219,44 @@ it("retries a transient bootstrap failure and retains the recovered session", as
   expect(fixture.state().failure).toBeNull()
   await fixture.review.navigate("2026-09-14", "jira")
   expect(fixture.transport.bootstrapSession).toHaveBeenCalledTimes(2)
+})
+
+// QA-J16: without a session the page showed zeros and enabled controls. A 401 anywhere signs the tab out.
+it("signs the tab out on a 401 instead of reporting a failed read", async () => {
+  const fixture = setup({
+    readSavedWeek: async () => {
+      throw new RequestFailure({ status: 401, message: "Missing or invalid owner session" })
+    }
+  })
+  await fixture.review.initialize()
+  expect(fixture.state().signedOut).toBe(true)
+  expect(fixture.state().failure).toBeNull()
+})
+
+// QA-J19: an unconnected Jira read as an empty week and stayed a write target.
+it("never writes to a system the server says is not connected", async () => {
+  const fixture = setup({
+    readSources: async () => ({
+      jira: { connected: false, connect: "jcf auth jira token" },
+      clockify: { connected: true, connect: "jcf auth clockify setup" }
+    })
+  })
+  await fixture.review.initialize()
+  expect(fixture.state().sources?.jira.connected).toBe(false)
+  expect(fixture.state().writeTargets).toEqual({ jira: false, clockify: true })
+})
+
+// Review finding: a failed sources read blocked every provider read.
+it("reads the week even when the sources read fails for another reason", async () => {
+  const fixture = setup({
+    readSources: async () => {
+      throw new RequestFailure({ status: 500, message: "Could not read the Jira credential" })
+    }
+  })
+  await fixture.review.initialize()
+  expect(fixture.transport.readSavedWeek).toHaveBeenCalledTimes(1)
+  expect(fixture.state().sources).toBeNull()
+  expect(fixture.state().signedOut).toBe(false)
 })
 
 it("shares one pending bootstrap between overlapping initialization attempts", async () => {

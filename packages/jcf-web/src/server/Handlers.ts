@@ -6,8 +6,15 @@
  *
  * @module
  */
-import { ConfigService, FetchTicket, IssueFacts, ReconcileService } from "@knpkv/jira-clockify"
-import { Effect, Semaphore } from "effect"
+import {
+  ClockifyAuth,
+  ConfigService,
+  FetchTicket,
+  IssueFacts,
+  JiraAccess,
+  ReconcileService
+} from "@knpkv/jira-clockify"
+import { Effect, Option, Semaphore } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import type { ConfirmBatchItemResponse, ReadProgress, WeekScopeName } from "../shared/contracts.js"
 import { ApiError, JcfWebApi, PlanExpiredError, ProposalRejectedError } from "./Api.js"
@@ -184,8 +191,20 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
     const config = yield* ConfigService.ConfigService
     const plans = yield* WeekPlans
     const configWrites = yield* Semaphore.make(1)
+    const jiraAccess = yield* JiraAccess.JiraAccess
+    const clockifyAuth = yield* ClockifyAuth.ClockifyAuth
 
     return handlers
+      .handle("sources", () =>
+        Effect.gen(function*() {
+          // Re-read on every request: a system connected in a terminal shows up without a restart.
+          const jira = yield* jiraAccess.connection.pipe(Effect.mapError((error) => failed(error.message)))
+          const clockify = yield* clockifyAuth.isConfigured
+          return {
+            jira: { connected: Option.isSome(jira), connect: JiraAccess.connectJiraCommand },
+            clockify: { connected: clockify, connect: "jcf auth clockify setup" }
+          }
+        }))
       .handle("agent", () => config.get.pipe(Effect.map((settings) => settings.sessionAgent)))
       .handle("saveAgent", ({ payload }) =>
         configWrites.withPermits(1)(Effect.gen(function*() {
