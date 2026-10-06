@@ -3,8 +3,9 @@
  *
  * The review workspace shows Relay as a third column when its grid is wide, and stacked under
  * the diff on narrow screens. Between those, a third column would squeeze the diff, so the pane
- * moves into a native modal `<dialog>` opened from a "Findings (n)" button: Esc closes it, and the
- * browser returns focus to that button. The pane's state lives in the workspace, so moving it loses nothing.
+ * moves into a native modal `<dialog>` opened from a header button ("Relay" before a review,
+ * "Findings (n)" after): Esc closes it, and the browser returns focus to that button. The pane's
+ * state lives in the workspace, so moving it loses nothing.
  *
  * @module
  */

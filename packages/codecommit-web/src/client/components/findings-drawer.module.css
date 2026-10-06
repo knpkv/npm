@@ -20,7 +20,8 @@
 }
 
 .drawer::backdrop {
-  background: color-mix(in srgb, var(--rly-color-text-1) 32%, transparent);
+  /* rly Dialog's scrim: the canvas at 78%, so the page dims in both themes. */
+  background: color-mix(in srgb, var(--rly-color-canvas) 78%, transparent);
 }
 
 .head {
@@ -29,13 +30,16 @@
   display: flex;
   gap: var(--rly-space-12);
   justify-content: space-between;
-  min-block-size: 48px;
+  min-block-size: var(--rly-space-48);
   padding-inline: var(--rly-space-16);
 }
 
 .title {
-  font-size: 1.0625rem;
-  font-weight: 600;
+  font-family: var(--rly-type-card-title-font);
+  font-size: var(--rly-type-card-title-size);
+  font-weight: var(--rly-type-card-title-weight);
+  letter-spacing: var(--rly-type-card-title-tracking);
+  line-height: var(--rly-type-card-title-line-height);
   margin: 0;
 }
 
