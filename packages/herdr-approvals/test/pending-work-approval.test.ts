@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { JobHash, type JobPayload, JobRecord, JobStore } from "@knpkv/herdr-fleet"
 import { Effect, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -19,11 +20,11 @@ const openStore = Effect.gen(function*() {
   )
 }).pipe(provideNodeServices)
 
-const pending = (id: string, createdAt: number, payload: JobPayload) =>
+const pending = (id: string, createdAt: number, payload: JobPayload, approvalExpiresAt: number | null = null) =>
   Schema.decodeUnknownEffect(JobRecord)({
     acceptedReceipt: null,
     actor: "owner",
-    approvalExpiresAt: null,
+    approvalExpiresAt,
     approvalNonce: `nonce-${id}`,
     approvedAt: null,
     approvedBy: null,
@@ -81,6 +82,16 @@ describe("hasPendingWorkApproval", () => {
       for (let index = 0; index < 150; index += 1) {
         yield* store.put(yield* pending(`job-delegate-${index}`, 2_000 + index, delegate))
       }
+      expect(yield* hasPendingWorkApproval(store)).toBe(true)
+    })))
+
+  it.effect("does not count a Work approval whose expiry has passed but is still stored as pending", () =>
+    Effect.scoped(Effect.gen(function*() {
+      yield* TestClock.setTime(5_000)
+      const store = yield* openStore
+      yield* store.put(yield* pending("job-admit-expired", 1_000, admit, 4_000))
+      expect(yield* hasPendingWorkApproval(store)).toBe(false)
+      yield* store.put(yield* pending("job-admit-live", 1_001, admit, 6_000))
       expect(yield* hasPendingWorkApproval(store)).toBe(true)
     })))
 })
