@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import {
   binColumns,
+  binRates,
   chartTicks,
   chooseBinSize,
   moveFocus,
@@ -15,16 +16,38 @@ const column = (index: number, values: Record<string, number>): RlyChartColumn =
   start: index * hour
 })
 
+const hourly = (count: number): ReadonlyArray<RlyChartColumn> =>
+  Array.from({ length: count }, (_, index) => column(index, { a: 1 }))
+
 describe("chart model", () => {
   it("bins only as coarsely as needed to keep every bar at least the minimum width", () => {
-    expect(chooseBinSize(720, 24)).toBe(1)
-    expect(chooseBinSize(720, 168)).toBe(2)
-    expect(chooseBinSize(320, 168)).toBe(6)
-    expect(chooseBinSize(40, 168)).toBe(48)
-    expect(chooseBinSize(0, 0)).toBe(1)
+    expect(chooseBinSize(720, hourly(24))).toBe(1)
+    expect(chooseBinSize(720, hourly(168))).toBe(2)
+    expect(chooseBinSize(320, hourly(168))).toBe(6)
+    expect(chooseBinSize(40, hourly(168))).toBe(48)
+    expect(chooseBinSize(0, [])).toBe(1)
     // Past a day per bar, bins grow in whole days until every bar is 6px wide again.
-    expect(chooseBinSize(320, 2000)).toBe(48)
-    expect(320 / Math.ceil(2000 / chooseBinSize(320, 2000))).toBeGreaterThanOrEqual(6)
+    expect(chooseBinSize(320, hourly(2000))).toBe(48)
+  })
+
+  it("measures bars on the time axis, so a short period among long ones is never drawn under 6px", () => {
+    const uneven: ReadonlyArray<RlyChartColumn> = [
+      { end: hour, segments: [], start: 0 },
+      { end: 1000 * hour, segments: [], start: hour }
+    ]
+    // Each column alone would leave the first bar 0.72px wide; together they are one bar.
+    expect(chooseBinSize(720, uneven)).toBe(2)
+    expect(binColumns(uneven, 2)).toHaveLength(1)
+  })
+
+  it("turns each bin's total into a rate per nominal bin, so a folded bin is not taller for holding more time", () => {
+    const columns = hourly(25)
+    const bins = binColumns(columns, 2)
+    const rates = binRates(bins, columns, 2)
+    expect(rates[0]).toBeCloseTo(1)
+    expect(rates.at(-1)).toBeCloseTo(2 / 3)
+    // Three hours of 1 each, as a rate per two hours, stand as tall as two hours of 1.
+    expect((bins.at(-1)?.total ?? 0) * (rates.at(-1) ?? 0)).toBeCloseTo(bins[0]?.total ?? 0)
   })
 
   it("merges a bin's segments by id in the order the series first appear, offsetting each on the last", () => {
@@ -51,7 +74,7 @@ describe("chart model", () => {
     // Every bar at the chosen size keeps the 6px minimum on a time-proportional axis, remainder included.
     const cases: ReadonlyArray<readonly [width: number, count: number]> = [[100, 25], [320, 1009], [100, 24]]
     for (const [width, count] of cases) {
-      const size = chooseBinSize(width, count)
+      const size = chooseBinSize(width, hourly(count))
       const narrowest = Math.min(
         ...binColumns(Array.from({ length: count }, (_, index) => column(index, { a: 1 })), size).map(
           (bin) => ((bin.last - bin.first + 1) / count) * width
@@ -86,11 +109,13 @@ describe("chart model", () => {
   })
 
   it("spaces ticks at least the label width apart and anchors the last one to the end", () => {
-    const ticks = chartTicks(24, 480, 70)
+    const ticks = chartTicks(Array.from({ length: 24 }, (_, index) => index * 20), 480, 70)
     expect(ticks.map(({ index }) => index)).toEqual([0, 4, 8, 12, 16, 23])
     expect(ticks.at(-1)?.anchor).toBe("end")
     expect(ticks[0]?.anchor).toBe("start")
-    expect(chartTicks(1, 480, 70)).toEqual([{ anchor: "start", index: 0 }])
-    expect(chartTicks(0, 480, 70)).toEqual([])
+    // Uneven bins: ticks follow where bins actually start, never crowding their labels.
+    expect(chartTicks([0, 10, 20, 400], 480, 70).map(({ index }) => index)).toEqual([0, 3])
+    expect(chartTicks([0], 480, 70)).toEqual([{ anchor: "start", index: 0 }])
+    expect(chartTicks([], 480, 70)).toEqual([])
   })
 })

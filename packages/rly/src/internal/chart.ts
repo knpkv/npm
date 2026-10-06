@@ -40,17 +40,51 @@ const BIN_SIZES: ReadonlyArray<number> = [1, 2, 3, 6, 12, 24]
 
 const DAY = 24
 
+/** Where each bin starts, in column indices; a short trailing remainder joins the bin before it. */
+const groupStarts = (count: number, size: number): ReadonlyArray<number> => {
+  const starts: Array<number> = []
+  for (let first = 0; first < count; first += size) starts.push(first)
+  if (count % size > 0 && starts.length > 1) starts.pop()
+  return starts
+}
+
+/** The narrowest bar, in pixels, that binning `columns` by `size` draws on the shared time axis. */
+const narrowestBar = (columns: ReadonlyArray<RlyChartColumn>, size: number, width: number): number => {
+  const from = columns[0]?.start ?? 0
+  const span = Math.max(1, (columns[columns.length - 1]?.end ?? from) - from)
+  const starts = groupStarts(columns.length, size)
+  return Math.min(
+    ...starts.map((first, index) => {
+      const last = (starts[index + 1] ?? columns.length) - 1
+      return (((columns[last]?.end ?? from) - (columns[first]?.start ?? from)) / span) * width
+    })
+  )
+}
+
 /**
- * The smallest bin size that keeps each bar at least `minBar` pixels wide. Past a day per bar it
- * grows in whole days, so bins still line up with midnight.
+ * The smallest bin size whose every bar, measured on the shared time axis, is at least `minBar`
+ * pixels wide, so uneven or sparse periods are measured as drawn. Past a day per bar it grows in
+ * whole days, so bins still line up with midnight; failing all, one bin holds everything.
  */
-export const chooseBinSize = (width: number, count: number, minBar = 6): number => {
-  if (count === 0) return 1
-  const fits = (size: number): boolean => width / Math.ceil(count / size) >= minBar
-  const preferred = BIN_SIZES.find(fits)
-  if (preferred !== undefined) return preferred
-  const bars = Math.max(1, Math.floor(width / minBar))
-  return Math.max(1, Math.ceil(count / bars / DAY)) * DAY
+export const chooseBinSize = (width: number, columns: ReadonlyArray<RlyChartColumn>, minBar = 6): number => {
+  if (columns.length === 0) return 1
+  const days = Array.from({ length: Math.ceil(columns.length / DAY) }, (_, index) => (index + 2) * DAY)
+  return [...BIN_SIZES, ...days].find((size) => narrowestBar(columns, size, width) >= minBar) ?? columns.length
+}
+
+/**
+ * Per bin, the factor that turns its total into a rate per nominal bin (`size` columns of average
+ * length), so a folded or longer bin stands as tall as its spending rate, not its raw sum. Bar areas
+ * then match totals on the time-proportional axis.
+ */
+export const binRates = (
+  bins: ReadonlyArray<RlyChartBin>,
+  columns: ReadonlyArray<RlyChartColumn>,
+  size: number
+): ReadonlyArray<number> => {
+  const from = columns[0]?.start ?? 0
+  const average = Math.max(1, (columns[columns.length - 1]?.end ?? from) - from) / Math.max(1, columns.length)
+  return bins.map((bin) => (average * size) / Math.max(1, bin.end - bin.start))
 }
 
 /**
@@ -59,10 +93,7 @@ export const chooseBinSize = (width: number, count: number, minBar = 6): number 
  */
 export const binColumns = (columns: ReadonlyArray<RlyChartColumn>, size: number): ReadonlyArray<RlyChartBin> => {
   const bins: Array<RlyChartBin> = []
-  const remainder = columns.length % size
-  const starts: Array<number> = []
-  for (let first = 0; first < columns.length; first += size) starts.push(first)
-  if (remainder > 0 && starts.length > 1) starts.pop()
+  const starts = groupStarts(columns.length, size)
   for (const [index, first] of starts.entries()) {
     const group = columns.slice(first, starts[index + 1] ?? columns.length)
     const values = new Map<string, RlyChartSegment>()
@@ -118,16 +149,23 @@ export const moveFocus = (key: string, current: number, last: number): number | 
 }
 
 /**
- * Tick positions at least `labelWidth` apart. The last bin always gets an end-anchored tick, so the
- * axis says where it ends without a label clipping at the edge; ticks crowding it are dropped.
+ * Ticks at least `labelWidth` apart, from each bin's start in pixels on the shared time axis, so
+ * uneven bins never crowd their labels. The last bin always gets an end-anchored tick, so the axis
+ * says where it ends without a label clipping at the edge; ticks crowding it are dropped.
  */
-export const chartTicks = (count: number, width: number, labelWidth: number): ReadonlyArray<RlyChartTick> => {
-  if (count === 0) return []
-  if (count === 1) return [{ anchor: "start", index: 0 }]
-  const bar = width / count
-  const every = Math.max(1, Math.ceil(labelWidth / bar))
-  const regular = Array.from({ length: Math.ceil(count / every) }, (_, step) => step * every)
-    .filter((index) => index * bar + labelWidth <= width - labelWidth)
-    .map((index): RlyChartTick => ({ anchor: "start", index }))
-  return [...regular, { anchor: "end", index: count - 1 }]
+export const chartTicks = (
+  starts: ReadonlyArray<number>,
+  width: number,
+  labelWidth: number
+): ReadonlyArray<RlyChartTick> => {
+  if (starts.length === 0) return []
+  if (starts.length === 1) return [{ anchor: "start", index: 0 }]
+  const regular = starts.reduce<ReadonlyArray<RlyChartTick>>((ticks, x, index) => {
+    const previous = ticks.at(-1)
+    const previousX = previous === undefined ? Number.NEGATIVE_INFINITY : (starts[previous.index] ?? 0)
+    return x - previousX >= labelWidth && x + labelWidth <= width - labelWidth
+      ? [...ticks, { anchor: "start", index }]
+      : ticks
+  }, [])
+  return [...regular, { anchor: "end", index: starts.length - 1 }]
 }

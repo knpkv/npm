@@ -4,6 +4,7 @@ import { classNames, cssClass, requireText } from "../internal/component.js"
 import * as Predicate from "../internal/predicates.js"
 import {
   binColumns,
+  binRates,
   chartTicks,
   chooseBinSize,
   moveFocus,
@@ -46,7 +47,10 @@ export type StackedBarsProps = StackedBarsBaseProps & {
   readonly bands?: ReadonlyArray<RlyStepBand>
   /** A stretch of time to shade across the bands and bars, such as the current limit window. */
   readonly window?: RlyChartWindow
-  /** The caption for the scale, given the tallest bin's total and the bin size in columns. */
+  /**
+   * The caption for the scale: the tallest bar's rate per `binSize` columns. Bars plot rates, so a
+   * folded or longer bin reads true against "per N hours".
+   */
   readonly formatScale: (max: number, binSize: number) => string
   /** The axis label for a bin. */
   readonly formatTick: (bin: RlyChartBin, binSize: number) => string
@@ -159,6 +163,16 @@ const Band = ({
         {band.near === undefined ? null : (
           <line className={style("near")} x1={0} x2={1000} y1={100 - band.near} y2={100 - band.near} />
         )}
+        {/* The window's edges again over the levels, so a full or unknown stretch never hides it. */}
+        {window === undefined ? null : (
+          <rect
+            className={style("windowEdge")}
+            data-part="window-edge"
+            height={100}
+            width={Math.max(0, x(window.to) - x(window.from))}
+            x={x(window.from)}
+          />
+        )}
       </svg>
     </div>
   )
@@ -190,10 +204,18 @@ export const StackedBars = ({
 }: StackedBarsProps): ReactElement => {
   const [width, ref] = useInlineSize(720, callerRef)
   const instructionsId = useId()
-  const binSize = chooseBinSize(width, columns.length)
+  const binSize = chooseBinSize(width, columns)
   const bins = useMemo(() => binColumns(columns, binSize), [columns, binSize])
-  const max = Math.max(0, ...bins.map(({ total }) => total))
-  const ticks = chartTicks(bins.length, width, LABEL_WIDTH)
+  // Heights are rates per nominal bin, so a longer (folded) bin is not taller just for holding more time.
+  const rates = binRates(bins, columns, binSize)
+  const max = Math.max(0, ...bins.map(({ total }, index) => total * (rates[index] ?? 1)))
+  const axisStart = columns[0]?.start ?? 0
+  const axisEnd = columns[columns.length - 1]?.end ?? axisStart
+  const ticks = chartTicks(
+    bins.map((bin) => axisFraction(bin.start, axisStart, axisEnd) * width),
+    width,
+    LABEL_WIDTH
+  )
   // The keyboard cursor is a column, so a click or a resize that rebins keeps it on the same time.
   const [cursor, setCursor] = useState<number | null>(null)
   const [pendingTap, setPendingTap] = useState<number | null>(null)
@@ -293,8 +315,9 @@ export const StackedBars = ({
               >
                 <rect className={style("hit")} height={100} width={slot.width} x={slot.x} />
                 {bin.segments.map((segment) => {
-                  const top = max === 0 ? 0 : ((segment.offset + segment.value) / max) * 88
-                  const size = max === 0 ? 0 : (segment.value / max) * 88
+                  const rate = rates[index] ?? 1
+                  const top = max === 0 ? 0 : (((segment.offset + segment.value) * rate) / max) * 88
+                  const size = max === 0 ? 0 : ((segment.value * rate) / max) * 88
                   return (
                     <rect
                       className={style("segment")}

@@ -321,4 +321,31 @@ describe("StackedBars", () => {
     tap(3, "touch")
     expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 1, to: 3 })
   })
+
+  it("keeps the window's edge over a full or unknown band stretch", () => {
+    const root = render({
+      bands: [
+        {
+          id: "5h",
+          label: "5-hour window",
+          segments: [
+            { from: 0, level: 100, to: 3 * hour },
+            { from: 3 * hour, level: null, to: 6 * hour }
+          ]
+        }
+      ],
+      window: { from: 2 * hour, label: "Current window", to: 4 * hour }
+    })
+    const band = root.querySelector('[data-band="5h"] svg')
+    expect(band?.lastElementChild?.getAttribute("data-part")).toBe("window-edge")
+  })
+
+  it("captions the scale with a rate per bin, so a folded last bin is not read as a bigger total", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const formatScale = vi.fn((max: number, size: number) => `${max} per ${size}`)
+    // 25 hourly columns of 1 at 100px bin in pairs; the last bin folds three hours (total 3).
+    await mount(<StackedBars {...props} columns={hours(25)} formatScale={formatScale} />)
+    await resizeTo(100)
+    expect(formatScale).toHaveBeenLastCalledWith(2, 2)
+  })
 })
