@@ -44,6 +44,9 @@ const pullRequests = [
   pullRequest("21", { author: "viewer", isMergeable: false, title: "Split the usage chunk" })
 ]
 
+/** Enough added lines that the diff must scroll inside its own viewport. */
+const longTail = Array.from({ length: 120 }, (_, line) => `export const line${line} = ${line}\n`).join("")
+
 const serve = async (page: Page) => {
   await page.route(
     "**/api/prs/*/*/refresh*",
@@ -69,7 +72,7 @@ const serve = async (page: Page) => {
   await page.route("**/api/prs/*/12/diff/0?*", (route) =>
     route.fulfill({
       json: {
-        after: "export const readPatch = (limit: number) => fetchPatch(limit)\n",
+        after: `export const readPatch = (limit: number) => fetchPatch(limit)\n${longTail}`,
         before: "export const readPatch = () => fetchPatch()\n",
         fileIndex: 0,
         revisionId: "revision-1",
@@ -139,4 +142,25 @@ test("keeps Relay in the grid on a wide screen and on a phone", async ({ page })
     await expect(page.getByRole("complementary", { name: "Relay findings" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Relay", exact: true })).toHaveCount(0)
   }
+})
+
+// Between the drawer threshold and the 52rem column breakpoint, the stacked layout's fixed diff
+// height used to outgrow the drawer grid, so the end of a long diff was clipped and unreachable.
+test("keeps the diff inside the workspace in the drawer layout of a narrow column", async ({ page }) => {
+  await page.setViewportSize({ height: 720, width: 1000 })
+  await serve(page)
+  await page.goto(detail)
+
+  await expect(page.locator("[data-findings]")).toHaveAttribute("data-findings", "drawer")
+  await expect(page.getByText("export const line0 = 0")).toBeVisible()
+  const overflow = await page.evaluate(() => {
+    const workbench = document.querySelector("[data-findings]")
+    if (workbench === null) return Number.POSITIVE_INFINITY
+    const end = workbench.getBoundingClientRect().bottom
+    const scrollers = [...workbench.querySelectorAll("*")].filter((element) =>
+      ["auto", "scroll"].includes(getComputedStyle(element).overflowY)
+    )
+    return Math.max(0, ...scrollers.map((element) => element.getBoundingClientRect().bottom - end))
+  })
+  expect(overflow).toBeLessThanOrEqual(1)
 })

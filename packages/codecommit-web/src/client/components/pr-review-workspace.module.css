@@ -129,6 +129,11 @@
   grid-template-columns: minmax(12rem, 0.28fr) minmax(24rem, 1fr);
 }
 
+/* The drawer grid has a fixed height, so the diff fills its row instead of the stacked layout's fixed height. */
+.workbench[data-findings="drawer"] .diffViewport {
+  block-size: auto;
+}
+
 .workbench[data-findings="drawer"] > .fileTree {
   border-block-end: 0;
   border-inline-end: 1px solid var(--rly-color-border-1);
