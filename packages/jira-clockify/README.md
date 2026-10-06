@@ -29,7 +29,9 @@ jcf auth jira token        # Site, email and an API token from https://id.atlass
 ```
 
 The token is checked against Jira before it is saved to `~/.jcf/jira.json` (owner-only, `0600`) and is
-never printed. A failed check says whether the site, the token or the network was the problem.
+never printed. Only Jira Cloud addresses (`*.atlassian.net`) are accepted, so a typo or look-alike
+domain never receives the token. A failed check says whether the site, the token or the network was
+the problem.
 
 Advanced: connect through your own Atlassian OAuth app instead.
 
@@ -45,7 +47,7 @@ When both exist, the API token is used. `jcf auth jira logout` removes both.
 
 ```bash
 jcf auth clockify setup    # Enter API key from https://app.clockify.me/manage-api-keys
-jcf auth clockify setup --api-key <key>   # For scripts; the key is visible to other processes
+jcf auth clockify setup --api-key <key> --workspace <name>   # For scripts; the key is visible to other processes
 ```
 
 Commands that need a system that is not connected fail with one line naming the command that

@@ -1,6 +1,7 @@
 ---
 "@knpkv/jira-clockify": minor
 "@knpkv/jira-api-client": minor
+"@knpkv/agent-skills": patch
 ---
 
 Connect Jira with an API token, and set up each system on its own:
@@ -10,3 +11,4 @@ Connect Jira with an API token, and set up each system on its own:
 - Commands that need Jira (`issue list`, `timer start`, `sync reconcile`) fail with "Jira is not connected. Run jcf auth jira token to connect it." and exit 1, instead of reporting no issues. `auth clockify setup` takes `--api-key` and fails without a terminal. Failed `timer` and `config set project` steps and a failed reconcile exit non-zero.
 - `jcf auth status` names the Clockify workspace and the next command for anything not connected. Every command has a help description, and `--version` reports the package version.
 - `@knpkv/jira-api-client`: a basic-auth credential may carry its `siteUrl`, used as the request host, so a credential re-read per request keeps its site.
+- `@knpkv/agent-skills`: the jcf skill names `jcf auth jira token` as the way to connect Jira.

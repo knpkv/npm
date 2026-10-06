@@ -24,6 +24,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Random from "effect/Random"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -71,10 +72,18 @@ export class JiraTokenNotSaved extends Data.TaggedError("JiraTokenNotSaved")<{ r
   }
 }
 
-/** What the user typed is not a site address. */
+/** What the user typed is not a Jira Cloud address, so no token is sent to it. */
 export class JiraSiteInvalid extends Data.TaggedError("JiraSiteInvalid")<{ readonly input: string }> {
   override get message() {
-    return `"${this.input}" is not a Jira site address. Use the address of your Jira, such as your-team.atlassian.net.`
+    return `"${this.input}" is not a Jira Cloud address. API tokens work with Jira Cloud sites, ` +
+      "which end in .atlassian.net, such as your-team.atlassian.net."
+  }
+}
+
+/** The OAuth login changed between reading its token and its profile; nothing mixed is used. */
+export class JiraLoginChanged extends Data.TaggedError("JiraLoginChanged")<{}> {
+  override get message() {
+    return "The Jira OAuth login changed while it was being read. Try again."
   }
 }
 
@@ -107,7 +116,7 @@ export type JiraTokenVerificationError = JiraSiteInvalid | JiraSiteNotFound | Ji
 
 export interface JiraAccessContract {
   /** The current connection, or none when Jira is not connected. Re-read on every call. */
-  readonly connection: Effect.Effect<Option.Option<JiraConnection>, JiraAccessUnreadable>
+  readonly connection: Effect.Effect<Option.Option<JiraConnection>, JiraAccessUnreadable | JiraLoginChanged>
   /** Checks a site, email and token against Jira and returns what would be stored. Saves nothing. */
   readonly verifyToken: (input: {
     readonly site: string
@@ -124,8 +133,10 @@ export class JiraAccess extends Context.Service<JiraAccess, JiraAccessContract>(
 const loopbackHosts = new Set(["localhost", "127.0.0.1", "[::1]"])
 
 /**
- * The origin of a site the user typed: `team`, `team.atlassian.net` and a pasted Jira URL all name
- * `https://team.atlassian.net`. Plain http is accepted for loopback stand-ins only.
+ * The origin of a Jira Cloud site the user typed: `team`, `team.atlassian.net` and a pasted Jira URL
+ * all name `https://team.atlassian.net`. Only `*.atlassian.net` over https is accepted, because the
+ * token is sent to this host: a typo or a look-alike domain must fail before any credential leaves.
+ * Plain http on loopback is the one exception, for stand-ins in tests.
  */
 export const siteOrigin = (input: string): Option.Option<string> => {
   const trimmed = input.trim()
@@ -134,8 +145,9 @@ export const siteOrigin = (input: string): Option.Option<string> => {
   const url = URL.parse(withScheme)
   if (url === null || url.username !== "" || url.password !== "") return Option.none()
   if (url.protocol === "http:" && loopbackHosts.has(url.hostname)) return Option.some(url.origin)
-  if (url.protocol !== "https:") return Option.none()
-  return Option.some(url.hostname.includes(".") ? url.origin : `https://${url.hostname}.atlassian.net`)
+  if (url.protocol !== "https:" || url.port !== "") return Option.none()
+  const host = url.hostname.includes(".") ? url.hostname : `${url.hostname}.atlassian.net`
+  return /^[a-z0-9][a-z0-9-]*\.atlassian\.net$/u.test(host) ? Option.some(`https://${host}`) : Option.none()
 }
 
 const TenantInfo = Schema.Struct({ cloudId: Schema.NonEmptyString })
@@ -169,12 +181,15 @@ export const layer = Layer.effect(
       })
     }).pipe(Effect.mapError(() => new JiraAccessUnreadable({ path: file })))
 
+    // The token is refreshed first, then site and account come from one profile object holding that
+    // same token. Reading them separately could pair one profile's token with another's site.
     const oauthConnection = Effect.gen(function*() {
       if (!(yield* oauth.isLoggedIn())) return Option.none<JiraConnection>()
       const accessToken = yield* oauth.getAccessToken()
-      const cloudId = yield* oauth.getCloudId()
-      const siteUrl = yield* oauth.getSiteUrl()
-      const user = yield* oauth.getCurrentUser()
+      const profile = yield* oauth.getActiveProfile()
+      if (profile === null) return Option.none<JiraConnection>()
+      if (profile.token.access_token !== Redacted.value(accessToken)) return yield* new JiraLoginChanged()
+      const { cloud_id: cloudId, site_url: siteUrl, user } = profile.token
       return Option.some<JiraConnection>({
         method: "oauth",
         credential: { type: "oauth2", accessToken, cloudId },
@@ -183,7 +198,13 @@ export const layer = Layer.effect(
         accountId: user?.account_id ?? "",
         displayName: user?.name ?? ""
       })
-    }).pipe(Effect.mapError(() => new JiraAccessUnreadable({ path: "the Jira OAuth login" })))
+    }).pipe(
+      Effect.mapError((error): JiraAccessUnreadable | JiraLoginChanged =>
+        Predicate.isTagged(error, "JiraLoginChanged")
+          ? new JiraLoginChanged()
+          : new JiraAccessUnreadable({ path: "the Jira OAuth login" })
+      )
+    )
 
     const connection = tokenConnection.pipe(
       Effect.flatMap((token) => Option.isSome(token) ? Effect.succeed(token) : oauthConnection)

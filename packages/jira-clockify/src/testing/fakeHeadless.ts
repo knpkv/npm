@@ -1535,11 +1535,14 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
               scope: "write:jira-work",
               cloud_id: world.jiraAuth.cloudId,
               site_url: world.jiraAuth.siteUrl,
-              user: {
-                account_id: world.jiraAuth.accountId,
-                name: "Fake User",
-                email: "fake@example.com"
-              }
+              // The cached user lives on the profile; a missing cache is a profile without one.
+              ...(options.jiraCachedUserMissing !== true && {
+                user: {
+                  account_id: world.jiraAuth.accountId,
+                  name: "Fake User",
+                  email: "fake@example.com"
+                }
+              })
             },
             created_at: "2026-01-01T00:00:00.000Z",
             updated_at: "2026-01-01T00:00:00.000Z"

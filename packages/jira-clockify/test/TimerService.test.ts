@@ -170,6 +170,22 @@ const mockJiraAuthProfileMethods = {
   removeProfile: () => Effect.succeed(null)
 }
 
+/** The active OAuth profile holding `token`, so access reads token and site from one profile. */
+const profileWith = (token: string) => ({
+  id: "profile",
+  name: "Profile",
+  token: {
+    access_token: token,
+    refresh_token: "refresh",
+    expires_at: 4_102_444_800_000,
+    scope: "write:jira-work",
+    cloud_id: "cloud-1",
+    site_url: "https://test.atlassian.net"
+  },
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z"
+})
+
 const MockJiraAuthLayer = Layer.succeed(JiraAuth, {
   configure: () => Effect.void,
   isConfigured: () => Effect.succeed(true),
@@ -180,6 +196,7 @@ const MockJiraAuthLayer = Layer.succeed(JiraAuth, {
   getSiteUrl: () => Effect.succeed("https://test.atlassian.net"),
   getCurrentUser: () => Effect.succeed(null),
   ...mockJiraAuthProfileMethods,
+  getActiveProfile: () => Effect.succeed(profileWith("jira-token")),
   isLoggedIn: () => Effect.succeed(true)
 })
 
@@ -767,6 +784,8 @@ describe("TimerService", () => {
         getSiteUrl: () => Effect.succeed("https://test.atlassian.net"),
         getCurrentUser: () => Effect.succeed(null),
         ...mockJiraAuthProfileMethods,
+        // A refresh persists the new token to the same profile.
+        getActiveProfile: () => Effect.succeed(profileWith(`jira-token-${accessTokenCalls}`)),
         isLoggedIn: () => Effect.succeed(true)
       })
       const httpLayer = Layer.succeed(

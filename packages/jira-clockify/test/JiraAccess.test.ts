@@ -64,13 +64,28 @@ const loggedOut: JiraAuthService = {
   isLoggedIn: () => Effect.succeed(false)
 }
 
+/** The stored OAuth profile holding `token`, for `cloud` and its account. */
+const profileWith = (token: string, cloud: string) => ({
+  id: cloud,
+  name: cloud,
+  token: {
+    access_token: token,
+    refresh_token: "refresh",
+    expires_at: 4_102_444_800_000,
+    scope: "write:jira-work",
+    cloud_id: cloud,
+    site_url: `https://${cloud}.atlassian.net`,
+    user: { account_id: `${cloud}-account`, name: "OAuth Dev", email: "dev@example.com" }
+  },
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z"
+})
+
 const oauthLoggedIn: JiraAuthService = {
   ...loggedOut,
   isLoggedIn: () => Effect.succeed(true),
   getAccessToken: () => Effect.succeed(Redacted.make("oauth-token")),
-  getCloudId: () => Effect.succeed("oauth-cloud"),
-  getSiteUrl: () => Effect.succeed("https://oauth.atlassian.net"),
-  getCurrentUser: () => Effect.succeed({ account_id: "oauth-account", name: "OAuth Dev", email: "dev@example.com" })
+  getActiveProfile: () => Effect.succeed(profileWith("oauth-token", "oauth-cloud"))
 }
 
 const site: Site = { origin: "https://team.atlassian.net", cloudId: "cloud-1", token: "right-token" }
@@ -103,6 +118,15 @@ describe("siteOrigin", () => {
     }
   })
 
+  // Review finding: any dotted https host was accepted, and the token sent there. A look-alike domain
+  // that answers tenant_info would have collected it.
+  it("accepts only Jira Cloud hosts, so a look-alike domain never receives the token", () => {
+    expect(siteOrigin("https://team.atlassian.net.evil.example")).toEqual(Option.none())
+    expect(siteOrigin("team.atlassian.net.evil.example")).toEqual(Option.none())
+    expect(siteOrigin("https://jira.example.com")).toEqual(Option.none())
+    expect(siteOrigin("https://team.atlassian.net:8443")).toEqual(Option.none())
+  })
+
   it("refuses plain http outside loopback, credentials in the address, and nothing", () => {
     expect(siteOrigin("http://team.atlassian.net")).toEqual(Option.none())
     expect(siteOrigin("https://me:secret@team.atlassian.net")).toEqual(Option.none())
@@ -121,10 +145,23 @@ describe("JiraAccess", () => {
     withAccess({ oauth: oauthLoggedIn }, () => JiraAccess.use((access) => access.connection)).pipe(
       Effect.map((connection) =>
         expect(Option.map(connection, ({ accountId, cloudId, method }) => ({ method, cloudId, accountId }))).toEqual(
-          Option.some({ method: "oauth", cloudId: "oauth-cloud", accountId: "oauth-account" })
+          Option.some({ method: "oauth", cloudId: "oauth-cloud", accountId: "oauth-cloud-account" })
         )
       )
     ))
+
+  // Review finding: token, site and account were read separately, so a profile switch in between could
+  // pair one profile's token with another's site. A token that is not the active profile's fails closed.
+  it.effect("refuses an OAuth token that does not belong to the active profile", () =>
+    withAccess(
+      {
+        oauth: {
+          ...oauthLoggedIn,
+          getActiveProfile: () => Effect.succeed(profileWith("another-profile-token", "other-cloud"))
+        }
+      },
+      () => Effect.flip(JiraAccess.use((access) => access.connection))
+    ).pipe(Effect.map((error) => expect(error._tag).toBe("JiraLoginChanged"))))
 
   // QA-J2: the API token needs no developer console; once saved it wins over an OAuth login.
   it.effect("saves a verified token with mode 0600 and prefers it to OAuth", () =>

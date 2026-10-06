@@ -258,7 +258,10 @@ const clockifyBaseUrl = "https://api.clockify.me/api"
  * Asks for a Clockify API key (unless given), checks it, picks a workspace and saves it. A key that
  * Clockify refuses, a failed request and an account with no workspace each fail with their own line.
  */
-export const connectClockify = (given: Option.Option<string>) =>
+export const connectClockify = (
+  given: Option.Option<string>,
+  workspaceName: Option.Option<string> = Option.none()
+) =>
   Effect.gen(function*() {
     const auth = yield* ClockifyAuth
     if (Option.isNone(given)) {
@@ -283,10 +286,25 @@ export const connectClockify = (given: Option.Option<string>) =>
         message: "This Clockify account has no workspace. Create one at https://app.clockify.me, then run this again."
       })
     }
-    const workspace = workspaces.length === 1 ? first : yield* Prompt.Select({
-      message: "Workspace:",
-      choices: workspaces.map((candidate) => ({ title: candidate.name, value: candidate }))
-    })
+    const names = workspaces.map((candidate) => candidate.name).join(", ")
+    const workspace = Option.isSome(workspaceName)
+      ? workspaces.find((candidate) => candidate.name === workspaceName.value || candidate.id === workspaceName.value)
+      : workspaces.length === 1
+      ? first
+      : yield* requireTerminal(
+        `This key can use ${workspaces.length} workspaces; pass --workspace with one of: ${names}.`
+      )
+        .pipe(Effect.andThen(Prompt.Select({
+          message: "Workspace:",
+          choices: workspaces.map((candidate) => ({ title: candidate.name, value: candidate }))
+        })))
+    if (workspace === undefined) {
+      return yield* new CommandFailed({
+        message: `No workspace named "${
+          Option.getOrElse(workspaceName, () => "")
+        }" for this key. Its workspaces: ${names}.`
+      })
+    }
 
     yield* auth.save({ apiKey, workspaceId: workspace.id, userId: user.id, baseUrl: clockifyBaseUrl })
     yield* Console.log(`Clockify connected: ${user.name ?? user.email ?? user.id}, workspace ${workspace.name}.`)
@@ -301,9 +319,13 @@ export const clockifySetup = Command.make(
     apiKey: Options.String("api-key").pipe(
       Options.withDescription("Clockify API key, for scripts; without it the key is asked for and not echoed"),
       Options.optional
+    ),
+    workspace: Options.String("workspace").pipe(
+      Options.withDescription("Workspace name or id, when the key can use more than one"),
+      Options.optional
     )
   },
-  ({ apiKey }) => connectClockify(apiKey)
+  ({ apiKey, workspace }) => connectClockify(apiKey, workspace)
 ).pipe(Command.withDescription("Connect Clockify with an API key"))
 
 /** One line saying which Clockify workspace is connected, or what to run when none is. */
