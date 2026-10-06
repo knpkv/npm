@@ -63,6 +63,13 @@ checkpoints of history stay free. A goal is stamped at most once, by the
 reconciler's own record of what it wrote, so a goal its owner reopens stays
 reopened. The checkpoint adds a `reconciler.` activity unless the goal's
 activity list is full; owner activity is never dropped to make room.
+`abandon` applies an approved `work.abandon` job. The goal, owned by exactly the
+approved owner and still at the approved head, becomes `abandoned`: its blocker
+is cleared, and a status activity naming the job is added, credited to the
+approval. A goal with an active (not shipped) lane is refused with
+`WorkGoalLaneActiveError`, which names the lane, so abandoning never releases
+anyone's lane. A goal that has already finished is refused with
+`WorkGoalTerminalError`. An exact replay of the job returns the stored result.
 `isTerminalWorkState`
 names the finished states: `completed`, `deployed` and `abandoned`.
 

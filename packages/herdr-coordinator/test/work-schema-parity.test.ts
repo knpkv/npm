@@ -282,6 +282,7 @@ const storeOnly = [
   "index work_decision_handoffs_lane_time",
   "index work_observed_facts_age",
   "index work_observed_failures_age",
+  "table work_goal_abandonments",
   "table work_goal_reassignments",
   "table work_goal_transaction_totals",
   "table work_goal_transactions",
