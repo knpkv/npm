@@ -52,6 +52,7 @@ import {
 } from "./internal/decision-handoff-migration.js"
 import {
   LaneOperationLedgerRow,
+  type LaneOperationRow,
   LaneOperationTotalsRow,
   planLegacyLaneOperations,
   resolveLegacyLaneClaim
@@ -978,10 +979,21 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           // must fit the ledger, matching WorkStore.
           const existingOperations = yield* Effect.forEach(migratedClaims, ({ lane }) =>
             sql`SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId, phase, revision, record
-                FROM work_lane_operations WHERE operation_id = ${lane.operationId}`.pipe(
+                FROM work_lane_operations WHERE CAST(operation_id AS TEXT) = ${lane.operationId}`.pipe(
               Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LaneOperationLedgerRow))),
-              Effect.mapError(storeError("sql-work.initialize.lane-operation-rows"))
-            )).pipe(Effect.map((rows) => new Map(rows.flat().map((row) => [row.operationId, row]))))
+              Effect.mapError(storeError("sql-work.initialize.lane-operation-rows")),
+              // A key stored as a blob, or twice, is a collision even when its bytes match.
+              Effect.map((rows) => {
+                const found = rows.find(({ operationId }) => operationId !== lane.operationId) ?? rows[0]
+                if (found === undefined) {
+                  return []
+                }
+                const entry: readonly [string, LaneOperationRow] = [lane.operationId, found]
+                return [entry]
+              })
+            )).pipe(Effect.map((entries) =>
+              new Map(entries.flat())
+            ))
           const operationTotals = yield* sql`
             SELECT COUNT(*) AS count, COALESCE(SUM(
               length(CAST(operation_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
@@ -990,9 +1002,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             Effect.mapError(storeError("sql-work.initialize.lane-operation-ledger-totals"))
           )
           const operations = planLegacyLaneOperations(
-            migratedClaims.map(({ lane }) =>
-              lane
-            ),
+            migratedClaims.map(({ lane }) => lane),
             existingOperations,
             operationTotals[0],
             { bytes: workAgentBindingLaneOperationMaxBytes, records: workAgentBindingLaneOperationMaxRecords }

@@ -243,11 +243,14 @@ const withDatabase = <A>(path: string, read: (database: DatabaseSync) => A): A =
   }
 }
 
-/** Both drivers reject a copy of `fixture` with their own operation, leaving every copy unchanged. */
+/**
+ * Both drivers reject a copy of `fixture` with their own operation, leaving every copy unchanged. A null
+ * store operation accepts any WorkStore open failure.
+ */
 const expectRejectedUnchanged = (
   root: string,
   fixture: string,
-  operations: { readonly bridge: string; readonly store: string }
+  operations: { readonly bridge: string; readonly store: string | null }
 ) =>
   Effect.gen(function*() {
     const before = { rows: tableRows(fixture), schema: schemaSnapshot(fixture) }
@@ -255,12 +258,15 @@ const expectRejectedUnchanged = (
     const bridgePath = join(root, "rejected-bridge.sqlite")
     copyFileSync(fixture, storePath)
     copyFileSync(fixture, bridgePath)
+    // null: WorkStore rejects the file before this check, through an earlier reader.
     expect(yield* Effect.result(drivers.store(storePath))).toMatchObject({
-      failure: {
-        _tag: "WorkStoreError",
-        cause: { _tag: "WorkStoreError", operation: operations.store },
-        operation: "open.database"
-      }
+      failure: operations.store === null
+        ? { _tag: "WorkStoreError", operation: "open.database" }
+        : {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: operations.store },
+          operation: "open.database"
+        }
     })
     expect(yield* Effect.result(drivers.bridge(bridgePath))).toMatchObject({
       failure: { _tag: "WorkStoreError", operation: operations.bridge }
@@ -606,6 +612,18 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
         yield* expectRejectedUnchanged(root, mistyped, {
           bridge: "sql-work.initialize.lane-operation-collision",
           store: "open.migrate.lane-operation-collision"
+        })
+        // A blob key with the same bytes is the same operation to the migration, so a collision too.
+        const blobKey = join(root, "blob-key.sqlite")
+        copyFileSync(replica, blobKey)
+        writeFixture(blobKey, (database) => {
+          database.exec(
+            "UPDATE work_lane_operations SET operation_id = CAST(operation_id AS BLOB) WHERE operation_id = 'goal:legacy'"
+          )
+        })
+        yield* expectRejectedUnchanged(root, blobKey, {
+          bridge: "sql-work.initialize.lane-operation-collision",
+          store: null
         })
         const blob = join(root, "blob.sqlite")
         copyFileSync(replica, blob)

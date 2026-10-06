@@ -739,11 +739,14 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
       new Map(
         hasLedger
           ? migratedClaims.flatMap(({ lane }) => {
-            const row = database.prepare(
+            const matches = database.prepare(
               `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId, phase, revision, record
-               FROM work_lane_operations WHERE operation_id = ?`
-            ).get(lane.operationId)
-            return row === undefined ? [] : [[lane.operationId, Schema.decodeUnknownSync(LaneOperationLedgerRow)(row)]]
+               FROM work_lane_operations WHERE CAST(operation_id AS TEXT) = ?`
+            ).all(lane.operationId)
+            const rows = Schema.decodeUnknownSync(Schema.Array(LaneOperationLedgerRow))(matches)
+            // A key stored as a blob, or twice, is a collision even when its bytes match.
+            const found = rows.find(({ operationId }) => operationId !== lane.operationId) ?? rows[0]
+            return found === undefined ? [] : [[lane.operationId, found]]
           })
           : []
       ),

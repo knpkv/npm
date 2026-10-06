@@ -60,7 +60,7 @@ export const resolveLegacyLaneClaim = (
 // decode error.
 const LedgerValue = Schema.Union([Schema.String, Schema.Number, Schema.Uint8Array])
 export const LaneOperationLedgerRow = Schema.Struct({
-  operationId: Schema.String,
+  operationId: LedgerValue,
   laneId: LedgerValue,
   goalId: LedgerValue,
   phase: LedgerValue,
@@ -85,6 +85,7 @@ export type LegacyLaneOperations =
 
 const sameOperation = (lane: WorkLaneClaimed, row: LaneOperationRow): boolean => {
   if (
+    row.operationId !== lane.operationId ||
     row.laneId !== lane.laneId || row.goalId !== lane.goalId || row.phase !== lane.phase ||
     row.revision !== lane.revision
   ) return false
