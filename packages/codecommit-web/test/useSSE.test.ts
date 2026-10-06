@@ -8,7 +8,6 @@ describe("SSE sandbox coordinates", () => {
       pullRequests: [],
       accounts: [],
       status: "idle",
-      pendingReviewCount: 0,
       sandboxes: [{
         id: "sandbox-1",
         pullRequestId: "42",
@@ -77,7 +76,6 @@ describe("SSE account visibility", () => {
       // Detection found nothing — the case that must not decide visibility.
       accounts: [],
       status: "idle",
-      pendingReviewCount: 0,
       ...(enabledProfiles !== undefined && { enabledProfiles })
     })
 

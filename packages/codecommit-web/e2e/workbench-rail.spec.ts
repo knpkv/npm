@@ -65,7 +65,6 @@ const serve = async (page: Page) => {
           accounts: [],
           currentUser: "viewer",
           enabledProfiles: ["production"],
-          pendingReviewCount: 2,
           pullRequests,
           sandboxes: [],
           status: "idle"
@@ -157,7 +156,6 @@ test("marks only the open pull request when two share a number in different regi
           accounts: [],
           currentUser: "viewer",
           enabledProfiles: ["production"],
-          pendingReviewCount: 2,
           pullRequests: [
             pullRequest("12", { title: "Bound patch reads" }),
             {
@@ -175,4 +173,33 @@ test("marks only the open pull request when two share a number in different regi
   const rail = page.getByRole("region", { name: /^Queue/ })
   await expect(rail.locator("a[aria-current='page']")).toHaveCount(1)
   await expect(rail.getByRole("link", { name: /Same number in Virginia/ })).toHaveAttribute("aria-current", "page")
+})
+
+// The badge counts with the rail's own rule on the client; a stale server count on the wire must not win.
+test("counts the header badge from the queue, not a stale server count", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  await page.route("**/api/events/", (route) =>
+    route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          accounts: [],
+          currentUser: "viewer",
+          enabledProfiles: ["production"],
+          pendingReviewCount: 0,
+          pullRequests: [pullRequest("12", { title: "Bound patch reads" })],
+          sandboxes: [],
+          status: "idle"
+        })
+      }\n\n`,
+      contentType: "text/event-stream"
+    }))
+  await page.goto(detail("12"))
+
+  const rail = page.getByRole("region", { name: /^Queue/ })
+  await expect(rail.getByText("1 pull request waits on your review.")).toBeVisible()
+  await expect(
+    page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: /, 1 needing your review$/ })
+  )
+    .toBeVisible()
 })
