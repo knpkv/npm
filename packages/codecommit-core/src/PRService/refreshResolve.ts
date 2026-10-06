@@ -11,6 +11,7 @@ import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import { type AppStatus, AwsRegion } from "../Domain.js"
+import { describeAwsClientError } from "../Errors.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
 import { enabledProfilesOf, retainEnabledAccountRows } from "./visibility.js"
 
@@ -75,16 +76,21 @@ const resolveIdentity = (
     const notificationRepo = yield* NotificationRepo
     const { clearCurrentUser, updateCurrentUser } = options ?? {}
 
-    const identity = yield* awsClient.getCallerIdentity({
+    const lookup = yield* awsClient.getCallerIdentity({
       profile: account.profile,
       region
-    }).pipe(Effect.catchIf(() => true, () => Effect.void))
+    }).pipe(Effect.result)
 
-    if (identity === undefined) {
+    if (lookup._tag === "Failure") {
       yield* notificationRepo.addSystem({
         type: "error",
         title: `${account.profile} (${region})`,
-        message: "Failed to get caller identity — session may have expired",
+        message: JSON.stringify({
+          operation: "getCallerIdentity",
+          profile: account.profile,
+          region,
+          cause: describeAwsClientError(lookup.failure)
+        }),
         profile: account.profile,
         deduplicate: true
       })
@@ -92,6 +98,7 @@ const resolveIdentity = (
       return
     }
 
+    const identity = lookup.success
     yield* Ref.update(accountIdRef, (m) => new Map(m).set(account.profile, identity.accountId))
     if (updateCurrentUser !== undefined) yield* updateCurrentUser(identity.username)
   })

@@ -610,7 +610,9 @@ const ConfigResponse = Schema.Struct({
 const ConfigPathResponse = Schema.Struct({
   path: Schema.String,
   exists: Schema.Boolean,
-  modifiedAt: Schema.optional(Schema.String)
+  modifiedAt: Schema.optional(Schema.String),
+  /** The files AWS profiles were detected from (AWS_CONFIG_FILE / AWS_SHARED_CREDENTIALS_FILE or ~/.aws). */
+  awsProfileSources: Schema.optional(Schema.Struct({ config: Schema.String, credentials: Schema.String }))
 })
 
 const DatabaseInfoResponse = Schema.Struct({

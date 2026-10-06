@@ -7,7 +7,7 @@
  * @internal
  */
 
-import { Cause, Effect, Option, Predicate, Ref, Stream, SubscriptionRef } from "effect"
+import { Cause, Effect, Option, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
 import { diffApprovalPools, diffPR } from "../CacheService/diff.js"
@@ -20,6 +20,7 @@ import {
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import type { PullRequestRefreshScope } from "../Domain.js"
+import { describeAwsClientError } from "../Errors.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
 
@@ -98,9 +99,7 @@ export const fetchAndUpsertPRs = (params: {
         return awsClient.getPullRequests({ profile: account.profile, region }).pipe(
           Stream.map((pr) => ({ awsAccountId, label, pr })),
           Stream.catch((error) => {
-            const causeStr = (Predicate.isError(error)
-              ? error.name !== "Error" ? error.name : error.message
-              : String(error)) || "Unknown error"
+            const causeStr = describeAwsClientError(error)
             const message = JSON.stringify({
               operation: "getPullRequests",
               profile: account.profile,

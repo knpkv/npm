@@ -1,0 +1,23 @@
+id: no-tailwind-side-stripe
+snapshots:
+  ? |
+    const bar = <div className="border-l-[3px] border-l-primary" />
+  : labels:
+    - source: '"border-l-[3px] border-l-primary"'
+      style: primary
+      start: 27
+      end: 60
+  ? |
+    const callout = <aside className="border-s-4 border-amber-500 pl-3" />
+  : labels:
+    - source: '"border-s-4 border-amber-500 pl-3"'
+      style: primary
+      start: 33
+      end: 67
+  ? |
+    const row = <div className={`flex ${unread ? "border-l-2 border-l-blue-500" : ""}`} />
+  : labels:
+    - source: '"border-l-2 border-l-blue-500"'
+      style: primary
+      start: 45
+      end: 75

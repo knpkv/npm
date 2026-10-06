@@ -1,0 +1,13 @@
+id: no-tailwind-side-stripe
+valid:
+  - |
+    const row = <div className="flex border-l-0 first:border-l" />
+  - |
+    const box = <div className="rounded-md border" />
+invalid:
+  - |
+    const row = <div className={`flex ${unread ? "border-l-2 border-l-blue-500" : ""}`} />
+  - |
+    const callout = <aside className="border-s-4 border-amber-500 pl-3" />
+  - |
+    const bar = <div className="border-l-[3px] border-l-primary" />

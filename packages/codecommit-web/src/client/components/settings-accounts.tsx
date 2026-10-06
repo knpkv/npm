@@ -1,11 +1,13 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { AwsProfileName } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { InfoIcon, LogInIcon, LogOutIcon, SearchIcon, ServerIcon, UserIcon } from "lucide-react"
+import { StatePanel } from "@knpkv/rly/primitives"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   appStateAtom,
+  configPathQueryAtom,
   configQueryAtom,
   configSaveAtom,
   notificationsSsoLoginAtom,
@@ -119,6 +121,54 @@ export function SettingsAccounts() {
   )
 }
 
+/**
+ * First run: no AWS profile was detected. Names where detection looked, the two commands that create a
+ * profile (this page never edits AWS files itself), and re-runs detection on request, saying what it found.
+ */
+function NoProfiles() {
+  const paths = useAtomValue(configPathQueryAtom)
+  const detectAgain = useAtomRefresh(configQueryAtom)
+  const [checkedAt, setCheckedAt] = useState<Date | null>(null)
+  const sources = AsyncResult.isSuccess(paths) ? paths.value.awsProfileSources : undefined
+  return (
+    <StatePanel
+      action={
+        <Button
+          onClick={() => {
+            detectAgain()
+            setCheckedAt(new Date())
+          }}
+          size="sm"
+          variant="outline"
+        >
+          Detect again
+        </Button>
+      }
+      description={
+        <div className="grid gap-3">
+          <p>
+            {sources === undefined ? (
+              "CodeCommit reads profiles from your AWS CLI configuration."
+            ) : (
+              <>
+                CodeCommit reads profiles from <code>{sources.config}</code> and <code>{sources.credentials}</code>.
+              </>
+            )}{" "}
+            Create one with either command, then detect again:
+          </p>
+          <pre className="rounded-md border bg-muted px-3 py-2 text-sm">
+            <code>aws configure sso{"\n"}aws configure --profile NAME</code>
+          </pre>
+          {checkedAt === null ? null : (
+            <p role="status">Checked again at {checkedAt.toLocaleTimeString()}: still no profiles.</p>
+          )}
+        </div>
+      }
+      title="No AWS profiles found"
+    />
+  )
+}
+
 function AccountsList({
   currentUser,
   data,
@@ -162,7 +212,8 @@ function AccountsList({
 
   return (
     <>
-      <div className="flex items-center gap-2 text-sm">
+      {/* Who is signed in only means something once a profile exists. */}
+      <div className="flex items-center gap-2 text-sm" hidden={accounts.length === 0}>
         <UserIcon className="size-4 text-muted-foreground" />
         {currentUser ? (
           <>
@@ -200,9 +251,7 @@ function AccountsList({
         )}
       </div>
       {accounts.length === 0 ? (
-        <p className="text-sm text-muted-foreground py-4">
-          No accounts configured. Edit the config file to add AWS profiles.
-        </p>
+        <NoProfiles />
       ) : (
         <>
           <div className="flex items-center gap-2">

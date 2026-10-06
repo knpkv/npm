@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-tailwind-side-stripe
+language: tsx
+severity: error
+message: "No one-sided accent stripe from a utility class (border-l-2, border-s-4, border-l-[3px]); mark state with words, weight or a full border."
+
+rule:
+  any:
+    - kind: string_fragment
+    - kind: string
+  regex: '(^|[\s:"])border-[lrse]-(?:[2-9]|\[[2-9]px\])(?:$|[\s"])'
+
+files:
+  - "packages/**/*.tsx"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+
+note: |
+  `lint:stripes` reads stylesheets, so a Tailwind utility class is invisible to it. The notifications
+  page drew its unread marker as `border-l-2 border-l-blue-500`. Removing a side (`border-l-0`) or a
+  1px hairline (`border-l`) stays allowed.

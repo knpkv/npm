@@ -15,16 +15,25 @@
  * **Common tasks**
  *
  * - Connect SSE: {@link useSSE}
- * - Connection state: {@link ConnectionState}
+ * - Connection state: `streamConnectionAtom` in connection.ts
  *
  * @module
  */
+import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { AppStatus, AwsProfileName, AwsRegion, PullRequest, PullRequestStatus } from "@knpkv/codecommit-core/Domain.js"
 import { Effect, Schema } from "effect"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import { toast } from "sonner"
 import type { AppState } from "../atoms/app.js"
 import { codeCommitPullRequestHref } from "../codecommit-route.js"
+import {
+  connectionAfterProbe,
+  retryDelayMs,
+  streamConnectionAtom,
+  type StreamProbe,
+  streamRetryAtom,
+  streamSnapshotSeenAtom
+} from "../connection.js"
 import { ownerSessionReady } from "../ownerSession.js"
 
 const PullRequestWire = Schema.Struct({
@@ -168,7 +177,21 @@ const toAppState = (payload: typeof SsePayload.Type): AppState => {
 /** Decode one server-sent snapshot, retaining nullable sandbox coordinates. */
 export const decodeSseState = (json: string): AppState => toAppState(decode(json))
 
-export type ConnectionState = "connected" | "reconnecting" | "disconnected"
+/** Tries before the stream gives up and waits for "Retry now". */
+const MAX_RETRIES = 50
+
+/**
+ * Asks a cheap authenticated endpoint what the server says, since an EventSource can't see the
+ * status of a refused connection. A framework boundary: the browser's fetch.
+ */
+const probeStream = async (): Promise<StreamProbe> => {
+  try {
+    const response = await window.fetch("/api/config", { credentials: "same-origin", method: "GET" })
+    return { _tag: "Status", status: response.status }
+  } catch {
+    return { _tag: "Unreachable" }
+  }
+}
 
 export function useSSE(
   onState: (state: AppState) => void,
@@ -192,7 +215,9 @@ export function useSSE(
   toastClickRef.current = onToastClick
   const desktopNotifyRef = useRef(onDesktopNotify)
   desktopNotifyRef.current = onDesktopNotify
-  const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected")
+  const setConnection = useAtomSet(streamConnectionAtom)
+  const setSnapshotSeen = useAtomSet(streamSnapshotSeenAtom)
+  const retryRequest = useAtomValue(streamRetryAtom)
   const maxSeenIdRef = useRef<number>(0)
 
   useEffect(() => {
@@ -202,11 +227,12 @@ export function useSSE(
     let disposed = false
 
     const connect = () => {
+      setConnection({ _tag: "Connecting" })
       es = new EventSource("/api/events/")
 
       es.onopen = () => {
         retryCount = 0
-        setConnectionState("connected")
+        setConnection({ _tag: "Live" })
       }
 
       es.onmessage = (event) => {
@@ -258,6 +284,7 @@ export function useSSE(
           }
 
           callbackRef.current(state)
+          setSnapshotSeen(true)
         } catch (e) {
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
@@ -268,30 +295,31 @@ export function useSSE(
 
       es.onerror = () => {
         es?.close()
-        if (retryCount >= 50) {
-          setConnectionState("disconnected")
-          return
-        }
-        setConnectionState("reconnecting")
-        const delay = Math.min(1000 * 2 ** retryCount, 30000)
-        retryTimeout = setTimeout(() => {
-          retryCount++
-          connect()
-        }, delay)
+        void probeStream().then((probe) => {
+          if (disposed) return
+          const giveUp = retryCount >= MAX_RETRIES
+          const delay = retryDelayMs(retryCount)
+          const next = connectionAfterProbe(probe, giveUp ? null : Date.now() + delay)
+          setConnection(next)
+          // Without a session, retrying can't succeed; the page says how to sign in instead.
+          if (next._tag === "Unauthenticated" || giveUp) return
+          retryTimeout = setTimeout(() => {
+            retryCount++
+            connect()
+          }, delay)
+        })
       }
     }
 
     void ownerSessionReady.then((status) => {
       if (disposed) return
       if (status._tag === "Ready") connect()
-      else setConnectionState("disconnected")
+      else setConnection({ _tag: "Unauthenticated", detail: status.message })
     })
     return () => {
       disposed = true
       es?.close()
       if (retryTimeout !== undefined && retryTimeout !== null) clearTimeout(retryTimeout)
     }
-  }, [])
-
-  return connectionState
+  }, [retryRequest, setConnection, setSnapshotSeen])
 }
