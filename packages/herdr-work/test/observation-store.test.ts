@@ -1,10 +1,11 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Effect, Result, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import {
   makeWorkService,
   withObservedFacts,
@@ -12,6 +13,7 @@ import {
   type WorkAgentObservation,
   type WorkGoal,
   type WorkObservationEnvelope,
+  workObservationMaxSkewMillis,
   workObservedFactMaxRecords,
   type WorkPullRequestObservation,
   WorkSnapshots,
@@ -409,5 +411,46 @@ describe("observed facts", () => {
       const { work } = yield* fixture
       const report = yield* work.observe([at(100, { ...agent("idle"), host: "İ".repeat(256) })])
       expect(report.outcomes[0]?._tag).toBe("stored")
+    })))
+
+  it.effect("fails a read whose fact row is filed under another subject", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { path, work } = yield* fixture
+      yield* work.observe([at(100, pullRequest())])
+      const database = new DatabaseSync(path)
+      database.exec("UPDATE work_observed_facts SET subject = 'github:knpkv/npm#8'")
+      database.close()
+      expect(yield* Effect.flip(work.snapshots(10_000))).toMatchObject({
+        _tag: "WorkStoreError",
+        operation: "snapshot-input.fact-subject"
+      })
+    })))
+
+  it.effect("skips an observation stamped further ahead than clock skew allows", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      const future =
+        (yield* work.observe([at(10_000 + workObservationMaxSkewMillis + 1, agent("working"))])).outcomes[0]
+      expect(future?._tag).toBe("stale")
+      expect((yield* work.observe([at(9_000, agent("idle"))])).outcomes[0]?._tag).toBe("stored")
+      expect((yield* work.observe([at(10_000 + workObservationMaxSkewMillis, agent("working"))])).outcomes[0]?._tag)
+        .toBe("stored")
+    })))
+
+  it.effect("accepts observed facts only on the now window, once per goal in it", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* work.record({ eventId: "goal-pr7.1", goal, occurredAt: 1_000, version: "herdr.work.event.v1" })
+      yield* work.observe([at(5_000, pullRequest())])
+      const valid = Schema.encodeSync(WorkSnapshots)(yield* work.snapshots(10_000))
+      const entry = valid.now.observed?.[0]
+      const decode = Schema.decodeUnknownResult(WorkSnapshots)
+      expect(Result.isSuccess(decode(valid))).toBe(true)
+      expect(Result.isFailure(decode({ ...valid, day: { ...valid.day, observed: [] } }))).toBe(true)
+      expect(Result.isFailure(decode({ ...valid, now: { ...valid.now, observed: [entry, entry] } }))).toBe(true)
+      expect(
+        Result.isFailure(decode({ ...valid, now: { ...valid.now, observed: [{ ...entry, goalId: "goal-absent" }] } }))
+      )
+        .toBe(true)
     })))
 })

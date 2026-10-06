@@ -91,6 +91,7 @@ import {
   WorkLaneClaim,
   WorkLaneClaimed,
   WorkObservationEnvelope,
+  workObservationMaxSkewMillis,
   WorkObservationSubject,
   WorkObservedFact,
   workObservedFactMaxBytes,
@@ -1938,6 +1939,7 @@ type PreparedObservation =
     readonly observedAt: number
     readonly record: string
   }
+  | { readonly _tag: "future"; readonly subject: string }
   | {
     readonly _tag: "unknown"
     readonly subject: string
@@ -2007,6 +2009,7 @@ const writeObservations = (
          last_at = max(last_at, excluded.last_at)`
     )
     const outcomes = prepared.map((item): WorkObserveOutcome => {
+      if (item._tag === "future") return { _tag: "stale", subject: item.subject }
       const row = readFact.get(item.subject)
       const stored = row === undefined ? undefined : Schema.decodeUnknownSync(StoredFactRow)(row)
       if (item._tag === "unknown") {
@@ -4809,6 +4812,11 @@ export class WorkStore implements WorkStoreService {
           }),
         catch: storeError("snapshot-input.decode-fact")
       }))
+    // A row is filed under its own facts' subject; anything else is a corrupt row.
+    const misfiled = facts.find((fact) => fact.subject !== observationSubject(fact.observation))
+    if (misfiled !== undefined) {
+      return yield* new WorkStoreError({ cause: misfiled.subject, operation: "snapshot-input.fact-subject" })
+    }
     return { events, facts, failures, logicalObservedAt }
   })
 
@@ -4820,6 +4828,9 @@ export class WorkStore implements WorkStoreService {
       Schema.Array(WorkObservationEnvelope).check(Schema.isMaxLength(workObservedFactMaxRecords))
     )(envelopes).pipe(Effect.mapError(storeError("observe.decode")))
     const cryptoService = this.#cryptoService
+    // An observation from further ahead than clock skew allows would outrank
+    // every real reading until wall time caught up, so it is skipped as stale.
+    const latestAllowed = (yield* Clock.currentTimeMillis) + workObservationMaxSkewMillis
     const prepared = yield* Effect.forEach(
       decoded,
       Effect.fnUntraced(function*(envelope) {
@@ -4827,6 +4838,7 @@ export class WorkStore implements WorkStoreService {
         const subject = yield* Schema.decodeUnknownEffect(WorkObservationSubject)(
           observationSubject(envelope.observation)
         ).pipe(Effect.mapError(storeError("observe.subject")))
+        if (envelope.observedAt > latestAllowed) return { _tag: "future", subject } satisfies PreparedObservation
         if (envelope.observation._tag === "unknown") {
           if (canonicalSubject(envelope.observation.source, envelope.observation.subject) === null) {
             return yield* new WorkStoreError({ cause: envelope.observation, operation: "observe.subject" })

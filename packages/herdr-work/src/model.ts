@@ -842,6 +842,9 @@ export const WorkObservedFailure = Schema.Struct({
 export interface WorkObservedFailure extends Schema.Schema.Type<typeof WorkObservedFailure> {}
 
 /** The overlay keeps one latest fact per subject, within its own bounds; over them, the oldest facts go first. */
+/** How far ahead of the store's clock an observation may be stamped before it is skipped as stale. */
+export const workObservationMaxSkewMillis = 5 * 60 * 1_000
+
 export const workObservedFactMaxRecords = 4_096
 export const workObservedFactMaxBytes = 2 * 1024 * 1024
 
@@ -959,5 +962,13 @@ export const WorkSnapshots = Schema.Struct({
   day: WorkSnapshot,
   week: WorkSnapshot,
   month: WorkSnapshot
-})
+}).check(Schema.makeFilter(
+  ({ day, month, now, week }) =>
+    [day, week, month].every((window) => window.observed === undefined && window.observedOmitted === undefined) &&
+    (now.observed === undefined || (
+      new Set(now.observed.map(({ goalId }) => goalId)).size === now.observed.length &&
+      now.observed.every(({ goalId }) => now.goals.some(({ id }) => id === goalId))
+    )),
+  { expected: "observed facts only on the now window, at most one entry per goal in that window" }
+))
 export interface WorkSnapshots extends Schema.Schema.Type<typeof WorkSnapshots> {}

@@ -17,7 +17,8 @@ review and checks as GitHub reported them, or an agent's Herdr status. One
 latest fact is kept per subject (`github:<repo>#<n>`, `herdr:<host>/<agentId>`).
 The same facts again keep their first-seen time (`observedAt`) and move their
 last confirmation (`confirmedAt`); facts older than the last confirmation are
-skipped. An `unknown` observation (a source that could not be read) never
+skipped, and so are facts stamped more than five minutes ahead of the store's
+clock, which would otherwise outrank every real reading. An `unknown` observation (a source that could not be read) never
 replaces a fact: it starts or continues the subject's run of failures, whose
 `since` stays at the first failure until a good read newer than every failure
 ends it (a delayed good read inside the run restarts it at its latest failure). Hostd names the
