@@ -49,7 +49,8 @@ export class FleetctlUsageError extends Data.TaggedError("FleetctlUsageError")<{
 }> {}
 
 /** What the process should print to stderr for a usage mistake: the cause on one line, then usage. */
-export const formatUsageError = (error: FleetctlUsageError): string => `fleetctl: ${error.reason}\n\n${error.usage}`
+export const formatUsageError = (error: FleetctlUsageError): string =>
+  `fleetctl: ${oneLine(error.reason)}\n\n${error.usage}`
 
 const commands = new Set(["hosts", "status", "history", "job", "follow", "submit", "work", "apply-everywhere"])
 

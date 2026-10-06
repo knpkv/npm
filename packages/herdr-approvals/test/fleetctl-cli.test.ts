@@ -77,4 +77,11 @@ describe("fleetctl invocation", () => {
     ])
     expect(parseInvocation(["job", "SER8", "job-1"])._tag).toBe("Run")
   })
+
+  // A reason quotes what was typed; a typed newline must not split the cause line.
+  it("keeps a quoted command on the cause line", () => {
+    const invocation = parseInvocation(["de\nploy"])
+    if (invocation._tag !== "FleetctlUsageError") throw new Error("expected a usage error")
+    expect(formatUsageError(invocation).split("\n\n")[0]).toBe("fleetctl: unknown command \"de; ploy\"")
+  })
 })
