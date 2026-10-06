@@ -22,7 +22,7 @@
   .name {
     color: var(--rly-color-text-1);
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .compact {

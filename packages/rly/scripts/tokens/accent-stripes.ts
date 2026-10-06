@@ -27,14 +27,12 @@ export interface AccentStripeViolation {
 }
 
 const ONE_SIDE = String.raw`border-(?:left|right|inline-start|inline-end)`
-const DECLARATION = new RegExp(
-  // Only a real declaration name: not the tail of a custom property such as `--card-border-left`.
-  String.raw`(?<![\w-])(${ONE_SIDE}(?:-width|-color)?|border-inline-width|border-width|box-shadow)\s*:\s*([^;}]+)`,
-  "gi"
+const DECLARATION_NAME = new RegExp(
+  String.raw`^(?:${ONE_SIDE}(?:-width|-color)?|border-inline-width|border-width|box-shadow)$`,
+  "i"
 )
 const RULE_COLOR =
   /(?:^|[;{\s])(border(?:-color|-(?:left|right|inline-start|inline-end|inline)-color)?)\s*:\s*([^;}]+)/gi
-const EXEMPT = /\/\*\s*stripe-ok:\s*\S[^*]*\*\//
 const ZEROED = /^\s*(?:0|none|0px|var\(--rly-space-0\))\s*$/i
 const NEUTRAL_COLOR = /^(?:var\(\s*--rly-color-border-[12]\s*\)|transparent)$/i
 const HAIRLINE = /^(?:0?\.\d+|1)px$|^(?:0|0px|var\(\s*--rly-space-0\s*\))$/i
@@ -43,14 +41,6 @@ const COLOR_TOKEN =
   /^(?:#|rgb|hsl|oklch|oklab|lab|lch|color|color-mix\(|var\(\s*--rly-color-|currentcolor$|transparent$|[a-z]+$)/i
 const LENGTH = /^(?:-?\d*\.?\d+(?:px|rem|em)?|var\(\s*--rly-space-\d+\s*\))$/i
 const ZERO_LENGTH = /^(?:-?0*\.?0+(?:px|rem|em)?|var\(\s*--rly-space-0\s*\))$/i
-
-const stripComments = (source: string): string =>
-  source.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "))
-
-const position = (source: string, offset: number) => {
-  const lines = source.slice(0, offset).split("\n")
-  return { column: (lines.at(-1)?.length ?? 0) + 1, line: lines.length }
-}
 
 /** Splits a value on top-level separators, keeping `var(...)` and `color-mix(...)` whole. */
 const splitTopLevel = (value: string, separator: RegExp): ReadonlyArray<string> => {
@@ -126,38 +116,6 @@ const widthEdges = (
       { inline: false, width: third },
       { inline: true, width: fourth }
     ]
-}
-
-/**
- * The declarations of the rule that holds a declaration: from its block's `{` to the matching `}`,
- * leaving out nested blocks, so a nested child's colour never stands in for its parent's.
- */
-const ruleAround = (source: string, offset: number): string => {
-  let depth = 0
-  let start = 0
-  for (let index = offset; index >= 0; index -= 1) {
-    if (source[index] === "}") depth += 1
-    if (source[index] === "{") {
-      if (depth === 0) {
-        start = index + 1
-        break
-      }
-      depth -= 1
-    }
-  }
-  let own = ""
-  depth = 0
-  for (let index = start; index < source.length; index += 1) {
-    const character = source[index]
-    if (character === "{") depth += 1
-    if (character === "}") {
-      if (depth === 0) break
-      depth -= 1
-      continue
-    }
-    if (depth === 0 && character !== "{") own += character
-  }
-  return own
 }
 
 /** A value without its `!important` priority, which says nothing about what the border draws. */
@@ -272,9 +230,14 @@ const ruleEdges = (rule: Rule): ReadonlyMap<EdgeName, Edge> => {
   const edges = new Map<EdgeName, Edge>(
     EDGES.map((name) => [name, { by: undefined, color: "currentcolor", style: "none", width: "medium" }])
   )
+  const important = new Set<string>()
+  // A later declaration replaces an edge part only when CSS priority lets it: never over !important.
   const set = (name: EdgeName, part: EdgePart, value: string, by: Declaration): void => {
     const edge = edges.get(name)
-    if (edge !== undefined) edges.set(name, { ...edge, [part]: value, by })
+    const key = `${name}:${part}`
+    if (edge === undefined || (important.has(key) && !by.important)) return
+    if (by.important) important.add(key)
+    edges.set(name, { ...edge, [part]: value, by })
   }
   for (const node of rule.nodes ?? []) {
     if (node.type !== "decl" || node.prop.startsWith("--")) continue
@@ -328,29 +291,57 @@ const edgeStripe = (rule: Rule): Declaration | undefined => {
     ?? (shown.some(({ edge }) => neutral(edge)) ? lone(shown.filter(({ edge }) => !neutral(edge))) : undefined)
 }
 
+const THIN = /^(?:[0-4](?:\.\d+)?px|0?\.\d+px|var\(\s*--rly-space-[024]\s*\))$/i
+const NEUTRAL_FILL = /^(?:none|transparent|var\(\s*--rly-color-(?:border-[12]|surface-\d|canvas)\s*\))$/i
+
+/**
+ * The declaration that makes a rule a thin coloured bar: an element 4px or narrower whose background
+ * is a colour rather than a neutral divider or surface (ServiceMark's old 3px `.rail`). Thin
+ * horizontal lines stay allowed, like block-edge borders.
+ */
+const barStripe = (rule: Rule): Declaration | undefined => {
+  const own = (rule.nodes ?? []).flatMap((node) => (node.type === "decl" ? [node] : []))
+  const thin = own.find((decl) => /^(?:width|inline-size)$/i.test(decl.prop) && THIN.test(decl.value.trim()))
+  const fill = own.find((decl) => /^background(?:-color)?$/i.test(decl.prop))
+  if (thin === undefined || fill === undefined) return undefined
+  return NEUTRAL_FILL.test(fill.value.trim()) ? undefined : thin
+}
+
+/** Whether a declaration carries its own stripe-ok comment (with a reason) right after it on the same line. */
+const exempt = (decl: Declaration): boolean => {
+  const next = decl.next()
+  return next?.type === "comment"
+    && next.source?.start?.line === decl.source?.start?.line
+    && /^stripe-ok:\s*\S/.test(next.text.trim())
+}
+
+/** A rule's own declarations as text (no nested blocks), for reading the border colour it states. */
+const ownDeclarations = (decl: Declaration): string =>
+  (decl.parent?.nodes ?? []).flatMap((node) => (node.type === "decl" ? [`${node.prop}: ${node.value};`] : [])).join(" ")
+
 /** Every one-sided accent stripe declared in a CSS source, with its 1-based position. */
 export const findAccentStripes = (path: string, source: string): ReadonlyArray<AccentStripeViolation> => {
-  const comparable = stripComments(source)
-  const lines = source.split("\n")
   const violations: Array<AccentStripeViolation> = []
-  const report = (line: number, column: number, declaration: string): void => {
-    if (EXEMPT.test(lines[line - 1] ?? "")) return
-    if (violations.some((seen) => seen.line === line && seen.column === column)) return
-    violations.push({ column, declaration, line, path })
+  const report = (by: Declaration): void => {
+    const start = by.source?.start
+    if (start === undefined || exempt(by)) return
+    if (violations.some((seen) => seen.line === start.line && seen.column === start.column)) return
+    violations.push({
+      column: start.column,
+      declaration: `${by.prop}: ${by.value}${by.important ? " !important" : ""}`,
+      line: start.line,
+      path
+    })
   }
-  for (const match of comparable.matchAll(DECLARATION)) {
-    const [declaration, property, value] = match
-    if (property === undefined || value === undefined || declaration === undefined) continue
-    if (!isStripe(property, withoutPriority(value.trim()), ruleAround(comparable, match.index))) continue
-    const at = position(comparable, match.index)
-    report(at.line, at.column, declaration.trim())
-  }
-  // The same policy per rule and edge, so longhands (`border-style: none none none solid`) cannot assemble a stripe.
-  postcss.parse(source).walkRules((rule) => {
-    const by = edgeStripe(rule)
-    const start = by?.source?.start
-    if (by === undefined || start === undefined) return
-    report(start.line, start.column, `${by.prop}: ${by.value}${by.important ? " !important" : ""}`)
+  const root = postcss.parse(source)
+  // Each declaration on its own (quoted strings and comments are never declarations here)...
+  root.walkDecls((decl) => {
+    if (decl.prop.startsWith("--") || !DECLARATION_NAME.test(decl.prop)) return
+    if (isStripe(decl.prop, decl.value.trim(), ownDeclarations(decl))) report(decl)
+  })
+  // ...and per rule and edge, so longhands (`border-style: none none none solid`) cannot assemble a stripe.
+  root.walkRules((rule) => {
+    for (const by of [edgeStripe(rule), barStripe(rule)]) if (by !== undefined) report(by)
   })
   return violations.sort((left, right) => left.line - right.line || left.column - right.column)
 }

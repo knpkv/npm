@@ -1,5 +1,6 @@
 /**
- * Fails when any stylesheet draws a one-sided accent stripe (see accent-stripes.ts): every rly
+ * Fails when any stylesheet draws a one-sided accent stripe (see accent-stripes.ts) or splits words
+ * (see word-breaks.ts): every rly
  * source and story stylesheet, and every product package's `src` CSS. Stripes that product packages
  * already had are listed in `stripe-baseline.json` and allowed until removed (see stripe-baseline.ts).
  * Run with `pnpm lint:stripes`; part of the root `lint:static`.
@@ -15,6 +16,7 @@ import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import { findAccentStripes } from "./accent-stripes.js"
 import { compareToBaseline, type StripeBaselineEntry } from "./stripe-baseline.js"
+import { findWordSplits } from "./word-breaks.js"
 
 class StripeLintError extends Data.TaggedError("StripeLintError")<{
   readonly reason: string
@@ -79,7 +81,8 @@ const program = Effect.gen(function*() {
   const violations = []
   for (const file of files.sort()) {
     const source = yield* fs.readFileString(file)
-    for (const violation of findAccentStripes(path.relative(repoRoot, file), source)) {
+    const relativePath = path.relative(repoRoot, file)
+    for (const violation of [...findAccentStripes(relativePath, source), ...findWordSplits(relativePath, source)]) {
       violations.push(violation)
     }
   }
@@ -88,7 +91,7 @@ const program = Effect.gen(function*() {
     return yield* new StripeLintError({
       reason: [
         ...fresh.map((violation) =>
-          `${violation.path}:${violation.line}:${violation.column} one-sided accent stripe: ${violation.declaration}`
+          `${violation.path}:${violation.line}:${violation.column} one-sided stripe or mid-word break: ${violation.declaration}`
         ),
         ...fixed.map((entry) =>
           `${entry.path}: no longer draws "${entry.declaration}"; remove it from scripts/tokens/stripe-baseline.json`
@@ -97,7 +100,7 @@ const program = Effect.gen(function*() {
     })
   }
   yield* Console.log(
-    `stripe policy checked ${files.length} stylesheets; ${baseline.length} known stripes outside rly remain`
+    `stripe policy checked ${files.length} stylesheets; ${baseline.length} known stripes and word splits remain in the baseline`
   )
 })
 

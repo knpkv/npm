@@ -54,7 +54,7 @@
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .positive .title {
@@ -74,7 +74,7 @@
     color: var(--rly-color-text-2);
     font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
       var(--rly-type-body-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
   .description > :first-child {
     margin-block-start: var(--rly-space-0);

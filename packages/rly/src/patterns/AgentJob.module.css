@@ -43,7 +43,7 @@
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .eyebrow,
@@ -53,7 +53,7 @@
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .eyebrow {
@@ -112,7 +112,7 @@
   }
 
   .metadata code {
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .slot {

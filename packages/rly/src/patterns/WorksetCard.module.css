@@ -15,7 +15,7 @@
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     padding: var(--rly-space-16) var(--rly-space-20);
   }
 
@@ -54,7 +54,7 @@
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .list,
@@ -117,7 +117,7 @@
     color: var(--rly-color-text-1);
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .reference,
@@ -129,7 +129,7 @@
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .empty {

@@ -31,7 +31,7 @@
   .thesis h1,
   .thesis p {
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .thesis h1 {

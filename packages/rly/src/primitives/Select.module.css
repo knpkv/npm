@@ -100,7 +100,7 @@
     min-block-size: var(--rly-space-40);
     min-inline-size: var(--rly-space-0);
     outline: none;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     padding: var(--rly-space-8) var(--rly-space-12);
     user-select: none;
   }

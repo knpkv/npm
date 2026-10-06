@@ -10,23 +10,23 @@ export const RLY_STATE_LABEL_VARIANTS = defineVariants({
     neutral: {
       className: style("neutral"),
       purpose: "Neutral or unavailable state",
-      tokens: ["color-text-2", "color-surface-2"]
+      tokens: ["color-text-2"]
     },
     positive: {
       className: style("positive"),
       purpose: "Positive state",
-      tokens: ["color-success-ink", "color-success-tint"]
+      tokens: ["color-success-ink"]
     },
     critical: {
       className: style("critical"),
       purpose: "Critical state",
-      tokens: ["color-blocked-ink", "color-blocked-tint"]
+      tokens: ["color-blocked-ink"]
     },
-    caution: { className: style("caution"), purpose: "Caution state", tokens: ["color-held-ink", "color-held-tint"] },
+    caution: { className: style("caution"), purpose: "Caution state", tokens: ["color-held-ink"] },
     progress: {
       className: style("progress"),
       purpose: "Work in progress",
-      tokens: ["color-deploying-ink", "color-deploying-tint"]
+      tokens: ["color-deploying-ink"]
     }
   },
   size: {
@@ -50,7 +50,7 @@ export type StateLabelProps = Omit<ComponentPropsWithRef<"span">, "children"> & 
   readonly tone?: RlyStateTone
 }
 
-/** Render state through a visible word, icon, ink, and restrained tint. */
+/** Render state as a visible word and icon in the tone's ink, never as a chip. */
 export const StateLabel = ({
   className,
   icon,
