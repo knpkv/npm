@@ -708,7 +708,7 @@ describe("fetchAndUpsertPRs", () => {
 
       const sent = yield* Ref.get(notifications)
       expect(sent).toHaveLength(1)
-      expect(sent[0]?.title).toBe("test-profile")
+      expect(sent[0]?.title).toBe("test-profile: approval evaluation")
       expect(sent[0]?.message).toMatch(
         /^2 pull requests in (us-east-1, eu-west-1|eu-west-1, us-east-1) couldn't be re-evaluated/
       )

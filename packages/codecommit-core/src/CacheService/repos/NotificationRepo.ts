@@ -156,7 +156,10 @@ const makeNotificationRepo = Effect.gen(function*() {
       readonly title: string
       readonly message: string
       readonly profile?: string
+      /** Keep an existing unread notification with the same profile, type and title; insert nothing. */
       readonly deduplicate?: boolean
+      /** Replace an existing unread notification with the same profile, type and title, so a summary stays current. */
+      readonly replaceUnread?: boolean
     }) => {
       const insert = add_({
         pullRequestId: "",
@@ -167,14 +170,24 @@ const makeNotificationRepo = Effect.gen(function*() {
         profile: n.profile ?? ""
       }).pipe(Effect.tap(() => publish))
 
+      if (n.replaceUnread === true) {
+        return sql`
+          DELETE FROM notifications
+          WHERE profile = ${n.profile ?? ""} AND type = ${n.type} AND title = ${n.title}
+            AND pull_request_id = '' AND read = 0
+        `.pipe(Effect.andThen(insert), cacheError("addSystem"))
+      }
+
       if (n.deduplicate !== true) {
         return insert.pipe(cacheError("addSystem"))
       }
 
-      // Skip if an unread system notification with same profile+type already exists
+      // Skip if an unread system notification with the same profile, type and title already exists.
+      // The title names the scope or subject, so one profile's unrelated errors do not suppress each other.
       return sql<{ count: number }>`
           SELECT count(*) as count FROM notifications
-          WHERE profile = ${n.profile ?? ""} AND type = ${n.type} AND pull_request_id = '' AND read = 0
+          WHERE profile = ${n.profile ?? ""} AND type = ${n.type} AND title = ${n.title}
+            AND pull_request_id = '' AND read = 0
         `.pipe(
         Effect.flatMap((rows) => (rows[0]?.count ?? 0) > 0 ? Effect.void : insert),
         cacheError("addSystem")

@@ -325,12 +325,12 @@ export const fetchAndUpsertPRs = (params: {
         const regions = [...new Set(failures.map(({ region }) => region))].join(", ")
         return notificationRepo.addSystem({
           type: "error",
-          title: first.profile,
+          title: `${first.profile}: approval evaluation`,
           message: `${failures.length} pull request${
             failures.length === 1 ? "" : "s"
           } in ${regions} couldn't be re-evaluated and kept their cached approval state: ${first.message}`,
           profile: first.profile,
-          deduplicate: true
+          replaceUnread: true
         }).pipe(Effect.catch(() => Effect.void))
       },
       { discard: true }
