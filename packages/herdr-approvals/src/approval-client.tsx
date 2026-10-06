@@ -465,6 +465,9 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     }
     resetPull()
   }
+  // The latest rendered snapshot's time, read when a decision's answer arrives (the render that
+  // created onDecision may be older by then).
+  const latestObservedAt = useRef(0)
   const onDecision = async (decision: ApprovalDecision): Promise<void> => {
     setBusyJobId(decision.jobId)
     setSendingDecision(decision)
@@ -475,7 +478,8 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     const answer = decisionAnswerOf(decision, exit)
     setDecisionStatus({
       jobId: decision.jobId,
-      observedAt: currentSnapshot?.observedAt ?? 0,
+      // The snapshot on screen now, when the answer arrived; only a later read may unlock the request.
+      observedAt: latestObservedAt.current,
       settles: answerSettles(answer),
       text: answerText(answer)
     })
@@ -629,6 +633,9 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       target.removeAttribute("data-approval-target")
     }
   }, [currentSnapshot?.observedAt, deepLinkTarget])
+  useEffect(() => {
+    if (currentSnapshot !== null) latestObservedAt.current = currentSnapshot.observedAt
+  }, [currentSnapshot?.observedAt])
   if (currentSnapshot === null) {
     return (
       <>

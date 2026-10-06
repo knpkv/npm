@@ -128,11 +128,13 @@ const ApprovalHero = ({
   const clock = clockText(soonest.expiresAt, now)
   const urgency = soonest.expiresAt === null ? "calm" : urgencyOf(soonest.expiresAt - now)
   const more = waiting - 1
+  // Pages come newest first, so a request on a page not loaded yet may expire sooner than this one.
+  const partial = snapshot.pendingApprovals.nextCursors.length > 0
   return (
     <Hero
       caption={`${factsLabel(soonest.kind, soonest.host)}.${more > 0 ? ` ${plural(more, "more", "more")} waiting.` : ""}${
         unchecked > 0 ? ` ${plural(unchecked, "host", "hosts")} unchecked.` : ""
-      }`}
+      }${partial ? " More requests aren't loaded yet; one of them may expire sooner." : ""}`}
       fact={
         clock === null ? (
           <>{soonest.title} is waiting for you</>
@@ -375,7 +377,10 @@ export const ApprovalsCountdown = ({
   }, [snapshot])
   const selectedId = selected === undefined ? null : factsOf(selected, snapshot.host).id
   useEffect(() => {
-    if (decisionStatus !== null && decisionStatus.jobId !== selectedId) setAnnouncement(decisionStatus.text)
+    // The selected DecisionBar announces only its own local request's answer; every other answer,
+    // including one for a local job that shares its id with a selected remote request, goes here.
+    const ownBar = selected?._tag === "Local" && selected.record.id === decisionStatus?.jobId
+    if (decisionStatus !== null && !ownBar) setAnnouncement(decisionStatus.text)
   }, [decisionStatus])
 
   // Your own decision keeps the hub's answer, also after the request leaves the queue; any other
@@ -465,7 +470,11 @@ export const ApprovalsCountdown = ({
       <div className="countdown-regions" data-has-selection={selected !== undefined}>
         <Region
           className="countdown-waiting"
-          count={unchecked.length > 0 ? `${String(items.length)}+` : items.length}
+          count={
+            unchecked.length > 0 || snapshot.pendingApprovals.nextCursors.length > 0
+              ? `${String(items.length)}+`
+              : items.length
+          }
           title="Waiting for you"
         >
           {items.length === 0 ? (

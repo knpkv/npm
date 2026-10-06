@@ -458,4 +458,51 @@ describe("ApprovalsCountdown", () => {
     expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("job-9")
     view.unmount()
   })
+
+  it("admits that a later page may hold a sooner deadline", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1")],
+          nextCursors: [{ cursor: { createdAt: 1, id: "job-1" }, host: "ALPHA" }],
+          remote: []
+        }
+      })
+    })
+    expect(view.container.querySelector("[aria-label='Approval summary']")?.textContent).toContain(
+      "More requests aren't loaded yet; one of them may expire sooner."
+    )
+    expect(view.container.querySelector(".countdown-waiting h2")?.textContent).toBe("Waiting for you 1+")
+    view.unmount()
+  })
+
+  it("announces a local answer while a remote request with the same id is selected", () => {
+    const remote: DashboardSnapshot["pendingApprovals"]["remote"][number] = {
+      approval: {
+        actor: "ops@example.com",
+        approvalExpiresAt: Date.now() + 9 * 60_000,
+        createdAt: Date.now(),
+        id: "job-1",
+        payload: { kind: "nix.check", ref: "main" },
+        status: "pending_approval"
+      },
+      approvalUrl: "https://beta.example.test/approve/job-1",
+      host: "BETA"
+    }
+    const pending = { failures: [], local: [record("job-1")], nextCursors: [], remote: [remote] }
+    const view = mount({ snapshot: snapshot({ pendingApprovals: pending }) })
+    act(() => view.container.querySelector<HTMLButtonElement>("[data-approval-host='BETA']")?.click())
+    view.render({
+      decisionStatus: {
+        jobId: "job-1",
+        observedAt: Date.now(),
+        settles: true,
+        text: "The hub recorded your approval."
+      },
+      snapshot: snapshot({ pendingApprovals: pending })
+    })
+    expect(view.container.querySelector(".countdown-announcer")?.textContent).toBe("The hub recorded your approval.")
+    view.unmount()
+  })
 })
