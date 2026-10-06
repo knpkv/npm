@@ -2604,6 +2604,84 @@ database.close()`,
       expect(laneColumns).toEqual(["lane_id", "revision", "record"])
     }).pipe(provideNodeServices))
 
+  it.effect("migrates pre-session lane claims when the file has no lane-operation ledger yet", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-no-ledger-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const legacyClaim = {
+        branch: "feat/legacy-work",
+        expectedRevision: 0,
+        head: "0123456789012345678901234567890123456789",
+        laneId: "goal:legacy",
+        owner: { id: "owner:legacy", name: "Legacy owner" },
+        parent: null,
+        phase: "implementation",
+        revision: 1,
+        worktree: "/worktrees/legacy"
+      }
+      const legacy = fixtureDatabase(path)
+      legacy.exec(
+        "CREATE TABLE work_lane_claims (lane_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record TEXT NOT NULL)"
+      )
+      legacy.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?)").run("goal:legacy", 1, JSON.stringify(legacyClaim))
+      legacy.close()
+      yield* Effect.scoped(
+        Effect.acquireRelease(WorkStore.open(path), (store) => Effect.sync(() => store.close()))
+      )
+      const migrated = fixtureDatabase(path)
+      const operations = migrated.prepare("SELECT operation_id AS operationId, revision FROM work_lane_operations")
+        .all()
+      migrated.close()
+      expect(operations).toEqual([{ operationId: "goal:legacy", revision: 1 }])
+    }).pipe(provideNodeServices))
+
+  it.effect("rejects a ledger-less legacy file whose claims would overflow the new ledger, leaving it unchanged", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-no-ledger-capacity-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const legacy = fixtureDatabase(path)
+      legacy.exec(
+        "CREATE TABLE work_lane_claims (lane_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record TEXT NOT NULL)"
+      )
+      const insert = legacy.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?)")
+      legacy.exec("BEGIN")
+      for (let index = 0; index <= 16_384; index += 1) {
+        const laneId = `goal:legacy-${index}`
+        insert.run(
+          laneId,
+          1,
+          JSON.stringify({
+            branch: "feat/legacy-work",
+            expectedRevision: 0,
+            head: "0123456789012345678901234567890123456789",
+            laneId,
+            owner: { id: "owner:legacy", name: "Legacy owner" },
+            parent: null,
+            phase: "implementation",
+            revision: 1,
+            worktree: `/worktrees/legacy-${index}`
+          })
+        )
+      }
+      legacy.exec("COMMIT")
+      legacy.close()
+      expect(yield* safelyOpenResult(path)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.lane-operation-capacity" },
+          operation: "open.database"
+        }
+      })
+      const reopened = fixtureDatabase(path)
+      const tables = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
+        reopened.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()
+      ).map(({ name }) => name)
+      reopened.close()
+      expect(tables).toEqual(["work_lane_claims"])
+    }).pipe(provideNodeServices))
+
   it.effect("transactionally migrates the previous lane and handoff schema", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-authority-"))
@@ -3032,15 +3110,21 @@ database.close()`,
       const concurrentDispatchRequestId = `dispatch:${concurrentHandoff.id}`
       const concurrentBinding = migrationBinding(
         concurrentDispatchRequestId,
+        // The concurrent dispatch claims the lane's next revision, as lane CAS requires.
         Schema.decodeUnknownSync(WorkLaneClaimed)({
           ...legacyClaim,
-          expectedRevision: legacyClaim.expectedRevision,
+          expectedRevision: legacyClaim.revision,
           goalId: concurrentHandoff.goalId,
           operationId: concurrentDispatchRequestId,
-          revision: legacyClaim.revision
+          revision: legacyClaim.revision + 1
         }),
         concurrentHandoff.occurredAt
       )
+      const concurrentClaim = {
+        ...legacyClaim,
+        expectedRevision: legacyClaim.revision,
+        revision: legacyClaim.revision + 1
+      }
       const writer = spawn(
         execPath,
         [
@@ -3051,9 +3135,12 @@ const database = new DatabaseSync(process.argv[1])
 const handoff = JSON.parse(process.argv[2])
 const expectedRevision = Number(process.argv[3])
 const binding = JSON.parse(process.argv[4])
+const claim = JSON.parse(process.argv[5])
 const dispatchRequestId = "dispatch:" + handoff.id
 const lineage = ["dispatch:lineage:" + handoff.id]
 database.exec("BEGIN IMMEDIATE")
+database.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?")
+  .run(claim.revision, JSON.stringify(claim), claim.laneId)
 database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
   .run(handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
 database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
@@ -3091,8 +3178,9 @@ database.exec("COMMIT")
 database.close()`,
           path,
           JSON.stringify(concurrentHandoff),
-          String(legacyClaim.expectedRevision),
-          JSON.stringify(concurrentBinding)
+          String(legacyClaim.revision),
+          JSON.stringify(concurrentBinding),
+          JSON.stringify(concurrentClaim)
         ],
         { stdio: ["ignore", "pipe", "pipe"] }
       )
@@ -3118,7 +3206,8 @@ database.close()`,
       const opened = yield* openScopedStore(path)
       const service = yield* makeWorkService(opened.store)
       expect(yield* service.currentClaim(legacyClaim.laneId)).toMatchObject({
-        value: { goalId: legacyClaim.laneId, operationId: legacyClaim.laneId, revision: 1 }
+        // The claim takes the lane its running binding recorded at the claim's revision.
+        value: { goalId: legacyClaim.laneId, operationId: concurrentDispatchRequestId, revision: 2 }
       })
       expect(yield* service.coordinatorHandoff(legacyHandoff.id)).toMatchObject({
         value: {

@@ -17,6 +17,7 @@ import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 import * as SourceConsumption from "../src/agent/sourceConsumption.js"
 import { root } from "../src/cli/root.js"
+import { ConfigService } from "../src/services/ConfigService.js"
 import {
   layer as reconcileServiceLayer,
   type ReconcileDirection,
@@ -58,15 +59,20 @@ const iso = (atMs: number): string => new Date(atMs).toISOString()
 
 /**
  * `kind` decides whether the event evidences *presence*:
- * - `human` — a message the person typed. The only thing that counts as Session Activity.
- * - `assistant` — the agent's own output.
+ * - `human` — a message the person typed. Opens a supervised turn.
+ * - `queued` — a message typed while the agent was busy, stored as a `queued_command` attachment.
+ * - `assistant` — the agent's own output; counts only inside a supervised turn.
  * - `tool` — a tool result, which the transcript records as a `user` message even though nobody
  *   typed it. These outnumber real prompts by roughly ten to one in practice.
+ * - `notification` — a turn nobody typed (`origin.kind: "task-notification"`); ends supervision.
+ * - `meta` — an `isMeta` line such as an expanded skill; never opens a turn.
  */
 interface TranscriptEvent {
   readonly atMs: number
   readonly text?: string | undefined
-  readonly kind?: "human" | "assistant" | "tool" | undefined
+  readonly kind?: "human" | "queued" | "assistant" | "tool" | "notification" | "meta" | undefined
+  /** An assistant line's stop reason; `end_turn` ends the supervised turn. */
+  readonly stopReason?: string | undefined
   /** A turn the agent addressed to its own subagent. Shaped exactly like a typed prompt. */
   readonly sidechain?: boolean | undefined
   /** Overrides the transcript's session id for this line only — a resumed or forked session. */
@@ -93,6 +99,21 @@ const transcript = (options: {
     JSON.stringify({ type: "future-line-type-we-do-not-know", sessionId: options.sessionId, timestamp: "nonsense" }),
     ...options.events.map((event) => {
       const kind = event.kind ?? "human"
+      if (kind === "queued") {
+        return JSON.stringify({
+          type: "attachment",
+          sessionId: event.sessionId ?? options.sessionId,
+          timestamp: iso(event.atMs),
+          cwd: options.cwd,
+          gitBranch: event.branch ?? options.gitBranch ?? null,
+          attachment: {
+            type: "queued_command",
+            commandMode: "prompt",
+            origin: { kind: "human" },
+            prompt: event.text ?? "working"
+          }
+        })
+      }
       const content = kind === "assistant"
         ? [{ type: "thinking", thinking: "..." }, { type: "text", text: event.text ?? "working" }]
         : kind === "tool"
@@ -105,9 +126,15 @@ const transcript = (options: {
         cwd: options.cwd,
         gitBranch: event.branch ?? options.gitBranch ?? null,
         isSidechain: event.sidechain ?? false,
+        ...(kind === "meta" && { isMeta: true }),
+        ...(kind === "notification" && { origin: { kind: "task-notification" } }),
         uuid: `${options.sessionId}-${event.atMs}`,
         version: "9.9.9",
-        message: { role: kind === "assistant" ? "assistant" : "user", content }
+        message: {
+          role: kind === "assistant" ? "assistant" : "user",
+          content,
+          ...(event.stopReason !== undefined && { stop_reason: event.stopReason })
+        }
       })
     })
   ].join("\n")
@@ -158,6 +185,9 @@ const visibleDescription = (description: string): string => description.replace(
  * the one failure this contract exists to catch.
  */
 const ReportProposal = Schema.Struct({
+  writeBlocked: Schema.optional(
+    Schema.Struct({ clockify: Schema.optional(Schema.String), jira: Schema.optional(Schema.String) })
+  ),
   ticketKey: Schema.String,
   day: Schema.String,
   signal: Schema.optional(Schema.String),
@@ -175,6 +205,8 @@ const ReportProposal = Schema.Struct({
 const AgentReport = Schema.Struct({
   mode: Schema.optional(Schema.String),
   proposals: Schema.Array(ReportProposal),
+  ignored: Schema.Array(Schema.Struct({ ticketKey: Schema.String, day: Schema.String, seconds: Schema.Finite })),
+  ignoredTickets: Schema.Array(Schema.String),
   ownershipWithheld: Schema.Array(
     Schema.Struct({
       ...ReportProposal.fields,
@@ -197,6 +229,65 @@ const jsonProposals = (stdout: ReadonlyArray<string>): ReadonlyArray<typeof Repo
 // ---------------------------------------------------------------------------
 
 describe("jcf sync reconcile --agent: usage", () => {
+  it.effect("fails a scan for corrupt private ledger storage rather than treating it as a review hold", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(
+        agent(["--json"]),
+        baseOptions({
+          writtenFiles: { [`${FAKE_HOME}/.jcf/source-consumption.v1.json`]: "{ broken" },
+          transcripts: {
+            "work/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5662-work",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+            })
+          }
+        })
+      )
+      expect(exit._tag).toBe("Failure")
+      expect(jsonProposals(world.stdout)).toEqual([])
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+      expect(world.writtenFiles[`${FAKE_HOME}/.jcf/source-consumption.v1.json`]).toBe("{ broken")
+    }))
+
+  it.effect("reports readable session proposals while unreviewed Clockify time blocks its writes", () =>
+    Effect.gen(function*() {
+      const transcripts = {
+        "work/s1.jsonl": transcript({
+          sessionId: "s1",
+          cwd: `${WORK_ROOT}/repo`,
+          gitBranch: "feat/PROJ-5662-work",
+          events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+        })
+      }
+      const options = baseOptions({
+        writtenFiles: {},
+        transcripts,
+        clockifyEntries: [{
+          description: "[PROJ-5662] earlier manual time",
+          start: iso(at(DAY.year, DAY.month, DAY.day, 9, 0)),
+          end: iso(at(DAY.year, DAY.month, DAY.day, 9, 5))
+        }],
+        keep: [true]
+      })
+      const read = yield* run(agent(["--json"]), options)
+      expect(read.exit._tag).toBe("Success")
+      const rows = jsonProposals(read.world.stdout)
+      expect(rows).toHaveLength(1)
+      expect(rows[0]?.sessionSeconds).toBe(30 * 60 + IDLE_CAP)
+      expect(rows[0]?.writeBlocked?.clockify).toContain("manual review")
+      expect(rows[0]?.writeBlocked?.jira).toBeUndefined()
+      expect(read.world.createdClockifyEntries).toEqual([])
+      expect(read.world.jiraWorklogs).toEqual([])
+
+      const write = yield* run(agent(), options)
+      expect(write.world.createdClockifyEntries).toEqual([])
+      expect(write.world.jiraWorklogs).toHaveLength(1)
+      expect(output(write.world.stdout)).toContain("manual review")
+    }))
+
   // --agent changes where the evidence comes from, so pairing it with a direction is
   // contradictory. Honouring one silently would leave the user guessing which.
   it.effect("rejects --agent combined with a direction", () =>
@@ -549,6 +640,59 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.jiraWorklogs).toMatchObject([{ timeSpentSeconds: 2100 }])
     }))
 
+  // Ranking needs who logged what on which day, which only worklog bodies say. The read takes that
+  // tally before attribution and the recorded refresh reuses it, so Jira worklogs are read once.
+  it.effect("reads Jira worklogs once per scan for both ranking and recorded time", () =>
+    Effect.gen(function*() {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 10, 0)
+      const { world } = yield* run(
+        agent(["--json"]),
+        baseOptions({
+          transcripts: branchSession({ minutes: 60 }),
+          jiraWorklogs: { "PROJ-5662": [{ started: iso(startMs), timeSpentSeconds: 1800 }] }
+        })
+      )
+      const worklogReads = world.jiraRequests.filter((request) =>
+        request.method === "GET" && request.url.includes("PROJ-5662/worklog")
+      )
+      expect(worklogReads).toHaveLength(1)
+      expect(jsonProposals(world.stdout)[0]).toMatchObject({ jiraDelta: 3900 - 1800 })
+    }))
+
+  // The agent can choose a ticket the pre-read neither required nor found holding my time. Only that
+  // ticket is read on its own and merged; the pre-read's own tickets are not read again.
+  it.effect("tops up an agent-chosen ticket without re-reading the pre-read tickets", () =>
+    Effect.gen(function*() {
+      const start = at(DAY.year, DAY.month, DAY.day, 14, 0)
+      const { world } = yield* run(
+        agent(["--json"]),
+        baseOptions({
+          transcripts: {
+            ...branchSession({ minutes: 60 }),
+            "work-dev/s-dev.jsonl": transcript({
+              sessionId: "s-dev",
+              cwd: `${WORK_ROOT}/dev`,
+              gitBranch: "develop",
+              events: steady(start, 30, "continue PROJ-77")
+            })
+          },
+          jiraWorklogs: {
+            "PROJ-5662": [{ started: iso(at(DAY.year, DAY.month, DAY.day, 10, 0)), timeSpentSeconds: 1800 }],
+            "PROJ-77": [{ started: iso(start), timeSpentSeconds: 600 }]
+          },
+          // Eventual consistency: the window search has not indexed PROJ-77's worklog yet.
+          jiraSearchHiddenIssues: ["PROJ-77"],
+          attributor: (request) => ({ _tag: "Chosen", ticketKey: request.candidateKeys[0]!, confidence: 0.9 })
+        })
+      )
+      const reads = (key: string) =>
+        world.jiraRequests.filter((request) => request.method === "GET" && request.url.includes(`${key}/worklog`))
+      expect(reads("PROJ-5662")).toHaveLength(1)
+      expect(reads("PROJ-77")).toHaveLength(1)
+      const chosen = jsonProposals(world.stdout).find((proposal) => proposal.ticketKey === "PROJ-77")
+      expect(chosen).toMatchObject({ jiraDelta: (30 * 60 + IDLE_CAP) - 600 })
+    }))
+
   it.effect("uses the smaller refreshed gap when provider time appears after approval", () =>
     Effect.gen(function*() {
       const startMs = at(DAY.year, DAY.month, DAY.day, 10, 0)
@@ -643,9 +787,9 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(jsonProposals(historical.world.stdout)[0]?.sessionSeconds).toBe(IDLE_CAP)
     }))
 
-  // An hour and a half of dense agent output between two prompts is credited as the Idle Cap after
-  // the first prompt, not as ninety minutes of attention.
-  it.effect("credits the gap between prompts, not the agent's output between them", () =>
+  // The person asked for something and the agent worked on it for twenty minutes, then ended its
+  // turn. The work they started is supervised; the hour of silence before the next prompt is not.
+  it.effect("credits the agent's work inside a turn the person started, until the turn ends", () =>
     Effect.gen(function*() {
       const { world } = yield* run(
         agent(["--json"]),
@@ -657,16 +801,67 @@ describe("jcf sync reconcile --agent: proposals", () => {
               gitBranch: "feat/PROJ-5662-otel",
               events: [
                 { atMs: at(DAY.year, DAY.month, DAY.day, 10, 0) },
-                ...agentChatter(at(DAY.year, DAY.month, DAY.day, 10, 1), 88),
+                ...agentChatter(at(DAY.year, DAY.month, DAY.day, 10, 1), 19),
+                { atMs: at(DAY.year, DAY.month, DAY.day, 10, 20), kind: "assistant", stopReason: "end_turn" },
+                ...agentChatter(at(DAY.year, DAY.month, DAY.day, 10, 21), 60),
                 { atMs: at(DAY.year, DAY.month, DAY.day, 11, 30) }
               ]
             })
           }
         })
       )
-      const proposals = jsonProposals(world.stdout)
-      // One 90-minute gap between two prompts, capped at the 5-minute Idle Cap.
-      expect(proposals[0]).toMatchObject({ sessionSeconds: 300 + IDLE_CAP })
+      // Twenty supervised minutes plus the Idle Cap after the turn ended, then the final prompt's cap.
+      expect(jsonProposals(world.stdout)[0]).toMatchObject({ sessionSeconds: 1200 + 300 + IDLE_CAP })
+    }))
+
+  // A message typed while the agent was busy is a `queued_command` attachment, not a `user` line.
+  it.effect("counts a prompt queued while the agent was busy", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(["--json"]),
+        baseOptions({
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5662-otel",
+              events: [
+                { atMs: at(DAY.year, DAY.month, DAY.day, 10, 0) },
+                { atMs: at(DAY.year, DAY.month, DAY.day, 10, 30), kind: "queued" }
+              ]
+            })
+          }
+        })
+      )
+      expect(jsonProposals(world.stdout)[0]).toMatchObject({ sessionSeconds: 300 + IDLE_CAP })
+    }))
+
+  // Background tasks report back as `user` lines with a machine origin, and the agent then works on
+  // them. Nobody typed either, so they neither open a turn nor extend the one the person started.
+  it.effect("credits nothing for work started by a task notification or an isMeta line", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(["--json"]),
+        baseOptions({
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5662-otel",
+              events: [
+                { atMs: at(DAY.year, DAY.month, DAY.day, 10, 0) },
+                ...agentChatter(at(DAY.year, DAY.month, DAY.day, 10, 1), 9),
+                { atMs: at(DAY.year, DAY.month, DAY.day, 10, 10), kind: "notification", text: "<task-notification>" },
+                ...agentChatter(at(DAY.year, DAY.month, DAY.day, 10, 11), 40),
+                { atMs: at(DAY.year, DAY.month, DAY.day, 11, 0), kind: "meta", text: "skill body" },
+                ...agentChatter(at(DAY.year, DAY.month, DAY.day, 11, 1), 40)
+              ]
+            })
+          }
+        })
+      )
+      // Supervised until the last chatter before the notification, plus its Idle Cap; nothing after.
+      expect(jsonProposals(world.stdout)[0]).toMatchObject({ sessionSeconds: 570 + IDLE_CAP })
     }))
 
   // A worklog someone asks about months later has to explain itself. The source suffix is
@@ -1733,9 +1928,9 @@ describe("jcf sync reconcile --agent: what counts as presence", () => {
       expect(world.jiraWorklogs).toEqual([])
     }))
 
-  // The person typed twice, forty minutes apart, while the agent talked to subagents throughout.
-  // Only the two typed prompts evidence presence, and they are further apart than the Idle Cap.
-  it.effect("counts the typed prompts in a session that also drove subagents", () =>
+  // The person typed for ten minutes, then the agent drove subagents for forty. Subagent turns may
+  // continue a turn the person started; they never open one (see the test above).
+  it.effect("supervises subagent work that follows a typed prompt", () =>
     Effect.gen(function*() {
       const { world } = yield* run(
         agent(),
@@ -1758,7 +1953,7 @@ describe("jcf sync reconcile --agent: what counts as presence", () => {
         })
       )
       expect(world.jiraWorklogs).toHaveLength(1)
-      expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(600 + IDLE_CAP)
+      expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(3000 + IDLE_CAP)
     }))
 
   // Windows are grouped by the activity's session id and attributions are looked up by the
@@ -2141,6 +2336,165 @@ describe("jcf sync reconcile --agent: unreadable recorded state", () => {
 // ---------------------------------------------------------------------------
 
 describe("jcf sync reconcile --agent: attribution", () => {
+  for (
+    const answer of ["none", "low", "unknown", "unverified"] satisfies ReadonlyArray<
+      "none" | "low" | "unknown" | "unverified"
+    >
+  ) {
+    it.effect(`splits orchestrator mentions only onto known sprint candidates after ${answer} attribution`, () => {
+      const fake = makeFakeHeadless(baseOptions({
+        config: { sessionTicketMap: {} },
+        jiraSprintTickets: ["PROJ-1", "PROJ-2"],
+        jiraCurrentUserFails: answer === "unverified",
+        attributor: () =>
+          answer === "low" ? { _tag: "Chosen", ticketKey: "PROJ-3", confidence: 0.2 } : { _tag: "None" },
+        transcripts: {
+          "work/orchestrator.jsonl": transcript({
+            sessionId: "orchestrator",
+            cwd: WORK_ROOT,
+            gitBranch: "main",
+            events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 55, "PROJ-1 PROJ-1 PROJ-1 PROJ-2 PROJ-3")
+          })
+        }
+      }))
+      if (answer === "unknown") fake.world.jiraSearchFailuresRemaining = 1
+      return Effect.gen(function*() {
+        yield* TestClock.setTime(HISTORICAL_NOW)
+        const service = yield* ReconcileService
+        const report = yield* service.proposeFromSessions({
+          from: new Date(at(DAY.year, DAY.month, DAY.day, 0, 0)),
+          to: new Date(at(DAY.year, DAY.month, DAY.day + 1, 0, 0))
+        }, { sides: { jira: true, clockify: false } })
+        if (answer === "unknown" || answer === "unverified") {
+          expect(report.attributed).toEqual([])
+          expect(report.unattributed.reduce((sum, row) => sum + row.seconds, 0)).toBe(3600)
+        } else {
+          expect(report.attributed.map((row) => [row.ticketKey, row.seconds, row.signal])).toEqual([[
+            "PROJ-1",
+            2700,
+            "split"
+          ], ["PROJ-2", 900, "split"]])
+          expect(report.withheld).toEqual([])
+          expect(report.sessionEvidence?.map((evidence) => evidence.ticketKey)).toEqual(["PROJ-1", "PROJ-2"])
+        }
+      }).pipe(Effect.provide(fake.layer))
+    })
+  }
+  it.effect("does not split orchestrator mentions in a deterministic read", () => {
+    const fake = makeFakeHeadless(baseOptions({
+      config: { sessionTicketMap: {} },
+      jiraSprintTickets: ["PROJ-1", "PROJ-2"],
+      transcripts: {
+        "work/orchestrator.jsonl": transcript({
+          sessionId: "orchestrator",
+          cwd: WORK_ROOT,
+          gitBranch: "main",
+          events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 55, "PROJ-1 PROJ-1 PROJ-2")
+        })
+      }
+    }))
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const service = yield* ReconcileService
+      const report = yield* service.proposeFromSessions({
+        from: new Date(at(DAY.year, DAY.month, DAY.day, 0, 0)),
+        to: new Date(at(DAY.year, DAY.month, DAY.day + 1, 0, 0))
+      }, { sides: { jira: true, clockify: false }, attribution: "deterministic" })
+      expect(report.attributed).toEqual([])
+      expect(report.unattributed.reduce((sum, row) => sum + row.seconds, 0)).toBe(3600)
+    }).pipe(Effect.provide(fake.layer))
+  })
+  it.effect("filters an ignored branch key from the agent candidates and accepts a different evidenced ticket", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(
+        agent(["--json"]),
+        baseOptions({
+          config: { sessionIgnoredTickets: ["PROJ-4242"] },
+          transcripts: {
+            "work/s-int.jsonl": transcript({
+              sessionId: "ignored-branch",
+              cwd: `${WORK_ROOT}/integration`,
+              gitBranch: "feat/PROJ-4242-rollout",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30, "PROJ-4242 mentions PROJ-9")
+            })
+          },
+          attributor: () => ({ _tag: "Chosen", ticketKey: "PROJ-9", confidence: 0.9 })
+        })
+      )
+      expect(exit._tag).toBe("Success")
+      expect(world.attributorRequests.map((request) => request.candidateKeys)).toEqual([["PROJ-9"]])
+      expect(jsonProposals(world.stdout)).toMatchObject([{ ticketKey: "PROJ-9", sessionSeconds: 2100 }])
+      expect(jsonProposals(world.stdout)).toHaveLength(1)
+    }))
+
+  it.effect("offers the full parallel stretch and reports unioned ignored solo presence in JSON", () =>
+    Effect.gen(function*() {
+      const ignoredTranscript = (sessionId: string, hour: number) =>
+        transcript({
+          sessionId,
+          cwd: `${WORK_ROOT}/ignored`,
+          gitBranch: "feat/PROJ-4242-ignore",
+          events: steady(at(DAY.year, DAY.month, DAY.day, hour, 0), 30)
+        })
+      const { exit, world } = yield* run(
+        agent(["--json"]),
+        baseOptions({
+          config: { sessionIgnoredTickets: ["PROJ-4242"] },
+          transcripts: {
+            "work/ignored.jsonl": ignoredTranscript("ignored", 10),
+            "work/duplicate.jsonl": ignoredTranscript("duplicate", 10),
+            "work/solo.jsonl": ignoredTranscript("solo", 14),
+            "work/worked.jsonl": transcript({
+              sessionId: "worked",
+              cwd: `${WORK_ROOT}/worked`,
+              gitBranch: "feat/PROJ-9-work",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+            })
+          }
+        })
+      )
+      expect(exit._tag).toBe("Success")
+      const report = Schema.decodeUnknownSync(Schema.fromJsonString(AgentReport))(world.stdout.join("\n"))
+      expect(report.proposals).toMatchObject([{ ticketKey: "PROJ-9", sessionSeconds: 2100 }])
+      expect(report.proposals).toHaveLength(1)
+      expect(report.ignored).toEqual([{ ticketKey: "PROJ-4242", day: "2026-07-01", seconds: 4200 }])
+      expect(report.ignoredTickets).toEqual(["PROJ-4242"])
+      expect(world.attributorRequests).toEqual([])
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+    }))
+
+  it.effect("removes a newly ignored ticket from retained proposals on the fresh recorded read", () => {
+    const fake = makeFakeHeadless(baseOptions({
+      transcripts: {
+        "work/worked.jsonl": transcript({
+          sessionId: "worked",
+          cwd: `${WORK_ROOT}/worked`,
+          gitBranch: "feat/PROJ-4242-work",
+          events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+        })
+      }
+    }))
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const service = yield* ReconcileService
+      const config = yield* ConfigService
+      const period = {
+        from: new Date(at(DAY.year, DAY.month, DAY.day, 0, 0)),
+        to: new Date(at(DAY.year, DAY.month, DAY.day + 1, 0, 0))
+      }
+      const initial = yield* service.proposeFromSessions(period)
+      expect(initial.proposals).toHaveLength(1)
+      expect(initial.ignoredTickets).toEqual([])
+      yield* config.set({ sessionIgnoredTickets: ["PROJ-9", "PROJ-4242", "PROJ-1"] })
+      const refreshed = yield* service.refreshRecordedTime(period, initial)
+      expect(refreshed.attributed).toEqual([])
+      expect(refreshed.proposals).toEqual([])
+      expect(refreshed.ignored).toEqual([{ ticketKey: "PROJ-4242", day: "2026-07-01", seconds: 2100 }])
+      expect(refreshed.ignoredTickets).toEqual(["PROJ-1", "PROJ-4242", "PROJ-9"])
+    }).pipe(Effect.provide(fake.layer))
+  })
+
   const integrationSession = transcript({
     sessionId: "s-int",
     cwd: `${WORK_ROOT}/integration`,
@@ -2482,7 +2836,7 @@ describe("jcf sync reconcile <direction>", () => {
     jiraCreatedAtMs: Schema.optionalKey(Schema.Number)
   }))
   const decodeLedgerEvidence = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
-    version: Schema.Literal(4),
+    version: Schema.Literal(5),
     reviewedWindows: Schema.Array(Schema.Unknown),
     pending: Schema.Array(LedgerIdentityEvidence),
     bindings: Schema.Array(LedgerBindingEvidence),

@@ -215,7 +215,14 @@ const toWire = (draft: RowDraft, consumption: HeldPlan["consumption"]): WeekRowR
     // only what is missing right now and would fall to zero the moment one side is filled.
     maxSeconds: draft.proposal.sessionSeconds,
     sessionCount: draft.proposal.sessionIds.length,
-    signal: draft.proposal.signal
+    signal: draft.proposal.signal,
+    ...(draft.proposal.writeBlocked !== undefined &&
+      (draft.proposal.writeBlocked.clockify !== undefined || draft.proposal.writeBlocked.jira !== undefined) && {
+      writeBlocked: {
+        ...(draft.proposal.writeBlocked.clockify !== undefined && { clockify: "review-required" }),
+        ...(draft.proposal.writeBlocked.jira !== undefined && { jira: "review-required" })
+      }
+    })
   }
 })
 
@@ -351,6 +358,14 @@ export const buildWeekPlan = (options: {
         a,
         b
       ) => (a.day === b.day ? a.ticketKey.localeCompare(b.ticketKey) : a.day.localeCompare(b.day))),
+      ignoredTickets: [...(options.report.ignoredTickets ?? [])].sort(),
+      ignored: (options.report.ignored ?? [])
+        .filter((row) => inWeek.has(row.day))
+        .map((row) => ({ day: row.day, seconds: row.seconds, ticketKey: row.ticketKey }))
+        .sort((
+          a,
+          b
+        ) => (a.ticketKey === b.ticketKey ? a.day.localeCompare(b.day) : a.ticketKey.localeCompare(b.ticketKey))),
       ownership: ownership.mode,
       ownershipChecked: ownership.checked,
       planId: options.planId,

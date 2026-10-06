@@ -2,22 +2,29 @@
 import { ConfigService, ReconcileService, SavedEntries, SessionAttributor, WriterGuard } from "@knpkv/jira-clockify"
 import { Cache, Context, Crypto, Effect, FileSystem, Layer, Path, Ref, Semaphore } from "effect"
 import type { PlatformError } from "effect"
-import { ApiError, PlanExpiredError, ProposalRejectedError } from "../shared/contracts.js"
+import { ApiError, PlanExpiredError, ProposalRejectedError, RetargetPartialError } from "../shared/contracts.js"
 import type {
+  DeleteSavedEntryRequest,
+  DeleteSavedEntryResponse,
   DescribeRowRequest,
   DescribeRowResponse,
   DescribeSavedEntryRequest,
   DescribeSavedEntryResponse,
+  PromoteWithheldRequest,
   UpdateSavedEntryRequest,
   UpdateSavedEntryResponse,
+  WeekPlanResponse,
   WeekScopeName
 } from "../shared/contracts.js"
 import { agentSettingsKey, makeRowDescriptions } from "./RowDescriptions.js"
 import type { DescriptionKey } from "./RowDescriptions.js"
 import {
+  changeSavedEntries,
   describeSavedEntry,
   findSavedEntry,
-  replaceSavedEntry,
+  promoteWithheld,
+  promotionCollides,
+  removeSavedEntry,
   savedEntryFailure,
   validateSavedUpdate
 } from "./SavedEntryOperations.js"
@@ -46,7 +53,16 @@ export interface WeekPlansContract {
   ) => Effect.Effect<DescribeSavedEntryResponse, ApiError | PlanExpiredError>
   readonly updateSaved: (
     request: UpdateSavedEntryRequest
-  ) => Effect.Effect<UpdateSavedEntryResponse, ApiError | PlanExpiredError | ProposalRejectedError>
+  ) => Effect.Effect<
+    UpdateSavedEntryResponse,
+    ApiError | PlanExpiredError | ProposalRejectedError | RetargetPartialError
+  >
+  readonly promoteWithheld: (
+    request: PromoteWithheldRequest
+  ) => Effect.Effect<WeekPlanResponse, PlanExpiredError | ProposalRejectedError>
+  readonly deleteSaved: (
+    request: DeleteSavedEntryRequest
+  ) => Effect.Effect<DeleteSavedEntryResponse, ApiError | PlanExpiredError | ProposalRejectedError>
   /** Call before and after changing agent settings so even pending lookups cannot reuse old results. */
   readonly invalidateDescriptions: Effect.Effect<void>
   /** Serialize a live provider tally and the writes it authorizes. */
@@ -163,14 +179,58 @@ export const layer = Layer.effect(
         const nextRevision = yield* cryptoService.randomUUIDv4.pipe(
           Effect.mapError(() => new ApiError({ message: "Could not create an entry revision. Retry the save." }))
         )
+        const retargeted = request.ticketKey !== undefined && request.ticketKey !== expected.ticketKey
+        if (retargeted && plan.report.writeBlocked?.[expected.source] !== undefined) {
+          return yield* new ProposalRejectedError({
+            message: "This provider has entries that need manual review first; the ticket was not changed."
+          })
+        }
         const saved = yield* savedEntries.update({
           expected,
           startMs: request.startMs,
           endMs: request.endMs,
-          description: request.description
-        }).pipe(Effect.mapError(savedEntryFailure))
+          description: request.description,
+          ...(retargeted && { ticketKey: request.ticketKey }),
+          expectedScopes: plan.boundScopes
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.gen(function*() {
+              const replacementEntry = error.replacement
+              if (error.reason !== "partial" || replacementEntry === undefined) {
+                return yield* savedEntryFailure(error)
+              }
+              // Both entries exist now. Keep both in the retained week so neither is offered again,
+              // and name both ids so the duplicate can be reviewed before anything is retried.
+              const both = changeSavedEntries(plan, [], { ...replacementEntry, revision: nextRevision }, {
+                source: expected.source,
+                id: expected.id
+              })
+              yield* Ref.update(plans, (held) =>
+                held.map((retained) => retained.plan === plan ? { ...retained, plan: both } : retained))
+              yield* Ref.update(readGeneration, (value) =>
+                value + 1)
+              return yield* new RetargetPartialError({
+                message:
+                  `Created the ${expected.source} entry ${replacementEntry.id} under ${
+                    replacementEntry.ticketKey ?? "no ticket"
+                  }, ` +
+                  `but removing the original ${expected.id} under ${
+                    expected.ticketKey ?? "no ticket"
+                  } did not complete. ` +
+                  "The original may still exist: refresh and check both entries before retrying.",
+                original: { source: expected.source, id: expected.id, ticketKey: expected.ticketKey },
+                replacement: {
+                  source: replacementEntry.source,
+                  id: replacementEntry.id,
+                  ticketKey: replacementEntry.ticketKey
+                }
+              })
+            })
+          )
+        )
         const entry = { ...saved, revision: nextRevision }
-        const replacement = replaceSavedEntry(plan, entry)
+        // A ticket change returns a replacement under a new provider id; the original is gone.
+        const replacement = changeSavedEntries(plan, [{ source: expected.source, id: expected.id }], entry)
         const descriptions = yield* makeRowDescriptions({
           plan: find(replacement.planId),
           config,
@@ -183,6 +243,69 @@ export const layer = Layer.effect(
         )
         yield* Ref.update(readGeneration, (value) => value + 1)
         return { planId: request.planId, entry }
+      }, withProviderPermit),
+      promoteWithheld: Effect.fn("WeekPlans.promoteWithheld")(function*(request) {
+        const plan = yield* find(request.planId)
+        if (plan === undefined) {
+          return yield* new PlanExpiredError({ message: "That week is no longer retained. Reload it." })
+        }
+        // A second credit on the same row would replace that row's suggestion, and merging the two
+        // would collide their source block identities. Refuse rather than lose the existing offer.
+        if (promotionCollides(plan, request.ticketKey, request.day)) {
+          return yield* new ProposalRejectedError({
+            message: `${request.ticketKey} already has a suggestion on ${request.day}; log that row instead.`
+          })
+        }
+        const promoted = promoteWithheld(plan, request.ticketKey, request.day)
+        if (promoted === undefined) {
+          return yield* new ProposalRejectedError({ message: "That low-confidence match is no longer in this week." })
+        }
+        const descriptions = yield* makeRowDescriptions({
+          plan: find(promoted.planId),
+          config,
+          reconcile,
+          revision: Ref.get(revision)
+        })
+        yield* Ref.update(
+          plans,
+          (held) => held.map((retained) => retained.plan === plan ? { plan: promoted, descriptions } : retained)
+        )
+        yield* Ref.update(readGeneration, (value) => value + 1)
+        return promoted.plan
+      }, mutations.withPermit),
+      deleteSaved: Effect.fn("WeekPlans.deleteSaved")(function*(request) {
+        const plan = yield* find(request.planId)
+        const expected = plan === undefined ? undefined : findSavedEntry(plan, request)
+        if (plan === undefined || expected === undefined) {
+          return yield* new PlanExpiredError({ message: "That saved entry is not part of a retained week. Reload it." })
+        }
+        if (expected.revision !== request.revision) {
+          return yield* new PlanExpiredError({
+            message: "That saved entry changed since you opened it. Reload before deleting."
+          })
+        }
+        // A provider held for manual review accepts no session-ledger mutation, a delete included.
+        if (plan.report.writeBlocked?.[expected.source] !== undefined) {
+          return yield* new ProposalRejectedError({
+            message: "This provider has entries that need manual review first; nothing was deleted."
+          })
+        }
+        yield* savedEntries.remove({ expected, expectedScopes: plan.boundScopes }).pipe(
+          Effect.mapError(savedEntryFailure)
+        )
+        const replacement = removeSavedEntry(plan, { source: expected.source, id: expected.id })
+        const descriptions = yield* makeRowDescriptions({
+          plan: find(replacement.planId),
+          config,
+          reconcile,
+          revision: Ref.get(revision)
+        })
+        yield* Ref.update(
+          plans,
+          (held) => held.map((retained) => retained.plan === plan ? { plan: replacement, descriptions } : retained)
+        )
+        yield* Ref.update(readGeneration, (value) => value + 1)
+        return { planId: request.planId }
       }, withProviderPermit),
       describeSaved: Effect.fn("WeekPlans.describeSaved")(function*(request) {
         const plan = yield* find(request.planId)

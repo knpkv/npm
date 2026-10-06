@@ -442,6 +442,23 @@
       ]
     },
     {
+      "name": "Hero",
+      "paths": {
+        "source": "packages/rly/src/patterns/Hero.tsx",
+        "story": "packages/rly/stories/patterns/Hero.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/Hero.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/Hero.test.tsx"
+        ]
+      },
+      "storyId": "patterns-hero--states",
+      "storyIds": [
+        "patterns-hero--states"
+      ]
+    },
+    {
       "name": "Icon",
       "paths": {
         "source": "packages/rly/src/foundations/Icon.tsx",
@@ -567,6 +584,23 @@
       "storyId": "foundations-portalprovider--custom-target",
       "storyIds": [
         "foundations-portalprovider--custom-target"
+      ]
+    },
+    {
+      "name": "Region",
+      "paths": {
+        "source": "packages/rly/src/patterns/Region.tsx",
+        "story": "packages/rly/stories/patterns/Region.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/Region.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/Region.test.tsx"
+        ]
+      },
+      "storyId": "patterns-region--states",
+      "storyIds": [
+        "patterns-region--states"
       ]
     },
     {
@@ -777,7 +811,8 @@
       },
       "storyId": "patterns-stagerail--states",
       "storyIds": [
-        "patterns-stagerail--states"
+        "patterns-stagerail--states",
+        "patterns-stagerail--words"
       ]
     },
     {

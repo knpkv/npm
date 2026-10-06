@@ -9,9 +9,15 @@
 import { ConfigService, FetchTicket, IssueFacts, ReconcileService } from "@knpkv/jira-clockify"
 import { Effect, Semaphore } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
-import type { ReadProgress, WeekScopeName } from "../shared/contracts.js"
+import type { ConfirmBatchItemResponse, ReadProgress, WeekScopeName } from "../shared/contracts.js"
 import { ApiError, JcfWebApi, PlanExpiredError, ProposalRejectedError } from "./Api.js"
-import { confirmProposal, logManualEntry, MINIMUM_WRITE_SECONDS } from "./Confirm.js"
+import {
+  type BatchConfirmOutcome,
+  confirmProposal,
+  confirmProposals,
+  logManualEntry,
+  MINIMUM_WRITE_SECONDS
+} from "./Confirm.js"
 import { WeekPlans } from "./WeekPlans.js"
 import { readRecordedWeekPlan, readWeekPlan, refreshWeekPlan, savedWeekPlan, streamWeekRead } from "./WeekRead.js"
 
@@ -43,6 +49,45 @@ export const WeekLive = HttpApiBuilder.group(JcfWebApi, "week", (handlers) =>
         )))
   }))
 
+/** One confirmation's outcome as the browser sees it: written, or why not and whether to reload. */
+const confirmItem = (outcome: BatchConfirmOutcome): ConfirmBatchItemResponse => {
+  switch (outcome._tag) {
+    case "Written":
+    case "NothingOwed":
+      return { _tag: "Written", result: outcome.result }
+    case "UnknownRow":
+      return { _tag: "Failed", message: "That row is not part of this week — reload it", reload: true }
+    case "UnknownBlocks":
+      return {
+        _tag: "Failed",
+        message: "Those blocks are not part of this row any more — reload the week",
+        reload: true
+      }
+    case "PastEvidence":
+      return {
+        _tag: "Failed",
+        message: "That is more time than the sessions evidence. Log the rest as a manual entry.",
+        reload: false
+      }
+    case "BelowMinimum":
+      return {
+        _tag: "Failed",
+        message: `Jira floors worklogs to the minute, so ${outcome.minimumSeconds}s is the smallest write.`,
+        reload: false
+      }
+    case "RunningTimer":
+      return { _tag: "Failed", message: outcome.reason, reload: false }
+    case "NoTargets":
+      return {
+        _tag: "Failed",
+        message: "Pick at least one of Clockify or Jira — a write to neither is not a write.",
+        reload: false
+      }
+    case "Failed":
+      return { _tag: "Failed", message: outcome.message, reload: false }
+  }
+}
+
 export const RowsLive = HttpApiBuilder.group(JcfWebApi, "rows", (handlers) =>
   Effect.gen(function*() {
     const reconcile = yield* ReconcileService.ReconcileService
@@ -71,35 +116,41 @@ export const RowsLive = HttpApiBuilder.group(JcfWebApi, "rows", (handlers) =>
             summaryOf: ticketSummary
           }).pipe(Effect.mapError((error) => failed(error.message)))
 
-          if (outcome._tag === "UnknownRow") {
-            return yield* new PlanExpiredError({ message: "That row is not part of this week — reload it" })
-          }
-          if (outcome._tag === "UnknownBlocks") {
-            return yield* new PlanExpiredError({
-              message: "Those blocks are not part of this row any more — reload the week"
+          const item = confirmItem(outcome)
+          if (item._tag === "Written") return item.result
+          return yield* item.reload
+            ? new PlanExpiredError({ message: item.message })
+            : new ProposalRejectedError({
+              ...(outcome._tag === "PastEvidence" && { maxSeconds: outcome.maxSeconds }),
+              message: item.message
             })
-          }
-          if (outcome._tag === "PastEvidence") {
-            return yield* new ProposalRejectedError({
-              maxSeconds: outcome.maxSeconds,
-              message: "That is more time than the sessions evidence. Log the rest as a manual entry."
-            })
-          }
-          if (outcome._tag === "BelowMinimum") {
-            return yield* new ProposalRejectedError({
-              message: `Jira floors worklogs to the minute, so ${outcome.minimumSeconds}s is the smallest write.`
-            })
-          }
-          if (outcome._tag === "RunningTimer") {
-            return yield* new ProposalRejectedError({ message: outcome.reason })
-          }
-          if (outcome._tag === "NoTargets") {
-            return yield* new ProposalRejectedError({
-              message: "Pick at least one of Clockify or Jira — a write to neither is not a write."
-            })
-          }
-          return outcome.result
         })))
+      .handle("confirmBatch", ({ payload }) =>
+        plans.withConfirmationPermit(Effect.gen(function*() {
+          const planId = payload.requests[0]?.planId
+          if (planId === undefined || payload.requests.some((request) => request.planId !== planId)) {
+            return yield* new ProposalRejectedError({ message: "A batch confirms rows of one week read" })
+          }
+          const plan = yield* plans.find(planId)
+          if (plan === undefined) {
+            return yield* new PlanExpiredError({ message: "This week was read too long ago — reload it" })
+          }
+          const outcomes = yield* confirmProposals({
+            plan,
+            requests: payload.requests.map((request) => ({
+              blocks: request.blocks,
+              note: request.note,
+              rowId: request.rowId,
+              seconds: request.seconds,
+              targets: request.targets,
+              ticketKey: request.ticketKey
+            })),
+            service: reconcile,
+            summaryOf: ticketSummary
+          })
+          return { items: outcomes.map(confirmItem) }
+        })))
+      .handle("promote", ({ payload }) => plans.promoteWithheld(payload))
       .handle("manual", ({ payload }) =>
         plans.withConfirmationPermit(Effect.gen(function*() {
           const targets = payload.targets ?? { clockify: true, jira: true }
@@ -176,6 +227,19 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
           }
           return { ownershipOverrides: stored }
         })))
+      .handle("ignore", ({ payload }) =>
+        configWrites.withPermits(1)(Effect.gen(function*() {
+          const current = yield* config.get
+          const others = current.sessionIgnoredTickets.filter((key) => key !== payload.ticketKey)
+          const next = payload.ignored ? [...others, payload.ticketKey].sort() : others
+          yield* config.set({ sessionIgnoredTickets: next })
+          // Read back rather than echo, for the same reason as the ownership list above.
+          const stored = (yield* config.get).sessionIgnoredTickets
+          if (stored.includes(payload.ticketKey) !== payload.ignored) {
+            return yield* failed("The ignored ticket could not be saved to ~/.jcf/config.json")
+          }
+          return { ignoredTickets: stored }
+        })))
   }))
 
 export const EntriesLive = HttpApiBuilder.group(JcfWebApi, "entries", (handlers) =>
@@ -183,5 +247,6 @@ export const EntriesLive = HttpApiBuilder.group(JcfWebApi, "entries", (handlers)
     const plans = yield* WeekPlans
     return handlers
       .handle("update", ({ payload }) => plans.updateSaved(payload))
+      .handle("delete", ({ payload }) => plans.deleteSaved(payload))
       .handle("describe", ({ payload }) => plans.describeSaved(payload))
   }))

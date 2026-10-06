@@ -27,6 +27,7 @@ export interface SideWrite {
 
 /** Sizing and anchoring are finished before a provider executes this plan. */
 export interface PlannedWrite {
+  readonly writeBlocked?: Readonly<Partial<Record<"clockify" | "jira", string>>> | undefined
   readonly _tag: "Write"
   readonly ticketKey: string
   readonly day: string
@@ -108,6 +109,7 @@ export type PreparedProposal =
  */
 export const prepareProposal = (options: {
   readonly evidence: {
+    readonly writeBlocked?: PlannedWrite["writeBlocked"]
     readonly blocks: ReadonlyArray<CreditedBlock>
     readonly credited: number
     readonly ticketKey: string
@@ -190,7 +192,9 @@ export const prepareProposal = (options: {
             const skipped = Math.min(skip, rangeSeconds)
             skip -= skipped
             const capacity = Math.min(rangeSeconds - skipped, availableCredit)
-            const allocated = Math.min(remaining, capacity)
+            // Whole seconds: providers store whole seconds, so a fractional plan would report and
+            // consume time the written entry does not hold.
+            const allocated = Math.floor(Math.min(remaining, capacity))
             if (allocated > 0) {
               // Jira rounds every worklog up to its one-minute floor. A shorter executable segment
               // would write more than this evidence permits, even when several short gaps total a
@@ -222,6 +226,7 @@ export const prepareProposal = (options: {
       }
       return {
         _tag: "Write",
+        writeBlocked: evidence.writeBlocked,
         ticketKey,
         day: evidence.day,
         targets,

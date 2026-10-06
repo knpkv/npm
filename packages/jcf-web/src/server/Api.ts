@@ -11,18 +11,26 @@ import {
 } from "effect/http-api"
 import {
   ApiError,
+  ConfirmBatchPayload,
+  ConfirmBatchResult,
   ConfirmPayload,
   Day,
+  DeleteSavedEntryRequest,
+  DeleteSavedEntryResponse,
   DescribeRowRequest,
   DescribeRowResponse,
   DescribeSavedEntryRequest,
   DescribeSavedEntryResponse,
   ForbiddenApiError,
+  IgnorePayload,
+  IgnoreResult,
   ManualPayload,
   OwnershipPayload,
   OwnershipResult,
   PlanExpiredError,
+  PromoteWithheldRequest,
   ProposalRejectedError,
+  RetargetPartialError,
   SavedWeek,
   StandingPayload,
   StandingResult,
@@ -89,10 +97,24 @@ export class RowsGroup extends HttpApiGroup.make("rows")
     })
   )
   .add(
+    HttpApiEndpoint.post("confirmBatch", "/confirm-batch", {
+      error: [ApiError, PlanExpiredError, ProposalRejectedError],
+      payload: ConfirmBatchPayload,
+      success: ConfirmBatchResult
+    })
+  )
+  .add(
     HttpApiEndpoint.post("manual", "/manual", {
       error: [ApiError, ProposalRejectedError],
       payload: ManualPayload,
       success: WriteResult
+    })
+  )
+  .add(
+    HttpApiEndpoint.post("promote", "/promote", {
+      error: [PlanExpiredError, ProposalRejectedError],
+      payload: PromoteWithheldRequest,
+      success: WeekPlan
     })
   )
   .prefix("/api/rows")
@@ -119,14 +141,26 @@ export class ConfigGroup extends HttpApiGroup.make("config")
       success: OwnershipResult
     })
   )
+  .add(
+    HttpApiEndpoint.post("ignore", "/ignore", {
+      error: [ApiError, ProposalRejectedError],
+      payload: IgnorePayload,
+      success: IgnoreResult
+    })
+  )
   .prefix("/api/config")
 {}
 
 export class EntriesGroup extends HttpApiGroup.make("entries")
   .add(HttpApiEndpoint.post("update", "/update", {
-    error: [ApiError, PlanExpiredError, ProposalRejectedError],
+    error: [ApiError, PlanExpiredError, ProposalRejectedError, RetargetPartialError],
     payload: UpdateSavedEntryRequest,
     success: UpdateSavedEntryResponse
+  }))
+  .add(HttpApiEndpoint.post("delete", "/delete", {
+    error: [ApiError, PlanExpiredError, ProposalRejectedError],
+    payload: DeleteSavedEntryRequest,
+    success: DeleteSavedEntryResponse
   }))
   .add(HttpApiEndpoint.post("describe", "/describe", {
     error: [ApiError, PlanExpiredError],

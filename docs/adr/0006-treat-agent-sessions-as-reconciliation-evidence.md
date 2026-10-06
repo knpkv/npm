@@ -121,3 +121,108 @@ injected instructions, tool output, compaction replay and native subagent rollou
 do not establish human activity. Both providers feed the same allocation and idle
 rules; adding a transcript source does not relax the fifteen-minute web minimum or
 make reloading the page start a scan.
+
+## Amendment, 3 October 2026: supervised turns, parallel shares and ranking
+
+Typed prompts alone under-reported real weeks, and some lines counted as typed were
+machine-generated. Measured over one week of Claude and Codex transcripts: about 1,260
+prompts typed while the agent was busy were ignored, because Claude stores them as
+`queued_command` attachments rather than `user` lines. At the same time, roughly 900 task
+notifications and 950 `isMeta` lines were counted as typed — one watch loop's notifications
+credited five hours.
+
+Presence is now a **supervised turn**. A prompt the person typed, queued prompts included,
+opens a turn. The agent's work inside it — output, tool results, completed items, subagent
+turns — counts as presence until the agent ends the turn (`end_turn`, `stop_sequence`,
+`task_complete`, `turn_aborted`), a turn nobody typed takes over (a task notification or an
+auto-continuation), or the agent is silent for longer than the Idle Cap. Agent output outside
+a turn the person started still never counts, so the original objection to counting agent
+output — measuring how busy the agent was — still holds for unattended work.
+
+This supersedes "presence is evidenced only by messages the person typed". The Idle Cap, the
+equal split of overlapping presence and the bound by wall clock are unchanged.
+
+Parallel stretches no longer drop tickets: every attributed ticket in a stretch receives a
+share, and the web projection's minimum follows Jira's one-minute minimum rather than fifteen
+minutes. When a stretch cannot fit everyone at the floor, tickets in an open sprint assigned
+to me rank first, then tickets I have not logged that day, then evidence weight. The same two
+facts appear beside candidates in the attribution prompt, as tie-breakers only. Ranking is
+read with key-only JQL searches — one for the open sprint, one per day for logged tickets —
+through the verified Jira profile; when Jira cannot
+answer, every ticket ranks equally and the failure is logged. Ranking orders tickets that
+evidence already placed; it never adds, removes or resizes one.
+
+## Amendment, 4 October 2026: one block per ticket per stretch
+
+Placing every ticket's minutes only inside the slices where its own session was active turned a
+parallel stretch into confetti: on one real week, 715 blocks for 38 tickets, 436 of them under a
+minute. Each piece was defensible; the day as a whole was unreadable and could not be logged.
+
+Within a connected stretch of presence, each attributed ticket now receives one contiguous block.
+Blocks are ordered by the ticket's first activity in the stretch and packed back to back from its
+start, so a stretch has no internal gaps. A block may sit anywhere inside its own stretch, not only
+inside its own session's active slices — consistent with the 9 September amendment: a calendar
+position is an allocation of evidenced presence, not a claim about when each minute happened. Idle
+gaps and local midnight remain barriers, and the stretch's total never exceeds its wall clock.
+
+Amounts are still decided by the allocator: every ticket that fits receives at least Jira's
+one-minute minimum, ranked by open sprint, then not logged that day, then evidence. A ticket that
+cannot reach the minimum folds its share into the next higher-ranked ticket in the same stretch, so
+every block offered can be written. First-activity order does not change when later activity is
+appended, which keeps blocks a watch has already written in place.
+
+Agent-orchestrated work counts as presence. Prompts an orchestrator writes into a worker pane are
+recorded exactly like typed ones and are deliberately not filtered: the person is accountable for
+the work their agents do on their behalf.
+
+### Ignored tickets
+
+A person may ignore a ticket in every week. Ignoring is a statement about what to offer, not about
+what happened: an ignored ticket is never suggested and never offered to the attribution agent as a
+candidate, and a branch, path or standing match to it counts as no deterministic match, so the
+session falls through to its other candidates. Where an ignored ticket ran alongside others, its
+sessions are removed before sharing and the others take that parallel time; where it ran alone, its
+time is offered to nobody — ignoring never moves evidence onto a ticket it did not evidence. Its raw
+time is still reported, separately and never added to totals, so a quiet week can be explained.
+Saved worklogs are untouched. The list lives in the config file, is reversible, and takes effect on
+the next session read; a retained plan read before the change cannot write an ignored ticket.
+
+## Amendment, 4 October 2026: splitting unplaced orchestrator sessions
+
+The 3 October amendment kept unplaced orchestrator time unattributed rather than guess. Measured
+week data reversed that: one day's 5.6 hours of coordination ran on `main` with no branch or path,
+the agent's single pick fell below the confidence floor, and the day read as nearly empty although
+the work had a clear set of tickets.
+
+A session that no branch, path, standing attribution or confident agent answer places is now split
+across the tickets it mentions that are in an open sprint and assigned to the person, weighted by
+mention count. The split is computed per active stretch — the session is divided at idle-cap gaps —
+so a stretch already settled never changes when the same session later mentions other tickets. It
+needs a verified Jira answer about the sprint; with none, or with no qualifying mention, the session
+stays unplaced. Ignored tickets are never split targets. The attribution signal is `split`, the
+weakest after `agent`, and the total still never exceeds the wall clock. A deterministic read, as
+`jcf watch` makes, never splits: the session stays unplaced there, so a guess cannot downgrade a
+branch-placed row out of what watch writes unattended.
+
+Saved entries can now be deleted, or moved to another ticket by creating a replacement before
+deleting the original, at the person's explicit request. Both release or move the entry's source
+claim, so evidence is offered again exactly once, and both are refused while the provider is held
+for review.
+
+### Amendment: durable saved-entry replacement, 2026-10-05
+
+Create-first ticket moves now persist a replacement intent before POST in the owner-only source
+ledger, version 5. The identity includes provider/account scope and the original provider entry ID;
+the intent also retains the original ticket and requested ticket, bounds and description. Provider
+scope and intent remain server-private. Entry IDs, ticket, bounds and description may cross only
+the authenticated saved-entry boundary, never public or unauthenticated output. Credentials are
+not stored in the intent.
+
+An acknowledged replacement ID is persisted before verification. Verified replacements retain
+the original source claim or ordinary-entry observation before DELETE; successful original removal
+atomically releases its tracking and clears the intent. Unknown create outcomes remain held across
+restart, never permission to POST again. A partial replacement holds session writes for its provider.
+Explicit deletion of either member of a verified pair may resolve that intent while retaining the
+other member's tracking. Unverified pairs and failed local completion require private recovery;
+they do not grant a cleanup exception. A verified ordinary move is remembered by its actual ID and
+start, including when a later read extends the reviewed window.

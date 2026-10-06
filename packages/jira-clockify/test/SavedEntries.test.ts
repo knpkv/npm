@@ -3,9 +3,13 @@ import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { JiraApiClient } from "@knpkv/jira-api-client"
 import { Deferred, Effect, Fiber, Layer, Result } from "effect"
 import * as TestClock from "effect/testing/TestClock"
+import { marker } from "../src/agent/sourceConsumption.js"
+import { make as providerSnapshots, ProviderSnapshotError } from "../src/services/ProviderSnapshots.js"
 import { ReconcileService } from "../src/services/ReconcileService.js"
 import { layer as savedLayer, type RecordedEntry, SavedEntries } from "../src/services/SavedEntries.js"
+import { SourceLedger, SourceLedgerError } from "../src/services/SourceLedger.js"
 import { FAKE_HOME, makeFakeHeadless } from "../src/testing/fakeHeadless.js"
+import { localDay } from "../src/utils/time.js"
 
 // @effect-diagnostics strictEffectProvide:off
 // @effect-diagnostics multipleEffectProvide:off
@@ -42,7 +46,215 @@ const comment = {
   ]
 }
 
+/** Seed the same server-private verified scope a normal reviewed read retains, never a wire locator. */
+const reviewedEntry = Effect.fn("test.reviewedEntry")(function*(entry: RecordedEntry) {
+  const snapshots = yield* providerSnapshots
+  const ledger = yield* SourceLedger
+  const jira = (yield* snapshots.jira).snapshot
+  const clockify = yield* snapshots.clockify
+  if (jira === null) return yield* new ProviderSnapshotError({ message: "test fixture requires verified Jira" })
+  const scope = entry.source === "jira" ? jira.ledgerScope : clockify.scope
+  yield* ledger.ensureWindow(
+    { provider: entry.source, scope, fromMs: period.from.getTime(), toMs: period.to.getTime() },
+    [],
+    []
+  )
+  yield* ledger.reserve({
+    provider: entry.source,
+    scope,
+    rowId: `${localDay(new Date(entry.startMs))}:PROJ-1`,
+    sourceStartMs: entry.startMs,
+    startMs: entry.startMs,
+    endMs: entry.endMs,
+    seconds: (entry.endMs - entry.startMs) / 1000,
+    ticketKey: entry.ticketKey ?? "PROJ-1"
+  })
+  const pending = (yield* ledger.read).pending.at(-1)
+  if (pending === undefined) return yield* new SourceLedgerError({ message: "test fixture requires pending binding" })
+  yield* ledger.bind(pending, entry.id)
+  return { clockify: clockify.scope, jira: jira.heldScope }
+})
+
 describe("saved entries", () => {
+  for (const source of ["jira", "clockify"] satisfies ReadonlyArray<RecordedEntry["source"]>) {
+    it.effect(`deletes a verified ${source} entry and releases only its consumption`, () => {
+      const expected = source === "jira" ? jiraEntry : clockifyEntry
+      const fake = makeFakeHeadless({
+        writtenFiles: {},
+        clockifyEntries: [{ ...interval, description: clockifyEntry.description ?? "" }],
+        jiraWorklogs: { "PROJ-1": [{ started: interval.start, timeSpentSeconds: 3661, comment }] }
+      })
+      return Effect.gen(function*() {
+        const saved = yield* SavedEntries
+        const ledger = yield* SourceLedger
+        const expectedScopes = yield* reviewedEntry(expected)
+        yield* saved.remove({ expected, expectedScopes })
+        expect((yield* ledger.read).bindings).toEqual([])
+        expect(
+          source === "jira"
+            ? fake.world.deletedJiraWorklogs.map((entry) => entry.id)
+            : fake.world.deletedClockifyEntries
+        ).toEqual([expected.id])
+      }).pipe(Effect.provide(fake.layer))
+    })
+
+    it.effect(`refuses a stale or held ${source} delete before any write`, () => {
+      const expected = source === "jira" ? jiraEntry : clockifyEntry
+      const fake = makeFakeHeadless({
+        writtenFiles: {},
+        clockifyEntries: [{ ...interval, description: clockifyEntry.description ?? "" }],
+        jiraWorklogs: { "PROJ-1": [{ started: interval.start, timeSpentSeconds: 3661, comment }] }
+      })
+      return Effect.gen(function*() {
+        const saved = yield* SavedEntries
+        // An unlinked session marker is a real hold: refused before the provider is read.
+        const unlinked = `${expected.description ?? ""}\n${marker(`${localDay(new Date(startMs))}:PROJ-1`, startMs)}`
+        const held = yield* saved.remove({ expected: { ...expected, description: unlinked } }).pipe(Effect.result)
+        expect(Result.isFailure(held) && held.failure.reason).toBe("conflict")
+        const expectedScopes = yield* reviewedEntry(expected)
+        const stale = yield* saved.remove({ expected: { ...expected, description: "stale" }, expectedScopes }).pipe(
+          Effect.result
+        )
+        expect(Result.isFailure(stale) && stale.failure.reason).toBe("conflict")
+        const switched = yield* saved.remove({
+          expected,
+          expectedScopes: { clockify: "other-account", jira: "other-site" }
+        }).pipe(Effect.result)
+        expect(Result.isFailure(switched) && switched.failure.reason).toBe("conflict")
+        expect(fake.world.deletedJiraWorklogs).toEqual([])
+        expect(fake.world.deletedClockifyEntries).toEqual([])
+      }).pipe(Effect.provide(fake.layer))
+    })
+
+    it.effect(`deletes an ordinary ${source} entry in a week never scanned for sessions`, () => {
+      const expected = source === "jira" ? jiraEntry : clockifyEntry
+      const fake = makeFakeHeadless({
+        writtenFiles: {},
+        clockifyEntries: [{ ...interval, description: clockifyEntry.description ?? "" }],
+        jiraWorklogs: { "PROJ-1": [{ started: interval.start, timeSpentSeconds: 3661, comment }] }
+      })
+      return Effect.gen(function*() {
+        const saved = yield* SavedEntries
+        yield* saved.remove({ expected })
+        expect(
+          source === "jira"
+            ? fake.world.deletedJiraWorklogs.map((entry) => entry.id)
+            : fake.world.deletedClockifyEntries
+        ).toEqual([expected.id])
+      }).pipe(Effect.provide(fake.layer))
+    })
+
+    for (
+      const outcome of ["success", "create-failure", "delete-failure"] satisfies ReadonlyArray<
+        "success" | "create-failure" | "delete-failure"
+      >
+    ) {
+      it.effect(`retargets ${source} create-first with ${outcome} and durable source binding`, () => {
+        const expected = source === "jira" ? jiraEntry : clockifyEntry
+        const fake = makeFakeHeadless({
+          clockifyEntries: [{ ...interval, description: clockifyEntry.description ?? "" }],
+          jiraWorklogs: { "PROJ-1": [{ started: interval.start, timeSpentSeconds: 3661, comment }] },
+          jiraPostsFail: source === "jira" && outcome === "create-failure",
+          clockifyWritesFail: source === "clockify" && outcome === "create-failure",
+          jiraDeletesFail: source === "jira" && outcome === "delete-failure",
+          clockifyDeletesFail: source === "clockify" && outcome === "delete-failure"
+        })
+        return Effect.gen(function*() {
+          const saved = yield* SavedEntries
+          const ledger = yield* SourceLedger
+          const expectedScopes = yield* reviewedEntry(expected)
+          const result = yield* saved.update({
+            expected,
+            expectedScopes,
+            startMs,
+            endMs,
+            description: expected.description ?? "",
+            ticketKey: "PROJ-2"
+          }).pipe(Effect.result)
+          const bindings = (yield* ledger.read).bindings
+          const deleted = source === "jira" ? fake.world.deletedJiraWorklogs : fake.world.deletedClockifyEntries
+          if (outcome === "create-failure") {
+            expect(Result.isFailure(result) && result.failure.reason).toBe("provider")
+            expect(deleted).toEqual([])
+            expect(bindings.map((binding) => binding.entryId)).toEqual([expected.id])
+          } else if (outcome === "delete-failure") {
+            expect(Result.isFailure(result) && result.failure.reason).toBe("partial")
+            expect(Result.isFailure(result) && result.failure.replacement?.ticketKey).toBe("PROJ-2")
+            expect(deleted).toEqual([])
+            expect(bindings).toHaveLength(2)
+          } else {
+            expect(Result.isSuccess(result) && result.success.ticketKey).toBe("PROJ-2")
+            expect(deleted).toHaveLength(1)
+            expect(bindings).toHaveLength(1)
+            expect(bindings[0]?.ticketKey).toBe("PROJ-2")
+            expect(bindings[0]?.rowId).toBe(`${localDay(new Date(startMs))}:PROJ-1`)
+            expect(bindings[0]?.entryId).not.toBe(expected.id)
+          }
+        }).pipe(Effect.provide(fake.layer))
+      })
+    }
+  }
+
+  it.effect("retains the original when the Clockify account changes after replacement creation", () => {
+    const fake = makeFakeHeadless({
+      clockifyEntries: [{ ...interval, description: clockifyEntry.description ?? "" }],
+      afterClockifyWrite: (world) => {
+        world.clockifyAuth = { ...world.clockifyAuth, workspaceId: "other-workspace" }
+      }
+    })
+    return Effect.gen(function*() {
+      const saved = yield* SavedEntries
+      const ledger = yield* SourceLedger
+      const expectedScopes = yield* reviewedEntry(clockifyEntry)
+      const result = yield* saved.update({
+        expected: clockifyEntry,
+        expectedScopes,
+        startMs,
+        endMs,
+        description: clockifyEntry.description ?? "",
+        ticketKey: "PROJ-2"
+      }).pipe(Effect.result)
+      expect(Result.isFailure(result) && result.failure.reason).toBe("partial")
+      expect(Result.isFailure(result) && result.failure.replacement?.ticketKey).toBe("PROJ-2")
+      expect(fake.world.deletedClockifyEntries).toEqual([])
+      expect((yield* ledger.read).bindings.map((binding) => binding.entryId)).toEqual([
+        clockifyEntry.id,
+        Result.isFailure(result) ? result.failure.replacement?.id : undefined
+      ])
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("reoffers the original evidence after deleting its bound Jira entry", () => {
+    const description = `work\n${marker(`${localDay(new Date(startMs))}:PROJ-1`, startMs)}`
+    const expected = { ...jiraEntry, endMs: startMs + 300_000, description }
+    const cwd = `${FAKE_HOME}/dev/work`
+    const fake = makeFakeHeadless({
+      config: { sessionRoots: [cwd] },
+      transcripts: {
+        "work/session.jsonl": JSON.stringify({
+          type: "user",
+          sessionId: "worked",
+          cwd,
+          gitBranch: "feat/PROJ-1",
+          timestamp: interval.start,
+          message: { role: "user", content: "Implemented validation" }
+        })
+      },
+      jiraWorklogs: { "PROJ-1": [{ started: interval.start, timeSpentSeconds: 300, comment: description }] }
+    })
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(period.to.getTime())
+      const saved = yield* SavedEntries
+      const reconcile = yield* ReconcileService
+      const expectedScopes = yield* reviewedEntry(expected)
+      const initial = yield* reconcile.proposeFromSessions(period, { sides: { jira: true, clockify: false } })
+      expect(initial.proposals).toEqual([])
+      yield* saved.remove({ expected, expectedScopes })
+      const refreshed = yield* reconcile.refreshRecordedTime(period, initial)
+      expect(refreshed.sourceEntries).toEqual([])
+      expect(refreshed.proposals.map((proposal) => proposal.jiraDelta)).toEqual([300])
+    }).pipe(Effect.provide(fake.layer))
+  })
   it.effect("refuses malformed Jira ADF before any provider update", () => {
     const fake = makeFakeHeadless({
       jiraWorklogs: {

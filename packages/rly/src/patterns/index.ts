@@ -48,10 +48,14 @@ export { FreshnessStamp, RLY_FRESHNESS_STAMP_DEFAULT_VARIANTS, RLY_FRESHNESS_STA
 export type { FreshnessStampProps, RlyFreshnessStampSize, RlyFreshnessState } from "./FreshnessStamp.js"
 export { GovernedActionReview } from "./GovernedActionReview.js"
 export type { GovernedActionReviewProps, RlyGovernedActionState } from "./GovernedActionReview.js"
+export { Hero, HeroWord, RLY_HERO_DEFAULT_VARIANTS, RLY_HERO_VARIANTS, RLY_HERO_WORD_VARIANTS } from "./Hero.js"
+export type { HeroProps, HeroWordProps, RlyHeroSize, RlyHeroWordTone } from "./Hero.js"
 export { PeopleStrip, RLY_PEOPLE_STRIP_DEFAULT_VARIANTS, RLY_PEOPLE_STRIP_VARIANTS } from "./PeopleStrip.js"
 export type { PeopleStripProps, RlyPeopleStripSize } from "./PeopleStrip.js"
 export { Person, RLY_PERSON_DEFAULT_VARIANTS, RLY_PERSON_VARIANTS } from "./Person.js"
 export type { PersonProps, RlyPerson, RlyPersonSize } from "./Person.js"
+export { Region, RLY_REGION_DEFAULT_VARIANTS, RLY_REGION_VARIANTS } from "./Region.js"
+export type { RegionProps, RlyRegionHeadingLevel, RlyRegionTone } from "./Region.js"
 export {
   RelationshipChain,
   RLY_RELATIONSHIP_DIRECTION_PRESENTATION,

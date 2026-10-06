@@ -119,19 +119,32 @@ Codex rollouts live under `~/.codex/sessions` in creation-date directories. Thos
 identify the working project, so JCF decodes their metadata locally before applying session roots
 to each stretch of work. Resumed rollouts in older directories remain eligible for the current
 week. Large tool payloads are discarded while streaming the file. Current `UserMessage` events
-and older `user_message` events count as presence; injected instructions, response-item prompt
-copies, compacted history and native subagent rollouts do not. Selecting Claude or Codex as the
-matching agent does not restrict which of these two transcript sources is scanned.
+and older `user_message` events open a turn; completed items continue it and `task_complete` ends
+it. Injected instructions, response-item prompt copies, compacted history and native subagent
+rollouts establish nothing. Selecting Claude or Codex as the matching agent does not restrict which
+of these two transcript sources is scanned.
 
-Only messages _you typed_ count as presence — the agent's own output, its tool results, and the
-prompts it sends its own subagents do not, since they show it was busy rather than that you were
-working. On one real day that was 66 events out
-of 1641, and the difference between 1h 53m and 3h 51m. A session counts as active between its own
-consecutive prompts, gaps longer than the idle cap are
+Presence is a _supervised turn_. A message you typed — including one typed while the agent was busy,
+which Claude stores as a queued command — opens a turn, and the agent's work inside it counts until
+the agent ends the turn, a task notification or auto-continuation takes over, or the agent is silent
+for longer than the idle cap. Agent output outside a turn you started never counts: a task
+notification, an expanded skill (`isMeta`) or a subagent's own prompt cannot open one, since they
+show the agent was busy rather than that you were working. Gaps longer than the idle cap are
 credited to nothing, and any moment you were working on several tickets at once is divided equally
-between them — so a day's proposals can never add up to more than that day's wall clock. Time
-spent reading and thinking between prompts is therefore under-counted rather than over-counted; a day
+between them — so a day's proposals can never add up to more than that day's wall clock. A day
 with a timer still running is reported but never proposed.
+
+When parallel tickets compete for the same minutes, tickets in your open sprint come first, then
+tickets you have not logged that day, then the strength of their evidence. Key-only JQL searches —
+one for the open sprint, one per day for logged tickets — supply those facts, which also appear beside candidates in the matching prompt as tie-breakers.
+When Jira cannot answer, every ticket ranks equally. Inside one unbroken stretch each ticket gets a
+single block, ordered by when it first appeared and packed back to back; a ticket that cannot reach
+a minute folds into the one ranked above it. Work an orchestrator agent prompts into a worker pane
+counts like your own typing. An orchestrating session that no branch, path or confident agent answer
+places is split across the open-sprint tickets assigned to you that it mentions, weighted by mentions
+and computed per active stretch, so settled time never moves when the session later mentions more.
+Splitting needs a verified Jira answer about the sprint; without one the session stays unplaced.
+`jcf watch` reads deterministically and never splits: such a session stays unplaced there.
 
 Everything you need to judge a row is on the row itself, in the picker: when the work item started
 and ended, the issue summary, its assignee, the attribution signal, what each side already holds, and
@@ -175,12 +188,13 @@ edits, including removal of the source suffix, do not reset its consumed seconds
 read still observes genuine duration changes and deletions. The suffix can import a legacy entry on
 first read, but text alone does not override an existing ID binding.
 
-The same private file now stores version 3: it also remembers the IDs and original starts of ordinary
+The same private file now stores version 5: it also remembers the IDs and original starts of ordinary
 entries seen in a newly reviewed forward interval, separately by provider and account. Repeated or
 overlapping review can recognize those entries. A new unmarked entry in older coverage or a changed
 start for a remembered ID needs manual review; the tool does not infer its origin from a timestamp.
-Versions 1 and 2 load without inventing ordinary entries and upgrade only on a successful atomic
-write. New Clockify evidence is scoped to the configured endpoint, workspace, and user verified by
+Versions 1 through 4 upgrade only on a successful atomic write. Versions 1 and 2 load without
+inventing ordinary entries; earlier versions never invent replacement intents or Jira creation
+checkpoints. New Clockify evidence is scoped to the configured endpoint, workspace, and user verified by
 that credential. Older Clockify scopes cannot prove the endpoint: affected windows, observations,
 pending intents, and bindings remain intact and held for private manual review. Neither switching
 the endpoint nor editing a description turns them into a fresh empty account. Jira evidence remains
@@ -328,13 +342,36 @@ an explicit full read collects new session evidence.
 ### Ticket overlap and live matching
 
 With the default 900-second dwell floor, overlapping attributed work is allocated
-in sequential blocks of at least fifteen minutes when the stretch permits it.
-Tickets share the stretch evenly; if fewer slots fit, the strongest credited
-tickets retain them. Mixed stretches reserve unplaced credit before allocating known tickets. Separate
+in sequential blocks across every evidenced ticket. Each ticket receives a writable
+minute when the stretch permits it. Open-sprint tickets assigned to you rank first,
+then tickets not yet logged that day, then evidence weight. Shorter shares remain
+credited; the scheduler never invents minutes. Mixed stretches reserve unplaced credit before allocating known tickets. Separate
 work, idle gaps, wholly unplaced stretches and midnight stay
 separate. Short standalone work is never inflated. Setting dwell to zero retains
 raw overlap sharing. Proposal blocks and confirmed amounts use the same timeline;
 `activeSeconds` retains the original activity duration.
+
+### Ignoring session tickets
+
+```sh
+jcf config set session-ignore PROJ-42     # Ignore in every week
+jcf config unset session-ignore PROJ-42   # Restore
+jcf config                               # Lists ignored tickets
+```
+
+`sessionIgnoredTickets` defaults to `[]` and persists validated issue keys. Ignored
+branch, path or standing matches fall through to the attribution agent, whose
+candidate list excludes ignored keys. An ignored key cannot become a final match.
+If the agent chooses another evidenced key, that work can be proposed there.
+Otherwise the ignored session's windows are removed before sharing: overlapping
+tickets receive those minutes; solo time is not offered elsewhere.
+
+Session reports and `--json` include `ignored` rows with `ticketKey`, `day` and
+`seconds`. These are raw active windows unioned per ignored ticket/day, before
+sharing, so simultaneous sessions on one key count once. They explain suppressed
+evidence and must not be added to allocated totals. A fresh recorded read also
+filters newly ignored tickets out of retained proposals; rescan sessions to
+redistribute overlapping credit or restore an ignored ticket.
 
 `SessionAttributor.attribute` accepts an optional activity observer. Reconciliation
 forwards visible text and process status as `AgentActivity`, tagged with the batch
@@ -354,7 +391,7 @@ totals; their days are excluded from proposals until the timer stops.
 `SavedEntries.layer` is included in `Headless.layer`. Its `update` operation takes a
 server-retained `RecordedEntry` snapshot plus new start/end milliseconds and description,
 rechecks provider ownership and the current snapshot, and returns the actual saved
-entry. `SavedEntryError.reason` distinguishes validation, conflict and provider failures.
+entry. `SavedEntryError.reason` distinguishes validation, conflict, provider and partial failures.
 Recorded intervals carry optional whole-entry metadata, including exact original
 bounds and description, even when the calendar slices an entry at midnight.
 
@@ -368,6 +405,23 @@ formatting and embeds. Mention and emoji labels are readable in the editor; card
 media have no plain-text representation. Updates leave
 Jira estimates and visibility unchanged. The service serializes local updates, but the
 provider APIs offer no atomic protection from external edits between re-read and save.
+
+Changing tickets creates a replacement before deleting the original. Before POST, the private
+ledger stores a `Pending` replacement intent containing the provider/account scope, original entry
+ID and ticket, and requested ticket, bounds and description. The returned replacement ID is persisted
+before verification. A verified replacement retains the original session claim, or is remembered as
+ordinary provider time, before DELETE. Deleting the original atomically releases its tracking and
+clears the intent. The provider/account scope and intent stay in the owner-only ledger. Entry IDs,
+ticket, bounds and description appear in the authenticated saved-entry snapshot; HTTP responses
+never carry private provider account locators or credentials.
+
+An interrupted or uncertain create stays held and is never repeated automatically. A partial move
+holds session writes for that provider, including after restart. Refresh and inspect both entries;
+if the replacement was verified, explicitly deleting either entry resolves the intent while keeping
+the other entry's tracking. An unverified replacement, or a remote delete whose local completion
+could not persist, requires private ledger recovery after checking the provider. Never clear an
+intent just to retry POST. Ordinary replacements keep their ID and actual start, so extending a
+reviewed window does not turn the tool's own move into an unknown-entry hold.
 
 Session reports optionally retain `sessionEvidence` with each session's ticket and
 individual active intervals. This lets web description requests correlate saved time
