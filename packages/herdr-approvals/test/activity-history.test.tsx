@@ -150,7 +150,7 @@ describe("activity history", () => {
     const items = activityItemsFor([abandoned])
     expect(items[0]).toMatchObject({
       title: "Abandon Work goal",
-      summary: "Abandoned fix-iphone-live-ui-polish: No PR, no branch, no owner"
+      summary: "Abandon fix-iphone-live-ui-polish: No PR, no branch, no owner"
     })
     expect(filterActivityItems(items, "work", "")).toHaveLength(1)
     expect(filterActivityItems(items, "approvals", "")).toHaveLength(1)

@@ -153,7 +153,7 @@ const safeSummary = (record: SanitizedJobRecord): string => {
     case "work.reassign":
       return `Reassigned ${record.payload.goalId} from ${record.payload.from.name} to ${record.payload.to.name}.`
     case "work.abandon":
-      return `Abandoned ${record.payload.goalId}: ${record.payload.reason}`
+      return `Abandon ${record.payload.goalId}: ${record.payload.reason}`
   }
 }
 

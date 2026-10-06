@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { makeWorkService, WorkStore } from "../src/index.js"
-import type { WorkGoalAbandonment, WorkGoalCheckpoint, WorkLaneClaim } from "../src/model.js"
+import type { WorkActivity, WorkGoalAbandonment, WorkGoalCheckpoint, WorkLaneClaim } from "../src/model.js"
 
 const owner = { id: "agent-codex-owner", name: "Codex owner" }
 
@@ -139,6 +139,26 @@ describe("approved goal abandonment", () => {
       })
       expect(result.checkpoint.occurredAt).toBe(5_001)
       expect((yield* work.snapshots()).now.goals.find(({ id }) => id === original.goal.id)?.state).toBe("abandoned")
+    })))
+
+  it.effect("abandons a goal whose activity list is full without dropping any owner activity", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture({ lane: false })
+      const activity = Array.from({ length: 128 }, (_, index): WorkActivity => ({
+        id: `owner-${index}`,
+        kind: "note",
+        occurredAt: 600,
+        summary: `Owner note ${index}`
+      }))
+      yield* work.record({
+        ...original,
+        eventId: "goal-full",
+        occurredAt: 600,
+        goal: { ...original.goal, activity, updatedAt: 600 }
+      })
+      const result = yield* work.abandon({ ...request, expectedGoalEventId: "goal-full", expectedGoalUpdatedAt: 600 })
+      expect(result.checkpoint.goal.state).toBe("abandoned")
+      expect(result.checkpoint.goal.activity).toEqual(activity)
     })))
 
   it.effect("replays the exact job and refuses a changed payload under the same job id", () =>

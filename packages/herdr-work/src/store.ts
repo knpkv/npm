@@ -87,7 +87,12 @@ import {
   SessionIndexDefinition,
   sessionIndexDefinitionQuery
 } from "./internal/session-index.js"
-import { terminalCandidates, terminalCheckpoint, withoutBlockers } from "./internal/terminal-reconcile.js"
+import {
+  goalActivityLimit,
+  terminalCandidates,
+  terminalCheckpoint,
+  withoutBlockers
+} from "./internal/terminal-reconcile.js"
 import {
   admissionEvidence,
   isTerminalWorkState,
@@ -3166,11 +3171,14 @@ export class WorkStore implements WorkStoreService {
           }
           // occurredAt equals updatedAt for every valid checkpoint; both bound the ordering defensively.
           const at = Math.max(observedAt, head.occurredAt + 1, head.goal.updatedAt + 1)
+          const existingActivity = head.goal.activity ?? []
           const goal = Schema.decodeUnknownSync(WorkGoal)({
             ...withoutBlockers(head.goal),
             state: "abandoned",
-            activity: [
-              ...(head.goal.activity ?? []),
+            // A full activity list keeps the owner's entries and takes no note; the
+            // checkpoint's event id and the abandonments table still name the job.
+            activity: existingActivity.length >= goalActivityLimit ? existingActivity : [
+              ...existingActivity,
               {
                 id: jobId,
                 kind: "status",

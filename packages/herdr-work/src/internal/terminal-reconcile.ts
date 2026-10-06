@@ -47,7 +47,8 @@ export const terminalCandidates = (
   })
 }
 
-const goalActivityLimit = 128
+/** The most activities a goal holds; a terminal transition never drops one to fit its own note. */
+export const goalActivityLimit = 128
 
 /**
  * The terminal checkpoint for one candidate. It is stamped with the pull
