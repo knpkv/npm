@@ -1500,6 +1500,7 @@ const ReadyReviewWorkspace = ({
   // Whether keyboard focus is inside Relay; a pane moving into the drawer then opens it, so a reader
   // resizing mid-finding keeps the pane in view. Moving focus elsewhere clears it.
   const relayHasFocus = useRef(false)
+  const findingsTrigger = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     setFindingsOpen(placement === "drawer" && relayHasFocus.current)
   }, [placement])
@@ -1815,6 +1816,7 @@ const ReadyReviewWorkspace = ({
               aria-expanded={findingsOpen}
               aria-haspopup="dialog"
               onClick={() => setFindingsOpen(true)}
+              ref={findingsTrigger}
               size="compact"
               variant="secondary"
             >
@@ -1902,7 +1904,16 @@ const ReadyReviewWorkspace = ({
           Relay is advisory. Accept posts immediately; acknowledge and reject stay local to this review session.
         </footer>
       </Surface>
-      <FindingsDrawer onClose={() => setFindingsOpen(false)} open={findingsOpen} title={findingsLabel}>
+      <FindingsDrawer
+        onClose={() => {
+          // An explicit close also ends "focus is in Relay", so a later resize doesn't reopen it.
+          relayHasFocus.current = false
+          setFindingsOpen(false)
+        }}
+        open={findingsOpen}
+        returnFocus={findingsTrigger}
+        title={findingsLabel}
+      >
         {placement === "drawer" ? relayPane : null}
       </FindingsDrawer>
     </>

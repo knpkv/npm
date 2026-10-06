@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { describe, expect, it } from "@effect/vitest"
-import { act, createElement, useState } from "react"
+import { act, createElement, useRef, useState } from "react"
 import { createRoot } from "react-dom/client"
 
 import { FindingsDrawer, findingsPlacement } from "../src/client/components/findings-drawer.js"
@@ -24,13 +24,14 @@ describe("findingsPlacement", () => {
 describe("FindingsDrawer", () => {
   const Harness = () => {
     const [open, setOpen] = useState(false)
+    const trigger = useRef<HTMLButtonElement>(null)
     return createElement(
       "div",
       null,
-      createElement("button", { onClick: () => setOpen(true), type: "button" }, "Findings (2)"),
+      createElement("button", { onClick: () => setOpen(true), ref: trigger, type: "button" }, "Findings (2)"),
       createElement(
         FindingsDrawer,
-        { onClose: () => setOpen(false), open, title: "Findings (2)" },
+        { onClose: () => setOpen(false), open, returnFocus: trigger, title: "Findings (2)" },
         createElement("aside", { "aria-label": "Relay findings" }, "Two findings")
       )
     )

@@ -11,8 +11,7 @@
  *
  * @module
  */
-import type { ReactNode } from "react"
-import { useEffect, useRef } from "react"
+import { type ReactNode, type RefObject, useEffect, useRef } from "react"
 import { isCommandPaletteShortcut } from "./command-palette.js"
 import styles from "./findings-drawer.module.css"
 
@@ -38,11 +37,14 @@ export function FindingsDrawer({
   children,
   onClose,
   open,
+  returnFocus,
   title
 }: {
   readonly children: ReactNode
   readonly onClose: () => void
   readonly open: boolean
+  /** Where focus goes when the drawer closes with nothing else focused, e.g. after it opened itself. */
+  readonly returnFocus: RefObject<HTMLElement | null>
   readonly title: string
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -56,7 +58,12 @@ export function FindingsDrawer({
     <dialog
       aria-labelledby="findings-drawer-title"
       className={styles.drawer}
-      onClose={onClose}
+      onClose={() => {
+        // The browser restores focus to the element that opened the dialog. When the drawer opened
+        // itself on a resize, that element has unmounted and focus would fall to the page body.
+        if (document.activeElement === null || document.activeElement === document.body) returnFocus.current?.focus()
+        onClose()
+      }}
       onKeyDown={(event) => {
         if (isCommandPaletteShortcut(event)) onClose()
       }}
