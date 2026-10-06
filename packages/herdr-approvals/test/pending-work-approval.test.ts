@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { JobHash, JobRecord, JobStore } from "@knpkv/herdr-fleet"
+import { JobHash, type JobPayload, JobRecord, JobStore } from "@knpkv/herdr-fleet"
 import { Effect, Schema } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -19,7 +19,7 @@ const openStore = Effect.gen(function*() {
   )
 }).pipe(provideNodeServices)
 
-const pending = (id: string, createdAt: number, payload: unknown) =>
+const pending = (id: string, createdAt: number, payload: JobPayload) =>
   Schema.decodeUnknownEffect(JobRecord)({
     acceptedReceipt: null,
     actor: "owner",
@@ -41,9 +41,9 @@ const pending = (id: string, createdAt: number, payload: unknown) =>
     updatedAt: createdAt
   })
 
-const delegate = { kind: "agent.delegate", mode: "consult", prompt: "look", repository: "/repo" }
+const delegate: JobPayload = { kind: "agent.delegate", mode: "consult", prompt: "look", repository: "/repo" }
 
-const admit = {
+const admit: JobPayload = {
   kind: "work.admit",
   repository: "knpkv/npm",
   pullRequest: 433,
