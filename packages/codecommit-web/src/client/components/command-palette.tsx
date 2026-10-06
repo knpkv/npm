@@ -25,6 +25,13 @@ const FILTER_LABELS = {
   size: "Size"
 } satisfies Record<FilterKey, string>
 
+/**
+ * The command palette's global shortcut, Ctrl/Cmd+P. Shared so a native modal (the findings drawer)
+ * can close itself first: the palette's portal would otherwise open behind the modal, inert.
+ */
+export const isCommandPaletteShortcut = (event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey">): boolean =>
+  event.key === "p" && (event.metaKey || event.ctrlKey)
+
 export function CommandPalette() {
   const isOpen = useAtomValue(commandPaletteAtom)
   const setIsOpen = useAtomSet(commandPaletteAtom)
@@ -38,7 +45,7 @@ export function CommandPalette() {
 
   useEffect(() => {
     const down = (e: KeyboardEvent) => {
-      if (e.key === "p" && (e.metaKey || e.ctrlKey)) {
+      if (isCommandPaletteShortcut(e)) {
         e.preventDefault()
         setIsOpen((o) => !o)
       }

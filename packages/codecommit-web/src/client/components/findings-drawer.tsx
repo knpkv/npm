@@ -4,13 +4,16 @@
  * The review workspace shows Relay as a third column when its grid is wide, and stacked under
  * the diff on narrow screens. Between those, a third column would squeeze the diff, so the pane
  * moves into a native modal `<dialog>` opened from a header button ("Relay" before a review,
- * "Findings (n)" after): Esc closes it, and the browser returns focus to that button. The pane's
- * state lives in the workspace, so moving it loses nothing.
+ * "Findings (n)" after): Esc closes it, and the browser returns focus to that button. The command
+ * palette shortcut closes it too, so the palette does not open behind the modal. The findings and
+ * the selection live in the workspace and survive a move between placements; the pane itself
+ * remounts, so DOM-only state (an expanded Evidence section, the deck's scroll) resets on a resize.
  *
  * @module
  */
 import type { ReactNode } from "react"
 import { useEffect, useRef } from "react"
+import { isCommandPaletteShortcut } from "./command-palette.js"
 import styles from "./findings-drawer.module.css"
 
 /**
@@ -50,7 +53,15 @@ export function FindingsDrawer({
     if (!open && element.open) element.close()
   }, [open])
   return (
-    <dialog aria-labelledby="findings-drawer-title" className={styles.drawer} onClose={onClose} ref={dialog}>
+    <dialog
+      aria-labelledby="findings-drawer-title"
+      className={styles.drawer}
+      onClose={onClose}
+      onKeyDown={(event) => {
+        if (isCommandPaletteShortcut(event)) onClose()
+      }}
+      ref={dialog}
+    >
       <header className={styles.head}>
         <h2 className={styles.title} id="findings-drawer-title">
           {title}

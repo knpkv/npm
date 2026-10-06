@@ -1497,13 +1497,25 @@ const ReadyReviewWorkspace = ({
   const [workbenchRef, workbenchWidth] = useInlineSize<HTMLDivElement>()
   const placement = findingsPlacement(workbenchWidth, rootFontSizePx())
   const [findingsOpen, setFindingsOpen] = useState(false)
+  // Whether keyboard focus is inside Relay; a pane moving into the drawer then opens it, so a reader
+  // resizing mid-finding keeps the pane in view. Moving focus elsewhere clears it.
+  const relayHasFocus = useRef(false)
   useEffect(() => {
-    if (placement !== "drawer") setFindingsOpen(false)
+    setFindingsOpen(placement === "drawer" && relayHasFocus.current)
   }, [placement])
   const findingsLabel = review === null ? "Relay" : `Findings (${String(review.result.findings.length)})`
 
   const relayPane = (
-    <aside aria-label="Relay findings" className={styles.agentPane}>
+    <aside
+      aria-label="Relay findings"
+      className={styles.agentPane}
+      onBlur={(event) => {
+        if (event.relatedTarget !== null) relayHasFocus.current = event.currentTarget.contains(event.relatedTarget)
+      }}
+      onFocus={() => {
+        relayHasFocus.current = true
+      }}
+    >
       <header>
         <div className={styles.agentTitle}>
           <span>

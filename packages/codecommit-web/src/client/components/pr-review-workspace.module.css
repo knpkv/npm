@@ -123,13 +123,22 @@
   min-block-size: var(--rly-space-0);
 }
 
+/*
+ * The drawer grid has a fixed height: one row that may shrink below its content, items that may too,
+ * and the diff filling that row instead of the stacked layout's fixed height, so the diff scrolls
+ * inside the grid rather than running past it.
+ */
 .workbench[data-findings="drawer"] {
   block-size: clamp(32rem, calc(100vh - 12rem), 48rem);
   display: grid;
   grid-template-columns: minmax(12rem, 0.28fr) minmax(24rem, 1fr);
+  grid-template-rows: minmax(var(--rly-space-0), 1fr);
 }
 
-/* The drawer grid has a fixed height, so the diff fills its row instead of the stacked layout's fixed height. */
+.workbench[data-findings="drawer"] > * {
+  min-block-size: var(--rly-space-0);
+}
+
 .workbench[data-findings="drawer"] .diffViewport {
   block-size: auto;
 }

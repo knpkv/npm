@@ -164,3 +164,32 @@ test("keeps the diff inside the workspace in the drawer layout of a narrow colum
   })
   expect(overflow).toBeLessThanOrEqual(1)
 })
+
+// The palette opens in a portal under body; a native modal above it would leave it inert.
+test("closes the drawer when the command palette opens, so the palette takes input", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  await page.goto(detail)
+
+  await page.getByRole("button", { name: "Relay", exact: true }).click()
+  const drawer = page.getByRole("dialog", { name: "Relay" })
+  await expect(drawer).toBeVisible()
+  await page.keyboard.press("Control+p")
+  await expect(drawer).toBeHidden()
+  const input = page.getByPlaceholder("Type a command...")
+  await expect(input).toBeFocused()
+  await page.keyboard.type("Settings")
+  await expect(input).toHaveValue("Settings")
+})
+
+// A reader inside Relay who narrows the window keeps the pane: it moves into the drawer, open.
+test("opens the drawer when the window narrows while focus is in Relay", async ({ page }) => {
+  await page.setViewportSize({ height: 1080, width: 1920 })
+  await serve(page)
+  await page.goto(detail)
+
+  const pane = page.getByRole("complementary", { name: "Relay findings" })
+  await pane.getByRole("button", { name: "Run Relay" }).focus()
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
+})
