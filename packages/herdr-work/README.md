@@ -66,11 +66,24 @@ activity list is full; owner activity is never dropped to make room.
 `isTerminalWorkState`
 names the finished states: `completed`, `deployed` and `abandoned`.
 
+`admitObserved` admits a worker the reconciler observed, without an approval.
+It makes the same goal, lane and binding write as `admitExistingOwner`, checked
+against the same absence token inside the transaction, but records
+`observedAdmission` (actor `reconciler`, the observation id) on the binding
+instead of `prospectiveAdmission`. The caller (hostd) checks what the store
+can't see: the pane is on this host with agent lineage, and its worktree is the
+canonical toplevel on the PR branch at the PR head, with an origin equal to the
+PR's repository. An exact replay of the same observation returns the stored link;
+another observation, or an approved job, over the same binding is a conflict.
+Its admission activity is credited to the reconciler, and the goal can still take
+its terminal checkpoint when its pull request merges or closes.
+
 The `now` window also says who wrote each activity that is not the owner's:
 `activityProvenance` lists reconciler and approved-job activities (with the
 job id). An activity is credited only when the checkpoint that started its
 current unchanged run is the writer's own: an approved operation's checkpoint
-(whose event id is the activity id), or one in the reconciler's record. A later
+(whose event id is the activity id), one in the reconciler's record, or an
+observed admission's checkpoint. A later
 owner rewrite or re-creation is the owner's. Authorship never comes from an id's
 spelling, and `activityProvenanceGoals` lists the goals whose such activities
 are all present. In a covered goal an unlisted activity is the owner's; a goal
