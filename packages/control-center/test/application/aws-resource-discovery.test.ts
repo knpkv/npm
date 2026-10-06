@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe, it, layer } from "@effect/vitest"
 import { AwsApiError, AwsCredentialError } from "@knpkv/codecommit-core/Errors.js"
 import * as CodeCommit from "@knpkv/codecommit-core/ReadClient.js"
 import * as Effect from "effect/Effect"
@@ -312,7 +312,7 @@ describe("AWS resource discovery", () => {
       })
     ))
 
-  describe("sign-in failures", () => {
+  layer(NodeServices.layer)("sign-in failures", (it) => {
     /** Point the AWS SDK's shared-file loader at one fixture directory for this test. */
     const useProfileFiles = (directory: string) =>
       Effect.gen(function*() {
@@ -320,7 +320,7 @@ describe("AWS resource discovery", () => {
         const root = yield* path.fromFileUrl(new URL(`../fixtures/aws-profiles/${directory}/`, import.meta.url))
         vi.stubEnv("AWS_CONFIG_FILE", path.join(root, "config"))
         vi.stubEnv("AWS_SHARED_CREDENTIALS_FILE", path.join(root, "credentials"))
-      }).pipe(Effect.provide(NodeServices.layer))
+      })
     afterEach(() => {
       vi.unstubAllEnvs()
     })
