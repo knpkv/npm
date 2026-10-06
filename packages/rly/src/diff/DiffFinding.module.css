@@ -80,7 +80,7 @@
   .body h2,
   .body p {
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .prevention {
@@ -179,7 +179,7 @@
   .prevention dd {
     color: var(--rly-color-text-1);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .body h2 {
@@ -213,7 +213,7 @@
   .anchorDetails dd {
     color: var(--rly-color-text-1);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .footer {
@@ -250,7 +250,7 @@
   .footer button code,
   .stale code {
     color: var(--rly-color-text-2);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .stale {

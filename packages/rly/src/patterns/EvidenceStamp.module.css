@@ -47,7 +47,7 @@
       var(--rly-type-code-font);
     max-inline-size: 100%;
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     padding: var(--rly-space-4) var(--rly-space-8);
     white-space: normal;
   }

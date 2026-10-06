@@ -51,7 +51,7 @@
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .agentRole,
@@ -74,7 +74,7 @@
   .proposalReference {
     font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
       var(--rly-type-code-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .state {
@@ -138,7 +138,7 @@
   .facts dd {
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .evidence,
@@ -174,7 +174,7 @@
     color: var(--rly-color-text-1);
     font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
       var(--rly-type-code-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   @container (max-width: 28rem) {

@@ -74,32 +74,6 @@
   border-block-start: 1px solid var(--rly-color-border-2);
 }
 
-.resource[data-status-tone="positive"] {
-  box-shadow: inset 3px 0 var(--rly-color-success-ink);
-}
-
-.resource[data-status-tone="positive"]:dir(rtl) {
-  box-shadow: inset -3px 0 var(--rly-color-success-ink);
-}
-
-.resource[data-status-tone="critical"] {
-  box-shadow: inset 3px 0 var(--rly-color-blocked-ink);
-}
-
-.resource[data-status-tone="critical"]:dir(rtl) {
-  box-shadow: inset -3px 0 var(--rly-color-blocked-ink);
-}
-
-.resource[data-status-tone="caution"],
-.resource[data-status-tone="progress"] {
-  box-shadow: inset 3px 0 var(--rly-color-text-2);
-}
-
-.resource[data-status-tone="caution"]:dir(rtl),
-.resource[data-status-tone="progress"]:dir(rtl) {
-  box-shadow: inset -3px 0 var(--rly-color-text-2);
-}
-
 .resourceSummary {
   min-block-size: var(--rly-space-48);
   padding: var(--rly-space-16);
@@ -207,16 +181,32 @@
 
 .connectionIdentity {
   display: flex;
+  flex: 1 1 auto;
   min-inline-size: 0;
   align-items: center;
   gap: var(--rly-space-12);
+}
+
+/* The mark keeps its size; the title takes the rest and wraps between words, never inside one. */
+.connectionIdentity > :first-child {
+  flex: none;
+}
+
+.connectionIdentity > h2 {
+  min-inline-size: 0;
+  overflow-wrap: break-word;
+}
+
+/* The card's state keeps its own width beside the title, so neither squeezes the other. */
+.status {
+  flex: none;
 }
 
 .testEvidence {
   display: grid;
   gap: var(--rly-space-12);
   padding: var(--rly-space-16);
-  border-inline-start: 2px solid var(--rly-color-border-2);
+  border: 1px solid var(--rly-color-border-2);
   border-radius: var(--rly-radius-control);
   background: var(--rly-color-surface-2);
 }
@@ -243,7 +233,7 @@
 }
 
 .identifier {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 @media (max-width: 32rem) {

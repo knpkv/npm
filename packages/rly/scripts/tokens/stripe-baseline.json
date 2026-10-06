@@ -1,5 +1,9 @@
 [
   {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/agent-usage/src/client/usage.css"
+  },
+  {
     "declaration": "border-inline-start-color: LinkText",
     "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
   },
@@ -9,6 +13,30 @@
   },
   {
     "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codecommit)",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
     "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
   },
   {
@@ -32,6 +60,26 @@
     "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
   },
   {
+    "declaration": "inline-size: 3px",
+    "path": "packages/codecommit-web/src/client/components/sandbox.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/sandbox.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/sandbox.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/sandbox.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/workbench-rail.module.css"
+  },
+  {
     "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-confluence)",
     "path": "packages/control-center/src/client/AgentPage.module.css"
   },
@@ -41,6 +89,10 @@
   },
   {
     "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-clockify)",
+    "path": "packages/control-center/src/client/entities/WorkspaceClockifyTimeEntryDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
     "path": "packages/control-center/src/client/entities/WorkspaceClockifyTimeEntryDetails.module.css"
   },
   {
@@ -56,6 +108,22 @@
     "path": "packages/control-center/src/client/entities/WorkspaceConfluencePageDetails.module.css"
   },
   {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspaceConfluencePageDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspaceConfluencePageDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspaceConfluencePageDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspaceEntityRoute.module.css"
+  },
+  {
     "declaration": "border-inline-start: 2px solid var(--rly-color-border-2)",
     "path": "packages/control-center/src/client/entities/WorkspaceIssueDetails.module.css"
   },
@@ -64,6 +132,18 @@
     "path": "packages/control-center/src/client/entities/WorkspaceIssueDetails.module.css"
   },
   {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspaceIssueDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspaceIssueDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codepipeline)",
+    "path": "packages/control-center/src/client/entities/WorkspacePipelineExecutionDetails.module.css"
+  },
+  {
     "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codepipeline)",
     "path": "packages/control-center/src/client/entities/WorkspacePipelineExecutionDetails.module.css"
   },
@@ -72,7 +152,15 @@
     "path": "packages/control-center/src/client/entities/WorkspacePipelineExecutionDetails.module.css"
   },
   {
-    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codepipeline)",
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePipelineExecutionDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePipelineExecutionDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
     "path": "packages/control-center/src/client/entities/WorkspacePipelineExecutionDetails.module.css"
   },
   {
@@ -100,6 +188,38 @@
     "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
   },
   {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
     "declaration": "border-inline-start-color: var(--rly-color-blocked-ink)",
     "path": "packages/control-center/src/client/entities/WorkspacePullRequestDiff.module.css"
   },
@@ -112,40 +232,56 @@
     "path": "packages/control-center/src/client/entities/WorkspacePullRequestDiff.module.css"
   },
   {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDiff.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/items/AuthorizedSharePage.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/items/ItemsPage.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/releases/RelationshipDetailSheet.module.css"
+  },
+  {
     "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-border-2)",
     "path": "packages/control-center/src/client/releases/RelationshipRepairPanel.module.css"
   },
   {
-    "declaration": "border-inline-start: 2px solid var(--rly-color-border-2)",
-    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/releases/ReleaseRoute.module.css"
   },
   {
-    "declaration": "box-shadow: inset -3px 0 var(--rly-color-blocked-ink)",
-    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/releases/ReleaseWorkset.module.css"
   },
   {
-    "declaration": "box-shadow: inset -3px 0 var(--rly-color-success-ink)",
-    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/releases/ReleaseWorkset.module.css"
   },
   {
-    "declaration": "box-shadow: inset -3px 0 var(--rly-color-text-2)",
-    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
-  },
-  {
-    "declaration": "box-shadow: inset 3px 0 var(--rly-color-blocked-ink)",
-    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
-  },
-  {
-    "declaration": "box-shadow: inset 3px 0 var(--rly-color-success-ink)",
-    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
-  },
-  {
-    "declaration": "box-shadow: inset 3px 0 var(--rly-color-text-2)",
-    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/settings/BrowserSessionsPanel.module.css"
   },
   {
     "declaration": "border-left: 2px solid var(--rly-color-border-2)",
     "path": "packages/control-center/src/client/settings/WorkspaceSettingsPage.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/settings/WorkspaceSettingsPage.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/timeline/TimelineDetailSheet.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/control-center/src/client/timeline/TimelineDetailSheet.module.css"
   },
   {
     "declaration": "border-inline-start-color: var(--rly-color-agent)",
@@ -160,8 +296,44 @@
     "path": "packages/herdr-approvals/src/styles.css"
   },
   {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
     "declaration": "box-shadow: inset 3px 0 0 var(--rly-color-agent)",
     "path": "packages/herdr-connect/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-connect/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-connect/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-monitor/src/client/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-work/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-work/src/styles.css"
   },
   {
     "declaration": "border-left: 3px solid var(--rly-color-service-clockify)",
@@ -180,11 +352,51 @@
     "path": "packages/jcf-web/src/client/week.css"
   },
   {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/jcf-web/src/client/week.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/jcf-web/src/client/week.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/jcf-web/src/client/week.css"
+  },
+  {
+    "declaration": "word-break: break-word",
+    "path": "packages/jcf-web/src/client/week.css"
+  },
+  {
     "declaration": "border-inline-start: 3px solid var(--rly-color-border-2)",
     "path": "packages/review/src/guide/style.css"
   },
   {
     "declaration": "border-left: 2px solid currentColor",
     "path": "packages/review/src/guide/style.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/review/src/guide/style.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/review/src/guide/style.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/review/src/guide/style.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/review/src/guide/style.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/review/src/guide/style.css"
+  },
+  {
+    "declaration": "inline-size: 3px",
+    "path": "packages/rly/src/patterns/ServiceMark.module.css"
   }
 ]

@@ -328,6 +328,22 @@ const edgeStripe = (rule: Rule): Declaration | undefined => {
     ?? (shown.some(({ edge }) => neutral(edge)) ? lone(shown.filter(({ edge }) => !neutral(edge))) : undefined)
 }
 
+const THIN = /^(?:[0-4](?:\.\d+)?px|0?\.\d+px|var\(\s*--rly-space-[024]\s*\))$/i
+const NEUTRAL_FILL = /^(?:none|transparent|var\(\s*--rly-color-(?:border-[12]|surface-\d|canvas)\s*\))$/i
+
+/**
+ * The declaration that makes a rule a thin coloured bar: an element 4px or narrower whose background
+ * is a colour rather than a neutral divider or surface (ServiceMark's old 3px `.rail`). Thin
+ * horizontal lines stay allowed, like block-edge borders.
+ */
+const barStripe = (rule: Rule): Declaration | undefined => {
+  const own = (rule.nodes ?? []).flatMap((node) => (node.type === "decl" ? [node] : []))
+  const thin = own.find((decl) => /^(?:width|inline-size)$/i.test(decl.prop) && THIN.test(decl.value.trim()))
+  const fill = own.find((decl) => /^background(?:-color)?$/i.test(decl.prop))
+  if (thin === undefined || fill === undefined) return undefined
+  return NEUTRAL_FILL.test(fill.value.trim()) ? undefined : thin
+}
+
 /** Every one-sided accent stripe declared in a CSS source, with its 1-based position. */
 export const findAccentStripes = (path: string, source: string): ReadonlyArray<AccentStripeViolation> => {
   const comparable = stripComments(source)
@@ -347,10 +363,11 @@ export const findAccentStripes = (path: string, source: string): ReadonlyArray<A
   }
   // The same policy per rule and edge, so longhands (`border-style: none none none solid`) cannot assemble a stripe.
   postcss.parse(source).walkRules((rule) => {
-    const by = edgeStripe(rule)
-    const start = by?.source?.start
-    if (by === undefined || start === undefined) return
-    report(start.line, start.column, `${by.prop}: ${by.value}${by.important ? " !important" : ""}`)
+    for (const by of [edgeStripe(rule), barStripe(rule)]) {
+      const start = by?.source?.start
+      if (by === undefined || start === undefined) continue
+      report(start.line, start.column, `${by.prop}: ${by.value}${by.important ? " !important" : ""}`)
+    }
   })
   return violations.sort((left, right) => left.line - right.line || left.column - right.column)
 }

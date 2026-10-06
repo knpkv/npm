@@ -34,6 +34,24 @@ describe("findAccentStripes", () => {
     expect(declarations(".a { border-inline-start-width: thick; }")).toHaveLength(1)
   })
 
+  it("flags a thin coloured bar element, like ServiceMark's old rail, and allows neutral or horizontal lines", () => {
+    expect(
+      declarations(
+        ".rail { align-self: stretch; background: currentcolor; border-radius: var(--rly-radius-round); inline-size: 3px; min-block-size: var(--rly-space-24); }"
+      )
+    ).toEqual(["inline-size: 3px"])
+    expect(
+      declarations(
+        ".bar { position: absolute; inset-inline-start: 0; width: 4px; background: var(--rly-color-held-ink); }"
+      )
+    )
+      .toEqual(["width: 4px"])
+    expect(declarations(".divider { inline-size: 1px; background: var(--rly-color-border-1); }")).toEqual([])
+    expect(declarations(".underline { block-size: 2px; background: var(--rly-color-focus); }")).toEqual([])
+    expect(declarations(".swatch { inline-size: var(--rly-space-16); background: var(--rly-color-series-1); }"))
+      .toEqual([])
+  })
+
   it("flags a stripe assembled from border longhands, per edge", () => {
     expect(
       declarations(".card { border: 4px solid red; border-style: none; border-inline-start-style: solid; }")

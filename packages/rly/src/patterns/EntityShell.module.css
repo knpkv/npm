@@ -35,7 +35,7 @@
     margin: var(--rly-space-0);
     max-inline-size: 24ch;
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     text-wrap: balance;
   }
 

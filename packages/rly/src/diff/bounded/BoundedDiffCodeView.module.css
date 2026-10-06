@@ -79,7 +79,7 @@
 
 .wrappedCode {
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .deletion > td,

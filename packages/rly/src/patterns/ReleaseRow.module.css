@@ -34,7 +34,7 @@
       var(--rly-type-code-font);
     letter-spacing: var(--rly-type-label-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .verdictBlock {
@@ -46,7 +46,7 @@
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .reason {
@@ -55,7 +55,7 @@
       var(--rly-type-body-font);
     letter-spacing: var(--rly-type-body-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .people {
@@ -104,7 +104,7 @@
       var(--rly-type-label-font);
     letter-spacing: var(--rly-type-label-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .actions {

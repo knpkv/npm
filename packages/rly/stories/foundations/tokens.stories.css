@@ -74,7 +74,7 @@
 
 .tokenStory code {
   color: var(--rly-color-text-2);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .tokenStory__states,

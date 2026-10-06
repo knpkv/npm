@@ -70,7 +70,7 @@
 
   .label {
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
   .loadingContent {
     opacity: 0;

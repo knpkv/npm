@@ -191,7 +191,7 @@ const ConnectionCard = ({
             {connection.displayName}
           </Text>
         </div>
-        <StateLabel label={status.label} size="compact" tone={status.tone} />
+        <StateLabel className={styles.status} label={status.label} size="compact" tone={status.tone} />
       </div>
       <ConnectionTestEvidence state={testState} />
       <ConnectionSynchronization
@@ -403,6 +403,7 @@ const CatalogCard = ({
           </Text>
         </div>
         <StateLabel
+          className={styles.status}
           label={isRecovery ? "Needs correction" : isAdditional ? "Add another" : "Not configured"}
           size="compact"
           tone={isRecovery ? "critical" : "neutral"}
@@ -483,7 +484,7 @@ const ServicePreviewCard = ({
           {service.displayName}
         </Text>
       </div>
-      <StateLabel label={statusLabel} size="compact" tone={statusTone} />
+      <StateLabel className={styles.status} label={statusLabel} size="compact" tone={statusTone} />
     </div>
     <Text tone="secondary" variant="body">
       {service.description}

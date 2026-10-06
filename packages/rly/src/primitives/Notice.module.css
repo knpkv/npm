@@ -56,7 +56,7 @@
   .message {
     flex: 1 1 0;
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
   .message > :first-child {
     margin-block-start: var(--rly-space-0);
