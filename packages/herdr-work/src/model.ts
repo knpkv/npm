@@ -58,8 +58,20 @@ export type WorkLaneOperationId = typeof WorkLaneOperationId.Type
 export const WorkCoordinatorSessionId = Identifier
 export type WorkCoordinatorSessionId = typeof WorkCoordinatorSessionId.Type
 
-export const WorkState = Schema.Literals(["planned", "working", "blocked", "review", "deployed", "completed"])
+export const WorkState = Schema.Literals([
+  "planned",
+  "working",
+  "blocked",
+  "review",
+  "deployed",
+  "completed",
+  "abandoned"
+])
 export type WorkState = typeof WorkState.Type
+
+/** A goal in one of these states is finished: nothing may bind to it, link it, or move it back. */
+export const isTerminalWorkState = (state: WorkState): boolean =>
+  state === "completed" || state === "deployed" || state === "abandoned"
 
 export const DeliveryStage = Schema.Literals(["local", "review", "pull_request", "merged", "deployed"])
 export type DeliveryStage = typeof DeliveryStage.Type
@@ -870,8 +882,25 @@ export const WorkObserveReport = Schema.Struct({
 })
 export interface WorkObserveReport extends Schema.Schema.Type<typeof WorkObserveReport> {}
 
+/** History the reconciler always leaves free for owners and approvals. */
+export const workReconcilerHeadroom = 256
+
+/**
+ * What `reconcile` did for one goal whose pull request is observed merged or
+ * closed: recorded it as finished, found it already recorded once by the
+ * reconciler (it never stamps a goal twice, even after an owner reopens it),
+ * or found a newer owner checkpoint than the one it planned from (it tries
+ * again on the next run).
+ */
+export const WorkReconcileOutcome = Schema.TaggedUnion({
+  applied: { goalId: WorkGoalId, eventId: Identifier, state: Schema.Literals(["completed", "abandoned"]) },
+  recorded: { goalId: WorkGoalId, eventId: Identifier },
+  conflict: { goalId: WorkGoalId }
+})
+export type WorkReconcileOutcome = typeof WorkReconcileOutcome.Type
+
 /** What the Work tab shows for a goal: its recorded state, or a newer observed one. */
-export const WorkDisplayState = Schema.Literals([...WorkState.literals, "abandoned"])
+export const WorkDisplayState = WorkState
 export type WorkDisplayState = typeof WorkDisplayState.Type
 
 /** Observed facts overlaid on one goal at read time. Nothing here is goal history. */
@@ -900,6 +929,18 @@ export interface WorkGoalObserved extends Schema.Schema.Type<typeof WorkGoalObse
 export const WorkGoalObservedEntry = Schema.Struct({ goalId: WorkGoalId, ...WorkGoalObserved.fields })
 export interface WorkGoalObservedEntry extends Schema.Schema.Type<typeof WorkGoalObservedEntry> {}
 
+/**
+ * Who wrote one goal activity, when it was not the goal's owner: the
+ * reconciler (from an observed fact) or an approved Fleet job.
+ */
+export const WorkActivityProvenance = Schema.Struct({
+  goalId: WorkGoalId,
+  activityId: Identifier,
+  provenance: Schema.Literals(["reconciler", "approval"]),
+  approvalJobId: Schema.NullOr(Identifier)
+})
+export interface WorkActivityProvenance extends Schema.Schema.Type<typeof WorkActivityProvenance> {}
+
 export const WorkSnapshotWindow = Schema.Literals(["now", "day", "week", "month"])
 export type WorkSnapshotWindow = typeof WorkSnapshotWindow.Type
 
@@ -920,7 +961,18 @@ export const WorkSnapshot = Schema.Struct({
    * How many goals' observed entries were left out to keep the snapshot within
    * the response budget; the most recently updated goals keep theirs.
    */
-  observedOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)))
+  observedOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+  /** Activities written by the reconciler or an approved job; only on `now`. */
+  activityProvenance: Schema.optionalKey(Schema.Array(WorkActivityProvenance)),
+  /**
+   * Goals whose non-owner activities are all in `activityProvenance`. In a
+   * covered goal an activity missing from it is the owner's; a goal that isn't
+   * covered has unknown provenance. Trimming to the response budget drops
+   * whole goals, never single activities.
+   */
+  activityProvenanceGoals: Schema.optionalKey(Schema.Array(WorkGoalId).check(Schema.isMaxLength(workSnapshotMaxGoals))),
+  /** How many goals were left uncovered to keep the snapshot within the response budget. */
+  activityProvenanceOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)))
 }).check(
   Schema.makeFilter(
     (snapshot) => {
@@ -967,11 +1019,22 @@ export const WorkSnapshots = Schema.Struct({
   month: WorkSnapshot
 }).check(Schema.makeFilter(
   ({ day, month, now, week }) =>
-    [day, week, month].every((window) => window.observed === undefined && window.observedOmitted === undefined) &&
+    [day, week, month].every((window) =>
+      window.observed === undefined && window.observedOmitted === undefined &&
+      window.activityProvenance === undefined && window.activityProvenanceGoals === undefined &&
+      window.activityProvenanceOmitted === undefined
+    ) &&
+    (now.activityProvenanceGoals === undefined ||
+      now.activityProvenanceGoals.every((goalId) => now.goals.some(({ id }) => id === goalId))) &&
+    (now.activityProvenance === undefined ||
+      now.activityProvenance.every(({ goalId }) => now.activityProvenanceGoals?.includes(goalId) === true)) &&
     (now.observed === undefined || (
       new Set(now.observed.map(({ goalId }) => goalId)).size === now.observed.length &&
       now.observed.every(({ goalId }) => now.goals.some(({ id }) => id === goalId))
     )),
-  { expected: "observed facts only on the now window, at most one entry per goal in that window" }
+  {
+    expected:
+      "observed facts and activity provenance only on the now window, for goals in that window and covered goals only"
+  }
 ))
 export interface WorkSnapshots extends Schema.Schema.Type<typeof WorkSnapshots> {}

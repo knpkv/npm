@@ -1876,7 +1876,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
     const currentDecision = decodeAgentBindingGoalEvent(currentRow, "sql-work.agent-binding.current-goal")
     if (currentDecision._tag === "invalid") return yield* currentDecision.error
     const current = currentDecision.checkpoint
-    if (current.goal.state === "completed") {
+    if (current.goal.state === "completed" || current.goal.state === "abandoned") {
       return yield* new WorkAgentBindingAuthorityError({
         actualRevision: lane.revision,
         expectedRevision: decoded.expectedRevision,
