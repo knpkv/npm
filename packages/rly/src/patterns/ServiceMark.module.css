@@ -3,13 +3,20 @@
     align-items: center;
     display: inline-grid;
     gap: var(--rly-space-8);
-    grid-template-columns: auto minmax(0, auto);
     max-inline-size: 100%;
     min-inline-size: var(--rly-space-0);
   }
 
   .glyph {
     display: block;
+  }
+
+  .nameVisible {
+    grid-template-columns: auto minmax(0, auto);
+  }
+
+  .nameHidden {
+    grid-template-columns: auto;
   }
 
   .name {

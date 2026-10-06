@@ -186,7 +186,7 @@ const ConnectionCard = ({
     <Surface as="article" className={styles.card} padding="default" form="grouped">
       <div className={styles.cardHeading}>
         <div className={styles.connectionIdentity}>
-          <ServiceMark service={connection.providerId} size="compact" />
+          <ServiceMark name="hidden" service={connection.providerId} size="compact" />
           <Text as="h2" variant="card-title">
             {connection.displayName}
           </Text>
@@ -397,7 +397,7 @@ const CatalogCard = ({
     <Surface as="article" className={styles.card} padding="default" form="grouped">
       <div className={styles.cardHeading}>
         <div className={styles.connectionIdentity}>
-          <ServiceMark service={catalog.providerId} size="compact" />
+          <ServiceMark name="hidden" service={catalog.providerId} size="compact" />
           <Text as="h2" variant="card-title">
             {catalog.displayName}
           </Text>
@@ -478,7 +478,7 @@ const ServicePreviewCard = ({
   <Surface as="article" className={styles.card} padding="default" form="grouped">
     <div className={styles.cardHeading}>
       <div className={styles.connectionIdentity}>
-        <ServiceMark service={service.providerId} size="compact" />
+        <ServiceMark name="hidden" service={service.providerId} size="compact" />
         <Text as="h2" variant="card-title">
           {service.displayName}
         </Text>

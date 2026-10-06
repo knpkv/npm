@@ -29,6 +29,18 @@ export const RLY_SERVICE_MARK_VARIANTS = defineVariants({
       tokens: ["color-service-clockify"]
     }
   },
+  name: {
+    visible: {
+      className: style("nameVisible"),
+      purpose: "Provider name printed beside the glyph",
+      tokens: ["color-text-1"]
+    },
+    hidden: {
+      className: style("nameHidden"),
+      purpose: "Glyph only, where adjacent text already names the provider; the accessible name stays",
+      tokens: []
+    }
+  },
   size: {
     compact: { className: style("compact"), purpose: "Dense provenance metadata", tokens: ["space-24", "type-meta"] },
     default: {
@@ -40,10 +52,13 @@ export const RLY_SERVICE_MARK_VARIANTS = defineVariants({
 })
 
 /** Default ServiceMark density. A service is always supplied explicitly. */
-export const RLY_SERVICE_MARK_DEFAULT_VARIANTS = defineVariants({ size: "default" })
+export const RLY_SERVICE_MARK_DEFAULT_VARIANTS = defineVariants({ name: "visible", size: "default" })
 
 /** Service identities supported by rly provenance patterns. */
 export type RlyService = keyof typeof RLY_SERVICE_MARK_VARIANTS.service
+
+/** Whether ServiceMark prints the provider name; the accessible name is always present. */
+export type RlyServiceMarkName = keyof typeof RLY_SERVICE_MARK_VARIANTS.name
 
 /** Visual density supported by ServiceMark. */
 export type RlyServiceMarkSize = keyof typeof RLY_SERVICE_MARK_VARIANTS.size
@@ -120,11 +135,19 @@ const serviceGlyphs = {
 /** Props for a fully named, code-owned service identity mark. */
 export type ServiceMarkProps = Omit<ComponentPropsWithRef<"span">, "aria-label" | "children" | "role"> & {
   readonly service: RlyService
+  /** `hidden` drops the printed name where a title beside the mark already says it. Default `visible`. */
+  readonly name?: RlyServiceMarkName
   readonly size?: RlyServiceMarkSize
 }
 
 /** Render recognizable service provenance with a full visible and accessible provider name. */
-export const ServiceMark = ({ className, service, size = "default", ...props }: ServiceMarkProps): ReactElement => {
+export const ServiceMark = ({
+  className,
+  name: nameVariant = "visible",
+  service,
+  size = "default",
+  ...props
+}: ServiceMarkProps): ReactElement => {
   const Glyph = serviceGlyphs[service]
   const name = serviceNames[service]
   return (
@@ -134,6 +157,7 @@ export const ServiceMark = ({ className, service, size = "default", ...props }: 
       className={classNames(
         style("root"),
         RLY_SERVICE_MARK_VARIANTS.service[service].className,
+        RLY_SERVICE_MARK_VARIANTS.name[nameVariant].className,
         RLY_SERVICE_MARK_VARIANTS.size[size].className,
         className
       )}
@@ -141,9 +165,11 @@ export const ServiceMark = ({ className, service, size = "default", ...props }: 
       role="img"
     >
       <Glyph />
-      <span aria-hidden="true" className={style("name")}>
-        {name}
-      </span>
+      {nameVariant === "visible" ? (
+        <span aria-hidden="true" className={style("name")}>
+          {name}
+        </span>
+      ) : null}
     </span>
   )
 }
