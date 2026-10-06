@@ -8,7 +8,7 @@ test.beforeEach(async ({ page }) => {
   const setup = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(await response.json())
   await page.goto(setup.url)
   await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
-  await page.getByRole("button", { name: "Quick approve · 5s Undo", exact: true }).click()
+  await page.getByRole("button", { name: "Quick approve", exact: true }).click()
 })
 
 // Undo removes both optimistic providers before any create request can leave the browser.
