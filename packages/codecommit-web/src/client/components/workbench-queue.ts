@@ -234,6 +234,21 @@ const groupOf = (pullRequest: Domain.PullRequest, currentUser: string): Workbenc
   return undefined
 }
 
+/**
+ * Whether an open pull request belongs in "Needs your review" for this user. The one definition
+ * that the rail, the header badge, the review reminder and the pull request list's review filter
+ * all count with, so their numbers agree.
+ */
+export const needsYourReview = (pullRequest: Domain.PullRequest, currentUser: string | undefined): boolean =>
+  currentUser !== undefined && currentUser.length > 0 && pullRequest.status === "OPEN" &&
+  groupOf(pullRequest, currentUser) === "review"
+
+/** How many of these pull requests need the user's review; pass the account-filtered queue. */
+export const yourReviewCount = (
+  pullRequests: ReadonlyArray<Domain.PullRequest>,
+  currentUser: string | undefined
+): number => pullRequests.filter((pullRequest) => needsYourReview(pullRequest, currentUser)).length
+
 const groupOrder = { review: 0, pool: 1, yours: 2, watching: 3, unsorted: 4 } satisfies Readonly<
   Record<WorkbenchGroup, number>
 >

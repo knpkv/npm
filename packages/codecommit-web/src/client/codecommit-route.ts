@@ -7,6 +7,26 @@ export interface CodeCommitPullRequestRouteCoordinates {
   readonly repositoryName?: string
 }
 
+/**
+ * The coordinates a pull-request URL names: path `accounts/:accountId/prs/:prId` plus the
+ * optional `repository` and `region` search parameters. `undefined` without a pull-request id.
+ * Shared by the PR page and the Workbench rail so both resolve the same pull request.
+ */
+export const pullRequestRouteCoordinates = (
+  accountId: string | undefined,
+  pullRequestId: string | undefined,
+  searchParams: URLSearchParams
+): CodeCommitPullRequestRouteCoordinates | undefined => {
+  if (pullRequestId === undefined || pullRequestId.length === 0) return undefined
+  let route: CodeCommitPullRequestRouteCoordinates = { pullRequestId }
+  if (accountId !== undefined) route = { ...route, accountId }
+  const region = searchParams.get("region")
+  if (region !== null) route = { ...route, region }
+  const repositoryName = searchParams.get("repository")
+  if (repositoryName !== null) route = { ...route, repositoryName }
+  return route
+}
+
 /** Build a browser route that retains the provider coordinates selected by Relay. */
 export const codeCommitPullRequestHref = (
   accountId: string,

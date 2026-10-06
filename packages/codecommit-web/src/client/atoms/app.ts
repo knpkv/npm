@@ -62,7 +62,6 @@ export interface AppState {
   readonly error?: string
   readonly lastUpdated?: Date
   readonly currentUser?: string
-  readonly pendingReviewCount?: number
   readonly unreadNotificationCount?: number
   readonly notifications?: {
     readonly items: ReadonlyArray<NotificationItem>

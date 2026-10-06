@@ -676,7 +676,7 @@
   padding: var(--rly-space-12) var(--rly-space-20);
 }
 
-@media (max-width: 82rem) {
+@container pr-column (width <= 82rem) {
   .workbench {
     block-size: auto;
     grid-template-columns: minmax(12rem, 0.28fr) minmax(24rem, 1fr);
@@ -692,7 +692,7 @@
   }
 }
 
-@media (max-width: 52rem) {
+@container pr-column (width <= 52rem) {
   .workspaceHeader {
     align-items: stretch;
     flex-direction: column;

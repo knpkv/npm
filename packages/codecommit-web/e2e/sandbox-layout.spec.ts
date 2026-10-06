@@ -4,7 +4,6 @@ const sandboxState = (logs: string) =>
   JSON.stringify({
     accounts: [],
     currentUser: "reviewer",
-    pendingReviewCount: 0,
     pullRequests: [],
     sandboxes: [
       {
@@ -66,7 +65,6 @@ const appState = JSON.stringify({
   ],
   currentUser: "reviewer",
   lastUpdated: "2026-08-12T09:30:00.000Z",
-  pendingReviewCount: 1,
   pullRequests: [
     {
       account: {
