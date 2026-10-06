@@ -198,7 +198,8 @@ const reserveLoopbackPort = (): Promise<number> =>
     })
   })
 
-const isAddressInUse = Schema.is(Schema.Struct({ code: Schema.Literal("EADDRINUSE") }))
+const AddressInUse = Schema.Struct({ code: Schema.Literal("EADDRINUSE"), port: Schema.Number })
+const isAddressInUse = Schema.is(AddressInUse)
 
 /** Another process took the reserved approval port before hostd bound it. */
 class ApprovalPortTaken extends Data.TaggedError("ApprovalPortTaken")<{ readonly cause: unknown }> {}
@@ -211,16 +212,29 @@ class ApprovalStartFailed extends Data.TaggedError("ApprovalStartFailed")<{ read
  * checks the Host header against `approvalHub.url`, so that one port must be
  * known before binding; every other listener should bind port 0 and be read
  * back from the started server. A reserved port can be taken by another
- * process before hostd binds it, so a start that fails with EADDRINUSE retries
- * with a fresh reservation, up to five attempts in all.
+ * process before hostd binds it, so a start that fails with EADDRINUSE on that
+ * port retries with a fresh reservation, up to five attempts in all.
  */
 const startWithApprovalPort = <A>(
   start: (approvalPort: number) => Promise<A>
 ): Effect.Effect<A, ApprovalPortTaken | ApprovalStartFailed> =>
   Effect.tryPromise({
-    try: async () => start(await reserveLoopbackPort()),
-    catch: (cause) => isAddressInUse(cause) ? new ApprovalPortTaken({ cause }) : new ApprovalStartFailed({ cause })
-  }).pipe(Effect.retry({ times: 4, while: (error) => error._tag === "ApprovalPortTaken" }))
+    try: reserveLoopbackPort,
+    catch: (cause) => new ApprovalStartFailed({ cause })
+  }).pipe(
+    Effect.flatMap((approvalPort) =>
+      Effect.tryPromise({
+        try: () => start(approvalPort),
+        // Only a collision on the reserved port is worth a new reservation; any
+        // other listener's EADDRINUSE would fail the same way again.
+        catch: (cause) =>
+          isAddressInUse(cause) && cause.port === approvalPort
+            ? new ApprovalPortTaken({ cause })
+            : new ApprovalStartFailed({ cause })
+      })
+    ),
+    Effect.retry({ times: 4, while: (error) => error._tag === "ApprovalPortTaken" })
+  )
 
 /**
  * Binds `server` to an ephemeral port on `host` and returns the port it got.
@@ -359,12 +373,13 @@ const waitForFile = Effect.fn("HostHttpTest.waitForFile")(function*(path: string
 })
 
 describe("approval port reservation", () => {
-  const collision = Object.assign(new Error("listen EADDRINUSE"), { code: "EADDRINUSE" })
-  const startFailingTimes = (failures: number, error: Error) => {
+  const inUse = (port: number) => Object.assign(new Error("listen EADDRINUSE"), { code: "EADDRINUSE", port })
+  const collision = (approvalPort: number) => inUse(approvalPort)
+  const startFailingTimes = (failures: number, error: (approvalPort: number) => Error) => {
     let attempts = 0
     const start = async (approvalPort: number) => {
       attempts += 1
-      if (attempts <= failures) throw error
+      if (attempts <= failures) throw error(approvalPort)
       return approvalPort
     }
     return { attempts: () => attempts, start }
@@ -386,9 +401,17 @@ describe("approval port reservation", () => {
       expect(starter.attempts()).toBe(5)
     }))
 
+  it.effect("does not retry a collision on another listener's port", () =>
+    Effect.gen(function*() {
+      const starter = startFailingTimes(1, (approvalPort) => inUse(approvalPort + 1))
+      const error = yield* Effect.flip(startWithApprovalPort(starter.start))
+      expect(error._tag).toBe("ApprovalStartFailed")
+      expect(starter.attempts()).toBe(1)
+    }))
+
   it.effect("does not retry any other start failure", () =>
     Effect.gen(function*() {
-      const starter = startFailingTimes(1, new Error("bad config"))
+      const starter = startFailingTimes(1, () => new Error("bad config"))
       const error = yield* Effect.flip(startWithApprovalPort(starter.start))
       expect(error._tag).toBe("ApprovalStartFailed")
       expect(starter.attempts()).toBe(1)

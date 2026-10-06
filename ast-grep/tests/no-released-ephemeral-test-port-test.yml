@@ -35,7 +35,37 @@ valid:
       }
       resolve(probe)
     })
+  - |
+    new Promise((resolve) => {
+      server.listen(0, host, () => {
+        server.close(() => expect(port).toBeGreaterThan(0))
+        resolve(undefined)
+      })
+    })
+  - |
+    new Promise((done) => {
+      server.listen(0, host, async () => {
+        await assertResponse(server.address().port)
+        server.close(() => done())
+      })
+    })
 invalid:
+  - |
+    new Promise<number>((resolve, reject) => {
+      const probe = createServer()
+      probe.listen(0, "127.0.0.1", () => {
+        const address = probe.address()
+        probe.close((error) => (error === undefined ? resolve(address.port) : reject(error)))
+      })
+    })
+  - |
+    new Promise((resolve) => {
+      const probe = createServer()
+      probe.listen(0, "127.0.0.1", () => {
+        const selected = probe.address().port
+        probe.close(() => resolve(selected))
+      })
+    })
   - |
     const reserve = () =>
       new Promise((resolve) => {
@@ -46,7 +76,9 @@ invalid:
         })
       })
   - |
-    reservation.listen(0, "127.0.0.1", function() {
-      const address = reservation.address()
-      reservation.close((error) => error === undefined ? resolve(address.port) : reject(error))
+    new Promise((resolve, reject) => {
+      reservation.listen(0, "127.0.0.1", function() {
+        const address = reservation.address()
+        reservation.close((error) => error === undefined ? resolve(address.port) : reject(error))
+      })
     })

@@ -1,10 +1,12 @@
 import { defineConfig } from "@playwright/test"
-import { playwrightPort } from "../../playwright-ports.ts"
+import { join } from "node:path"
+import { keepLastRunAt, playwrightPort } from "../../playwright-ports.ts"
 
 // A free port per run, so this suite can run beside another copy of itself;
 // `pnpm storybook` and `pnpm storybook:serve` keep 6006 for people.
 const port = await playwrightPort("PLAYWRIGHT_RLY_VISUAL_PORT")
 const origin = `http://127.0.0.1:${port}`
+keepLastRunAt(join(import.meta.dirname, "test-results", "rly-visual.last-run.json"))
 
 export default defineConfig({
   expect: {

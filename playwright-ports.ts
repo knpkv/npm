@@ -61,3 +61,13 @@ export const playwrightPort = async (variable: string): Promise<number> => {
   env[variable] = String(port)
   return port
 }
+
+/**
+ * Keeps `--last-failed` working across runs whose `outputDir` differs by
+ * port: Playwright reads and writes its last-run file at `file` instead of
+ * inside `outputDir`. An explicit `PLAYWRIGHT_LAST_RUN_OUTPUT_FILE` wins.
+ * When two copies run at once, the one that finishes last is the last run.
+ */
+export const keepLastRunAt = (file: string): void => {
+  env["PLAYWRIGHT_LAST_RUN_OUTPUT_FILE"] ??= file
+}

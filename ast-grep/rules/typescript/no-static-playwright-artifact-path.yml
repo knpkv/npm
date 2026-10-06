@@ -22,6 +22,8 @@ files:
   - "packages/*/e2e/**/*.tsx"
   - "packages/*/visual/**/*.ts"
   - "packages/*/visual/**/*.tsx"
+  - "packages/*/test/browser/**/*.ts"
+  - "packages/*/test/browser/**/*.tsx"
 
 note: |
   Playwright gives each run its own output directory (`outputDir`), so two

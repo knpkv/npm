@@ -5,37 +5,42 @@ language: tsx
 severity: error
 message: "Bind the server under test to port 0 and read its bound address; a port reserved and released here can be taken before it is used"
 rule:
-  pattern: $SERVER.listen(0, $$$)
-  has:
-    field: arguments
-    has:
-      any:
-        - kind: arrow_function
-        - kind: function_expression
-      has:
-        # Closing the probe hands its port on: the close callback passes a port
-        # value (`resolve(port)`, `resolve(address.port)`). A close that only
-        # ends the listener after its test, or on a failure branch, is fine.
-        pattern: $SERVER.close($CALLBACK)
+  # Ordered so $RESOLVE, bound by the enclosing Promise, is the resolver the
+  # close callback must call: closing the probe and resolving the Promise with
+  # a value hands that value (its port) to whoever binds it next.
+  all:
+    - pattern: $SERVER.listen(0, $$$)
+    - inside:
         stopBy: end
+        any:
+          - pattern: new Promise(($RESOLVE, $$$) => { $$$ })
+          - pattern: new Promise(($RESOLVE) => { $$$ })
+          - pattern: new Promise(($RESOLVE, $$$) => $BODY)
+          - pattern: new Promise(($RESOLVE) => $BODY)
+          - pattern: new Promise(function($RESOLVE, $$$) { $$$ })
+          - pattern: new Promise<$T>(($RESOLVE, $$$) => { $$$ })
+          - pattern: new Promise<$T>(($RESOLVE) => { $$$ })
+          - pattern: new Promise<$T>(($RESOLVE, $$$) => $BODY)
+          - pattern: new Promise<$T>(($RESOLVE) => $BODY)
+          - pattern: new Promise<$T>(function($RESOLVE, $$$) { $$$ })
+    - has:
+        field: arguments
         has:
-          field: arguments
+          any:
+            - kind: arrow_function
+            - kind: function_expression
           has:
-            any:
-              - kind: arrow_function
-              - kind: function_expression
+            pattern: $SERVER.close($CALLBACK)
+            stopBy: end
             has:
-              kind: call_expression
-              stopBy: end
+              field: arguments
               has:
-                field: arguments
-                # A direct port value (`port`, `address.port`), not any text
-                # mentioning a port, such as `reject(new MissingPortError())`.
+                any:
+                  - kind: arrow_function
+                  - kind: function_expression
                 has:
-                  any:
-                    - kind: identifier
-                    - kind: member_expression
-                  regex: "(?i)port$"
+                  pattern: $RESOLVE($VALUE)
+                  stopBy: end
 
 files:
   - "packages/*/test/**/*.ts"
