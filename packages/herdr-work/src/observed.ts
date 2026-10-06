@@ -187,16 +187,19 @@ export const withObservedFacts = (
     return observedSomething(observed) ? [{ goalId: goal.id, ...observed }] : []
   })
   const encode = Schema.encodeSync(WorkSnapshots)
+  // Any overlay already on the snapshots is replaced, never added to.
+  const { observed: _previous, observedOmitted: _previousOmitted, ...bareNow } = snapshots.now
+  const bare: WorkSnapshots = { ...snapshots, now: bareNow }
   const withEntries = (kept: ReadonlyArray<WorkGoalObservedEntry>): WorkSnapshots => {
     const omitted = candidates.length - kept.length
-    const now = { ...snapshots.now, observed: kept }
-    return { ...snapshots, now: omitted === 0 ? now : { ...now, observedOmitted: omitted } }
+    const now = { ...bareNow, observed: kept }
+    return { ...bare, now: omitted === 0 ? now : { ...now, observedOmitted: omitted } }
   }
   // Estimate greedily, then check the real encoding and drop entries until it
   // fits. `observed` is always present, empty when nothing was observed; if
   // not even that fits, the snapshots carry no overlay keys at all, which a
   // reader treats as "live state not available".
-  let used = encodedBytes(encode(snapshots)) + 64
+  let used = encodedBytes(encode(bare)) + 64
   const kept: Array<WorkGoalObservedEntry> = []
   for (const entry of candidates) {
     const bytes = encodedBytes(Schema.encodeSync(WorkGoalObservedEntry)(entry)) + 1
@@ -207,7 +210,7 @@ export const withObservedFacts = (
   for (;;) {
     const result = withEntries(kept)
     if (encodedBytes(encode(result)) <= maxBytes) return result
-    if (kept.length === 0) return snapshots
+    if (kept.length === 0) return bare
     kept.pop()
   }
 }

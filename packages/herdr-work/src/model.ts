@@ -838,7 +838,10 @@ export const WorkObservedFailure = Schema.Struct({
   since: Timestamp,
   /** The latest failed read of the run; `source` and `reason` are from it. */
   lastAt: Timestamp
-})
+}).check(Schema.makeFilter(
+  ({ lastAt, since }) => lastAt >= since,
+  { expected: "a latest failed read no earlier than the run's first" }
+))
 export interface WorkObservedFailure extends Schema.Schema.Type<typeof WorkObservedFailure> {}
 
 /** The overlay keeps one latest fact per subject, within its own bounds; over them, the oldest facts go first. */

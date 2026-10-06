@@ -18,15 +18,16 @@ latest fact is kept per subject (`github:<repo>#<n>`, `herdr:<host>/<agentId>`).
 The same facts again keep their first-seen time (`observedAt`) and move their
 last confirmation (`confirmedAt`); facts older than the last confirmation are
 skipped, and so are facts stamped more than five minutes ahead of the store's
-clock, which would otherwise outrank every real reading. An `unknown` observation (a source that could not be read) never
+clock, which would otherwise outrank every real reading; a fact stamped less
+than that ahead counts as read now. An `unknown` observation (a source that could not be read) never
 replaces a fact: it starts or continues the subject's run of failures, whose
 `since` stays at the first failure until a good read newer than every failure
 ends it (a delayed good read inside the run restarts it at its latest failure). Hostd names the
 failed subject the same way as its facts (`pullRequestSubject`, `agentSubject`). Facts are not goal
 history: they never write a checkpoint, never count against the history bound,
 and are not part of any approval token, so observing cannot invalidate a pending
-approval. Facts and failures each have their own bounds (4,096 rows, 2 MiB) and evict
-the oldest rows beyond them. Pull request subjects lowercase the repository, since GitHub names are
+approval. Facts and failures each have their own bounds (4,096 rows, 2 MiB); beyond them
+the rows read least recently go first. Pull request subjects lowercase the repository, since GitHub names are
 case-insensitive. `snapshots` merges the facts into the `now` window, for each
 goal something was observed about, as
 `observed` entries: the matching facts, the oldest current failure among the

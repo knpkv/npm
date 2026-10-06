@@ -2051,8 +2051,10 @@ const writeObservations = (
       }
       return evicted
     }
-    const evicted = evict("work_observed_facts", "observed_at", "record") +
-      evict("work_observed_failures", "since", "reason")
+    // The least recently read rows go first: a fact by its last confirmation,
+    // a failure by its latest failed read.
+    const evicted = evict("work_observed_facts", "confirmed_at", "record") +
+      evict("work_observed_failures", "last_at", "reason")
     database.exec("COMMIT")
     return { evicted, outcomes }
   } catch (cause) {
@@ -2201,7 +2203,7 @@ export class WorkStore implements WorkStoreService {
           record TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS work_observed_facts_age
-          ON work_observed_facts (observed_at, subject);
+          ON work_observed_facts (confirmed_at, subject);
         CREATE TABLE IF NOT EXISTS work_observed_failures (
           subject TEXT PRIMARY KEY,
           source TEXT NOT NULL,
@@ -2210,7 +2212,7 @@ export class WorkStore implements WorkStoreService {
           last_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS work_observed_failures_age
-          ON work_observed_failures (since, subject);
+          ON work_observed_failures (last_at, subject);
       `)
           const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
             database.prepare("PRAGMA table_info(work_goal_events)").all()
@@ -4830,7 +4832,8 @@ export class WorkStore implements WorkStoreService {
     const cryptoService = this.#cryptoService
     // An observation from further ahead than clock skew allows would outrank
     // every real reading until wall time caught up, so it is skipped as stale.
-    const latestAllowed = (yield* Clock.currentTimeMillis) + workObservationMaxSkewMillis
+    const clockNow = yield* Clock.currentTimeMillis
+    const latestAllowed = clockNow + workObservationMaxSkewMillis
     const prepared = yield* Effect.forEach(
       decoded,
       Effect.fnUntraced(function*(envelope) {
@@ -4845,7 +4848,9 @@ export class WorkStore implements WorkStoreService {
           }
           return {
             _tag: "unknown",
-            observedAt: envelope.observedAt,
+            // Within the skew allowance, a reading from slightly ahead counts
+            // as now, so it is visible to a snapshot taken now.
+            observedAt: Math.min(envelope.observedAt, clockNow),
             reason: envelope.observation.reason,
             source: envelope.observation.source,
             subject
@@ -4867,7 +4872,7 @@ export class WorkStore implements WorkStoreService {
         return {
           _tag: "fact",
           observationId: Hex.encode(digest),
-          observedAt: envelope.observedAt,
+          observedAt: Math.min(envelope.observedAt, clockNow),
           record,
           subject
         } satisfies PreparedObservation

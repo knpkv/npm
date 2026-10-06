@@ -304,6 +304,10 @@ describe("observed facts", () => {
       expect(countOnly.now.observed).toEqual([])
       expect(countOnly.now.observedOmitted).toBe(3)
       expect(size(countOnly)).toBeLessThanOrEqual(size(base) + 48)
+      // Applied again with room for everything, the old omission count is gone.
+      const again = withObservedFacts(trimmed, facts, failures, 10_000_000)
+      expect(again.now.observed?.map(({ goalId }) => goalId)).toEqual(["goal-pr9", "goal-pr8", "goal-pr7"])
+      expect(again.now.observedOmitted).toBeUndefined()
       // Not even the count fits: the snapshots come back unchanged, never over budget.
       expect(withObservedFacts(base, facts, failures, size(base))).toEqual(base)
     })))
@@ -452,5 +456,50 @@ describe("observed facts", () => {
         Result.isFailure(decode({ ...valid, now: { ...valid.now, observed: [{ ...entry, goalId: "goal-absent" }] } }))
       )
         .toBe(true)
+    })))
+
+  it.effect("shows a fact accepted from slightly ahead of the clock at once, instead of hiding the subject", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* work.record({
+        eventId: "goal-pr7.1",
+        goal: {
+          ...goal,
+          agentHierarchy: { agent: { agentId: "agent-owner", host: "SER8", name: "Owner", paneId: "w1:p1" } },
+          connectTarget: { agentId: "agent-owner", host: "SER8", url: "/connect/?agent=agent-owner&host=SER8" }
+        },
+        occurredAt: 1_000,
+        version: "herdr.work.event.v1"
+      })
+      yield* work.observe([at(9_999, agent("working"))])
+      yield* work.observe([at(10_000 + workObservationMaxSkewMillis, agent("gone"))])
+      expect((yield* work.snapshots(10_000)).now.observed?.[0]?.agent?.fact.status).toBe("gone")
+    })))
+
+  it.effect("evicts the subjects read least recently, not the ones first seen longest ago", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* work.observe(
+        Array.from(
+          { length: workObservedFactMaxRecords },
+          (_, index) => at(100 + index, agent("idle", `agent-${index}`))
+        )
+      )
+      yield* work.observe([at(9_000, agent("idle", "agent-0"))])
+      yield* work.observe([at(9_001, agent("idle", "agent-new"))])
+      expect((yield* work.observe([at(9_002, agent("idle", "agent-0"))])).outcomes[0]?._tag).toBe("unchanged")
+      expect((yield* work.observe([at(9_003, agent("idle", "agent-1"))])).outcomes[0]?._tag).toBe("stored")
+    })))
+
+  it.effect("fails a read whose failure row ends before it starts", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { path, work } = yield* fixture
+      yield* work.observe([
+        at(200, { _tag: "unknown", reason: "gh: 502", source: "github", subject: "github:knpkv/npm#7" })
+      ])
+      const database = new DatabaseSync(path)
+      database.exec("UPDATE work_observed_failures SET last_at = 100")
+      database.close()
+      expect(yield* Effect.flip(work.snapshots(10_000))).toMatchObject({ _tag: "WorkStoreError" })
     })))
 })
