@@ -40,7 +40,7 @@
  * @category Domain
  * @module
  */
-import { Data, Effect, Schema, SchemaGetter, SchemaIssue } from "effect"
+import { Data, Effect, Match, Schema, SchemaGetter, SchemaIssue } from "effect"
 
 // ---------------------------------------------------------------------------
 // Branded Types
@@ -175,6 +175,39 @@ export class ApprovalRule extends Schema.Class<ApprovalRule>("ApprovalRule")({
 }) {}
 
 /**
+ * Why CodeCommit could not say whether a pull request's approval rules are satisfied. Reasons carry
+ * no provider text, which can include account paths; the account's notification keeps that.
+ *
+ * @category Domain
+ */
+export const ApprovalUnknownReason = Schema.TaggedUnion({
+  /** `codecommit:EvaluatePullRequestApprovalRules` is denied, typically a missing IAM grant. */
+  NotPermitted: {},
+  /** AWS was still throttling the evaluation after retries. */
+  Throttled: {},
+  /** Any other failure the provider returned. */
+  ProviderFailed: {}
+})
+
+/**
+ * @category Domain
+ */
+export type ApprovalUnknownReason = typeof ApprovalUnknownReason.Type
+
+/**
+ * An {@link ApprovalUnknownReason} as its bare tag, for flat representations: the cache column and the
+ * cached-row API response.
+ *
+ * @category Domain
+ */
+export const ApprovalUnknownTag = Schema.Literals(["NotPermitted", "Throttled", "ProviderFailed"])
+
+/**
+ * @category Domain
+ */
+export type ApprovalUnknownTag = typeof ApprovalUnknownTag.Type
+
+/**
  * CodeCommit pull request.
  *
  * @category Domain
@@ -193,7 +226,10 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
   isMergeable: Schema.Boolean,
+  /** The last known approval. Read approval through {@link approvalOf}, which accounts for `approvalUnknown`. */
   isApproved: Schema.Boolean,
+  /** Set when the last evaluation failed: `isApproved` is then only the last known value. */
+  approvalUnknown: Schema.optionalKey(ApprovalUnknownReason),
   commentCount: Schema.optional(Schema.Number),
   healthScore: Schema.optional(Schema.Number),
   fetchedAt: Schema.optional(Schema.Date),
@@ -207,6 +243,50 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
     return codecommitConsoleUrl(this.account.region, this.repositoryName, this.id)
   }
 }
+
+/**
+ * A pull request's approval as a reader should treat it: unknown whenever the last evaluation failed,
+ * whatever the last known `isApproved` says.
+ *
+ * @category Domain
+ */
+export type Approval =
+  | { readonly _tag: "Approved" }
+  | { readonly _tag: "Pending" }
+  | { readonly _tag: "Unknown"; readonly reason: ApprovalUnknownReason }
+
+/**
+ * The single read path for approval. Works with domain instances, cache rows mapped to them, and plain
+ * wire objects.
+ *
+ * @category Domain
+ */
+export const approvalOf = (
+  pr: { readonly isApproved: boolean; readonly approvalUnknown?: ApprovalUnknownReason | undefined }
+): Approval =>
+  pr.approvalUnknown !== undefined
+    ? { _tag: "Unknown", reason: pr.approvalUnknown }
+    : pr.isApproved
+    ? { _tag: "Approved" }
+    : { _tag: "Pending" }
+
+/**
+ * The label every surface shows for an {@link Approval} of `Unknown`.
+ *
+ * @category Domain
+ */
+export const approvalUnknownLabel = "Approval unknown"
+
+/**
+ * The sentence every surface shows to explain an unknown approval.
+ *
+ * @category Domain
+ */
+export const approvalUnknownReasonText: (reason: ApprovalUnknownReason) => string = Match.valueTags({
+  NotPermitted: () => "Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules).",
+  Throttled: () => "AWS throttled the approval check; it is retried on the next refresh.",
+  ProviderFailed: () => "AWS could not evaluate the approval rules; see the account's notification."
+})
 
 /**
  * Robust identity comparison for matching a caller against an author or

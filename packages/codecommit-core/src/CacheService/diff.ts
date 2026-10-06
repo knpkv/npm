@@ -37,6 +37,8 @@ export interface DiffablePR {
   readonly accountRegion?: string
   readonly status: string
   readonly isApproved: boolean | number
+  /** Set (non-null) when the approval evaluation failed: `isApproved` is then only the last known value. */
+  readonly approvalUnknownReason?: string | null | undefined
   readonly isMergeable: boolean | number
   readonly commentCount?: number | null | undefined
 }
@@ -71,7 +73,9 @@ export const diffPR = (
   const freshMergeable = isEnabled(fresh.isMergeable)
   const cachedMergeable = isEnabled(cached.isMergeable)
 
-  if (freshApproved !== cachedApproved) {
+  // An unknown fresh approval is no transition. A cached unknown still holds its last known value, so
+  // recovery compares last known against the fresh evaluation.
+  if (fresh.approvalUnknownReason == null && freshApproved !== cachedApproved) {
     notifications.push({
       ...base,
       type: "approval_changed",

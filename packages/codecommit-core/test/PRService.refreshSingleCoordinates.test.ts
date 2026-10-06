@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Ref, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
+import { PullRequestDetail } from "../src/AwsClient/internal.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
 import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
@@ -113,6 +114,13 @@ const runWithLayer = <A, E, R>(
     })
   )
 
+const singleRefreshApprovalCases: ReadonlyArray<
+  readonly [string, Domain.ApprovalUnknownReason | undefined, readonly [number, Domain.ApprovalUnknownTag | null]]
+> = [
+  ["an evaluated approval replaces the cached one and clears the reason", undefined, [0, null]],
+  ["an unknown approval keeps the cached one and stores the reason", { _tag: "NotPermitted" }, [1, "NotPermitted"]]
+]
+
 describe("PRService.refreshSinglePR coordinates", () => {
   it.effect("uses the selected repository and region for the provider refresh", () =>
     Effect.gen(function*() {
@@ -167,6 +175,64 @@ describe("PRService.refreshSinglePR coordinates", () => {
       expect(result).toEqual({ revisionId: "revision-2", sourceCommit: "b".repeat(40) })
       expect(yield* Ref.get(providerCalls)).toEqual([{ region: "eu-west-1", repositoryName: "payments" }])
     }))
+
+  it.effect.each(singleRefreshApprovalCases)(
+    "on a single refresh, %s",
+    ([, approvalUnknown, expected]) =>
+      Effect.gen(function*() {
+        const initialState: Domain.AppState = { pullRequests: [pullRequest], accounts: [], status: "idle" }
+        const state = yield* SubscriptionRef.make(initialState)
+        const upserted = yield* Ref.make<ReadonlyArray<readonly [number, string | null]>>([])
+        const approvedCache = Schema.decodeSync(CachedPullRequest)({
+          ...Schema.encodeSync(CachedPullRequest)(cachedPullRequest),
+          isApproved: 1
+        })
+        yield* runWithLayer(
+          makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
+            region: "eu-west-1",
+            repositoryName: "payments"
+          }),
+          Layer.mergeAll(
+            Layer.mock(AwsClient, {
+              getPullRequest: () =>
+                Effect.succeed(
+                  new PullRequestDetail({
+                    revisionId: "revision-2",
+                    sourceCommit: "b".repeat(40),
+                    title: "Coordinate refresh",
+                    author: "reviewer",
+                    status: "OPEN",
+                    repositoryName: "payments",
+                    sourceBranch: "feature",
+                    destinationBranch: "main",
+                    creationDate: new Date(0),
+                    lastActivityDate: new Date(2_000),
+                    approvedBy: [],
+                    approvedByArns: [],
+                    approvalRules: [],
+                    isApproved: false,
+                    approvalUnknown
+                  })
+                ),
+              getCommentsForPullRequest: () => Effect.succeed([])
+            }),
+            Layer.mock(PullRequestRepo, {
+              findByAccountAndId: () => Effect.succeed(Option.none()),
+              findByCoordinates: () => Effect.succeed(Option.some(approvedCache)),
+              findAll: () => Effect.succeed([approvedCache]),
+              upsert: (input) =>
+                Ref.update(upserted, (all) => [...all, [input.isApproved, input.approvalUnknownReason]])
+            }),
+            Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+            Layer.mock(NotificationRepo, {}),
+            Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
+            Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+            Layer.mock(EventsHub, {})
+          )
+        )
+        expect(yield* Ref.get(upserted)).toEqual([expected])
+      })
+  )
 
   it.effect("rejects a same-id refresh with a different provider region", () =>
     Effect.gen(function*() {

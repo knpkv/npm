@@ -19,7 +19,14 @@
  *
  * @module
  */
-import { AppStatus, AwsProfileName, AwsRegion, PullRequest, PullRequestStatus } from "@knpkv/codecommit-core/Domain.js"
+import {
+  ApprovalUnknownReason,
+  AppStatus,
+  AwsProfileName,
+  AwsRegion,
+  PullRequest,
+  PullRequestStatus
+} from "@knpkv/codecommit-core/Domain.js"
 import { Effect, Schema } from "effect"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -47,6 +54,7 @@ const PullRequestWire = Schema.Struct({
   destinationBranch: Schema.String,
   isMergeable: Schema.Boolean,
   isApproved: Schema.Boolean,
+  approvalUnknown: Schema.optionalKey(ApprovalUnknownReason),
   commentCount: Schema.optional(Schema.Number),
   healthScore: Schema.optional(Schema.Number),
   fetchedAt: Schema.optional(Schema.DateFromString),

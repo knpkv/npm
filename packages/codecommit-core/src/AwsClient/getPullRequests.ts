@@ -45,6 +45,7 @@ import { AwsClientConfig } from "../AwsClientConfig.js"
 import {
   Account,
   ApprovalRule,
+  ApprovalUnknownReason,
   codecommitConsoleUrl,
   normalizeAccountId,
   PullRequest,
@@ -52,7 +53,14 @@ import {
 } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { parseRuleContent } from "./approvalRuleContent.js"
-import { type AccountParams, acquireCredentials, makeApiError, normalizeAuthor, throttleRetry } from "./internal.js"
+import {
+  type AccountParams,
+  acquireCredentials,
+  isThrottlingError,
+  makeApiError,
+  normalizeAuthor,
+  throttleRetry
+} from "./internal.js"
 
 type AwsMethodEnv = AwsClientConfig | Credentials.Credentials | Region.Region | HttpClient.HttpClient
 type AwsStreamEnv = Credentials.Credentials | Region.Region | HttpClient.HttpClient
@@ -128,6 +136,49 @@ export const fetchApprovalEvaluation = (
     Effect.mapError((cause) => new ApprovalEvaluationError({ pullRequestId, revisionId, cause }))
   )
 
+/** Provider tags that mean the caller may not evaluate approval rules. */
+const notPermittedTags = new Set(["AccessDeniedException", "AccessDenied", "NotAuthorized"])
+
+const tagOf = <Cause>(cause: Cause, key: "_tag" | "errorTag"): string =>
+  Predicate.hasProperty(cause, key) && Predicate.isString(cause[key]) ? cause[key] : ""
+
+/** Why an evaluation failed, decided from the provider error's type, never its message text. */
+export const approvalUnknownReasonOf = (error: ApprovalEvaluationError): ApprovalUnknownReason =>
+  isThrottlingError(error.cause)
+    ? ApprovalUnknownReason.cases.Throttled.make({})
+    : notPermittedTags.has(tagOf(error.cause, "_tag")) ||
+        (tagOf(error.cause, "_tag") === "UnknownAwsError" && notPermittedTags.has(tagOf(error.cause, "errorTag")))
+    ? ApprovalUnknownReason.cases.NotPermitted.make({})
+    : ApprovalUnknownReason.cases.ProviderFailed.make({})
+
+/**
+ * Evaluate a revision's approval rules without failing: a failed evaluation leaves approval unknown,
+ * with no satisfied rules, and logs the provider's message.
+ */
+export const evaluateApproval = (
+  pullRequestId: string,
+  revisionId: string
+): Effect.Effect<
+  {
+    readonly isApproved: boolean
+    readonly satisfiedNames: Set<string>
+    readonly approvalUnknown: ApprovalUnknownReason | undefined
+  },
+  never,
+  AwsMethodEnv
+> =>
+  fetchApprovalEvaluation(pullRequestId, revisionId).pipe(
+    Effect.map((evaluation) => ({ ...evaluation, approvalUnknown: undefined })),
+    Effect.catchTag("ApprovalEvaluationError", (error) =>
+      Effect.logWarning(error.message).pipe(
+        Effect.as({
+          isApproved: false,
+          satisfiedNames: new Set<string>(),
+          approvalUnknown: approvalUnknownReasonOf(error)
+        })
+      ))
+  )
+
 /** Plain data shape matching ApprovalRule — avoids Schema.Class branding. */
 export interface ApprovalRuleData {
   readonly ruleName: string
@@ -177,7 +228,7 @@ const fetchPRDetails = (id: string, repoName: string) =>
 
     const revisionId = pr.revisionId ?? ""
     const [evaluation, isMergeable, approvers] = yield* Effect.all([
-      fetchApprovalEvaluation(id, revisionId),
+      evaluateApproval(id, revisionId),
       fetchMergeStatus(repoName, pr.pullRequestTargets?.[0]),
       fetchApprovers(id, revisionId)
     ])
@@ -187,6 +238,7 @@ const fetchPRDetails = (id: string, repoName: string) =>
       ...pr,
       repoName,
       isApproved: evaluation.isApproved,
+      approvalUnknown: evaluation.approvalUnknown,
       isMergeable,
       approvers: approvers.names,
       approverArns: approvers.arns,
@@ -256,6 +308,7 @@ const RawPullRequest = Schema.Struct({
   }))),
   repoName: Schema.String,
   isApproved: Schema.Boolean,
+  approvalUnknown: Schema.optional(ApprovalUnknownReason),
   isMergeable: Schema.Boolean,
   approvers: Schema.Array(Schema.String),
   approverArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
@@ -291,6 +344,7 @@ const RawToPullRequest = RawPullRequest.pipe(
         destinationBranch,
         isMergeable: raw.isMergeable,
         isApproved: raw.isApproved,
+        ...(raw.approvalUnknown !== undefined && { approvalUnknown: raw.approvalUnknown }),
         approvedBy: raw.approvers,
         approvedByArns: raw.approverArns,
         commentedBy: [],
@@ -311,6 +365,7 @@ const RawToPullRequest = RawPullRequest.pipe(
       }],
       repoName: pr.repositoryName,
       isApproved: pr.isApproved,
+      approvalUnknown: pr.approvalUnknown,
       isMergeable: pr.isMergeable,
       approvers: pr.approvedBy ?? [],
       approverArns: pr.approvedByArns ?? [],
@@ -358,33 +413,16 @@ const listPullRequestIds = (
 // ---------------------------------------------------------------------------
 
 /**
- * One pull request from a refresh: fetched in full, or read but with approval rules that could not be
- * evaluated. A failed evaluation affects only that pull request, so a refresh carries on with the rest.
+ * Stream every pull request of one account. A pull request whose approval rules cannot be evaluated is
+ * still listed, with `approvalUnknown` set. Any other failure (listing, reading, decoding) fails the
+ * stream with an `AwsApiError`.
  */
-export type PullRequestRefreshItem =
-  | { readonly _tag: "Fetched"; readonly pullRequest: PullRequest }
-  | {
-    readonly _tag: "EvaluationFailed"
-    readonly pullRequestId: string
-    readonly repositoryName: string
-    readonly error: ApprovalEvaluationError
-  }
-
-/** A pull request's details read in full, before its repository account is attached and it is decoded. */
-type DetailRead =
-  | { readonly _tag: "Read"; readonly pr: Effect.Success<ReturnType<typeof fetchPRDetails>> }
-  | Extract<PullRequestRefreshItem, { readonly _tag: "EvaluationFailed" }>
-
-/**
- * Stream every pull request of one account, isolating approval-evaluation failures per pull request.
- * Any other failure (listing, reading, decoding) still fails the stream with an `AwsApiError`.
- */
-export const getPullRequestRefresh = (
+export const getPullRequests = (
   account: AccountParams,
   options?: { status?: "OPEN" | "CLOSED"; repositoryName?: string }
-): Stream.Stream<PullRequestRefreshItem, AwsClientError, AwsClientConfig | HttpClient.HttpClient> => {
+): Stream.Stream<PullRequest, AwsClientError, AwsClientConfig | HttpClient.HttpClient> => {
   const pullRequestsEffect: Effect.Effect<
-    Stream.Stream<PullRequestRefreshItem, AwsClientError, AwsClientConfig>,
+    Stream.Stream<PullRequest, AwsClientError, AwsClientConfig>,
     AwsClientError,
     AwsClientConfig | HttpClient.HttpClient
   > = Effect.gen(function*() {
@@ -407,40 +445,21 @@ export const getPullRequestRefresh = (
       ? listAllRepositories()
       : Stream.make(options.repositoryName)
 
-    // The approval-evaluation failure becomes a value inside the retried effect: fetchApprovalEvaluation
-    // has already spent its own retries, and its message can still read like throttling.
-    const read = (id: string, repoName: string) =>
-      throttleRetry(
-        fetchPRDetails(id, repoName).pipe(
-          Effect.map((pr): DetailRead => ({ _tag: "Read", pr })),
-          Effect.catchTag("ApprovalEvaluationError", (error) =>
-            Effect.succeed<DetailRead>({
-              _tag: "EvaluationFailed",
-              pullRequestId: id,
-              repositoryName: repoName,
-              error
-            }))
-        )
-      )
-
     const stream = repositories.pipe(
       Stream.flatMap((repoName) => listPullRequestIds(repoName, status), { concurrency: 2 }),
-      Stream.mapEffect(({ id, repoName }) => read(id, repoName), { concurrency: 3 }),
+      Stream.mapEffect(({ id, repoName }) => throttleRetry(fetchPRDetails(id, repoName)), { concurrency: 3 }),
       // Serial, as before: one GetRepository per repository, cached before the next pull request asks.
-      Stream.mapEffect((item): Effect.Effect<PullRequestRefreshItem, unknown, AwsStreamEnv> =>
-        item._tag !== "Read"
-          ? Effect.succeed(item)
-          : getRepoAccount(item.pr.repoName).pipe(
-            Effect.flatMap((repoAcct) =>
-              decodePullRequest({
-                ...item.pr,
-                accountProfile: account.profile,
-                accountRegion: account.region,
-                repoAccountId: repoAcct
-              })
-            ),
-            Effect.map((pullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest }))
+      Stream.mapEffect((pr) =>
+        getRepoAccount(pr.repoName).pipe(
+          Effect.flatMap((repoAcct) =>
+            decodePullRequest({
+              ...pr,
+              accountProfile: account.profile,
+              accountRegion: account.region,
+              repoAccountId: repoAcct
+            })
           )
+        )
       ),
       Stream.mapError((cause) => makeApiError("getPullRequests", account.profile, account.region, cause))
     )
@@ -455,19 +474,3 @@ export const getPullRequestRefresh = (
 
   return Stream.unwrap(pullRequestsEffect)
 }
-
-/**
- * Stream every pull request of one account. A pull request whose approval rules cannot be evaluated
- * fails the stream, because a listing without its approval state would misreport it as pending.
- */
-export const getPullRequests = (
-  account: AccountParams,
-  options?: { status?: "OPEN" | "CLOSED"; repositoryName?: string }
-): Stream.Stream<PullRequest, AwsClientError, AwsClientConfig | HttpClient.HttpClient> =>
-  getPullRequestRefresh(account, options).pipe(
-    Stream.mapEffect((item) =>
-      item._tag === "Fetched"
-        ? Effect.succeed(item.pullRequest)
-        : Effect.fail(makeApiError("getPullRequests", account.profile, account.region, item.error))
-    )
-  )

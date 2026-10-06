@@ -12,7 +12,7 @@
  * @category CacheService
  */
 import { Effect, Schema, SchemaGetter } from "effect"
-import { ApprovalRule, PullRequestId, PullRequestStatus, RepositoryName } from "../../../Domain.js"
+import { ApprovalRule, ApprovalUnknownTag, PullRequestId, PullRequestStatus, RepositoryName } from "../../../Domain.js"
 import { CacheError } from "../../CacheError.js"
 
 /** DB column `TEXT` (comma-separated) <-> `readonly string[]` */
@@ -45,6 +45,11 @@ const ApprovalRulesFromJson = Schema.NullOr(Schema.String).pipe(
   })
 )
 
+/**
+ * The `approval_unknown_reason` column: the reason's tag, or NULL when the last evaluation succeeded.
+ */
+export const ApprovalUnknownColumn = Schema.NullOr(ApprovalUnknownTag)
+
 export const CachedPullRequest = Schema.Struct({
   id: PullRequestId,
   awsAccountId: Schema.String,
@@ -62,6 +67,7 @@ export const CachedPullRequest = Schema.Struct({
   destinationBranch: Schema.String,
   isMergeable: BooleanFromNumber,
   isApproved: BooleanFromNumber,
+  approvalUnknownReason: Schema.optionalKey(ApprovalUnknownColumn),
   commentCount: Schema.NullOr(Schema.Number),
   healthScore: Schema.NullOr(Schema.Number),
   link: Schema.String,
@@ -102,6 +108,7 @@ export const UpsertInput = Schema.Struct({
   destinationBranch: Schema.String,
   isMergeable: Schema.Number,
   isApproved: Schema.Number,
+  approvalUnknownReason: ApprovalUnknownColumn,
   commentCount: Schema.NullOr(Schema.Number),
   link: Schema.String,
   approvedBy: Schema.Array(Schema.String),

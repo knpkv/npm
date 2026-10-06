@@ -8,6 +8,7 @@ import * as SqlClient from "effect/sql/SqlClient"
 import migration0018 from "../src/CacheService/migrations/0018_pull_request_coordinates.js"
 import migration0019 from "../src/CacheService/migrations/0019_dependent_pr_coordinates.js"
 import migration0020 from "../src/CacheService/migrations/0020_notification_coordinates.js"
+import migration0022 from "../src/CacheService/migrations/0022_pull_request_approval_unknown.js"
 import { UpsertInput } from "../src/CacheService/repos/PullRequestRepo/internal.js"
 import { mutations } from "../src/CacheService/repos/PullRequestRepo/mutations.js"
 
@@ -44,6 +45,7 @@ const upsertInput = (repositoryName: string, region: string, title: string, id =
     destinationBranch: "main",
     isMergeable: 1,
     isApproved: 0,
+    approvalUnknownReason: null,
     commentCount: 0,
     link: "https://example.invalid/pr/42",
     approvedBy: [],
@@ -93,6 +95,8 @@ describe("pull request coordinate migration", () => {
       )`
       yield* insertPullRequest(sql, "payments", "eu-west-1")
       yield* migration0018.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      // The repository writes the approval column added later.
+      yield* migration0022.pipe(Effect.provideService(SqlClient.SqlClient, sql))
       yield* insertPullRequest(sql, "orders", "us-east-1")
       const repo = mutations(sql, Effect.void)
       yield* repo.upsert(upsertInput("orders", "us-east-1", "Orders updated"))

@@ -216,6 +216,22 @@ describe("buildListItems", () => {
       expect(prs[0]!.type === "pr" && prs[0]!.pr.isApproved).toBe(true)
     })
 
+    // An unknown approval is neither approved nor pending, whatever its last known value.
+    it.each(["approved", "pending"])("leaves a PR with unknown approval out of status %s", (value) => {
+      const unknown = decodePR({
+        ...base,
+        id: "5",
+        title: "feat: unknown",
+        account: acc1,
+        isApproved: true,
+        approvalUnknown: { _tag: "NotPermitted" }
+      })
+      const qf: QuickFilter = { type: "status", value, currentUser: "" }
+      const ids = buildListItems(state([unknown], accs()), "prs", "", [], qf)
+        .flatMap((i) => i.type === "pr" ? [i.pr.id] : [])
+      expect(ids).toEqual([])
+    })
+
     // Status "conflicts" shows only non-mergeable PRs.
     it("filters by status conflicts", () => {
       const qf: QuickFilter = { type: "status", value: "conflicts", currentUser: "" }

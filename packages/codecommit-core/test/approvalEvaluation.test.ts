@@ -1,10 +1,10 @@
 import * as DistilledRetry from "@distilled.cloud/aws/Retry"
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Layer, Option, Predicate, Ref, Schema, Stream } from "effect"
+import { Effect, Layer, Ref, Schema, Stream } from "effect"
 import type { HttpClientRequest } from "effect/http"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { getPullRequest } from "../src/AwsClient/getPullRequest.js"
-import { getPullRequestRefresh, getPullRequests } from "../src/AwsClient/getPullRequests.js"
+import { getPullRequests } from "../src/AwsClient/getPullRequests.js"
 import { layer as awsClientConfigLayer } from "../src/AwsClientConfig.js"
 import { AwsProfileName, AwsRegion } from "../src/Domain.js"
 import { codeCommitMockAwsClientConfig } from "../src/MockTransport.js"
@@ -38,8 +38,9 @@ const pullRequest = {
  * `"8-denied"`: three open pull requests, and evaluation is denied for pull request 8 only.
  * `"three-approved"`: three open pull requests in one repository, all approved.
  * `"throttled"`: one pull request whose evaluation is always throttled.
+ * `"broken"`: one pull request whose evaluation fails with a provider error that is neither.
  */
-type Evaluation = "approved" | "denied" | "8-denied" | "three-approved" | "throttled"
+type Evaluation = "approved" | "denied" | "8-denied" | "three-approved" | "throttled" | "broken"
 
 const threePullRequests = (evaluation: Evaluation) => evaluation === "8-denied" || evaluation === "three-approved"
 
@@ -105,6 +106,8 @@ const answer = (
     case "EvaluatePullRequestApprovalRules":
       return evaluation === "throttled"
         ? awsError("ThrottlingException", "Rate exceeded")
+        : evaluation === "broken"
+        ? awsError("InvalidRevisionIdException", "revision is not valid")
         : evaluation === "approved" || evaluation === "three-approved" ||
             (evaluation === "8-denied" && requestedPullRequestId(request.body) !== "8")
         ? json({ evaluation: { approved: true, approvalRulesSatisfied: ["two-reviewers"] } })
@@ -114,81 +117,73 @@ const answer = (
   }
 }
 
-/** The provider failure an AwsApiError wraps, when the run failed with one. */
-const wrappedFailure = <A, E extends { readonly cause: unknown }>(exit: Exit.Exit<A, E>) =>
-  Exit.isFailure(exit) ? Option.map(Cause.findErrorOption(exit.cause), (error) => error.cause) : Option.none()
-
-const isApprovalEvaluationError = (cause: Option.Option<unknown>) =>
-  Option.exists(cause, Predicate.isTagged("ApprovalEvaluationError"))
-
 describe("approval evaluation", () => {
   it.layer(codeCommit("approved"))((it) => {
     it.effect("maps an evaluation into approval and satisfied rules", () =>
       Effect.gen(function*() {
         const [pr] = yield* Stream.runCollect(getPullRequests(account))
         expect(pr?.isApproved).toBe(true)
+        expect(pr?.approvalUnknown).toBeUndefined()
         expect(pr?.approvalRules?.map((rule) => [rule.ruleName, rule.satisfied])).toEqual([["two-reviewers", true]])
       }))
   })
 
   it.layer(codeCommit("denied"))((it) => {
-    it.effect("fails the refresh instead of listing the pull request as pending when evaluation fails", () =>
+    it.effect("lists a pull request whose evaluation is denied with approval unknown, not as pending", () =>
       Effect.gen(function*() {
-        const exit = yield* Effect.exit(Stream.runCollect(getPullRequests(account)))
-        expect(isApprovalEvaluationError(wrappedFailure(exit))).toBe(true)
+        const [pr] = yield* Stream.runCollect(getPullRequests(account))
+        expect(pr?.approvalUnknown).toEqual({ _tag: "NotPermitted" })
+        expect(pr?.approvalRules?.map((rule) => rule.satisfied)).toEqual([false])
       }))
 
-    it.effect("fails the pull-request detail instead of reporting every rule unsatisfied", () =>
+    it.effect("reads the pull-request detail with approval unknown", () =>
       Effect.gen(function*() {
-        const exit = yield* Effect.exit(getPullRequest({ account, pullRequestId: "7" }))
-        expect(isApprovalEvaluationError(wrappedFailure(exit))).toBe(true)
-        // The web detail view shows the wrapped error's message, so it must say what failed.
-        expect(Option.map(wrappedFailure(exit), (cause) => Predicate.hasProperty(cause, "message") && cause.message))
-          .toEqual(Option.some(expect.stringContaining("EvaluatePullRequestApprovalRules")))
+        const detail = yield* getPullRequest({ account, pullRequestId: "7" })
+        expect(detail.approvalUnknown).toEqual({ _tag: "NotPermitted" })
       }))
   })
 
   it.layer(codeCommit("8-denied"))((it) => {
-    it.effect("keeps streaming the other pull requests when one fails evaluation", () =>
+    it.effect("marks only the pull request whose evaluation failed", () =>
       Effect.gen(function*() {
-        const items = yield* Stream.runCollect(getPullRequestRefresh(account))
+        const prs = yield* Stream.runCollect(getPullRequests(account))
         expect(
-          [...items].map((item) =>
-            item._tag === "Fetched" ? `fetched ${item.pullRequest.id}` : `unevaluated ${item.pullRequestId}`
-          ).toSorted()
-        ).toEqual(["fetched 7", "fetched 9", "unevaluated 8"])
+          [...prs].map((pr) => `${pr.id} ${pr.approvalUnknown?._tag ?? "evaluated"}`).toSorted()
+        ).toEqual(["7 evaluated", "8 NotPermitted", "9 evaluated"])
       }))
+  })
 
-    it.effect("still fails getPullRequests, which has no way to report one pull request as unknown", () =>
+  it.layer(codeCommit("broken"))((it) => {
+    it.effect("reports any other provider failure as ProviderFailed", () =>
       Effect.gen(function*() {
-        const exit = yield* Effect.exit(Stream.runCollect(getPullRequests(account)))
-        expect(isApprovalEvaluationError(wrappedFailure(exit))).toBe(true)
+        const [pr] = yield* Stream.runCollect(getPullRequests(account))
+        expect(pr?.approvalUnknown).toEqual({ _tag: "ProviderFailed" })
       }))
   })
 
   it.effect("looks up a repository's account once, however many of its pull requests are read", () =>
     Effect.gen(function*() {
       const calls = yield* Ref.make<ReadonlyArray<string>>([])
-      const items = yield* Stream.runCollect(getPullRequestRefresh(account)).pipe(
+      const prs = yield* Stream.runCollect(getPullRequests(account)).pipe(
         // Test entry point: this test's own recording transport is provided once here.
         // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(codeCommit("three-approved", calls))
       )
-      expect(items).toHaveLength(3)
+      expect(prs).toHaveLength(3)
       expect((yield* Ref.get(calls)).filter((operation) => operation === "GetRepository")).toHaveLength(1)
     }))
 
-  it.effect("spends an evaluation's retries once, then reports it unevaluated", () =>
+  it.effect("spends an evaluation's retries once, then reports it Throttled", () =>
     Effect.gen(function*() {
       const calls = yield* Ref.make<ReadonlyArray<string>>([])
       // The SDK's own retries are off, so only our throttle-retry budget is counted.
-      const items = yield* Stream.runCollect(getPullRequestRefresh(account)).pipe(
+      const prs = yield* Stream.runCollect(getPullRequests(account)).pipe(
         DistilledRetry.none,
         // Test entry point: this test's own recording transport is provided once here.
         // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(codeCommit("throttled", calls))
       )
-      expect([...items].map((item) => item._tag)).toEqual(["EvaluationFailed"])
+      expect([...prs].map((pr) => pr.approvalUnknown)).toEqual([{ _tag: "Throttled" }])
       const made = yield* Ref.get(calls)
       // One read of the pull request, and the evaluation tried once plus its single retry.
       expect(made.filter((operation) => operation === "GetPullRequest")).toHaveLength(1)

@@ -1,4 +1,4 @@
-import type { CacheService, Domain } from "@knpkv/codecommit-core"
+import { type CacheService, Domain } from "@knpkv/codecommit-core"
 import { calculateHealthScore } from "@knpkv/codecommit-core/HealthScore.js"
 import { Option } from "effect"
 import type { QuickFilterType } from "./atoms/ui.js"
@@ -114,10 +114,11 @@ export const buildListItems = (
               return pr.repositoryName === quickFilter.value
             case "status":
               switch (quickFilter.value) {
+                // An unknown approval is neither: it must not be listed as pending.
                 case "approved":
-                  return pr.isApproved
+                  return Domain.approvalOf(pr)._tag === "Approved"
                 case "pending":
-                  return !pr.isApproved
+                  return Domain.approvalOf(pr)._tag === "Pending"
                 case "mergeable":
                   return pr.isMergeable
                 case "conflicts":

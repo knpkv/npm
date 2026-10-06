@@ -68,12 +68,12 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       return sql`INSERT INTO pull_requests
         (id, aws_account_id, repo_account_id, account_profile, account_region, title, description,
          author, repository_name, creation_date, last_modified_date, status,
-         source_branch, destination_branch, is_mergeable, is_approved,
+         source_branch, destination_branch, is_mergeable, is_approved, approval_unknown_reason,
          comment_count, link, approved_by, approved_by_arns, approval_rules, fetched_at)
         VALUES (${req.id}, ${req.awsAccountId}, ${req.repoAccountId}, ${req.accountProfile}, ${req.accountRegion},
           ${req.title}, ${req.description}, ${req.author}, ${req.repositoryName},
           ${req.creationDate}, ${req.lastModifiedDate}, ${req.status},
-          ${req.sourceBranch}, ${req.destinationBranch}, ${req.isMergeable}, ${req.isApproved},
+          ${req.sourceBranch}, ${req.destinationBranch}, ${req.isMergeable}, ${req.isApproved}, ${req.approvalUnknownReason},
           ${req.commentCount}, ${req.link}, ${approvedByStr}, ${approvedByArnsStr}, ${approvalRulesJson}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         ON CONFLICT (aws_account_id, id, repository_name, account_region) DO UPDATE SET
           account_profile = excluded.account_profile,
@@ -88,14 +88,18 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
           source_branch = excluded.source_branch,
           destination_branch = excluded.destination_branch,
           is_mergeable = excluded.is_mergeable,
-          is_approved = excluded.is_approved,
+          -- An unknown evaluation keeps the last known approval and rules; a successful one replaces both.
+          is_approved = CASE WHEN excluded.approval_unknown_reason IS NULL
+            THEN excluded.is_approved ELSE pull_requests.is_approved END,
+          approval_unknown_reason = excluded.approval_unknown_reason,
           comment_count = COALESCE(excluded.comment_count, pull_requests.comment_count),
           health_score = pull_requests.health_score,
           link = excluded.link,
           approved_by = COALESCE(excluded.approved_by, pull_requests.approved_by),
           approved_by_arns = COALESCE(excluded.approved_by_arns, pull_requests.approved_by_arns),
-          -- Always overwrite: rules are fetched fresh on every sync, unlike approved_by which accumulates
-          approval_rules = excluded.approval_rules,
+          -- Rules are fetched fresh on every evaluated sync, unlike approved_by which accumulates
+          approval_rules = CASE WHEN excluded.approval_unknown_reason IS NULL
+            THEN excluded.approval_rules ELSE pull_requests.approval_rules END,
           repo_account_id = COALESCE(excluded.repo_account_id, pull_requests.repo_account_id),
           fetched_at = excluded.fetched_at`
     }

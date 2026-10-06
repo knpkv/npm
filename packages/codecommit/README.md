@@ -36,7 +36,7 @@ CLI and TUI for AWS CodeCommit pull requests.
   currently supported on Windows.
 - IAM permissions for CodeCommit (optionally granted per command):
   - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest`, `codecommit:GetRepository` — list/view and repository account identity
-  - `codecommit:EvaluatePullRequestApprovalRules` — approval state and satisfied rules; without it an account's refresh fails rather than listing every pull request as pending
+  - `codecommit:EvaluatePullRequestApprovalRules` — approval state and satisfied rules; without it pull requests are still listed, marked "approval unknown", never as pending
   - `codecommit:GetPullRequestApprovalStates` — who approved
   - `codecommit:GetDifferences` — exact-revision changed files in TUI and web review workbenches
   - `codecommit:GetBlob` — TUI/web API diff previews, web Relay review, and mandatory exact-line publication validation

@@ -19,7 +19,6 @@ const AwsLayer = Layer.succeed(
   AwsClient.AwsClient,
   AwsClient.AwsClient.of({
     getPullRequests: () => Stream.die("unexpected getPullRequests"),
-    getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
     getCallerIdentity: () => unused("getCallerIdentity"),
     createPullRequest: () => unused("createPullRequest"),
     listBranches: () => unused("listBranches"),
@@ -84,7 +83,6 @@ const emptyAwsLayer = (calls: Array<PullRequestCall> = []) =>
           calls.push({ options, profile: account.profile, region: account.region })
           return Stream.empty
         })),
-      getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
       getCallerIdentity: () => unused("getCallerIdentity"),
       createPullRequest: () => unused("createPullRequest"),
       listBranches: () => unused("listBranches"),

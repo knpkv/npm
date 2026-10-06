@@ -8,11 +8,11 @@
  * ```
  * codecommit.getPullRequest ─┬─► decodePullRequestDetail
  *                            ├─► fetchApprovers          → { names, arns }
- *                            ├─► fetchApprovalEvaluation → satisfiedNames
+ *                            ├─► evaluateApproval → satisfiedNames, or approval unknown
  *                            └─► fetchRepoAccountId      → repo account ID
  * ```
  *
- * - Shared: {@link buildApprovalRules}, {@link fetchApprovalEvaluation},
+ * - Shared: {@link buildApprovalRules}, {@link evaluateApproval},
  *   {@link fetchRepoAccountId} from getPullRequests.ts
  * - Runs inside {@link withAwsContext} (Credentials + Region + AwsClientConfig)
  *
@@ -25,7 +25,7 @@
  */
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Schema, SchemaGetter } from "effect"
-import { buildApprovalRules, fetchApprovalEvaluation, fetchApprovers, fetchRepoAccountId } from "./getPullRequests.js"
+import { buildApprovalRules, evaluateApproval, fetchApprovers, fetchRepoAccountId } from "./getPullRequests.js"
 import {
   type GetPullRequestParams,
   makeApiError,
@@ -114,7 +114,7 @@ const callGetPullRequest = (params: GetPullRequestParams) =>
     const [detail, approvers, evaluation, repoAccountId] = yield* Effect.all([
       decodePullRequestDetail(resp),
       fetchApprovers(params.pullRequestId, revisionId),
-      fetchApprovalEvaluation(params.pullRequestId, revisionId),
+      evaluateApproval(params.pullRequestId, revisionId),
       fetchRepoAccountId(repoName)
     ], { concurrency: 4 })
     const approvalRules = yield* buildApprovalRules(resp.pullRequest?.approvalRules ?? [], evaluation.satisfiedNames)
@@ -123,7 +123,9 @@ const callGetPullRequest = (params: GetPullRequestParams) =>
       approvedBy: approvers.names,
       approvedByArns: approvers.arns,
       approvalRules,
-      repoAccountId: repoAccountId || undefined
+      repoAccountId: repoAccountId || undefined,
+      isApproved: evaluation.isApproved,
+      approvalUnknown: evaluation.approvalUnknown
     })
   }).pipe(
     Effect.mapError((cause) => makeApiError("getPullRequest", params.account.profile, params.account.region, cause))
