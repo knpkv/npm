@@ -60,8 +60,12 @@ export function FindingsDrawer({
       className={styles.drawer}
       onClose={() => {
         // The browser restores focus to the element that opened the dialog. When the drawer opened
-        // itself on a resize, that element has unmounted and focus would fall to the page body.
-        if (document.activeElement === null || document.activeElement === document.body) returnFocus.current?.focus()
+        // itself on a resize, that element has unmounted, and focus is left on the page body or on
+        // a control inside the now-closed dialog.
+        const active = document.activeElement
+        if (active === null || active === document.body || dialog.current?.contains(active) === true) {
+          returnFocus.current?.focus()
+        }
         onClose()
       }}
       onKeyDown={(event) => {
