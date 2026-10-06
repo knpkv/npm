@@ -99,6 +99,28 @@ test("typing and clearing while the agent is pending keeps the user's draft", as
   await expect(page.getByRole("status", { name: "Description suggestion" })).toContainText("Your description")
 })
 
+// A suggestion landing while the person is already in the field must not become a prefix of what they type.
+test("a suggestion that lands in a focused field is replaced by the first keystroke", async ({ page }) => {
+  await open(page)
+  let release: (() => void) | undefined
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route("**/api/rows/describe", async (route) => {
+    await held
+    await route.continue()
+  })
+  const requested = page.waitForRequest("**/api/rows/describe")
+  await page.getByRole("button", { name: /PROJ-123, 11:00/ }).click()
+  await requested
+  await noteField(page).focus()
+  release?.()
+  await expect(noteField(page)).toHaveValue(suggestion)
+  await page.keyboard.type("Own words")
+  await expect(noteField(page)).toHaveValue("Own words")
+  await expect(page.getByRole("status", { name: "Description suggestion" })).toContainText("Your description")
+})
+
 // A failed optional request leaves approval usable and exposes an explicit retry.
 test("shows a description failure and retries without rescanning sessions", async ({ page }) => {
   await open(page)
