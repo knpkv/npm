@@ -159,9 +159,13 @@ const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule)
 /**
  * Whether the caller, known only by user name, is in one rule's approval pool. `open` means the
  * rule has no pool, so any approval counts. `member` means an entry without a wildcard names the
- * caller: by user name, as core's `needsMyReview` and the pending-review count decide; the role
- * and account in that entry are not checked, because the client has no caller ARN. `maybe` means
- * only a wildcard or role-only entry could match, and its fixed name part does not rule the caller out.
+ * caller by user name; the role and account in that entry are not checked, because the client has
+ * no caller ARN. `maybe` means only a wildcard or role-only entry could match, and its fixed name
+ * part does not rule the caller out.
+ *
+ * This intentionally differs from core's `needsMyReview` (and so the pending-review count) in two
+ * cases: a rule with no pool is `open` here (core says no review needed), and a wildcard entry is
+ * `maybe` here (core matches it by its tail name as a certain member).
  */
 const poolStanding = (rule: Domain.ApprovalRule, currentUser: string): "member" | "maybe" | "open" | "out" => {
   const entries = poolEntries(rule)
@@ -202,10 +206,6 @@ const stuckReason = (pullRequest: Domain.PullRequest, quietMs: number): StuckRea
 }
 
 /**
- * Yours first; then, unless the caller already approved, `review` when some unsatisfied rule
- * certainly counts their approval (named member, or no pool at all) and `pool` when one only might.
- */
-/**
  * Whether the caller already approved toward this rule. With approver ARNs, only a same-name
  * approval that the rule's pool counts does, so `Operations/alice` approving leaves a
  * `Reviewers/*` rule open for alice; without ARNs, any same-name approval does.
@@ -219,6 +219,10 @@ const approvedToward = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRu
   )
 }
 
+/**
+ * Yours first; then, for the unsatisfied rules the caller hasn't approved toward, `review` when one
+ * certainly counts their approval (named member, or no pool at all) and `pool` when one only might.
+ */
 const groupOf = (pullRequest: Domain.PullRequest, currentUser: string): WorkbenchGroup | undefined => {
   if (identityMatches(currentUser, pullRequest.author)) return "yours"
   const standings = pullRequest.approvalRules
