@@ -2318,15 +2318,17 @@ describe("durable coordinator orchestrator", () => {
         const concurrentDispatchRequestId = `dispatch:${concurrent.id}`
         const concurrentBinding = migrationBinding(
           concurrentDispatchRequestId,
+          // The concurrent dispatch claims the lane's next revision, as lane CAS requires.
           Schema.decodeUnknownSync(WorkLaneClaimed)({
             ...lane,
-            expectedRevision: lane.expectedRevision,
+            expectedRevision: lane.revision,
             goalId: concurrent.goalId,
             operationId: concurrentDispatchRequestId,
-            revision: lane.revision
+            revision: lane.revision + 1
           }),
           concurrent.occurredAt
         )
+        const concurrentClaim = { ...lane, expectedRevision: lane.revision, revision: lane.revision + 1 }
         const writer = spawn(
           execPath,
           [
@@ -2337,9 +2339,12 @@ const database = new DatabaseSync(process.argv[1])
 const handoff = JSON.parse(process.argv[2])
 const expectedRevision = Number(process.argv[3])
 const binding = JSON.parse(process.argv[4])
+const claim = JSON.parse(process.argv[5])
 const dispatchRequestId = "dispatch:" + handoff.id
 const lineage = ["dispatch:lineage:" + handoff.id]
 database.exec("BEGIN IMMEDIATE")
+database.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?")
+  .run(claim.revision, JSON.stringify(claim), claim.laneId)
 database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
   .run(handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
 database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
@@ -2376,8 +2381,9 @@ database.exec("COMMIT")
 database.close()`,
             path,
             JSON.stringify(concurrent),
-            String(lane.expectedRevision),
-            JSON.stringify(concurrentBinding)
+            String(lane.revision),
+            JSON.stringify(concurrentBinding),
+            JSON.stringify(concurrentClaim)
           ],
           { stdio: ["ignore", "pipe", "pipe"] }
         )
@@ -2431,10 +2437,11 @@ database.close()`,
         }))(migratedLane)
         expect(decodedLane).toMatchObject({
           goalId: lane.laneId,
-          operationId: lane.laneId,
+          operationId: concurrentDispatchRequestId,
           phase: lane.phase
         })
-        expect(JSON.parse(decodedLane.record)).toEqual({ ...lane, goalId: lane.laneId, operationId: lane.laneId })
+        // The claim becomes the lane its running binding recorded at the claim's revision.
+        expect(JSON.parse(decodedLane.record)).toEqual(concurrentBinding.lane)
         expect(Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(dispatch).record)
           .toContain("dispatch:legacy-luna")
         expect(Schema.decodeUnknownSync(Schema.Struct({ workLink: Schema.String }))(metadata).workLink)

@@ -188,9 +188,14 @@ const legacyClaim = (dispatchRequestId: string, goalId: string) =>
 /**
  * The schema before handoffs carried a session (no `session_id` column), with
  * one running Sol dispatch bound to `legacyLane` plus unrelated and
- * unreadable rows a migration must leave alone. Returns that dispatch's binding.
+ * unreadable rows a migration must leave alone. `goalId` is the lane's goal,
+ * by default the same id as the lane. Returns that dispatch's binding.
  */
-export const writePreV2WorkFile = (database: DatabaseSync): WorkAgentBinding => {
+export const writePreV2WorkFile = (
+  database: DatabaseSync,
+  goalId: string = legacyHandoff.goalId
+): WorkAgentBinding => {
+  const handoff = { ...legacyHandoff, goalId }
   database.exec("PRAGMA journal_mode = WAL")
   database.exec(`
     CREATE TABLE work_lane_claims (
@@ -230,21 +235,21 @@ export const writePreV2WorkFile = (database: DatabaseSync): WorkAgentBinding => 
   database.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?)")
     .run(legacyLane.laneId, legacyLane.revision, JSON.stringify(legacyLane))
   database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
-    .run(legacyHandoff.id, legacyHandoff.laneId, legacyHandoff.occurredAt, JSON.stringify(legacyHandoff))
+    .run(handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
   const lineage = ["dispatch:legacy-luna"]
   const binding = migrationBinding(
     "dispatch:legacy-sol",
-    legacyClaim("dispatch:legacy-sol", legacyHandoff.goalId),
-    legacyHandoff.occurredAt
+    legacyClaim("dispatch:legacy-sol", handoff.goalId),
+    handoff.occurredAt
   )
   persistMigrationBindingCompanions(database, binding)
   database.prepare("INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)")
-    .run("event:unreferenced", legacyHandoff.goalId, "not-a-timestamp", "not-json")
+    .run("event:unreferenced", handoff.goalId, "not-a-timestamp", "not-json")
   database.prepare("INSERT INTO work_lane_operations VALUES (?, ?, ?, ?, ?, ?)")
     .run(
       "operation:unreferenced",
-      legacyHandoff.laneId,
-      legacyHandoff.goalId,
+      handoff.laneId,
+      handoff.goalId,
       binding.lane.phase,
       "not-a-revision",
       "not-json"
@@ -252,15 +257,15 @@ export const writePreV2WorkFile = (database: DatabaseSync): WorkAgentBinding => 
   database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
     .run(
       "dispatch:legacy-sol",
-      legacyHandoff.id,
-      legacyHandoff.laneId,
-      legacyHandoff.occurredAt,
+      handoff.id,
+      handoff.laneId,
+      handoff.occurredAt,
       JSON.stringify(lineage),
-      JSON.stringify(legacyHandoff)
+      JSON.stringify(handoff)
     )
   database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     "dispatch:legacy-sol",
-    legacyHandoff.laneId,
+    handoff.laneId,
     binding.request.expectedRevision,
     binding.lane.revision,
     binding.request.worker.agentId,
@@ -269,7 +274,7 @@ export const writePreV2WorkFile = (database: DatabaseSync): WorkAgentBinding => 
   )
   database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
     "dispatch:unrelated-binding",
-    legacyHandoff.laneId,
+    handoff.laneId,
     0,
     1,
     "agent:unrelated",
@@ -280,7 +285,7 @@ export const writePreV2WorkFile = (database: DatabaseSync): WorkAgentBinding => 
     .run(
       "dispatch:legacy-sol",
       JSON.stringify(legacySolRoute),
-      JSON.stringify({ handoff: legacyHandoff, lineage })
+      JSON.stringify({ handoff, lineage })
     )
   database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, NULL, NULL)")
     .run("dispatch:unrelated-metadata")
@@ -335,4 +340,13 @@ export const addOversizedLegacyHandoffs = (database: DatabaseSync, count: number
     persistMigrationLifecycle(database, dispatchRequestId, binding.checkpoint.occurredAt, "running", "work")
   }
   database.exec("COMMIT")
+}
+
+/** Advances `legacyLane`'s claim one revision past its binding, as a lane that moved on after dispatch. */
+export const advanceLegacyClaim = (database: DatabaseSync): void => {
+  database.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?").run(
+    legacyLane.revision + 1,
+    JSON.stringify({ ...legacyLane, expectedRevision: legacyLane.revision, revision: legacyLane.revision + 1 }),
+    legacyLane.laneId
+  )
 }
