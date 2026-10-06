@@ -482,6 +482,11 @@ describe("CodeCommit web security boundary", () => {
       expect(
         yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3000, "http://127.0.0.1:3000")
       ).toBe("http://localhost:5173")
+      // The dev proxy forwards to 127.0.0.1 only, so it cannot be advertised for another bind host.
+      const proxyForLocalhost = yield* Effect.result(
+        resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3000, "http://localhost:3000")
+      )
+      expect(Result.isFailure(proxyForLocalhost) && proxyForLocalhost.failure._tag).toBe("UnsafeLoopbackAddressError")
       // `--hostname localhost` advertises the host it was asked to bind, not 127.0.0.1.
       expect(yield* resolveCodeCommitPublicOriginForBind(undefined, 3000, 3000, "http://localhost:3000")).toBe(
         "http://localhost:3000"

@@ -1,5 +1,19 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Clock, Crypto, Deferred, Duration, Effect, Exit, Fiber, Layer, Redacted, Ref, Result } from "effect"
+import {
+  Cause,
+  Clock,
+  Crypto,
+  Deferred,
+  Duration,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Redacted,
+  Ref,
+  Result
+} from "effect"
 import { HttpRouter } from "effect/http"
 import { TestClock } from "effect/testing"
 import * as OwnerSession from "../src/owner-session.js"
@@ -349,6 +363,10 @@ describe("BootstrapRouter", () => {
     }))
 })
 
+/** The typed failure a run ended with, ignoring the trace annotations `Effect.fn` adds. */
+const failureOf = <A, E>(exit: Exit.Exit<A, E>) =>
+  Exit.isFailure(exit) ? Option.getOrUndefined(Cause.findErrorOption(exit.cause)) : undefined
+
 describe("serveWithBootstrapUrl", () => {
   const url = "http://127.0.0.1:1/#bootstrap_token=x"
   const portTaken = new OwnerSession.UnsafeLoopbackAddressError({ address: "127.0.0.1:1", message: "port in use" })
@@ -381,7 +399,7 @@ describe("serveWithBootstrapUrl", () => {
           (printed) => Deferred.succeed(announced, printed)
         )
       )
-      expect(exit).toStrictEqual(Exit.fail(portTaken))
+      expect(failureOf(exit)).toBe(portTaken)
       expect(yield* Deferred.isDone(announced)).toBe(false)
     }))
 
@@ -394,7 +412,7 @@ describe("serveWithBootstrapUrl", () => {
           () => Ref.update(announcements, (n) => n + 1)
         )
       )
-      expect(exit).toStrictEqual(Exit.fail(portTaken))
+      expect(failureOf(exit)).toBe(portTaken)
       expect(yield* Ref.get(announcements)).toBe(1)
     }))
 
@@ -412,7 +430,27 @@ describe("serveWithBootstrapUrl", () => {
           () => Effect.fail(portTaken)
         )
       )
-      expect(exit).toStrictEqual(Exit.fail(portTaken))
+      expect(failureOf(exit)).toBe(portTaken)
+      expect(yield* Deferred.isDone(stopped)).toBe(true)
+    }))
+
+  it.effect("stops the server when onReady throws while building its effect", () =>
+    Effect.gen(function*() {
+      const stopped = yield* Deferred.make<void>()
+      const exit = yield* Effect.exit(
+        OwnerSession.serveWithBootstrapUrl(
+          (ready) =>
+            Layer.effectDiscard(
+              Deferred.succeed(ready, url).pipe(
+                Effect.andThen(Effect.addFinalizer(() => Deferred.succeed(stopped, undefined)))
+              )
+            ),
+          (): Effect.Effect<void> => {
+            throw new Error("browser launcher misconfigured")
+          }
+        )
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
       expect(yield* Deferred.isDone(stopped)).toBe(true)
     }))
 })

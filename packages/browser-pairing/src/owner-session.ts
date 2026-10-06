@@ -435,14 +435,14 @@ export const BootstrapRouter = HttpRouter.use((router) =>
  * `onReady` never runs, so no URL is announced for a server that does not exist. A failing `onReady`
  * fails the whole run and stops the server.
  */
-export const serveWithBootstrapUrl = <E, R, E2, R2>(
+export const serveWithBootstrapUrl = Effect.fn("OwnerSession.serveWithBootstrapUrl")(function*<E, R, E2, R2>(
   server: (ready: Deferred.Deferred<string>) => Layer.Layer<never, E, R>,
   onReady: (url: string) => Effect.Effect<void, E2, R2>
-): Effect.Effect<never, E | E2, R | R2> =>
-  Effect.gen(function*() {
-    const ready = yield* Deferred.make<string>()
-    const running = yield* Layer.launch(server(ready)).pipe(Effect.forkChild({ startImmediately: true }))
-    const url = yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(running))
-    yield* onReady(url).pipe(Effect.onError(() => Fiber.interrupt(running)))
-    return yield* Fiber.join(running)
-  })
+): Effect.fn.Return<never, E | E2, R | R2> {
+  const ready = yield* Deferred.make<string>()
+  const running = yield* Layer.launch(server(ready)).pipe(Effect.forkChild({ startImmediately: true }))
+  const url = yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(running))
+  // Suspended so a callback that throws while building its effect still stops the server.
+  yield* Effect.suspend(() => onReady(url)).pipe(Effect.onError(() => Fiber.interrupt(running)))
+  return yield* Fiber.join(running)
+})
