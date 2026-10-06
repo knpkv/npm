@@ -233,10 +233,7 @@ export const WeekGrid = (props: {
   readonly onOpenRow: (rowId: string, blockIndex: number) => void
   readonly onOpenSlot: (day: string, clock: string) => void
 }) => {
-  const layers = useMemo(
-    () => connectedLayers(props.layers, props.connected),
-    [props.layers, props.connected]
-  )
+  const layers = useMemo(() => connectedLayers(props.layers, props.connected), [props.layers, props.connected])
   const [view, setView] = useState<"auto" | "calendar" | "agenda">("auto")
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 900px)").matches)
   useEffect(() => {
