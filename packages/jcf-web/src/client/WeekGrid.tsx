@@ -238,9 +238,14 @@ export const WeekGrid = (props: {
   const { calendarPlacements, counts, days, hours, placements, visibleHours } = useMemo(() => {
     return projectCalendar(props.plan, props.optimisticEntries, layers)
   }, [props.plan, props.optimisticEntries, layers])
-  // Dense collision lanes still need a 24px review target beside the 24px quick action.
+  // Dense collision lanes still need a 24px review target beside the 24px quick action. A stretch row
+  // also spends its border, padding and row gap, so its lanes need 64px.
   const minimumColumnPixels = [...calendarPlacements.values()].reduce(
-    (maximum, day) => day.reduce((maximum, placed) => Math.max(maximum, placed.columns * 48), maximum),
+    (maximum, day) =>
+      day.reduce(
+        (maximum, placed) => Math.max(maximum, placed.columns * (placed.block.kind === "stretch" ? 64 : 48)),
+        maximum
+      ),
     0
   )
   const calendarStyle: CSSProperties & Record<"--jcf-columns" | "--jcf-hour" | "--jcf-column-min", string> = {

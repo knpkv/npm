@@ -97,6 +97,21 @@ it("keeps settled split blocks unchanged when later mentions are appended across
   expect(allocate(appended)).toEqual(allocate(first))
 })
 
+// A queued prompt is stamped when typed, so it can arrive after later activity; idle is measured from the latest.
+it("measures idle from the latest activity when a queued prompt arrives out of order", () => {
+  const line = (minute: number): SessionLine => ({
+    sessionId: "queued",
+    cwd: "/work",
+    gitBranch: null,
+    atMs: fromMs + minute * 60_000,
+    presence: "prompt",
+    text: ""
+  })
+  const records = decodeSessionLines([line(0), line(4), line(1), line(8)], { fromMs, toMs, idleCapMs: 300_000 })
+  expect(records.map((record) => record.sessionId)).toEqual(["queued"])
+  expect(records[0]?.activity.map((activity) => (activity.atMs - fromMs) / 60_000)).toEqual([0, 1, 4, 8])
+})
+
 it("keeps the person's turn open when a subagent ends its own turn", () => {
   const line = (minutes: number, fields: Readonly<Record<string, Schema.Json>>) =>
     JSON.stringify({ sessionId: "main", cwd: "/work", timestamp: at(minutes), ...fields })

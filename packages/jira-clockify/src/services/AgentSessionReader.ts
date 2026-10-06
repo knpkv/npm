@@ -333,6 +333,9 @@ export const decodeSessionLines = (
 ): ReadonlyArray<DecodedTranscript> => {
   const segments: Array<DecodedTranscript> = []
   let activityTimes: Array<number> = []
+  // Latest counted instant of the open segment. A queued prompt is stamped when typed, so input order
+  // is not time order and `activityTimes.at(-1)` can be stale.
+  let latestActivityMs: number | null = null
   let texts: Array<string> = []
   let sessionId: string | null = null
   let cwd: string | null = null
@@ -358,13 +361,14 @@ export const decodeSessionLines = (
         // one whole Idle Cap later: the same person carried straight on under a different branch, so
         // crediting the tail to both would put the switch's minutes on two tickets at once.
         boundedAtMs: endedAtMs,
-        activity: activityTimes.map((atMs): SessionActivity => ({ sessionId: id, atMs })),
+        activity: [...activityTimes].sort((a, b) => a - b).map((atMs): SessionActivity => ({ sessionId: id, atMs })),
         texts
       })
     }
     // Reset unconditionally. A stretch with no activity still has text, and leaving it behind
     // leaks it into the next segment — including text from a directory that was never opted in.
     activityTimes = []
+    latestActivityMs = null
     texts = []
   }
 
@@ -384,9 +388,8 @@ export const decodeSessionLines = (
 
     // Later mentions must not rebalance an already settled group. An idle barrier closes its text
     // and activity together; the next group has a timestamp identity stable under later appends.
-    const lastActivityMs = activityTimes.at(-1)
-    if (lastActivityMs !== undefined && atMs - lastActivityMs > options.idleCapMs) {
-      closeSegment(lastActivityMs + options.idleCapMs)
+    if (latestActivityMs !== null && atMs - latestActivityMs > options.idleCapMs) {
+      closeSegment(latestActivityMs + options.idleCapMs)
       afterIdle = true
     }
 
@@ -407,7 +410,10 @@ export const decodeSessionLines = (
     // yesterday's hours from today's work, and could carry text from a directory that was never
     // opted in to a Coding Agent.
     if (line.text !== "") texts.push(line.text)
-    if (counts) activityTimes.push(atMs)
+    if (counts) {
+      activityTimes.push(atMs)
+      latestActivityMs = Math.max(latestActivityMs ?? atMs, atMs)
+    }
   }
 
   closeSegment(null)

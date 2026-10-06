@@ -76,3 +76,13 @@ it("never joins suggestions across local midnight", () => {
   ], 12 * MIN)
   expect(grouped.filter((block) => block.kind === "stretch")).toHaveLength(0)
 })
+
+// A stretch is placed on every day it touches, so a member crossing midnight would carry the earlier block over.
+it("keeps a short suggestion that crosses local midnight out of a stretch", () => {
+  const midnight = new Date(2026, 8, 8).getTime() / MIN
+  const grouped = groupStretches([
+    suggestion("PROJ-1", midnight - 10, midnight - 5),
+    suggestion("PROJ-2", midnight - 5, midnight + 2)
+  ], 12 * MIN)
+  expect(grouped.map((block) => block.kind)).toEqual(["proposable", "proposable"])
+})

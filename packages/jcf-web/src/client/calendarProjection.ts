@@ -229,7 +229,9 @@ export const groupStretches = (
   }
   for (const block of proposable) {
     const previous = run.at(-1)
-    if (block.endMs - block.startMs >= shortMs) {
+    // A stretch is drawn on every day it touches, so a block crossing midnight stays its own card.
+    const crossesMidnight = new Date(block.startMs).toDateString() !== new Date(block.endMs - 1).toDateString()
+    if (block.endMs - block.startMs >= shortMs || crossesMidnight) {
       flush()
       grouped.push(block)
       continue
