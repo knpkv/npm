@@ -608,34 +608,6 @@
     },
     {
       "capabilities": [
-        "present",
-        "status"
-      ],
-      "category": "pattern",
-      "importPath": "@knpkv/rly/patterns",
-      "name": "Hero",
-      "states": [
-        "default",
-        "display",
-        "heading",
-        "line"
-      ],
-      "terms": [
-        "blocked",
-        "display",
-        "heading",
-        "held",
-        "hero",
-        "line",
-        "pattern",
-        "present",
-        "size",
-        "status",
-        "tone"
-      ]
-    },
-    {
-      "capabilities": [
         "symbol"
       ],
       "category": "foundation",

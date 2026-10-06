@@ -442,23 +442,6 @@
       ]
     },
     {
-      "name": "Hero",
-      "paths": {
-        "source": "packages/rly/src/patterns/Hero.tsx",
-        "story": "packages/rly/stories/patterns/Hero.stories.tsx",
-        "styles": [
-          "packages/rly/src/patterns/Hero.module.css"
-        ],
-        "tests": [
-          "packages/rly/test/patterns/Hero.test.tsx"
-        ]
-      },
-      "storyId": "patterns-hero--states",
-      "storyIds": [
-        "patterns-hero--states"
-      ]
-    },
-    {
       "name": "Icon",
       "paths": {
         "source": "packages/rly/src/foundations/Icon.tsx",

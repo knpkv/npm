@@ -17,6 +17,7 @@ import { selectCodeCommitPullRequest } from "./pr-detail.js"
 import { prListHref, prListKey } from "./pr-list.js"
 import styles from "./workbench-rail.module.css"
 import {
+  callerOf,
   formatSpan,
   QUIET_AFTER_MS,
   type WorkbenchGroup,
@@ -125,7 +126,7 @@ const Summary = ({ summary }: { readonly summary: WorkbenchSummary }) =>
 export function WorkbenchRail({ route }: { readonly route?: CodeCommitPullRequestRouteCoordinates | undefined }) {
   const appState = useAtomValue(appStateAtom)
   // Ages are measured when the queue data changes, which the server pushes on every refresh.
-  const queue = useMemo(() => workbenchQueue(queuePullRequests(appState), appState.currentUser, new Date()), [appState])
+  const queue = useMemo(() => workbenchQueue(queuePullRequests(appState), callerOf(appState), new Date()), [appState])
   const open = route === undefined ? null : selectCodeCommitPullRequest(appState.pullRequests, route).pullRequest
   return (
     <WorkbenchRailView

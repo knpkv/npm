@@ -21,11 +21,6 @@ export const COMPONENT_REGISTRY_METADATA = {
     ],
     ["compose", "present"]
   ),
-  Hero: registryMetadata("State the one fact a screen leads with as a sentence, with an optional caption", [
-    "heading",
-    "line",
-    "display"
-  ], ["present", "status"]),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"
