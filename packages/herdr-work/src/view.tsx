@@ -29,9 +29,8 @@ import type {
 } from "./model.js"
 import { decodeWorkBoardNavigationGoal, encodeWorkBoardNavigationGoal } from "./navigation.js"
 import { workRequestClockText, workRequestDecidability, type WorkRequestDecisions } from "./request-decision.js"
+import { displayStateOf, observedFor } from "./display-state.js"
 import {
-  displayStateOf,
-  observedFor,
   type WorkTriageSummary,
   workTriage,
   workTriageGroups,
@@ -52,7 +51,8 @@ const goalStates: ReadonlyArray<WorkGoal["state"]> = [
   "blocked",
   "review",
   "deployed",
-  "completed"
+  "completed",
+  "abandoned"
 ]
 const statusFilters: ReadonlyArray<"all" | WorkGoal["state"]> = ["all", ...goalStates]
 
@@ -69,7 +69,8 @@ const statePresentation = {
   blocked: { label: "Blocked", tone: "critical" },
   review: { label: "In review", tone: "caution" },
   deployed: { label: "Deployed", tone: "positive" },
-  completed: { label: "Completed", tone: "positive" }
+  completed: { label: "Completed", tone: "positive" },
+  abandoned: { label: "Abandoned", tone: "neutral" }
 } satisfies Readonly<Record<WorkGoal["state"], { readonly label: string; readonly tone: RlyStateTone }>>
 
 /** Every state the tab can show: the recorded ones, plus `abandoned`, which only an observation can show today. */
@@ -413,7 +414,9 @@ const GoalDetail = ({
             <dt>Pull request</dt>
             <dd>
               {observed?.pullRequest == null
-                ? "None known"
+                ? snapshot.observedOmitted === undefined
+                  ? "None known"
+                  : "Not in this read: live state was trimmed to the most recently updated goals"
                 : `#${observed.pullRequest.fact.pullRequest} ${pullRequestStateLabel[observed.pullRequest.fact.state]}, ${checksLabel[observed.pullRequest.fact.checks]}`}
             </dd>
           </div>
@@ -655,6 +658,12 @@ export const WorkBoard = ({
   const selectedLinkRowRef = useRef<HTMLAnchorElement | null>(null)
   const selectedRowRef = useRef<HTMLButtonElement | null>(null)
   const triage = workTriage(snapshot)
+  // The overlay by goal, built once per snapshot: rows, captions and filters all read it.
+  const overlay: ReadonlyMap<string, WorkGoalObserved> = new Map(
+    (snapshot.observed ?? []).map((entry) => [entry.goalId, entry])
+  )
+  const observedOf = (goal: WorkGoal): WorkGoalObserved | null => overlay.get(goal.id) ?? null
+  const shownOf = (goal: WorkGoal): WorkDisplayState => observedOf(goal)?.displayState ?? goal.state
   // A historical window is the state as of its time; say so, never in the present tense.
   const tense: WorkTriageTense = window === "now" ? "present" : "past"
   const sentence = workTriageSentence(triage.summary, tense)
@@ -665,8 +674,7 @@ export const WorkBoard = ({
   const groupById = new Map(triage.rows.map((row) => [row.goal.id, row.group]))
   const ordered = triage.rows.map((row) => row.goal)
   // Filters match what each row shows: the observed state where there is one.
-  const filteredGoals =
-    statusFilter === "all" ? ordered : ordered.filter((goal) => displayStateOf(snapshot, goal) === statusFilter)
+  const filteredGoals = statusFilter === "all" ? ordered : ordered.filter((goal) => shownOf(goal) === statusFilter)
   const selectedFilteredGoalIndex = filteredGoals.findIndex(({ id }) => id === selectedId)
   const selected = filteredGoals.find(({ id }) => id === selectedId) ?? null
   const visibleGoalStart =
@@ -697,11 +705,7 @@ export const WorkBoard = ({
   }, [selectedFilteredGoalIndex, selectedId])
 
   const goalRow = (goal: WorkGoal): ReactElement => {
-    const caption = rowCaption(
-      goal,
-      observedFor(snapshot, goal.id),
-      externalLinks === "enabled" ? decisions : undefined
-    )
+    const caption = rowCaption(goal, observedOf(goal), externalLinks === "enabled" ? decisions : undefined)
     const content = (
       <>
         <span className="work-row-title">
@@ -710,8 +714,8 @@ export const WorkBoard = ({
           </span>
           {goal.title}
         </span>
-        <span className="work-row-state" data-tone={displayPresentation[displayStateOf(snapshot, goal)].tone}>
-          {displayPresentation[displayStateOf(snapshot, goal)].label}
+        <span className="work-row-state" data-tone={displayPresentation[shownOf(goal)].tone}>
+          {displayPresentation[shownOf(goal)].label}
         </span>
         <span className="work-row-caption" data-blocking={caption.blocking}>
           {caption.text}
@@ -869,7 +873,7 @@ export const WorkBoard = ({
           {window !== "now"
             ? null
             : snapshot.observed === undefined
-              ? ". Live state not available, so states are as recorded."
+              ? ". Live state not available: this hub sends no observed facts (its herdr-work predates the reconciler, or the overlay did not fit the response), so states are as recorded. Update herdr-work on the hub to see them."
               : snapshot.observedOmitted === undefined
                 ? null
                 : `. Live state shown for the most recently updated goals; ${snapshot.observedOmitted} left out.`}
@@ -883,8 +887,8 @@ export const WorkBoard = ({
             {window === "now" ? (
               <>
                 No goals yet. Delegate work to an agent with{" "}
-                <code>fleetctl submit HOST agent.delegate work REPOSITORY PROMPT</code>; its goal appears here once the
-                hub admits it.
+                <code>fleetctl submit HOST agent.delegate work REPOSITORY PROMPT</code> (HOST is a name from{" "}
+                <code>fleetctl hosts</code>); its goal appears here once the hub admits it.
               </>
             ) : (
               "No goals at this checkpoint."

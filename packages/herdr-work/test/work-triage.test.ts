@@ -73,6 +73,14 @@ describe("workTriage", () => {
     expect(workTriageGroupTitle.planned).toBe("Not started")
   })
 
+  it("treats an abandoned goal as finished", () => {
+    const rows = groupsOf([
+      goal("dropped", { state: "abandoned", updatedAt: AS_OF - 60_000 }),
+      goal("dropped-long-ago", { state: "abandoned", updatedAt: AS_OF - workTriageDoneWindowMs - 1 })
+    ])
+    expect(rows).toEqual([["dropped", "done"], ["dropped-long-ago", "earlier"]])
+  })
+
   it("orders within a group by most recent update, then keeps the snapshot's order", () => {
     const rows = groupsOf([
       goal("goal-2", { updatedAt: AS_OF - 1_000 }),
@@ -116,8 +124,8 @@ describe("workTriage summary", () => {
     expect(workTriageSentence({ _tag: "Empty" })).toBe("No goals yet")
   })
 
-  it("labels the done group honestly as the last 24 hours", () => {
-    expect(workTriageGroupTitle.done).toBe("Done in the last 24 hours")
+  it("labels the finished group honestly as the last 24 hours, not as done", () => {
+    expect(workTriageGroupTitle.done).toBe("Finished in the last 24 hours")
   })
 
   it("speaks of a historical window in the past tense", () => {

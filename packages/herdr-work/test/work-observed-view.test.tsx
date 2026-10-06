@@ -115,7 +115,7 @@ describe("Work triage with the observed overlay", () => {
 describe("Work board with the observed overlay", () => {
   it("says when live state is missing or trimmed, and only on the live window", async () => {
     expect((await mount(snapshotOf([goal("g1")], {}))).textContent).toContain(
-      "Live state not available, so states are as recorded."
+      "Live state not available: this hub sends no observed facts"
     )
     expect((await mount(snapshotOf([goal("g1")], { observed: [] }))).textContent).not.toContain("Live state")
     expect((await mount(snapshotOf([goal("g1")], { observed: [], observedOmitted: 3 }))).textContent).toContain(

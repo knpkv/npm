@@ -1,12 +1,14 @@
-import type { HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
+import type { FleetStoreError, HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { FleetOperationError, JobStore, loadConfiguration, makeFleetService } from "@knpkv/herdr-fleet"
 import { Console, Effect, FileSystem, Path, Redacted, Scope } from "effect"
 import type { HostdOperationsCompositionError } from "./errors.js"
 import { startHttpServer, type UiAssets } from "./http.js"
 import { fleetConfigPath } from "./internal/config-path.js"
+import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-job.js"
 import { makeHostOperations } from "./operations.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
+export { runWorkAbandon } from "./work-abandon.js"
 export { runWorkReassign } from "./work-reassign.js"
 
 export type HostdLifetimeFork = <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<void>
@@ -16,6 +18,13 @@ export interface HostdOperationsComposition {
   readonly defaultOperations: HostOperations
   /** Registers accepted work for interruption when the hostd process scope closes. */
   readonly fork: HostdLifetimeFork
+  /**
+   * Whether any Work job is still to run: waiting for approval (and not
+   * expired), approved and queued, or running. Its preflight tokens hash the
+   * whole Work store until it runs, so a background Work writer defers its
+   * writes while this is true.
+   */
+  readonly hasOutstandingWorkJob: Effect.Effect<boolean, FleetStoreError>
 }
 
 export type HostdOperationsComposer = (
@@ -53,13 +62,19 @@ const loadUiAssets = Effect.fn("Hostd.loadUiAssets")(function*(directory: string
 
 export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
   config: HostConfiguration,
-  composeOperations?: HostdOperationsComposer
+  composeOperations?: HostdOperationsComposer,
+  jobs?: JobStore
 ) {
   const scope = yield* Scope.Scope
   const defaultOperations = yield* makeHostOperations(config)
   if (composeOperations === undefined) return defaultOperations
   const fork: HostdLifetimeFork = (effect) => Effect.forkIn(effect, scope).pipe(Effect.asVoid)
-  return yield* composeOperations({ config, defaultOperations, fork })
+  return yield* composeOperations({
+    config,
+    defaultOperations,
+    fork,
+    hasOutstandingWorkJob: jobs === undefined ? noJobStore : hasOutstandingWorkJob(jobs)
+  })
 })
 
 /**
@@ -77,7 +92,7 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
     JobStore.open(paths.join(config.stateDirectory, "jobs.sqlite")),
     (opened) => Effect.sync(() => opened.close())
   )
-  const operations = yield* makeHostdOperations(config, options.composeOperations)
+  const operations = yield* makeHostdOperations(config, options.composeOperations, store)
   const service = yield* makeFleetService({
     approvalEnabled: config.crossHost,
     host: config.host,

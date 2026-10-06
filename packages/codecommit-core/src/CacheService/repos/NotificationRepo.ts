@@ -156,25 +156,56 @@ const makeNotificationRepo = Effect.gen(function*() {
       readonly title: string
       readonly message: string
       readonly profile?: string
+      /** Keep an existing unread notification with the same profile, type and title; insert nothing. */
       readonly deduplicate?: boolean
+      /** Replace an existing unread notification with the same profile, type and title, so a summary stays current. */
+      readonly replaceUnread?: boolean
     }) => {
-      const insert = add_({
+      const insertRow = add_({
         pullRequestId: "",
         awsAccountId: "",
         type: n.type,
         message: n.message,
         title: n.title,
         profile: n.profile ?? ""
-      }).pipe(Effect.tap(() => publish))
+      })
+      const insert = insertRow.pipe(Effect.tap(() => publish))
+
+      if (n.replaceUnread === true) {
+        // One transaction, and the unread summary keeps its id: clients alert on ids they have not seen,
+        // so an unchanged summary must not look new. Nothing is written, or announced, when it is unchanged.
+        const replaced = sql.withTransaction(
+          sql<{ id: number; message: string }>`
+            SELECT id, message FROM notifications
+            WHERE profile = ${n.profile ?? ""} AND type = ${n.type} AND title = ${n.title}
+              AND pull_request_id = '' AND read = 0
+            ORDER BY id LIMIT 1
+          `.pipe(
+            Effect.flatMap(([current]) =>
+              current === undefined
+                ? insertRow.pipe(Effect.as(true))
+                : current.message === n.message
+                ? Effect.succeed(false)
+                : sql`UPDATE notifications SET message = ${n.message} WHERE id = ${current.id}`.pipe(Effect.as(true))
+            )
+          )
+        )
+        return replaced.pipe(
+          Effect.flatMap((changed) => changed ? publish : Effect.void),
+          cacheError("addSystem")
+        )
+      }
 
       if (n.deduplicate !== true) {
         return insert.pipe(cacheError("addSystem"))
       }
 
-      // Skip if an unread system notification with same profile+type already exists
+      // Skip if an unread system notification with the same profile, type and title already exists.
+      // The title names the scope or subject, so one profile's unrelated errors do not suppress each other.
       return sql<{ count: number }>`
           SELECT count(*) as count FROM notifications
-          WHERE profile = ${n.profile ?? ""} AND type = ${n.type} AND pull_request_id = '' AND read = 0
+          WHERE profile = ${n.profile ?? ""} AND type = ${n.type} AND title = ${n.title}
+            AND pull_request_id = '' AND read = 0
         `.pipe(
         Effect.flatMap((rows) => (rows[0]?.count ?? 0) > 0 ? Effect.void : insert),
         cacheError("addSystem")

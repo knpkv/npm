@@ -13,11 +13,11 @@
  * you looked"; older finished goals stay listed last, as "Finished earlier", so a status filter
  * still finds them.
  */
-import type { WorkDisplayState, WorkGoal, WorkGoalObserved, WorkRequest, WorkSnapshot } from "./model.js"
+import type { WorkDisplayState, WorkGoal, WorkRequest, WorkSnapshot } from "./model.js"
 
 const DAY_MS = 86_400_000
 
-/** How long a finished goal stays in the "Done in the last 24 hours" group. */
+/** How long a finished goal stays in the "Finished in the last 24 hours" group. */
 export const workTriageDoneWindowMs = DAY_MS
 
 /** The groups, in reading order. */
@@ -59,18 +59,6 @@ export interface WorkTriage {
   readonly rows: ReadonlyArray<WorkTriageRow>
   readonly summary: WorkTriageSummary
 }
-
-/**
- * The observed overlay entry for one goal, or null when nothing was observed about it (or the
- * snapshot carries no overlay). Same contract as arch-a's `display-state.ts` (#516); this local
- * copy is replaced by that import when it lands.
- */
-export const observedFor = (snapshot: Pick<WorkSnapshot, "observed">, goalId: string): WorkGoalObserved | null =>
-  snapshot.observed?.find((entry) => entry.goalId === goalId) ?? null
-
-/** What the tab shows for a goal: the observed state when one was observed, else its recorded state. */
-export const displayStateOf = (snapshot: Pick<WorkSnapshot, "observed">, goal: WorkGoal): WorkDisplayState =>
-  observedFor(snapshot, goal.id)?.displayState ?? goal.state
 
 /**
  * Which displayed states have finished. Keyed by every WorkDisplayState, so a new state must be
@@ -135,12 +123,17 @@ const compareRows = (left: WorkTriageRow, right: WorkTriageRow): number => {
  * so a zero here is a real zero.
  */
 export const workTriage = (snapshot: Pick<WorkSnapshot, "asOf" | "goals" | "observed">): WorkTriage => {
+  const overlay = new Map((snapshot.observed ?? []).map((entry) => [entry.goalId, entry]))
   const rows = snapshot.goals
     .map((goal, index): WorkTriageRow => {
       const openRequests = openRequestsOf(goal)
-      const observed = observedFor(snapshot, goal.id)
+      const observed = overlay.get(goal.id) ?? null
       const displayState = observed?.displayState ?? goal.state
-      const finishedAt = observed?.pullRequest?.fact.closedAt ?? goal.updatedAt
+      // A goal its owner already recorded as finished finished then; one finished only by its observed
+      // pull request finished when that pull request closed.
+      const finishedAt = terminalState[goal.state]
+        ? goal.updatedAt
+        : (observed?.pullRequest?.fact.closedAt ?? goal.updatedAt)
       return {
         displayState,
         goal,
@@ -205,6 +198,7 @@ export const workTriageGroupTitle = {
   blocked: "Blocked",
   moving: "Moving",
   planned: "Not started",
-  done: "Done in the last 24 hours",
+  // Completed, deployed and abandoned alike; each row's state word says which.
+  done: "Finished in the last 24 hours",
   earlier: "Finished earlier"
 } satisfies Readonly<Record<WorkTriageGroup, string>>
