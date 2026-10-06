@@ -55,8 +55,8 @@ export type IdentityEvent = Data.TaggedEnum<{
   RefreshAuthFailed: { readonly generation: number; readonly profile: string }
   ResolutionFinished: { readonly generation: number }
   /**
-   * `aws sso login` succeeded. Without an identity (its lookup failed) the session still changed, so
-   * in-flight work goes stale and the profile waits for the next refresh.
+   * `aws sso login` succeeded. Without an identity (its lookup failed) the session still changed, maybe
+   * to another principal: in-flight work goes stale and the profile is absent until the next refresh.
    */
   SignedIn: { readonly profile: string; readonly identity: ResolvedIdentity | undefined }
   /** `aws sso logout` succeeded. */
@@ -115,9 +115,11 @@ export const transition = (s: IdentityLifecycle, event: IdentityEvent): Identity
     ResolutionFinished: ({ generation }) => applies(s, generation) ? { ...s, firstRefreshDone: true } : s,
     SignedIn: ({ identity, profile }) => {
       const bumped = { ...s, generation: s.generation + 1 }
-      return identity !== undefined && s.enabled.includes(profile)
-        ? withProfile(bumped, profile, resolvedState(identity))
-        : bumped
+      if (!s.enabled.includes(profile)) return bumped
+      if (identity !== undefined) return withProfile(bumped, profile, resolvedState(identity))
+      // The old identity may belong to the previous principal, so it is not kept.
+      const { [profile]: _, ...rest } = bumped.profiles
+      return { ...bumped, profiles: rest }
     },
     SignedOut: (): IdentityLifecycle => ({
       ...s,

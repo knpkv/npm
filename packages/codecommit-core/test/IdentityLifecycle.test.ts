@@ -118,7 +118,8 @@ const columns: ReadonlyArray<Column> = [
     // The login succeeded but its identity lookup failed: the session still changed.
     name: "SignedIn (this profile, no identity)",
     event: IdentityEvent.SignedIn({ profile: subject, identity: undefined }),
-    expect: () => "same",
+    // The login may have changed the principal, so the old identity is not kept.
+    expect: () => undefined,
     bumps: true
   },
   {

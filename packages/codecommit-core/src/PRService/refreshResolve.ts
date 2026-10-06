@@ -97,18 +97,19 @@ const resolveIdentity = (
     const lookup = yield* awsClient.getCallerIdentity({ profile: account.profile, region }).pipe(Effect.result)
 
     if (Result.isFailure(lookup)) {
-      yield* notificationRepo.addSystem({
+      // The identity is applied first, so a notification that fails to persist cannot leave it stale.
+      const reason = unresolvedReasonOf(lookup.failure)
+      yield* SubscriptionRef.update(
+        state,
+        (s) => applyIdentityEvent(s, IdentityEvent.LookupFailed({ generation, profile: account.profile, reason }))
+      )
+      return yield* notificationRepo.addSystem({
         type: "error",
         title: `${account.profile} (${region})`,
         message: "Failed to get caller identity — session may have expired",
         profile: account.profile,
         deduplicate: true
-      })
-      const reason = unresolvedReasonOf(lookup.failure)
-      return yield* SubscriptionRef.update(
-        state,
-        (s) => applyIdentityEvent(s, IdentityEvent.LookupFailed({ generation, profile: account.profile, reason }))
-      )
+      }).pipe(Effect.catch((error) => Effect.logWarning("caller identity notification failed", error)))
     }
 
     const identity = lookup.success

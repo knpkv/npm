@@ -251,6 +251,71 @@ describe("fetchAndUpsertPRs", () => {
         .toEqual(expected === "resolved" ? resolved : expected)
     }))
 
+  it.effect.each([
+    ["a credential failure", "credential"],
+    ["an evaluation failure caused by expired credentials", "evaluation"]
+  ])(
+    "marks the identity RefreshAuthFailed when a stale-row re-read fails with %s",
+    ([, kind]) =>
+      Effect.gen(function*() {
+        const resolved: CallerIdentityState = {
+          _tag: "Resolved",
+          accountId: "123456789012",
+          arn: "arn:aws:sts::123456789012:assumed-role/R/alice",
+          username: "alice"
+        }
+        const state = yield* SubscriptionRef.make<AppState>(seeded({ "test-profile": resolved }))
+        const account = Schema.decodeSync(AccountConfig)({
+          profile: "test-profile",
+          regions: ["us-east-1"],
+          enabled: true
+        })
+        const dependencies = Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            // The listing succeeds; credentials then expire while a stale row is re-read.
+            getPullRequestRefresh: () => Stream.empty,
+            getPullRequest: () =>
+              Effect.fail(
+                kind === "credential"
+                  ? new AwsCredentialError({ profile: account.profile, region: account.regions[0]!, cause: "expired" })
+                  : new AwsApiError({
+                    operation: "getPullRequest",
+                    profile: account.profile,
+                    region: account.regions[0]!,
+                    cause: new ApprovalEvaluationError({
+                      pullRequestId: staleOpenPR.id,
+                      revisionId: "rev-1",
+                      cause: new AwsErrors.ExpiredTokenException({ message: "expired" })
+                    })
+                  })
+              )
+          }),
+          Layer.mock(PullRequestRepo, {
+            findStaleOpen: () => Effect.succeed([staleOpenPR]),
+            deleteOne: () => Effect.void,
+            propagateRepoAccountId: () => Effect.void
+          }),
+          Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+          Layer.mock(SubscriptionRepo, {})
+        )
+        yield* fetchAndUpsertPRs({
+          state,
+          enabledAccounts: [account],
+          accountIdMap: new Map([["test-profile", "123456789012"]]),
+          subscribedRef: yield* Ref.make(new Set<string>()),
+          currentUser: "alice",
+          identityGeneration: 1,
+          staleThreshold: "2026-08-03T00:00:00Z"
+        }).pipe(Effect.provide(dependencies))
+        const after = yield* SubscriptionRef.get(state)
+        expect(after.callerIdentities?.["test-profile"]).toEqual({
+          _tag: "Unresolved",
+          reason: { _tag: "RefreshAuthFailed" }
+        })
+        expect(after.currentUser).toBeUndefined()
+      })
+  )
+
   // Production refresh failures are typed: an expired credential, or a provider auth error wrapped in AwsApiError.
   it.effect.each([
     ["an AwsCredentialError", "credential"],

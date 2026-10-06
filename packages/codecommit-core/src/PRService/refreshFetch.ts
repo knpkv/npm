@@ -54,9 +54,17 @@ const isCredentialInvalidCause = <Cause>(cause: Cause): boolean =>
   credentialInvalidTags.has(tagOf(cause, "_tag")) ||
   (tagOf(cause, "_tag") === "UnknownAwsError" && credentialInvalidTags.has(tagOf(cause, "errorTag")))
 
-/** Whether a refresh failure means the account's credentials no longer work, decided from its type. */
-const isAuthFailure = (error: AwsClientError): boolean =>
-  error._tag === "AwsCredentialError" || (error._tag === "AwsApiError" && isCredentialInvalidCause(error.cause))
+/**
+ * Whether a refresh failure means the account's credentials no longer work, decided from its type: a
+ * credential failure, or a provider error saying so, directly or inside a failed approval evaluation.
+ */
+const isAuthFailure = (error: AwsClientError | CacheError): boolean =>
+  error._tag === "AwsCredentialError" ||
+  (error._tag === "AwsApiError" && (
+    isCredentialInvalidCause(error.cause) ||
+    (Predicate.isTagged(error.cause, "ApprovalEvaluationError") && Predicate.hasProperty(error.cause, "cause") &&
+      isCredentialInvalidCause(error.cause.cause))
+  ))
 
 /** A pull-request read that failed only because its approval rules could not be evaluated. */
 const failedOnlyOnApprovalEvaluation = (error: AwsClientError | CacheError): boolean =>
@@ -354,6 +362,8 @@ export const fetchAndUpsertPRs = (params: {
                 ),
                 Effect.catch((error) =>
                   withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(
+                    // Credentials that stopped working while stale rows are re-read are an auth failure too.
+                    Effect.andThen(isAuthFailure(error) ? markAuthFailed(pr.accountProfile) : Effect.void),
                     Effect.andThen(
                       // The pull request was read; only its approval enrichment failed. That is not
                       // evidence it is gone, so the row stays for the next refresh to settle.

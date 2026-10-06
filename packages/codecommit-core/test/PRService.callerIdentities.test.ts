@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Layer, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
+import { CacheError } from "../src/CacheService/CacheError.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 import { PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
@@ -270,5 +271,32 @@ describe("resolveAccounts caller identities", () => {
       const after = yield* SubscriptionRef.get(state)
       expect(after.currentUser).toBe("new")
       expect(after.callerIdentities?.["alpha"]).toEqual({ _tag: "Resolved", ...login })
+    }))
+
+  it.effect("applies a failed lookup even when its notification cannot be stored", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "idle" })
+      const failing = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getCallerIdentity: (account) =>
+            Effect.fail(new AwsCredentialError({ profile: account.profile, region, cause: "sso expired" }))
+        }),
+        Layer.mock(NotificationRepo, {
+          addSystem: () => Effect.fail(new CacheError({ operation: "addSystem", cause: "disk full" }))
+        }),
+        Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([]) }),
+        Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
+        Layer.mock(ConfigService, {
+          load: Effect.succeed(
+            Schema.decodeSync(TuiConfig)({ accounts: [{ profile: "alpha", regions: ["us-east-1"], enabled: true }] })
+          ),
+          detectProfiles: Effect.succeed([])
+        })
+      )
+      // Test entry point: this case's own failing services are provided once here.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      yield* resolveAccounts(state).pipe(Effect.provide(failing))
+      expect((yield* SubscriptionRef.get(state)).callerIdentities?.["alpha"])
+        .toEqual({ _tag: "Unresolved", reason: { _tag: "CredentialsUnavailable" } })
     }))
 })

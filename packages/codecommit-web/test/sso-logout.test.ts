@@ -83,6 +83,9 @@ describe("SSO logout", () => {
       const noIdentity: ResolvedIdentity | undefined = undefined
       yield* signInAfterLogin(Effect.succeed(noIdentity), "alpha", state, Ref.update(refreshes, (n) => n + 1))
       expect((yield* SubscriptionRef.get(state)).identityLifecycle?.generation).toBe(before + 1)
+      // The login may have changed the principal, so the old identity and current user are not kept.
+      expect((yield* SubscriptionRef.get(state)).callerIdentities?.["alpha"]).toBeUndefined()
+      expect((yield* SubscriptionRef.get(state)).currentUser).toBeUndefined()
       expect(yield* Ref.get(refreshes)).toBe(1)
     }))
 })
