@@ -80,4 +80,19 @@
       background: var(--rly-color-text-2);
     }
   }
+
+  /*
+   * In forced colours the primary fill is ButtonText and its label ButtonFace. The browser's text
+   * backplate would paint Canvas behind that label and hide it, so the primary keeps its own
+   * system colours unadjusted.
+   */
+  @media (forced-colors: active) {
+    .primary {
+      forced-color-adjust: none;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .primary {
+    forced-color-adjust: none;
+  }
 }

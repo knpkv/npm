@@ -49,4 +49,15 @@
       background: var(--rly-color-text-2);
     }
   }
+
+  /* In forced colours the primary fill is ButtonText; keep its own system colours unadjusted (see Button). */
+  @media (forced-colors: active) {
+    .primary {
+      forced-color-adjust: none;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .primary {
+    forced-color-adjust: none;
+  }
 }
