@@ -328,8 +328,11 @@ When writing Effect code:
 - No one-sided accent stripes on cards, rows, notices, or panels (a thick or
   coloured `border-left`/`border-inline-start`, or an inset `box-shadow` bar).
   State and severity go in words, an even 1px border, or a flat tint.
-  `pnpm --filter @knpkv/rly lint:stripes` enforces this for rly stylesheets;
-  1px neutral column dividers stay allowed.
+  `pnpm --filter @knpkv/rly lint:stripes` (in the root `lint:static`) enforces
+  this for rly and every `packages/*/src` stylesheet; 1px neutral column
+  dividers stay allowed. Stripes product packages already had are listed in
+  `packages/rly/scripts/tokens/stripe-baseline.json`: a new stripe fails, and
+  removing a listed one means deleting its baseline line in the same change.
 - The sole raw Node filesystem exception is
   `packages/codecommit-core/src/CacheService/internal/PrivateDatabasePathNode.ts`:
   it is an audited descriptor boundary that must retain `O_NOFOLLOW` directory

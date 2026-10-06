@@ -1,0 +1,190 @@
+[
+  {
+    "declaration": "border-inline-start-color: LinkText",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "border-inline-start: 2px solid var(--rly-color-border-1)",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codecommit)",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-2) solid var(--rly-color-action-background)",
+    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-action-background)",
+    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-border-2)",
+    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink)",
+    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
+  },
+  {
+    "declaration": "box-shadow: inset var(--rly-space-4) 0 var(--rly-color-action-background)",
+    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-confluence)",
+    "path": "packages/control-center/src/client/AgentPage.module.css"
+  },
+  {
+    "declaration": "border-inline-start-color: var(--rly-color-held-ink)",
+    "path": "packages/control-center/src/client/entities/WorkspaceClockifyTimeEntryDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-clockify)",
+    "path": "packages/control-center/src/client/entities/WorkspaceClockifyTimeEntryDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: 2px solid var(--rly-color-service-confluence)",
+    "path": "packages/control-center/src/client/entities/WorkspaceConfluencePageDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-confluence)",
+    "path": "packages/control-center/src/client/entities/WorkspaceConfluencePageDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-8) solid var(--rly-color-service-confluence)",
+    "path": "packages/control-center/src/client/entities/WorkspaceConfluencePageDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: 2px solid var(--rly-color-border-2)",
+    "path": "packages/control-center/src/client/entities/WorkspaceIssueDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-jira)",
+    "path": "packages/control-center/src/client/entities/WorkspaceIssueDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codepipeline)",
+    "path": "packages/control-center/src/client/entities/WorkspacePipelineExecutionDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codepipeline)",
+    "path": "packages/control-center/src/client/entities/WorkspacePipelineExecutionDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codepipeline)",
+    "path": "packages/control-center/src/client/entities/WorkspacePipelineExecutionDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start-color: var(--rly-color-blocked-ink)",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start-color: var(--rly-color-held-ink)",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: 2px solid var(--rly-color-border-1)",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codecommit)",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codecommit)",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-text-3)",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDetails.module.css"
+  },
+  {
+    "declaration": "border-inline-start-color: var(--rly-color-blocked-ink)",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDiff.module.css"
+  },
+  {
+    "declaration": "border-inline-start-color: var(--rly-color-held-ink)",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDiff.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-text-3)",
+    "path": "packages/control-center/src/client/entities/WorkspacePullRequestDiff.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-border-2)",
+    "path": "packages/control-center/src/client/releases/RelationshipRepairPanel.module.css"
+  },
+  {
+    "declaration": "border-inline-start: 2px solid var(--rly-color-border-2)",
+    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+  },
+  {
+    "declaration": "box-shadow: inset -3px 0 var(--rly-color-blocked-ink)",
+    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+  },
+  {
+    "declaration": "box-shadow: inset -3px 0 var(--rly-color-success-ink)",
+    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+  },
+  {
+    "declaration": "box-shadow: inset -3px 0 var(--rly-color-text-2)",
+    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+  },
+  {
+    "declaration": "box-shadow: inset 3px 0 var(--rly-color-blocked-ink)",
+    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+  },
+  {
+    "declaration": "box-shadow: inset 3px 0 var(--rly-color-success-ink)",
+    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+  },
+  {
+    "declaration": "box-shadow: inset 3px 0 var(--rly-color-text-2)",
+    "path": "packages/control-center/src/client/services/ServicesPage.module.css"
+  },
+  {
+    "declaration": "border-left: 2px solid var(--rly-color-border-2)",
+    "path": "packages/control-center/src/client/settings/WorkspaceSettingsPage.module.css"
+  },
+  {
+    "declaration": "border-inline-start-color: var(--rly-color-agent)",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "border-inline-start: 2px solid var(--rly-color-agent)",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink)",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "box-shadow: inset 3px 0 0 var(--rly-color-agent)",
+    "path": "packages/herdr-connect/src/styles.css"
+  },
+  {
+    "declaration": "border-left: 3px solid var(--rly-color-service-clockify)",
+    "path": "packages/jcf-web/src/client/week.css"
+  },
+  {
+    "declaration": "border-left: var(--rly-space-4) solid var(--rly-color-service-clockify)",
+    "path": "packages/jcf-web/src/client/week.css"
+  },
+  {
+    "declaration": "border-left: var(--rly-space-4) solid var(--rly-color-service-clockify)",
+    "path": "packages/jcf-web/src/client/week.css"
+  },
+  {
+    "declaration": "border-left: var(--rly-space-4) solid var(--rly-color-service-jira)",
+    "path": "packages/jcf-web/src/client/week.css"
+  },
+  {
+    "declaration": "border-inline-start: 3px solid var(--rly-color-border-2)",
+    "path": "packages/review/src/guide/style.css"
+  },
+  {
+    "declaration": "border-left: 2px solid currentColor",
+    "path": "packages/review/src/guide/style.css"
+  }
+]
