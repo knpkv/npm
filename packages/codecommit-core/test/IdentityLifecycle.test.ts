@@ -32,13 +32,13 @@ const newIdentity: ResolvedIdentity = {
 
 type StateName = "Absent" | "Resolved" | "LookupFailed" | "AuthFailed" | "SignedOut"
 
-const stateOf: Record<StateName, CallerIdentityState | undefined> = {
+const stateOf = {
   Absent: undefined,
   Resolved: { _tag: "Resolved", ...oldIdentity },
   LookupFailed: { _tag: "Unresolved", reason: { _tag: "StsRejected" } },
   AuthFailed: { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } },
   SignedOut: { _tag: "Unresolved", reason: { _tag: "SignedOut" } }
-}
+} satisfies Record<StateName, CallerIdentityState | undefined>
 
 const lifecycleWith = (subjectState: CallerIdentityState | undefined): IdentityLifecycle => ({
   generation,
