@@ -202,3 +202,26 @@ test("opens the drawer when the window narrows while focus is in Relay", async (
   await page.setViewportSize({ height: 900, width: 1280 })
   await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
 })
+
+// Leaving Relay for plain page content (no focus target) must not open the drawer on a later resize.
+test("keeps the drawer closed on a resize after focus left Relay for page content", async ({ page }) => {
+  await page.setViewportSize({ height: 1080, width: 1920 })
+  await serve(page)
+  await page.goto(detail)
+  await expect(page.getByRole("complementary", { name: "Relay findings" })).toBeVisible()
+
+  const focusedInPane = await page.evaluate(() => {
+    const pane = document.querySelector("aside[aria-label='Relay findings']")
+    const control = [...(pane?.querySelectorAll<HTMLElement>("button, select, a[href], summary") ?? [])].find(
+      (element) => !element.matches(":disabled")
+    )
+    control?.focus()
+    return pane !== null && pane.contains(document.activeElement)
+  })
+  expect(focusedInPane).toBe(true)
+  await page.getByRole("heading", { level: 1, name: "Bound patch reads" }).click()
+  await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true)
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await expect(page.getByRole("button", { name: "Relay", exact: true })).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Relay" })).toBeHidden()
+})

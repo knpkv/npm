@@ -1510,7 +1510,16 @@ const ReadyReviewWorkspace = ({
       aria-label="Relay findings"
       className={styles.agentPane}
       onBlur={(event) => {
-        if (event.relatedTarget !== null) relayHasFocus.current = event.currentTarget.contains(event.relatedTarget)
+        const pane = event.currentTarget
+        if (event.relatedTarget !== null) {
+          relayHasFocus.current = pane.contains(event.relatedTarget)
+          return
+        }
+        // Focus went nowhere: a click on plain page content clears the flag, while a pane that is
+        // unmounting (moving into the drawer) is already detached here and keeps it.
+        queueMicrotask(() => {
+          if (pane.isConnected) relayHasFocus.current = false
+        })
       }}
       onFocus={() => {
         relayHasFocus.current = true
