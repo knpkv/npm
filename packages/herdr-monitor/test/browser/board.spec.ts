@@ -46,3 +46,29 @@ test("an outage keeps the last snapshot and says how old it is", async ({ page }
   await expect(page.locator(".agent")).toHaveCount(3)
   await expect(page.getByRole("heading", { name: "Demo flight board" })).toBeVisible()
 })
+
+// ui-b: the board is read across a room. At 1920 it was a 780px column of 185px tiles with ~11px facts.
+test("on a wall display the tiles fill the width, rows are even and facts are large", async ({ page }) => {
+  await openDemo(page, 1920)
+  const tiles = await page.locator(".agent").evaluateAll((elements) =>
+    elements.map((element) => {
+      const box = element.getBoundingClientRect()
+      return { top: Math.round(box.top), width: box.width, height: Math.round(box.height) }
+    })
+  )
+  const used = tiles.reduce((sum, tile) => sum + tile.width, 0)
+  expect(used / 1920).toBeGreaterThan(0.8)
+  const firstRow = tiles.filter((tile) => tile.top === tiles[0]?.top)
+  expect(new Set(firstRow.map((tile) => tile.height)).size).toBe(1)
+  const fact = await page.locator(".agent dd").first().evaluate((element) =>
+    Number.parseFloat(getComputedStyle(element).fontSize)
+  )
+  expect(fact).toBeGreaterThanOrEqual(18)
+})
+
+// ui-b: "Blocked" was said three times; the card line gives only the reason.
+test("a blocked card names its reason once, under its state word", async ({ page }) => {
+  await openDemo(page)
+  await expect(page.locator(".blocked .blocker")).toHaveText("Browser slot in use")
+  await expect(page.locator("#connection")).toHaveText(/updated \d{2}:\d{2}$/u)
+})

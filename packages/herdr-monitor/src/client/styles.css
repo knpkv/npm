@@ -1,4 +1,9 @@
-/* Follows the system theme through rly's light-dark tokens; a wall display set to dark stays dark. */
+/* Follows the system theme through rly's light-dark tokens; a wall display set to dark stays dark.
+   The board is read across a room, so all type grows with the screen: rem-based tokens scale from
+   16px on a laptop to about 20px on a 1920px wall display. */
+html {
+  font-size: clamp(100%, 0.45vw + 0.7rem, 125%);
+}
 :root {
   font-family: var(--rly-font-ui);
   color: var(--rly-color-text-1);
@@ -8,8 +13,7 @@
   box-sizing: border-box;
 }
 body {
-  margin: 0 auto;
-  max-width: 100rem;
+  margin: 0;
   padding: var(--rly-space-24);
 }
 /* Product name left, connection state and Lock right, a rule below. */
@@ -60,7 +64,7 @@ dt,
 form {
   display: grid;
   gap: var(--rly-space-8);
-  margin: var(--rly-space-48) 0;
+  margin: var(--rly-space-48) auto;
   max-width: 28rem;
 }
 form h2 {
@@ -122,10 +126,9 @@ button {
   margin: var(--rly-space-32) 0 var(--rly-space-24);
   overflow-wrap: break-word;
 }
+/* The board is a header and its tiles; the tiles are the only surfaces, so no frame around them. */
 .region {
-  background: var(--rly-color-surface-1);
-  border: 1px solid var(--rly-color-border-1);
-  border-radius: var(--rly-radius-control);
+  margin-top: var(--rly-space-16);
 }
 .region-header {
   align-items: baseline;
@@ -133,23 +136,25 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: var(--rly-space-4) var(--rly-space-12);
-  padding: var(--rly-space-12) var(--rly-space-16);
+  padding: var(--rly-space-12) 0;
 }
 #totals {
   color: var(--rly-color-text-2);
   font-variant-numeric: tabular-nums;
 }
+/* Tiles share the full width, and a row is one band: equal heights, whatever each one lists. */
 #agents {
-  align-items: start;
+  align-items: stretch;
   display: grid;
   gap: var(--rly-space-16);
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   list-style: none;
   margin: 0;
-  padding: var(--rly-space-16);
+  padding: var(--rly-space-16) 0 0;
 }
 /* Each agent is a flat card with an even border; its state leads as a word. */
 .agent {
+  align-content: start;
   background: var(--rly-color-surface-2);
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-control);
@@ -171,7 +176,7 @@ button {
 dl {
   border-top: 1px solid var(--rly-color-border-1);
   display: grid;
-  font-size: var(--rly-type-label-size);
+  font-size: var(--rly-type-body-size);
   gap: var(--rly-space-8) var(--rly-space-12);
   grid-template-columns: max-content minmax(0, 1fr);
   margin: var(--rly-space-12) 0 0;
@@ -182,7 +187,6 @@ dd {
   margin: 0;
 }
 .unpublished {
-  font-size: var(--rly-type-label-size);
   margin-top: var(--rly-space-8);
 }
 footer {
@@ -195,8 +199,5 @@ footer {
 @media (max-width: 30rem) {
   body {
     padding: var(--rly-space-16);
-  }
-  #agents {
-    padding: var(--rly-space-12);
   }
 }

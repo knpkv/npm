@@ -64,7 +64,8 @@ if (
         element("p", agent.task ?? "No task published", "task"),
         element("p", agent.status)
       )
-      if (agent.blocker !== null) row.append(element("p", `Blocked: ${agent.blocker}`, "blocker"))
+      // The state word above already says Blocked; this line gives only the reason.
+      if (agent.blocker !== null) row.append(element("p", agent.blocker, "blocker"))
       const facts = cardFacts(agent)
       if (facts.known.length > 0) {
         const details = element("dl", "")

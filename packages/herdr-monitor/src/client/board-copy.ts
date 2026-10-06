@@ -83,7 +83,9 @@ export type Connection =
   | { readonly _tag: "Stale"; readonly receivedAt: number }
   | { readonly _tag: "Offline"; readonly shownFrom: number | null }
 
-const clock = (at: number) => new Date(at).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+/** 24-hour `13:05`, the clock jcf and Control Center use too. */
+const clock = (at: number) =>
+  new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hourCycle: "h23" })
 
 /** The connection state's word, which leads in its tone, and the rest of the line. */
 export interface ConnectionLine {
