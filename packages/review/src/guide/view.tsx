@@ -3,10 +3,41 @@
 import { findFile, type FileDiff, type Patch, PatchDiffView } from "@knpkv/rly/diff/patch"
 import { ThemeProvider } from "@knpkv/rly/foundations"
 import { Button, StateLabel, Surface, Tabs, Text } from "@knpkv/rly/primitives"
-import { memo, type ReactElement, useEffect, useId, useRef, useState } from "react"
+import { Fragment, memo, type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { renderInline, renderMarkdown } from "./markdown.js"
 import type { Findings, Guide, Issue, Usage } from "./model.js"
 import { bySeverity, placeAll, type Placed } from "./plan.js"
+
+/**
+ * A title with `<wbr>` before each camel-case hump of a long identifier, so a heading or link breaks
+ * between words of `verifySignedApproval…` instead of mid-word or leaving one letter on a line.
+ */
+const humane = (text: string): ReactNode =>
+  text.split(/(\s+)/u).map((word, index) =>
+    word.length < 16 ? (
+      word
+    ) : (
+      <Fragment key={index}>
+        {word.split(/(?<=[a-z0-9])(?=[A-Z])/u).map((part, at) => (
+          <Fragment key={at}>
+            {at === 0 ? null : <wbr />}
+            {part}
+          </Fragment>
+        ))}
+      </Fragment>
+    )
+  )
+
+/**
+ * The file as the diff should show it: a file's default mode (`100644`) on its only side is not news,
+ * so it is left out rather than shown as "Mode added: 100644".
+ */
+const withoutDefaultMode = (file: FileDiff): FileDiff => {
+  const { newMode, oldMode, ...rest } = file
+  const keepNew = newMode !== undefined && !(oldMode === undefined && newMode === "100644")
+  const keepOld = oldMode !== undefined && !(newMode === undefined && oldMode === "100644")
+  return { ...rest, ...(keepNew && { newMode }), ...(keepOld && { oldMode }) }
+}
 
 /** Keep Mermaid-owned DOM intact when unrelated diff or theme controls change. */
 const Prose = memo(({ text }: { readonly text: string }) => (
@@ -185,9 +216,10 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
         </header>
         {summary === "" ? null : <Prose text={summary} />}
         <PatchDiffView
-          file={file}
+          file={withoutDefaultMode(file)}
           id={id}
-          mode={mode}
+          // A file that exists on one side only has nothing to show beside it: one column.
+          mode={file.status === "added" || file.status === "deleted" ? "stacked" : mode}
           wrap={wrap}
           renderAnnotation={(side, line) => {
             const issues = placed.filter(
@@ -220,7 +252,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
       <div className="review-side">
         <nav className="review-nav" aria-label="Guide chapters">
           <Text as="p" className="review-nav-title" variant="label">
-            {guide.title}
+            {humane(guide.title)}
           </Text>
           <ol>
             {hasFindings ? (
@@ -232,7 +264,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
             ) : null}
             {guide.sections.map((section, index) => (
               <li key={index}>
-                <a href={`#${fragmentId(`s${index + 1}`)}`}>{section.title}</a>
+                <a href={`#${fragmentId(`s${index + 1}`)}`}>{humane(section.title)}</a>
               </li>
             ))}
             {guide.unplacedFiles.length > 0 ? (
@@ -291,7 +323,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
             )}
           </div>
           <Text as="h1" variant="page-title">
-            {guide.title}
+            {humane(guide.title)}
           </Text>
           <Tabs
             aria-label="Read the change"
@@ -314,7 +346,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                     <ol className="review-roadmap">
                       {guide.sections.map((section, index) => (
                         <li key={index}>
-                          <a href={`#${fragmentId(`s${index + 1}`)}`}>{section.title}</a>
+                          <a href={`#${fragmentId(`s${index + 1}`)}`}>{humane(section.title)}</a>
                           {section.diffs.length === 0 ? null : (
                             <span className="review-muted">
                               , {section.diffs.length} file{section.diffs.length === 1 ? "" : "s"}
@@ -381,7 +413,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
         {guide.sections.map((section, index) => (
           <section className="review-chapter" id={fragmentId(`s${index + 1}`)} key={index}>
             <Text as="h2" variant="section-title">
-              {section.title}
+              {humane(section.title)}
             </Text>
             <Prose text={section.overview} />
             {section.diffs.map((diff) => {

@@ -143,7 +143,7 @@ const a = "<x>";
       "<p>Intro line continues.</p>",
       "<h4>Why</h4>",
       "<ul><li>one</li><li>two wrapped</li></ul>",
-      "<aside class=\"callout callout-warning\"><strong class=\"callout-label\">Warning</strong><p>Careful with <code>x</code>.</p></aside>",
+      "<aside class=\"callout callout-warning\"><p><strong class=\"callout-label\">Warning:</strong> Careful with <code>x</code>.</p></aside>",
       "<blockquote><p>plain quote</p></blockquote>",
       "<pre tabindex=\"0\"><code class=\"lang-ts\">const a = &quot;&lt;x&gt;&quot;;</code></pre>"
     ].join("\n")

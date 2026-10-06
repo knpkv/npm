@@ -239,9 +239,10 @@ export const renderMarkdown = (source: string): Rendered => {
         const name = `${label.charAt(0)}${label.slice(1).toLowerCase()}`
         const body = renderMarkdown(quoted.slice(1).join("\n"))
         mermaid ||= body.mermaid
-        out.push(
-          `<aside class="callout callout-${label.toLowerCase()}"><strong class="callout-label">${name}</strong>${body.html}</aside>`
-        )
+        // The kind is the body's first word, in bold: "Important: …", not a label above the text.
+        const lead = `<strong class="callout-label">${name}:</strong> `
+        const html = body.html.startsWith("<p>") ? `<p>${lead}${body.html.slice(3)}` : `${lead}${body.html}`
+        out.push(`<aside class="callout callout-${label.toLowerCase()}">${html}</aside>`)
       } else {
         const body = renderMarkdown(quoted.join("\n"))
         mermaid ||= body.mermaid

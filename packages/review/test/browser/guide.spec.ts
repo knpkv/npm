@@ -183,3 +183,58 @@ for (const width of [1024, 1440]) {
     expect(total, JSON.stringify(Schema.decodeUnknownSync(Schema.Array(LayoutShift))(entries))).toBeLessThan(0.05)
   })
 }
+
+// ui-b: an added file drew an empty "Before" column the height of the hunk, under a raw
+// "Mode added: 100644" header.
+test("an added file is one column with no mode line", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await load(page, await guideHtml(), testInfo)
+  const added = page.locator(".review-file", { has: page.getByText("test/release.test.ts", { exact: true }) })
+  await expect(added).toHaveCount(1)
+  // One code column ("Change") with both line numbers beside it, not an empty Before pane.
+  await expect(added.getByRole("columnheader", { name: "Change" })).toHaveCount(1)
+  await expect(page.getByText(/Mode added/u)).toHaveCount(0)
+})
+
+for (const width of [390, 1280]) {
+  // ui-b: an identifier heading left one letter on its own line, or split mid-word.
+  test(
+    `identifier headings break between words, never leaving a lone letter at ${width}px`,
+    async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 })
+      await load(page, await guideHtml(true), testInfo)
+      const shortestLastLine = await page.locator("h1, h2, .review-nav a, .review-roadmap a").evaluateAll((elements) =>
+        elements.flatMap((element) => {
+          const text = element.textContent ?? ""
+          if (text.length < 16) return []
+          // Characters on the heading's last rendered line.
+          const range = document.createRange()
+          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+          const tops: Array<number> = []
+          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+            for (let at = 0; at < (node.textContent ?? "").length; at++) {
+              range.setStart(node, at)
+              range.setEnd(node, at + 1)
+              const rect = range.getBoundingClientRect()
+              if (rect.width > 0) tops.push(Math.round(rect.top))
+            }
+          }
+          // Collapsed (e.g. inside a closed <details>): nothing is drawn, so nothing can be orphaned.
+          if (tops.length === 0) return []
+          const last = Math.max(...tops)
+          return [{ text: text.slice(0, 30), lastLine: tops.filter((top) => Math.abs(top - last) < 4).length }]
+        })
+      )
+      expect(shortestLastLine.filter((heading) => heading.lastLine < 3)).toEqual([])
+    }
+  )
+}
+
+// ui-b: at phone widths the view controls came before the guide's title.
+test("on a phone the title comes before the view controls", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await load(page, await guideHtml(), testInfo)
+  const title = await page.getByRole("heading", { level: 1 }).boundingBox()
+  const controls = await page.locator(".review-controls").boundingBox()
+  expect(title !== null && controls !== null && title.y < controls.y).toBe(true)
+})

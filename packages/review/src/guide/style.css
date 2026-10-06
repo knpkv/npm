@@ -149,9 +149,11 @@ html[data-review-fonts="loading"] body {
 .review-header {
   padding-block-end: var(--rly-space-32);
 }
+/* A document's title, not a poster's: page-title type, capped so a long title stays a few lines. */
 .review-header h1 {
   margin-block: var(--rly-space-24);
   max-width: 28ch;
+  font-size: min(var(--rly-type-page-title-size), 2.75rem);
 }
 .review-explanation {
   padding-block: var(--rly-space-8);
@@ -284,19 +286,8 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   background: var(--rly-color-surface-1);
 }
 .review-prose .callout-label {
-  display: block;
-  font-size: var(--rly-type-label-size);
   font-weight: 600;
   color: var(--rly-color-text-1);
-}
-.review-prose .callout-warning .callout-label {
-  color: var(--rly-color-held-ink);
-}
-.review-prose .callout-important .callout-label {
-  color: var(--rly-color-deploying-ink);
-}
-.review-prose .callout > p:first-of-type {
-  margin-block-start: var(--rly-space-4);
 }
 .review-chapter {
   border-top: 1px solid var(--rly-color-border-1);
@@ -471,7 +462,8 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
 .review-skip:focus {
   top: 1rem;
 }
-/* Phone: reading controls in one band on top, then the guide, then the chapter list. */
+/* Phone: the guide first, its title and summary on the first screen, then the chapter list, then the
+   reading controls. */
 @media (max-width: 800px) {
   .review-guide {
     grid-template-columns: minmax(0, 1fr);
@@ -480,20 +472,20 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
     display: contents;
   }
   .review-controls {
-    order: 1;
+    order: 3;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--rly-space-8) var(--rly-space-16);
     padding: var(--rly-space-12) var(--rly-space-16);
-    border-bottom: 1px solid var(--rly-color-border-1);
+    border-top: 1px solid var(--rly-color-border-1);
   }
   .review-content {
     border-inline-start: 0;
-    order: 2;
+    order: 1;
   }
   .review-nav {
-    order: 3;
+    order: 2;
     border-top: 1px solid var(--rly-color-border-1);
     padding: var(--rly-space-24) var(--rly-space-16);
   }
