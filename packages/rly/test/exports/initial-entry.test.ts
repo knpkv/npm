@@ -38,6 +38,7 @@ describe("public entries", () => {
       "GovernedActionReview",
       "Hero",
       "HeroWord",
+      "RLY_HERO_DEFAULT_VARIANTS",
       "RLY_HERO_VARIANTS",
       "RLY_HERO_WORD_VARIANTS",
       "PeopleStrip",

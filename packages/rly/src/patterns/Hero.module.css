@@ -8,7 +8,6 @@
 
   .fact {
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
   }
 
   .caption {
@@ -58,5 +57,25 @@
 
   .held {
     color: var(--rly-color-held-ink);
+  }
+
+  /*
+   * Forced colours drop the state ink, and the word already inherits the sentence's weight, so
+   * underline it to keep it distinct. The same rule applies under the Storybook toolbar's mode.
+   */
+  @media (forced-colors: active) {
+    .blocked,
+    .held {
+      text-decoration: underline;
+      text-decoration-thickness: var(--rly-space-2);
+      text-underline-offset: var(--rly-space-4);
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .blocked,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .held {
+    text-decoration: underline;
+    text-decoration-thickness: var(--rly-space-2);
+    text-underline-offset: var(--rly-space-4);
   }
 }

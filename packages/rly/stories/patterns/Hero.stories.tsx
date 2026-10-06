@@ -16,8 +16,8 @@ export const States: Story = {
   args: { fact: "" },
   play: async ({ canvas }) => {
     await expect(canvas.getByRole("region", { name: "Work summary" })).toHaveTextContent("3 goals need you, 2 blocked")
-    await expect(canvas.getByText("blocked", { selector: "span" })).toBeVisible()
-    await expect(canvas.getAllByRole("region", { name: /Summary/ }).length).toBeGreaterThan(2)
+    await expect(canvas.getAllByText("blocked", { selector: "span" })).toHaveLength(2)
+    await expect(canvas.getAllByRole("region", { name: /summary$/ })).toHaveLength(6)
   },
   render: () => (
     <div style={{ display: "grid", gap: "var(--rly-space-32)" }}>
@@ -28,6 +28,7 @@ export const States: Story = {
         size="heading"
       />
       <Hero
+        label="Release summary"
         caption="Going to prod, Thu 8 Oct. 2 items aren't merged and staging failed 40m ago."
         fact={
           <>
@@ -36,6 +37,7 @@ export const States: Story = {
         }
       />
       <Hero
+        label="Queue summary"
         caption="1 account not checked: production (token expired)."
         fact={
           <>
@@ -43,9 +45,19 @@ export const States: Story = {
           </>
         }
       />
-      <Hero caption="No caller identity resolved, so nothing is counted as yours." fact="Unknown" />
-      <Hero caption="Oldest open for 2d 6h." fact="2 pull requests wait on your review" size="line" />
       <Hero
+        label="Identity summary"
+        caption="No caller identity resolved, so nothing is counted as yours."
+        fact="Unknown"
+      />
+      <Hero
+        label="Review summary"
+        caption="Oldest open for 2d 6h."
+        fact="2 pull requests wait on your review"
+        size="line"
+      />
+      <Hero
+        label="Board summary"
         caption="arch: needs approval for work.admit RLY-142."
         fact={
           <>

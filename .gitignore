@@ -47,3 +47,6 @@ scratchpad/**/*.ts
 
 # Local environment variables
 .envrc.local
+
+# Storybook test-runner traces left by a failing story run
+**/__traces__/

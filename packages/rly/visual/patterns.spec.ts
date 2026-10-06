@@ -62,6 +62,8 @@ test(
           getComputedStyle(element.parentElement ?? element).color
         ])
         expect(wordInk).not.toBe(sentenceInk)
+      } else {
+        expect(await word.evaluate((element) => getComputedStyle(element).textDecorationLine)).toBe("underline")
       }
       await expectNoHorizontalOverflow(page)
       await page.screenshot({

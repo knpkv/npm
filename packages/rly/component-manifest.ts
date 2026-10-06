@@ -169,6 +169,7 @@ export const componentManifest = {
       exports: [
         { kind: "value", name: "Hero" },
         { kind: "value", name: "HeroWord" },
+        { kind: "value", name: "RLY_HERO_DEFAULT_VARIANTS" },
         { kind: "value", name: "RLY_HERO_VARIANTS" },
         { kind: "value", name: "RLY_HERO_WORD_VARIANTS" },
         { kind: "type", name: "HeroProps" },

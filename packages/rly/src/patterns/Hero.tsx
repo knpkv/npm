@@ -25,6 +25,9 @@ export const RLY_HERO_VARIANTS = defineVariants({
   }
 })
 
+/** Default Hero size. */
+export const RLY_HERO_DEFAULT_VARIANTS = defineVariants({ size: "heading" })
+
 /** Hero size. Only one Hero per screen, and `display` only where it is read from a distance. */
 export type RlyHeroSize = keyof typeof RLY_HERO_VARIANTS.size
 
@@ -69,7 +72,7 @@ export const Hero = ({
   className,
   fact,
   label = "Summary",
-  size = "heading",
+  size = RLY_HERO_DEFAULT_VARIANTS.size,
   ...props
 }: HeroProps): ReactElement => {
   const classes = classNames(style("root"), RLY_HERO_VARIANTS.size[size].className, className)
