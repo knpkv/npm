@@ -121,6 +121,19 @@ describe("Connect Work goal association", () => {
     expect(resolveConnectWorkGoal(connectAgent, snapshot([completed]))).toEqual({ _tag: "missing" })
   })
 
+  it("ignores abandoned ownership the same way", () => {
+    const abandoned = Schema.decodeUnknownSync(WorkGoal)({
+      ...workGoal,
+      id: "goal-abandoned",
+      state: "abandoned",
+      title: "Abandoned goal"
+    })
+    expect(resolveConnectWorkGoal(connectAgent, snapshot([abandoned, workGoal]))).toMatchObject({
+      _tag: "available",
+      goalId: "goal-review"
+    })
+  })
+
   it("fails closed when a duplicated goal record makes ownership ambiguous", () => {
     const duplicate = Schema.decodeUnknownSync(WorkGoal)({
       ...workGoal,
