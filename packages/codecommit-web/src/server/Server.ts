@@ -324,8 +324,9 @@ export interface CodeCommitServeOptions {
 export const serveCodeCommit = Effect.fn("CodeCommitServer.serve")(function*(options: CodeCommitServeOptions = {}) {
   const stdio = yield* Stdio.Stdio
   const hostname = options.hostname ?? "127.0.0.1"
-  const requestedPort = options.port ?? (yield* Port.pipe(Effect.orDie))
-  const portRef = yield* Ref.make(requestedPort)
+  // The Vite dev proxy forwards to PORT, whatever port this server was asked to start on.
+  const proxyPort = yield* Port.pipe(Effect.orDie)
+  const portRef = yield* Ref.make(options.port ?? proxyPort)
   const retriesRef = yield* Ref.make(10)
   const listening = yield* Ref.make(false)
   const publicOriginOverride = yield* PublicOrigin.pipe(Effect.orDie)
@@ -339,7 +340,7 @@ export const serveCodeCommit = Effect.fn("CodeCommitServer.serve")(function*(opt
       const security = yield* makeOwnerSession(directOrigin)
       const publicOrigin = yield* resolveCodeCommitPublicOriginForBind(
         Option.getOrUndefined(publicOriginOverride),
-        requestedPort,
+        proxyPort,
         p,
         directOrigin
       )

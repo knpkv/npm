@@ -491,6 +491,14 @@ describe("CodeCommit web security boundary", () => {
       expect(
         yield* resolveCodeCommitPublicOriginForBind("http://LOCALHOST:3000/", 3000, 3000, "http://localhost:3000")
       ).toBe("http://localhost:3000")
+      // `codecommit web --port 3001` while the proxy forwards to PORT 3000: advertise the direct origin.
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3001, "http://127.0.0.1:3001")
+      ).toBe("http://127.0.0.1:3001")
+      // `:80` is HTTP's default port, so 127.0.0.1:80 is exactly the proxy's backend.
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 80, 80, "http://127.0.0.1:80")
+      ).toBe("http://localhost:5173")
       // `--hostname localhost` advertises the host it was asked to bind, not 127.0.0.1.
       expect(yield* resolveCodeCommitPublicOriginForBind(undefined, 3000, 3000, "http://localhost:3000")).toBe(
         "http://localhost:3000"

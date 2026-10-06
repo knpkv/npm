@@ -14,27 +14,37 @@ export const resolveCodeCommitPublicOrigin = Effect.fn("CodeCommitServer.resolve
 )
 
 /**
- * The origin to advertise for one bind attempt at `authorityOrigin`. A retrying backend has moved
- * off the port the Vite proxy forwards to, so it advertises itself directly instead. The proxy
- * forwards to `127.0.0.1` only, so a configured proxy origin for any other bind host fails.
+ * The origin to advertise for one bind attempt at `authorityOrigin`.
+ *
+ * A configured origin is either the server's own origin or the Vite dev proxy, which forwards to
+ * `127.0.0.1:<proxyPort>` (its `PORT`). The proxy is advertised only when this bind is exactly that
+ * backend. A bind on another host can never be reached through it, so that fails. A bind on another
+ * port (a retry moved off a taken port, or `--port` differs from `PORT`) advertises its direct
+ * origin instead and says so in the log.
  */
 export const resolveCodeCommitPublicOriginForBind = Effect.fn("CodeCommitServer.resolvePublicOriginForBind")(
   function*(
     configuredOrigin: string | undefined,
-    requestedPort: number,
+    proxyPort: number,
     actualPort: number,
     authorityOrigin: string
   ) {
-    const originOverride = requestedPort === actualPort ? configuredOrigin : undefined
-    // Compare canonical origins: `http://localhost:3000/` is the server's own origin, not a proxy.
-    const advertised = yield* resolvePublicOrigin(originOverride, authorityOrigin)
+    // Canonical forms throughout: `http://localhost:3000/` and `:80` spellings name the same origin.
+    const advertised = yield* resolvePublicOrigin(configuredOrigin, authorityOrigin)
     const authority = yield* requireLoopbackOrigin(authorityOrigin)
-    const proxyTarget = loopbackOrigin("127.0.0.1", actualPort)
-    if (advertised !== authority && authority !== proxyTarget) {
+    if (advertised === authority) return authority
+    const proxyHostBind = yield* requireLoopbackOrigin(loopbackOrigin("127.0.0.1", actualPort))
+    if (authority !== proxyHostBind) {
       return yield* new UnsafeLoopbackAddressError({
         address: advertised,
-        message: `The dev proxy forwards to ${proxyTarget}; it cannot reach a server bound at ${authority}`
+        message: `The dev proxy forwards to 127.0.0.1; it cannot reach a server bound at ${authority}`
       })
+    }
+    if (actualPort !== proxyPort) {
+      yield* Effect.logWarning(
+        `Not advertising ${advertised}: it forwards to port ${proxyPort}, this server is on ${actualPort}`
+      )
+      return authority
     }
     return advertised
   }
