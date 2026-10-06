@@ -6,8 +6,15 @@
   border-radius: var(--rly-radius-field);
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  /* Fits the viewport beside a long pull request; the list scrolls inside a closed box. */
-  max-block-size: calc(100dvh - var(--app-header-block-size, 4.5rem) - var(--rly-space-32));
+  /*
+   * Fits the viewport beside a long pull request; the list scrolls inside a closed box. A sticky
+   * box cannot leave its grid, which ends above the page's bottom padding: so the rail also leaves
+   * that padding free, or at the bottom of the page the grid drags its top under the app header.
+   */
+  max-block-size: calc(
+    100dvh - var(--app-header-block-size, 4.5rem) - var(--rly-space-16) -
+      var(--app-main-padding-block-end, var(--rly-space-16))
+  );
   min-inline-size: 0;
 }
 
