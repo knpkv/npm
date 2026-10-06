@@ -63,6 +63,16 @@ describe("workTriage", () => {
     expect(rows).toEqual([["shipped", "done"], ["edge", "done"], ["old", "earlier"]])
   })
 
+  it("lists planned goals as not started, after moving work, and never counts them as moving", () => {
+    const triage = workTriage({ asOf: AS_OF, goals: [goal("idea", { state: "planned" }), goal("active")] })
+    expect(triage.rows.map(({ goal: { id }, group }) => [id, group])).toEqual([["active", "moving"], [
+      "idea",
+      "planned"
+    ]])
+    expect(triage.summary).toMatchObject({ _tag: "Clear", moving: 1 })
+    expect(workTriageGroupTitle.planned).toBe("Not started")
+  })
+
   it("orders within a group by most recent update, then keeps the snapshot's order", () => {
     const rows = groupsOf([
       goal("goal-2", { updatedAt: AS_OF - 1_000 }),

@@ -1,16 +1,19 @@
 /**
- * The Work tab's triage: which goals need the viewer, which are blocked, which are moving, and
- * which finished in the last 24 hours, plus the one-sentence summary above them.
+ * The Work tab's triage: which goals need the viewer, which are blocked, which are moving, which
+ * have not started, and which finished in the last 24 hours, plus the one-sentence summary above them.
  *
  * Pure: callers pass one snapshot. View-only derivation lives here; the goal model, its
  * projection and observed facts stay in `model.ts`/`projection.ts`.
  *
  * A goal needs the viewer when it has an open request: someone asked for an approval only a
- * person can give. Blocked follows the goal's recorded state. Done counts terminal goals updated
- * within 24 hours of the snapshot, labelled as such, never as "since you looked"; older terminal
- * goals stay listed last, as "Finished earlier", so a status filter still finds them.
+ * person can give. Blocked and finished follow the displayed state: the observed overlay's when it
+ * has one (a merged pull request is done, a closed one abandoned), else the recorded state. Done
+ * counts goals that finished within 24 hours of the snapshot (the pull request's close time when
+ * that is what finished them, else the goal's last update), labelled as such, never as "since
+ * you looked"; older finished goals stay listed last, as "Finished earlier", so a status filter
+ * still finds them.
  */
-import type { WorkGoal, WorkRequest, WorkSnapshot, WorkState } from "./model.js"
+import type { WorkDisplayState, WorkGoal, WorkGoalObserved, WorkRequest, WorkSnapshot } from "./model.js"
 
 const DAY_MS = 86_400_000
 
@@ -18,12 +21,21 @@ const DAY_MS = 86_400_000
 export const workTriageDoneWindowMs = DAY_MS
 
 /** The groups, in reading order. */
-export type WorkTriageGroup = "needs-you" | "blocked" | "moving" | "done" | "earlier"
+export type WorkTriageGroup = "needs-you" | "blocked" | "moving" | "planned" | "done" | "earlier"
 
-export const workTriageGroups: ReadonlyArray<WorkTriageGroup> = ["needs-you", "blocked", "moving", "done", "earlier"]
+export const workTriageGroups: ReadonlyArray<WorkTriageGroup> = [
+  "needs-you",
+  "blocked",
+  "moving",
+  "planned",
+  "done",
+  "earlier"
+]
 
 export interface WorkTriageRow {
   readonly goal: WorkGoal
+  /** The state the tab shows: observed when the overlay has one, else recorded. */
+  readonly displayState: WorkDisplayState
   readonly group: WorkTriageGroup
   /** Position in the snapshot, the projection's own order; ties fall back to it. */
   readonly index: number
@@ -48,17 +60,31 @@ export interface WorkTriage {
   readonly summary: WorkTriageSummary
 }
 
-/** Which states have finished. Keyed by every WorkState, so a new state must be placed here to compile. */
+/**
+ * The observed overlay entry for one goal, or null when nothing was observed about it (or the
+ * snapshot carries no overlay). Same contract as arch-a's `display-state.ts` (#516); this local
+ * copy is replaced by that import when it lands.
+ */
+export const observedFor = (snapshot: Pick<WorkSnapshot, "observed">, goalId: string): WorkGoalObserved | null =>
+  snapshot.observed?.find((entry) => entry.goalId === goalId) ?? null
+
+/** What the tab shows for a goal: the observed state when one was observed, else its recorded state. */
+export const displayStateOf = (snapshot: Pick<WorkSnapshot, "observed">, goal: WorkGoal): WorkDisplayState =>
+  observedFor(snapshot, goal.id)?.displayState ?? goal.state
+
+/**
+ * Which displayed states have finished. Keyed by every WorkDisplayState, so a new state must be
+ * placed here to compile.
+ */
 const terminalState = {
   planned: false,
   working: false,
   blocked: false,
   review: false,
   deployed: true,
-  completed: true
-} satisfies Readonly<Record<WorkState, boolean>>
-
-const terminal = (goal: WorkGoal): boolean => terminalState[goal.state]
+  completed: true,
+  abandoned: true
+} satisfies Readonly<Record<WorkDisplayState, boolean>>
 
 const openRequestsOf = (goal: WorkGoal): ReadonlyArray<WorkRequest> =>
   (goal.requests ?? []).filter((request) => request.state === "open").toSorted((a, b) => a.requestedAt - b.requestedAt)
@@ -68,14 +94,21 @@ const openRequestsOf = (goal: WorkGoal): ReadonlyArray<WorkRequest> =>
  * with an open request is in "needs you" and not in the blocked count. A request without an
  * approval target still counts: a person must act, even when the hub link is missing.
  */
-const groupOf = (goal: WorkGoal, openRequests: ReadonlyArray<WorkRequest>, asOf: number): WorkTriageGroup => {
+const groupOf = (
+  finishedAt: number,
+  displayState: WorkDisplayState,
+  openRequests: ReadonlyArray<WorkRequest>,
+  asOf: number
+): WorkTriageGroup => {
   if (openRequests.length > 0) return "needs-you"
-  if (goal.state === "blocked") return "blocked"
-  if (terminal(goal)) return asOf - goal.updatedAt <= workTriageDoneWindowMs ? "done" : "earlier"
+  if (displayState === "blocked") return "blocked"
+  if (terminalState[displayState]) return asOf - finishedAt <= workTriageDoneWindowMs ? "done" : "earlier"
+  // Not started yet: listed after the work that is moving, never counted as moving.
+  if (displayState === "planned") return "planned"
   return "moving"
 }
 
-const groupOrder = { "needs-you": 0, blocked: 1, moving: 2, done: 3, earlier: 4 } satisfies Readonly<
+const groupOrder = { "needs-you": 0, blocked: 1, moving: 2, planned: 3, done: 4, earlier: 5 } satisfies Readonly<
   Record<WorkTriageGroup, number>
 >
 
@@ -101,11 +134,20 @@ const compareRows = (left: WorkTriageRow, right: WorkTriageRow): number => {
  * every goal (the model rejects a snapshot over `workSnapshotMaxGoals` rather than truncating it),
  * so a zero here is a real zero.
  */
-export const workTriage = (snapshot: Pick<WorkSnapshot, "asOf" | "goals">): WorkTriage => {
+export const workTriage = (snapshot: Pick<WorkSnapshot, "asOf" | "goals" | "observed">): WorkTriage => {
   const rows = snapshot.goals
     .map((goal, index): WorkTriageRow => {
       const openRequests = openRequestsOf(goal)
-      return { goal, group: groupOf(goal, openRequests, snapshot.asOf), index, openRequests }
+      const observed = observedFor(snapshot, goal.id)
+      const displayState = observed?.displayState ?? goal.state
+      const finishedAt = observed?.pullRequest?.fact.closedAt ?? goal.updatedAt
+      return {
+        displayState,
+        goal,
+        group: groupOf(finishedAt, displayState, openRequests, snapshot.asOf),
+        index,
+        openRequests
+      }
     })
     .toSorted(compareRows)
   const needsYou = rows.filter((row) => row.group === "needs-you")
@@ -162,6 +204,7 @@ export const workTriageGroupTitle = {
   "needs-you": "Needs you",
   blocked: "Blocked",
   moving: "Moving",
+  planned: "Not started",
   done: "Done in the last 24 hours",
   earlier: "Finished earlier"
 } satisfies Readonly<Record<WorkTriageGroup, string>>
