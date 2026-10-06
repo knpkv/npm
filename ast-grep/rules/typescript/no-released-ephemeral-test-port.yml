@@ -1,0 +1,87 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-released-ephemeral-test-port
+language: tsx
+severity: error
+message: "Bind the server under test to port 0 and read its bound address; a port reserved and released here can be taken before it is used"
+rule:
+  # Ordered so $RESOLVE, bound by the enclosing Promise, is the resolver the
+  # close callback must call: closing the probe and resolving the Promise with
+  # a value hands that value (its port) to whoever binds it next.
+  all:
+    - pattern: $SERVER.listen(0, $$$)
+    - inside:
+        stopBy: end
+        any:
+          - pattern: new Promise(($RESOLVE, $$$) => { $$$ })
+          - pattern: new Promise(($RESOLVE) => { $$$ })
+          - pattern: new Promise(($RESOLVE, $$$) => $BODY)
+          - pattern: new Promise(($RESOLVE) => $BODY)
+          - pattern: new Promise(function($RESOLVE, $$$) { $$$ })
+          - pattern: new Promise<$T>(($RESOLVE, $$$) => { $$$ })
+          - pattern: new Promise<$T>(($RESOLVE) => { $$$ })
+          - pattern: new Promise<$T>(($RESOLVE, $$$) => $BODY)
+          - pattern: new Promise<$T>(($RESOLVE) => $BODY)
+          - pattern: new Promise<$T>(function($RESOLVE, $$$) { $$$ })
+    - has:
+        field: arguments
+        has:
+          any:
+            - kind: arrow_function
+            - kind: function_expression
+          has:
+            pattern: $SERVER.close($CALLBACK)
+            stopBy: end
+            has:
+              field: arguments
+              has:
+                any:
+                  - kind: arrow_function
+                  - kind: function_expression
+                has:
+                  pattern: $RESOLVE($VALUE)
+                  stopBy: end
+                  # A handed-on value (`port`, `address.port`), not `resolve(undefined)`.
+                  has:
+                    field: arguments
+                    has:
+                      any:
+                        - kind: identifier
+                          not:
+                            regex: "^undefined$"
+                        - kind: member_expression
+    # The handed-on value is the port: `x.port`, a variable named for it, or an
+    # alias assigned from `.port`. `resolve(body)` after a real request is not.
+    - any:
+        - has:
+            stopBy: end
+            pattern: $RESOLVE($VALUE)
+            has:
+              field: arguments
+              has:
+                any:
+                  - kind: member_expression
+                    regex: "\\.port$"
+                  - kind: identifier
+                    regex: "(?i)port$"
+        - has:
+            stopBy: end
+            pattern: const $VALUE = $OBJ.port
+        - has:
+            stopBy: end
+            pattern: let $VALUE = $OBJ.port
+
+files:
+  - "packages/*/test/**/*.ts"
+  - "packages/*/test/**/*.tsx"
+  - "packages/*/e2e/**/*.ts"
+  - "packages/*/e2e/**/*.tsx"
+
+note: |
+  Picking a free port by listening on port 0, closing, and handing the number
+  to another listener races with every other process on the machine: two test
+  suites running at once collided this way with EADDRINUSE. Let the listener
+  under test bind port 0 itself and read the port back from it. When a port
+  truly must be known before any listener exists (for example, a test that
+  proves nothing listens yet), suppress with
+  `// ast-grep-ignore: no-released-ephemeral-test-port` and a reason.

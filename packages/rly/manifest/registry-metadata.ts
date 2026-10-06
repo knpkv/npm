@@ -328,7 +328,8 @@ export const COMPONENT_REGISTRY_METADATA = {
     "agent",
     "human",
     "service",
-    "system"
+    "system",
+    "provenance"
   ], ["audit", "timeline"]),
   Verdict: registryMetadata("State a release verdict with text, icon, and color-independent tone", [
     "caution",

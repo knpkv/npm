@@ -33,6 +33,7 @@ const decodePort = Schema.decodeUnknownOption(Schema.Struct({ port: Schema.Numbe
 const freePort = () =>
   new Promise<number>((resolve) => {
     const server = createServer()
+    // ast-grep-ignore: no-released-ephemeral-test-port -- the spawned server takes PORT from its environment; follow-up: let it bind 0 and report its port.
     server.listen(0, "127.0.0.1", () => {
       const address = server.address()
       const port = Option.getOrElse(Option.map(decodePort(address), (bound) => bound.port), () => 0)
