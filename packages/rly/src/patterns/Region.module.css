@@ -1,0 +1,67 @@
+@layer rly.components {
+  .root {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    box-sizing: border-box;
+    color: var(--rly-color-text-1);
+    display: grid;
+    grid-template-rows: auto 1fr;
+    max-inline-size: 100%;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .default {
+    background: var(--rly-color-surface-1);
+  }
+
+  .tray {
+    background: var(--rly-color-surface-2);
+  }
+
+  .header {
+    align-items: center;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8) var(--rly-space-12);
+    /* Room for a 40px control plus padding, so headers line up across adjacent regions. */
+    min-block-size: calc(var(--rly-space-48) + var(--rly-space-8));
+    padding: var(--rly-space-8) var(--rly-space-16);
+  }
+
+  .title {
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+    margin: var(--rly-space-0);
+    margin-inline-end: auto;
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .title:focus-visible {
+    border-radius: var(--rly-radius-tag);
+    outline: 2px solid var(--rly-color-focus);
+    outline-offset: 2px;
+  }
+
+  .count {
+    color: var(--rly-color-text-2);
+    font-variant-numeric: tabular-nums;
+    font-weight: 400;
+  }
+
+  .actions {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+  }
+
+  .body {
+    display: grid;
+    gap: var(--rly-space-16);
+    min-inline-size: var(--rly-space-0);
+    padding: var(--rly-space-16);
+  }
+}
