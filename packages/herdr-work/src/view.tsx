@@ -34,6 +34,8 @@ import {
 } from "./work-triage.js"
 
 export type { WorkRequestAnswer, WorkRequestDecision, WorkRequestDecisions } from "./request-decision.js"
+/** The request clock's wording ("52s", "4m 12s", "11m", "expiring"), shared with hosts that show the same clocks. */
+export { workRequestClockText } from "./request-decision.js"
 
 const windows: ReadonlyArray<WorkSnapshotWindow> = ["now", "day", "week", "month"]
 const stageOrder: ReadonlyArray<DeliveryStage> = ["local", "review", "pull_request", "merged", "deployed"]
@@ -220,6 +222,8 @@ const decisionBarFor = (request: WorkRequest, decisions: WorkRequestDecisions | 
   if (decidability._tag === "Elsewhere" || decisions === undefined) return null
   const { expiresAt, jobId } = decidability
   const pending = decisions.expiresAt(jobId) !== undefined && request.state === "open"
+  // Once the request has left the hub's queue, the snapshot's outcome is the proven one.
+  const outcome = request.state === "open" ? "Left the hub's queue." : `${requestPresentation[request.state].label}.`
   const state: RlyDecisionBarState =
     decisions.sending?.jobId === jobId
       ? { _tag: "sending", action: decisions.sending.decision }
@@ -227,7 +231,10 @@ const decisionBarFor = (request: WorkRequest, decisions: WorkRequestDecisions | 
         ? { _tag: "off", reason: "Another decision is waiting for the hub." }
         : pending
           ? { _tag: "ready" }
-          : { _tag: "off", reason: "The hub no longer lists this request as waiting." }
+          : { _tag: "off", reason: outcome }
+  const answer = decisions.answer?.jobId === jobId ? decisions.answer : null
+  // An uncertain answer stands only until the snapshot proves what happened.
+  const status = answer === null ? undefined : answer.settled || pending ? answer.text : `${outcome} ${answer.text}`
   const decide = (decision: "approve" | "reject") => () => {
     if (state._tag === "ready") decisions.onDecision({ decision, jobId })
   }
@@ -241,7 +248,7 @@ const decisionBarFor = (request: WorkRequest, decisions: WorkRequestDecisions | 
       onApprove={decide("approve")}
       onReject={decide("reject")}
       state={state}
-      {...(decisions.answer?.jobId === jobId ? { status: decisions.answer.text } : {})}
+      {...(status === undefined ? {} : { status })}
       target={request.summary}
     />
   )

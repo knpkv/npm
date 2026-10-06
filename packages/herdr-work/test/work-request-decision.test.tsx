@@ -155,7 +155,10 @@ describe("Work requests decided in place", () => {
   })
 
   it("keeps the bar and announces the hub's answer after the request leaves the queue", async () => {
-    const { decisions, sent } = decisionsOf({}, { answer: { jobId: "job-1", text: "The hub recorded your approval." } })
+    const { decisions, sent } = decisionsOf(
+      {},
+      { answer: { jobId: "job-1", settled: true, text: "The hub recorded your approval." } }
+    )
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
     const status = [...host.querySelectorAll("[role='status']")].map(({ textContent }) => textContent)
     expect(status).toContain("The hub recorded your approval.")
@@ -163,6 +166,27 @@ describe("Work requests decided in place", () => {
     expect(approve?.getAttribute("aria-disabled")).toBe("true")
     await act(async () => approve?.click())
     expect(sent).toEqual([])
+  })
+
+  it("lets the snapshot's proven outcome replace an uncertain answer, and names it as the off reason", async () => {
+    const uncertain = "Couldn't reach the hub, so the decision may not have arrived."
+    const { decisions } = decisionsOf({}, { answer: { jobId: "job-1", settled: false, text: uncertain } })
+    const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
+    const status = [...host.querySelectorAll("[role='status']")].map(({ textContent }) => textContent)
+    expect(status).toContain(`Approved. ${uncertain}`)
+    expect(host.textContent).toContain("Approved.")
+    expect(host.textContent).not.toContain("no longer lists")
+  })
+
+  it("keeps an uncertain answer as it is while the request is still waiting", async () => {
+    const uncertain = "Couldn't reach the hub, so the decision may not have arrived."
+    const { decisions } = decisionsOf(
+      { "job-1": NOW + 60_000 },
+      { answer: { jobId: "job-1", settled: false, text: uncertain } }
+    )
+    const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1")]) })
+    const status = [...host.querySelectorAll("[role='status']")].map(({ textContent }) => textContent)
+    expect(status).toContain(uncertain)
   })
 
   it("never offers a decision on the read-only view", async () => {

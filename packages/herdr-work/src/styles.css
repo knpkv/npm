@@ -163,6 +163,8 @@
   }
 
   .work-row-caption {
+    /* The clock ticks every second; even digits keep the line from re-wrapping each tick. */
+    font-variant-numeric: tabular-nums;
     grid-area: caption;
   }
 
