@@ -48,10 +48,12 @@
   justify-content: center;
 }
 
+/* Choices wrap to a second row on a narrow pane rather than scrolling or clipping a label. */
 .focusChoices {
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-control);
+  flex-wrap: wrap;
   gap: var(--rly-space-2);
   padding: var(--rly-space-2);
 }
@@ -68,7 +70,16 @@
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
   gap: var(--rly-space-4);
+  min-block-size: 32px;
   padding: var(--rly-space-6) var(--rly-space-8);
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .focusChoices button,
+  .diffToolbar button {
+    min-block-size: 44px;
+  }
 }
 
 .focusChoices svg,
@@ -742,7 +753,6 @@
 
   .focusChoices {
     display: flex;
-    overflow-x: auto;
   }
 
   .relayControls {
@@ -770,9 +780,10 @@
     block-size: min(36rem, 70vh);
   }
 
+  /* Sized by its content up to the cap, so an idle pane is not a tall empty box. */
   .agentPane {
-    block-size: min(42rem, 75vh);
-    min-block-size: 30rem;
+    block-size: auto;
+    max-block-size: min(42rem, 75vh);
   }
 }
 

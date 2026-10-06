@@ -350,6 +350,24 @@ test("returns focus to the trigger when the palette that replaced the drawer clo
   await expect(page).toHaveURL(/\/accounts\/production\/prs\/12\?/)
 })
 
+// The window can widen while the palette is up; closing it then lands in the now-inline Relay pane.
+test("returns focus to the Relay pane when the layout widened while the palette was open", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  await page.goto(detail)
+
+  await page.getByRole("button", { name: "Relay", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  await page.keyboard.press("Control+p")
+  await expect(page.getByPlaceholder("Type a command...")).toBeFocused()
+  await page.setViewportSize({ height: 900, width: 1920 })
+  await expect(page.getByRole("button", { name: "Relay", exact: true })).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect
+    .poll(() => page.evaluate(() => document.activeElement?.closest("aside[aria-label='Relay findings']") !== null))
+    .toBe(true)
+})
+
 // On a short viewport the drawer scrolls, so every Relay control stays reachable.
 test("keeps Relay controls reachable in the drawer on a short viewport", async ({ page }) => {
   await page.setViewportSize({ height: 400, width: 1280 })
@@ -360,4 +378,30 @@ test("keeps Relay controls reachable in the drawer on a short viewport", async (
   const run = page.getByRole("dialog", { name: "Relay" }).getByRole("button", { name: "Run Relay" })
   await run.scrollIntoViewIfNeeded()
   await expect(run).toBeInViewport()
+})
+
+// On a phone the focus choices wrap whole, and an idle Relay pane is only as tall as what it shows.
+test("wraps Relay focus choices whole and sizes the idle pane to its content on a phone", async ({ page }) => {
+  await page.setViewportSize({ height: 844, width: 390 })
+  await serve(page)
+  await page.goto(detail)
+
+  const group = page.getByRole("group", { name: "Relay review focus" })
+  await expect(group).toBeVisible()
+  const box = await group.boundingBox()
+  for (const choice of await group.getByRole("button").all()) {
+    const choiceBox = await choice.boundingBox()
+    expect(choiceBox).not.toBeNull()
+    if (box === null || choiceBox === null) continue
+    expect(choiceBox.x).toBeGreaterThanOrEqual(box.x)
+    expect(choiceBox.x + choiceBox.width).toBeLessThanOrEqual(box.x + box.width + 0.5)
+    expect(choiceBox.height).toBeLessThanOrEqual(44)
+  }
+  const pane = page.locator("aside[aria-label='Relay findings']")
+  const slack = await pane.evaluate((element) => {
+    const children = [...element.children].map((child) => child.getBoundingClientRect())
+    const bottom = Math.max(...children.map((rect) => rect.bottom))
+    return element.getBoundingClientRect().bottom - bottom
+  })
+  expect(slack).toBeLessThan(24)
 })

@@ -12,7 +12,7 @@
  *
  * @module
  */
-import { type ReactNode, useEffect, useRef } from "react"
+import { type ReactNode, useEffect, useLayoutEffect, useRef } from "react"
 import styles from "./findings-drawer.module.css"
 
 /**
@@ -51,6 +51,12 @@ export function FindingsDrawer({
   readonly title: string
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
+  // The handoff below can outlive the render that opened the drawer (the layout may change while
+  // another dialog is up), so it reads the newest return target, not the one it was created with.
+  const latestReturnFocus = useRef(returnFocus)
+  useLayoutEffect(() => {
+    latestReturnFocus.current = returnFocus
+  })
   useEffect(() => {
     const element = dialog.current
     if (element === null) return
@@ -83,7 +89,9 @@ export function FindingsDrawer({
         handoff.disconnect()
         // After that dialog's own focus restore has run.
         window.requestAnimationFrame(() => {
-          if (document.activeElement === null || document.activeElement === document.body) returnFocus()?.focus()
+          if (document.activeElement === null || document.activeElement === document.body) {
+            latestReturnFocus.current()?.focus()
+          }
         })
       })
       handoff.observe(document.body, { childList: true, subtree: true })
