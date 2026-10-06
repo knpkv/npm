@@ -1,6 +1,6 @@
 import { assert, describe, expect, it } from "@effect/vitest"
 
-import { makeProfileCredentialProvider } from "../src/AwsClientConfig/internal/ProfileCredentialProvider.js"
+import { makeProfileCredentialProvider } from "../src/AwsProfileCredentials.js"
 
 const credentials = (accessKeyId: string) => ({
   accessKeyId,
