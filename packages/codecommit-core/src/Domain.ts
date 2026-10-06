@@ -645,6 +645,21 @@ export const CallerIdentities = Schema.Record(Schema.String, CallerIdentityState
 export type CallerIdentities = typeof CallerIdentities.Type
 
 /**
+ * A pull request the last refresh read but could not re-evaluate: its approval rules failed to
+ * evaluate, so its cached row is kept as it was and its account's refresh counts as partial.
+ *
+ * @category Domain
+ */
+export interface UnevaluatedPullRequest {
+  readonly profile: AwsProfileName
+  readonly region: AwsRegion
+  readonly pullRequestId: string
+  readonly repositoryName: string
+  /** Names the failed operation and the provider's reason. */
+  readonly message: string
+}
+
+/**
  * Application state.
  *
  * @category Domain
@@ -659,6 +674,8 @@ export interface AppState {
   readonly currentUser?: string
   /** Per-account caller identity; absent until the first refresh has resolved identities. */
   readonly callerIdentities?: CallerIdentities
+  /** Pull requests the last refresh kept from cache because their approval rules failed to evaluate. */
+  readonly unevaluatedPullRequests?: ReadonlyArray<UnevaluatedPullRequest>
   /**
    * Unused. codecommit-web no longer sets or reads it; its review count is the client-side
    * `yourReviewCount` (workbench-queue.ts). Kept for L2-7, which retires or replaces it.

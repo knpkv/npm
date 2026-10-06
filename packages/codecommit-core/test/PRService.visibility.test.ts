@@ -102,7 +102,8 @@ const syncDependencies = (
           accountId: "123456789012",
           arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
         }),
-      getPullRequests: () => Stream.empty
+      getPullRequests: () => Stream.empty,
+      getPullRequestRefresh: () => Stream.empty
     }),
     Layer.mock(PullRequestRepo, {
       findAll,

@@ -2,7 +2,8 @@
 
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Layer, Option, Ref, Schema, Stream, SubscriptionRef } from "effect"
-import { AwsClient } from "../src/AwsClient/index.js"
+import { ApprovalEvaluationError } from "../src/AwsClient/getPullRequests.js"
+import { AwsClient, type PullRequestRefreshItem } from "../src/AwsClient/index.js"
 import { PullRequestDetail } from "../src/AwsClient/internal.js"
 import { CacheError } from "../src/CacheService/CacheError.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
@@ -13,6 +14,9 @@ import { type AppState, type CallerIdentityState, PullRequest } from "../src/Dom
 import { AwsApiError } from "../src/Errors.js"
 import { fetchAndUpsertPRs } from "../src/PRService/refreshFetch.js"
 import { subscriptionKey } from "../src/PRService/refreshResolve.js"
+
+/** A provider pull request as the refresh stream delivers it. */
+const fetched = (pullRequest: PullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest })
 
 describe("fetchAndUpsertPRs", () => {
   it.effect("marks the account's caller identity unresolved when its refresh fails authentication", () =>
@@ -37,7 +41,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.fail(new Error("ExpiredTokenException: the security token has expired"))
+          getPullRequestRefresh: () => Stream.fail(new Error("ExpiredTokenException: the security token has expired"))
         }),
         Layer.mock(PullRequestRepo, {
           findStaleOpen: () => Effect.succeed([]),
@@ -62,6 +66,64 @@ describe("fetchAndUpsertPRs", () => {
         "test-profile": { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } },
         "other-profile": resolved
       })
+    }))
+
+  it.effect("keeps a stale cached PR when its re-read fails only on approval evaluation", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const deleteCalls = yield* Ref.make(0)
+      const notifications = yield* Ref.make<Array<{ readonly type: string; readonly message: string }>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          // No open pull requests, so the scope succeeds and stale reconciliation runs.
+          getPullRequestRefresh: () => Stream.empty,
+          getPullRequest: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "getPullRequest",
+                profile: account.profile,
+                region: account.regions[0]!,
+                cause: new ApprovalEvaluationError({
+                  pullRequestId: staleOpenPR.id,
+                  revisionId: "rev-1",
+                  cause: new Error("not authorized to perform codecommit:EvaluatePullRequestApprovalRules")
+                })
+              })
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {
+          addSystem: (notification) =>
+            Ref.update(notifications, (all) => [...all, { type: notification.type, message: notification.message }])
+        }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      // An enrichment failure is not evidence the pull request is gone.
+      expect(yield* Ref.get(deleteCalls)).toBe(0)
+      expect(successfulScopes).toEqual([])
+      // Kept, but not silently: the account says why its queue is stale.
+      expect(yield* Ref.get(notifications)).toEqual([
+        { type: "error", message: expect.stringContaining("EvaluatePullRequestApprovalRules") }
+      ])
     }))
 
   const staleOpenPR = Schema.decodeSync(CachedPullRequest)({
@@ -146,7 +208,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.fromEffect(Effect.failCause(interruption))
+          getPullRequestRefresh: () => Stream.fromEffect(Effect.failCause(interruption))
         }),
         Layer.mock(PullRequestRepo, {}),
         Layer.mock(NotificationRepo, {}),
@@ -193,7 +255,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: ({ profile }) =>
+          getPullRequestRefresh: ({ profile }) =>
             profile === failedAccount.profile ? Stream.fail(new Error("provider unavailable")) : Stream.empty,
           getPullRequest: () =>
             Ref.update(detailCalls, (count) => count + 1).pipe(
@@ -241,7 +303,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.empty,
+          getPullRequestRefresh: () => Stream.empty,
           getPullRequest: () => Effect.die("foreign-account stale row must not be reconciled")
         }),
         Layer.mock(PullRequestRepo, {
@@ -281,7 +343,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.empty
+          getPullRequestRefresh: () => Stream.empty
         }),
         Layer.mock(PullRequestRepo, {
           findStaleOpen: () =>
@@ -315,7 +377,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.empty,
+          getPullRequestRefresh: () => Stream.empty,
           getPullRequest: () =>
             Effect.fail(
               new AwsApiError({
@@ -360,7 +422,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.empty,
+          getPullRequestRefresh: () => Stream.empty,
           getPullRequest: () =>
             Effect.fail(
               new AwsApiError({
@@ -405,7 +467,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.empty,
+          getPullRequestRefresh: () => Stream.empty,
           getPullRequest: () => Effect.succeed(providerOpenDetail)
         }),
         Layer.mock(PullRequestRepo, {
@@ -444,7 +506,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.empty,
+          getPullRequestRefresh: () => Stream.empty,
           getPullRequest: () => Effect.succeed(providerClosedDetail)
         }),
         Layer.mock(PullRequestRepo, {
@@ -483,7 +545,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.empty,
+          getPullRequestRefresh: () => Stream.empty,
           getPullRequest: () =>
             Effect.succeed(
               new PullRequestDetail({
@@ -525,7 +587,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.make(providerOpenPR),
+          getPullRequestRefresh: () => Stream.make(fetched(providerOpenPR)),
           getPullRequest: () => Effect.die("stale reconciliation must not run for an uncertified scope")
         }),
         Layer.mock(PullRequestRepo, {
@@ -563,7 +625,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.make(providerOpenPR)
+          getPullRequestRefresh: () => Stream.make(fetched(providerOpenPR))
         }),
         Layer.mock(PullRequestRepo, {
           findStaleOpen: () => Effect.succeed([]),
@@ -585,6 +647,67 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([])
     }))
 
+  it.effect("refreshes the other pull requests when one fails approval evaluation, and reports the account as partial", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const upserted = yield* Ref.make<ReadonlyArray<string>>([])
+      const notifications = yield* Ref.make<ReadonlyArray<string>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const openPR = (id: string) =>
+        Schema.decodeSync(PullRequest)({ ...Schema.encodeSync(PullRequest)(providerOpenPR), id })
+      const evaluationFailed: PullRequestRefreshItem = {
+        _tag: "EvaluationFailed",
+        pullRequestId: "36",
+        repositoryName: "example-repository",
+        error: new ApprovalEvaluationError({
+          pullRequestId: "36",
+          revisionId: "revision-36",
+          cause: new Error("not authorized to perform codecommit:EvaluatePullRequestApprovalRules")
+        })
+      }
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequestRefresh: () => Stream.make(fetched(openPR("35")), evaluationFailed, fetched(openPR("37")))
+        }),
+        Layer.mock(PullRequestRepo, {
+          upsert: (input) => Ref.update(upserted, (ids) => [...ids, input.id]),
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {
+          addSystem: (notification) => Ref.update(notifications, (all) => [...all, notification.message])
+        }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      // The other two refreshed; the failed one kept its cached row (no upsert).
+      expect(yield* Ref.get(upserted)).toEqual(["35", "37"])
+      // Partial, not successful.
+      expect(successfulScopes).toEqual([])
+      const { unevaluatedPullRequests } = yield* SubscriptionRef.get(state)
+      expect(unevaluatedPullRequests).toEqual([{
+        profile: "test-profile",
+        region: "us-east-1",
+        pullRequestId: "36",
+        repositoryName: "example-repository",
+        message: expect.stringContaining("EvaluatePullRequestApprovalRules")
+      }])
+      expect(yield* Ref.get(notifications)).toEqual([expect.stringMatching(/^1 pull request couldn't be re-evaluated/)])
+    }))
+
   it.effect("publishes scope success after listed PR upsert and stale reconciliation succeed", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
@@ -597,7 +720,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequests: () => Stream.make(providerOpenPR)
+          getPullRequestRefresh: () => Stream.make(fetched(providerOpenPR))
         }),
         Layer.mock(PullRequestRepo, {
           upsert: (input) => Ref.set(upsertedRepoAccountId, input.repoAccountId),
@@ -634,7 +757,7 @@ describe("fetchAndUpsertPRs", () => {
         enabled: true
       })
       const dependencies = Layer.mergeAll(
-        Layer.mock(AwsClient, { getPullRequests: () => Stream.make(providerOpenPR) }),
+        Layer.mock(AwsClient, { getPullRequestRefresh: () => Stream.make(fetched(providerOpenPR)) }),
         Layer.mock(PullRequestRepo, {
           findByAccountAndId: () => Effect.succeed(Option.some(staleOpenPR)),
           findByCoordinates: () => Effect.succeed(Option.some(staleOpenPR)),
