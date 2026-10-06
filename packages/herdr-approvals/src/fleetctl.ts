@@ -326,6 +326,21 @@ export const payloadFrom = Effect.fn("Fleetctl.payloadFrom")(function*(args: Rea
         )
       )
     }
+    case "work.abandon": {
+      const body = args[1]
+      if (args.length !== 2 || body === undefined) {
+        return yield* new FleetValidationError({ detail: "work.abandon requires one JSON payload" })
+      }
+      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
+        onExcessProperty: "error"
+      })(body).pipe(
+        Effect.mapError(() => new FleetValidationError({ detail: "work.abandon payload is invalid" })),
+        Effect.filterOrFail(
+          (payload) => payload.kind === "work.abandon",
+          () => new FleetValidationError({ detail: "work.abandon payload kind does not match the command" })
+        )
+      )
+    }
     default:
       return yield* new FleetValidationError({ detail: `unknown job kind: ${kind ?? ""}` })
   }
@@ -348,6 +363,7 @@ const usage = `fleetctl commands:
   submit HOST work.admit PAYLOAD_JSON
   submit HOST work.recover PAYLOAD_JSON
   submit HOST work.reassign PAYLOAD_JSON
+  submit HOST work.abandon PAYLOAD_JSON
   work record HOST CHECKPOINT_JSON
   work snapshot [HOST]
   work admission-preflight HOST TARGET_JSON

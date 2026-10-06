@@ -1305,6 +1305,27 @@ describe("sanitized approval requests", () => {
     }
   })
 
+  it("shows every authority-bearing goal abandonment field", () => {
+    const payload = Schema.decodeUnknownSync(JobPayload)({
+      kind: "work.abandon",
+      goalId: "fix-iphone-live-ui-polish",
+      owner: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+      reason: "No PR, no branch, no owner",
+      expectedGoalEventId: "goal-event-7",
+      expectedGoalUpdatedAt: 500
+    })
+    const request = approvalRequestFor(payload)
+    expect(request.title).toBe("Abandon one Work goal")
+    expect(Object.fromEntries(request.fields.map(({ key, value }) => [key, value]))).toEqual({
+      goalId: "fix-iphone-live-ui-polish",
+      owner: "Codex host coordinator (owner-host-coordinator)",
+      reason: "No PR, no branch, no owner",
+      expectedGoalEventId: "goal-event-7",
+      expectedGoalUpdatedAt: "500"
+    })
+    expect(sanitizeJobPayload(payload)).toEqual(payload)
+  })
+
   it("shows every authority-bearing goal reassignment field", () => {
     const payload = Schema.decodeUnknownSync(JobPayload)({
       kind: "work.reassign",

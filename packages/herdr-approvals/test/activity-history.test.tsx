@@ -132,6 +132,30 @@ describe("activity history", () => {
     expect(filterActivityItems(items, "approvals", "")).toHaveLength(1)
   })
 
+  it("keeps approved goal abandonment in Work and approval activity", () => {
+    const abandoned: JobRecord = {
+      ...delegated,
+      connectTarget: undefined,
+      id: "job-abandon",
+      payload: {
+        kind: "work.abandon",
+        goalId: "fix-iphone-live-ui-polish",
+        owner: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+        reason: "No PR, no branch, no owner",
+        expectedGoalEventId: "goal-event-7",
+        expectedGoalUpdatedAt: 500
+      },
+      worker: undefined
+    }
+    const items = activityItemsFor([abandoned])
+    expect(items[0]).toMatchObject({
+      title: "Abandon Work goal",
+      summary: "Abandon fix-iphone-live-ui-polish: No PR, no branch, no owner"
+    })
+    expect(filterActivityItems(items, "work", "")).toHaveLength(1)
+    expect(filterActivityItems(items, "approvals", "")).toHaveLength(1)
+  })
+
   it("projects one sanitized row per job", () => {
     const items = activityItemsFor([delegated, failedMessage])
     const projection = JSON.stringify(items)

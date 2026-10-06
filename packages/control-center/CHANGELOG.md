@@ -1,5 +1,17 @@
 # @knpkv/control-center
 
+## 0.9.5
+
+### Patch Changes
+
+- Updated dependencies [[`43ab828`](https://github.com/knpkv/npm/commit/43ab8288a02a03924c66b5488d20ac7576e348e1), [`28c22ae`](https://github.com/knpkv/npm/commit/28c22ae49825b06472c0d35aa9d7ef92ed5748ff), [`da0e5ff`](https://github.com/knpkv/npm/commit/da0e5ff70ec5926beaeceff060a37b2b0f27b6f9), [`934843b`](https://github.com/knpkv/npm/commit/934843bbcea57cbf3266fce950c020733046cac1), [`148daa6`](https://github.com/knpkv/npm/commit/148daa6be147dca74bc642bd552b603deb760eae), [`4e8f346`](https://github.com/knpkv/npm/commit/4e8f346b926b859ea2b3be07ec7dc6cb77ca8e76), [`e57bb6d`](https://github.com/knpkv/npm/commit/e57bb6db1b393dbff8e116573cf2db23992c1cf4), [`7df3dbb`](https://github.com/knpkv/npm/commit/7df3dbb9875ab31f369351df2de898b36d40e613), [`8924289`](https://github.com/knpkv/npm/commit/89242895271072b83185d6cc02376b2c56830f6a), [`f8d2612`](https://github.com/knpkv/npm/commit/f8d2612e09b20974dd8eccc8ff197bb072c40cbf), [`e45eba3`](https://github.com/knpkv/npm/commit/e45eba30991dc662b7a8b09506d2d85b878fec97)]:
+  - @knpkv/codecommit-core@0.18.0
+  - @knpkv/clockify-api-client@3.0.0
+  - @knpkv/rly@0.9.0
+  - @knpkv/browser-pairing@0.4.0
+  - @knpkv/relay-product@0.2.3
+  - @knpkv/review@0.3.3
+
 ## 0.9.4
 
 ### Patch Changes

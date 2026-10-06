@@ -63,6 +63,14 @@ describe("workTriage", () => {
     expect(rows).toEqual([["shipped", "done"], ["edge", "done"], ["old", "earlier"]])
   })
 
+  it("treats an abandoned goal as finished", () => {
+    const rows = groupsOf([
+      goal("dropped", { state: "abandoned", updatedAt: AS_OF - 60_000 }),
+      goal("dropped-long-ago", { state: "abandoned", updatedAt: AS_OF - workTriageDoneWindowMs - 1 })
+    ])
+    expect(rows).toEqual([["dropped", "done"], ["dropped-long-ago", "earlier"]])
+  })
+
   it("orders within a group by most recent update, then keeps the snapshot's order", () => {
     const rows = groupsOf([
       goal("goal-2", { updatedAt: AS_OF - 1_000 }),
