@@ -35,6 +35,8 @@ import type {
   WorkGoalReassignment,
   WorkLaneClaim,
   WorkLaneClaimed,
+  WorkObservationEnvelope,
+  WorkObserveReport,
   WorkProspectiveAdmission,
   WorkRecoveryContext,
   WorkRecoveryPreflight,
@@ -42,6 +44,7 @@ import type {
   WorkSnapshots
 } from "./model.js"
 import { WorkGoalId, WorkPullRequestLink, WorkPullRequestLinkRequest } from "./model.js"
+import { withObservedFacts, workSnapshotBudgetBytes } from "./observed.js"
 import { projectWorkSnapshots } from "./projection.js"
 import type { WorkStoreService } from "./store.js"
 
@@ -105,8 +108,16 @@ export interface WorkService {
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
   /**
+   * Stores observed facts (a pull request's state, an agent's status) for the
+   * Work tab. Facts are not goal history and never change an approval token.
+   */
+  readonly observe: (
+    envelopes: ReadonlyArray<WorkObservationEnvelope>
+  ) => Effect.Effect<WorkObserveReport, WorkStoreError>
+  /**
    * Projects history at an explicit timestamp, or at the later of the current
-   * clock and the coordinator-owned logical timestamp when none is given.
+   * clock and the coordinator-owned logical timestamp when none is given. The
+   * `now` window also carries each goal's observed facts.
    */
   readonly snapshots: (observedAt?: number) => Effect.Effect<WorkSnapshots, WorkStoreError | WorkProjectionError>
   readonly recordMany: (
@@ -281,8 +292,16 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       yield* Clock.currentTimeMillis,
       source.logicalObservedAt ?? 0
     )
-    return yield* projectWorkSnapshots(source.events, timestamp)
+    return withObservedFacts(
+      yield* projectWorkSnapshots(source.events, timestamp),
+      source.facts,
+      source.failures,
+      workSnapshotBudgetBytes
+    )
   })
+  const observe = Effect.fn("HerdrWork.observe")((envelopes: ReadonlyArray<WorkObservationEnvelope>) =>
+    store.observe(envelopes)
+  )
   const recordMany = Effect.fn("HerdrWork.recordMany")((
     transactionId: string,
     events: ReadonlyArray<WorkGoalCheckpoint>
@@ -313,6 +332,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       currentClaim,
       decisions,
       handoff,
+      observe,
       record,
       recordMany,
       snapshots
