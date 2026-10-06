@@ -1,4 +1,4 @@
-import { Equal, Schema } from "effect"
+import { Equal, Predicate, Schema } from "effect"
 import { WorkLaneClaimed } from "../model.js"
 
 /**
@@ -43,13 +43,16 @@ export const resolveLegacyLaneClaim = (
 }
 
 /** One `work_lane_operations` row, as both drivers read it. */
+// SQLite keeps whatever type a row was written with, so every column may be
+// text or a number; a row of the wrong shape is a collision, not a decode error.
+const LedgerValue = Schema.Union([Schema.String, Schema.Number])
 export const LaneOperationLedgerRow = Schema.Struct({
   operationId: Schema.String,
-  laneId: Schema.String,
-  goalId: Schema.String,
-  phase: Schema.String,
-  revision: Schema.Number,
-  record: Schema.String
+  laneId: LedgerValue,
+  goalId: LedgerValue,
+  phase: LedgerValue,
+  revision: LedgerValue,
+  record: LedgerValue
 })
 export type LaneOperationRow = typeof LaneOperationLedgerRow.Type
 
@@ -72,6 +75,7 @@ const sameOperation = (lane: WorkLaneClaimed, row: LaneOperationRow): boolean =>
     row.laneId !== lane.laneId || row.goalId !== lane.goalId || row.phase !== lane.phase ||
     row.revision !== lane.revision
   ) return false
+  if (!Predicate.isString(row.record)) return false
   const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(WorkLaneClaimed))(row.record)
   return decoded._tag === "Some" && Equal.equals(decoded.value, lane)
 }

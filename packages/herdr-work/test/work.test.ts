@@ -2604,6 +2604,38 @@ database.close()`,
       expect(laneColumns).toEqual(["lane_id", "revision", "record"])
     }).pipe(provideNodeServices))
 
+  it.effect("migrates pre-session lane claims when the file has no lane-operation ledger yet", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-no-ledger-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const legacyClaim = {
+        branch: "feat/legacy-work",
+        expectedRevision: 0,
+        head: "0123456789012345678901234567890123456789",
+        laneId: "goal:legacy",
+        owner: { id: "owner:legacy", name: "Legacy owner" },
+        parent: null,
+        phase: "implementation",
+        revision: 1,
+        worktree: "/worktrees/legacy"
+      }
+      const legacy = fixtureDatabase(path)
+      legacy.exec(
+        "CREATE TABLE work_lane_claims (lane_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record TEXT NOT NULL)"
+      )
+      legacy.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?)").run("goal:legacy", 1, JSON.stringify(legacyClaim))
+      legacy.close()
+      yield* Effect.scoped(
+        Effect.acquireRelease(WorkStore.open(path), (store) => Effect.sync(() => store.close()))
+      )
+      const migrated = fixtureDatabase(path)
+      const operations = migrated.prepare("SELECT operation_id AS operationId, revision FROM work_lane_operations")
+        .all()
+      migrated.close()
+      expect(operations).toEqual([{ operationId: "goal:legacy", revision: 1 }])
+    }).pipe(provideNodeServices))
+
   it.effect("transactionally migrates the previous lane and handoff schema", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-authority-"))

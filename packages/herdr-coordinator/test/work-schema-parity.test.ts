@@ -572,6 +572,16 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
           bridge: "sql-work.initialize.lane-operation-collision",
           store: "open.migrate.lane-operation-collision"
         })
+        // SQLite keeps a text revision as text; that row is a collision too, not a decode error.
+        const mistyped = join(root, "mistyped.sqlite")
+        copyFileSync(replica, mistyped)
+        writeFixture(mistyped, (database) => {
+          database.exec("UPDATE work_lane_operations SET revision = 'two' WHERE operation_id = 'goal:legacy'")
+        })
+        yield* expectRejectedUnchanged(root, mistyped, {
+          bridge: "sql-work.initialize.lane-operation-collision",
+          store: "open.migrate.lane-operation-collision"
+        })
       })
     ))
 

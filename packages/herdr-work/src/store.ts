@@ -759,15 +759,18 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
     if (operations?._tag === "capacity") {
       throw new WorkStoreError({ cause: operations, operation: "open.migrate.lane-operation-capacity" })
     }
-    const recordOperation = database.prepare(
-      `INSERT INTO work_lane_operations
-         (operation_id, lane_id, goal_id, phase, revision, record) VALUES (?, ?, ?, ?, ?, ?)`
-    )
     for (const { lane } of migratedClaims) {
       update.run(lane.goalId, lane.operationId, lane.phase, JSON.stringify(lane), lane.laneId)
     }
-    for (const lane of operations?.inserts ?? []) {
-      recordOperation.run(lane.operationId, lane.laneId, lane.goalId, lane.phase, lane.revision, JSON.stringify(lane))
+    // Without a ledger, schema creation below creates it and backfills every claim.
+    if (operations !== undefined && operations.inserts.length > 0) {
+      const recordOperation = database.prepare(
+        `INSERT INTO work_lane_operations
+           (operation_id, lane_id, goal_id, phase, revision, record) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      for (const lane of operations.inserts) {
+        recordOperation.run(lane.operationId, lane.laneId, lane.goalId, lane.phase, lane.revision, JSON.stringify(lane))
+      }
     }
   }
   if (decisionColumns.length > 0 && !decisionColumns.includes("session_id")) {
