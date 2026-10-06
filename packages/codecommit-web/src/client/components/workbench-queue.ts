@@ -63,9 +63,25 @@ export interface WorkbenchQueue {
   readonly rows: ReadonlyArray<WorkbenchRow>
 }
 
-/** CodeCommit pool entries may end in `*` (e.g. `…:assumed-role/Reviewers/*`); match them as prefixes. */
-const arnMatches = (pattern: string, arn: string): boolean =>
-  pattern.endsWith("*") ? arn.startsWith(pattern.slice(0, -1)) : pattern === arn
+/** Whole-string match where each `*` stands for any run of characters, anywhere in the pattern. */
+const globMatches = (pattern: string, value: string): boolean =>
+  new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`)
+    .test(value)
+
+const approverArn = /^arn:aws[\w-]*:(?:iam|sts)::(\d+):(?:user|federated-user|assumed-role)\/(.+)$/
+
+/**
+ * One approval-pool entry against one approver ARN, with CodeCommit's semantics: a fully
+ * qualified ARN matches the whole ARN; the `CodeCommitApprovers:ACCOUNT:RESOURCE` shorthand
+ * matches an IAM user, federated user or role session in that account whose name (after
+ * `user/`, `federated-user/` or `assumed-role/`) matches RESOURCE. Both accept `*` anywhere.
+ */
+export const poolEntryMatches = (entry: string, arn: string): boolean => {
+  const shorthand = /^CodeCommitApprovers:(\d+):(.+)$/.exec(entry)
+  if (shorthand === null) return globMatches(entry, arn)
+  const approver = approverArn.exec(arn)
+  return approver !== null && approver[1] === shorthand[1] && globMatches(shorthand[2] ?? "", approver[2] ?? "")
+}
 
 /**
  * Approvals that count toward one rule. A satisfied rule is complete by definition; a rule with
@@ -77,7 +93,7 @@ const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule)
   if (rule.satisfied) return rule.requiredApprovals
   if (rule.poolMembers.length === 0 && rule.poolMemberArns.length === 0) return pullRequest.approvedBy.length
   if (rule.poolMemberArns.length > 0 && pullRequest.approvedByArns.length > 0) {
-    return pullRequest.approvedByArns.filter((arn) => rule.poolMemberArns.some((pattern) => arnMatches(pattern, arn)))
+    return pullRequest.approvedByArns.filter((arn) => rule.poolMemberArns.some((entry) => poolEntryMatches(entry, arn)))
       .length
   }
   const exactMembers = rule.poolMembers.filter((member) => !member.includes("*"))
@@ -87,7 +103,7 @@ const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule)
 
 const hasWildcardPool = (rule: Domain.ApprovalRule): boolean =>
   rule.poolMembers.some((member) => member.includes("*")) ||
-  rule.poolMemberArns.some((pattern) => pattern.endsWith("*"))
+  rule.poolMemberArns.some((entry) => entry.includes("*"))
 
 /**
  * The rule furthest from being met: lowest share approved, then most approvals still missing, so

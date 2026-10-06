@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 
-import { formatSpan, ruleProgress, workbenchQueue } from "../src/client/components/workbench-queue.js"
+import { formatSpan, poolEntryMatches, ruleProgress, workbenchQueue } from "../src/client/components/workbench-queue.js"
 
 const NOW = new Date("2026-10-05T15:30:00Z")
 const HOUR = 3_600_000
@@ -199,6 +199,55 @@ describe("ruleProgress", () => {
 
   it("is undefined when the PR has no approval rules", () => {
     expect(ruleProgress(make({ id: "1" }))).toBeUndefined()
+  })
+})
+
+describe("poolEntryMatches", () => {
+  const user = "arn:aws:iam::111122223333:user/alice"
+  const federated = "arn:aws:sts::111122223333:federated-user/alice"
+  const session = "arn:aws:sts::111122223333:assumed-role/Reviewers/alice"
+
+  it("matches the CodeCommitApprovers shorthand to an IAM or federated user of that name in that account", () => {
+    expect([user, federated].map((arn) => poolEntryMatches("CodeCommitApprovers:111122223333:alice", arn))).toEqual([
+      true,
+      true
+    ])
+    expect(poolEntryMatches("CodeCommitApprovers:444455556666:alice", user)).toBe(false)
+  })
+
+  it("reaches a role session through the shorthand only with a wildcard or the role name", () => {
+    expect(poolEntryMatches("CodeCommitApprovers:111122223333:alice", session)).toBe(false)
+    expect(poolEntryMatches("CodeCommitApprovers:111122223333:*alice", session)).toBe(true)
+    expect(poolEntryMatches("CodeCommitApprovers:111122223333:Reviewers/alice", session)).toBe(true)
+  })
+
+  it("matches wildcards anywhere in a fully qualified ARN, and nothing else", () => {
+    expect(poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Review*/alice", session)).toBe(true)
+    expect(poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Review*/*", session)).toBe(true)
+    expect(
+      poolEntryMatches(
+        "arn:aws:sts::111122223333:assumed-role/Review*/alice",
+        session.replace("Reviewers", "Operations")
+      )
+    )
+      .toBe(false)
+    expect(poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Reviewers/alice", session)).toBe(true)
+    expect(poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Reviewers.alice", session)).toBe(false)
+  })
+
+  it("counts a shorthand pool approval in rule progress", () => {
+    const pullRequest = make({
+      approvalRules: [
+        rule("Two", 2, ["alice", "bob"], false, [
+          "CodeCommitApprovers:111122223333:alice",
+          "CodeCommitApprovers:111122223333:bob"
+        ])
+      ],
+      approvedBy: ["alice"],
+      approvedByArns: [user],
+      id: "1"
+    })
+    expect(ruleProgress(pullRequest)).toEqual({ approved: 1, name: "Two", required: 2 })
   })
 })
 
