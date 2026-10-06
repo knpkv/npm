@@ -124,7 +124,8 @@ export const transition = (s: IdentityLifecycle, event: IdentityEvent): Identity
     SignedOut: (): IdentityLifecycle => ({
       ...s,
       generation: s.generation + 1,
-      profiles: Object.fromEntries(Object.keys(s.profiles).map((profile) => [profile, signedOut]))
+      // Every enabled account is signed out, including one whose first lookup is still in flight.
+      profiles: Object.fromEntries(s.enabled.map((profile) => [profile, signedOut]))
     })
   })
 

@@ -131,7 +131,8 @@ const columns: ReadonlyArray<Column> = [
   {
     name: "SignedOut",
     event: IdentityEvent.SignedOut(),
-    expect: (from) => from === "Absent" ? undefined : stateOf.SignedOut,
+    // Every enabled account, Absent included: its first lookup may still be in flight.
+    expect: () => stateOf.SignedOut,
     bumps: true
   }
 ]

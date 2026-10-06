@@ -168,8 +168,12 @@ describe("resolveAccounts caller identities", () => {
       yield* Fiber.join(resolving)
       const after = yield* SubscriptionRef.get(state)
       expect(after.currentUser).toBeUndefined()
-      // Alpha was published before the logout, which then signed it out; beta, found after it, is never published.
-      expect(after.callerIdentities).toEqual({ alpha: { _tag: "Unresolved", reason: { _tag: "SignedOut" } } })
+      // The logout signs out every enabled account, beta included while its lookup was in flight; what
+      // that lookup found afterwards is never published.
+      expect(after.callerIdentities).toEqual({
+        alpha: { _tag: "Unresolved", reason: { _tag: "SignedOut" } },
+        beta: { _tag: "Unresolved", reason: { _tag: "SignedOut" } }
+      })
       // The refresh's start, then the logout.
       expect(after.identityLifecycle?.generation).toBe(2)
     }))
