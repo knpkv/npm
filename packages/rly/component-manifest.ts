@@ -216,6 +216,29 @@ export const componentManifest = {
         tests: ["test/patterns/Hero.test.tsx"]
       }
     },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "DecisionBar" },
+        { kind: "value", name: "RLY_DECISION_BAR_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_DECISION_BAR_VARIANTS" },
+        { kind: "type", name: "DecisionBarProps" },
+        { kind: "type", name: "RlyDecisionBarPlacement" },
+        { kind: "type", name: "RlyDecisionBarState" }
+      ],
+      name: "DecisionBar",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/DecisionBar.tsx",
+      status: "experimental",
+      styles: ["src/patterns/DecisionBar.module.css"],
+      variants: [{ defaultValue: "inline", name: "placement", values: ["inline", "sticky"] }],
+      visual: {
+        story: "stories/patterns/DecisionBar.stories.tsx",
+        storyId: "patterns-decisionbar--states",
+        tests: ["test/patterns/DecisionBar.test.tsx"]
+      }
+    },
     // scaffold:components:insert
     {
       category: "diff",

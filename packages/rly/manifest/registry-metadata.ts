@@ -26,6 +26,16 @@ export const COMPONENT_REGISTRY_METADATA = {
     "line",
     "display"
   ], ["present", "status"]),
+  DecisionBar: registryMetadata(
+    "Approve or reject one named target, with an off reason, a clock and the server's answer",
+    [
+      "ready",
+      "off",
+      "sending",
+      "sticky"
+    ],
+    ["decide", "present"]
+  ),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"
