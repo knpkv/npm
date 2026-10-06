@@ -6,42 +6,72 @@ severity: error
 message: "Seed SQLite fixture rows in one transaction: a per-row autocommit write inside a loop fsyncs every row"
 rule:
   kind: call_expression
-  any:
-    - pattern: $DB.prepare($$$).run($$$)
-    # A statement prepared earlier in the same block, e.g. `const insert = db.prepare(...)`.
-    - all:
-        - pattern: $STATEMENT.run($$$)
-        - inside:
-            any:
-              - kind: statement_block
-              - kind: program
-            stopBy: end
-            has:
-              pattern: const $STATEMENT = $DB.prepare($$$)
-              stopBy: end
-  inside:
-    kind: for_statement
-    stopBy: end
-    # Exempt only while a transaction is open on the same connection: the
-    # nearest earlier BEGIN on $DB, with no COMMIT or ROLLBACK on $DB after it.
-    not:
-      follows:
-        kind: expression_statement
-        has:
-          pattern: $DB.exec($$$)
-          regex: "\\.exec\\(\\s*.BEGIN"
+  # Ordered: $DB is captured by the first entry before the exemptions use it.
+  all:
+    - any:
+        - pattern: $DB.prepare($$$).run($$$)
+        # A statement prepared earlier in the same block, e.g. `const insert = db.prepare(...)`.
+        - all:
+            - pattern: $STATEMENT.run($$$)
+            - inside:
+                any:
+                  - kind: statement_block
+                  - kind: program
+                stopBy: end
+                has:
+                  pattern: const $STATEMENT = $DB.prepare($$$)
+                  stopBy: end
+    # The write runs once per iteration: a loop encloses it with no function in
+    # between (a callback in a loop header's case list runs on its own).
+    - inside:
+        any:
+          - kind: for_statement
+          # for...of and for...in
+          - kind: for_in_statement
+          - kind: while_statement
+          - kind: do_statement
         stopBy:
-          kind: expression_statement
+          any:
+            - kind: arrow_function
+            - kind: function_expression
+            - kind: function_declaration
+            - kind: method_definition
+    # A connection opened inside the loop writes once per connection, not per row.
+    - not:
+        inside:
+          any:
+            - kind: for_statement
+            - kind: for_in_statement
+            - kind: while_statement
+            - kind: do_statement
+          stopBy: end
           has:
-            pattern: $DB.exec($$$)
-            regex: "\\.exec\\(\\s*.(COMMIT|ROLLBACK|END)"
-  not:
-    inside:
-      kind: call_expression
-      has:
-        field: function
-        regex: "[Tt]ransaction"
-      stopBy: end
+            pattern: const $DB = $INIT
+            stopBy: end
+    # Exempt only while a transaction is open on the same connection: some
+    # enclosing statement (the loop, or a try block around it) follows a BEGIN
+    # on $DB with no COMMIT or ROLLBACK on $DB in between.
+    - not:
+        inside:
+          stopBy: end
+          follows:
+            kind: expression_statement
+            has:
+              pattern: $DB.exec($$$)
+              # BEGIN [DEFERRED|IMMEDIATE|EXCLUSIVE] as a statement; a trigger body's BEGIN is not one.
+              regex: "(?is)\\.exec\\(.*\\bBEGIN(\\s+(DEFERRED|IMMEDIATE|EXCLUSIVE))?\\s*(;|[`\"'])"
+            stopBy:
+              kind: expression_statement
+              has:
+                pattern: $DB.exec($$$)
+                regex: "(?is)\\.exec\\(.*\\b(COMMIT|ROLLBACK)\\s*(;|[`\"'])"
+    - not:
+        inside:
+          kind: call_expression
+          has:
+            field: function
+            regex: "[Tt]ransaction"
+          stopBy: end
 
 files:
   - "packages/*/test/**/*.ts"

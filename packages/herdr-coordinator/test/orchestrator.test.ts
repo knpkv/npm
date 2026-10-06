@@ -1174,6 +1174,8 @@ describe("durable coordinator orchestrator", () => {
           "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
         )
         const maximumText = "x".repeat(4_096)
+        // One transaction: the 20 seeded events share one commit.
+        database.exec("BEGIN")
         for (const index of Array.from({ length: 20 }, (_, index) => index)) {
           const goalId = `goal:snapshot-capacity:${index}`
           const event = Schema.decodeUnknownSync(WorkGoalCheckpoint)({
@@ -1198,6 +1200,7 @@ describe("durable coordinator orchestrator", () => {
           })
           insert.run(event.eventId, event.goal.id, event.occurredAt, JSON.stringify(event))
         }
+        database.exec("COMMIT")
         database.close()
         expect(
           yield* Effect.result(withDatabase(

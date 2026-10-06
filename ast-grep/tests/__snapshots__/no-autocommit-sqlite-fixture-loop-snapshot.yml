@@ -66,6 +66,94 @@ snapshots:
         start: 47
         end: 153
   ? |
+    database.exec(`
+      CREATE TRIGGER rows_after_insert AFTER INSERT ON rows
+      BEGIN
+        UPDATE totals SET count = count + 1;
+      END;
+    `)
+    for (const row of rows) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(row)
+    }
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
+        style: primary
+        start: 159
+        end: 215
+      - source: |-
+          for (const row of rows) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(row)
+          }
+        style: secondary
+        start: 131
+        end: 217
+  ? |
+    for (const key in rows) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(key)
+    }
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(key)
+        style: primary
+        start: 28
+        end: 84
+      - source: |-
+          for (const key in rows) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(key)
+          }
+        style: secondary
+        start: 0
+        end: 86
+  ? |
+    for (const row of rows) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(row)
+    }
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
+        style: primary
+        start: 28
+        end: 84
+      - source: |-
+          for (const row of rows) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(row)
+          }
+        style: secondary
+        start: 0
+        end: 86
+  ? |
+    let index = 0
+    do {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+    } while (index < 260)
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+        style: primary
+        start: 21
+        end: 81
+      - source: |-
+          do {
+            database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+          } while (index < 260)
+        style: secondary
+        start: 14
+        end: 103
+  ? |
+    let index = 0
+    while (index < 260) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+    }
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+        style: primary
+        start: 38
+        end: 98
+      - source: |-
+          while (index < 260) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+          }
+        style: secondary
+        start: 14
+        end: 100
+  ? |
     other.exec("BEGIN")
     const insert = database.prepare("INSERT INTO rows VALUES (?)")
     for (let index = 0; index < 500; index++) {
@@ -114,3 +202,23 @@ snapshots:
         style: secondary
         start: 20
         end: 126
+  ? |
+    try {
+      for (let index = 0; index < 260; index++) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(index)
+      }
+    } finally {
+      database.close()
+    }
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(index)
+        style: primary
+        start: 56
+        end: 114
+      - source: |-
+          for (let index = 0; index < 260; index++) {
+              database.prepare("INSERT INTO rows VALUES (?)").run(index)
+            }
+        style: secondary
+        start: 8
+        end: 118

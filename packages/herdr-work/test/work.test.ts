@@ -2580,6 +2580,24 @@ database.close()`,
       ).map(({ name }) => name)
       reopened.close()
       expect(tables).toEqual(["work_decision_totals"])
+
+      // The legacy migration shares that transaction: its column changes roll back too.
+      const legacyPath = join(directory, "legacy.sqlite")
+      const legacy = fixtureDatabase(legacyPath)
+      legacy.exec(`
+        CREATE TABLE work_lane_claims (lane_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record TEXT NOT NULL);
+        CREATE TABLE work_decision_totals (singleton INTEGER PRIMARY KEY);
+      `)
+      legacy.close()
+      expect(yield* safelyOpenResult(legacyPath)).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "open.database" }
+      })
+      const legacyReopened = fixtureDatabase(legacyPath)
+      const laneColumns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
+        legacyReopened.prepare("PRAGMA table_info(work_lane_claims)").all()
+      ).map(({ name }) => name)
+      legacyReopened.close()
+      expect(laneColumns).toEqual(["lane_id", "revision", "record"])
     }).pipe(provideNodeServices))
 
   it.effect("transactionally migrates the previous lane and handoff schema", () =>
