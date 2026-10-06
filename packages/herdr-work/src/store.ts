@@ -81,6 +81,7 @@ import {
 } from "./internal/session-index.js"
 import { terminalCandidates, terminalCheckpoint } from "./internal/terminal-reconcile.js"
 import {
+  admissionEvidence,
   isTerminalWorkState,
   WorkAdmissionTarget,
   WorkAgentBinding,
@@ -100,6 +101,7 @@ import {
   WorkObservationEnvelope,
   workObservationMaxSkewMillis,
   WorkObservationSubject,
+  WorkObservedAdmission,
   WorkObservedFact,
   workObservedFactMaxBytes,
   workObservedFactMaxRecords,
@@ -123,6 +125,7 @@ import type {
   WorkGoalReassigned as WorkGoalReassignedType,
   WorkGoalReassignment as WorkGoalReassignmentType,
   WorkObservationEnvelope as WorkObservationEnvelopeType,
+  WorkObservedAdmission as WorkObservedAdmissionType,
   WorkObservedFact as WorkObservedFactType,
   WorkObservedFailure as WorkObservedFailureType,
   WorkObserveOutcome,
@@ -1573,7 +1576,7 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
     ) ||
     // A session id stays claimed by its lane even after a reassignment supersedes that binding.
     bindings.some(({ request }) =>
-      (request.prospectiveAdmission?.sessionId === target.sessionId && request.laneId !== target.laneId) ||
+      (admissionEvidence(request)?.sessionId === target.sessionId && request.laneId !== target.laneId) ||
       (request.existingGoalRecovery?.sessionId === target.sessionId && request.laneId !== target.laneId)
     ) || authority.ambiguousLanes.has(target.laneId)
   const exact = goal !== undefined && lane !== undefined && binding !== undefined &&
@@ -1586,10 +1589,10 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
     lane.phase !== "shipped" && Equal.equals(lane.owner, target.owner) &&
     binding.lane.laneId === target.laneId &&
     Equal.equals(binding.request.worker, target.worker) &&
-    (binding.request.prospectiveAdmission === undefined || (
-      binding.request.prospectiveAdmission.sessionId === target.sessionId &&
-      binding.request.prospectiveAdmission.workAssignment === target.expectedWork &&
-      binding.request.prospectiveAdmission.baseHead === target.baseHead
+    (admissionEvidence(binding.request) === undefined || (
+      admissionEvidence(binding.request)?.sessionId === target.sessionId &&
+      admissionEvidence(binding.request)?.workAssignment === target.expectedWork &&
+      admissionEvidence(binding.request)?.baseHead === target.baseHead
     )) &&
     (binding.request.existingGoalRecovery === undefined ||
       (binding.request.existingGoalRecovery.sessionId === target.sessionId &&
@@ -1623,7 +1626,7 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
       claim.worktree === target.worktree
     ) || authority.latest.some(({ request }) => request.worker.agentId === target.worker.agentId) ||
     bindings.some(({ request }) =>
-      request.prospectiveAdmission?.sessionId === target.sessionId ||
+      admissionEvidence(request)?.sessionId === target.sessionId ||
       request.existingGoalRecovery?.sessionId === target.sessionId
     )
   if (conflicts) {
@@ -1840,7 +1843,7 @@ const recoveryState = (database: DatabaseSync, target: WorkRecoveryTargetType): 
       ({ request }) =>
         request.laneId === target.laneId ||
         request.worker.agentId === target.worker.agentId ||
-        request.prospectiveAdmission?.sessionId === target.sessionId ||
+        admissionEvidence(request)?.sessionId === target.sessionId ||
         request.existingGoalRecovery?.sessionId === target.sessionId
     ) ||
     decisions.some(({ record }) => {
@@ -1889,6 +1892,9 @@ export interface WorkStoreService {
   ) => Effect.Effect<WorkAdmissionPreflightType, WorkProjectionError | WorkStoreError>
   readonly admitExistingOwner: (
     request: WorkProspectiveAdmissionType
+  ) => Effect.Effect<WorkPullRequestLinkType, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
+  readonly admitObserved: (
+    request: WorkObservedAdmissionType
   ) => Effect.Effect<WorkPullRequestLinkType, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
   readonly bindAgent: (
     request: WorkAgentBindingRequestType
@@ -1979,7 +1985,13 @@ export interface WorkStoreService {
     readonly approvals: ReadonlyArray<WorkApprovedActivity>
     /** The checkpoints the reconciler wrote, from its own record of them. */
     readonly reconcilerEvents: ReadonlyArray<{ readonly goalId: string; readonly eventId: string }>
-    /** Each activity's first checkpoint and content, keyed by goal id and activity id. */
+    /**
+     * The admission checkpoints the reconciler wrote for observed workers, from
+     * their bindings. Kept apart from `reconcilerEvents`, which also marks a goal
+     * as already given its terminal checkpoint.
+     */
+    readonly observedAdmissions: ReadonlyArray<{ readonly goalId: string; readonly eventId: string }>
+    /** The checkpoint that started each current activity's unchanged run, and its content, keyed by goal id and activity id. */
     readonly activityOrigins: ReadonlyMap<string, { readonly eventId: string; readonly activity: WorkActivityType }>
     readonly logicalObservedAt: number | null
   }, WorkStoreError>
@@ -2130,6 +2142,58 @@ const writeObservations = (
     if (database.isTransaction) database.exec("ROLLBACK")
     throw cause
   }
+}
+
+/** The admission fields both kinds share: an approved job adds its approval, the reconciler its observation. */
+type WorkAdmissionInput = Omit<WorkProspectiveAdmissionType, "kind" | "approvalJobId" | "approvalActor">
+
+/** Who admitted a worker: an approved Fleet job, or the reconciler from an observation. */
+type AdmissionProvenance =
+  | { readonly _tag: "approved"; readonly approvalJobId: string; readonly approvalActor: string }
+  | { readonly _tag: "observed"; readonly observationId: string }
+
+interface AdmissionEvidence {
+  readonly sessionId: string
+  readonly workAssignment: string
+  readonly baseHead: string
+  readonly expectedAbsenceToken: string
+}
+
+const admissionSummary = (provenance: AdmissionProvenance): string =>
+  provenance._tag === "approved"
+    ? `Prospective admission of an existing owner by approved Fleet job ${provenance.approvalJobId}`
+    : `Admission of an observed worker by the reconciler from observation ${provenance.observationId}`
+
+/** The binding-request key that records how a worker was admitted. */
+const admissionRecord = (
+  provenance: AdmissionProvenance,
+  evidence: AdmissionEvidence
+): Pick<WorkAgentBindingRequestType, "prospectiveAdmission" | "observedAdmission"> =>
+  provenance._tag === "approved"
+    ? {
+      prospectiveAdmission: {
+        ...evidence,
+        approvalJobId: provenance.approvalJobId,
+        approvalActor: provenance.approvalActor
+      }
+    }
+    : { observedAdmission: { ...evidence, actor: "reconciler", observationId: provenance.observationId } }
+
+/** Whether a stored binding was admitted by exactly this provenance and absence evidence (an exact replay). */
+const sameAdmission = (
+  request: WorkAgentBindingRequestType,
+  expectedAbsenceToken: string,
+  provenance: AdmissionProvenance
+): boolean => {
+  if (provenance._tag === "approved") {
+    const stored = request.prospectiveAdmission
+    return stored !== undefined &&
+      stored.expectedAbsenceToken === expectedAbsenceToken &&
+      stored.approvalJobId === provenance.approvalJobId && stored.approvalActor === provenance.approvalActor
+  }
+  const stored = request.observedAdmission
+  return stored !== undefined &&
+    stored.expectedAbsenceToken === expectedAbsenceToken && stored.observationId === provenance.observationId
 }
 
 export class WorkStore implements WorkStoreService {
@@ -2980,6 +3044,10 @@ export class WorkStore implements WorkStoreService {
     return preflight
   })
 
+  /**
+   * Admits an existing owner after an approved Fleet job. Its absence token is
+   * re-checked inside the write; an exact replay returns the stored link.
+   */
   readonly admitExistingOwner = Effect.fn("WorkStore.admitExistingOwner")(function*(
     this: WorkStore,
     request: WorkProspectiveAdmissionType
@@ -2987,6 +3055,32 @@ export class WorkStore implements WorkStoreService {
     const decoded = yield* Schema.decodeUnknownEffect(WorkProspectiveAdmission)(request).pipe(
       Effect.mapError(storeError("admission.decode"))
     )
+    return yield* this.#admit(decoded, {
+      _tag: "approved",
+      approvalActor: decoded.approvalActor,
+      approvalJobId: decoded.approvalJobId
+    })
+  })
+
+  /**
+   * Admits a worker the reconciler observed, without an approval: the same
+   * write and checks as `admitExistingOwner`, credited to the observation.
+   */
+  readonly admitObserved = Effect.fn("WorkStore.admitObserved")(function*(
+    this: WorkStore,
+    request: WorkObservedAdmissionType
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(WorkObservedAdmission)(request).pipe(
+      Effect.mapError(storeError("admission.decode"))
+    )
+    return yield* this.#admit(decoded, { _tag: "observed", observationId: decoded.observationId })
+  })
+
+  readonly #admit = Effect.fn("WorkStore.admit")(function*(
+    this: WorkStore,
+    decoded: WorkAdmissionInput,
+    provenance: AdmissionProvenance
+  ) {
     const target = Schema.decodeUnknownSync(WorkAdmissionTarget)(decoded)
     const now = yield* Clock.currentTimeMillis
     yield* this.secureFiles()
@@ -3016,13 +3110,10 @@ export class WorkStore implements WorkStoreService {
           const state = admissionState(this.#database, target)
           if (state._tag === "existing") {
             const existing = state.link
-            const provenance = existing.binding.request.prospectiveAdmission
             this.#database.exec("ROLLBACK")
             transaction = false
             return existing.binding.request.dispatchRequestId === decoded.operationId &&
-                provenance?.expectedAbsenceToken === decoded.expectedAbsenceToken &&
-                provenance?.approvalJobId === decoded.approvalJobId &&
-                provenance.approvalActor === decoded.approvalActor &&
+                sameAdmission(existing.binding.request, decoded.expectedAbsenceToken, provenance) &&
                 existing.goal.title === decoded.title &&
                 existing.goal.summary === decoded.summary &&
                 existing.goal.detail === decoded.detail
@@ -3071,7 +3162,7 @@ export class WorkStore implements WorkStoreService {
             activity: [{
               id: `${decoded.operationId}.admission`,
               kind: "status",
-              summary: `Prospective admission of an existing owner by approved Fleet job ${decoded.approvalJobId}`,
+              summary: admissionSummary(provenance),
               occurredAt: createdAt
             }],
             review: { state: "requested", summary: null, updatedAt: createdAt, url: decoded.reviewUrl },
@@ -3105,14 +3196,12 @@ export class WorkStore implements WorkStoreService {
               laneId: decoded.laneId,
               expectedRevision: 0,
               worker: decoded.worker,
-              prospectiveAdmission: {
+              ...admissionRecord(provenance, {
                 sessionId: decoded.sessionId,
                 workAssignment: decoded.expectedWork,
                 baseHead: decoded.baseHead,
-                expectedAbsenceToken: decoded.expectedAbsenceToken,
-                approvalJobId: decoded.approvalJobId,
-                approvalActor: decoded.approvalActor
-              }
+                expectedAbsenceToken: decoded.expectedAbsenceToken
+              })
             },
             lane,
             checkpoint: {
@@ -3167,7 +3256,7 @@ export class WorkStore implements WorkStoreService {
               _tag: "rejected",
               error: capacity ?? new WorkProjectionError({
                 cause: decoded,
-                detail: "prospective admission exceeds Work capacity",
+                detail: "admission exceeds Work capacity",
                 reason: "capacity_exceeded"
               })
             }
@@ -4931,6 +5020,7 @@ export class WorkStore implements WorkStoreService {
       approvalJobId,
       goalId
     }))
+    const observedAdmissions: Array<{ readonly goalId: string; readonly eventId: string }> = []
     for (const row of bindingRows) {
       const binding = yield* Effect.try({
         try: () => Schema.decodeUnknownSync(WorkAgentBinding)(JSON.parse(row.record)),
@@ -4958,7 +5048,11 @@ export class WorkStore implements WorkStoreService {
       if (readbackError !== undefined) return yield* readbackError
       logicalObservedAt = Math.max(logicalObservedAt ?? 0, binding.checkpoint.occurredAt)
       const goalId = binding.checkpoint.goal.id
-      const { dispatchRequestId, existingGoalRecovery, ownerReassignment, prospectiveAdmission } = binding.request
+      const { dispatchRequestId, existingGoalRecovery, observedAdmission, ownerReassignment, prospectiveAdmission } =
+        binding.request
+      if (observedAdmission !== undefined) {
+        observedAdmissions.push({ eventId: `${dispatchRequestId}.admission`, goalId })
+      }
       if (prospectiveAdmission !== undefined) {
         approvals.push({
           activityId: `${dispatchRequestId}.admission`,
@@ -5026,7 +5120,16 @@ export class WorkStore implements WorkStoreService {
       }
       previousByGoal.set(event.goal.id, current)
     }
-    return { activityOrigins, approvals, events, facts, failures, logicalObservedAt, reconcilerEvents }
+    return {
+      activityOrigins,
+      approvals,
+      events,
+      facts,
+      failures,
+      logicalObservedAt,
+      observedAdmissions,
+      reconcilerEvents
+    }
   })
 
   readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore) {
