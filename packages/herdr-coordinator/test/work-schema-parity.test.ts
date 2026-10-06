@@ -431,6 +431,49 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
       })
     ))
 
+  it.effect("makes a migrated file's plain session index unique through the bridge too, or fails closed on duplicates", () =>
+    withRoot((root) =>
+      Effect.gen(function*() {
+        // A file migrated from v1 handoffs: session_id was added by ALTER TABLE,
+        // so it has no column constraint and only a plain index under the name.
+        const migrated = join(root, "migrated.sqlite")
+        yield* drivers.store(migrated)
+        writeFixture(migrated, (database) => {
+          database.exec(`
+            DROP TABLE work_decision_handoffs;
+            CREATE TABLE work_decision_handoffs (
+              handoff_id TEXT PRIMARY KEY, session_id TEXT, lane_id TEXT NOT NULL,
+              occurred_at INTEGER NOT NULL, record TEXT NOT NULL
+            );
+            CREATE INDEX work_decision_handoffs_session ON work_decision_handoffs (session_id);
+          `)
+        })
+        const unique = (path: string) =>
+          rows(
+            Schema.Struct({ name: Schema.String, unique: Schema.Number }),
+            new DatabaseSync(path),
+            "PRAGMA index_list(work_decision_handoffs)"
+          )
+            .find(({ name }) => name === "work_decision_handoffs_session")?.unique
+        const clean = join(root, "clean.sqlite")
+        copyFileSync(migrated, clean)
+        yield* drivers.bridge(clean)
+        expect(unique(clean)).toBe(1)
+        const duplicated = join(root, "duplicated.sqlite")
+        copyFileSync(migrated, duplicated)
+        writeFixture(duplicated, (database) => {
+          database.exec(`
+            INSERT INTO work_decision_handoffs VALUES ('handoff:a', 'session:shared', 'lane:a', 1, '{}');
+            INSERT INTO work_decision_handoffs VALUES ('handoff:b', 'session:shared', 'lane:b', 2, '{}');
+          `)
+        })
+        expect(yield* Effect.result(drivers.bridge(duplicated))).toMatchObject({
+          failure: { _tag: "WorkStoreError", operation: "sql-work.initialize.session-index" }
+        })
+        expect(unique(duplicated)).toBe(0)
+      })
+    ))
+
   it.effect("is idempotent for each driver", () =>
     withRoot((root) =>
       Effect.gen(function*() {

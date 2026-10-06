@@ -1041,6 +1041,32 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           ], { discard: true })
         }, { discard: true })
       }
+      // A file migrated from v1 handoffs may already hold a plain index under
+      // this name, which IF NOT EXISTS leaves as it is: make it unique, or fail
+      // closed when two handoffs already share a session (WorkStore does the same).
+      const sessionIndex = yield* sql`PRAGMA index_list(work_decision_handoffs)`.pipe(
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ name: Schema.String, unique: Schema.Number })))
+        ),
+        Effect.map((indexes) => indexes.find(({ name }) => name === "work_decision_handoffs_session")),
+        Effect.mapError(storeError("sql-work.initialize.session-index"))
+      )
+      if (sessionIndex !== undefined && sessionIndex.unique !== 1) {
+        const duplicates = yield* sql`
+          SELECT session_id AS sessionId, COUNT(*) AS rows, group_concat(handoff_id) AS handoffIds
+          FROM work_decision_handoffs WHERE session_id IS NOT NULL
+          GROUP BY session_id HAVING COUNT(*) > 1 LIMIT 10
+        `.pipe(Effect.mapError(storeError("sql-work.initialize.session-index")))
+        if (duplicates.length > 0) {
+          return yield* new WorkStoreError({ cause: { duplicates }, operation: "sql-work.initialize.session-index" })
+        }
+        yield* sql`DROP INDEX work_decision_handoffs_session`.pipe(
+          Effect.mapError(storeError("sql-work.initialize.session-index"))
+        )
+        yield* sql`CREATE UNIQUE INDEX work_decision_handoffs_session ON work_decision_handoffs (session_id)`.pipe(
+          Effect.mapError(storeError("sql-work.initialize.session-index"))
+        )
+      }
       const storedDecisions = yield* sql`
         SELECT handoff_id AS "handoffId", session_id AS "sessionId", lane_id AS "laneId",
           occurred_at AS "occurredAt", record
