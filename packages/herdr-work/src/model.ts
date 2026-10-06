@@ -941,8 +941,8 @@ export const workObservedFactMaxBytes = 2 * 1024 * 1024
  * a source it could not read.
  */
 export const WorkObserveOutcome = Schema.TaggedUnion({
-  stored: { subject: WorkObservationSubject },
-  unchanged: { subject: WorkObservationSubject },
+  stored: { subject: WorkObservationSubject, observationId: Identifier },
+  unchanged: { subject: WorkObservationSubject, observationId: Identifier },
   stale: { subject: WorkObservationSubject },
   unknown: { subject: WorkObservationSubject, reason: FailureReason }
 })
@@ -965,13 +965,18 @@ export const workReconcilerHeadroom = 256
  * again on the next run).
  */
 /**
- * Options for `reconcile`. `confirmedSince` limits it to pull request facts
- * read again, successfully, at or after that time: a caller that has just
- * re-read every pull request passes the start of its read, so a fact stored
- * earlier (the pull request may since have reopened) is never acted on.
+ * Options for `reconcile`. `confirmed` limits it to the pull request facts the
+ * caller has just read and the store accepted: the `subject` and
+ * `observationId` of each `stored` or `unchanged` outcome from that `observe`.
+ * A read refused as stale, or one that failed, confirms nothing, so a fact
+ * stored earlier (the pull request may since have reopened) is never acted on.
  */
 export const WorkReconcileOptions = Schema.Struct({
-  confirmedSince: Schema.optionalKey(Timestamp)
+  confirmed: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ subject: WorkObservationSubject, observationId: Identifier })).check(
+      Schema.isMaxLength(workObservedFactMaxRecords)
+    )
+  )
 })
 export interface WorkReconcileOptions extends Schema.Schema.Type<typeof WorkReconcileOptions> {}
 

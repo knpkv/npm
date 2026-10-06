@@ -1312,8 +1312,6 @@ interface ReconcilerGuard {
   readonly head: WorkGoalCheckpointType
   readonly fact: { readonly subject: string; readonly observationId: string }
   readonly reserve: number
-  /** The caller's freshness floor, re-checked against the fact's last confirmation in the write. */
-  readonly confirmedSince: number | undefined
 }
 
 const ObservationIdRow = Schema.Struct({ observationId: Schema.String, confirmedAt: Schema.Number })
@@ -2138,12 +2136,12 @@ const writeObservations = (
       if (stored?.observationId === item.observationId) {
         confirmFact.run(item.observedAt, item.subject)
         endFailures.run(item.subject, item.observedAt)
-        return { _tag: "unchanged", subject: item.subject }
+        return { _tag: "unchanged", observationId: item.observationId, subject: item.subject }
       }
       if (stored !== undefined && stored.confirmedAt >= item.observedAt) return { _tag: "stale", subject: item.subject }
       upsertFact.run(item.subject, item.observationId, item.observedAt, item.observedAt, item.record)
       endFailures.run(item.subject, item.observedAt)
-      return { _tag: "stored", subject: item.subject }
+      return { _tag: "stored", observationId: item.observationId, subject: item.subject }
     })
     // Totals are read once and kept current as rows go, so eviction is one
     // indexed lookup and delete per row, not a full rescan per row.
@@ -3952,11 +3950,8 @@ export class WorkStore implements WorkStoreService {
             const failedAt = failureRow === undefined
               ? null
               : Schema.decodeUnknownSync(FailureLastAtRow)(failureRow).lastAt
-            // The plan's freshness, re-checked here: a failed read or a missing
-            // confirmation that arrived while the plan was made also makes it stale.
-            const stillFresh = fact !== null &&
-              (failedAt === null || failedAt <= fact.confirmedAt) &&
-              (guard.confirmedSince === undefined || fact.confirmedAt >= guard.confirmedSince)
+            // A failed read recorded while the plan was made also makes it stale.
+            const stillFresh = fact !== null && (failedAt === null || failedAt <= fact.confirmedAt)
             if (
               head?.eventId !== guard.head.eventId || fact?.observationId !== guard.fact.observationId || !stillFresh
             ) {
@@ -5374,6 +5369,15 @@ export class WorkStore implements WorkStoreService {
         reason: "capacity_exceeded"
       })
     }
+    // A confirmation names the fact the caller read; one that is no longer the
+    // subject's stored fact (replaced, evicted) is the caller's stale view.
+    if (options.confirmed !== undefined) {
+      const current = new Map(source.facts.map((fact) => [fact.subject, fact.observationId]))
+      const outdated = options.confirmed.filter(({ observationId, subject }) => current.get(subject) !== observationId)
+      if (outdated.length > 0) {
+        return yield* new WorkStoreError({ cause: outdated, operation: "reconcile.confirmed" })
+      }
+    }
     // A goal is stamped by the reconciler at most once, whatever its facts
     // look like later: a reopened goal stays the owner's.
     const stamped = new Map(source.reconcilerEvents.map(({ eventId, goalId }) => [goalId, eventId]))
@@ -5381,7 +5385,14 @@ export class WorkStore implements WorkStoreService {
     const now = yield* Clock.currentTimeMillis
     const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) => this.appendAt(checkpoint, guard)
     return yield* Effect.forEach(
-      terminalCandidates(source.events, source.facts, source.failures, options.confirmedSince),
+      terminalCandidates(
+        source.events,
+        source.facts,
+        source.failures,
+        options.confirmed === undefined
+          ? undefined
+          : new Set(options.confirmed.map(({ observationId, subject }) => `${subject}\u0000${observationId}`))
+      ),
       Effect.fnUntraced(function*(candidate): Effect.fn.Return<
         WorkReconcileOutcome,
         WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
@@ -5402,8 +5413,7 @@ export class WorkStore implements WorkStoreService {
         return yield* appendAt(checkpoint.success, {
           fact: { observationId: candidate.fact.observationId, subject: candidate.fact.subject },
           head: candidate.head,
-          reserve: workReconcilerHeadroom,
-          confirmedSince: options.confirmedSince
+          reserve: workReconcilerHeadroom
         }).pipe(
           Effect.as<WorkReconcileOutcome>({
             _tag: "applied",

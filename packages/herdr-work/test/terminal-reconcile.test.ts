@@ -14,6 +14,7 @@ import {
   type WorkGoal,
   type WorkGoalCheckpoint,
   workHistoryMaxEvents,
+  type WorkObserveReport,
   type WorkPullRequestObservation,
   workReconcilerHeadroom,
   WorkSnapshots,
@@ -91,6 +92,14 @@ const pullRequest = (overrides: Partial<WorkPullRequestObservation> = {}): WorkP
   state: "open",
   ...overrides
 })
+
+/** What an observe pass confirmed: the stored or unchanged facts, by subject and observation id. */
+const confirmedIn = (report: WorkObserveReport) =>
+  report.outcomes.flatMap((outcome) =>
+    outcome._tag === "stored" || outcome._tag === "unchanged"
+      ? [{ observationId: outcome.observationId, subject: outcome.subject }]
+      : []
+  )
 
 const record = (work: Effect.Success<typeof fixture>["work"], eventId: string, value: WorkGoal) =>
   work.record({ eventId, goal: value, occurredAt: value.updatedAt, version: "herdr.work.event.v1" })
@@ -173,19 +182,6 @@ describe("terminal reconcile", () => {
       expect(withActivityProvenance(base, [], reconcilerEvents, activityOrigins, size(base))).toEqual(base)
     })))
 
-  it.effect("with confirmedSince, acts only on a fact read again at or after it", () =>
-    Effect.scoped(Effect.gen(function*() {
-      const { work } = yield* fixture
-      yield* record(work, "goal-pr7.1", goal())
-      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 6_000 }])
-      // Stored at 6 000; a caller whose read began at 7 000 did not confirm it.
-      expect(yield* work.reconcile({ confirmedSince: 7_000 })).toEqual([])
-      expect((yield* currentGoal(work))?.state).toBe("review")
-      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 7_500 }])
-      expect((yield* work.reconcile({ confirmedSince: 7_000 }))[0]?._tag).toBe("applied")
-      expect((yield* currentGoal(work))?.state).toBe("abandoned")
-    })))
-
   it.effect("never acts on a fact a newer failed read has put in doubt", () =>
     Effect.scoped(Effect.gen(function*() {
       const { work } = yield* fixture
@@ -204,13 +200,60 @@ describe("terminal reconcile", () => {
       expect((yield* currentGoal(work))?.state).toBe("review")
     })))
 
-  it.effect("re-checks freshness in the write: a failed read during planning stops the close", () =>
+  it.effect("with confirmed, acts only on facts the caller read and the store accepted in this pass", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      const report = yield* work.observe([{
+        observation: pullRequest({ closedAt: 5_000, state: "closed" }),
+        observedAt: 6_000
+      }])
+      expect(yield* work.reconcile({ confirmed: [] })).toEqual([])
+      expect((yield* currentGoal(work))?.state).toBe("review")
+      expect((yield* work.reconcile({ confirmed: confirmedIn(report) }))[0]?._tag).toBe("applied")
+      expect((yield* currentGoal(work))?.state).toBe("abandoned")
+    })))
+
+  it.effect("a reopen the store refuses as stale confirms nothing, so the stored close is not acted on", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 8_000 }])
+      const reread = yield* work.observe([{
+        observation: pullRequest({ closedAt: null, state: "open" }),
+        observedAt: 7_500
+      }])
+      expect(reread.outcomes.map(({ _tag }) => _tag)).toEqual(["stale"])
+      expect(yield* work.reconcile({ confirmed: confirmedIn(reread) })).toEqual([])
+      expect((yield* currentGoal(work))?.state).toBe("review")
+    })))
+
+  it.effect("rejects a confirmation that is no longer the subject's stored fact", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      const closed = yield* work.observe([{
+        observation: pullRequest({ closedAt: 5_000, state: "closed" }),
+        observedAt: 6_000
+      }])
+      yield* work.observe([{ observation: pullRequest({ closedAt: null, state: "open" }), observedAt: 7_000 }])
+      const history = yield* store.list()
+      expect(yield* Effect.result(work.reconcile({ confirmed: confirmedIn(closed) }))).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "reconcile.confirmed" }
+      })
+      expect(yield* store.list()).toEqual(history)
+    })))
+
+  it.effect("re-checks failures in the write: a failed read during planning stops the close", () =>
     Effect.scoped(Effect.gen(function*() {
       const { entered, release, suspend, work } = yield* suspendingFixture
       yield* record(work, "goal-pr7.1", goal())
-      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 6_000 }])
+      const report = yield* work.observe([{
+        observation: pullRequest({ closedAt: 5_000, state: "closed" }),
+        observedAt: 6_000
+      }])
       yield* Ref.set(suspend, true)
-      const running = yield* Effect.forkChild(work.reconcile({ confirmedSince: 6_000 }))
+      const running = yield* Effect.forkChild(work.reconcile({ confirmed: confirmedIn(report) }))
       yield* Deferred.await(entered)
       yield* Ref.set(suspend, false)
       yield* work.observe([{
@@ -227,13 +270,13 @@ describe("terminal reconcile", () => {
       expect((yield* currentGoal(work))?.state).toBe("review")
     })))
 
-  it.effect("refuses a malformed freshness floor instead of ignoring it", () =>
+  it.effect("refuses a malformed confirmation instead of ignoring it", () =>
     Effect.scoped(Effect.gen(function*() {
       const { store, work } = yield* fixture
       yield* record(work, "goal-pr7.1", goal())
       yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 6_000 }])
       const history = yield* store.list()
-      expect(yield* Effect.result(work.reconcile({ confirmedSince: Number.NaN }))).toMatchObject({
+      expect(yield* Effect.result(work.reconcile({ confirmed: [{ observationId: "", subject: "" }] }))).toMatchObject({
         failure: { _tag: "WorkStoreError", operation: "reconcile.options" }
       })
       expect(yield* store.list()).toEqual(history)

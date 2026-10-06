@@ -62,11 +62,16 @@ planned from (otherwise that goal is reported as a conflict), and 256
 checkpoints of history stay free. A goal is stamped at most once, by the
 reconciler's own record of what it wrote, so a goal its owner reopens stays
 reopened. A pull request fact is never acted on after a failed read newer than
-its last confirmation. `reconcile({ confirmedSince })` also skips any fact not
-read again at or after `confirmedSince`: a caller that has just re-read its pull
-requests passes the start of that read, so a fact stored earlier (the pull
-request may since have reopened, or the read was refused as stale) never closes
-a goal, including one the snapshot hides as superseded. Both checks run again inside the write's transaction, so a failed read recorded while the reconciler plans also stops the close. A malformed `confirmedSince` fails with `WorkStoreError` rather than being ignored. The checkpoint adds a `reconciler.` activity unless the goal's
+its last confirmation. `reconcile({ confirmed })` also acts only on facts the
+caller has just read and the store accepted: `confirmed` lists the `subject`
+and `observationId` of each `stored` or `unchanged` outcome from that
+`observe`. A read refused as stale, or one that failed, confirms nothing, so a
+fact stored earlier (the pull request may since have reopened) never closes a
+goal, including one the snapshot hides as superseded. A confirmation that is no
+longer the subject's stored fact fails with `WorkStoreError`
+(`reconcile.confirmed`), and a malformed one with `reconcile.options`. The
+failure check runs again inside the write's transaction, so a failed read
+recorded while the reconciler plans also stops the close. The checkpoint adds a `reconciler.` activity unless the goal's
 activity list is full; owner activity is never dropped to make room.
 `abandon` applies an approved `work.abandon` job. The goal, owned by exactly the
 approved owner and still at the approved head, becomes `abandoned`: its blocker

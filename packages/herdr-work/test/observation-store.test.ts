@@ -81,8 +81,15 @@ describe("observed facts", () => {
     Effect.scoped(Effect.gen(function*() {
       const { work } = yield* fixture
       const first = yield* work.observe([at(100, agent("gone"))])
-      expect(first.outcomes).toEqual([{ _tag: "stored", subject: "herdr:ser8/agent-owner" }])
-      expect((yield* work.observe([at(200, agent("gone"))])).outcomes[0]?._tag).toBe("unchanged")
+      expect(first.outcomes).toMatchObject([{ _tag: "stored", subject: "herdr:ser8/agent-owner" }])
+      // Stored and unchanged outcomes name the fact, so a caller can confirm exactly what it read.
+      const again = (yield* work.observe([at(200, agent("gone"))])).outcomes[0]
+      expect(again?._tag).toBe("unchanged")
+      expect(
+        again?._tag === "unchanged" && first.outcomes[0]?._tag === "stored"
+          ? again.observationId === first.outcomes[0].observationId
+          : false
+      ).toBe(true)
       expect((yield* work.observe([at(50, agent("working"))])).outcomes[0]?._tag).toBe("stale")
       expect((yield* work.observe([at(300, agent("working"))])).outcomes[0]?._tag).toBe("stored")
       const reopened = yield* work.observe([at(400, agent("gone"))])
