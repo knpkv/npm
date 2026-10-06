@@ -17,9 +17,9 @@
   }
 
   .heading .fact {
-    font: var(--rly-type-card-title-weight) calc(var(--rly-type-card-title-size) * 1.2) / 1.25
-      var(--rly-type-card-title-font);
-    letter-spacing: var(--rly-type-card-title-tracking);
+    font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
+      var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
+    letter-spacing: var(--rly-type-section-title-tracking);
   }
 
   .heading .caption {
@@ -34,11 +34,12 @@
   }
 
   .line .fact {
-    font-weight: 620;
+    font-weight: var(--rly-type-card-title-weight);
   }
 
   .display .fact {
-    font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / 1 var(--rly-type-page-title-font);
+    font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / var(--rly-type-page-title-line-height)
+      var(--rly-type-page-title-font);
     letter-spacing: var(--rly-type-page-title-tracking);
   }
 
