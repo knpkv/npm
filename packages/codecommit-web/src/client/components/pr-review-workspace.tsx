@@ -1501,6 +1501,7 @@ const ReadyReviewWorkspace = ({
   // resizing mid-finding keeps the pane in view. Moving focus elsewhere clears it.
   const relayHasFocus = useRef(false)
   const findingsTrigger = useRef<HTMLButtonElement>(null)
+  const relayPaneRef = useRef<HTMLElement>(null)
   useEffect(() => {
     setFindingsOpen(placement === "drawer" && relayHasFocus.current)
   }, [placement])
@@ -1510,6 +1511,8 @@ const ReadyReviewWorkspace = ({
     <aside
       aria-label="Relay findings"
       className={styles.agentPane}
+      ref={relayPaneRef}
+      tabIndex={-1}
       onBlur={(event) => {
         const pane = event.currentTarget
         if (event.relatedTarget !== null) {
@@ -1911,7 +1914,9 @@ const ReadyReviewWorkspace = ({
           setFindingsOpen(false)
         }}
         open={findingsOpen}
-        returnFocus={findingsTrigger}
+        // In drawer layout focus goes back to the trigger; when the layout leaves the drawer while it
+        // is open, the trigger is gone and Relay is back in the page, so the reader lands in it.
+        returnFocus={() => (placement === "drawer" ? findingsTrigger.current : relayPaneRef.current)}
         title={findingsLabel}
       >
         {placement === "drawer" ? relayPane : null}

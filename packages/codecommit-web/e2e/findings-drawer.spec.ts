@@ -293,3 +293,21 @@ test("returns focus to the trigger after an auto-opened drawer closes, and does 
   await expect(page.getByRole("button", { name: "Relay", exact: true })).toBeVisible()
   await expect(drawer).toBeHidden()
 })
+
+// Widening while the drawer is open moves Relay back into the page with focus inside it.
+test("keeps focus in Relay when an open drawer's layout widens into a column", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  await page.goto(detail)
+
+  await page.getByRole("button", { name: "Relay", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  await page.setViewportSize({ height: 1080, width: 1920 })
+  const pane = page.getByRole("complementary", { name: "Relay findings" })
+  await expect(pane).toBeVisible()
+  await expect.poll(() =>
+    page.evaluate(() =>
+      document.querySelector("aside[aria-label='Relay findings']")?.contains(document.activeElement) ?? false
+    )
+  ).toBe(true)
+})

@@ -12,7 +12,7 @@
  *
  * @module
  */
-import { type ReactNode, type RefObject, useEffect, useRef } from "react"
+import { type ReactNode, useEffect, useRef } from "react"
 import styles from "./findings-drawer.module.css"
 
 /**
@@ -43,8 +43,11 @@ export function FindingsDrawer({
   readonly children: ReactNode
   readonly onClose: () => void
   readonly open: boolean
-  /** Where focus goes when the drawer closes with nothing else focused, e.g. after it opened itself. */
-  readonly returnFocus: RefObject<HTMLElement | null>
+  /**
+   * Where focus goes when the drawer closes and would otherwise leave it on the page body or inside
+   * the closed dialog, e.g. after it opened itself on a resize.
+   */
+  readonly returnFocus: () => HTMLElement | null
   readonly title: string
 }) {
   const dialog = useRef<HTMLDialogElement>(null)
@@ -87,7 +90,7 @@ export function FindingsDrawer({
         // a control inside the now-closed dialog.
         const active = document.activeElement
         if (active === null || active === document.body || dialog.current?.contains(active) === true) {
-          returnFocus.current?.focus()
+          returnFocus()?.focus()
         }
         onClose()
       }}

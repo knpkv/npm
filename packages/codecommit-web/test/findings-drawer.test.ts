@@ -31,7 +31,7 @@ describe("FindingsDrawer", () => {
       createElement("button", { onClick: () => setOpen(true), ref: trigger, type: "button" }, "Findings (2)"),
       createElement(
         FindingsDrawer,
-        { onClose: () => setOpen(false), open, returnFocus: trigger, title: "Findings (2)" },
+        { onClose: () => setOpen(false), open, returnFocus: () => trigger.current, title: "Findings (2)" },
         createElement("aside", { "aria-label": "Relay findings" }, "Two findings")
       )
     )
