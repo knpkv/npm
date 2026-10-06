@@ -17,4 +17,8 @@ test("grows dense and compact controls to the 44px touch target under a coarse p
   expect(await height(page.locator("[data-button-size=\"dense\"]"))).toBe(44)
   expect(await height(page.locator("[data-button-size=\"compact\"]"))).toBe(44)
   expect(await height(page.locator("[data-button-size=\"default\"]"))).toBe(48)
+
+  await page.goto(story("primitives-togglegroup--interaction"))
+  expect(await height(page.getByRole("radiogroup", { exact: true, name: "Range" }))).toBe(44)
+  expect(await height(page.getByRole("radiogroup", { name: "Range (compact)" }))).toBe(44)
 })

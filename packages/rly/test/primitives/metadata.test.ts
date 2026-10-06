@@ -14,6 +14,7 @@ import { RLY_STATE_PANEL_VARIANTS } from "../../src/primitives/StatePanel.js"
 import { RLY_SURFACE_VARIANTS } from "../../src/primitives/Surface.js"
 import { RLY_TABS_VARIANTS } from "../../src/primitives/Tabs.js"
 import { RLY_TEXT_VARIANTS } from "../../src/primitives/Text.js"
+import { RLY_TOGGLE_GROUP_VARIANTS } from "../../src/primitives/ToggleGroup.js"
 import {
   RLY_COLOR_TOKEN_NAMES,
   RLY_CONTROL_HEIGHT_TOKEN_NAMES,
@@ -77,7 +78,13 @@ describe("primitive metadata", () => {
   })
 
   it("names the shared control height for every size of a control", () => {
-    const controls = [RLY_BUTTON_VARIANTS, RLY_FIELD_VARIANTS, RLY_ICON_BUTTON_VARIANTS, RLY_SELECT_VARIANTS]
+    const controls = [
+      RLY_BUTTON_VARIANTS,
+      RLY_FIELD_VARIANTS,
+      RLY_ICON_BUTTON_VARIANTS,
+      RLY_SELECT_VARIANTS,
+      RLY_TOGGLE_GROUP_VARIANTS
+    ]
     for (const control of controls) {
       for (const [size, metadata] of Object.entries(control.size)) {
         expect(metadata.tokens).toContain(`control-height-${size}`)

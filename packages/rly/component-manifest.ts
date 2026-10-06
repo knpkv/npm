@@ -1001,7 +1001,7 @@ export const componentManifest = {
       source: "src/primitives/ToggleGroup.tsx",
       status: "experimental",
       styles: ["src/primitives/ToggleGroup.module.css"],
-      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+      variants: [{ defaultValue: "dense", name: "size", values: ["dense", "compact", "default"] }],
       visual: {
         story: "stories/primitives/ToggleGroup.stories.tsx",
         storyId: "primitives-togglegroup--interaction",

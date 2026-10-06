@@ -41,6 +41,19 @@ test("preserves deliberate control geometry and the shared focus treatment", asy
   }
 })
 
+test("sizes toggle groups to the shared control heights, border included", async ({ page }) => {
+  await page.goto(story("primitives-togglegroup--interaction"))
+  const groups: ReadonlyArray<readonly [name: string, size: number]> = [
+    ["Range", 32],
+    ["Range (compact)", 40],
+    ["Range (default)", 48]
+  ]
+  for (const [name, size] of groups) {
+    const box = await page.getByRole("radiogroup", { exact: true, name }).boundingBox()
+    expect(Math.round(box?.height ?? 0)).toBe(size)
+  }
+})
+
 test("keeps state explanations readable without horizontal overflow at 320 pixels", async ({ page }) => {
   await page.setViewportSize({ height: 900, width: 320 })
   await page.goto(story("primitives-statepanel--gallery"))

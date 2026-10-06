@@ -85,6 +85,17 @@ describe("registry source validation", () => {
     expect(failures).toContain("variant Button.size defaults to default but source defaults to dense")
   })
 
+  it("rejects a destructured fallback that disagrees with the declared default", () => {
+    const files = new Map(registryFiles())
+    const path = "src/primitives/ToggleGroup.tsx"
+    const source = files.get(path)
+    if (source === undefined) throw new Error("ToggleGroup source fixture is missing")
+    files.set(path, source.replace("size = RLY_TOGGLE_GROUP_DEFAULT_VARIANTS.size,", "size = \"default\","))
+    expect(findRegistrySourceFailures(componentManifest, files)).toContain(
+      "component ToggleGroup destructures size = \"default\" but its declared default is dense"
+    )
+  })
+
   it("does not credit sibling or hidden stories to the referenced navigable story", () => {
     const files = new Map(registryFiles())
     const storyPath = "stories/diff/DiffCodeView.stories.tsx"

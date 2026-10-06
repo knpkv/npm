@@ -1,19 +1,18 @@
 @layer rly.components {
+  /* One outlined row of options, like the controls beside it: no tinted track, 1px dividers. */
   .root {
-    background: var(--rly-color-surface-2);
-    border-radius: var(--rly-radius-field);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-tag);
     display: inline-flex;
     flex-wrap: wrap;
-    gap: var(--rly-space-2);
     max-inline-size: 100%;
-    padding: var(--rly-space-2);
+    overflow: hidden;
   }
 
   .item {
     appearance: none;
     background: transparent;
     border: var(--rly-space-0);
-    border-radius: var(--rly-radius-tag);
     color: var(--rly-color-text-2);
     cursor: pointer;
     font: inherit;
@@ -21,41 +20,46 @@
     white-space: nowrap;
   }
 
+  .item + .item {
+    border-inline-start: 1px solid var(--rly-color-border-2);
+  }
+
   .item[data-state="checked"] {
-    background: var(--rly-color-surface-1);
-    box-shadow: inset 0 0 0 1px var(--rly-color-border-2);
+    background: var(--rly-color-surface-3);
     color: var(--rly-color-text-1);
   }
 
   .item:focus-visible {
     outline: 2px solid var(--rly-color-focus);
-    outline-offset: 1px;
+    outline-offset: -2px;
+  }
+
+  /* Item heights leave room for the row's 1px border, so the whole group matches its size token,
+     which already grows to the touch target under a coarse pointer. */
+  .dense .item,
+  .compact .item {
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+
+  .dense .item {
+    min-block-size: calc(var(--rly-control-height-dense) - 2px);
+    padding-inline: var(--rly-space-8);
+  }
+
+  .compact .item {
+    min-block-size: calc(var(--rly-control-height-compact) - 2px);
   }
 
   .defaultSize .item {
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
-    min-block-size: var(--rly-space-40);
-  }
-
-  .compact .item {
-    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
-      var(--rly-type-meta-font);
-    min-block-size: var(--rly-space-32);
-    padding-inline: var(--rly-space-8);
-  }
-
-  /* Fingers need a bigger target than a pointer, whichever size the row uses. */
-  @media (pointer: coarse) {
-    .defaultSize .item,
-    .compact .item {
-      min-block-size: calc(var(--rly-space-40) + var(--rly-space-4));
-    }
+    min-block-size: calc(var(--rly-control-height-default) - 2px);
   }
 
   @media (hover: hover) {
     .item:not([data-state="checked"]):hover {
-      background: var(--rly-color-surface-3);
+      background: var(--rly-color-surface-2);
       color: var(--rly-color-text-1);
     }
   }
@@ -63,6 +67,7 @@
   @media (forced-colors: active) {
     .item[data-state="checked"] {
       outline: 2px solid CanvasText;
+      outline-offset: -2px;
     }
   }
 }

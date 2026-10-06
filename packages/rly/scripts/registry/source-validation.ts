@@ -333,6 +333,25 @@ const sourceVariants = (source: string, fileName: string): SourceVariants => {
   return { axes, defaults }
 }
 
+/** String literals a component destructures as a prop's fallback (`size = "default"`). */
+const destructuredDefaults = (source: string, fileName: string, prop: string): ReadonlyArray<string> => {
+  const literals: Array<string> = []
+  const visit = (node: TypeScript.Node): void => {
+    if (
+      TypeScript.isBindingElement(node)
+      && TypeScript.isIdentifier(node.name)
+      && node.name.text === prop
+      && node.initializer !== undefined
+      && TypeScript.isStringLiteral(node.initializer)
+    ) {
+      literals.push(node.initializer.text)
+    }
+    TypeScript.forEachChild(node, visit)
+  }
+  visit(TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true))
+  return literals
+}
+
 /**
  * The manifest's variants must match the source's: same values on an axis, same default. An axis
  * declared by more than one `defineVariants` in the file is ambiguous and left to judgment.
@@ -354,6 +373,15 @@ const validateVariants = (component: ComponentRecord, source: string): ReadonlyA
       }
     }
     const fallback = defaults.get(variant.name)
+    for (const literal of destructuredDefaults(source, component.source, variant.name)) {
+      if (fallback?.length === 1 && literal !== fallback[0]) {
+        failures.push(
+          `component ${component.name} destructures ${variant.name} = "${literal}" but its declared default is ${
+            fallback[0]
+          }`
+        )
+      }
+    }
     if (fallback?.length === 1 && fallback[0] !== variant.defaultValue) {
       failures.push(
         `variant ${component.name}.${variant.name} defaults to ${variant.defaultValue} but source defaults to ${
