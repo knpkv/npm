@@ -29,7 +29,7 @@ export {
   RLY_COLLABORATOR_GROUP_VARIANTS
 } from "./CollaboratorGroup.js"
 export type { CollaboratorGroupProps, RlyCollaboratorCategory, RlyCollaboratorGroupSize } from "./CollaboratorGroup.js"
-export { DecisionBar, RLY_DECISION_BAR_VARIANTS } from "./DecisionBar.js"
+export { DecisionBar, RLY_DECISION_BAR_DEFAULT_VARIANTS, RLY_DECISION_BAR_VARIANTS } from "./DecisionBar.js"
 export type { DecisionBarProps, RlyDecisionBarPlacement, RlyDecisionBarState } from "./DecisionBar.js"
 export { EntityShell } from "./EntityShell.js"
 export type { EntityShellProps } from "./EntityShell.js"

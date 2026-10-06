@@ -24,7 +24,6 @@
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
   }
 
   .clock {
@@ -53,5 +52,16 @@
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     margin: var(--rly-space-0);
+  }
+
+  /* Forced colours flatten the muted ink of an off action, so mark it with a dashed border too. */
+  @media (forced-colors: active) {
+    .actions > [aria-disabled="true"] {
+      border-style: dashed;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .actions > [aria-disabled="true"] {
+    border-style: dashed;
   }
 }

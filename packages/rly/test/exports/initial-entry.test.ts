@@ -28,6 +28,7 @@ describe("public entries", () => {
       "RLY_COLLABORATOR_GROUP_DEFAULT_VARIANTS",
       "RLY_COLLABORATOR_GROUP_VARIANTS",
       "DecisionBar",
+      "RLY_DECISION_BAR_DEFAULT_VARIANTS",
       "RLY_DECISION_BAR_VARIANTS",
       "EntityShell",
       "EntityTable",

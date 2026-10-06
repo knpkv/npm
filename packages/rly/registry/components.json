@@ -759,6 +759,10 @@
         },
         {
           "kind": "value",
+          "name": "RLY_DECISION_BAR_DEFAULT_VARIANTS"
+        },
+        {
+          "kind": "value",
           "name": "RLY_DECISION_BAR_VARIANTS"
         },
         {

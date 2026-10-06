@@ -58,6 +58,9 @@ test(
       await expect(off).toHaveAccessibleDescription(/hub is unreachable/)
       await off.focus()
       await expect(off).toBeFocused()
+      if (forcedColors === "active") {
+        expect(await off.evaluate((element) => getComputedStyle(element).borderTopStyle)).toBe("dashed")
+      }
       await expect(page.getByText("Reassign Rotate signing keys from arch to arch-b, 4m 12s left")).toBeVisible()
       await expectNoHorizontalOverflow(page)
       await page.screenshot({

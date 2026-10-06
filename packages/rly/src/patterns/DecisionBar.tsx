@@ -21,6 +21,9 @@ export const RLY_DECISION_BAR_VARIANTS = defineVariants({
   }
 })
 
+/** Default DecisionBar placement. */
+export const RLY_DECISION_BAR_DEFAULT_VARIANTS = defineVariants({ placement: "inline" })
+
 /** Where the bar sits. */
 export type RlyDecisionBarPlacement = keyof typeof RLY_DECISION_BAR_VARIANTS.placement
 
@@ -65,7 +68,7 @@ export const DecisionBar = ({
   note,
   onApprove,
   onReject,
-  placement = "inline",
+  placement = RLY_DECISION_BAR_DEFAULT_VARIANTS.placement,
   rejectLabel = "Reject",
   state,
   target,
