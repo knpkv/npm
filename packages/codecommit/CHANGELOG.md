@@ -1,5 +1,29 @@
 # @knpkv/codecommit
 
+## 0.14.0
+
+### Minor Changes
+
+- [#493](https://github.com/knpkv/npm/pull/493) [`e45eba3`](https://github.com/knpkv/npm/commit/e45eba30991dc662b7a8b09506d2d85b878fec97) Thanks [@konopkov](https://github.com/konopkov)! - `codecommit web` now starts through the same `serveCodeCommit` as `@knpkv/codecommit-web`:
+
+  - `--port` is the starting port. When it is taken, the server moves to the next free one (up to ten tries) instead of failing, and prints the URL it actually bound.
+  - `CODECOMMIT_WEB_PUBLIC_ORIGIN` is honoured as it is by the web package's own entry.
+  - The printed line is `Authenticated bootstrap URL: …`, the same as the web package's entry.
+
+  `--hostname` and opening the browser are unchanged.
+
+### Patch Changes
+
+- [#496](https://github.com/knpkv/npm/pull/496) [`43ab828`](https://github.com/knpkv/npm/commit/43ab8288a02a03924c66b5488d20ac7576e348e1) Thanks [@konopkov](https://github.com/konopkov)! - A failed `EvaluatePullRequestApprovalRules` call no longer shows a pull request as "pending approval" with every rule unsatisfied.
+
+  - `AwsClient.getPullRequestRefresh` streams each pull request as `Fetched` or `EvaluationFailed` with a typed `ApprovalEvaluationError`. The refresh keeps a failed pull request's cached row, carries on with the account's other pull requests, and records the failure in `AppState.unevaluatedPullRequests`. The account's refresh then counts as partial rather than successful, and a notification says how many pull requests couldn't be re-evaluated.
+  - `getPullRequests` and the pull-request detail still fail with the typed error, because they can't report one pull request as unknown.
+  - The codecommit README now lists `codecommit:EvaluatePullRequestApprovalRules` and `codecommit:GetPullRequestApprovalStates` among the required IAM actions.
+
+- Updated dependencies [[`43ab828`](https://github.com/knpkv/npm/commit/43ab8288a02a03924c66b5488d20ac7576e348e1), [`34cfd71`](https://github.com/knpkv/npm/commit/34cfd71a66f76a25313637036e5d5324982ee236), [`e45eba3`](https://github.com/knpkv/npm/commit/e45eba30991dc662b7a8b09506d2d85b878fec97), [`ceb59a9`](https://github.com/knpkv/npm/commit/ceb59a90f535a15c164c7e4e373366ab45acd699)]:
+  - @knpkv/codecommit-core@0.18.0
+  - @knpkv/codecommit-web@0.21.0
+
 ## 0.13.3
 
 ### Patch Changes
