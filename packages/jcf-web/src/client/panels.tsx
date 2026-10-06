@@ -200,7 +200,7 @@ export const ConfirmPanel = (props: {
   return (
     <section aria-label={`Confirm ${props.row.ticketKey} on ${props.row.day}`} className="jcf-panel">
       <h2>
-        {props.row.ticketKey} · {props.row.day} · {spanRange(block)}
+        {props.row.ticketKey} on {props.row.day}, {spanRange(block)}
       </h2>
       {props.row.ticketTitle === null ? null : <p className="jcf-muted">{props.row.ticketTitle}</p>}
       <dl>
@@ -210,17 +210,17 @@ export const ConfirmPanel = (props: {
           {proposal.sessionCount === 1 ? "" : "s"} in {proposal.blocks.length} block
           {proposal.blocks.length === 1 ? "" : "s"}
           {proposal.activeSeconds > proposal.maxSeconds
-            ? ` · ${duration(proposal.activeSeconds)} active, shared with work on other tickets`
+            ? `, ${duration(proposal.activeSeconds)} active, shared with work on other tickets`
             : ""}
         </dd>
         <dt>Placed by</dt>
         <dd>
-          {proposal.signal} — {signalMeaning[proposal.signal] ?? "unknown signal"}
-          {proposal.confidence === null ? "" : ` · confidence ${proposal.confidence.toFixed(2)}`}
+          {proposal.signal}: {signalMeaning[proposal.signal] ?? "unknown signal"}
+          {proposal.confidence === null ? "" : `, confidence ${proposal.confidence.toFixed(2)}`}
         </dd>
         <dt>Already held</dt>
         <dd>
-          Clockify {duration(props.row.clockifySeconds)} · Jira {duration(props.row.jiraSeconds)}
+          Clockify {duration(props.row.clockifySeconds)}, Jira {duration(props.row.jiraSeconds)}
         </dd>
       </dl>
       <div className="jcf-fields">
@@ -283,7 +283,7 @@ export const ConfirmPanel = (props: {
       ) : null}
       {noTargets ? (
         <p className="jcf-note" data-tone="failure">
-          Pick at least one system — a write to neither is not a write.
+          Pick at least one system. A write to neither is not a write.
         </p>
       ) : null}
       {preview?._tag === "Write" ? (
@@ -294,7 +294,7 @@ export const ConfirmPanel = (props: {
               ? "Clockify 0s (held for review)"
               : `Clockify ${exactDuration(preview.clockify.seconds)}`
             : ""}
-          {targets.clockify && targets.jira ? " · " : ""}
+          {targets.clockify && targets.jira ? " and " : ""}
           {targets.jira ? `Jira ${exactDuration(preview.jira.seconds)}` : ""}.
           {(targets.clockify &&
             preview.clockify.refusal === undefined &&

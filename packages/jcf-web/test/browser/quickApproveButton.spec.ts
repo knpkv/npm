@@ -21,7 +21,7 @@ const calendarPosition = (page: Page) =>
   }))
 
 // Plus always queues, including in Review first. Undo must retain the visible time and never write.
-for (const mode of ["Review first", "Quick approve · 5s Undo"]) {
+for (const mode of ["Review first", "Quick approve"]) {
   test(`calendar + queues with Undo and preserves position in ${mode}`, async ({ page }) => {
     await open(page)
     await page.getByRole("button", { name: mode, exact: true }).click()

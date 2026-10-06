@@ -59,7 +59,7 @@ const QuickApproveButton = (props: {
     type="button"
     disabled={props.disabled}
     aria-label={`Quick approve ${props.block.ticketKey} at ${formatClock(new Date(props.block.startMs))}–${formatClock(new Date(props.block.endMs))} with 5-second Undo`}
-    title="Quick approve · 5s Undo"
+    title="Quick approve, with 5 seconds to undo"
     onClick={(event) => {
       event.stopPropagation()
       props.onApprove(props.block.rowId, props.block.blockIndex)
@@ -110,7 +110,7 @@ const Block = (props: {
         aria-label={`${clock}, ${String(block.members.length)} tickets packed in this stretch`}
       >
         <span className="jcf-stretch-head">
-          {clock} · {block.members.length} tickets
+          {clock}, {block.members.length} tickets
         </span>
         <ul>
           {block.members.map((member) => (
@@ -123,7 +123,7 @@ const Block = (props: {
                 data-selected={selected(member)}
                 aria-pressed={selected(member)}
                 disabled={props.disabled}
-                title={`${member.ticketKey}${member.ticketTitle === null ? "" : ` — ${member.ticketTitle}`}\n${formatClock(new Date(member.startMs))}–${formatClock(new Date(member.endMs))} · ${duration(member.seconds)}`}
+                title={`${member.ticketKey}${member.ticketTitle === null ? "" : `: ${member.ticketTitle}`}\n${formatClock(new Date(member.startMs))}–${formatClock(new Date(member.endMs))}, ${duration(member.seconds)}`}
                 onClick={(event) => {
                   event.stopPropagation()
                   props.onOpen(member.rowId, member.blockIndex)
@@ -155,7 +155,7 @@ const Block = (props: {
         data-source={block.source}
         data-pending={block.pending === true}
         style={style}
-        title={`${block.pending === true ? "Pending in" : "Saved in"} ${block.source === "jira" ? "Jira" : "Clockify"}: ${block.ticketKey ?? "No ticket"} ${clock}${block.description === null ? "" : ` — ${block.description}`}`}
+        title={`${block.pending === true ? "Pending in" : "Saved in"} ${block.source === "jira" ? "Jira" : "Clockify"}: ${block.ticketKey ?? "No ticket"} ${clock}${block.description === null ? "" : `: ${block.description}`}`}
       >
         <span className="jcf-block-label">
           <span className="jcf-block-key">{block.ticketKey ?? "No ticket"}</span>
@@ -186,9 +186,9 @@ const Block = (props: {
           props.onOpen(block.rowId, block.blockIndex)
         }}
         title={[
-          `${block.ticketKey}${block.ticketTitle === null ? "" : ` — ${block.ticketTitle}`}`,
-          `${clock} · ${duration(block.seconds)} on this block`,
-          `+${duration(block.deltaSeconds)} proposable on this ticket today · placed by ${block.signal}`
+          `${block.ticketKey}${block.ticketTitle === null ? "" : `: ${block.ticketTitle}`}`,
+          `${clock}, ${duration(block.seconds)} on this block`,
+          `${duration(block.deltaSeconds)} more proposable on this ticket today, placed by ${block.signal}`
         ].join("\n")}
         type="button"
       >
@@ -263,18 +263,18 @@ export const WeekGrid = (props: {
           {(
             [
               {
-                label: "Saved entries · click to edit",
+                label: "Saved entries",
                 choices: [
                   { key: "jira", label: "Jira entries", detail: "Jira worklogs" },
-                  { key: "clockify", label: "Clockify entries", detail: "With or without a ticket" }
+                  { key: "clockify", label: "Clockify entries", detail: "with or without a ticket" }
                 ]
               },
               {
-                label: props.quickApproval ? "Suggestions · click to approve" : "Suggestions · click to review",
+                label: "Suggestions",
                 choices: [
-                  { key: "available", label: "No overlap", detail: "Outside visible saved time" },
-                  { key: "overlapping", label: "Overlap", detail: "Check before logging" },
-                  { key: "all", label: "All", detail: "Every suggestion" }
+                  { key: "available", label: "No overlap", detail: "outside the saved time you show" },
+                  { key: "overlapping", label: "Overlap", detail: "check before logging" },
+                  { key: "all", label: "All", detail: "every suggestion" }
                 ]
               }
             ] satisfies ReadonlyArray<{
@@ -287,8 +287,10 @@ export const WeekGrid = (props: {
             }>
           ).map((group) => (
             <div className="jcf-layer-group" key={group.label}>
-              <strong>{group.label}</strong>
-              <div className="jcf-layer-choices" data-suggestions={group.choices.some(({ key }) => key === "all")}>
+              <span className="jcf-layer-title" id={`jcf-layer-${group.label}`}>
+                {group.label}
+              </span>
+              <div className="jcf-layer-choices" role="group" aria-labelledby={`jcf-layer-${group.label}`}>
                 {group.choices
                   .filter(
                     ({ key }) =>
@@ -304,23 +306,19 @@ export const WeekGrid = (props: {
                             ? layers.overlapping && !layers.available
                             : layers[key]
                     return (
-                      <div className="jcf-layer-choice" key={key}>
-                        <Button
-                          variant={selected ? "primary" : "secondary"}
-                          {...(key === "jira" || key === "clockify"
-                            ? { leadingIcon: selected ? "check" : "plus" }
-                            : {})}
-                          title={`${selected && (key === "jira" || key === "clockify") ? "Hide" : "Show"} ${label}`}
-                          data-source={key}
-                          aria-label={label}
-                          aria-pressed={selected}
-                          disabled={props.writing && (key === "jira" || key === "clockify")}
-                          onClick={() => props.onToggleLayer(key)}
-                        >
-                          {`${label} · ${key === "all" ? counts.available + counts.overlapping : counts[key]}`}
-                        </Button>
-                        <small>{detail}</small>
-                      </div>
+                      <Button
+                        key={key}
+                        size="compact"
+                        variant={selected ? "primary" : "secondary"}
+                        title={`${selected && (key === "jira" || key === "clockify") ? "Hide" : "Show"} ${label}: ${detail}`}
+                        data-source={key}
+                        aria-label={label}
+                        aria-pressed={selected}
+                        disabled={props.writing && (key === "jira" || key === "clockify")}
+                        onClick={() => props.onToggleLayer(key)}
+                      >
+                        {`${label} (${key === "all" ? counts.available + counts.overlapping : counts[key]})`}
+                      </Button>
                     )
                   })}
               </div>
@@ -346,14 +344,6 @@ export const WeekGrid = (props: {
           </Button>
         </div>
       </div>
-      <p className="jcf-layer-help">
-        Overlap is checked against the Jira and Clockify layers you show, for any ticket or entry without a ticket. Only
-        selected provider layers receive new time.{" "}
-        {props.quickApproval
-          ? "Click a dashed suggestion to queue it. Undo is available for at least five seconds before saving."
-          : "Click a dashed suggestion to review and log it."}{" "}
-        Use + to quick approve with five-second Undo in either mode. Click empty space to add time.
-      </p>
       <div
         className="jcf-calendar"
         role="region"
@@ -468,8 +458,8 @@ export const WeekGrid = (props: {
                           <strong>{block.ticketKey ?? "No ticket"}</strong>
                           <span>{block.ticketTitle ?? "Proposed work"}</span>
                           <span className="jcf-agenda-state">
-                            {duration(block.seconds)} suggested · {block.overlap ? "overlaps saved time" : "no overlap"}
-                            {props.quickApproval ? " · click to approve" : ""}
+                            {duration(block.seconds)} suggested, {block.overlap ? "overlaps saved time" : "no overlap"}
+                            {props.quickApproval ? ". Click to approve." : ""}
                           </span>
                         </button>
                         <QuickApproveButton
@@ -513,7 +503,7 @@ export const WeekGrid = (props: {
   )
 }
 
-/** `YYYY-MM-DD` of an instant, by the local clock — the same key every bucket uses. */
+/** `YYYY-MM-DD` of an instant, by the local clock: the same key every bucket uses. */
 const localDayOf = (at: Date): string => {
   const month = String(at.getMonth() + 1).padStart(2, "0")
   return `${at.getFullYear()}-${month}-${String(at.getDate()).padStart(2, "0")}`

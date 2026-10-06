@@ -86,7 +86,7 @@ test("narrow editor preserves the viewport and restores focus on Escape and Canc
   for (const close of ["Escape", "Cancel"]) {
     await suggestion.press("Enter")
     const editor = page.getByRole("complementary", { name: "Time entry editor" })
-    await expect(editor).toBeFocused()
+    await expect(editor.getByRole("heading", { level: 2 }).first()).toBeFocused()
     await expect(editor.getByRole("textbox", { name: "What was done (optional)", exact: true })).toHaveValue(
       "Improved weekly time review and tested approval behavior"
     )

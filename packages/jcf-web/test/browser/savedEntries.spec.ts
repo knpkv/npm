@@ -60,7 +60,7 @@ for (const source of ["jira", "clockify"]) {
     await card.press("Enter")
     expect(errors).toEqual([])
     const editor = page.getByRole("complementary", { name: "Saved time editor" })
-    await expect(editor).toBeFocused()
+    await expect(editor.getByRole("heading", { level: 2 }).first()).toBeFocused()
     const description = editor.getByRole("textbox", { name: "What was done (optional)" })
     await expect(description).toHaveJSProperty("tagName", "TEXTAREA")
     const note = source === "clockify"
@@ -177,7 +177,7 @@ test("edits unkeyed and cross-midnight Clockify entries in the mobile agenda", a
     .first()
   await card.click()
   const editor = page.getByRole("complementary", { name: "Saved time editor" })
-  await expect(editor.getByRole("heading", { name: "No ticket · Clockify" })).toBeVisible()
+  await expect(editor.getByRole("heading", { name: "No ticket in Clockify" })).toBeVisible()
   await editor.getByRole("button", { name: "Generate description", exact: true }).click()
   await expect(editor.getByRole("textbox", { name: "What was done (optional)" })).toHaveValue(
     "Improved weekly time review and tested approval behavior"
