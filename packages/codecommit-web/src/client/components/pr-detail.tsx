@@ -59,6 +59,7 @@ import { toast } from "sonner"
 import {
   appStateAtom,
   createApprovalRuleAtom,
+  deleteApprovalRuleAtom,
   createSandboxAtom,
   openPrAtom,
   refreshSinglePrAtom,
@@ -616,6 +617,8 @@ interface ApproversCardProps {
   readonly currentUser: string | undefined
   readonly repoAccountId: string
   readonly onSetApprovers: (arns: ReadonlyArray<string>) => void
+  /** Deletes this card's own rule (never a template rule). */
+  readonly onRemoveRule: () => void
   readonly onRefresh: () => void
   readonly permissionPrompt: boolean
 }
@@ -626,6 +629,7 @@ function ApproversCard({
   currentUser,
   knownUserArns,
   onRefresh,
+  onRemoveRule,
   onSetApprovers,
   permissionPrompt,
   repoAccountId,
@@ -712,6 +716,12 @@ function ApproversCard({
         >
           <PlusIcon className="size-4" />
         </Button>
+        {managedRule === undefined ? null : (
+          // Only the rule this page created can be removed; template rules belong to the repository.
+          <RlyButton onClick={onRemoveRule} size="compact" variant="quiet">
+            Remove rule
+          </RlyButton>
+        )}
       </header>
       <div className={styles.approverBody}>
         {showPicker && (
@@ -885,6 +895,7 @@ export function PRDetail() {
   const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom, { mode: "promise" })
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
+  const deleteRule = useAtomSet(deleteApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
   const routeSelection = useMemo(() => {
     const route = pullRequestRouteCoordinates(accountId, prId, searchParams)
@@ -1616,6 +1627,11 @@ export function PRDetail() {
                       }
                     })
                   }
+                }}
+                onRemoveRule={() => {
+                  deleteRule({
+                    payload: { account: pr.account, approvalRuleName: card.ruleName, pullRequestId: pr.id }
+                  })
                 }}
                 permissionPrompt={state.permissionPrompt !== undefined}
                 repoAccountId={currentAcct}

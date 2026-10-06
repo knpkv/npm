@@ -32,7 +32,8 @@ test("says this browser isn't signed in when the session is refused, with no zer
 
   await page.goto("/")
   await expect(page.getByText("This browser isn't signed in", { exact: true })).toBeVisible()
-  await expect(page.getByText("Open the sign-in link that codecommit web printed.", { exact: false })).toBeVisible()
+  await expect(page.getByRole("main").getByText("Open the sign-in link that codecommit web printed.", { exact: false }))
+    .toBeVisible()
   await expect(page.getByRole("status").filter({ hasText: "Not signed in" })).toBeVisible()
   const facets = page.getByRole("group", { name: "Pull request facets" })
   await expect(facets.getByLabel("unknown")).toHaveCount(4)

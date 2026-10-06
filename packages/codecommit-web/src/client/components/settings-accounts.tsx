@@ -94,7 +94,8 @@ export function SettingsAccounts() {
       </div>
       <Separator />
       {AsyncResult.builder(config)
-        .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)
+        // Only the first load replaces the list; a re-detect keeps it (and its result line) on screen.
+        .onInitial(() => <p className="text-sm text-muted-foreground">Loading...</p>)
         .onDefect(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onSuccess((data) => (
           <AccountsList
