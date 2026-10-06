@@ -259,6 +259,45 @@ it("reads the week even when the sources read fails for another reason", async (
   expect(fixture.state().signedOut).toBe(false)
 })
 
+// Review finding: saves went through the write atoms, which dropped the HTTP status, so a 401 from a
+// save showed an action failure instead of the signed-out screen.
+it("signs the tab out when a save is refused for a missing session", async () => {
+  const fixture = setup({
+    logManual: async () => {
+      throw new RequestFailure({ status: 401, message: "Missing or invalid owner session" })
+    }
+  })
+  await fixture.review.initialize()
+  expect(await fixture.review.logManual({ day: fixture.plan.monday, ticketKey: "PROJ-123", seconds: 60 })).toBe(false)
+  expect(fixture.state().signedOut).toBe(true)
+  expect(fixture.state().actionFailure).toBeNull()
+})
+
+it("keeps an ordinary save failure as an action failure", async () => {
+  const fixture = setup({
+    logManual: async () => {
+      throw new RequestFailure({ status: 500, message: "Clockify is unavailable" })
+    }
+  })
+  await fixture.review.initialize()
+  expect(await fixture.review.logManual({ day: fixture.plan.monday, ticketKey: "PROJ-123", seconds: 60 })).toBe(false)
+  expect(fixture.state().signedOut).toBe(false)
+  expect(fixture.state().actionFailure).toContain("Clockify is unavailable")
+})
+
+// Review finding: a remembered Jira-only scope stayed active after Jira was disconnected.
+it("reads both systems when the remembered single-system scope is no longer connected", async () => {
+  const fixture = setup({
+    readSources: async () => ({
+      jira: { connected: false, connect: "jcf auth jira token" },
+      clockify: { connected: true, connect: "jcf auth clockify setup" }
+    })
+  })
+  await fixture.review.navigate(fixture.plan.monday, "jira")
+  expect(fixture.state().scope).toBe("both")
+  expect(fixture.transport.readSavedWeek.mock.calls.at(-1)?.[1]).toBe("both")
+})
+
 it("shares one pending bootstrap between overlapping initialization attempts", async () => {
   const bootstrap = gate<void>()
   const fixture = setup({ bootstrapSession: () => bootstrap.promise })

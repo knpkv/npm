@@ -16,7 +16,7 @@
  *
  * @module
  */
-import { Data, Effect, FileSystem, Path, Random, Schema } from "effect"
+import { Clock, Data, Effect, FileSystem, Option, Path, Random, Schedule, Schema } from "effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
 import { HomeDirectory } from "../services/HomeDirectory.js"
 
@@ -53,9 +53,36 @@ export class ControlFileError extends Data.TaggedError("ControlFileError")<{ rea
   }
 }
 
+/** A lock older than this was left by a process that died holding it. */
+const staleLockMillis = 10_000
+
+/**
+ * Runs `effect` holding `~/.jcf/web.lock`, created exclusively, so one server's write and another's
+ * check-then-remove never interleave. A lock is retried for about two seconds, and a stale one is broken.
+ */
+const withControlLock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function*() {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const lock = path.join(path.dirname(yield* controlFilePath), "web.lock")
+    yield* fs.makeDirectory(path.dirname(lock), { recursive: true, mode: 0o700 })
+    const take = fs.writeFileString(lock, "", { flag: "wx", mode: 0o600 }).pipe(
+      Effect.catch(() =>
+        Effect.gen(function*() {
+          const info = yield* fs.stat(lock)
+          const modified = Option.getOrElse(info.mtime, () => new Date(0)).getTime()
+          if ((yield* Clock.currentTimeMillis) - modified > staleLockMillis) yield* fs.remove(lock)
+          return yield* Effect.fail("held")
+        })
+      )
+    )
+    yield* take.pipe(Effect.retry({ schedule: Schedule.spaced("25 millis"), times: 80 }))
+    return yield* effect.pipe(Effect.ensuring(fs.remove(lock).pipe(Effect.ignore)))
+  })
+
 /** Records this server's origin and control token, replacing any earlier server's file. */
 export const writeControlFile = (control: ControlFile) =>
-  Effect.gen(function*() {
+  withControlLock(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const file = yield* controlFilePath
@@ -64,18 +91,18 @@ export const writeControlFile = (control: ControlFile) =>
     yield* fs.writeFileString(pending, JSON.stringify(control), { mode: 0o600 })
     yield* fs.chmod(pending, 0o600)
     yield* fs.rename(pending, file).pipe(Effect.tapError(() => fs.remove(pending).pipe(Effect.ignore)))
-  }).pipe(
+  })).pipe(
     Effect.catch(() => controlFilePath.pipe(Effect.flatMap((path) => Effect.fail(new ControlFileError({ path })))))
   )
 
 /** Removes the control file if it is still this server's; a newer server's file is left alone. */
 export const removeControlFile = (token: string) =>
-  Effect.gen(function*() {
+  withControlLock(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const file = yield* controlFilePath
     const current = yield* fs.readFileString(file).pipe(Effect.flatMap(decodeControlFile))
     if (current.token === token) yield* fs.remove(file)
-  }).pipe(Effect.ignore)
+  })).pipe(Effect.ignore)
 
 /** Asks the running jcf-web for a fresh one-time sign-in link. */
 export const requestLoginUrl = Effect.gen(function*() {

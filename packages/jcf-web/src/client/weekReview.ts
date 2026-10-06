@@ -89,8 +89,7 @@ interface ReviewStatus {
 }
 
 /** A 401 means this tab holds no valid session, whichever request saw it first. */
-const isSignedOut = (cause: unknown): boolean =>
-  Api.RequestFailure.is(cause) && Predicate.hasProperty(cause, "status") && cause.status === 401
+const isSignedOut = (cause: unknown): boolean => Predicate.hasProperty(cause, "status") && cause.status === 401
 
 const messageOf = (cause: unknown): string => Predicate.isError(cause) ? cause.message : String(cause)
 const excerpt = (text: string): string =>
@@ -166,7 +165,8 @@ export const makeWeekReview = (
 
   const load = async (request: ReadRequest) => {
     if (readLocked()) return
-    const { mode, scope, week } = request
+    const { mode, week } = request
+    let scope = request.scope
     lastRead = request
     active?.abort()
     const controller = new AbortController()
@@ -203,7 +203,17 @@ export const makeWeekReview = (
           return null
         })
         if (!isCurrent()) return
-        if (sources !== null) update({ sources })
+        if (sources !== null) {
+          update({ sources })
+          // A remembered single-system scope whose system is no longer connected would read nothing
+          // and leave no scope selected; read both, which shows whatever is connected.
+          if ((scope === "jira" && !sources.jira.connected) || (scope === "clockify" && !sources.clockify.connected)) {
+            scope = "both"
+            lastRead = { ...request, scope }
+            update({ scope })
+            preferences.rememberScope(scope)
+          }
+        }
       }
       const onProgress = (progress: ReadProgress) => {
         if (!isCurrent()) return
@@ -397,7 +407,8 @@ export const makeWeekReview = (
             if (failures.length > 0) recordQueueFailure(failures.join("; "))
           }
         } catch (cause) {
-          recordQueueFailure(messageOf(cause))
+          if (isSignedOut(cause)) update({ signedOut: true })
+          else recordQueueFailure(messageOf(cause))
         }
       }
     } finally {

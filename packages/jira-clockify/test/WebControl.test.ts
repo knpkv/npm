@@ -7,8 +7,7 @@
  */
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import type { Path } from "effect"
-import { Effect, FileSystem, Layer } from "effect"
+import { Effect, Fiber, FileSystem, Layer, Path } from "effect"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http"
 import { HomeDirectory } from "../src/services/HomeDirectory.js"
 import { controlFilePath, removeControlFile, requestLoginUrl, writeControlFile } from "../src/web/WebControl.js"
@@ -96,6 +95,48 @@ describe("WebControl", () => {
         expect(yield* fs.exists(file)).toBe(true)
         yield* removeControlFile(control.token)
         expect(yield* fs.exists(file)).toBe(false)
+      })
+    ))
+
+  // Live clock: the lock is retried on real time.
+  // Review finding: an exiting server's check and unlink could straddle a newer server's write and
+  // delete it. Both now hold web.lock, so whichever order they take, the newer server's file survives.
+  it.live("a newer server's file survives an older server's exit racing its write", () =>
+    inHome(
+      "running",
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const file = yield* controlFilePath
+        const lock = path.join(path.dirname(file), "web.lock")
+        yield* writeControlFile(control)
+        // Hold the lock, start both, then release: neither may run until the lock is free.
+        yield* fs.writeFileString(lock, "")
+        const newer = { origin: control.origin, token: "newer-token" }
+        const fibers = yield* Effect.all([
+          Effect.forkChild(removeControlFile(control.token)),
+          Effect.forkChild(writeControlFile(newer))
+        ])
+        yield* Effect.sleep("100 millis")
+        expect(yield* fs.readFileString(file)).toContain(control.token)
+        yield* fs.remove(lock)
+        yield* Effect.forEach(fibers, Fiber.join)
+        expect(yield* fs.readFileString(file)).toContain("newer-token")
+      })
+    ))
+
+  it.live("breaks a lock left by a process that died holding it", () =>
+    inHome(
+      "running",
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const lock = path.join(path.dirname(yield* controlFilePath), "web.lock")
+        yield* fs.makeDirectory(path.dirname(lock), { recursive: true })
+        yield* fs.writeFileString(lock, "")
+        yield* fs.utimes(lock, new Date(0), new Date(0))
+        yield* writeControlFile(control)
+        expect(yield* requestLoginUrl).toBe("http://127.0.0.1:3111/#bootstrap_token=fresh")
       })
     ))
 })
