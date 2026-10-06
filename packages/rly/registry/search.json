@@ -1314,6 +1314,7 @@
         "agent",
         "default",
         "human",
+        "provenance",
         "service",
         "system"
       ],
@@ -1322,6 +1323,7 @@
         "audit",
         "human",
         "pattern",
+        "provenance",
         "service",
         "system",
         "timeline",

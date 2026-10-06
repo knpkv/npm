@@ -45,3 +45,27 @@ test("keeps named collaborator roles and controlled overflow clear at 320 pixels
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("people-320.png") })
 })
+
+test(
+  "keeps every provenance shape distinct and labelled at 320 pixels, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_400, width: 320 })
+      await page.goto(story("patterns-timelinerow--provenance", forcedColors))
+
+      for (const kind of ["auto", "approved", "pending", "unknown", "flag"]) {
+        const mark = page.locator(`li [data-rly-timeline-provenance='${kind}']`)
+        await expect(mark).toBeVisible()
+        const box = await mark.boundingBox()
+        expect(box?.width ?? 0).toBeGreaterThan(0)
+      }
+      await expect(page.getByText("Not applied: GitHub rate limit, retrying at 05:12")).toBeVisible()
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`timeline-provenance-320-${forcedColors}.png`)
+      })
+    }
+  }
+)

@@ -59,6 +59,7 @@ describe("public entries", () => {
       "RLY_STAGE_RAIL_DEFAULT_VARIANTS",
       "RLY_STAGE_RAIL_VARIANTS",
       "StageRail",
+      "TimelineProvenanceKey",
       "TimelineRow",
       "RLY_VERDICT_VARIANTS",
       "Verdict",
