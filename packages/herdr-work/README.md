@@ -19,7 +19,8 @@ The same facts again keep their first-seen time (`observedAt`) and move their
 last confirmation (`confirmedAt`); facts older than the last confirmation are
 skipped. An `unknown` observation (a source that could not be read) never
 replaces a fact: it starts or continues the subject's run of failures, whose
-`since` stays at the first failure until a good read ends it. Hostd names the
+`since` stays at the first failure until a good read newer than every failure
+ends it (a delayed good read inside the run restarts it at its latest failure). Hostd names the
 failed subject the same way as its facts (`pullRequestSubject`, `agentSubject`). Facts are not goal
 history: they never write a checkpoint, never count against the history bound,
 and are not part of any approval token, so observing cannot invalidate a pending
@@ -38,7 +39,8 @@ recently updated goals first, while the encoded snapshots fit the 1 MiB response
 budget; any left out are counted in `observedOmitted`. `observed` is always
 present, empty when nothing was observed; when not even that fits, the `now`
 window carries no overlay keys, which means live state is not available. A snapshot taken at an explicit
-time shows only facts first seen by then and failures that had started.
+time shows only what was known by then: facts first seen by then, with the last
+confirmation made by then, and failures whose latest failed read was by then.
 Earlier windows stay as recorded. A goal's agent is its agent hierarchy, or its
 connect target on older goals; host and repository letter case never makes a
 new fact.

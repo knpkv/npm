@@ -140,6 +140,7 @@ describe("observeGoal", () => {
 
   it("reports the oldest current read failure among the goal's own subjects, with its last good read", () => {
     const failure = (subject: string, since: number): WorkObservedFailure => ({
+      lastAt: since,
       reason: "gh: rate limited",
       since,
       source: subject.startsWith("github:") ? "github" : "herdr",

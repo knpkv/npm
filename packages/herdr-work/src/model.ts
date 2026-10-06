@@ -740,6 +740,16 @@ export const WorkObservationSubject = Schema.String.check(
   Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
 )
 
+/**
+ * A branch name as a provider reported it. Looser than the lane `Branch`
+ * authority type: any one-line name a provider accepts (`renovate/@types-x`).
+ */
+const ObservedBranch = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
+)
+
 /** Why a source could not be read: one bounded line, so failures stay small in every snapshot. */
 const FailureReason = Schema.String.check(
   Schema.isNonEmpty(),
@@ -756,7 +766,7 @@ export const WorkPullRequestObservation = Schema.TaggedStruct("pull_request", {
   repository: RepositoryName,
   pullRequest: PullRequestNumber,
   state: Schema.Literals(["open", "merged", "closed"]),
-  branch: Branch,
+  branch: ObservedBranch,
   head: ExactHead,
   review: WorkReviewState,
   checks: WorkObservedChecks,
@@ -817,13 +827,17 @@ export interface WorkObservedFact extends Schema.Schema.Type<typeof WorkObserved
 
 /**
  * The current run of failed reads for one subject. `since` is the first
- * failure of the run; a later failure keeps it, a good read ends the run.
+ * failure of the run; a later failure keeps it, a good read newer than every
+ * failure ends the run, and a good read inside it restarts the run at its
+ * latest failure.
  */
 export const WorkObservedFailure = Schema.Struct({
   subject: WorkObservationSubject,
   source: WorkUnknownObservation.fields.source,
   reason: FailureReason,
-  since: Timestamp
+  since: Timestamp,
+  /** The latest failed read of the run; `source` and `reason` are from it. */
+  lastAt: Timestamp
 })
 export interface WorkObservedFailure extends Schema.Schema.Type<typeof WorkObservedFailure> {}
 

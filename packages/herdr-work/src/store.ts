@@ -1982,15 +1982,17 @@ const writeObservations = (
       "UPDATE work_observed_facts SET confirmed_at = max(confirmed_at, ?) WHERE subject = ?"
     )
     // A good read ends a run of failures only if it is newer than the run's
-    // latest failure; a delayed good read only moves the run's start past it.
+    // latest failure.
     const clearFailures = database.prepare("DELETE FROM work_observed_failures WHERE subject = ? AND last_at <= ?")
+    // We keep only the run's first and latest failure, so a run split by a
+    // delayed good read restarts at its latest failure: a real failed read.
     const trimFailures = database.prepare(
-      "UPDATE work_observed_failures SET since = max(since, ? + 1) WHERE subject = ? AND last_at > ?"
+      "UPDATE work_observed_failures SET since = last_at WHERE subject = ? AND since <= ? AND last_at > ?"
     )
     const endFailures = {
       run: (subject: string, observedAt: number) => {
         clearFailures.run(subject, observedAt)
-        trimFailures.run(observedAt, subject, observedAt)
+        trimFailures.run(subject, observedAt, observedAt)
       }
     }
     // `since` is the earliest failure of the run; source and reason come from
@@ -4714,7 +4716,8 @@ export class WorkStore implements WorkStoreService {
              LIMIT ?`
           ).all(workObservedFactMaxRecords + 1)
           const failures = this.#database.prepare(
-            "SELECT subject, source, reason, since FROM work_observed_failures ORDER BY subject ASC LIMIT ?"
+            `SELECT subject, source, reason, since, last_at AS lastAt
+             FROM work_observed_failures ORDER BY subject ASC LIMIT ?`
           ).all(workObservedFactMaxRecords + 1)
           this.#database.exec("COMMIT")
           inTransaction = false

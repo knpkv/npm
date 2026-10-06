@@ -317,7 +317,7 @@ describe("observed facts", () => {
       yield* work.observe([failed(100, "failed 100")])
       yield* work.observe([failed(300, "failed 300")])
       yield* work.observe([at(200, pullRequest())])
-      expect(yield* unknownOf).toEqual({ lastGoodAt: 200, reason: "failed 300", since: 201, source: "github" })
+      expect(yield* unknownOf).toEqual({ lastGoodAt: 200, reason: "failed 300", since: 300, source: "github" })
       yield* work.observe([at(400, pullRequest())])
       expect(yield* unknownOf).toBeNull()
     })))
@@ -355,5 +355,37 @@ describe("observed facts", () => {
       const now = (yield* work.snapshots(10_000)).now
       expect(now.observed).toEqual([])
       expect(now.observedOmitted).toBeUndefined()
+    })))
+
+  it.effect("accepts any one-line branch name a provider reports", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      const report = yield* work.observe([
+        at(100, pullRequest({ branch: "renovate/@types-node-26.x" })),
+        at(100, agent("idle"))
+      ])
+      expect(report.outcomes.map(({ _tag }) => _tag)).toEqual(["stored", "stored"])
+      expect(yield* Effect.flip(work.observe([at(200, pullRequest({ branch: "feat/x\nbad" }))]))).toMatchObject({
+        _tag: "WorkStoreError",
+        operation: "observe.decode"
+      })
+    })))
+
+  it.effect("never invents a confirmation or a failure reason a historical read could not have known", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      const failed = (observedAt: number, reason: string) =>
+        at(observedAt, { _tag: "unknown", reason, source: "github", subject: "github:knpkv/npm#7" })
+      yield* work.record({ eventId: "goal-pr7.1", goal, occurredAt: 1_000, version: "herdr.work.event.v1" })
+      yield* work.observe([at(3_000, pullRequest())])
+      yield* work.observe([at(5_000, pullRequest())])
+      expect((yield* work.snapshots(4_000)).now.observed?.[0]?.pullRequest?.confirmedAt).toBe(3_000)
+      expect((yield* work.snapshots(5_000)).now.observed?.[0]?.pullRequest?.confirmedAt).toBe(5_000)
+      yield* work.observe([failed(6_000, "first"), failed(8_000, "second")])
+      expect((yield* work.snapshots(6_500)).now.observed?.[0]?.unknown).toBeNull()
+      expect((yield* work.snapshots(8_000)).now.observed?.[0]?.unknown).toMatchObject({
+        reason: "second",
+        since: 6_000
+      })
     })))
 })

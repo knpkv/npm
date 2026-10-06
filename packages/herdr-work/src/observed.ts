@@ -145,15 +145,17 @@ export const withObservedFacts = (
   maxBytes: number
 ): WorkSnapshots => {
   // A snapshot at time t shows only what was known at t: facts first seen by
-  // then (their confirmation clamped to t) and failures that had started.
+  // then, with the last confirmation made by then (the first sighting, also a
+  // real read, when the latest is later), and failures whose latest failed
+  // read, and so their reason, was known by then.
   const asOf = snapshots.observedAt
   const factMap = bySubject(
     facts.filter(({ observedAt }) => observedAt <= asOf).map((fact) => ({
       ...fact,
-      confirmedAt: Math.min(fact.confirmedAt, asOf)
+      confirmedAt: fact.confirmedAt <= asOf ? fact.confirmedAt : fact.observedAt
     }))
   )
-  const failureMap = bySubject(failures.filter(({ since }) => since <= asOf))
+  const failureMap = bySubject(failures.filter(({ lastAt }) => lastAt <= asOf))
   const candidates: ReadonlyArray<WorkGoalObservedEntry> = snapshots.now.goals.flatMap((goal) => {
     const observed = observeWith(goal, factMap, failureMap, snapshots.observedAt)
     return observedSomething(observed) ? [{ goalId: goal.id, ...observed }] : []
