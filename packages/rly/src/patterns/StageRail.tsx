@@ -71,7 +71,8 @@ const wordTone = (tone: RlyStateTone): "blocked" | "held" | "quiet" =>
 /**
  * Render every supplied stage as an ordered, color-independent progression. The `words` size
  * reads as a sentence ("Build succeeded, Staging failed: integration tests, Prod waiting") for
- * rows and facts; its heading stays for assistive technology only.
+ * rows and facts: it renders no heading or landmark, only a list named by `heading`, so a long
+ * list of rows does not become a long list of regions.
  */
 export const StageRail = ({
   className,
@@ -89,7 +90,7 @@ export const StageRail = ({
   return (
     <section
       {...props}
-      aria-labelledby={headingId}
+      aria-labelledby={size === "words" ? undefined : headingId}
       className={classNames(
         style("root"),
         RLY_STAGE_RAIL_VARIANTS.size[size].className,
@@ -98,20 +99,23 @@ export const StageRail = ({
       )}
       data-rly-stage-rail-size={size}
     >
-      <h2 className={style("heading")} id={headingId}>
-        {visibleHeading}
-      </h2>
+      {size === "words" ? null : (
+        <h2 className={style("heading")} id={headingId}>
+          {visibleHeading}
+        </h2>
+      )}
       {stages.length === 0 ? (
         <p className={style("empty")}>{visibleEmptyLabel}</p>
       ) : size === "words" ? (
-        <ol className={style("wordList")}>
-          {stages.map((stage) => (
+        <ol aria-label={visibleHeading} className={style("wordList")}>
+          {stages.map((stage, index) => (
             <li className={style("word")} data-rly-stage-id={stage.id} key={stage.id}>
-              <span className={style("wordName")}>{stage.name}</span>{" "}
+              {stage.name}{" "}
               <span className={style("wordState")} data-rly-stage-word={wordTone(stage.tone)}>
                 {stage.state}
               </span>
               {stage.reason === undefined ? null : <span className={style("wordReason")}>: {stage.reason}</span>}
+              {index === stages.length - 1 ? null : ","}
             </li>
           ))}
         </ol>

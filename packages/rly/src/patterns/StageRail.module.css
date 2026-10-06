@@ -165,13 +165,9 @@
   }
 
   /* Words: one line of "Name state" pairs, commas between them, no chips or markers. */
-  .words .heading {
-    block-size: 1px;
-    clip-path: inset(50%);
-    inline-size: 1px;
-    overflow: hidden;
-    position: absolute;
-    white-space: nowrap;
+  /* Words: no heading row, so the list sits flush in the row or fact around it. */
+  .words {
+    gap: var(--rly-space-0);
   }
 
   .wordList {
@@ -189,16 +185,6 @@
   .word {
     color: var(--rly-color-text-1);
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
-  }
-
-  .word:not(:last-child)::after {
-    color: var(--rly-color-text-2);
-    content: ",";
-  }
-
-  .wordName {
-    color: var(--rly-color-text-1);
   }
 
   .wordState {
@@ -217,5 +203,6 @@
 
   .wordReason {
     color: var(--rly-color-text-2);
+    overflow-wrap: anywhere;
   }
 }

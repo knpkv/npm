@@ -134,7 +134,8 @@ const heldStages = [
 export const Words: Story = {
   args: { heading: "Relay 2.4 stages", size: "words", stages: releaseStages },
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getByRole("region", { name: "Relay 2.4 stages" })).toBeVisible()
+    await expect(canvas.getByRole("list", { name: "Relay 2.4 stages" })).toBeVisible()
+    await expect(canvas.queryAllByRole("region")).toHaveLength(0)
     await expect(canvasElement.querySelectorAll("[data-rly-stage-marker]")).toHaveLength(0)
     await expect(canvasElement.querySelectorAll("[data-rly-stage-word='blocked']")).toHaveLength(1)
     await expect(canvasElement.querySelectorAll("[data-rly-stage-word='held']")).toHaveLength(1)
