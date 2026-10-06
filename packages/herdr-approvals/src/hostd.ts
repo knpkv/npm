@@ -1,9 +1,10 @@
-import type { HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
+import type { FleetStoreError, HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { FleetOperationError, JobStore, loadConfiguration, makeFleetService } from "@knpkv/herdr-fleet"
 import { Console, Effect, FileSystem, Path, Redacted, Scope } from "effect"
 import type { HostdOperationsCompositionError } from "./errors.js"
 import { startHttpServer, type UiAssets } from "./http.js"
 import { fleetConfigPath } from "./internal/config-path.js"
+import { hasPendingWorkApproval, noJobStore } from "./internal/pending-work-approval.js"
 import { makeHostOperations } from "./operations.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
@@ -16,6 +17,12 @@ export interface HostdOperationsComposition {
   readonly defaultOperations: HostOperations
   /** Registers accepted work for interruption when the hostd process scope closes. */
   readonly fork: HostdLifetimeFork
+  /**
+   * Whether any Work job is waiting for approval right now. A writer that must
+   * not invalidate pending approvals (their preflight tokens hash the whole
+   * Work store) defers its writes while this is true.
+   */
+  readonly hasPendingWorkApproval: Effect.Effect<boolean, FleetStoreError>
 }
 
 export type HostdOperationsComposer = (
@@ -53,13 +60,19 @@ const loadUiAssets = Effect.fn("Hostd.loadUiAssets")(function*(directory: string
 
 export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
   config: HostConfiguration,
-  composeOperations?: HostdOperationsComposer
+  composeOperations?: HostdOperationsComposer,
+  jobs?: JobStore
 ) {
   const scope = yield* Scope.Scope
   const defaultOperations = yield* makeHostOperations(config)
   if (composeOperations === undefined) return defaultOperations
   const fork: HostdLifetimeFork = (effect) => Effect.forkIn(effect, scope).pipe(Effect.asVoid)
-  return yield* composeOperations({ config, defaultOperations, fork })
+  return yield* composeOperations({
+    config,
+    defaultOperations,
+    fork,
+    hasPendingWorkApproval: jobs === undefined ? noJobStore : hasPendingWorkApproval(jobs)
+  })
 })
 
 /**
@@ -77,7 +90,7 @@ export const makeHostdProgram = Effect.fn("Hostd.makeProgram")(function*(
     JobStore.open(paths.join(config.stateDirectory, "jobs.sqlite")),
     (opened) => Effect.sync(() => opened.close())
   )
-  const operations = yield* makeHostdOperations(config, options.composeOperations)
+  const operations = yield* makeHostdOperations(config, options.composeOperations, store)
   const service = yield* makeFleetService({
     approvalEnabled: config.crossHost,
     host: config.host,
