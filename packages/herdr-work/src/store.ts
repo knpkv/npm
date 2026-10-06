@@ -90,6 +90,13 @@ import {
   workHistoryMaxEvents,
   WorkLaneClaim,
   WorkLaneClaimed,
+  WorkObservationEnvelope,
+  workObservationMaxSkewMillis,
+  WorkObservationSubject,
+  WorkObservedFact,
+  workObservedFactMaxBytes,
+  workObservedFactMaxRecords,
+  WorkObservedFailure,
   WorkProspectiveAdmission,
   WorkPullRequestLink,
   WorkRecoveryTarget,
@@ -100,16 +107,24 @@ import type {
   WorkAdmissionTarget as WorkAdmissionTargetType,
   WorkAgentBinding as WorkAgentBindingType,
   WorkAgentBindingRequest as WorkAgentBindingRequestType,
+  WorkAgentObservation as WorkAgentObservationType,
   WorkDecisionHandoff as WorkDecisionHandoffType,
   WorkExistingGoalRecovery as WorkExistingGoalRecoveryType,
   WorkGoalCheckpoint as WorkGoalCheckpointType,
   WorkGoalReassigned as WorkGoalReassignedType,
   WorkGoalReassignment as WorkGoalReassignmentType,
+  WorkObservationEnvelope as WorkObservationEnvelopeType,
+  WorkObservedFact as WorkObservedFactType,
+  WorkObservedFailure as WorkObservedFailureType,
+  WorkObserveOutcome,
+  WorkObserveReport,
   WorkProspectiveAdmission as WorkProspectiveAdmissionType,
   WorkPullRequestLink as WorkPullRequestLinkType,
+  WorkPullRequestObservation as WorkPullRequestObservationType,
   WorkRecoveryPreflight as WorkRecoveryPreflightType,
   WorkRecoveryTarget as WorkRecoveryTargetType
 } from "./model.js"
+import { asciiLower, canonicalSubject, observationSubject } from "./observed.js"
 
 const StoredEventRow = Schema.Struct({ record: Schema.String })
 const StoredEventRows = Schema.Array(StoredEventRow)
@@ -1887,11 +1902,165 @@ export interface WorkStoreService {
     laneId: string
   ) => Effect.Effect<ReadonlyArray<WorkDecisionHandoff>, WorkStoreError>
   readonly list: () => Effect.Effect<ReadonlyArray<WorkGoalCheckpointType>, WorkStoreError>
-  /** Atomically reads projection history and its coordinator-owned logical-time boundary. */
+  /**
+   * Stores the latest observed facts per subject. Facts are never goal history
+   * and never input to an approval token, so observing cannot invalidate a
+   * pending approval or fill the goal history.
+   */
+  readonly observe: (
+    envelopes: ReadonlyArray<WorkObservationEnvelopeType>
+  ) => Effect.Effect<WorkObserveReport, WorkStoreError>
+  /** Atomically reads projection history, observed facts, and the coordinator-owned logical-time boundary. */
   readonly snapshotInput: () => Effect.Effect<{
     readonly events: ReadonlyArray<WorkGoalCheckpointType>
+    readonly facts: ReadonlyArray<WorkObservedFactType>
+    readonly failures: ReadonlyArray<WorkObservedFailureType>
     readonly logicalObservedAt: number | null
   }, WorkStoreError>
+}
+
+const ObservedFactRow = Schema.Struct({
+  subject: Schema.String,
+  observationId: Schema.String,
+  observedAt: Schema.Number,
+  confirmedAt: Schema.Number,
+  record: Schema.String
+})
+
+const StoredFactRow = Schema.Struct({ observationId: Schema.String, confirmedAt: Schema.Number })
+const FactTotalsRow = Schema.Struct({ count: Schema.Number, bytes: Schema.Number })
+const EvictionRow = Schema.Struct({ subject: Schema.String, bytes: Schema.Number })
+
+type PreparedObservation =
+  | {
+    readonly _tag: "fact"
+    readonly subject: string
+    readonly observationId: string
+    readonly observedAt: number
+    readonly record: string
+  }
+  | { readonly _tag: "future"; readonly subject: string }
+  | {
+    readonly _tag: "unknown"
+    readonly subject: string
+    readonly source: "github" | "herdr" | "git"
+    readonly reason: string
+    readonly observedAt: number
+  }
+
+const canonicalObservation = (
+  observation: WorkPullRequestObservationType | WorkAgentObservationType
+): WorkPullRequestObservationType | WorkAgentObservationType =>
+  observation._tag === "agent"
+    ? { ...observation, host: asciiLower(observation.host) }
+    : { ...observation, repository: asciiLower(observation.repository) }
+
+/**
+ * Applies each observation in one transaction, then evicts the oldest rows
+ * until facts and failures are each within their bounds.
+ *
+ * - The same facts again keep their first-seen time and move `confirmed_at`.
+ * - Different facts replace the stored ones, unless the stored ones were
+ *   confirmed at or after this observation (then it is stale).
+ * - A good read ends the subject's run of failures. A failure starts a run,
+ *   or keeps the running one's `since`; one older than the last good read is stale.
+ */
+const writeObservations = (
+  database: DatabaseSync,
+  prepared: ReadonlyArray<PreparedObservation>
+): WorkObserveReport => {
+  database.exec("BEGIN IMMEDIATE")
+  try {
+    const readFact = database.prepare(
+      `SELECT observation_id AS observationId, confirmed_at AS confirmedAt
+       FROM work_observed_facts WHERE subject = ?`
+    )
+    const upsertFact = database.prepare(
+      `INSERT INTO work_observed_facts (subject, observation_id, observed_at, confirmed_at, record)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (subject) DO UPDATE SET observation_id = excluded.observation_id,
+         observed_at = excluded.observed_at, confirmed_at = excluded.confirmed_at, record = excluded.record`
+    )
+    const confirmFact = database.prepare(
+      "UPDATE work_observed_facts SET confirmed_at = max(confirmed_at, ?) WHERE subject = ?"
+    )
+    // A good read ends a run of failures only if it is newer than the run's
+    // latest failure.
+    const clearFailures = database.prepare("DELETE FROM work_observed_failures WHERE subject = ? AND last_at <= ?")
+    // We keep only the run's first and latest failure, so a run split by a
+    // delayed good read restarts at its latest failure: a real failed read.
+    const trimFailures = database.prepare(
+      "UPDATE work_observed_failures SET since = last_at WHERE subject = ? AND since <= ? AND last_at > ?"
+    )
+    const endFailures = {
+      run: (subject: string, observedAt: number) => {
+        clearFailures.run(subject, observedAt)
+        trimFailures.run(subject, observedAt, observedAt)
+      }
+    }
+    // `since` is the earliest failure of the run; source and reason come from
+    // the latest one, whatever order the failures arrive in.
+    const recordFailure = database.prepare(
+      `INSERT INTO work_observed_failures (subject, source, reason, since, last_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (subject) DO UPDATE SET
+         since = min(since, excluded.since),
+         source = CASE WHEN excluded.last_at >= last_at THEN excluded.source ELSE source END,
+         reason = CASE WHEN excluded.last_at >= last_at THEN excluded.reason ELSE reason END,
+         last_at = max(last_at, excluded.last_at)`
+    )
+    const outcomes = prepared.map((item): WorkObserveOutcome => {
+      if (item._tag === "future") return { _tag: "stale", subject: item.subject }
+      const row = readFact.get(item.subject)
+      const stored = row === undefined ? undefined : Schema.decodeUnknownSync(StoredFactRow)(row)
+      if (item._tag === "unknown") {
+        if (stored !== undefined && stored.confirmedAt >= item.observedAt) {
+          return { _tag: "stale", subject: item.subject }
+        }
+        recordFailure.run(item.subject, item.source, item.reason, item.observedAt, item.observedAt)
+        return { _tag: "unknown", reason: item.reason, subject: item.subject }
+      }
+      if (stored?.observationId === item.observationId) {
+        confirmFact.run(item.observedAt, item.subject)
+        endFailures.run(item.subject, item.observedAt)
+        return { _tag: "unchanged", subject: item.subject }
+      }
+      if (stored !== undefined && stored.confirmedAt >= item.observedAt) return { _tag: "stale", subject: item.subject }
+      upsertFact.run(item.subject, item.observationId, item.observedAt, item.observedAt, item.record)
+      endFailures.run(item.subject, item.observedAt)
+      return { _tag: "stored", subject: item.subject }
+    })
+    // Totals are read once and kept current as rows go, so eviction is one
+    // indexed lookup and delete per row, not a full rescan per row.
+    const evict = (table: string, age: string, payload: string): number => {
+      const size = `length(CAST(subject AS BLOB)) + length(CAST(${payload} AS BLOB))`
+      const totals = Schema.decodeUnknownSync(FactTotalsRow)(
+        database.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${size}), 0) AS bytes FROM ${table}`).get()
+      )
+      const oldest = database.prepare(
+        `SELECT subject, ${size} AS bytes FROM ${table} ORDER BY ${age} ASC, subject ASC LIMIT 1`
+      )
+      const remove = database.prepare(`DELETE FROM ${table} WHERE subject = ?`)
+      let { bytes, count } = totals
+      let evicted = 0
+      while (count > workObservedFactMaxRecords || bytes > workObservedFactMaxBytes) {
+        const row = Schema.decodeUnknownSync(EvictionRow)(oldest.get())
+        remove.run(row.subject)
+        count -= 1
+        bytes -= row.bytes
+        evicted += 1
+      }
+      return evicted
+    }
+    // The least recently read rows go first: a fact by its last confirmation,
+    // a failure by its latest failed read.
+    const evicted = evict("work_observed_facts", "confirmed_at", "record") +
+      evict("work_observed_failures", "last_at", "reason")
+    database.exec("COMMIT")
+    return { evicted, outcomes }
+  } catch (cause) {
+    if (database.isTransaction) database.exec("ROLLBACK")
+    throw cause
+  }
 }
 
 export class WorkStore implements WorkStoreService {
@@ -2026,6 +2195,24 @@ export class WorkStore implements WorkStoreService {
           ON work_decision_handoffs (lane_id, occurred_at, handoff_id);
         CREATE INDEX IF NOT EXISTS work_decision_handoffs_session
           ON work_decision_handoffs (session_id);
+        CREATE TABLE IF NOT EXISTS work_observed_facts (
+          subject TEXT PRIMARY KEY,
+          observation_id TEXT NOT NULL,
+          observed_at INTEGER NOT NULL,
+          confirmed_at INTEGER NOT NULL,
+          record TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS work_observed_facts_age
+          ON work_observed_facts (confirmed_at, subject);
+        CREATE TABLE IF NOT EXISTS work_observed_failures (
+          subject TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          since INTEGER NOT NULL,
+          last_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS work_observed_failures_age
+          ON work_observed_failures (last_at, subject);
       `)
           const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
             database.prepare("PRAGMA table_info(work_goal_events)").all()
@@ -4536,9 +4723,19 @@ export class WorkStore implements WorkStoreService {
              FROM work_lane_operations ORDER BY operation_id ASC
              LIMIT ?`
           ).all(workLaneOperationMaxRecords + 1)
+          const facts = this.#database.prepare(
+            `SELECT subject, observation_id AS observationId, observed_at AS observedAt,
+               confirmed_at AS confirmedAt, record
+             FROM work_observed_facts ORDER BY subject ASC
+             LIMIT ?`
+          ).all(workObservedFactMaxRecords + 1)
+          const failures = this.#database.prepare(
+            `SELECT subject, source, reason, since, last_at AS lastAt
+             FROM work_observed_failures ORDER BY subject ASC LIMIT ?`
+          ).all(workObservedFactMaxRecords + 1)
           this.#database.exec("COMMIT")
           inTransaction = false
-          return { bindings, events, laneOperations }
+          return { bindings, events, facts, failures, laneOperations }
         } catch (cause) {
           if (inTransaction) this.#database.exec("ROLLBACK")
           throw cause
@@ -4596,7 +4793,99 @@ export class WorkStore implements WorkStoreService {
       if (readbackError !== undefined) return yield* readbackError
       logicalObservedAt = Math.max(logicalObservedAt ?? 0, binding.checkpoint.occurredAt)
     }
-    return { events, logicalObservedAt }
+    const factRows = yield* Schema.decodeUnknownEffect(Schema.Array(ObservedFactRow))(source.facts).pipe(
+      Effect.mapError(storeError("snapshot-input.decode-fact-rows"))
+    )
+    const failures = yield* Schema.decodeUnknownEffect(Schema.Array(WorkObservedFailure))(source.failures).pipe(
+      Effect.mapError(storeError("snapshot-input.decode-failures"))
+    )
+    if (factRows.length > workObservedFactMaxRecords || failures.length > workObservedFactMaxRecords) {
+      return yield* new WorkStoreError({ cause: factRows.length, operation: "snapshot-input.fact-capacity" })
+    }
+    const facts = yield* Effect.forEach(factRows, (row) =>
+      Effect.try({
+        try: () =>
+          Schema.decodeUnknownSync(WorkObservedFact)({
+            confirmedAt: row.confirmedAt,
+            observation: JSON.parse(row.record),
+            observationId: row.observationId,
+            observedAt: row.observedAt,
+            subject: row.subject
+          }),
+        catch: storeError("snapshot-input.decode-fact")
+      }))
+    // A row is filed under its own facts' subject; anything else is a corrupt row.
+    const misfiled = facts.find((fact) => fact.subject !== observationSubject(fact.observation))
+    if (misfiled !== undefined) {
+      return yield* new WorkStoreError({ cause: misfiled.subject, operation: "snapshot-input.fact-subject" })
+    }
+    return { events, facts, failures, logicalObservedAt }
+  })
+
+  readonly observe = Effect.fn("WorkStore.observe")(function*(
+    this: WorkStore,
+    envelopes: ReadonlyArray<WorkObservationEnvelopeType>
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(
+      Schema.Array(WorkObservationEnvelope).check(Schema.isMaxLength(workObservedFactMaxRecords))
+    )(envelopes).pipe(Effect.mapError(storeError("observe.decode")))
+    const cryptoService = this.#cryptoService
+    // An observation from further ahead than clock skew allows would outrank
+    // every real reading until wall time caught up, so it is skipped as stale.
+    const clockNow = yield* Clock.currentTimeMillis
+    const latestAllowed = clockNow + workObservationMaxSkewMillis
+    const prepared = yield* Effect.forEach(
+      decoded,
+      Effect.fnUntraced(function*(envelope) {
+        // Composite subjects are bounded on their own; check before anything is written.
+        const subject = yield* Schema.decodeUnknownEffect(WorkObservationSubject)(
+          observationSubject(envelope.observation)
+        ).pipe(Effect.mapError(storeError("observe.subject")))
+        if (envelope.observedAt > latestAllowed) return { _tag: "future", subject } satisfies PreparedObservation
+        if (envelope.observation._tag === "unknown") {
+          if (canonicalSubject(envelope.observation.source, envelope.observation.subject) === null) {
+            return yield* new WorkStoreError({ cause: envelope.observation, operation: "observe.subject" })
+          }
+          return {
+            _tag: "unknown",
+            // Within the skew allowance, a reading from slightly ahead counts
+            // as now, so it is visible to a snapshot taken now.
+            observedAt: Math.min(envelope.observedAt, clockNow),
+            reason: envelope.observation.reason,
+            source: envelope.observation.source,
+            subject
+          } satisfies PreparedObservation
+        }
+        // Case-insensitive identities are lowercased so a spelling change is the
+        // same fact; encoding emits keys in schema field order, so equal facts
+        // give equal text and one id.
+        const record = JSON.stringify(
+          Schema.encodeSync(WorkObservationEnvelope)({
+            ...envelope,
+            observation: canonicalObservation(envelope.observation)
+          })
+            .observation
+        )
+        const digest = yield* cryptoService.digest("SHA-256", utf8.encode(record)).pipe(
+          Effect.mapError(storeError("observe.digest"))
+        )
+        return {
+          _tag: "fact",
+          observationId: Hex.encode(digest),
+          observedAt: Math.min(envelope.observedAt, clockNow),
+          record,
+          subject
+        } satisfies PreparedObservation
+      })
+    )
+    yield* this.secureFiles()
+    const report = yield* Effect.try({
+      try: () => writeObservations(this.#database, prepared),
+      catch: storeError("observe.write")
+    })
+    // The write may have created the WAL siblings; they get the same private mode.
+    yield* this.secureFiles()
+    return report
   })
 
   private secureFiles() {
