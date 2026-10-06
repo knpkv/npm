@@ -546,14 +546,14 @@ describe("hostd runtime operations injection", () => {
           (composition) =>
             Effect.sync(() => {
               compositionKeys = Object.keys(composition).sort()
-              pendingCheck = composition.hasPendingWorkApproval
+              pendingCheck = composition.hasOutstandingWorkJob
               return composition.defaultOperations
             })
         )
-        expect(compositionKeys).toEqual(["config", "defaultOperations", "fork", "hasPendingWorkApproval"])
+        expect(compositionKeys).toEqual(["config", "defaultOperations", "fork", "hasOutstandingWorkJob"])
         // Composed without the job store, the question fails loudly instead of reading "none pending".
         expect(yield* Effect.result(pendingCheck)).toMatchObject({
-          failure: { _tag: "FleetStoreError", operation: "pending-work-approval" }
+          failure: { _tag: "FleetStoreError", operation: "outstanding-work-job" }
         })
         const jobs = yield* Effect.acquireRelease(
           JobStore.open(join(root, "pending-jobs.sqlite")),
@@ -563,7 +563,7 @@ describe("hostd runtime operations injection", () => {
           config(root),
           (composition) =>
             Effect.sync(() => {
-              pendingCheck = composition.hasPendingWorkApproval
+              pendingCheck = composition.hasOutstandingWorkJob
               return composition.defaultOperations
             }),
           jobs

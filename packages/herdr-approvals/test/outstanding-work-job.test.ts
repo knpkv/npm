@@ -6,7 +6,7 @@ import { TestClock } from "effect/testing"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { hasPendingWorkApproval } from "../src/internal/pending-work-approval.js"
+import { hasOutstandingWorkJob } from "../src/internal/outstanding-work-job.js"
 
 // @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
@@ -20,7 +20,13 @@ const openStore = Effect.gen(function*() {
   )
 }).pipe(provideNodeServices)
 
-const pending = (id: string, createdAt: number, payload: JobPayload, approvalExpiresAt: number | null = null) =>
+const job = (
+  id: string,
+  createdAt: number,
+  payload: JobPayload,
+  approvalExpiresAt: number | null = null,
+  status: "pending_approval" | "queued" | "running" | "succeeded" = "pending_approval"
+) =>
   Schema.decodeUnknownEffect(JobRecord)({
     acceptedReceipt: null,
     actor: "owner",
@@ -38,7 +44,7 @@ const pending = (id: string, createdAt: number, payload: JobPayload, approvalExp
     rejectedAt: null,
     rejectedBy: null,
     result: null,
-    status: "pending_approval",
+    status,
     updatedAt: createdAt
   })
 
@@ -66,32 +72,46 @@ const admit: JobPayload = {
   detail: "Admit the running owner"
 }
 
-describe("hasPendingWorkApproval", () => {
+describe("hasOutstandingWorkJob", () => {
   it.effect("is false when nothing, or only non-Work jobs, wait for approval", () =>
     Effect.scoped(Effect.gen(function*() {
       const store = yield* openStore
-      expect(yield* hasPendingWorkApproval(store)).toBe(false)
-      yield* store.put(yield* pending("job-delegate", 1_000, delegate))
-      expect(yield* hasPendingWorkApproval(store)).toBe(false)
+      expect(yield* hasOutstandingWorkJob(store)).toBe(false)
+      yield* store.put(yield* job("job-delegate", 1_000, delegate))
+      expect(yield* hasOutstandingWorkJob(store)).toBe(false)
     })))
 
   it.effect("finds a pending Work job past the first page of other pending jobs", () =>
     Effect.scoped(Effect.gen(function*() {
       const store = yield* openStore
-      yield* store.put(yield* pending("job-admit", 1_000, admit))
+      yield* store.put(yield* job("job-admit", 1_000, admit))
       for (let index = 0; index < 150; index += 1) {
-        yield* store.put(yield* pending(`job-delegate-${index}`, 2_000 + index, delegate))
+        yield* store.put(yield* job(`job-delegate-${index}`, 2_000 + index, delegate))
       }
-      expect(yield* hasPendingWorkApproval(store)).toBe(true)
+      expect(yield* hasOutstandingWorkJob(store)).toBe(true)
     })))
 
   it.effect("does not count a Work approval whose expiry has passed but is still stored as pending", () =>
     Effect.scoped(Effect.gen(function*() {
       yield* TestClock.setTime(5_000)
       const store = yield* openStore
-      yield* store.put(yield* pending("job-admit-expired", 1_000, admit, 4_000))
-      expect(yield* hasPendingWorkApproval(store)).toBe(false)
-      yield* store.put(yield* pending("job-admit-live", 1_001, admit, 6_000))
-      expect(yield* hasPendingWorkApproval(store)).toBe(true)
+      yield* store.put(yield* job("job-admit-expired", 1_000, admit, 4_000))
+      expect(yield* hasOutstandingWorkJob(store)).toBe(false)
+      yield* store.put(yield* job("job-admit-live", 1_001, admit, 6_000))
+      expect(yield* hasOutstandingWorkJob(store)).toBe(true)
+    })))
+
+  it.effect("counts an approved Work job until it has run", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const store = yield* openStore
+      yield* store.put(yield* job("job-admit-queued", 1_000, admit, null, "queued"))
+      expect(yield* hasOutstandingWorkJob(store)).toBe(true)
+    })))
+
+  it.effect("stops counting a Work job once it has run", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const store = yield* openStore
+      yield* store.put(yield* job("job-admit-done", 1_000, admit, null, "succeeded"))
+      expect(yield* hasOutstandingWorkJob(store)).toBe(false)
     })))
 })

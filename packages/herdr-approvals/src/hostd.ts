@@ -4,7 +4,7 @@ import { Console, Effect, FileSystem, Path, Redacted, Scope } from "effect"
 import type { HostdOperationsCompositionError } from "./errors.js"
 import { startHttpServer, type UiAssets } from "./http.js"
 import { fleetConfigPath } from "./internal/config-path.js"
-import { hasPendingWorkApproval, noJobStore } from "./internal/pending-work-approval.js"
+import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-job.js"
 import { makeHostOperations } from "./operations.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
@@ -18,11 +18,12 @@ export interface HostdOperationsComposition {
   /** Registers accepted work for interruption when the hostd process scope closes. */
   readonly fork: HostdLifetimeFork
   /**
-   * Whether any Work job is waiting for approval right now. A writer that must
-   * not invalidate pending approvals (their preflight tokens hash the whole
-   * Work store) defers its writes while this is true.
+   * Whether any Work job is still to run: waiting for approval (and not
+   * expired), approved and queued, or running. Its preflight tokens hash the
+   * whole Work store until it runs, so a background Work writer defers its
+   * writes while this is true.
    */
-  readonly hasPendingWorkApproval: Effect.Effect<boolean, FleetStoreError>
+  readonly hasOutstandingWorkJob: Effect.Effect<boolean, FleetStoreError>
 }
 
 export type HostdOperationsComposer = (
@@ -71,7 +72,7 @@ export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
     config,
     defaultOperations,
     fork,
-    hasPendingWorkApproval: jobs === undefined ? noJobStore : hasPendingWorkApproval(jobs)
+    hasOutstandingWorkJob: jobs === undefined ? noJobStore : hasOutstandingWorkJob(jobs)
   })
 })
 
