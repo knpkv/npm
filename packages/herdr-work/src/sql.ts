@@ -58,6 +58,11 @@ import {
   resolveLegacyLaneClaim
 } from "./internal/legacy-lane-claim.js"
 import {
+  enforcesOneHandoffPerSession,
+  SessionIndexDefinition,
+  sessionIndexDefinitionQuery
+} from "./internal/session-index.js"
+import {
   WorkAgentBinding,
   type WorkAgentBinding as WorkAgentBindingType,
   WorkAgentBindingRequest,
@@ -1044,14 +1049,12 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
       // A file migrated from v1 handoffs may already hold a plain index under
       // this name, which IF NOT EXISTS leaves as it is: make it unique, or fail
       // closed when two handoffs already share a session (WorkStore does the same).
-      const sessionIndex = yield* sql`PRAGMA index_list(work_decision_handoffs)`.pipe(
-        Effect.flatMap(
-          Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ name: Schema.String, unique: Schema.Number })))
-        ),
-        Effect.map((indexes) => indexes.find(({ name }) => name === "work_decision_handoffs_session")),
+      const sessionIndex = yield* sql.unsafe(sessionIndexDefinitionQuery).pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SessionIndexDefinition))),
+        Effect.map((definitions) => definitions[0]),
         Effect.mapError(storeError("sql-work.initialize.session-index"))
       )
-      if (sessionIndex !== undefined && sessionIndex.unique !== 1) {
+      if (sessionIndex !== undefined && !enforcesOneHandoffPerSession(sessionIndex)) {
         const duplicates = yield* sql`
           SELECT session_id AS sessionId, COUNT(*) AS rows, group_concat(handoff_id) AS handoffIds
           FROM work_decision_handoffs WHERE session_id IS NOT NULL

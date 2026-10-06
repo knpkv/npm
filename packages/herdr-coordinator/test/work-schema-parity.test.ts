@@ -12,7 +12,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, expect, it } from "@effect/vitest"
 import { WorkStore } from "@knpkv/herdr-work"
 import { makeSqliteWorkBridge } from "@knpkv/herdr-work/sql"
-import { Effect, Option, Predicate, Schema } from "effect"
+import { Effect, Option, Predicate, Result, Schema } from "effect"
 import * as SqlClient from "effect/sql/SqlClient"
 import { copyFileSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -471,6 +471,50 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
           failure: { _tag: "WorkStoreError", operation: "sql-work.initialize.session-index" }
         })
         expect(unique(duplicated)).toBe(0)
+      })
+    ))
+
+  it.effect("does not trust a composite unique index under the session index's name", () =>
+    withRoot((root) =>
+      Effect.gen(function*() {
+        const migrated = join(root, "composite.sqlite")
+        yield* drivers.store(migrated)
+        writeFixture(migrated, (database) => {
+          database.exec(`
+            DROP TABLE work_decision_handoffs;
+            CREATE TABLE work_decision_handoffs (
+              handoff_id TEXT PRIMARY KEY, session_id TEXT, lane_id TEXT NOT NULL,
+              occurred_at INTEGER NOT NULL, record TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX work_decision_handoffs_session ON work_decision_handoffs (session_id, handoff_id);
+          `)
+        })
+        const columns = (path: string) =>
+          rows(
+            Schema.Struct({ name: Schema.String }),
+            new DatabaseSync(path),
+            "PRAGMA index_info(work_decision_handoffs_session)"
+          ).map(({ name }) => name)
+        const openers: ReadonlyArray<readonly [string, (path: string) => ReturnType<typeof drivers.store>]> = [
+          ["store", drivers.store],
+          ["bridge", drivers.bridge]
+        ]
+        for (const [name, open] of openers) {
+          const clean = join(root, `${name}-clean.sqlite`)
+          copyFileSync(migrated, clean)
+          yield* open(clean)
+          expect(columns(clean)).toEqual(["session_id"])
+          const duplicated = join(root, `${name}-duplicated.sqlite`)
+          copyFileSync(migrated, duplicated)
+          writeFixture(duplicated, (database) => {
+            database.exec(`
+              INSERT INTO work_decision_handoffs VALUES ('handoff:a', 'session:shared', 'lane:a', 1, '{}');
+              INSERT INTO work_decision_handoffs VALUES ('handoff:b', 'session:shared', 'lane:b', 2, '{}');
+            `)
+          })
+          expect(Result.isFailure(yield* Effect.result(open(duplicated)))).toBe(true)
+          expect(columns(duplicated)).toEqual(["session_id", "handoff_id"])
+        }
       })
     ))
 

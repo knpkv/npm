@@ -75,6 +75,11 @@ import {
   resolveLegacyLaneClaim
 } from "./internal/legacy-lane-claim.js"
 import {
+  enforcesOneHandoffPerSession,
+  SessionIndexDefinition,
+  sessionIndexDefinitionQuery
+} from "./internal/session-index.js"
+import {
   WorkAdmissionTarget,
   WorkAgentBinding,
   WorkAgentBindingRequest,
@@ -268,11 +273,10 @@ const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
  * index in place.
  */
 const requireUniqueSessionIndex = (database: DatabaseSync): void => {
-  const sessionIndex = Schema.decodeUnknownSync(
-    Schema.Array(Schema.Struct({ name: Schema.String, unique: Schema.Number }))
-  )(database.prepare("PRAGMA index_list(work_decision_handoffs)").all())
-    .find(({ name }) => name === "work_decision_handoffs_session")
-  if (sessionIndex === undefined || sessionIndex.unique === 1) return
+  const sessionIndex = Schema.decodeUnknownSync(Schema.Array(SessionIndexDefinition))(
+    database.prepare(sessionIndexDefinitionQuery).all()
+  )[0]
+  if (sessionIndex === undefined || enforcesOneHandoffPerSession(sessionIndex)) return
   // NULL sessions never collide under a UNIQUE index, so they are not duplicates.
   const duplicateGroups = `SELECT session_id AS sessionId, COUNT(*) AS rows, group_concat(handoff_id) AS handoffIds
     FROM work_decision_handoffs WHERE session_id IS NOT NULL
