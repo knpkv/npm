@@ -2864,7 +2864,7 @@
         "storyId": "patterns-region--states",
         "storyPath": "?path=/story/patterns-region--states"
       },
-      "example": "import { RLY_REGION_VARIANTS } from \"@knpkv/rly/patterns\"",
+      "example": "import { RLY_REGION_DEFAULT_VARIANTS } from \"@knpkv/rly/patterns\"",
       "exports": [
         {
           "kind": "value",
@@ -2873,6 +2873,10 @@
         {
           "kind": "type",
           "name": "RegionProps"
+        },
+        {
+          "kind": "value",
+          "name": "RLY_REGION_DEFAULT_VARIANTS"
         },
         {
           "kind": "value",

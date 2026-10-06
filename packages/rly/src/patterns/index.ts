@@ -52,7 +52,7 @@ export { PeopleStrip, RLY_PEOPLE_STRIP_DEFAULT_VARIANTS, RLY_PEOPLE_STRIP_VARIAN
 export type { PeopleStripProps, RlyPeopleStripSize } from "./PeopleStrip.js"
 export { Person, RLY_PERSON_DEFAULT_VARIANTS, RLY_PERSON_VARIANTS } from "./Person.js"
 export type { PersonProps, RlyPerson, RlyPersonSize } from "./Person.js"
-export { Region, RLY_REGION_VARIANTS } from "./Region.js"
+export { Region, RLY_REGION_DEFAULT_VARIANTS, RLY_REGION_VARIANTS } from "./Region.js"
 export type { RegionProps, RlyRegionHeadingLevel, RlyRegionTone } from "./Region.js"
 export {
   RelationshipChain,

@@ -43,6 +43,7 @@ describe("public entries", () => {
       "RLY_PERSON_DEFAULT_VARIANTS",
       "RLY_PERSON_VARIANTS",
       "Region",
+      "RLY_REGION_DEFAULT_VARIANTS",
       "RLY_REGION_VARIANTS",
       "RelationshipChain",
       "RLY_RELATIONSHIP_DIRECTION_PRESENTATION",

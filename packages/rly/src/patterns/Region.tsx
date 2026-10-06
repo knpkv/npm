@@ -20,6 +20,9 @@ export const RLY_REGION_VARIANTS = defineVariants({
   }
 })
 
+/** Default Region surface. */
+export const RLY_REGION_DEFAULT_VARIANTS = defineVariants({ tone: "default" })
+
 /** Surface step for a Region; it carries no state meaning. */
 export type RlyRegionTone = keyof typeof RLY_REGION_VARIANTS.tone
 
@@ -31,7 +34,11 @@ export type RegionProps = Omit<ComponentPropsWithRef<"section">, "children" | "t
   /** Controls at the end of the header row, such as a filter or "Mark all read". */
   readonly actions?: ReactNode
   readonly children: ReactNode
-  /** Plain count shown after the title in secondary ink, such as the number of rows. */
+  /**
+   * Plain count shown after the title in secondary ink, such as the number of rows. It is part of
+   * the region's accessible name ("Queue 3"), so a screen reader hears the count when it lands on
+   * the region.
+   */
   readonly count?: number | string
   /** Heading level within the page outline. Defaults to 2. */
   readonly headingLevel?: RlyRegionHeadingLevel
@@ -61,7 +68,7 @@ export const Region = ({
   headingId,
   headingLevel = 2,
   title,
-  tone = "default",
+  tone = RLY_REGION_DEFAULT_VARIANTS.tone,
   ...props
 }: RegionProps): ReactElement => {
   const visibleTitle = requireText(title, "Region title")

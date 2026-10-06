@@ -21,6 +21,9 @@ export const States: Story = {
     await expect(canvas.getByRole("region", { name: "Queue 3" })).toBeVisible()
     await expect(canvas.getByRole("region", { name: "Findings 2" })).toBeVisible()
     await expect(canvas.getByRole("heading", { level: 3, name: "Checks" })).toBeVisible()
+    await expect(
+      canvas.getByRole("region", { name: "Checks" }).closest("[data-rly-region] [data-rly-region]")
+    ).toBeNull()
     const heading = canvas.getByRole("heading", { level: 2, name: "Findings 2" })
     heading.focus()
     await expect(heading).toHaveFocus()
@@ -48,11 +51,7 @@ export const States: Story = {
         </ul>
       </Region>
       <Region
-        actions={
-          <Button size="compact" variant="secondary">
-            Acknowledge all
-          </Button>
-        }
+        actions={<Button variant="secondary">Acknowledge all</Button>}
         count={2}
         headingId="findings-heading"
         title="Findings"
@@ -72,10 +71,8 @@ export const States: Story = {
           </article>
         ))}
       </Region>
-      <Region headingLevel={2} title="Merge status">
-        <Region headingLevel={3} title="Checks">
-          Nested only to show the level-3 heading; prefer titled sub-groups inside one Region.
-        </Region>
+      <Region headingLevel={3} title="Checks">
+        A level-3 region, for a block that sits under a page section heading.
       </Region>
     </div>
   )

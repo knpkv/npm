@@ -167,6 +167,7 @@ export const componentManifest = {
     {
       category: "pattern",
       exports: [
+        { kind: "value", name: "RLY_REGION_DEFAULT_VARIANTS" },
         { kind: "value", name: "RLY_REGION_VARIANTS" },
         { kind: "value", name: "Region" },
         { kind: "type", name: "RegionProps" },

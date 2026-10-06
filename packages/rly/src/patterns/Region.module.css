@@ -24,8 +24,11 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--rly-space-8) var(--rly-space-12);
-    /* Room for a 40px control plus padding, so headers line up across adjacent regions. */
-    min-block-size: calc(var(--rly-space-48) + var(--rly-space-8));
+    /*
+     * Room for one dense (32px) header control plus padding, so headers line up across adjacent
+     * regions. Switch to var(--rly-control-height-dense) once the de-template tokens land.
+     */
+    min-block-size: calc(var(--rly-space-32) + 2 * var(--rly-space-8));
     padding: var(--rly-space-8) var(--rly-space-16);
   }
 
@@ -36,7 +39,6 @@
     margin: var(--rly-space-0);
     margin-inline-end: auto;
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
   }
 
   .title:focus-visible {
