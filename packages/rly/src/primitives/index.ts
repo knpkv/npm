@@ -45,6 +45,7 @@ export type {
   RlyChartColumn,
   RlyChartSegment,
   RlyChartSelection,
+  RlyChartWindow,
   RlyStepBand,
   StackedBarsProps
 } from "./StackedBars.js"

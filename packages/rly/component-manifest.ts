@@ -296,7 +296,8 @@ export const componentManifest = {
         { kind: "type", name: "RlyChartBin" },
         { kind: "type", name: "RlyChartColumn" },
         { kind: "type", name: "RlyChartSegment" },
-        { kind: "type", name: "RlyChartSelection" }
+        { kind: "type", name: "RlyChartSelection" },
+        { kind: "type", name: "RlyChartWindow" }
       ],
       name: "StackedBars",
       publicEntry: "primitives",

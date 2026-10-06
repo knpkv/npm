@@ -67,8 +67,35 @@
     cursor: pointer;
     fill: transparent;
   }
-  [data-selected="true"] > .hit {
+  .selection {
     fill: var(--rly-color-surface-3);
+    stroke: var(--rly-color-text-2);
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+  /* The window shading sits under the selection and bars; its edges mark where it starts and ends. */
+  .window {
+    fill: color-mix(in srgb, var(--rly-color-focus) 12%, transparent);
+    stroke: var(--rly-color-focus);
+    stroke-dasharray: 3 3;
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+  .windowKey {
+    align-items: center;
+    color: var(--rly-color-text-2);
+    display: flex;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-6);
+    margin: 0;
+  }
+  .windowSwatch {
+    background: color-mix(in srgb, var(--rly-color-focus) 12%, transparent);
+    block-size: var(--rly-space-12);
+    border: 1px dashed var(--rly-color-focus);
+    flex: none;
+    inline-size: var(--rly-space-12);
   }
   .focusRing {
     fill: none;
@@ -100,6 +127,15 @@
   @media (forced-colors: active) {
     .segment {
       stroke: Canvas;
+    }
+    .window,
+    .selection {
+      fill: none;
+      stroke: CanvasText;
+    }
+    .windowSwatch {
+      background: none;
+      border-color: CanvasText;
     }
   }
 }

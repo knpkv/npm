@@ -26,6 +26,14 @@ export interface RlyStepBand {
   readonly near?: number
 }
 
+/** A stretch of the time axis to shade behind the bars and bands, named in a key under the axis. */
+export interface RlyChartWindow {
+  readonly from: number
+  readonly to: number
+  /** What the stretch is, for example "Current 5-hour window, resets 14:57". */
+  readonly label: string
+}
+
 type StackedBarsBaseProps = Omit<ComponentPropsWithRef<"div">, "aria-label" | "children" | "onChange">
 export type StackedBarsProps = StackedBarsBaseProps & {
   /** Names the chart, for example "Spend by booking". */
@@ -35,6 +43,8 @@ export type StackedBarsProps = StackedBarsBaseProps & {
   readonly columns: ReadonlyArray<RlyChartColumn>
   /** Bands of limit levels drawn above the bars, sharing their time axis. */
   readonly bands?: ReadonlyArray<RlyStepBand>
+  /** A stretch of time to shade across the bands and bars, such as the current limit window. */
+  readonly window?: RlyChartWindow
   /** The caption for the scale, given the tallest bin's total and the bin size in columns. */
   readonly formatScale: (max: number, binSize: number) => string
   /** The axis label for a bin. */
@@ -65,13 +75,35 @@ const useInlineSize = (fallback: number): readonly [number, RefObject<HTMLDivEle
   return [size, ref]
 }
 
-const Band = ({ band, from, to }: { readonly band: RlyStepBand; readonly from: number; readonly to: number }) => {
-  const span = Math.max(1, to - from)
-  const x = (at: number): number => Math.max(0, Math.min(1000, ((at - from) / span) * 1000))
+/** Where an instant falls on the time axis, from 0 to 1, clamped to the drawn range. */
+const axisFraction = (at: number, from: number, to: number): number =>
+  Math.max(0, Math.min(1, (at - from) / Math.max(1, to - from)))
+
+const Band = ({
+  band,
+  from,
+  to,
+  window
+}: {
+  readonly band: RlyStepBand
+  readonly from: number
+  readonly to: number
+  readonly window: RlyChartWindow | undefined
+}) => {
+  const x = (at: number): number => axisFraction(at, from, to) * 1000
   return (
     <div className={style("band")} data-band={band.id}>
       <span className={style("bandLabel")}>{requireText(band.label, "StackedBars band label")}</span>
       <svg aria-hidden="true" className={style("bandPlot")} preserveAspectRatio="none" viewBox="0 0 1000 100">
+        {window === undefined ? null : (
+          <rect
+            className={style("window")}
+            data-part="window"
+            height={100}
+            width={Math.max(0, x(window.to) - x(window.from))}
+            x={x(window.from)}
+          />
+        )}
         {band.segments.map((segment) => {
           const left = x(segment.from)
           const width = x(segment.to) - left
@@ -117,6 +149,7 @@ export const StackedBars = ({
   label,
   onSelectionChange,
   selection,
+  window,
   ...props
 }: StackedBarsProps): ReactElement => {
   const [width, ref] = useInlineSize(720)
@@ -154,11 +187,28 @@ export const StackedBars = ({
   const from = columns[0]?.start ?? 0
   const to = columns[columns.length - 1]?.end ?? from
   const percent = (index: number): string => `${(index / Math.max(1, bins.length)) * 100}%`
+  const slots = Math.max(1, bins.length)
+  const shaded =
+    window === undefined
+      ? null
+      : {
+          x: axisFraction(window.from, from, to) * slots,
+          width: (axisFraction(window.to, from, to) - axisFraction(window.from, from, to)) * slots
+        }
+  // The selection is drawn once over whole bins, behind the bars, so its edges stay visible where
+  // the bars cover its fill.
+  const selectedBins =
+    selection === null
+      ? null
+      : bins.reduce<{ readonly first: number; readonly last: number } | null>((span, bin, index) => {
+          if (bin.first < selection.from || bin.last > selection.to) return span
+          return span === null ? { first: index, last: index } : { first: span.first, last: index }
+        }, null)
 
   return (
     <div {...props} className={classNames(style("root"), className)} ref={ref}>
       {bands.map((band) => (
-        <Band band={band} from={from} key={band.id} to={to} />
+        <Band band={band} from={from} key={band.id} to={to} window={window} />
       ))}
       <div
         aria-describedby={instructionsId}
@@ -178,6 +228,18 @@ export const StackedBars = ({
           preserveAspectRatio="none"
           viewBox={`0 0 ${Math.max(1, bins.length)} 100`}
         >
+          {shaded === null || shaded.width <= 0 ? null : (
+            <rect className={style("window")} data-part="window" height={100} width={shaded.width} x={shaded.x} />
+          )}
+          {selectedBins === null ? null : (
+            <rect
+              className={style("selection")}
+              data-part="selection"
+              height={100}
+              width={selectedBins.last - selectedBins.first + 1}
+              x={selectedBins.first}
+            />
+          )}
           {bins.map((bin, index) => {
             const selected = selection !== null && bin.first >= selection.from && bin.last <= selection.to
             return (
@@ -230,6 +292,12 @@ export const StackedBars = ({
           )
         })}
       </div>
+      {window === undefined ? null : (
+        <p className={style("windowKey")}>
+          <span aria-hidden="true" className={style("windowSwatch")} />
+          {requireText(window.label, "StackedBars window label")}
+        </p>
+      )}
       <p className={style("hidden")} id={instructionsId}>
         {requireText(instructions, "StackedBars instructions")}
       </p>

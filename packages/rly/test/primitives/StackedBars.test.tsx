@@ -56,6 +56,30 @@ describe("StackedBars", () => {
     expect(root.querySelectorAll('[data-selected="true"]')).toHaveLength(2)
   })
 
+  it("draws the selection once over whole bins, behind the bars", () => {
+    const root = render({ selection: { from: 2, to: 3 } })
+    const selection = root.querySelector('[data-part="selection"]')
+    expect(selection?.getAttribute("x")).toBe("2")
+    expect(selection?.getAttribute("width")).toBe("2")
+    const bars = root.querySelector("svg:not([class*='band'])")
+    expect(bars?.firstElementChild).toBe(selection)
+    expect(render().querySelector('[data-part="selection"]')).toBeNull()
+  })
+
+  it("shades a window across the band and the bars and names it under the axis", () => {
+    const root = render({
+      bands: [{ id: "5h", label: "5-hour window", segments: [{ from: 0, level: 40, to: 6 * hour }] }],
+      window: { from: 3 * hour, label: "Current 5-hour window, resets 06:00", to: 6 * hour }
+    })
+    const [band, bars] = root.querySelectorAll('[data-part="window"]')
+    expect(band?.getAttribute("x")).toBe("500")
+    expect(band?.getAttribute("width")).toBe("500")
+    expect(bars?.getAttribute("x")).toBe("3")
+    expect(bars?.getAttribute("width")).toBe("3")
+    expect(root.textContent).toContain("Current 5-hour window, resets 06:00")
+    expect(() => render({ window: { from: 0, label: " ", to: hour } })).toThrow("visible text")
+  })
+
   it("draws limit bands on the same axis, with unknown stretches and the near mark", () => {
     const root = render({
       bands: [

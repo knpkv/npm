@@ -192,7 +192,8 @@ to expose it as a meter instead. With `value={null}`, it is a named image whose
 accessible label combines `label` and `valueText`, without a numeric range.
 
 `StackedBars` stacks values per period on a time axis, with optional `bands` of
-limit levels above the bars on the same axis. Narrow containers bin periods so every
+limit levels above the bars on the same axis, and an optional `window` (such as the
+current limit window) shaded across bands and bars and named in a key under the axis. Narrow containers bin periods so every
 bar stays at least 6px wide. The plot is one tab stop: ←/→ move and select, Shift
 extends, Home/End jump and Escape clears. Click selects, and Shift+click or a second
 tap elsewhere extends the span. The caller owns `selection` and words it through

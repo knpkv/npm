@@ -75,6 +75,15 @@ const Chart = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> })
         <StackedBars
           bands={bands}
           columns={columns}
+          {...(columns.length === 0
+            ? {}
+            : {
+                window: {
+                  from: (columns[columns.length - 1]?.end ?? 0) - 5 * 3_600_000,
+                  label: "Current 5-hour window",
+                  to: columns[columns.length - 1]?.end ?? 0
+                }
+              })}
           data-selection={selection === null ? "none" : `${selection.from}-${selection.to}`}
           describeSelection={describe}
           formatScale={(max, size) => `$${max.toFixed(2)} per ${size === 1 ? "hour" : `${size} hours`}`}
@@ -126,6 +135,8 @@ export const Week: Story = {
     await userEvent.keyboard("{Escape}")
     await expect(root).toHaveAttribute("data-selection", "none")
     await expect(canvasElement.querySelectorAll("[data-band]")).toHaveLength(2)
+    await expect(canvas.getByText("Current 5-hour window")).toBeVisible()
+    await expect(canvasElement.querySelectorAll('[data-part="window"]')).toHaveLength(3)
     await expect(canvasElement.scrollWidth).toBeLessThanOrEqual(canvasElement.clientWidth + 1)
   },
   render: () => <Chart columns={week} />

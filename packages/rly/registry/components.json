@@ -4515,6 +4515,10 @@
         },
         {
           "kind": "type",
+          "name": "RlyChartWindow"
+        },
+        {
+          "kind": "type",
           "name": "RlyStepBand"
         },
         {
