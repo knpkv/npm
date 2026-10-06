@@ -41,15 +41,6 @@
   opacity: 0.58;
 }
 
-.jcf-visually-hidden {
-  block-size: 1px;
-  clip-path: inset(50%);
-  inline-size: 1px;
-  overflow: hidden;
-  position: absolute;
-  white-space: nowrap;
-}
-
 /* Lanes, never a sum: each system's saved and suggested time in its own column, in words. */
 .jcf-totals {
   background: var(--rly-color-surface-2);

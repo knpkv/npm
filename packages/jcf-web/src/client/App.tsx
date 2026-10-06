@@ -265,7 +265,7 @@ export const App = () => {
               >
                 Agent requests and responses
               </Button>
-              <span className="jcf-visually-hidden" id="jcf-agent-log-reason">
+              <span hidden id="jcf-agent-log-reason">
                 {cancelled ? "The read was cancelled." : "No agent has run yet. Rescan sessions to start one."}
               </span>
               <Button disabled={busy || loading} onClick={refreshRecorded} size="compact">
