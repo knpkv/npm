@@ -155,7 +155,9 @@ export const agoText = (at: number, now: number): string => {
   if (seconds < 60) return `${seconds}s ago`
   const minutes = Math.floor(seconds / 60)
   if (minutes < 60) return `${minutes}m ago`
-  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours}h ${minutes % 60}m ago`
+  return `${Math.floor(hours / 24)}d ago`
 }
 
 /** A finished approval decision, newest first in "Recently decided". */

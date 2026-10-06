@@ -1059,7 +1059,8 @@
       "outcome caption"
       "outcome request";
     grid-template-columns: 5.5rem minmax(0, 1fr);
-    padding-block: var(--rly-space-12);
+    /* The disclosure's 32px target already leaves room below its label. */
+    padding-block: var(--rly-space-12) var(--rly-space-4);
     row-gap: var(--rly-space-2);
   }
 
@@ -1156,15 +1157,16 @@
     margin: 0;
   }
 
+  /* Aligned with the region title: the Region body already pads inline. */
   .countdown-empty {
     color: var(--rly-color-text-2);
     margin: 0;
-    padding: var(--rly-space-16);
+    padding-block: var(--rly-space-8);
   }
 
   .countdown-more {
     border-block-start: 1px solid var(--rly-color-border-1);
-    padding: var(--rly-space-8) var(--rly-space-16);
+    padding-block: var(--rly-space-8) 0;
   }
 
   /* On narrow screens the outcome word sits above what was decided, so titles keep their width. */

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
+  agoText,
   answerForStatus,
   answerSettles,
   answerText,
@@ -66,6 +67,12 @@ describe("countdown model", () => {
     expect(countdownText(4 * 60_000 + 12_000)).toBe("4m 12s")
     expect(countdownText(11 * 60_000 + 40_000)).toBe("11m")
     expect(countdownText(-5_000)).toBe("0s")
+  })
+
+  it("says how long ago in minutes, hours, then whole days", () => {
+    expect(agoText(0, 45 * 60_000)).toBe("45m ago")
+    expect(agoText(0, (9 * 60 + 55) * 60_000)).toBe("9h 55m ago")
+    expect(agoText(0, (79 * 60 + 51) * 60_000)).toBe("3d ago")
   })
 
   it("says expiring at zero instead of claiming the hub expired it", () => {
