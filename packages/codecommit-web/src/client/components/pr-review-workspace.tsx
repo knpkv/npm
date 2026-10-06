@@ -584,6 +584,7 @@ const ReviewFindings = ({
           <li key={finding.id}>
             <article
               className={styles.findingCard}
+              aria-current={selectedFindingId === finding.id ? "true" : undefined}
               data-selected={selectedFindingId === finding.id ? "true" : undefined}
             >
               <button className={styles.findingBody} onClick={() => onSelect(finding)} type="button">

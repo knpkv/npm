@@ -19,10 +19,7 @@
 }
 
 .eyebrow {
-  display: inline-grid;
-  grid-template-columns: 3px auto;
-  align-items: center;
-  gap: var(--rly-space-12);
+  display: block;
   inline-size: fit-content;
   color: var(--rly-color-text-2);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
@@ -31,13 +28,6 @@
   text-transform: uppercase;
 }
 
-.eyebrow::before {
-  inline-size: 3px;
-  block-size: var(--rly-space-24);
-  border-radius: var(--rly-radius-round);
-  background: var(--rly-color-service-codecommit);
-  content: "";
-}
 
 .title,
 .lede,

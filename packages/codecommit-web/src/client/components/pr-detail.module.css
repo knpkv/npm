@@ -155,10 +155,10 @@
   justify-content: center;
 }
 
+/* A flat panel like the others: no provider-coloured edge or tint; the CodeCommit mark says whose it is. */
 .revisionCard {
-  background: color-mix(in srgb, var(--rly-color-service-codecommit) 9%, var(--rly-color-surface-2));
-  border: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 42%, var(--rly-color-border-1));
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codecommit);
+  background: var(--rly-color-surface-2);
+  border: 1px solid var(--rly-color-border-1);
   box-shadow: none;
   gap: var(--rly-space-24);
   min-inline-size: var(--rly-space-0);
@@ -224,7 +224,7 @@
 
 .facts > dt,
 .facts > dd {
-  border-block-start: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 18%, var(--rly-color-border-1));
+  border-block-start: 1px solid var(--rly-color-border-1);
   margin: var(--rly-space-0);
   min-inline-size: var(--rly-space-0);
   padding-block: var(--rly-space-12);
@@ -608,10 +608,9 @@
   padding-inline: var(--rly-space-12);
 }
 
+/* A reply is indented under its comment; the indent alone shows the thread. */
 .commentReply {
-  border-inline-start: 2px solid var(--rly-color-border-1);
-  margin-inline-start: var(--rly-space-16);
-  padding-inline-start: var(--rly-space-16);
+  margin-inline-start: var(--rly-space-32);
 }
 
 .commentBody {
@@ -694,7 +693,7 @@
   }
 
   .facts > dt:not(:first-child) {
-    border-block-start: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 18%, var(--rly-color-border-1));
+    border-block-start: 1px solid var(--rly-color-border-1);
     margin-block-start: var(--rly-space-8);
     padding-block-start: var(--rly-space-12);
   }
@@ -750,8 +749,3 @@
   }
 }
 
-@media (forced-colors: active) {
-  .revisionCard {
-    border-inline-start-color: LinkText;
-  }
-}
