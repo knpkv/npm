@@ -561,7 +561,7 @@
       "name": "Button",
       "props": {
         "defaults": {
-          "size": "default",
+          "size": "dense",
           "variant": "secondary"
         },
         "types": [
@@ -573,6 +573,7 @@
       "states": [
         "compact",
         "default",
+        "dense",
         "disabled",
         "loading",
         "primary",
@@ -583,7 +584,7 @@
       "status": "stable",
       "variants": [
         {
-          "defaultValue": "default",
+          "defaultValue": "dense",
           "description": "Controls the size presentation axis of Button.",
           "name": "size",
           "values": [
@@ -594,6 +595,10 @@
             {
               "description": "Use default for the size presentation.",
               "name": "default"
+            },
+            {
+              "description": "Use dense for the size presentation.",
+              "name": "dense"
             },
             {
               "description": "Use principal for the size presentation.",
@@ -1867,7 +1872,7 @@
       "name": "Field",
       "props": {
         "defaults": {
-          "size": "default"
+          "size": "dense"
         },
         "types": [
           "FieldControlProps",
@@ -1880,12 +1885,13 @@
       ],
       "states": [
         "compact",
-        "default"
+        "default",
+        "dense"
       ],
       "status": "stable",
       "variants": [
         {
-          "defaultValue": "default",
+          "defaultValue": "dense",
           "description": "Controls the size presentation axis of Field.",
           "name": "size",
           "values": [
@@ -1896,6 +1902,10 @@
             {
               "description": "Use default for the size presentation.",
               "name": "default"
+            },
+            {
+              "description": "Use dense for the size presentation.",
+              "name": "dense"
             }
           ]
         }
@@ -2333,7 +2343,7 @@
       "name": "IconButton",
       "props": {
         "defaults": {
-          "size": "default",
+          "size": "dense",
           "variant": "secondary"
         },
         "types": [
@@ -2345,6 +2355,7 @@
       "states": [
         "compact",
         "default",
+        "dense",
         "disabled",
         "loading",
         "primary",
@@ -2355,7 +2366,7 @@
       "status": "stable",
       "variants": [
         {
-          "defaultValue": "default",
+          "defaultValue": "dense",
           "description": "Controls the size presentation axis of IconButton.",
           "name": "size",
           "values": [
@@ -2366,6 +2377,10 @@
             {
               "description": "Use default for the size presentation.",
               "name": "default"
+            },
+            {
+              "description": "Use dense for the size presentation.",
+              "name": "dense"
             },
             {
               "description": "Use principal for the size presentation.",
@@ -3564,7 +3579,7 @@
       "name": "Select",
       "props": {
         "defaults": {
-          "size": "default"
+          "size": "dense"
         },
         "types": [
           "SelectProps"
@@ -3575,12 +3590,13 @@
       "states": [
         "compact",
         "default",
+        "dense",
         "disabled"
       ],
       "status": "stable",
       "variants": [
         {
-          "defaultValue": "default",
+          "defaultValue": "dense",
           "description": "Controls the size presentation axis of Select.",
           "name": "size",
           "values": [
@@ -3591,6 +3607,10 @@
             {
               "description": "Use default for the size presentation.",
               "name": "default"
+            },
+            {
+              "description": "Use dense for the size presentation.",
+              "name": "dense"
             }
           ]
         }

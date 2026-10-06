@@ -179,7 +179,7 @@ export const AgentJob = ({
       )}
       {cancellable && onCancel !== undefined ? (
         <footer className={style("footer")}>
-          <Button onClick={onCancel} size="compact" variant="quiet">
+          <Button onClick={onCancel} variant="quiet">
             {visibleCancelLabel}
           </Button>
         </footer>

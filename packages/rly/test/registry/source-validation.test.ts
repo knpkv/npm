@@ -62,6 +62,29 @@ describe("registry source validation", () => {
     expect(findRegistrySourceFailures(componentManifest, files).join("\n")).toMatch(/a11y|docs|principal/)
   })
 
+  it("rejects manifest variants that drift from the source's defineVariants", () => {
+    const manifest: ComponentManifest = {
+      ...componentManifest,
+      components: componentManifest.components.map((component) =>
+        component.name === "Button"
+          ? {
+            ...component,
+            variants: component.variants.map((variant) =>
+              variant.name === "size"
+                ? { ...variant, defaultValue: "default", values: ["compact", "default", "principal"] }
+                : variant
+            )
+          }
+          : component
+      )
+    }
+    const failures = findRegistrySourceFailures(manifest, registryFiles())
+    expect(failures).toContain(
+      "variant Button.size lists compact|default|principal but source declares dense|compact|default|principal"
+    )
+    expect(failures).toContain("variant Button.size defaults to default but source defaults to dense")
+  })
+
   it("does not credit sibling or hidden stories to the referenced navigable story", () => {
     const files = new Map(registryFiles())
     const storyPath = "stories/diff/DiffCodeView.stories.tsx"

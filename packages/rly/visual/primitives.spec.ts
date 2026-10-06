@@ -5,7 +5,7 @@ const story = (id: string, theme = "dark"): string =>
 
 const iconButtonSizes: ReadonlyArray<readonly [name: string, size: number]> = [
   ["Mark done", 32],
-  ["Add item", 44],
+  ["Add item", 40],
   ["Search", 48],
   ["Continue", 56]
 ]

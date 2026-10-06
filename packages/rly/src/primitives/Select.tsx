@@ -15,11 +15,15 @@ export const RLY_SELECT_VARIANTS = defineVariants({
       purpose: "Tool-density selection control; the default",
       tokens: ["control-height-dense", "radius-tag"]
     },
-    compact: { className: style("compact"), purpose: "Dense form rows", tokens: ["space-40", "type-meta"] },
+    compact: {
+      className: style("compact"),
+      purpose: "Dense form rows",
+      tokens: ["control-height-compact", "type-meta"]
+    },
     default: {
       className: style("defaultSize"),
       purpose: "Standard selection control",
-      tokens: ["space-48", "type-body"]
+      tokens: ["control-height-default", "type-body"]
     }
   }
 })

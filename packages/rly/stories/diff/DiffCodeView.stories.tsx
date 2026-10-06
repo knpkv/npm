@@ -103,7 +103,7 @@ const RichAnnotationCard = ({
     <Text as="strong">{model.title}</Text>
     <Text tone="secondary">{model.evidence}</Text>
     {model.replacement === undefined ? null : <Text>Replacement: {model.replacement}</Text>}
-    <Button onClick={context.returnFocus} size="compact" variant="quiet">
+    <Button onClick={context.returnFocus} variant="quiet">
       Return to line
     </Button>
   </article>
@@ -199,7 +199,6 @@ const DiffHarness = (): ReactElement => {
               diffRef.current?.addItems([auditItem])
               setActivity("Audit evidence appended without resetting the viewer")
             }}
-            size="compact"
           >
             Add evidence file
           </Button>
@@ -208,7 +207,6 @@ const DiffHarness = (): ReactElement => {
               diffRef.current?.scrollTo({ align: "start", id: "release-gate", type: "item" })
               setActivity("Release gate brought into view")
             }}
-            size="compact"
             variant="quiet"
           >
             Jump to release gate
@@ -262,9 +260,7 @@ const StatePreservationHarness = (): ReactElement => {
   return (
     <main style={pageStyle}>
       <div style={{ ...stackStyle, inlineSize: "100%", maxInlineSize: "76rem" }}>
-        <Button onClick={() => setResolved(true)} size="compact">
-          Resolve annotation
-        </Button>
+        <Button onClick={() => setResolved(true)}>Resolve annotation</Button>
         <DiffCodeView
           annotations={annotations}
           contextLines={2}
@@ -295,12 +291,8 @@ const ThemeTransitionHarness = (): ReactElement => {
       <main data-diff-theme-type={themeType} style={pageStyle}>
         <div style={{ ...stackStyle, inlineSize: "100%", maxInlineSize: "76rem" }}>
           <div style={{ display: "flex", gap: "var(--rly-space-8)" }}>
-            <Button onClick={() => setThemeType("light")} size="compact">
-              Use light diff theme
-            </Button>
-            <Button onClick={() => setThemeType("dark")} size="compact">
-              Use dark diff theme
-            </Button>
+            <Button onClick={() => setThemeType("light")}>Use light diff theme</Button>
+            <Button onClick={() => setThemeType("dark")}>Use dark diff theme</Button>
           </div>
           <ThemeAwareDiffCodeView initialItems={[releaseItem]} />
         </div>

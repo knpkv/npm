@@ -98,8 +98,8 @@
 
   .group > li::before {
     block-size: 20px;
-    border-block-end: 1px solid color-mix(in srgb, var(--rly-color-text-3) 70%, transparent);
-    border-inline-start: 1px solid color-mix(in srgb, var(--rly-color-text-3) 70%, transparent);
+    border-block-end: 1px solid var(--rly-color-border-2);
+    border-inline-start: 1px solid var(--rly-color-border-2);
     content: "";
     inline-size: var(--rly-space-12);
     inset-block-start: var(--rly-space-0);
@@ -110,7 +110,7 @@
   }
 
   .group > li:not(:last-child)::after {
-    border-inline-start: 1px solid color-mix(in srgb, var(--rly-color-text-3) 70%, transparent);
+    border-inline-start: 1px solid var(--rly-color-border-2);
     content: "";
     inset-block: 20px var(--rly-space-0);
     inset-inline-start: var(--rly-space-0);
@@ -196,7 +196,7 @@
 
   .file[aria-current="true"] {
     background: var(--rly-color-surface-3);
-    box-shadow: inset var(--rly-space-4) 0 var(--rly-color-focus);
+    box-shadow: inset 0 0 0 1px var(--rly-color-border-2);
   }
 
   .file:focus-visible {

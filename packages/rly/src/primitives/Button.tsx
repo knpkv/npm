@@ -29,12 +29,12 @@ export const RLY_BUTTON_VARIANTS = defineVariants({
       purpose: "Tool-density action sized to its text; the default",
       tokens: ["control-height-dense", "radius-tag"]
     },
-    compact: { className: style("compact"), purpose: "Dense text action", tokens: ["space-40"] },
-    default: { className: style("defaultSize"), purpose: "Standard action", tokens: ["space-48"] },
+    compact: { className: style("compact"), purpose: "Dense text action", tokens: ["control-height-compact"] },
+    default: { className: style("defaultSize"), purpose: "Standard action", tokens: ["control-height-default"] },
     principal: {
       className: style("principal"),
       purpose: "Prominent consequential action",
-      tokens: ["space-48", "space-8"]
+      tokens: ["control-height-principal", "space-8"]
     }
   }
 })

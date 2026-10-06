@@ -34,8 +34,8 @@
     inline-size: var(--rly-control-height-dense);
   }
   .compact {
-    block-size: calc(var(--rly-space-40) + var(--rly-space-4));
-    inline-size: calc(var(--rly-space-40) + var(--rly-space-4));
+    block-size: var(--rly-control-height-compact);
+    inline-size: var(--rly-control-height-compact);
   }
   .defaultSize {
     block-size: var(--rly-control-height-default);

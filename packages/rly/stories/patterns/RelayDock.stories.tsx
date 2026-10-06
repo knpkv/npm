@@ -105,7 +105,7 @@ const richTextState: RlyRelayDockState = {
 }
 
 const unavailableState: RlyRelayDockState = {
-  action: <Button size="compact">Check connection</Button>,
+  action: <Button>Check connection</Button>,
   description: "The product adapter cannot reach Relay. The review remains unchanged.",
   status: "unavailable",
   title: "Relay unavailable"
@@ -124,7 +124,7 @@ const emptyState: RlyRelayDockState = {
 }
 
 const errorState: RlyRelayDockState = {
-  action: <Button size="compact">Retry review</Button>,
+  action: <Button>Retry review</Button>,
   description: "Relay returned no usable review. No verdict was recorded.",
   status: "error",
   title: "Review failed"
@@ -141,7 +141,7 @@ const storyArgs = {
 
 const Composer = (): ReactElement => (
   <form onSubmit={(event) => event.preventDefault()}>
-    <Field controlId="relay-message" label="Message Relay" size="compact">
+    <Field controlId="relay-message" label="Message Relay">
       {(controlProps) => <textarea {...controlProps} rows={3} />}
     </Field>
     <div style={{ marginBlockStart: "var(--rly-space-12)" }}>

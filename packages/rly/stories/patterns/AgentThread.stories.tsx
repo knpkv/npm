@@ -36,7 +36,7 @@ const firstMessages = [
     dateTime: "2026-07-13T09:13:00+02:00",
     time: "09:13",
     evidence: <EvidenceStamp freshness="current" reference="PR-191 · execution-1842" service="codecommit" />,
-    actions: <Button size="compact">Inspect missing link</Button>
+    actions: <Button>Inspect missing link</Button>
   },
   {
     id: "message-3",

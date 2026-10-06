@@ -602,7 +602,7 @@ export const componentManifest = {
       styles: ["src/primitives/Button.module.css"],
       variants: [
         { defaultValue: "secondary", name: "variant", values: ["primary", "secondary", "quiet"] },
-        { defaultValue: "default", name: "size", values: ["compact", "default", "principal"] }
+        { defaultValue: "dense", name: "size", values: ["dense", "compact", "default", "principal"] }
       ],
       visual: {
         story: "stories/primitives/Button.stories.tsx",
@@ -678,7 +678,7 @@ export const componentManifest = {
       source: "src/primitives/Field.tsx",
       status: "stable",
       styles: ["src/primitives/Field.module.css"],
-      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+      variants: [{ defaultValue: "dense", name: "size", values: ["dense", "compact", "default"] }],
       visual: {
         story: "stories/primitives/Field.stories.tsx",
         storyId: "primitives-field--states",
@@ -703,7 +703,7 @@ export const componentManifest = {
       styles: ["src/primitives/IconButton.module.css"],
       variants: [
         { defaultValue: "secondary", name: "variant", values: ["primary", "secondary", "quiet"] },
-        { defaultValue: "default", name: "size", values: ["compact", "default", "principal"] }
+        { defaultValue: "dense", name: "size", values: ["dense", "compact", "default", "principal"] }
       ],
       visual: {
         story: "stories/primitives/IconButton.stories.tsx",
@@ -756,7 +756,7 @@ export const componentManifest = {
       source: "src/primitives/Select.tsx",
       status: "stable",
       styles: ["src/primitives/Select.module.css"],
-      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+      variants: [{ defaultValue: "dense", name: "size", values: ["dense", "compact", "default"] }],
       visual: {
         story: "stories/primitives/Select.stories.tsx",
         storyId: "primitives-select--states",

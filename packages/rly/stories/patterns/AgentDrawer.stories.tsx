@@ -84,9 +84,7 @@ const DrawerInteraction = ({ initiallyOpen = false }: { readonly initiallyOpen?:
             <div style={stackStyle}>
               <Text>Agent: The release has current build and review evidence.</Text>
               <Text>Live updates {updates}</Text>
-              <Button onClick={() => setUpdates((count) => count + 1)} size="compact">
-                Add live update
-              </Button>
+              <Button onClick={() => setUpdates((count) => count + 1)}>Add live update</Button>
             </div>
           }
           title="Release agent"

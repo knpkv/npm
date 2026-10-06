@@ -75,4 +75,13 @@ describe("primitive metadata", () => {
       }
     }
   })
+
+  it("names the shared control height for every size of a control", () => {
+    const controls = [RLY_BUTTON_VARIANTS, RLY_FIELD_VARIANTS, RLY_ICON_BUTTON_VARIANTS, RLY_SELECT_VARIANTS]
+    for (const control of controls) {
+      for (const [size, metadata] of Object.entries(control.size)) {
+        expect(metadata.tokens).toContain(`control-height-${size}`)
+      }
+    }
+  })
 })

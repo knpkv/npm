@@ -286,6 +286,85 @@ const validateStory = (
   return failures
 }
 
+const propertyName = (property: TypeScript.ObjectLiteralElementLike): string | undefined =>
+  TypeScript.isPropertyAssignment(property)
+    && (TypeScript.isIdentifier(property.name) || TypeScript.isStringLiteral(property.name))
+    ? property.name.text
+    : undefined
+
+interface SourceVariants {
+  /** Axis name to its value names, from each `RLY_*_VARIANTS = defineVariants({...})`. */
+  readonly axes: ReadonlyMap<string, ReadonlyArray<ReadonlySet<string>>>
+  /** Axis name to its default, from each `RLY_*_DEFAULT_VARIANTS = defineVariants({...})`. */
+  readonly defaults: ReadonlyMap<string, ReadonlyArray<string>>
+}
+
+/** Literal variant axes and defaults a component source declares through `defineVariants`. */
+const sourceVariants = (source: string, fileName: string): SourceVariants => {
+  const axes = new Map<string, Array<ReadonlySet<string>>>()
+  const defaults = new Map<string, Array<string>>()
+  const sourceFile = TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true)
+  for (const statement of sourceFile.statements) {
+    if (!TypeScript.isVariableStatement(statement)) continue
+    for (const declaration of statement.declarationList.declarations) {
+      const initializer = declaration.initializer
+      if (!TypeScript.isIdentifier(declaration.name) || initializer === undefined) continue
+      if (!TypeScript.isCallExpression(initializer) || !TypeScript.isIdentifier(initializer.expression)) continue
+      if (initializer.expression.text !== "defineVariants") continue
+      const [argument] = initializer.arguments
+      if (argument === undefined || !TypeScript.isObjectLiteralExpression(argument)) continue
+      const isDefaults = declaration.name.text.endsWith("_DEFAULT_VARIANTS")
+      for (const property of argument.properties) {
+        const axis = propertyName(property)
+        if (axis === undefined || !TypeScript.isPropertyAssignment(property)) continue
+        if (isDefaults && TypeScript.isStringLiteral(property.initializer)) {
+          defaults.set(axis, [...(defaults.get(axis) ?? []), property.initializer.text])
+        } else if (!isDefaults && TypeScript.isObjectLiteralExpression(property.initializer)) {
+          const values = new Set<string>()
+          for (const value of property.initializer.properties) {
+            const name = propertyName(value)
+            if (name !== undefined) values.add(name)
+          }
+          axes.set(axis, [...(axes.get(axis) ?? []), values])
+        }
+      }
+    }
+  }
+  return { axes, defaults }
+}
+
+/**
+ * The manifest's variants must match the source's: same values on an axis, same default. An axis
+ * declared by more than one `defineVariants` in the file is ambiguous and left to judgment.
+ */
+const validateVariants = (component: ComponentRecord, source: string): ReadonlyArray<string> => {
+  const failures: Array<string> = []
+  const { axes, defaults } = sourceVariants(source, component.source)
+  for (const variant of component.variants) {
+    const declared = axes.get(variant.name)
+    if (declared?.length === 1 && declared[0] !== undefined) {
+      const values = declared[0]
+      const listed = new Set(variant.values)
+      if (values.size !== listed.size || [...values].some((value) => !listed.has(value))) {
+        failures.push(
+          `variant ${component.name}.${variant.name} lists ${variant.values.join("|")} but source declares ${
+            [...values].join("|")
+          }`
+        )
+      }
+    }
+    const fallback = defaults.get(variant.name)
+    if (fallback?.length === 1 && fallback[0] !== variant.defaultValue) {
+      failures.push(
+        `variant ${component.name}.${variant.name} defaults to ${variant.defaultValue} but source defaults to ${
+          fallback[0]
+        }`
+      )
+    }
+  }
+  return failures
+}
+
 const validateComponent = (
   component: ComponentRecord,
   metadata: RegistryMetadata | undefined,
@@ -300,6 +379,7 @@ const validateComponent = (
     for (const declaration of component.exports) {
       if (!exports.has(declaration.name)) failures.push(`missing export ${declaration.name} in ${component.source}`)
     }
+    for (const failure of validateVariants(component, source)) failures.push(failure)
   }
   for (const style of component.styles) {
     const contents = files.get(style)

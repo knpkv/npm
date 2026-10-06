@@ -34,18 +34,19 @@ export interface ThemeSelectProps {
  *
  * Settings pages show the label and fill the field width. Compact headers pass
  * `labelVisibility="hidden"`, which keeps the name for assistive technology through
- * `aria-label` and sizes the trigger to its longest option.
+ * `aria-label` and sizes the trigger to its longest option. Dense by default, like the
+ * controls beside it in a header.
  *
  * @example
  * const [theme, setTheme] = useStoredTheme("jcf_theme", browserStorage)
- * <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} size="compact" value={theme} />
+ * <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} value={theme} />
  */
 export const ThemeSelect = ({
   className,
   label = "Appearance",
   labelVisibility = "visible",
   onValueChange,
-  size = "compact",
+  size = "dense",
   value
 }: ThemeSelectProps): ReactElement => {
   const onChange = (next: string): void => {

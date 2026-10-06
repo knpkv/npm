@@ -31,10 +31,10 @@ export const RLY_ICON_BUTTON_VARIANTS = defineVariants({
     compact: {
       className: style("compact"),
       purpose: "Minimum accessible icon target",
-      tokens: ["space-40", "space-4"]
+      tokens: ["control-height-compact"]
     },
-    default: { className: style("defaultSize"), purpose: "Standard icon target", tokens: ["space-48"] },
-    principal: { className: style("principal"), purpose: "Prominent icon target", tokens: ["space-48", "space-8"] }
+    default: { className: style("defaultSize"), purpose: "Standard icon target", tokens: ["control-height-default"] },
+    principal: { className: style("principal"), purpose: "Prominent icon target", tokens: ["control-height-principal"] }
   }
 })
 export const RLY_ICON_BUTTON_DEFAULT_VARIANTS = defineVariants({ variant: "secondary", size: "dense" })

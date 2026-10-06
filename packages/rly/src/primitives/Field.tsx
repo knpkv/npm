@@ -23,8 +23,16 @@ export const RLY_FIELD_VARIANTS = defineVariants({
       purpose: "Tool-density form controls; the default",
       tokens: ["control-height-dense", "radius-tag"]
     },
-    compact: { className: style("compact"), purpose: "Dense form rows", tokens: ["space-40", "type-meta"] },
-    default: { className: style("defaultSize"), purpose: "Standard form controls", tokens: ["space-48", "type-label"] }
+    compact: {
+      className: style("compact"),
+      purpose: "Dense form rows",
+      tokens: ["control-height-compact", "type-meta"]
+    },
+    default: {
+      className: style("defaultSize"),
+      purpose: "Standard form controls",
+      tokens: ["control-height-default", "type-label"]
+    }
   }
 })
 

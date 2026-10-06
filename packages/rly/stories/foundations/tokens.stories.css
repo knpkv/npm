@@ -87,7 +87,7 @@
 .tokenStory__state {
   align-content: start;
   background: var(--state-tint);
-  border: 1px solid var(--rly-color-border-1);
+  border: 1px solid var(--state-ink);
   border-radius: var(--rly-radius-control);
   color: var(--state-ink);
   display: grid;
@@ -96,13 +96,6 @@
   overflow: hidden;
   padding: var(--rly-space-20);
   position: relative;
-}
-
-.tokenStory__stateRail {
-  background: var(--state-ink);
-  inset: 0 auto 0 0;
-  position: absolute;
-  width: 4px;
 }
 
 .tokenStory__state[data-state="success"] {
