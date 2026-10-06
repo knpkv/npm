@@ -1,0 +1,95 @@
+id: no-released-ephemeral-test-port
+valid:
+  - |
+    const port = await new Promise((resolve) => {
+      server.listen(0, "127.0.0.1", () => resolve(server.address().port))
+    })
+    try {
+      await use(port)
+    } finally {
+      server.close()
+    }
+  - |
+    server.listen(0, "127.0.0.1", resolve)
+  - |
+    server.listen(4180, "127.0.0.1", () => other.close())
+  - |
+    server.listen(0, host, async () => {
+      await assertResponse(server.address().port)
+      server.close(resolve)
+    })
+  - |
+    probe.listen(0, "127.0.0.1", () => {
+      if (probe.address() === null) {
+        probe.close()
+        reject(new Error("no port"))
+        return
+      }
+      resolve(probe)
+    })
+  - |
+    probe.listen(0, host, () => {
+      if (probe.address() === null) {
+        probe.close(() => reject(new MissingPortError()))
+        return
+      }
+      resolve(probe)
+    })
+  - |
+    new Promise((resolve) => {
+      server.listen(0, host, () => {
+        server.close(() => expect(port).toBeGreaterThan(0))
+        resolve(undefined)
+      })
+    })
+  - |
+    new Promise((done) => {
+      server.listen(0, host, async () => {
+        await assertResponse(server.address().port)
+        server.close(() => done())
+      })
+    })
+  - |
+    new Promise<void>((resolve, reject) => {
+      server.listen(0, host, () => server.close((error) => (error ? reject(error) : resolve(undefined))))
+    })
+  - |
+    new Promise((resolve) => {
+      server.listen(0, host, async () => {
+        const body = await request(`http://${host}:${server.address().port}/`)
+        server.close(() => resolve(body))
+      })
+    })
+invalid:
+  - |
+    new Promise<number>((resolve, reject) => {
+      const probe = createServer()
+      probe.listen(0, "127.0.0.1", () => {
+        const address = probe.address()
+        probe.close((error) => (error === undefined ? resolve(address.port) : reject(error)))
+      })
+    })
+  - |
+    new Promise((resolve) => {
+      const probe = createServer()
+      probe.listen(0, "127.0.0.1", () => {
+        const selected = probe.address().port
+        probe.close(() => resolve(selected))
+      })
+    })
+  - |
+    const reserve = () =>
+      new Promise((resolve) => {
+        const probe = createServer()
+        probe.listen(0, "127.0.0.1", () => {
+          const port = probe.address().port
+          probe.close(() => resolve(port))
+        })
+      })
+  - |
+    new Promise((resolve, reject) => {
+      reservation.listen(0, "127.0.0.1", function() {
+        const address = reservation.address()
+        reservation.close((error) => error === undefined ? resolve(address.port) : reject(error))
+      })
+    })
