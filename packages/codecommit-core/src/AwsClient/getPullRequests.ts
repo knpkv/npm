@@ -357,12 +357,29 @@ const listPullRequestIds = (
 // Main
 // ---------------------------------------------------------------------------
 
-export const getPullRequests = (
+/**
+ * One pull request from a refresh: fetched in full, or read but with approval rules that could not be
+ * evaluated. A failed evaluation affects only that pull request, so a refresh carries on with the rest.
+ */
+export type PullRequestRefreshItem =
+  | { readonly _tag: "Fetched"; readonly pullRequest: PullRequest }
+  | {
+    readonly _tag: "EvaluationFailed"
+    readonly pullRequestId: string
+    readonly repositoryName: string
+    readonly error: ApprovalEvaluationError
+  }
+
+/**
+ * Stream every pull request of one account, isolating approval-evaluation failures per pull request.
+ * Any other failure (listing, reading, decoding) still fails the stream with an `AwsApiError`.
+ */
+export const getPullRequestRefresh = (
   account: AccountParams,
   options?: { status?: "OPEN" | "CLOSED"; repositoryName?: string }
-): Stream.Stream<PullRequest, AwsClientError, AwsClientConfig | HttpClient.HttpClient> => {
+): Stream.Stream<PullRequestRefreshItem, AwsClientError, AwsClientConfig | HttpClient.HttpClient> => {
   const pullRequestsEffect: Effect.Effect<
-    Stream.Stream<PullRequest, AwsClientError, AwsClientConfig>,
+    Stream.Stream<PullRequestRefreshItem, AwsClientError, AwsClientConfig>,
     AwsClientError,
     AwsClientConfig | HttpClient.HttpClient
   > = Effect.gen(function*() {
@@ -385,24 +402,33 @@ export const getPullRequests = (
       ? listAllRepositories()
       : Stream.make(options.repositoryName)
 
+    const fetched = (id: string, repoName: string) =>
+      throttleRetry(fetchPRDetails(id, repoName)).pipe(
+        Effect.flatMap((pr) =>
+          getRepoAccount(pr.repoName).pipe(
+            Effect.flatMap((repoAcct) =>
+              decodePullRequest({
+                ...pr,
+                accountProfile: account.profile,
+                accountRegion: account.region,
+                repoAccountId: repoAcct
+              })
+            )
+          )
+        ),
+        Effect.map((pullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest })),
+        Effect.catchTag("ApprovalEvaluationError", (error) =>
+          Effect.succeed<PullRequestRefreshItem>({
+            _tag: "EvaluationFailed",
+            pullRequestId: id,
+            repositoryName: repoName,
+            error
+          }))
+      )
+
     const stream = repositories.pipe(
       Stream.flatMap((repoName) => listPullRequestIds(repoName, status), { concurrency: 2 }),
-      Stream.mapEffect(
-        ({ id, repoName }) => throttleRetry(fetchPRDetails(id, repoName)),
-        { concurrency: 3 }
-      ),
-      Stream.mapEffect((pr) =>
-        getRepoAccount(pr.repoName).pipe(
-          Effect.flatMap((repoAcct) =>
-            decodePullRequest({
-              ...pr,
-              accountProfile: account.profile,
-              accountRegion: account.region,
-              repoAccountId: repoAcct
-            })
-          )
-        )
-      ),
+      Stream.mapEffect(({ id, repoName }) => fetched(id, repoName), { concurrency: 3 }),
       Stream.mapError((cause) => makeApiError("getPullRequests", account.profile, account.region, cause))
     )
 
@@ -416,3 +442,19 @@ export const getPullRequests = (
 
   return Stream.unwrap(pullRequestsEffect)
 }
+
+/**
+ * Stream every pull request of one account. A pull request whose approval rules cannot be evaluated
+ * fails the stream, because a listing without its approval state would misreport it as pending.
+ */
+export const getPullRequests = (
+  account: AccountParams,
+  options?: { status?: "OPEN" | "CLOSED"; repositoryName?: string }
+): Stream.Stream<PullRequest, AwsClientError, AwsClientConfig | HttpClient.HttpClient> =>
+  getPullRequestRefresh(account, options).pipe(
+    Stream.mapEffect((item) =>
+      item._tag === "Fetched"
+        ? Effect.succeed(item.pullRequest)
+        : Effect.fail(makeApiError("getPullRequests", account.profile, account.region, item.error))
+    )
+  )

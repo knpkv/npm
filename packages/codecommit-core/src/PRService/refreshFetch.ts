@@ -7,7 +7,7 @@
  * @internal
  */
 
-import { Cause, Effect, Option, Predicate, Ref, Stream, SubscriptionRef } from "effect"
+import { Array as Arr, Cause, Effect, Option, Predicate, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
 import type { CacheError } from "../CacheService/CacheError.js"
@@ -20,7 +20,7 @@ import {
 } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
-import type { PullRequestRefreshScope } from "../Domain.js"
+import type { PullRequestRefreshScope, UnevaluatedPullRequest } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
@@ -108,8 +108,8 @@ export const fetchAndUpsertPRs = (params: {
       (account.regions ?? []).map((region) => {
         const label = `${account.profile} (${region})`
         const awsAccountId = accountIdMap.get(account.profile) ?? ""
-        return awsClient.getPullRequests({ profile: account.profile, region }).pipe(
-          Stream.map((pr) => ({ awsAccountId, label, pr })),
+        return awsClient.getPullRequestRefresh({ profile: account.profile, region }).pipe(
+          Stream.map((item) => ({ awsAccountId, item, label, profile: account.profile, region })),
           Stream.catch((error) => {
             const causeStr = (Predicate.isError(error)
               ? error.name !== "Error" ? error.name : error.message
@@ -145,9 +145,25 @@ export const fetchAndUpsertPRs = (params: {
       })
     )
 
+    const unevaluated = yield* Ref.make<ReadonlyArray<UnevaluatedPullRequest>>([])
+
     yield* Stream.mergeAll(streams, { concurrency: 2 }).pipe(
-      Stream.runForEach(({ awsAccountId, label, pr }) =>
+      Stream.runForEach(({ awsAccountId, item, label, profile, region }) =>
         Effect.gen(function*() {
+          if (item._tag === "EvaluationFailed") {
+            // Only this pull request is unknown: its cached row stays as it was, the account's other
+            // pull requests carry on, and the account's refresh counts as partial rather than successful.
+            yield* Ref.update(unevaluated, (all) => [...all, {
+              profile,
+              region,
+              pullRequestId: item.pullRequestId,
+              repositoryName: item.repositoryName,
+              message: item.error.message
+            }])
+            yield* withholdScopeSuccess(profile, region)
+            return
+          }
+          const pr = item.pullRequest
           // Diff subscribed PRs against cache
           const subscribed = yield* Ref.get(subscribedRef)
           if (
@@ -219,6 +235,26 @@ export const fetchAndUpsertPRs = (params: {
           }))
         })
       )
+    )
+
+    // Every refresh replaces the list: a pull request that evaluates again drops off it.
+    const unevaluatedPullRequests = yield* Ref.get(unevaluated)
+    yield* SubscriptionRef.update(state, (s) => ({ ...s, unevaluatedPullRequests }))
+    yield* Effect.forEach(
+      Object.values(Arr.groupBy(unevaluatedPullRequests, ({ profile, region }) => accountRegionKey(profile, region))),
+      (scope) => {
+        const first = Arr.headNonEmpty(scope)
+        return notificationRepo.addSystem({
+          type: "error",
+          title: `${first.profile} (${first.region})`,
+          message: `${scope.length} pull request${
+            scope.length === 1 ? "" : "s"
+          } couldn't be re-evaluated and kept their cached approval state: ${first.message}`,
+          profile: first.profile,
+          deduplicate: true
+        }).pipe(Effect.catch(() => Effect.void))
+      },
+      { discard: true }
     )
 
     // Transition stale OPEN PRs: re-fetch to discover if they were merged/closed
