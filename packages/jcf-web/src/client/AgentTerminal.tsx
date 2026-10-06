@@ -16,7 +16,7 @@ export const AgentTerminal = (props: { readonly activity: ReadonlyArray<AgentAct
       <div className="jcf-terminal-toolbar">
         <strong>Agent activity</strong>
         <span>Read only</span>
-        <div className="jcf-terminal-batches" aria-label="Agent batches">
+        <div className="jcf-terminal-batches" role="group" aria-label="Agent batches">
           {props.activity.map((batch) => (
             <Button
               key={batch.batch}
@@ -33,14 +33,18 @@ export const AgentTerminal = (props: { readonly activity: ReadonlyArray<AgentAct
       <div className="jcf-agent-conversation" key={entry?.batch}>
         <section className="jcf-agent-message" data-speaker="request" aria-label="Agent request">
           <h3>Request</h3>
-          <pre tabIndex={0}>{request || "Request not available for this batch"}</pre>
+          <pre data-kind={request.kind} tabIndex={0}>
+            {request.text || "Request not available for this batch"}
+          </pre>
         </section>
         <section className="jcf-agent-message" data-speaker="response" aria-label="Agent response">
           <header>
             <h3>Response</h3>
             <span className="jcf-terminal-status">{entry?.status ?? "Waiting for agent output"}</span>
           </header>
-          <pre tabIndex={0}>{response || "Waiting for agent output"}</pre>
+          <pre data-kind={response.kind} tabIndex={0}>
+            {response.text || "Waiting for agent output"}
+          </pre>
         </section>
       </div>
     </section>
