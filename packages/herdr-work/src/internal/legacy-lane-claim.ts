@@ -41,3 +41,65 @@ export const resolveLegacyLaneClaim = (
   })
   return Equal.equals(only, expected) ? { _tag: "claim", lane: only } : { _tag: "mismatch", bound: only, lane: legacy }
 }
+
+/** One `work_lane_operations` row, as both drivers read it. */
+export const LaneOperationLedgerRow = Schema.Struct({
+  operationId: Schema.String,
+  laneId: Schema.String,
+  goalId: Schema.String,
+  phase: Schema.String,
+  revision: Schema.Number,
+  record: Schema.String
+})
+export type LaneOperationRow = typeof LaneOperationLedgerRow.Type
+
+/** The ledger's row count and encoded bytes, counted the way its totals trigger counts them. */
+export const LaneOperationTotalsRow = Schema.Struct({ count: Schema.Number, bytes: Schema.Number })
+
+/**
+ * How the migrated claims enter the operation ledger: insert the absent ones,
+ * or fail because a row already holds one of their operation ids with a
+ * different claim (an exact replay would then conflict), or because the new
+ * rows would take the ledger past its bounds.
+ */
+export type LegacyLaneOperations =
+  | { readonly _tag: "record"; readonly inserts: ReadonlyArray<WorkLaneClaimed> }
+  | { readonly _tag: "collision"; readonly lane: WorkLaneClaimed; readonly existing: LaneOperationRow }
+  | { readonly _tag: "capacity"; readonly count: number; readonly bytes: number }
+
+const sameOperation = (lane: WorkLaneClaimed, row: LaneOperationRow): boolean => {
+  if (
+    row.laneId !== lane.laneId || row.goalId !== lane.goalId || row.phase !== lane.phase ||
+    row.revision !== lane.revision
+  ) return false
+  const decoded = Schema.decodeUnknownOption(Schema.fromJsonString(WorkLaneClaimed))(row.record)
+  return decoded._tag === "Some" && Equal.equals(decoded.value, lane)
+}
+
+const utf8 = new TextEncoder()
+
+/**
+ * Plans the ledger rows for `claims` against the rows already holding their
+ * operation ids and the ledger's current totals.
+ */
+export const planLegacyLaneOperations = (
+  claims: ReadonlyArray<WorkLaneClaimed>,
+  existing: ReadonlyMap<string, LaneOperationRow>,
+  totals: { readonly count: number; readonly bytes: number },
+  limits: { readonly records: number; readonly bytes: number }
+): LegacyLaneOperations => {
+  const inserts: Array<WorkLaneClaimed> = []
+  for (const lane of claims) {
+    const row = existing.get(lane.operationId)
+    if (row === undefined) inserts.push(lane)
+    else if (!sameOperation(lane, row)) return { _tag: "collision", existing: row, lane }
+  }
+  const count = totals.count + inserts.length
+  const bytes = inserts.reduce(
+    (sum, lane) => sum + utf8.encode(lane.operationId).byteLength + utf8.encode(JSON.stringify(lane)).byteLength,
+    totals.bytes
+  )
+  return count > limits.records || bytes > limits.bytes
+    ? { _tag: "capacity", bytes, count }
+    : { _tag: "record", inserts }
+}

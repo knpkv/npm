@@ -13,7 +13,11 @@ import {
   WorkProjectionError,
   WorkStoreError
 } from "./errors.js"
-import { agentBindingAdmissionError } from "./internal/agent-binding-admission.js"
+import {
+  agentBindingAdmissionError,
+  workAgentBindingLaneOperationMaxBytes,
+  workAgentBindingLaneOperationMaxRecords
+} from "./internal/agent-binding-admission.js"
 import {
   AgentBindingGoalEventRow,
   AgentBindingLaneOperationRow,
@@ -46,7 +50,12 @@ import {
   workDispatchLineageContainedBy,
   workDispatchLineageEquivalent
 } from "./internal/decision-handoff-migration.js"
-import { resolveLegacyLaneClaim } from "./internal/legacy-lane-claim.js"
+import {
+  LaneOperationLedgerRow,
+  LaneOperationTotalsRow,
+  planLegacyLaneOperations,
+  resolveLegacyLaneClaim
+} from "./internal/legacy-lane-claim.js"
 import {
   WorkAgentBinding,
   type WorkAgentBinding as WorkAgentBindingType,
@@ -964,6 +973,42 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
                   phase = ${lane.phase}, record = ${JSON.stringify(lane)} WHERE lane_id = ${lane.laneId}`,
             { discard: true }
           )
+          // The backfill below inserts each migrated claim's operation only when
+          // absent; an existing row must be that exact claim, and the new rows
+          // must fit the ledger, matching WorkStore.
+          const existingOperations = yield* Effect.forEach(migratedClaims, ({ lane }) =>
+            sql`SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId, phase, revision, record
+                FROM work_lane_operations WHERE operation_id = ${lane.operationId}`.pipe(
+              Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LaneOperationLedgerRow))),
+              Effect.mapError(storeError("sql-work.initialize.lane-operation-rows"))
+            )).pipe(Effect.map((rows) => new Map(rows.flat().map((row) => [row.operationId, row]))))
+          const operationTotals = yield* sql`
+            SELECT COUNT(*) AS count, COALESCE(SUM(
+              length(CAST(operation_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+            FROM work_lane_operations`.pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.Tuple([LaneOperationTotalsRow]))),
+            Effect.mapError(storeError("sql-work.initialize.lane-operation-ledger-totals"))
+          )
+          const operations = planLegacyLaneOperations(
+            migratedClaims.map(({ lane }) =>
+              lane
+            ),
+            existingOperations,
+            operationTotals[0],
+            { bytes: workAgentBindingLaneOperationMaxBytes, records: workAgentBindingLaneOperationMaxRecords }
+          )
+          if (operations._tag === "collision") {
+            return yield* new WorkStoreError({
+              cause: operations,
+              operation: "sql-work.initialize.lane-operation-collision"
+            })
+          }
+          if (operations._tag === "capacity") {
+            return yield* new WorkStoreError({
+              cause: operations,
+              operation: "sql-work.initialize.lane-operation-capacity"
+            })
+          }
         }
         if (!decisionColumns.some(({ name }) => name === "session_id")) {
           yield* sql`ALTER TABLE work_decision_handoffs ADD COLUMN session_id TEXT`

@@ -68,7 +68,12 @@ import {
   workDispatchLineageEquivalent
 } from "./internal/decision-handoff-migration.js"
 import { workHistoryError } from "./internal/history-validation.js"
-import { resolveLegacyLaneClaim } from "./internal/legacy-lane-claim.js"
+import {
+  LaneOperationLedgerRow,
+  LaneOperationTotalsRow,
+  planLegacyLaneOperations,
+  resolveLegacyLaneClaim
+} from "./internal/legacy-lane-claim.js"
 import {
   WorkAdmissionTarget,
   WorkAgentBinding,
@@ -726,22 +731,43 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
     )
     // An existing lane-operation ledger is not backfilled later, so record each
     // migrated claim's operation here; the claim's readback requires it.
-    const recordOperation = tables.includes("work_lane_operations")
-      ? database.prepare(
-        `INSERT OR IGNORE INTO work_lane_operations
-           (operation_id, lane_id, goal_id, phase, revision, record) VALUES (?, ?, ?, ?, ?, ?)`
+    const operations = tables.includes("work_lane_operations")
+      ? planLegacyLaneOperations(
+        migratedClaims.map(({ lane }) => lane),
+        new Map(
+          migratedClaims.flatMap(({ lane }) => {
+            const row = database.prepare(
+              `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId, phase, revision, record
+               FROM work_lane_operations WHERE operation_id = ?`
+            ).get(lane.operationId)
+            return row === undefined ? [] : [[lane.operationId, Schema.decodeUnknownSync(LaneOperationLedgerRow)(row)]]
+          })
+        ),
+        Schema.decodeUnknownSync(LaneOperationTotalsRow)(
+          database.prepare(
+            `SELECT COUNT(*) AS count, COALESCE(SUM(
+               length(CAST(operation_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+             FROM work_lane_operations`
+          ).get()
+        ),
+        { bytes: workLaneOperationMaxBytes, records: workLaneOperationMaxRecords }
       )
       : undefined
+    if (operations?._tag === "collision") {
+      throw new WorkStoreError({ cause: operations, operation: "open.migrate.lane-operation-collision" })
+    }
+    if (operations?._tag === "capacity") {
+      throw new WorkStoreError({ cause: operations, operation: "open.migrate.lane-operation-capacity" })
+    }
+    const recordOperation = database.prepare(
+      `INSERT INTO work_lane_operations
+         (operation_id, lane_id, goal_id, phase, revision, record) VALUES (?, ?, ?, ?, ?, ?)`
+    )
     for (const { lane } of migratedClaims) {
       update.run(lane.goalId, lane.operationId, lane.phase, JSON.stringify(lane), lane.laneId)
-      recordOperation?.run(
-        lane.operationId,
-        lane.laneId,
-        lane.goalId,
-        lane.phase,
-        lane.revision,
-        JSON.stringify(lane)
-      )
+    }
+    for (const lane of operations?.inserts ?? []) {
+      recordOperation.run(lane.operationId, lane.laneId, lane.goalId, lane.phase, lane.revision, JSON.stringify(lane))
     }
   }
   if (decisionColumns.length > 0 && !decisionColumns.includes("session_id")) {

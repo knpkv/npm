@@ -228,6 +228,46 @@ const writeFixture = (path: string, write: (database: DatabaseSync) => void) => 
   }
 }
 
+const ledgerMaxRecords = 16_384
+const ledgerMaxBytes = 2 * 1024 * 1024
+
+const withDatabase = <A>(path: string, read: (database: DatabaseSync) => A): A => {
+  const database = new DatabaseSync(path)
+  try {
+    return read(database)
+  } finally {
+    database.close()
+  }
+}
+
+/** Both drivers reject a copy of `fixture` with their own operation, leaving every copy unchanged. */
+const expectRejectedUnchanged = (
+  root: string,
+  fixture: string,
+  operations: { readonly bridge: string; readonly store: string }
+) =>
+  Effect.gen(function*() {
+    const before = { rows: tableRows(fixture), schema: schemaSnapshot(fixture) }
+    const storePath = join(root, "rejected-store.sqlite")
+    const bridgePath = join(root, "rejected-bridge.sqlite")
+    copyFileSync(fixture, storePath)
+    copyFileSync(fixture, bridgePath)
+    expect(yield* Effect.result(drivers.store(storePath))).toMatchObject({
+      failure: {
+        _tag: "WorkStoreError",
+        cause: { _tag: "WorkStoreError", operation: operations.store },
+        operation: "open.database"
+      }
+    })
+    expect(yield* Effect.result(drivers.bridge(bridgePath))).toMatchObject({
+      failure: { _tag: "WorkStoreError", operation: operations.bridge }
+    })
+    for (const path of [storePath, bridgePath]) {
+      expect(schemaSnapshot(path), path).toEqual(before.schema)
+      expect(tableRows(path), path).toEqual(before.rows)
+    }
+  })
+
 /** Tables, indexes and triggers only one driver creates; both are required in production. */
 const storeOnly = [
   "index work_decision_handoffs_lane_time",
@@ -480,6 +520,105 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
           expect(schemaSnapshot(path), path).toEqual(before.schema)
           expect(tableRows(path), path).toEqual(before.rows)
         }
+      })
+    ))
+
+  it.effect("migrates a moved-past claim whose operation row already exists exactly, and rejects a different one", () =>
+    withRoot((root) =>
+      Effect.gen(function*() {
+        const legacy = join(root, "legacy.sqlite")
+        writeFixture(legacy, (database) => {
+          writePreV2WorkFile(database)
+          advanceLegacyClaim(database)
+        })
+        // The exact row a migration writes for the claim's own operation.
+        const probe = join(root, "probe.sqlite")
+        copyFileSync(legacy, probe)
+        yield* drivers.store(probe)
+        const migrated = withDatabase(probe, (database) =>
+          database.prepare("SELECT * FROM work_lane_operations WHERE operation_id = 'goal:legacy'").get())
+        const replica = join(root, "replica.sqlite")
+        copyFileSync(legacy, replica)
+        writeFixture(replica, (database) => {
+          database.prepare(
+            "INSERT INTO work_lane_operations (operation_id, lane_id, goal_id, phase, revision, record) VALUES (?, ?, ?, ?, ?, ?)"
+          ).run(
+            ...Schema.decodeUnknownSync(Schema.Tuple([
+              Schema.String,
+              Schema.String,
+              Schema.String,
+              Schema.String,
+              Schema.Number,
+              Schema.String
+            ]))(Object.values(migrated ?? {}))
+          )
+        })
+        for (const [name, open] of Object.entries(drivers)) {
+          const path = join(root, `replica-${name}.sqlite`)
+          copyFileSync(replica, path)
+          yield* open(path)
+          yield* open(path)
+          expect(laneClaim(path), name).toMatchObject({ operationId: "goal:legacy", revision: 2 })
+        }
+        const collision = join(root, "collision.sqlite")
+        copyFileSync(replica, collision)
+        writeFixture(collision, (database) => {
+          database.exec(`
+            UPDATE work_lane_operations SET goal_id = 'goal:other', record = json_set(record, '$.goalId', 'goal:other')
+            WHERE operation_id = 'goal:legacy'
+          `)
+        })
+        yield* expectRejectedUnchanged(root, collision, {
+          bridge: "sql-work.initialize.lane-operation-collision",
+          store: "open.migrate.lane-operation-collision"
+        })
+      })
+    ))
+
+  it.effect("rejects a migration whose new operation rows would overflow the ledger, by count or by bytes", () =>
+    withRoot((root) =>
+      Effect.gen(function*() {
+        const fill = (path: string, rows: (count: number, bytes: number) => ReadonlyArray<string>) =>
+          writeFixture(path, (database) => {
+            writePreV2WorkFile(database)
+            advanceLegacyClaim(database)
+            const { bytes, count } = Schema.decodeUnknownSync(
+              Schema.Struct({ bytes: Schema.Number, count: Schema.Number })
+            )(
+              database.prepare(
+                `SELECT COUNT(*) AS count, COALESCE(SUM(
+                   length(CAST(operation_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+                 FROM work_lane_operations`
+              ).get()
+            )
+            const insert = database.prepare(
+              "INSERT INTO work_lane_operations (operation_id, lane_id, goal_id, phase, revision, record) VALUES (?, ?, 'goal:filler', 'review', 1, ?)"
+            )
+            database.exec("BEGIN")
+            rows(count, bytes).forEach((record, index) => insert.run(`filler-${index}`, `lane:filler-${index}`, record))
+            database.exec("COMMIT")
+          })
+        const atCount = join(root, "at-count.sqlite")
+        fill(atCount, (count) => Array.from({ length: ledgerMaxRecords - count }, () => "{}"))
+        yield* expectRejectedUnchanged(root, atCount, {
+          bridge: "sql-work.initialize.lane-operation-capacity",
+          store: "open.migrate.lane-operation-capacity"
+        })
+        const belowCount = join(root, "below-count.sqlite")
+        fill(belowCount, (count) => Array.from({ length: ledgerMaxRecords - count - 1 }, () => "{}"))
+        for (const [name, open] of Object.entries(drivers)) {
+          const path = join(root, `below-count-${name}.sqlite`)
+          copyFileSync(belowCount, path)
+          yield* open(path)
+          yield* open(path)
+        }
+        const atBytes = join(root, "at-bytes.sqlite")
+        // One row that leaves the ledger a few bytes short of its byte bound: the migrated row cannot fit.
+        fill(atBytes, (_, bytes) => ["x".repeat(ledgerMaxBytes - bytes - "filler-0".length - 8)])
+        yield* expectRejectedUnchanged(root, atBytes, {
+          bridge: "sql-work.initialize.lane-operation-capacity",
+          store: "open.migrate.lane-operation-capacity"
+        })
       })
     ))
 
