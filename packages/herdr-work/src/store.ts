@@ -87,7 +87,7 @@ import {
   SessionIndexDefinition,
   sessionIndexDefinitionQuery
 } from "./internal/session-index.js"
-import { terminalCandidates, terminalCheckpoint } from "./internal/terminal-reconcile.js"
+import { terminalCandidates, terminalCheckpoint, withoutBlockers } from "./internal/terminal-reconcile.js"
 import {
   admissionEvidence,
   isTerminalWorkState,
@@ -3167,9 +3167,8 @@ export class WorkStore implements WorkStoreService {
           // occurredAt equals updatedAt for every valid checkpoint; both bound the ordering defensively.
           const at = Math.max(observedAt, head.occurredAt + 1, head.goal.updatedAt + 1)
           const goal = Schema.decodeUnknownSync(WorkGoal)({
-            ...head.goal,
+            ...withoutBlockers(head.goal),
             state: "abandoned",
-            blocker: null,
             activity: [
               ...(head.goal.activity ?? []),
               {

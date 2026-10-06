@@ -100,6 +100,28 @@ describe("approved goal abandonment", () => {
       }])
     })))
 
+  it.effect("abandons a goal blocked through its blockers list", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture({ lane: false })
+      yield* work.record({
+        ...original,
+        eventId: "goal-blocked-list",
+        occurredAt: 600,
+        goal: {
+          ...original.goal,
+          blocker: null,
+          blockers: [{ summary: "Waiting on a decision", since: 500 }],
+          updatedAt: 600
+        }
+      })
+      const result = yield* work.abandon({
+        ...request,
+        expectedGoalEventId: "goal-blocked-list",
+        expectedGoalUpdatedAt: 600
+      })
+      expect(result.checkpoint.goal).toMatchObject({ state: "abandoned", blocker: null, blockers: [] })
+    })))
+
   it.effect("replays the exact job and refuses a changed payload under the same job id", () =>
     Effect.scoped(Effect.gen(function*() {
       const { store, work } = yield* fixture({ lane: false })
