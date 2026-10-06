@@ -297,12 +297,15 @@ interface SourceVariants {
   readonly axes: ReadonlyMap<string, ReadonlyArray<ReadonlySet<string>>>
   /** Axis name to its default, from each `RLY_*_DEFAULT_VARIANTS = defineVariants({...})`. */
   readonly defaults: ReadonlyMap<string, ReadonlyArray<string>>
+  /** Names of the `*_DEFAULT_VARIANTS` constants the file declares. */
+  readonly defaultConstants: ReadonlySet<string>
 }
 
 /** Literal variant axes and defaults a component source declares through `defineVariants`. */
 const sourceVariants = (source: string, fileName: string): SourceVariants => {
   const axes = new Map<string, Array<ReadonlySet<string>>>()
   const defaults = new Map<string, Array<string>>()
+  const defaultConstants = new Set<string>()
   const sourceFile = TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true)
   for (const statement of sourceFile.statements) {
     if (!TypeScript.isVariableStatement(statement)) continue
@@ -314,6 +317,7 @@ const sourceVariants = (source: string, fileName: string): SourceVariants => {
       const [argument] = initializer.arguments
       if (argument === undefined || !TypeScript.isObjectLiteralExpression(argument)) continue
       const isDefaults = declaration.name.text.endsWith("_DEFAULT_VARIANTS")
+      if (isDefaults) defaultConstants.add(declaration.name.text)
       for (const property of argument.properties) {
         const axis = propertyName(property)
         if (axis === undefined || !TypeScript.isPropertyAssignment(property)) continue
@@ -330,65 +334,108 @@ const sourceVariants = (source: string, fileName: string): SourceVariants => {
       }
     }
   }
-  return { axes, defaults }
+  return { axes, defaults, defaultConstants }
 }
 
-/** String literals a component destructures as a prop's fallback (`size = "default"`). */
-const destructuredDefaults = (source: string, fileName: string, prop: string): ReadonlyArray<string> => {
-  const literals: Array<string> = []
+/**
+ * A component's destructured fallbacks for one prop: a string literal (`size = "dense"`), a read of
+ * a defaults constant in the same file (`size = RLY_BUTTON_DEFAULT_VARIANTS.size`), or anything
+ * else, reported as unsupported so the check never passes by not understanding the source.
+ */
+type Fallback =
+  | { readonly _tag: "Literal"; readonly value: string }
+  | { readonly _tag: "Defaults"; readonly constant: string; readonly axis: string }
+  | { readonly _tag: "Unsupported"; readonly text: string }
+
+const destructuredFallbacks = (source: string, fileName: string, prop: string): ReadonlyArray<Fallback> => {
+  const fallbacks: Array<Fallback> = []
+  const sourceFile = TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true)
   const visit = (node: TypeScript.Node): void => {
     if (
       TypeScript.isBindingElement(node)
       && TypeScript.isIdentifier(node.name)
       && node.name.text === prop
+      && node.propertyName === undefined
       && node.initializer !== undefined
-      && TypeScript.isStringLiteral(node.initializer)
     ) {
-      literals.push(node.initializer.text)
+      const initializer = node.initializer
+      fallbacks.push(
+        TypeScript.isStringLiteral(initializer)
+          ? { _tag: "Literal", value: initializer.text }
+          : TypeScript.isPropertyAccessExpression(initializer) && TypeScript.isIdentifier(initializer.expression)
+          ? { _tag: "Defaults", constant: initializer.expression.text, axis: initializer.name.text }
+          : { _tag: "Unsupported", text: initializer.getText(sourceFile) }
+      )
     }
     TypeScript.forEachChild(node, visit)
   }
-  visit(TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true))
-  return literals
+  visit(sourceFile)
+  return fallbacks
 }
 
 /**
- * The manifest's variants must match the source's: same values on an axis, same default. An axis
- * declared by more than one `defineVariants` in the file is ambiguous and left to judgment.
+ * The manifest's variants must match the source's `defineVariants` declarations exactly. Every
+ * axis the source declares there is listed in the manifest, declared once (not duplicated across
+ * catalogs), with the same values; a default it declares matches the manifest's; and every
+ * destructured fallback for it points at that default. Duplicated or unreadable declarations fail
+ * rather than being skipped. Manifest axes the source types as plain props, outside
+ * `defineVariants` (for example `DiffCodeView.mode`), have no catalog to compare and stay a review
+ * judgment.
  */
 const validateVariants = (component: ComponentRecord, source: string): ReadonlyArray<string> => {
   const failures: Array<string> = []
-  const { axes, defaults } = sourceVariants(source, component.source)
+  const { axes, defaultConstants, defaults } = sourceVariants(source, component.source)
+  const where = (axis: string) => `variant ${component.name}.${axis}`
   for (const variant of component.variants) {
-    const declared = axes.get(variant.name)
-    if (declared?.length === 1 && declared[0] !== undefined) {
-      const values = declared[0]
-      const listed = new Set(variant.values)
-      if (values.size !== listed.size || [...values].some((value) => !listed.has(value))) {
-        failures.push(
-          `variant ${component.name}.${variant.name} lists ${variant.values.join("|")} but source declares ${
-            [...values].join("|")
-          }`
-        )
-      }
+    const declared = axes.get(variant.name) ?? []
+    if (declared.length === 0) continue
+    if (declared.length > 1 || declared[0] === undefined) {
+      failures.push(`${where(variant.name)} is declared ${declared.length} times in ${component.source}, expected once`)
+      continue
     }
-    const fallback = defaults.get(variant.name)
-    for (const literal of destructuredDefaults(source, component.source, variant.name)) {
-      if (fallback?.length === 1 && literal !== fallback[0]) {
-        failures.push(
-          `component ${component.name} destructures ${variant.name} = "${literal}" but its declared default is ${
-            fallback[0]
-          }`
-        )
-      }
-    }
-    if (fallback?.length === 1 && fallback[0] !== variant.defaultValue) {
+    const values = declared[0]
+    const listed = new Set(variant.values)
+    if (values.size !== listed.size || [...values].some((value) => !listed.has(value))) {
       failures.push(
-        `variant ${component.name}.${variant.name} defaults to ${variant.defaultValue} but source defaults to ${
-          fallback[0]
-        }`
+        `${where(variant.name)} lists ${variant.values.join("|")} but source declares ${[...values].join("|")}`
       )
     }
+    const fallback = defaults.get(variant.name) ?? []
+    if (fallback.length === 0) continue
+    if (fallback.length > 1 || fallback[0] === undefined) {
+      failures.push(`${where(variant.name)} has ${fallback.length} source defaults, expected one`)
+      continue
+    }
+    const sourceDefault = fallback[0]
+    if (sourceDefault !== variant.defaultValue) {
+      failures.push(
+        `${where(variant.name)} defaults to ${variant.defaultValue} but source defaults to ${sourceDefault}`
+      )
+    }
+    for (const destructured of destructuredFallbacks(source, component.source, variant.name)) {
+      if (destructured._tag === "Literal" && destructured.value !== sourceDefault) {
+        failures.push(
+          `component ${component.name} destructures ${variant.name} = "${destructured.value}" but its declared default is ${sourceDefault}`
+        )
+      }
+      if (
+        destructured._tag === "Defaults"
+        && (!defaultConstants.has(destructured.constant) || destructured.axis !== variant.name)
+      ) {
+        failures.push(
+          `component ${component.name} destructures ${variant.name} from ${destructured.constant}.${destructured.axis}, not its own default`
+        )
+      }
+      if (destructured._tag === "Unsupported") {
+        failures.push(
+          `component ${component.name} destructures ${variant.name} = ${destructured.text}, which the registry cannot check`
+        )
+      }
+    }
+  }
+  const listedAxes = new Set(component.variants.map((variant) => variant.name))
+  for (const axis of axes.keys()) {
+    if (!listedAxes.has(axis)) failures.push(`${where(axis)} is declared in source but missing from the manifest`)
   }
   return failures
 }

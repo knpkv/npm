@@ -18,7 +18,13 @@ test("grows dense and compact controls to the 44px touch target under a coarse p
   expect(await height(page.locator("[data-button-size=\"compact\"]"))).toBe(44)
   expect(await height(page.locator("[data-button-size=\"default\"]"))).toBe(48)
 
+  // Each option is the target, not the group around it: every radio is at least 44 by 44.
   await page.goto(story("primitives-togglegroup--interaction"))
-  expect(await height(page.getByRole("radiogroup", { exact: true, name: "Range" }))).toBe(44)
-  expect(await height(page.getByRole("radiogroup", { name: "Range (compact)" }))).toBe(44)
+  for (const name of ["Range", "Range (compact)"]) {
+    const radios = page.getByRole("radiogroup", { exact: true, name }).getByRole("radio")
+    for (const box of await radios.evaluateAll((items) => items.map((item) => item.getBoundingClientRect()))) {
+      expect(Math.round(box.height)).toBeGreaterThanOrEqual(44)
+      expect(Math.round(box.width)).toBeGreaterThanOrEqual(44)
+    }
+  }
 })

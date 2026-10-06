@@ -26,6 +26,19 @@ describe("findAccentStripes", () => {
     expect(declarations(".a { box-shadow: 0 1px 2px black, inset -2px 0 0 var(--rly-color-agent); }")).toHaveLength(1)
   })
 
+  it("flags any side border that is not a neutral hairline, whatever its unit or colour spelling", () => {
+    expect(declarations(".a { border-inline-start: 1px solid currentColor; }")).toHaveLength(1)
+    expect(declarations(".a { border-left: 1px solid red; }")).toHaveLength(1)
+    expect(declarations(".a { border-left: 1px solid var(--brand-accent); }")).toHaveLength(1)
+    expect(declarations(".a { border-left: .125rem solid var(--rly-color-border-1); }")).toHaveLength(1)
+    expect(declarations(".a { border-inline-start-width: thick; }")).toHaveLength(1)
+  })
+
+  it("treats an inset whose offsets cannot be read as a stripe", () => {
+    expect(declarations(".a { box-shadow: inset calc(-1 * var(--rly-space-4)) 0 var(--rly-color-focus); }"))
+      .toHaveLength(1)
+  })
+
   it("flags an accent mixed with transparent on one side", () => {
     expect(
       declarations(".a { border-left: 1px solid color-mix(in srgb, var(--rly-color-blocked-ink), transparent); }")

@@ -49,9 +49,32 @@ test("sizes toggle groups to the shared control heights, border included", async
     ["Range (default)", 48]
   ]
   for (const [name, size] of groups) {
-    const box = await page.getByRole("radiogroup", { exact: true, name }).boundingBox()
-    expect(Math.round(box?.height ?? 0)).toBe(size)
+    const group = page.getByRole("radiogroup", { exact: true, name })
+    expect(Math.round((await group.boundingBox())?.height ?? 0)).toBe(size)
+    // The options carry the full height themselves; the outline does not take it from them.
+    for (
+      const box of await group.getByRole("radio").evaluateAll((items) =>
+        items.map((item) => item.getBoundingClientRect())
+      )
+    ) {
+      expect(Math.round(box.height)).toBe(size)
+      expect(Math.round(box.width)).toBeGreaterThanOrEqual(size)
+    }
   }
+})
+
+test("keeps a toggle group on one row that scrolls inside a narrow screen", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 320 })
+  await page.goto(story("primitives-togglegroup--interaction"))
+  const tops = await page
+    .getByRole("radiogroup", { exact: true, name: "Range (default)" })
+    .getByRole("radio")
+    .evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)))
+  expect(new Set(tops).size).toBe(1)
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth
+  )
+  expect(overflow).toBeLessThanOrEqual(0)
 })
 
 test("keeps state explanations readable without horizontal overflow at 320 pixels", async ({ page }) => {

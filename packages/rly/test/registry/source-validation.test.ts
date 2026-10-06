@@ -85,6 +85,35 @@ describe("registry source validation", () => {
     expect(failures).toContain("variant Button.size defaults to default but source defaults to dense")
   })
 
+  it("fails closed on duplicated, unlisted or unreadable variant declarations", () => {
+    const files = new Map(registryFiles())
+    const path = "src/primitives/Button.tsx"
+    const source = files.get(path)
+    if (source === undefined) throw new Error("Button source fixture is missing")
+    const mutate = (next: string) => findRegistrySourceFailures(componentManifest, new Map([...files, [path, next]]))
+    expect(
+      mutate(
+        `${source}\nexport const EXTRA = defineVariants({ size: { dense: { className: "x", purpose: "x", tokens: [] } } })\n`
+      )
+    ).toContain(
+      "variant Button.size is declared 2 times in src/primitives/Button.tsx, expected once"
+    )
+    expect(
+      mutate(
+        `${source}\nexport const EXTRA = defineVariants({ tone: { calm: { className: "x", purpose: "x", tokens: [] } } })\n`
+      )
+    ).toContain(
+      "variant Button.tone is declared in source but missing from the manifest"
+    )
+    expect(mutate(source.replace("size = RLY_BUTTON_DEFAULT_VARIANTS.size", "size = RLY_ICON_DEFAULT_VARIANTS.size")))
+      .toContain(
+        "component Button destructures size from RLY_ICON_DEFAULT_VARIANTS.size, not its own default"
+      )
+    expect(mutate(source.replace("size = RLY_BUTTON_DEFAULT_VARIANTS.size", "size = pickSize()"))).toContain(
+      "component Button destructures size = pickSize(), which the registry cannot check"
+    )
+  })
+
   it("rejects a destructured fallback that disagrees with the declared default", () => {
     const files = new Map(registryFiles())
     const path = "src/primitives/ToggleGroup.tsx"

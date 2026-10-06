@@ -4,8 +4,11 @@
  * drawn as `box-shadow: inset 3px 0 0 …`). Severity and state belong in words, an even border or a
  * flat tint, never a side bar.
  *
- * Allowed on purpose: 1px dividers that use no accent colour (`border-1`/`border-2`/`transparent`),
- * zeroed sides (`0`, `none`), full inset rings (`inset 0 0 0 2px …`), and blurred or spread insets.
+ * A side border is allowed only when it is zeroed (`0`, `none`) or a hairline (1px or less) in a
+ * neutral divider colour (`border-1`, `border-2`, `transparent`); anything else counts as a stripe,
+ * whatever unit or colour spelling it uses. Inset shadows are allowed as full rings
+ * (`inset 0 0 0 2px …`), blurred or spread insets, and block-edge underlines; an inset whose offsets
+ * cannot be read (`calc(…)`, an unknown variable) is treated as a stripe.
  */
 
 export interface AccentStripeViolation {
@@ -17,11 +20,12 @@ export interface AccentStripeViolation {
 
 const ONE_SIDE = String.raw`border-(?:left|right|inline-start|inline-end)`
 const DECLARATION = new RegExp(String.raw`(${ONE_SIDE}(?:-width|-color)?|box-shadow)\s*:\s*([^;}]+)`, "gi")
-// Any rly colour except the neutral divider borders; matched anywhere in the value, so an accent
-// mixed with `transparent` still counts.
-const ACCENT_COLOR = /var\(\s*--rly-(?:color-(?!border-[12]\b)[a-z0-9-]+|verdict-[a-z0-9-]+)/i
 const ZEROED = /^\s*(?:0|none|0px|var\(--rly-space-0\))\s*$/i
-const THICK = /(?:^|\s)(?:[2-9]|\d{2,}|1\.\d*[1-9])(?:\.\d+)?px\b|var\(\s*--rly-space-(?!0\b)\d+\s*\)/i
+const NEUTRAL_COLOR = /^(?:var\(\s*--rly-color-border-[12]\s*\)|transparent)$/i
+const HAIRLINE = /^(?:0?\.\d+|1)px$|^(?:0|0px|var\(\s*--rly-space-0\s*\))$/i
+const STYLE = /^(?:none|hidden|solid|dashed|dotted|double|groove|ridge|inset|outset)$/i
+const COLOR_TOKEN =
+  /^(?:#|rgb|hsl|oklch|oklab|lab|lch|color|color-mix\(|var\(\s*--rly-color-|currentcolor$|transparent$|[a-z]+$)/i
 const LENGTH = /^(?:-?\d*\.?\d+(?:px|rem|em)?|var\(\s*--rly-space-\d+\s*\))$/i
 const ZERO_LENGTH = /^(?:-?0*\.?0+(?:px|rem|em)?|var\(\s*--rly-space-0\s*\))$/i
 
@@ -59,19 +63,32 @@ const splitTopLevel = (value: string, separator: RegExp): ReadonlyArray<string> 
 const isOneSidedInset = (layer: string): boolean => {
   const tokens = splitTopLevel(layer, /\s/)
   if (!tokens.some((token) => token.toLowerCase() === "inset")) return false
-  const [x, y, blur, spread] = tokens.filter((token) => LENGTH.test(token))
+  // Offsets are the tokens that are neither `inset` nor a colour; one that cannot be read as a
+  // length (calc, an unknown variable) fails closed.
+  const offsets = tokens.filter((token) => token.toLowerCase() !== "inset" && !COLOR_TOKEN.test(token))
+  if (offsets.some((token) => !LENGTH.test(token))) return true
+  const [x, y, blur, spread] = offsets
   if (x === undefined || y === undefined) return false
   const flat = (length: string | undefined): boolean => length === undefined || ZERO_LENGTH.test(length)
   return !ZERO_LENGTH.test(x) && ZERO_LENGTH.test(y) && flat(blur) && flat(spread)
+}
+
+/** A side border's parts: width, style and colour, each optional, in any order. */
+const isNeutralHairline = (value: string): boolean => {
+  const tokens = splitTopLevel(value.trim(), /\s/)
+  const width = tokens.filter((token) => !STYLE.test(token) && !NEUTRAL_COLOR.test(token))
+  const colors = tokens.filter((token) => !STYLE.test(token) && !HAIRLINE.test(token))
+  // Every token must be a style, a hairline width, or a neutral colour.
+  return width.every((token) => HAIRLINE.test(token)) && colors.every((token) => NEUTRAL_COLOR.test(token))
 }
 
 const isStripe = (property: string, value: string): boolean => {
   const name = property.toLowerCase()
   if (name === "box-shadow") return splitTopLevel(value, /,/).some(isOneSidedInset)
   if (ZEROED.test(value)) return false
-  if (name.endsWith("-color")) return ACCENT_COLOR.test(value)
-  if (name.endsWith("-width")) return THICK.test(value)
-  return THICK.test(value) || ACCENT_COLOR.test(value)
+  if (name.endsWith("-color")) return !NEUTRAL_COLOR.test(value.trim())
+  if (name.endsWith("-width")) return !HAIRLINE.test(value.trim())
+  return !isNeutralHairline(value)
 }
 
 /** Every one-sided accent stripe declared in a CSS source, with its 1-based position. */

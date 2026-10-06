@@ -1,12 +1,17 @@
 @layer rly.components {
-  /* One outlined row of options, like the controls beside it: no tinted track, 1px dividers. */
+  /*
+   * One outlined row of options, like the controls beside it: no tinted track, 1px dividers. The
+   * outline is painted over the options' edges instead of taking room from them, so each option keeps
+   * the full control height and touch target. The row never wraps (dividers would strand on a second
+   * line); a row wider than its container scrolls inside it.
+   */
   .root {
-    border: 1px solid var(--rly-color-border-2);
     border-radius: var(--rly-radius-tag);
     display: inline-flex;
-    flex-wrap: wrap;
     max-inline-size: 100%;
-    overflow: hidden;
+    outline: 1px solid var(--rly-color-border-2);
+    outline-offset: -1px;
+    overflow-x: auto;
   }
 
   .item {
@@ -34,8 +39,8 @@
     outline-offset: -2px;
   }
 
-  /* Item heights leave room for the row's 1px border, so the whole group matches its size token,
-     which already grows to the touch target under a coarse pointer. */
+  /* Each option is at least as tall and as wide as its size token, which grows to the 44px touch
+     target under a coarse pointer, so even a one-character option is a full target. */
   .dense .item,
   .compact .item {
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
@@ -43,18 +48,21 @@
   }
 
   .dense .item {
-    min-block-size: calc(var(--rly-control-height-dense) - 2px);
+    min-block-size: var(--rly-control-height-dense);
+    min-inline-size: var(--rly-control-height-dense);
     padding-inline: var(--rly-space-8);
   }
 
   .compact .item {
-    min-block-size: calc(var(--rly-control-height-compact) - 2px);
+    min-block-size: var(--rly-control-height-compact);
+    min-inline-size: var(--rly-control-height-compact);
   }
 
   .defaultSize .item {
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
-    min-block-size: calc(var(--rly-control-height-default) - 2px);
+    min-block-size: var(--rly-control-height-default);
+    min-inline-size: var(--rly-control-height-default);
   }
 
   @media (hover: hover) {
