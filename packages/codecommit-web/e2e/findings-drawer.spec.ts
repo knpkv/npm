@@ -187,9 +187,18 @@ test("opens the drawer when the window narrows while focus is in Relay", async (
   await page.setViewportSize({ height: 1080, width: 1920 })
   await serve(page)
   await page.goto(detail)
+  await expect(page.getByRole("complementary", { name: "Relay findings" })).toBeVisible()
 
-  const pane = page.getByRole("complementary", { name: "Relay findings" })
-  await pane.getByRole("button", { name: "Run Relay" }).focus()
+  // Run Relay stays disabled without a review profile, so take the first enabled control in the pane.
+  const focusedInPane = await page.evaluate(() => {
+    const pane = document.querySelector("aside[aria-label='Relay findings']")
+    const control = [...(pane?.querySelectorAll<HTMLElement>("button, select, a[href], summary") ?? [])].find(
+      (element) => !element.matches(":disabled")
+    )
+    control?.focus()
+    return pane !== null && pane.contains(document.activeElement)
+  })
+  expect(focusedInPane).toBe(true)
   await page.setViewportSize({ height: 900, width: 1280 })
   await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
 })

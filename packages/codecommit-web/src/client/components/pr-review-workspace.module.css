@@ -124,19 +124,14 @@
 }
 
 /*
- * The drawer grid has a fixed height: one row that may shrink below its content, items that may too,
- * and the diff filling that row instead of the stacked layout's fixed height, so the diff scrolls
- * inside the grid rather than running past it.
+ * File tree beside the diff, sized by content: the diff keeps rly's own bounded scroller
+ * (min(70vh, 56rem)) and the tree scrolls at the same cap, so nothing is set to a fixed height
+ * that a long diff could run past.
  */
 .workbench[data-findings="drawer"] {
-  block-size: clamp(32rem, calc(100vh - 12rem), 48rem);
+  block-size: auto;
   display: grid;
   grid-template-columns: minmax(12rem, 0.28fr) minmax(24rem, 1fr);
-  grid-template-rows: minmax(var(--rly-space-0), 1fr);
-}
-
-.workbench[data-findings="drawer"] > * {
-  min-block-size: var(--rly-space-0);
 }
 
 .workbench[data-findings="drawer"] .diffViewport {
@@ -146,7 +141,7 @@
 .workbench[data-findings="drawer"] > .fileTree {
   border-block-end: 0;
   border-inline-end: 1px solid var(--rly-color-border-1);
-  max-block-size: none;
+  max-block-size: min(70vh, 56rem);
 }
 
 .fileTree {
