@@ -1,5 +1,13 @@
 # @knpkv/herdr-work
 
+## 0.5.3
+
+### Patch Changes
+
+- [#490](https://github.com/knpkv/npm/pull/490) [`8363bd4`](https://github.com/knpkv/npm/commit/8363bd4dd5fc6df3b15ae70132c080bd52d19a0f) Thanks [@konopkov](https://github.com/konopkov)! - `WorkStore.open` now upgrades legacy tables and creates or completes Work's schema in one transaction. If any step fails, the file is left exactly as it was, and opening a file no longer syncs it to disk once per schema statement.
+- Updated dependencies [[`487f2ba`](https://github.com/knpkv/npm/commit/487f2ba4fdb585f0cd0b2ab96fd4eeedce9da10d)]:
+  - @knpkv/rly@0.8.0
+
 ## 0.5.2
 
 ### Patch Changes

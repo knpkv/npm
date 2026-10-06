@@ -1,5 +1,11 @@
 # @knpkv/rly
 
+## 0.8.0
+
+### Minor Changes
+
+- [#486](https://github.com/knpkv/npm/pull/486) [`487f2ba`](https://github.com/knpkv/npm/commit/487f2ba4fdb585f0cd0b2ab96fd4eeedce9da10d) Thanks [@konopkov](https://github.com/konopkov)! - Add `useStoredTheme`, `useDocumentTheme`, `decodeRlyTheme`, and `ThemeSelect`, so apps share one way to remember, apply, and choose the theme instead of copying storage code. `useStoredTheme` takes an application-chosen key and lazily supplied storage, stays correct through server rendering and hydration, and keeps tabs in sync. `useDocumentTheme` themes `<html>` so the viewport canvas and scrollbars match. `Select` now shows a controlled value's label before its list mounts, including during server rendering.
+
 ## 0.7.0
 
 ### Minor Changes

@@ -21,7 +21,7 @@
  *
  * @module
  */
-import { Clock, Context, Crypto, Effect, Layer, Redacted, Ref, Schema } from "effect"
+import { Clock, Context, Crypto, Deferred, Effect, Fiber, Layer, Redacted, Ref, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { credentialValuesEqual, expiresAt, issueCsrfToken, issuePairingCode, issueSessionToken } from "./crypto.js"
 import type { BrowserPairingError } from "./crypto.js"
@@ -426,3 +426,23 @@ export const BootstrapRouter = HttpRouter.use((router) =>
     )
   })
 )
+
+/**
+ * Run a server whose layer completes `ready` with its bootstrap URL once it is listening: wait for
+ * that URL, hand it to `onReady` (print it, open a browser), then keep serving until the server stops.
+ *
+ * A launch that fails before it is listening (a port already taken, an invalid host) fails here and
+ * `onReady` never runs, so no URL is announced for a server that does not exist. A failing `onReady`
+ * fails the whole run and stops the server.
+ */
+export const serveWithBootstrapUrl = Effect.fn("OwnerSession.serveWithBootstrapUrl")(function*<E, R, E2, R2>(
+  server: (ready: Deferred.Deferred<string>) => Layer.Layer<never, E, R>,
+  onReady: (url: string) => Effect.Effect<void, E2, R2>
+): Effect.fn.Return<never, E | E2, R | R2> {
+  const ready = yield* Deferred.make<string>()
+  const running = yield* Layer.launch(server(ready)).pipe(Effect.forkChild({ startImmediately: true }))
+  const url = yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(running))
+  // Suspended so a callback that throws while building its effect still stops the server.
+  yield* Effect.suspend(() => onReady(url)).pipe(Effect.onError(() => Fiber.interrupt(running)))
+  return yield* Fiber.join(running)
+})
