@@ -1016,15 +1016,38 @@
     grid-area: caption;
   }
 
+  /* Outcome word first, then what was decided, who and when; the full request folds below. */
   .countdown-decided-row {
+    column-gap: var(--rly-space-12);
     display: grid;
-    gap: var(--rly-space-4);
+    grid-template-areas:
+      "outcome title"
+      "outcome caption"
+      "outcome request";
+    grid-template-columns: 5.5rem minmax(0, 1fr);
     padding: var(--rly-space-12) var(--rly-space-16);
+    row-gap: var(--rly-space-2);
   }
 
   .countdown-outcome {
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
+    grid-area: outcome;
+    padding-block-start: var(--rly-space-2);
+  }
+
+  .countdown-decided-row > .approval-request-disclosure {
+    border-block-start: 0;
+    grid-area: request;
+    margin-block-start: var(--rly-space-4);
+    padding-block-start: 0;
+  }
+
+  /* The selected request's disclosure sits between its facts and the decision, without a rule. */
+  .countdown-detail > .approval-request-disclosure {
+    border-block-start: 0;
+    margin-block-start: 0;
+    padding-block-start: 0;
   }
 
   .countdown-detail {
