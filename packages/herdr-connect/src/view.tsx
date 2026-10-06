@@ -418,6 +418,10 @@ type TerminalKeyRailProps = {
   readonly onKey: (key: TerminalRailKey) => void
   readonly error?: string | null
   readonly disabled?: boolean
+  /** Show the screen as selectable text; the touch counterpart of a mouse selection. */
+  readonly onSelectText?: () => void
+  /** Return to the newest output; always offered because the client may not know it is behind. */
+  readonly onJumpToLatest?: () => void
 }
 
 const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
@@ -428,17 +432,30 @@ export const TerminalKeyRail = ({
   error = null,
   modifier,
   onFocusTerminal,
+  onJumpToLatest,
   onKey,
-  onModifierChange
+  onModifierChange,
+  onSelectText
 }: TerminalKeyRailProps) => {
   const [activeIndex, setActiveIndex] = useState(0)
   const modifierCount = terminalModifiers.length
   const terminalKeyAvailability = terminalKeyDescriptors.map(
     (descriptor) => serializeTerminalKey(descriptor.key, modifier)._tag === "supported"
   )
+  // View actions stay pinned at the rail's end, in reach while the keys scroll under them.
+  const viewActions = [
+    ...(onJumpToLatest === undefined
+      ? []
+      : [{ key: "latest", label: "Latest", ariaLabel: "Jump to latest output", onClick: onJumpToLatest }]),
+    ...(onSelectText === undefined
+      ? []
+      : [{ key: "select", label: "Select", ariaLabel: "Select terminal text to copy", onClick: onSelectText }])
+  ]
+  const viewActionStart = modifierCount + terminalKeyDescriptors.length
   const enabledRail = [
     ...terminalModifiers.map(() => !disabled),
-    ...terminalKeyAvailability.map((available) => !disabled && available)
+    ...terminalKeyAvailability.map((available) => !disabled && available),
+    ...viewActions.map(() => !disabled)
   ]
   const tabStopIndex = enabledRail[activeIndex] === true ? activeIndex : enabledRail.findIndex((enabled) => enabled)
   return (
@@ -515,6 +532,26 @@ export const TerminalKeyRail = ({
             )
           })}
         </div>
+        {viewActions.length === 0 ? null : (
+          <div aria-label="Terminal view" className="terminal-key-group terminal-key-group-pinned" role="group">
+            {viewActions.map((action, index) => (
+              <button
+                aria-label={action.ariaLabel}
+                className="terminal-key"
+                data-terminal-key={action.key}
+                disabled={disabled}
+                key={action.key}
+                onClick={action.onClick}
+                onFocus={() => setActiveIndex(viewActionStart + index)}
+                onPointerDown={(event) => event.preventDefault()}
+                tabIndex={tabStopIndex === viewActionStart + index ? 0 : -1}
+                type="button"
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <small aria-live="polite" className="terminal-key-error">
         {error ?? ""}
