@@ -288,7 +288,9 @@ const validateStory = (
 
 const propertyName = (property: TypeScript.ObjectLiteralElementLike): string | undefined =>
   TypeScript.isPropertyAssignment(property)
-    && (TypeScript.isIdentifier(property.name) || TypeScript.isStringLiteral(property.name))
+    && (TypeScript.isIdentifier(property.name)
+      || TypeScript.isStringLiteral(property.name)
+      || TypeScript.isNumericLiteral(property.name))
     ? property.name.text
     : undefined
 
@@ -301,7 +303,10 @@ interface SourceVariants {
   readonly defaultConstants: ReadonlySet<string>
   /** Axes whose default is written as something other than a string literal. */
   readonly unreadableDefaults: ReadonlySet<string>
-  /** `defineVariants` calls whose argument is not an object literal the registry can read. */
+  /**
+   * `defineVariants` catalogs, axes or values the registry cannot read: a non-literal argument, a
+   * spread, a computed or shorthand member, or an axis whose values are not an inline object.
+   */
   readonly unreadableCatalogs: ReadonlySet<string>
 }
 
@@ -329,6 +334,9 @@ const sourceVariants = (source: string, fileName: string): SourceVariants => {
       const initializer = unwrap(declaration.initializer)
       if (!TypeScript.isCallExpression(initializer) || !TypeScript.isIdentifier(initializer.expression)) continue
       if (initializer.expression.text !== "defineVariants") continue
+      // Catalogs follow the `RLY_*_VARIANTS` / `RLY_*_DEFAULT_VARIANTS` naming; other `defineVariants`
+      // tables (ReleaseRelay's symbol list) describe no prop.
+      if (!declaration.name.text.endsWith("_VARIANTS")) continue
       const [rawArgument] = initializer.arguments
       const argument = rawArgument === undefined ? undefined : unwrap(rawArgument)
       if (argument === undefined || !TypeScript.isObjectLiteralExpression(argument)) {
@@ -339,21 +347,32 @@ const sourceVariants = (source: string, fileName: string): SourceVariants => {
       if (isDefaults) defaultConstants.add(declaration.name.text)
       for (const property of argument.properties) {
         const axis = propertyName(property)
-        if (axis === undefined || !TypeScript.isPropertyAssignment(property)) continue
+        // A spread, shorthand or computed axis hides what it declares, so it fails rather than vanishing.
+        if (axis === undefined || !TypeScript.isPropertyAssignment(property)) {
+          unreadableCatalogs.add(`${declaration.name.text} (${property.getText(sourceFile)})`)
+          continue
+        }
         if (isDefaults && TypeScript.isStringLiteral(property.initializer)) {
           defaults.set(axis, [...(defaults.get(axis) ?? []), property.initializer.text])
-        } else if (isDefaults) {
-          unreadableDefaults.add(axis)
-        } else if (!isDefaults && TypeScript.isObjectLiteralExpression(unwrap(property.initializer))) {
-          const values = new Set<string>()
-          const catalog = unwrap(property.initializer)
-          if (!TypeScript.isObjectLiteralExpression(catalog)) continue
-          for (const value of catalog.properties) {
-            const name = propertyName(value)
-            if (name !== undefined) values.add(name)
-          }
-          axes.set(axis, [...(axes.get(axis) ?? []), values])
+          continue
         }
+        if (isDefaults) {
+          unreadableDefaults.add(axis)
+          continue
+        }
+        const catalog = unwrap(property.initializer)
+        if (!TypeScript.isObjectLiteralExpression(catalog)) {
+          unreadableCatalogs.add(`${declaration.name.text}.${axis}`)
+          continue
+        }
+        const values = new Set<string>()
+        for (const value of catalog.properties) {
+          const name = propertyName(value)
+          if (name === undefined) {
+            unreadableCatalogs.add(`${declaration.name.text}.${axis} (${value.getText(sourceFile)})`)
+          } else values.add(name)
+        }
+        axes.set(axis, [...(axes.get(axis) ?? []), values])
       }
     }
   }
@@ -370,9 +389,64 @@ type Fallback =
   | { readonly _tag: "Defaults"; readonly constant: string; readonly axis: string }
   | { readonly _tag: "Unsupported"; readonly text: string }
 
-const destructuredFallbacks = (source: string, fileName: string, prop: string): ReadonlyArray<Fallback> => {
+type FunctionNode = TypeScript.ArrowFunction | TypeScript.FunctionExpression | TypeScript.FunctionDeclaration
+
+/**
+ * The functions that implement an exported component: its own arrow or function, the function a
+ * top-level wrapper call receives (`registerFieldControl(SelectImplementation)`), or every part of a
+ * compound object (`Object.freeze({ Root: DialogRoot, Content: DialogContent })`), followed through
+ * top-level names. Empty when the source builds it some other way.
+ */
+const componentImplementation = (sourceFile: TypeScript.SourceFile, name: string): ReadonlyArray<FunctionNode> => {
+  const declared = (identifier: string, seen: ReadonlySet<string>): ReadonlyArray<FunctionNode> => {
+    if (seen.has(identifier)) return []
+    for (const statement of sourceFile.statements) {
+      if (TypeScript.isFunctionDeclaration(statement) && statement.name?.text === identifier) return [statement]
+      if (!TypeScript.isVariableStatement(statement)) continue
+      for (const declaration of statement.declarationList.declarations) {
+        if (!TypeScript.isIdentifier(declaration.name) || declaration.name.text !== identifier) continue
+        if (declaration.initializer === undefined) return []
+        return resolve(unwrap(declaration.initializer), new Set([...seen, identifier]))
+      }
+    }
+    return []
+  }
+  const resolve = (expression: TypeScript.Expression, seen: ReadonlySet<string>): ReadonlyArray<FunctionNode> => {
+    if (TypeScript.isArrowFunction(expression) || TypeScript.isFunctionExpression(expression)) return [expression]
+    if (TypeScript.isIdentifier(expression)) return declared(expression.text, seen)
+    if (TypeScript.isCallExpression(expression)) {
+      const [first] = expression.arguments
+      return first === undefined ? [] : resolve(unwrap(first), seen)
+    }
+    if (TypeScript.isObjectLiteralExpression(expression)) {
+      return expression.properties.flatMap((property) =>
+        TypeScript.isPropertyAssignment(property)
+          ? resolve(unwrap(property.initializer), seen)
+          : TypeScript.isShorthandPropertyAssignment(property)
+          ? declared(property.name.text, seen)
+          : []
+      )
+    }
+    return []
+  }
+  return declared(name, new Set())
+}
+
+/**
+ * The fallbacks for `prop` inside the component's implementation (its parameters, or props it
+ * destructures in its body); bindings elsewhere in the file, such as a helper with the same prop
+ * name, never count. Undefined when no implementation is found.
+ */
+const destructuredFallbacks = (
+  source: string,
+  fileName: string,
+  component: string,
+  prop: string
+): ReadonlyArray<Fallback> | undefined => {
   const fallbacks: Array<Fallback> = []
   const sourceFile = TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true)
+  const implementation = componentImplementation(sourceFile, component)
+  if (implementation.length === 0) return undefined
   const visit = (node: TypeScript.Node): void => {
     if (
       TypeScript.isBindingElement(node)
@@ -392,7 +466,7 @@ const destructuredFallbacks = (source: string, fileName: string, prop: string): 
     }
     TypeScript.forEachChild(node, visit)
   }
-  visit(sourceFile)
+  for (const node of implementation) visit(node)
   return fallbacks
 }
 
@@ -446,7 +520,11 @@ const validateVariants = (component: ComponentRecord, source: string): ReadonlyA
         `${where(variant.name)} defaults to ${variant.defaultValue} but source defaults to ${sourceDefault}`
       )
     }
-    const destructuredAll = destructuredFallbacks(source, component.source, variant.name)
+    const destructuredAll = destructuredFallbacks(source, component.source, component.name, variant.name)
+    if (destructuredAll === undefined) {
+      failures.push(`component ${component.name} has no implementation the registry can find in ${component.source}`)
+      continue
+    }
     if (destructuredAll.length === 0) {
       failures.push(
         `component ${component.name} never falls back to its ${variant.name} default when the prop is omitted`

@@ -8,8 +8,10 @@
  * neutral divider colour (`border-1`, `border-2`, `transparent`); anything else counts as a stripe,
  * whatever unit or colour spelling it uses. Inset shadows are allowed as full rings
  * (`inset 0 0 0 2px …`), blurred or spread insets, and block-edge underlines; an inset whose offsets
- * cannot be read (`calc(…)`, an unknown variable) is treated as a stripe. A `border-width` list with
- * exactly one edge thicker than a hairline is a stripe too, however the colour is set.
+ * cannot be read (`calc(…)`, an unknown variable) is treated as a stripe. A `border-width` or
+ * `border-inline-width` list that draws only one inline edge is a stripe when that edge is thicker
+ * than a hairline, or when it is a hairline and its rule does not state a neutral border colour.
+ * Block-edge underlines (`border-width: 0 0 2px`) pass, like block-edge insets.
  *
  * A drawn shape that needs a thick edge (a chevron made of two edges of a rotated square) opts out
  * per declaration with a reasoned comment on the same line: `/* stripe-ok: drawn chevron *\/`.
@@ -23,7 +25,12 @@ export interface AccentStripeViolation {
 }
 
 const ONE_SIDE = String.raw`border-(?:left|right|inline-start|inline-end)`
-const DECLARATION = new RegExp(String.raw`(${ONE_SIDE}(?:-width|-color)?|border-width|box-shadow)\s*:\s*([^;}]+)`, "gi")
+const DECLARATION = new RegExp(
+  String.raw`(${ONE_SIDE}(?:-width|-color)?|border-inline-width|border-width|box-shadow)\s*:\s*([^;}]+)`,
+  "gi"
+)
+const RULE_COLOR =
+  /(?:^|[;{\s])(border(?:-color|-(?:left|right|inline-start|inline-end|inline)-color)?)\s*:\s*([^;}]+)/gi
 const EXEMPT = /\/\*\s*stripe-ok:\s*\S[^*]*\*\//
 const ZEROED = /^\s*(?:0|none|0px|var\(--rly-space-0\))\s*$/i
 const NEUTRAL_COLOR = /^(?:var\(\s*--rly-color-border-[12]\s*\)|transparent)$/i
@@ -95,17 +102,72 @@ const isNeutralHairline = (value: string): boolean => {
   )
 }
 
-/** `border-width` with exactly one edge thicker than a hairline, whether the others are zero or hairlines. */
-const isOneSidedWidth = (value: string): boolean => {
-  const [top, right = top, bottom = top, left = right] = splitTopLevel(value.trim(), /\s/)
-  const edges = [top, right, bottom, left]
-  return edges.filter((edge) => edge !== undefined && !HAIRLINE.test(edge)).length === 1
+/**
+ * A width list's edges, each marked inline or not: `border-width` lists top/right/bottom/left,
+ * `border-inline-width` lists start/end.
+ */
+const widthEdges = (
+  property: string,
+  value: string
+): ReadonlyArray<{ readonly width: string; readonly inline: boolean }> => {
+  const [first = "0", second = first, third = first, fourth = second] = splitTopLevel(value.trim(), /\s/)
+  return property === "border-inline-width"
+    ? [{ inline: true, width: first }, { inline: true, width: second }]
+    : [
+      { inline: false, width: first },
+      { inline: true, width: second },
+      { inline: false, width: third },
+      { inline: true, width: fourth }
+    ]
 }
 
-const isStripe = (property: string, value: string): boolean => {
+/** The rule body around a declaration: from its block's `{` to the matching `}`. */
+const ruleAround = (source: string, offset: number): string => {
+  let depth = 0
+  let start = 0
+  for (let index = offset; index >= 0; index -= 1) {
+    if (source[index] === "}") depth += 1
+    if (source[index] === "{") {
+      if (depth === 0) {
+        start = index + 1
+        break
+      }
+      depth -= 1
+    }
+  }
+  const end = source.indexOf("}", offset)
+  return source.slice(start, end < 0 ? source.length : end)
+}
+
+/** Whether a rule states its border colour, and every colour it states is a neutral divider. */
+const statesNeutralColor = (rule: string): boolean => {
+  const colors = [...rule.matchAll(RULE_COLOR)].flatMap(([, property, value]) =>
+    property === undefined || value === undefined
+      ? []
+      : property.toLowerCase() === "border"
+      ? splitTopLevel(value.trim(), /\s/).filter((token) => !STYLE.test(token) && !LENGTH.test(token))
+      : splitTopLevel(value.trim(), /\s/)
+  )
+  return colors.length > 0 && colors.every((color) => NEUTRAL_COLOR.test(color))
+}
+
+/**
+ * A width list that marks one inline edge: the only edge thicker than a hairline, or the only edge
+ * drawn at all while its rule leaves the colour unstated or coloured. A thick block edge alone is an
+ * underline and passes.
+ */
+const isOneSidedWidth = (property: string, value: string, rule: string): boolean => {
+  const edges = widthEdges(property, value)
+  const thick = edges.filter((edge) => !HAIRLINE.test(edge.width))
+  if (thick.length === 1) return thick[0]?.inline === true
+  const drawn = edges.filter((edge) => !ZERO_LENGTH.test(edge.width))
+  return thick.length === 0 && drawn.length === 1 && drawn[0]?.inline === true && !statesNeutralColor(rule)
+}
+
+const isStripe = (property: string, value: string, rule: string): boolean => {
   const name = property.toLowerCase()
   if (name === "box-shadow") return splitTopLevel(value, /,/).some(isOneSidedInset)
-  if (name === "border-width") return isOneSidedWidth(value)
+  if (name === "border-width" || name === "border-inline-width") return isOneSidedWidth(name, value, rule)
   if (ZEROED.test(value)) return false
   if (name.endsWith("-color")) return !NEUTRAL_COLOR.test(value.trim())
   if (name.endsWith("-width")) return !HAIRLINE.test(value.trim())
@@ -120,7 +182,7 @@ export const findAccentStripes = (path: string, source: string): ReadonlyArray<A
   for (const match of comparable.matchAll(DECLARATION)) {
     const [declaration, property, value] = match
     if (property === undefined || value === undefined || declaration === undefined) continue
-    if (!isStripe(property, value)) continue
+    if (!isStripe(property, value, ruleAround(comparable, match.index))) continue
     const at = position(comparable, match.index)
     if (EXEMPT.test(lines[at.line - 1] ?? "")) continue
     violations.push({ ...at, declaration: declaration.trim(), path })

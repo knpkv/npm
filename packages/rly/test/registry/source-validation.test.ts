@@ -93,14 +93,14 @@ describe("registry source validation", () => {
     const mutate = (next: string) => findRegistrySourceFailures(componentManifest, new Map([...files, [path, next]]))
     expect(
       mutate(
-        `${source}\nexport const EXTRA = defineVariants({ size: { dense: { className: "x", purpose: "x", tokens: [] } } })\n`
+        `${source}\nexport const RLY_EXTRA_VARIANTS = defineVariants({ size: { dense: { className: "x", purpose: "x", tokens: [] } } })\n`
       )
     ).toContain(
       "variant Button.size is declared 2 times in src/primitives/Button.tsx, expected once"
     )
     expect(
       mutate(
-        `${source}\nexport const EXTRA = defineVariants({ tone: { calm: { className: "x", purpose: "x", tokens: [] } } })\n`
+        `${source}\nexport const RLY_EXTRA_VARIANTS = defineVariants({ tone: { calm: { className: "x", purpose: "x", tokens: [] } } })\n`
       )
     ).toContain(
       "variant Button.tone is declared in source but missing from the manifest"
@@ -144,6 +144,43 @@ describe("registry source validation", () => {
     expect(mutate(source.replace("size = RLY_BUTTON_DEFAULT_VARIANTS.size", "size = pickSize()"))).toContain(
       "component Button destructures size = pickSize(), which the registry cannot check"
     )
+    // An axis built indirectly, a spread value, or a spread axis hides values; each fails instead of vanishing.
+    expect(mutate(
+      source.replace("  size: {\n    dense: {", "  size: sizes({\n    dense: {").replace(
+        "      tokens: [\"control-height-principal\", \"space-8\"]\n    }\n  }\n})",
+        "      tokens: [\"control-height-principal\", \"space-8\"]\n    }\n  })\n})"
+      )
+    )).toContain("component Button declares RLY_BUTTON_VARIANTS.size in a form the registry cannot read")
+    expect(mutate(source.replace("  size: {\n    dense: {", "  size: {\n    ...roomy,\n    dense: {"))).toContain(
+      "component Button declares RLY_BUTTON_VARIANTS.size (...roomy) in a form the registry cannot read"
+    )
+    expect(mutate(source.replace("  size: {\n    dense: {", "  ...axes,\n  size: {\n    dense: {"))).toContain(
+      "component Button declares RLY_BUTTON_VARIANTS (...axes) in a form the registry cannot read"
+    )
+  })
+
+  it("reads fallbacks only from the component's own implementation", () => {
+    const files = new Map(registryFiles())
+    const path = "src/primitives/Button.tsx"
+    const source = files.get(path)
+    if (source === undefined) throw new Error("Button source fixture is missing")
+    const mutate = (next: string) => findRegistrySourceFailures(componentManifest, new Map([...files, [path, next]]))
+    const helper = (fallback: string) =>
+      `\nconst sizeOf = ({ size = ${fallback} }: { readonly size?: string }) => size\n`
+    // A same-named helper neither stands in for a missing fallback nor rejects a correct one.
+    expect(
+      mutate(
+        source.replace("  size = RLY_BUTTON_DEFAULT_VARIANTS.size,\n", "  size,\n") +
+          helper("RLY_BUTTON_DEFAULT_VARIANTS.size")
+      )
+    ).toContain("component Button never falls back to its size default when the prop is omitted")
+    expect(mutate(source + helper("\"principal\""))).toEqual([])
+    // A wrapped implementation is followed; one the registry cannot locate fails closed.
+    expect(findRegistrySourceFailures(componentManifest, files)).toEqual([])
+    expect(mutate(source.replace("export const Button = (", "export const Button = makeButton(), unused = (")))
+      .toContain(
+        "component Button has no implementation the registry can find in src/primitives/Button.tsx"
+      )
   })
 
   it("rejects a destructured fallback that disagrees with the declared default", () => {

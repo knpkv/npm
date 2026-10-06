@@ -34,6 +34,21 @@ describe("findAccentStripes", () => {
     expect(declarations(".a { border-inline-start-width: thick; }")).toHaveLength(1)
   })
 
+  it("flags a coloured hairline on one inline edge and passes block underlines and neutral hairlines", () => {
+    expect(declarations(".card { border: solid var(--rly-color-held-ink); border-width: 0 0 0 1px; }")).toEqual([
+      "border-width: 0 0 0 1px"
+    ])
+    expect(declarations(".card { border-style: solid; border-width: 0 1px 0 0; }")).toEqual(["border-width: 0 1px 0 0"])
+    expect(declarations(".card { border: solid var(--rly-color-held-ink); border-inline-width: 1px 0; }")).toEqual([
+      "border-inline-width: 1px 0"
+    ])
+    expect(declarations(".row { border: solid var(--rly-color-border-1); border-width: 0 0 0 1px; }")).toEqual([])
+    expect(declarations(".card { border: 1px solid var(--rly-color-held-ink); }")).toEqual([])
+    expect(declarations(".tab { border: solid var(--rly-color-focus); border-width: 0 0 3px; }")).toEqual([])
+    expect(declarations(".tab { border-width: 0 0 3px 0; }")).toEqual([])
+    expect(declarations(".a { border-inline-width: 4px 0; }")).toEqual(["border-inline-width: 4px 0"])
+  })
+
   it("flags a stripe built from border-width, and a side border whose width is left at medium", () => {
     expect(declarations(".card { border: solid var(--rly-color-held-ink); border-width: 0 0 0 4px; }")).toEqual([
       "border-width: 0 0 0 4px"
