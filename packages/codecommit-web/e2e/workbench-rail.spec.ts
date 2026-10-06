@@ -5,6 +5,13 @@ const now = Date.now()
 
 /** The fields these tests vary on a wire pull request. */
 interface PullRequestOverrides {
+  readonly approvalRules?: ReadonlyArray<{
+    readonly poolMemberArns: ReadonlyArray<string>
+    readonly poolMembers: ReadonlyArray<string>
+    readonly requiredApprovals: number
+    readonly ruleName: string
+    readonly satisfied: boolean
+  }>
   readonly author?: string
   readonly creationDate?: string
   readonly isMergeable?: boolean
@@ -72,6 +79,14 @@ const serve = async (page: Page) => {
       }\n\n`,
       contentType: "text/event-stream"
     }))
+}
+
+/** The wire shape of one resolved caller identity in the SSE payload. */
+interface ResolvedIdentity {
+  readonly _tag: "Resolved"
+  readonly accountId: string
+  readonly arn: string
+  readonly username: string
 }
 
 const detail = (id: string) => `/accounts/production/prs/${id}?repository=infra-core&region=eu-west-1`
@@ -209,6 +224,59 @@ test("counts the header badge from the queue, not a stale server count", async (
 
   const rail = page.getByRole("region", { name: /^Queue/ })
   await expect(rail.getByText("1 pull request waits on your review.")).toBeVisible()
+  await expect(
+    page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: /, 1 needing your review$/ })
+  )
+    .toBeVisible()
+})
+
+// A role pool is "Open to a role pool" while the viewer is known only by name, and decided exactly
+// once the server publishes the viewer's resolved ARN for that account.
+test("decides a role pool from the caller's resolved identity", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  const pooled = pullRequest("12", {
+    approvalRules: [
+      {
+        poolMemberArns: ["arn:aws:sts::111122223333:assumed-role/Reviewers/*"],
+        poolMembers: ["*"],
+        requiredApprovals: 1,
+        ruleName: "Reviewers",
+        satisfied: false
+      }
+    ],
+    title: "Bound patch reads"
+  })
+  const events = (identity: ResolvedIdentity | null) => {
+    const payload = {
+      accounts: [],
+      currentUser: "viewer",
+      enabledProfiles: ["production"],
+      pullRequests: [pooled],
+      sandboxes: [],
+      status: "idle"
+    }
+    const body = identity === null ? payload : { ...payload, callerIdentities: { production: identity } }
+    return page.route(
+      "**/api/events/",
+      (route) => route.fulfill({ body: `data: ${JSON.stringify(body)}\n\n`, contentType: "text/event-stream" })
+    )
+  }
+  const rail = page.getByRole("region", { name: /^Queue/ })
+
+  await events(null)
+  await page.goto(detail("12"))
+  await expect(rail.getByRole("heading", { level: 3 })).toHaveText(["Open to a role pool 1"])
+
+  await page.unroute("**/api/events/")
+  await events({
+    _tag: "Resolved",
+    accountId: "111122223333",
+    arn: "arn:aws:sts::111122223333:assumed-role/Reviewers/viewer",
+    username: "viewer"
+  })
+  await page.goto(detail("12"))
+  await expect(rail.getByRole("heading", { level: 3 })).toHaveText(["Needs your review 1"])
   await expect(
     page.getByRole("navigation", { name: "Primary" }).getByRole("link", { name: /, 1 needing your review$/ })
   )

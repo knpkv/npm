@@ -1,10 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
-import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { type CallerIdentityState, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 
 import {
   type Caller,
-  type CallerIdentity,
   formatSpan,
   globMatches,
   poolEntryMatches,
@@ -436,7 +435,7 @@ describe("yourReviewCount", () => {
 describe("workbenchQueue with the caller's resolved identity", () => {
   const me = "arn:aws:sts::111122223333:assumed-role/Reviewers/andrey"
   const reviewers = rule("Reviewers", 1, ["*"], false, ["arn:aws:sts::111122223333:assumed-role/Reviewers/*"])
-  const caller = (identity: CallerIdentity | undefined): Caller => ({
+  const caller = (identity: CallerIdentityState | undefined): Caller => ({
     identities: identity === undefined ? {} : { "platform-prod": identity },
     username: "andrey"
   })
@@ -445,23 +444,26 @@ describe("workbenchQueue with the caller's resolved identity", () => {
 
   it("decides a wildcard pool exactly once the account's identity resolved", () => {
     const pr = make({ approvalRules: [reviewers], id: "1" })
-    expect(groups([pr], caller({ _tag: "Resolved", arn: me, username: "andrey" }))).toEqual([["1", "review"]])
+    expect(groups([pr], caller({ _tag: "Resolved", accountId: "111122223333", arn: me, username: "andrey" }))).toEqual([
+      ["1", "review"]
+    ])
     const operator = "arn:aws:sts::111122223333:assumed-role/Operations/andrey"
-    expect(groups([pr], caller({ _tag: "Resolved", arn: operator, username: "andrey" }))).toEqual([])
+    expect(groups([pr], caller({ _tag: "Resolved", accountId: "111122223333", arn: operator, username: "andrey" })))
+      .toEqual([])
   })
 
   it("keeps the name fallback, never out, while the identity is absent, missing or unresolved", () => {
     const pr = make({ approvalRules: [reviewers], id: "1" })
     expect(groups([pr], byName("andrey"))).toEqual([["1", "pool"]])
     expect(groups([pr], caller(undefined))).toEqual([["1", "pool"]])
-    expect(groups([pr], caller({ _tag: "Unresolved" }))).toEqual([["1", "pool"]])
+    expect(groups([pr], caller({ _tag: "Unresolved", reason: { _tag: "StsRejected" } }))).toEqual([["1", "pool"]])
   })
 
   it("decides each account on its own identity", () => {
     const who: Caller = {
       identities: {
-        "platform-prod": { _tag: "Resolved", arn: me, username: "andrey" },
-        staging: { _tag: "Unresolved" }
+        "platform-prod": { _tag: "Resolved", accountId: "111122223333", arn: me, username: "andrey" },
+        staging: { _tag: "Unresolved", reason: { _tag: "StsRejected" } }
       },
       username: "andrey"
     }
@@ -477,7 +479,7 @@ describe("workbenchQueue with the caller's resolved identity", () => {
   it("does not count another session of the same role as the caller's approval", () => {
     const two = { ...reviewers, requiredApprovals: 2 }
     const other = "arn:aws:sts::111122223333:assumed-role/Reviewers/andrey-ci"
-    const resolved = caller({ _tag: "Resolved", arn: me, username: "andrey" })
+    const resolved = caller({ _tag: "Resolved", accountId: "111122223333", arn: me, username: "andrey" })
     const byOther = make({ approvalRules: [two], approvedBy: ["andrey-ci"], approvedByArns: [other], id: "1" })
     expect(groups([byOther], resolved)).toEqual([["1", "review"]])
     const byMe = make({ approvalRules: [two], approvedBy: ["andrey"], approvedByArns: [me], id: "2" })
@@ -487,8 +489,8 @@ describe("workbenchQueue with the caller's resolved identity", () => {
   it("decides by a resolved identity even without an app-wide user name", () => {
     const nameless: Caller = {
       identities: {
-        "platform-prod": { _tag: "Resolved", arn: me, username: "andrey" },
-        staging: { _tag: "Unresolved" }
+        "platform-prod": { _tag: "Resolved", accountId: "111122223333", arn: me, username: "andrey" },
+        staging: { _tag: "Unresolved", reason: { _tag: "StsRejected" } }
       },
       username: undefined
     }
@@ -506,7 +508,7 @@ describe("workbenchQueue with the caller's resolved identity", () => {
   })
 
   it("counts the badge with the same identity as the queue", () => {
-    const resolved = caller({ _tag: "Resolved", arn: me, username: "andrey" })
+    const resolved = caller({ _tag: "Resolved", accountId: "111122223333", arn: me, username: "andrey" })
     const pullRequests = [make({ approvalRules: [reviewers], id: "1" })]
     expect(yourReviewCount(pullRequests, resolved)).toBe(1)
     expect(yourReviewCount(pullRequests, byName("andrey"))).toBe(0)

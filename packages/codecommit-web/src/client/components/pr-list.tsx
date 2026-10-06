@@ -64,7 +64,7 @@ export function PRList() {
     [appState.enabledProfiles, appState.pullRequests]
   )
   const isLoading = appState.status === "loading"
-  const caller = useMemo(() => callerOf(appState), [appState.currentUser])
+  const caller = useMemo(() => callerOf(appState), [appState.callerIdentities, appState.currentUser])
 
   const summary = useMemo(() => {
     let review = 0

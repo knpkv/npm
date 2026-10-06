@@ -59,32 +59,21 @@ export type WorkbenchSummary = Data.TaggedEnum<{
 /** Constructors and exhaustive `$match` for {@link WorkbenchSummary}. */
 export const WorkbenchSummary = Data.taggedEnum<WorkbenchSummary>()
 
-/**
- * The caller in one account, as the server resolved it with STS: the subset of core's L2-8 (v3)
- * `CallerIdentity` the queue reads, so core's value is assignable as is. The queue ignores the
- * `Unresolved` reason; any unresolved account keeps the name fallback. `arn` can carry an email
- * address (SSO session names): never log or persist it.
- */
-export type CallerIdentity =
-  | { readonly _tag: "Resolved"; readonly arn: string; readonly username: string }
-  | { readonly _tag: "Unresolved" }
-
-/**
- * Who the queue is for. `username` is the app-wide `currentUser`. `identities` is keyed by AWS
- * profile (`pullRequest.account.profile`); `undefined` until the server publishes it. Only a
- * `Resolved` identity decides pool membership exactly; every other case falls back to the name.
- */
 export interface Caller {
   readonly username: string | undefined
-  readonly identities: Readonly<Record<string, CallerIdentity>> | undefined
+  readonly identities: Domain.CallerIdentities | undefined
 }
 
 /**
- * The queue's caller from app state. Reads only the user name until core publishes per-account
- * identities (L2-8), so every pool decision keeps today's name fallback.
+ * The queue's caller from app state: the app-wide user name and core's per-account identities
+ * (`AppState.callerIdentities`, absent until the first refresh resolves them). An account without a
+ * `Resolved` identity, whatever the `Unresolved` reason, keeps the user-name rules.
  */
-export const callerOf = (state: { readonly currentUser?: string | undefined }): Caller => ({
-  identities: undefined,
+export const callerOf = (state: {
+  readonly currentUser?: string | undefined
+  readonly callerIdentities?: Domain.CallerIdentities | undefined
+}): Caller => ({
+  identities: state.callerIdentities,
   username: state.currentUser
 })
 
