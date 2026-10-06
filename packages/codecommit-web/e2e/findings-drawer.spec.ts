@@ -123,8 +123,10 @@ test("opens Relay in a drawer beside the rail and returns focus on Escape", asyn
   await expect(drawer).toBeVisible()
   await expect(drawer.getByRole("button", { name: "Run Relay" })).toBeVisible()
 
+  // Esc belongs to the dialog: it closes the drawer and must not also take the page's "back to the queue" shortcut.
   await page.keyboard.press("Escape")
   await expect(drawer).toBeHidden()
+  await expect(page).toHaveURL(/\/accounts\/production\/prs\/12\?/)
   await expect(trigger).toBeFocused()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280)
 })

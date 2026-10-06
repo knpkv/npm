@@ -219,11 +219,15 @@ export const ownsEnterKey = (target: EventTarget | null): boolean => {
 }
 
 /**
- * True when the key event comes from inside an open `<dialog>`: Esc there closes the dialog, so the
- * PR page's own shortcuts (Esc back to the queue, Enter/o console, `.` sandbox) must stay out of it.
+ * True when a key event's path (`event.composedPath()`) crosses an open `<dialog>`: Esc there closes
+ * the dialog, so the PR page's own shortcuts (Esc back to the queue, Enter/o console, `.` sandbox)
+ * must stay out of it.
  */
-export const insideOpenDialog = (target: EventTarget | null): boolean =>
-  target instanceof Element && target.closest("dialog[open]") !== null
+export const insideOpenDialog = (path: ReadonlyArray<EventTarget>): boolean =>
+  path.some((node) =>
+    Predicate.hasProperty(node, "tagName") && node.tagName === "DIALOG" &&
+    Predicate.hasProperty(node, "open") && node.open === true
+  )
 
 const formatRelativeDate = (dateStr: string): string => {
   const date = new Date(dateStr)
@@ -1289,7 +1293,7 @@ export function PRDetail() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isTextInputTarget(e.target) || insideOpenDialog(e.target)) return
+      if (isTextInputTarget(e.target) || insideOpenDialog(e.composedPath())) return
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")

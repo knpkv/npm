@@ -57,16 +57,23 @@ describe("FindingsDrawer", () => {
 })
 
 describe("insideOpenDialog", () => {
-  it("claims keys from inside an open dialog only", () => {
+  it("claims a key event only when its path crosses an open dialog", () => {
     const dialog = document.createElement("dialog")
     const button = document.createElement("button")
     dialog.append(button)
     document.body.append(dialog)
-    expect(insideOpenDialog(button)).toBe(false)
+    const pathOf = (target: EventTarget) => {
+      let path: ReadonlyArray<EventTarget> = []
+      target.addEventListener("keydown", (event) => {
+        path = event.composedPath()
+      }, { once: true })
+      target.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" }))
+      return path
+    }
+    expect(insideOpenDialog(pathOf(button))).toBe(false)
     dialog.setAttribute("open", "")
-    expect(insideOpenDialog(button)).toBe(true)
-    expect(insideOpenDialog(document.body)).toBe(false)
-    expect(insideOpenDialog(null)).toBe(false)
+    expect(insideOpenDialog(pathOf(button))).toBe(true)
+    expect(insideOpenDialog(pathOf(document.body))).toBe(false)
     dialog.remove()
   })
 })
