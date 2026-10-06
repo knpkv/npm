@@ -83,7 +83,11 @@ const isOneSidedInset = (layer: string): boolean => {
   const [x, y, blur, spread] = offsets
   if (x === undefined || y === undefined) return false
   const flat = (length: string | undefined): boolean => length === undefined || ZERO_LENGTH.test(length)
-  return !ZERO_LENGTH.test(x) && ZERO_LENGTH.test(y) && flat(blur) && flat(spread)
+  if (ZERO_LENGTH.test(x) || !ZERO_LENGTH.test(y) || !flat(blur) || !flat(spread)) return false
+  // A 1px bar in a neutral divider colour is a column divider, allowed as it is for borders.
+  const colors = tokens.filter((token) => token.toLowerCase() !== "inset" && COLOR_TOKEN.test(token))
+  const hairline = HAIRLINE.test(x.replace(/^-/, ""))
+  return !(hairline && colors.length > 0 && colors.every((color) => NEUTRAL_COLOR.test(color)))
 }
 
 /**

@@ -2,7 +2,7 @@ import type { ReactElement } from "react"
 import { decodeRlyTheme, RLY_THEME_NAMES, type RlyTheme } from "../foundations/ThemeProvider.js"
 import { Field } from "./Field.js"
 import { classNames, cssClass } from "../internal/component.js"
-import { type RlySelectOption, type RlySelectSize, Select } from "./Select.js"
+import { RLY_SELECT_DEFAULT_VARIANTS, type RlySelectOption, type RlySelectSize, Select } from "./Select.js"
 import styles from "./ThemeSelect.module.css"
 
 const themeLabels = {
@@ -46,7 +46,7 @@ export const ThemeSelect = ({
   label = "Appearance",
   labelVisibility = "visible",
   onValueChange,
-  size = "dense",
+  size = RLY_SELECT_DEFAULT_VARIANTS.size,
   value
 }: ThemeSelectProps): ReactElement => {
   const onChange = (next: string): void => {

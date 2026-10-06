@@ -34,6 +34,18 @@ describe("findAccentStripes", () => {
     expect(declarations(".a { border-inline-start-width: thick; }")).toHaveLength(1)
   })
 
+  it("allows a neutral 1px inset divider and flags a coloured or thick one", () => {
+    expect(declarations(".col { box-shadow: inset 1px 0 0 var(--rly-color-border-1); }")).toEqual([])
+    expect(declarations(".col { box-shadow: inset -1px 0 0 var(--rly-color-border-2); }")).toEqual([])
+    expect(declarations(".col { box-shadow: inset 1px 0 0 var(--rly-color-held-ink); }")).toEqual([
+      "box-shadow: inset 1px 0 0 var(--rly-color-held-ink)"
+    ])
+    expect(declarations(".col { box-shadow: inset 3px 0 0 var(--rly-color-border-1); }")).toEqual([
+      "box-shadow: inset 3px 0 0 var(--rly-color-border-1)"
+    ])
+    expect(declarations(".col { box-shadow: inset 1px 0; }")).toEqual(["box-shadow: inset 1px 0"])
+  })
+
   it("reads only the rule's own declarations and ignores !important", () => {
     expect(
       declarations(

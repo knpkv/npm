@@ -912,7 +912,8 @@
       },
       "storyId": "primitives-themeselect--gallery",
       "storyIds": [
-        "primitives-themeselect--gallery"
+        "primitives-themeselect--gallery",
+        "primitives-themeselect--sizes"
       ]
     },
     {

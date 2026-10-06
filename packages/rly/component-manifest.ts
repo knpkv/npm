@@ -978,8 +978,12 @@ export const componentManifest = {
       source: "src/primitives/ThemeSelect.tsx",
       status: "stable",
       styles: ["src/primitives/ThemeSelect.module.css"],
-      variants: [{ defaultValue: "visible", name: "labelVisibility", values: ["visible", "hidden"] }],
+      variants: [
+        { defaultValue: "visible", name: "labelVisibility", values: ["visible", "hidden"] },
+        { defaultValue: "dense", name: "size", values: ["dense", "compact", "default"] }
+      ],
       visual: {
+        coverageStoryIds: ["primitives-themeselect--sizes"],
         story: "stories/primitives/ThemeSelect.stories.tsx",
         storyId: "primitives-themeselect--gallery",
         tests: ["test/primitives/ThemeSelect.test.tsx"]

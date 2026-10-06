@@ -1321,10 +1321,14 @@
         "visible"
       ],
       "terms": [
+        "compact",
+        "default",
+        "dense",
         "hidden",
         "labelVisibility",
         "preference",
         "primitive",
+        "size",
         "theme",
         "themeselect",
         "visible"

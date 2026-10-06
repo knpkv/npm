@@ -577,10 +577,28 @@ const validateVariants = (component: ComponentRecord, source: string): ReadonlyA
   return failures
 }
 
+/**
+ * A component can forward another's axis without a catalog of its own (ThemeSelect passes Select's
+ * `size`). Any prop it defaults whose name is a registry axis elsewhere (`size`, `tone`, …) must
+ * then be listed among its manifest variants, or consumers never learn its values or default.
+ */
+const validateForwardedAxes = (
+  component: ComponentRecord,
+  source: string,
+  axisNames: ReadonlySet<string>
+): ReadonlyArray<string> => {
+  const listed = new Set(component.variants.map((variant) => variant.name))
+  return [...axisNames]
+    .filter((axis) => !listed.has(axis))
+    .filter((axis) => (destructuredFallbacks(source, component.source, component.name, axis) ?? []).length > 0)
+    .map((axis) => `component ${component.name} defaults its ${axis} prop but the manifest lists no ${axis} variant`)
+}
+
 const validateComponent = (
   component: ComponentRecord,
   metadata: RegistryMetadata | undefined,
-  files: ReadonlyMap<string, string>
+  files: ReadonlyMap<string, string>,
+  axisNames: ReadonlySet<string>
 ): ReadonlyArray<string> => {
   const failures: Array<string> = []
   if (metadata === undefined) failures.push(`missing registry metadata ${component.name}`)
@@ -592,6 +610,7 @@ const validateComponent = (
       if (!exports.has(declaration.name)) failures.push(`missing export ${declaration.name} in ${component.source}`)
     }
     for (const failure of validateVariants(component, source)) failures.push(failure)
+    for (const failure of validateForwardedAxes(component, source, axisNames)) failures.push(failure)
   }
   for (const style of component.styles) {
     const contents = files.get(style)
@@ -654,10 +673,13 @@ const validateImports = (files: ReadonlyMap<string, string>): ReadonlyArray<stri
 export const findRegistrySourceFailures = (
   manifest: ComponentManifest,
   files: ReadonlyMap<string, string>
-): ReadonlyArray<string> =>
-  [
-    ...manifest.components
-      .filter(({ registry }) => registry)
-      .flatMap((component) => validateComponent(component, manifest.registryMetadata[component.name], files)),
+): ReadonlyArray<string> => {
+  const registryComponents = manifest.components.filter(({ registry }) => registry)
+  const axisNames = new Set(registryComponents.flatMap((component) => component.variants.map(({ name }) => name)))
+  return [
+    ...registryComponents.flatMap((component) =>
+      validateComponent(component, manifest.registryMetadata[component.name], files, axisNames)
+    ),
     ...validateImports(files)
   ].sort((left, right) => left.localeCompare(right))
+}

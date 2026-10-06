@@ -223,6 +223,40 @@ describe("registry source validation", () => {
       )
   })
 
+  it("requires a forwarded axis a component defaults to be listed in its manifest variants", () => {
+    const files = registryFiles()
+    const pick = (name: string) => {
+      const component = componentManifest.components.find((candidate) => candidate.name === name)
+      if (component === undefined) throw new Error(`${name} is not in the manifest`)
+      return component
+    }
+    const themeSelect = pick("ThemeSelect")
+    const manifest = (withSize: boolean): ComponentManifest => ({
+      ...componentManifest,
+      components: componentManifest.components
+        .filter((component) => component.name === "ThemeSelect" || component.name === "Select")
+        .map((component) =>
+          component.name === "ThemeSelect" && !withSize
+            ? { ...component, variants: component.variants.filter((variant) => variant.name !== "size") }
+            : component
+        )
+    })
+    const focusedFiles = new Map(
+      [themeSelect, pick("Select")].flatMap((component) =>
+        [component.source, ...component.styles, component.visual.story, ...component.visual.tests].flatMap(
+          (path): ReadonlyArray<readonly [string, string]> => {
+            const source = files.get(path)
+            return source === undefined ? [] : [[path, source]]
+          }
+        )
+      )
+    )
+    expect(findRegistrySourceFailures(manifest(true), focusedFiles)).toEqual([])
+    expect(
+      findRegistrySourceFailures(manifest(false), focusedFiles)
+    ).toContain("component ThemeSelect defaults its size prop but the manifest lists no size variant")
+  })
+
   it("rejects a destructured fallback that disagrees with the declared default", () => {
     const files = new Map(registryFiles())
     const path = "src/primitives/ToggleGroup.tsx"
