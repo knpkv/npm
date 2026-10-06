@@ -18,6 +18,26 @@ snapshots:
         style: primary
         start: 88
         end: 210
+      - source: port
+        style: secondary
+        start: 197
+        end: 201
+      - source: port
+        style: secondary
+        start: 197
+        end: 201
+      - source: resolve(port)
+        style: secondary
+        start: 189
+        end: 202
+      - source: () => resolve(port)
+        style: secondary
+        start: 183
+        end: 202
+      - source: () => resolve(port)
+        style: secondary
+        start: 183
+        end: 202
       - source: probe.close(() => resolve(port))
         style: secondary
         start: 171
@@ -38,6 +58,60 @@ snapshots:
         style: secondary
         start: 117
         end: 209
+  ? |
+    reservation.listen(0, "127.0.0.1", function() {
+      const address = reservation.address()
+      reservation.close((error) => error === undefined ? resolve(address.port) : reject(error))
+    })
+  : labels:
+      - source: |-
+          reservation.listen(0, "127.0.0.1", function() {
+            const address = reservation.address()
+            reservation.close((error) => error === undefined ? resolve(address.port) : reject(error))
+          })
+        style: primary
+        start: 0
+        end: 182
+      - source: address.port
+        style: secondary
+        start: 149
+        end: 161
+      - source: address.port
+        style: secondary
+        start: 149
+        end: 161
+      - source: resolve(address.port)
+        style: secondary
+        start: 141
+        end: 162
+      - source: "(error) => error === undefined ? resolve(address.port) : reject(error)"
+        style: secondary
+        start: 108
+        end: 178
+      - source: "(error) => error === undefined ? resolve(address.port) : reject(error)"
+        style: secondary
+        start: 108
+        end: 178
+      - source: "reservation.close((error) => error === undefined ? resolve(address.port) : reject(error))"
+        style: secondary
+        start: 90
+        end: 179
+      - source: |-
+          function() {
+            const address = reservation.address()
+            reservation.close((error) => error === undefined ? resolve(address.port) : reject(error))
+          }
+        style: secondary
+        start: 35
+        end: 181
+      - source: |-
+          function() {
+            const address = reservation.address()
+            reservation.close((error) => error === undefined ? resolve(address.port) : reject(error))
+          }
+        style: secondary
+        start: 35
+        end: 181
   ? |
     reservation.listen(0, "127.0.0.1", function() {
       reservation.close()

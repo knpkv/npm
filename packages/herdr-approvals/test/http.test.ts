@@ -34,7 +34,7 @@ import {
   WorkSnapshots,
   WorkStore
 } from "@knpkv/herdr-work"
-import { Deferred, Effect, Fiber, Result, Schema, Stream } from "effect"
+import { Data, Deferred, Effect, Fiber, Result, Schema, Stream } from "effect"
 import { spawn } from "node:child_process"
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, request as httpRequest } from "node:http"
@@ -200,34 +200,38 @@ const reserveLoopbackPort = (): Promise<number> =>
 
 const isAddressInUse = Schema.is(Schema.Struct({ code: Schema.Literal("EADDRINUSE") }))
 
+/** Another process took the reserved approval port before hostd bound it. */
+class ApprovalPortTaken extends Data.TaggedError("ApprovalPortTaken")<{ readonly cause: unknown }> {}
+
+/** Hostd failed to start for a reason other than a taken port. */
+class ApprovalStartFailed extends Data.TaggedError("ApprovalStartFailed")<{ readonly cause: unknown }> {}
+
 /**
  * Starts hostd with an approval-hub port chosen up front. The serve listener
  * checks the Host header against `approvalHub.url`, so that one port must be
  * known before binding; every other listener should bind port 0 and be read
  * back from the started server. A reserved port can be taken by another
  * process before hostd binds it, so a start that fails with EADDRINUSE retries
- * with a fresh reservation.
+ * with a fresh reservation, up to five attempts in all.
  */
-const startWithApprovalPort = <A>(start: (approvalPort: number) => Promise<A>): Promise<A> => {
-  const attempt = async (remaining: number): Promise<A> => {
-    const approvalPort = await reserveLoopbackPort()
-    try {
-      return await start(approvalPort)
-    } catch (error) {
-      if (remaining > 1 && isAddressInUse(error)) return attempt(remaining - 1)
-      throw error
-    }
-  }
-  return attempt(5)
-}
+const startWithApprovalPort = <A>(
+  start: (approvalPort: number) => Promise<A>
+): Effect.Effect<A, ApprovalPortTaken | ApprovalStartFailed> =>
+  Effect.tryPromise({
+    try: async () => start(await reserveLoopbackPort()),
+    catch: (cause) => isAddressInUse(cause) ? new ApprovalPortTaken({ cause }) : new ApprovalStartFailed({ cause })
+  }).pipe(Effect.retry({ times: 4, while: (error) => error._tag === "ApprovalPortTaken" }))
 
-/** Binds `server` to an ephemeral port on `host` and returns the port it got. */
+/**
+ * Binds `server` to an ephemeral port on `host` and returns the port it got.
+ * A listener whose address can't be read is closed before the promise rejects.
+ */
 const listenOn = (server: ReturnType<typeof createServer>, host: string): Promise<number> =>
   new Promise((resolve, reject) => {
     server.once("error", reject)
     server.listen(0, host, () => {
       const address = Schema.decodeUnknownResult(Schema.Struct({ port: Schema.Number }))(server.address())
-      if (Result.isFailure(address)) reject(address.failure)
+      if (Result.isFailure(address)) server.close(() => reject(address.failure))
       else resolve(address.success.port)
     })
   })
@@ -352,6 +356,43 @@ const requestStatus = (url: string, host: string): Promise<number> =>
 
 const waitForFile = Effect.fn("HostHttpTest.waitForFile")(function*(path: string) {
   while (!existsSync(path)) yield* Effect.yieldNow
+})
+
+describe("approval port reservation", () => {
+  const collision = Object.assign(new Error("listen EADDRINUSE"), { code: "EADDRINUSE" })
+  const startFailingTimes = (failures: number, error: Error) => {
+    let attempts = 0
+    const start = async (approvalPort: number) => {
+      attempts += 1
+      if (attempts <= failures) throw error
+      return approvalPort
+    }
+    return { attempts: () => attempts, start }
+  }
+
+  it.effect("retries a start whose reserved port was taken", () =>
+    Effect.gen(function*() {
+      const starter = startFailingTimes(2, collision)
+      const port = yield* startWithApprovalPort(starter.start)
+      expect(port).toBeGreaterThan(0)
+      expect(starter.attempts()).toBe(3)
+    }))
+
+  it.effect("fails typed after five taken ports", () =>
+    Effect.gen(function*() {
+      const starter = startFailingTimes(5, collision)
+      const error = yield* Effect.flip(startWithApprovalPort(starter.start))
+      expect(error._tag).toBe("ApprovalPortTaken")
+      expect(starter.attempts()).toBe(5)
+    }))
+
+  it.effect("does not retry any other start failure", () =>
+    Effect.gen(function*() {
+      const starter = startFailingTimes(1, new Error("bad config"))
+      const error = yield* Effect.flip(startWithApprovalPort(starter.start))
+      expect(error._tag).toBe("ApprovalStartFailed")
+      expect(starter.attempts()).toBe(1)
+    }))
 })
 
 describe("host HTTP authority", () => {
@@ -1820,17 +1861,15 @@ esac
         yield* Effect.addFinalizer(() => Effect.sync(() => jobStore.close()))
         const fleet = yield* makeFleetService({ approvalEnabled: true, host: "SER8", operations, store: jobStore })
         const { approvalPort, listenerConfig, server } = yield* Effect.acquireRelease(
-          Effect.promise(() =>
-            startWithApprovalPort(async (approvalPort) => {
-              const listenerConfig = {
-                ...baseListenerConfig,
-                approvalPort,
-                approvalHub: { ...hostConfig.approvalHub, url: `https://127.0.0.1:${approvalPort}/` }
-              }
-              const server = await startHttpServer(listenerConfig, fleet, assets, { terminalConnector: unusedTerminal })
-              return { approvalPort, listenerConfig, server }
-            })
-          ),
+          startWithApprovalPort(async (approvalPort) => {
+            const listenerConfig = {
+              ...baseListenerConfig,
+              approvalPort,
+              approvalHub: { ...hostConfig.approvalHub, url: `https://127.0.0.1:${approvalPort}/` }
+            }
+            const server = await startHttpServer(listenerConfig, fleet, assets, { terminalConnector: unusedTerminal })
+            return { approvalPort, listenerConfig, server }
+          }),
           (running) => Effect.promise(running.server.close)
         )
         if (server.serveUrl === null) {
@@ -2837,14 +2876,12 @@ esac
               store
             })
             const { approvalPort, server } = yield* Effect.acquireRelease(
-              Effect.promise(() =>
-                startWithApprovalPort(async (approvalPort) => ({
-                  approvalPort,
-                  server: await startHttpServer(hostConfigFor(approvalPort), fleet, assets, {
-                    terminalConnector: unusedTerminal
-                  })
-                }))
-              ),
+              startWithApprovalPort(async (approvalPort) => ({
+                approvalPort,
+                server: await startHttpServer(hostConfigFor(approvalPort), fleet, assets, {
+                  terminalConnector: unusedTerminal
+                })
+              })),
               (running) => Effect.promise(running.server.close)
             )
             if (server.serveUrl === null) {

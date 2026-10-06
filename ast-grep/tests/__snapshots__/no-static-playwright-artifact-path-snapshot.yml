@@ -1,0 +1,32 @@
+id: no-static-playwright-artifact-path
+snapshots:
+  ? |
+    await page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })
+  : labels:
+      - source: 'path: "test-results/codecommit-web/pr-review-workspace.png"'
+        style: primary
+        start: 40
+        end: 99
+      - source: '"test-results/codecommit-web/pr-review-workspace.png"'
+        style: secondary
+        start: 46
+        end: 99
+      - source: path
+        style: secondary
+        start: 40
+        end: 44
+  ? |
+    await page.screenshot({ path: `./test-results/${name}.png` })
+  : labels:
+      - source: "path: `./test-results/${name}.png`"
+        style: primary
+        start: 24
+        end: 58
+      - source: "`./test-results/${name}.png`"
+        style: secondary
+        start: 30
+        end: 58
+      - source: path
+        style: secondary
+        start: 24
+        end: 28

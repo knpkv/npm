@@ -13,6 +13,20 @@ valid:
     server.listen(0, "127.0.0.1", resolve)
   - |
     server.listen(4180, "127.0.0.1", () => other.close())
+  - |
+    server.listen(0, host, async () => {
+      await assertResponse(server.address().port)
+      server.close(resolve)
+    })
+  - |
+    probe.listen(0, "127.0.0.1", () => {
+      if (probe.address() === null) {
+        probe.close()
+        reject(new Error("no port"))
+        return
+      }
+      resolve(probe)
+    })
 invalid:
   - |
     const reserve = () =>
@@ -25,5 +39,6 @@ invalid:
       })
   - |
     reservation.listen(0, "127.0.0.1", function() {
-      reservation.close()
+      const address = reservation.address()
+      reservation.close((error) => error === undefined ? resolve(address.port) : reject(error))
     })

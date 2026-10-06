@@ -13,12 +13,31 @@ rule:
         - kind: arrow_function
         - kind: function_expression
       has:
-        pattern: $SERVER.close($$$)
+        # Closing the probe hands its port on: the close callback passes a port
+        # value (`resolve(port)`, `resolve(address.port)`). A close that only
+        # ends the listener after its test, or on a failure branch, is fine.
+        pattern: $SERVER.close($CALLBACK)
         stopBy: end
+        has:
+          field: arguments
+          has:
+            any:
+              - kind: arrow_function
+              - kind: function_expression
+            has:
+              kind: call_expression
+              stopBy: end
+              has:
+                field: arguments
+                has:
+                  regex: "(?i)port"
+                  stopBy: end
 
 files:
   - "packages/*/test/**/*.ts"
   - "packages/*/test/**/*.tsx"
+  - "packages/*/e2e/**/*.ts"
+  - "packages/*/e2e/**/*.tsx"
 
 note: |
   Picking a free port by listening on port 0, closing, and handing the number
