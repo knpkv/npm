@@ -30,6 +30,24 @@ describe("chart model", () => {
     expect(chooseBinSize(320, hourly(2000))).toBe(48)
   })
 
+  it("bins a very long history without overflowing the stack, and keeps 24px pointer targets", () => {
+    const minutes: ReadonlyArray<RlyChartColumn> = Array.from({ length: 150_000 }, (_, index) => ({
+      end: (index + 1) * 60_000,
+      segments: [],
+      start: index * 60_000
+    }))
+    const size = chooseBinSize(720, minutes, 24)
+    const bins = binColumns(minutes, size)
+    expect(Math.min(...bins.slice(0, -1).map((bin) => ((bin.last - bin.first + 1) / minutes.length) * 720)))
+      .toBeGreaterThanOrEqual(24)
+    // A 403px week at 24px targets: every hourly bar is a full pointer target.
+    const week = hourly(168)
+    const weekSize = chooseBinSize(403, week, 24)
+    for (const bin of binColumns(week, weekSize)) {
+      expect(((bin.last - bin.first + 1) / 168) * 403).toBeGreaterThanOrEqual(24)
+    }
+  })
+
   it("measures bars on the time axis, so a short period among long ones is never drawn under 6px", () => {
     const uneven: ReadonlyArray<RlyChartColumn> = [
       { end: hour, segments: [], start: 0 },
@@ -109,12 +127,20 @@ describe("chart model", () => {
   })
 
   it("spaces ticks at least the label width apart and anchors the last one to the end", () => {
-    const ticks = chartTicks(Array.from({ length: 24 }, (_, index) => index * 20), 480, 70)
-    expect(ticks.map(({ index }) => index)).toEqual([0, 4, 8, 12, 16, 23])
-    expect(ticks.at(-1)?.anchor).toBe("end")
-    expect(ticks[0]?.anchor).toBe("start")
+    const indices = (ticks: ReturnType<typeof chartTicks>) =>
+      ticks.map((tick) => (tick.anchor === "end" ? "end" : tick.index))
+    expect(indices(chartTicks(Array.from({ length: 24 }, (_, index) => index * 20), 480, 70))).toEqual([
+      0,
+      4,
+      8,
+      12,
+      16,
+      "end"
+    ])
     // Uneven bins: ticks follow where bins actually start, never crowding their labels.
-    expect(chartTicks([0, 10, 20, 400], 480, 70).map(({ index }) => index)).toEqual([0, 3])
+    expect(indices(chartTicks([0, 10, 20, 400], 480, 70))).toEqual([0, "end"])
+    // The end label is the axis end, never a second label for the last bin.
+    expect(indices(chartTicks([0, 100], 1000, 72))).toEqual([0, 1, "end"])
     expect(chartTicks([0], 480, 70)).toEqual([{ anchor: "start", index: 0 }])
     expect(chartTicks([], 480, 70)).toEqual([])
   })

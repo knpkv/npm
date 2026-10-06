@@ -8,7 +8,6 @@ import {
   chartTicks,
   chooseBinSize,
   moveFocus,
-  type RlyChartBin,
   type RlyChartColumn,
   type RlyChartSelection,
   selectBin
@@ -53,7 +52,8 @@ export type StackedBarsProps = StackedBarsBaseProps & {
    */
   readonly formatScale: (max: number, binSize: number) => string
   /** The axis label for a bin. */
-  readonly formatTick: (bin: RlyChartBin, binSize: number) => string
+  /** The axis label for an instant: a bin's start, or the axis end for the right-hand label. */
+  readonly formatTick: (at: number, binSize: number) => string
   readonly selection: RlyChartSelection | null
   readonly onSelectionChange: (selection: RlyChartSelection | null) => void
   /** What the selection means, announced politely once it settles. */
@@ -64,6 +64,7 @@ export type StackedBarsProps = StackedBarsBaseProps & {
 
 const LABEL_WIDTH = 72
 const ANNOUNCE_AFTER = 500
+const MIN_TARGET = 24
 
 /**
  * Hand the element to a caller's object or callback ref and return how to detach it: a React 19
@@ -181,7 +182,7 @@ const Band = ({
 /**
  * Stacked values per period on a time axis, with optional limit bands above. Bars, bands, the window
  * and the selection share one time scale, so a short final bin is drawn narrower. Narrow containers
- * bin periods so every bar stays at least 6px wide; the selection keeps its columns across rebinning.
+ * bin periods so every bar stays at least 24px wide, a full pointer target; the selection keeps its columns across rebinning.
  * One tab stop: ←/→ move and select, Shift extends, Home/End jump, Escape clears. Click selects;
  * Shift+click, or a second touch tap elsewhere, extends. The SVG is hidden from assistive technology,
  * so callers render a table of the same columns (and band readings) beside it.
@@ -204,7 +205,8 @@ export const StackedBars = ({
 }: StackedBarsProps): ReactElement => {
   const [width, ref] = useInlineSize(720, callerRef)
   const instructionsId = useId()
-  const binSize = chooseBinSize(width, columns)
+  // Bars are pointer targets, so each is at least 24px wide (WCAG 2.2 target size).
+  const binSize = chooseBinSize(width, columns, MIN_TARGET)
   const bins = useMemo(() => binColumns(columns, binSize), [columns, binSize])
   // Heights are rates per nominal bin, so a longer (folded) bin is not taller just for holding more time.
   const rates = binRates(bins, columns, binSize)
@@ -218,17 +220,20 @@ export const StackedBars = ({
   )
   // The keyboard cursor is a column, so a click or a resize that rebins keeps it on the same time.
   const [cursor, setCursor] = useState<number | null>(null)
+  // The first touch tap's column, so a rebin between taps still compares the same instant.
   const [pendingTap, setPendingTap] = useState<number | null>(null)
   // Only a touch tap may extend by tapping again; a mouse extends with Shift.
   const pointerType = useRef("mouse")
   const [announcement, setAnnouncement] = useState("")
+  // The words, not the formatter's identity, decide when to announce, so parent renders don't postpone it.
+  const description = describeSelection(selection)
   const binOf = (column: number): number => Math.min(bins.length - 1, Math.floor(column / binSize))
   const focus = cursor === null ? null : binOf(cursor)
 
   useEffect(() => {
-    const timer = setTimeout(() => setAnnouncement(describeSelection(selection)), ANNOUNCE_AFTER)
+    const timer = setTimeout(() => setAnnouncement(description), ANNOUNCE_AFTER)
     return () => clearTimeout(timer)
-  }, [describeSelection, selection])
+  }, [description])
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "Escape") {
@@ -307,10 +312,14 @@ export const StackedBars = ({
                   const touch = pointerType.current === "touch"
                   // A second tap extends only a live selection; a cleared one starts a new gesture.
                   const extend =
-                    event.shiftKey || (touch && selection !== null && pendingTap !== null && pendingTap !== index)
+                    event.shiftKey ||
+                    (touch &&
+                      selection !== null &&
+                      pendingTap !== null &&
+                      (pendingTap < bin.first || pendingTap > bin.last))
                   onSelectionChange(selectBin(selection, bins, index, extend))
                   setCursor(bin.first)
-                  setPendingTap(touch && !extend ? index : null)
+                  setPendingTap(touch && !extend ? bin.first : null)
                 }}
                 onPointerDown={(event) => {
                   pointerType.current = event.pointerType
@@ -352,17 +361,17 @@ export const StackedBars = ({
       </div>
       <div aria-hidden="true" className={style("axis")}>
         {ticks.map((tick) => {
-          const bin = bins[tick.index]
-          if (bin === undefined) return null
+          const at = tick.anchor === "end" ? axisEnd : bins[tick.index]?.start
+          if (at === undefined) return null
           return (
             <span
               className={style("tick")}
               data-anchor={tick.anchor}
-              key={tick.index}
+              key={tick.anchor === "end" ? "end" : tick.index}
               // Physical sides, like the SVG's x axis, so labels stay under their bars in right-to-left text.
-              style={tick.anchor === "end" ? { right: 0 } : { left: `${x(bin.start) / 10}%` }}
+              style={tick.anchor === "end" ? { right: 0 } : { left: `${x(at) / 10}%` }}
             >
-              {formatTick(bin, binSize)}
+              {formatTick(at, binSize)}
             </span>
           )
         })}

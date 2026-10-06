@@ -148,8 +148,11 @@ const Chart = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> })
   const [selection, setSelection] = useState<RlyChartSelection | null>(null)
   const describe = useCallback(
     (span: RlyChartSelection | null) =>
-      span === null ? "No span selected" : `${span.to - span.from + 1} hours selected`,
-    []
+      // Names the period, so moving between equal-sized spans is announced too.
+      span === null
+        ? "No span selected"
+        : `${day.format(columns[span.from]?.start ?? 0)} to ${day.format(columns[span.to]?.end ?? 0)}, ${span.to - span.from + 1} hours selected`,
+    [columns]
   )
   return (
     <main style={pageStyle}>
@@ -172,7 +175,7 @@ const Chart = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> })
           data-selection={selection === null ? "none" : `${selection.from}-${selection.to}`}
           describeSelection={describe}
           formatScale={(max, size) => `$${max.toFixed(2)} per ${size === 1 ? "hour" : `${size} hours`}`}
-          formatTick={(bin) => day.format(bin.start)}
+          formatTick={(at) => day.format(at)}
           instructions="Arrow keys move between bars and select them. Shift with an arrow extends the span. Escape clears it."
           label="Spend by booking, API-equivalent dollars"
           onSelectionChange={setSelection}

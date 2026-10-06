@@ -25,7 +25,7 @@ const props: StackedBarsProps = {
   columns,
   describeSelection: () => "",
   formatScale: (max) => `${max} per hour`,
-  formatTick: (bin) => `${bin.first}h`,
+  formatTick: (at) => `${at / hour}h`,
   instructions: "Arrow keys move between bars.",
   label: "Spend by booking",
   onSelectionChange: () => undefined,
@@ -176,16 +176,16 @@ describe("StackedBars", () => {
   it("ends the axis on an end-anchored tick", () => {
     const ticks = [...render().querySelectorAll("[data-anchor]")]
     expect(ticks.at(-1)?.getAttribute("data-anchor")).toBe("end")
-    expect(ticks.at(-1)?.textContent).toBe("5h")
+    expect(ticks.at(-1)?.textContent).toBe("6h")
   })
 
   it("draws a folded final bin on the same time scale as the window over its last hour", async () => {
     vi.stubGlobal("ResizeObserver", TestResizeObserver)
-    // 25 hourly columns at 100px bin in pairs; the odd last hour joins the bin before it.
+    // 25 hourly columns at 400px bin in pairs; the odd last hour joins the bin before it.
     const root = await mount(
       <StackedBars {...props} columns={hours(25)} window={{ from: 24 * hour, label: "Last hour", to: 25 * hour }} />
     )
-    await resizeTo(100)
+    await resizeTo(400)
     const bars = root.querySelector("svg:not([class*='band'])")
     const last = bars?.querySelectorAll("[class*='hit']")
     const final = last?.[last.length - 1]
@@ -204,8 +204,8 @@ describe("StackedBars", () => {
     await resizeTo(720)
     const wide = root.querySelector('[data-part="selection"]')
     const before = { width: numeric(wide, "width"), x: numeric(wide, "x") }
-    // At 80px the 30 columns bin in threes, so no bin lies wholly inside columns 2–3.
-    await resizeTo(80)
+    // At 240px the 30 columns bin in threes, so no bin lies wholly inside columns 2–3.
+    await resizeTo(240)
     const narrow = root.querySelector('[data-part="selection"]')
     expect({ width: numeric(narrow, "width"), x: numeric(narrow, "x") }).toEqual(before)
     expect(root.querySelectorAll('[data-selected="true"]').length).toBeGreaterThan(0)
@@ -266,8 +266,8 @@ describe("StackedBars", () => {
     press("ArrowRight")
     expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 4, to: 4 })
     press("ArrowRight")
-    // At 80px the columns bin in threes; the cursor on column 5 is now bin 1 (columns 3–5).
-    await resizeTo(80)
+    // At 240px the columns bin in threes; the cursor on column 5 is now bin 1 (columns 3–5).
+    await resizeTo(240)
     press("ArrowRight")
     expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 6, to: 8 })
   })
@@ -343,9 +343,9 @@ describe("StackedBars", () => {
   it("captions the scale with a rate per bin, so a folded last bin is not read as a bigger total", async () => {
     vi.stubGlobal("ResizeObserver", TestResizeObserver)
     const formatScale = vi.fn((max: number, size: number) => `${max} per ${size}`)
-    // 25 hourly columns of 1 at 100px bin in pairs; the last bin folds three hours (total 3).
+    // 25 hourly columns of 1 at 400px bin in pairs; the last bin folds three hours (total 3).
     await mount(<StackedBars {...props} columns={hours(25)} formatScale={formatScale} />)
-    await resizeTo(100)
+    await resizeTo(400)
     expect(formatScale).toHaveBeenLastCalledWith(2, 2)
   })
 
@@ -390,5 +390,68 @@ describe("StackedBars", () => {
     expect(first?.getAttribute("style")).toContain("left:")
     expect(first?.getAttribute("style")).not.toContain("inset-inline")
     expect(root.querySelector('[data-anchor="end"]')?.getAttribute("style")).toContain("right:")
+  })
+
+  it("extends a touch span across a rebin, comparing the first tap's column, not its old bar index", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const onSelectionChange = vi.fn()
+    const Owner = (): ReactElement => {
+      const [selection, setSelection] = useState<RlyChartSelection | null>(null)
+      return (
+        <StackedBars
+          {...props}
+          columns={hours(30)}
+          onSelectionChange={(next) => {
+            onSelectionChange(next)
+            setSelection(next)
+          }}
+          selection={selection}
+        />
+      )
+    }
+    const root = await mount(<Owner />)
+    await resizeTo(720)
+    const tap = (index: number): void =>
+      act(() => {
+        const bar = root.querySelectorAll("svg:not([class*='band']) g")[index]
+        bar?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }))
+        bar?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      })
+    tap(1)
+    // At 240px bar 1 holds columns 3–5: a different instant from the first tap's column 1.
+    await resizeTo(240)
+    tap(1)
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 1, to: 5 })
+  })
+
+  it("announces a settled selection even while its owner keeps re-rendering", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    vi.useFakeTimers()
+    try {
+      const container = document.createElement("div")
+      document.body.append(container)
+      const root = createRoot(container)
+      roots.push(root)
+      const view = (tick: number) => (
+        <StackedBars
+          {...props}
+          data-tick={tick}
+          // A fresh formatter on every render, as an inline callback would be.
+          describeSelection={(selection) => (selection === null ? "None" : `Columns ${selection.from}–${selection.to}`)}
+          selection={{ from: 2, to: 3 }}
+        />
+      )
+      await act(async () => root.render(view(0)))
+      for (let tick = 1; tick <= 6; tick += 1) {
+        await act(async () => {
+          vi.advanceTimersByTime(200)
+          root.render(view(tick))
+        })
+      }
+      await act(async () => vi.advanceTimersByTime(600))
+      expect(container.querySelector('[aria-live="polite"]')?.textContent).toBe("Columns 2–3")
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

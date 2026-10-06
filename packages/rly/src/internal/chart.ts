@@ -30,10 +30,8 @@ export interface RlyChartSelection {
   readonly to: number
 }
 
-export interface RlyChartTick {
-  readonly index: number
-  readonly anchor: "start" | "end"
-}
+/** An axis label: at a bin's start, or the one end-anchored label at the axis end. */
+export type RlyChartTick = { readonly anchor: "start"; readonly index: number } | { readonly anchor: "end" }
 
 /** Bin sizes that divide a day evenly, so bins line up with clock hours. */
 const BIN_SIZES: ReadonlyArray<number> = [1, 2, 3, 6, 12, 24]
@@ -53,12 +51,13 @@ const narrowestBar = (columns: ReadonlyArray<RlyChartColumn>, size: number, widt
   const from = columns[0]?.start ?? 0
   const span = Math.max(1, (columns[columns.length - 1]?.end ?? from) - from)
   const starts = groupStarts(columns.length, size)
-  return Math.min(
-    ...starts.map((first, index) => {
-      const last = (starts[index + 1] ?? columns.length) - 1
-      return (((columns[last]?.end ?? from) - (columns[first]?.start ?? from)) / span) * width
-    })
-  )
+  // A loop, not Math.min(...), so a long history (150,000 columns) cannot overflow the call stack.
+  let narrowest = Number.POSITIVE_INFINITY
+  for (const [index, first] of starts.entries()) {
+    const last = (starts[index + 1] ?? columns.length) - 1
+    narrowest = Math.min(narrowest, (((columns[last]?.end ?? from) - (columns[first]?.start ?? from)) / span) * width)
+  }
+  return narrowest
 }
 
 /**
@@ -68,8 +67,14 @@ const narrowestBar = (columns: ReadonlyArray<RlyChartColumn>, size: number, widt
  */
 export const chooseBinSize = (width: number, columns: ReadonlyArray<RlyChartColumn>, minBar = 6): number => {
   if (columns.length === 0) return 1
-  const days = Array.from({ length: Math.ceil(columns.length / DAY) }, (_, index) => (index + 2) * DAY)
-  return [...BIN_SIZES, ...days].find((size) => narrowestBar(columns, size, width) >= minBar) ?? columns.length
+  const preferred = BIN_SIZES.find((size) => narrowestBar(columns, size, width) >= minBar)
+  if (preferred !== undefined) return preferred
+  // Whole days from an estimate of the bars that fit, stepping up only while a bar is still too narrow.
+  const bars = Math.max(1, Math.floor(width / minBar))
+  for (let days = Math.max(2, Math.floor(columns.length / bars / DAY)); days * DAY < columns.length; days += 1) {
+    if (narrowestBar(columns, days * DAY, width) >= minBar) return days * DAY
+  }
+  return columns.length
 }
 
 /**
@@ -160,12 +165,16 @@ export const chartTicks = (
 ): ReadonlyArray<RlyChartTick> => {
   if (starts.length === 0) return []
   if (starts.length === 1) return [{ anchor: "start", index: 0 }]
-  const regular = starts.reduce<ReadonlyArray<RlyChartTick>>((ticks, x, index) => {
-    const previous = ticks.at(-1)
-    const previousX = previous === undefined ? Number.NEGATIVE_INFINITY : (starts[previous.index] ?? 0)
-    return x - previousX >= labelWidth && x + labelWidth <= width - labelWidth
-      ? [...ticks, { anchor: "start", index }]
-      : ticks
-  }, [])
-  return [...regular, { anchor: "end", index: starts.length - 1 }]
+  // Start ticks leave room for the end label, so no bin is labelled twice.
+  const regular = starts.reduce<ReadonlyArray<{ readonly anchor: "start"; readonly index: number }>>(
+    (ticks, x, index) => {
+      const previous = ticks.at(-1)
+      const previousX = previous === undefined ? Number.NEGATIVE_INFINITY : (starts[previous.index] ?? 0)
+      return x - previousX >= labelWidth && x + labelWidth <= width - labelWidth
+        ? [...ticks, { anchor: "start", index }]
+        : ticks
+    },
+    []
+  )
+  return [...regular, { anchor: "end" }]
 }
