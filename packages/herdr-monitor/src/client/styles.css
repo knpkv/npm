@@ -1,5 +1,5 @@
+/* Follows the system theme through rly's light-dark tokens; a wall display set to dark stays dark. */
 :root {
-  color-scheme: dark;
   font-family: var(--rly-font-ui);
   color: var(--rly-color-text-1);
   background: var(--rly-color-canvas);
@@ -10,108 +10,156 @@
 body {
   margin: 0 auto;
   max-width: 100rem;
-  padding: clamp(1rem, 4vw, 4rem);
+  padding: var(--rly-space-24);
 }
-header {
-  border-bottom: 1px solid var(--rly-color-border-2);
-  padding-bottom: 1rem;
+/* Product name left, connection state and Lock right, a rule below. */
+.masthead {
+  align-items: center;
+  border-bottom: 1px solid var(--rly-color-border-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8) var(--rly-space-16);
+  padding-bottom: var(--rly-space-16);
 }
 h1 {
-  font-size: clamp(1.8rem, 4vw, 2.5rem);
-  font-weight: 550;
-  letter-spacing: -0.05em;
-  margin: 0.5rem 0;
+  font-size: var(--rly-type-section-title-size);
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  margin: 0 auto 0 0;
 }
 h2 {
-  font-size: 1.6rem;
+  font-size: var(--rly-type-card-title-size);
+  font-weight: 600;
+  margin: 0;
 }
 h3 {
-  font-size: 1.4rem;
-  margin: 0.5rem 0;
+  font-size: var(--rly-type-card-title-size);
+  margin: 0 0 var(--rly-space-4);
 }
 p {
   line-height: 1.5;
+  margin: 0;
 }
-header > p,
-footer,
-#freshness,
-dt,
-#key-help {
+#connection {
   color: var(--rly-color-text-2);
 }
-.eyebrow,
-.state {
-  font: 0.8rem var(--rly-font-mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+#connection strong {
+  color: var(--rly-color-text-1);
+}
+/* Degraded but readable: the word in held ink. */
+#connection[data-state="stale"] strong,
+#connection[data-state="offline"] strong {
+  color: var(--rly-color-held-ink);
+}
+footer,
+dt,
+#key-help,
+.unpublished {
+  color: var(--rly-color-text-2);
 }
 form {
+  display: grid;
+  gap: var(--rly-space-8);
+  margin: var(--rly-space-48) 0;
   max-width: 28rem;
-  margin: 3rem 0;
+}
+form h2 {
+  margin-bottom: var(--rly-space-8);
 }
 label {
-  display: block;
-  margin: 1.3rem 0 0.5rem;
+  font-weight: 600;
+  margin-top: var(--rly-space-12);
 }
 input,
 button {
   font: inherit;
-  min-height: 3rem;
+  min-height: var(--rly-space-48);
   border: 1px solid var(--rly-color-border-2);
-  border-radius: 0.35rem;
-  padding: 0.7rem 1rem;
+  border-radius: var(--rly-radius-control);
+  padding: var(--rly-space-12) var(--rly-space-16);
 }
 input {
   width: 100%;
   color: var(--rly-color-text-1);
   background: var(--rly-color-surface-1);
 }
+input[aria-invalid="true"] {
+  border-color: var(--rly-color-blocked-ink);
+}
+.error {
+  color: var(--rly-color-blocked-ink);
+  font-weight: 600;
+}
 button {
   cursor: pointer;
   color: var(--rly-color-action-foreground);
   background: var(--rly-color-action-background);
   font-weight: 600;
+  justify-self: start;
+}
+#lock {
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
 }
 :focus-visible {
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: 4px;
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 2px;
 }
-#connection {
-  padding-block: 1rem;
-  border-bottom: 1px solid var(--rly-color-border-1);
+/* Forced colours: system button colours keep every label visible. */
+@media (forced-colors: active) {
+  button,
+  #lock {
+    background: ButtonFace;
+    border-color: ButtonText;
+    color: ButtonText;
+  }
 }
-.toolbar {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  justify-content: space-between;
+/* The one fact, at heading size in text ink. */
+#headline {
+  font-size: var(--rly-type-section-title-size);
+  font-weight: 600;
+  line-height: 1.2;
+  margin: var(--rly-space-32) 0 var(--rly-space-24);
+  overflow-wrap: break-word;
 }
-#totals {
-  font: 1rem var(--rly-font-mono);
-  margin: 1rem 0;
-}
-#agents {
-  list-style: none;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 21rem), 1fr));
-  gap: 1rem;
-  padding: 0;
-}
-.agent {
+.region {
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-1);
-  border-top: 3px solid var(--rly-color-border-2);
-  padding: 1.5rem;
-  overflow-wrap: anywhere;
+  border-radius: var(--rly-radius-control);
 }
-.agent.working {
-  border-top-color: var(--rly-color-success-ink);
+.region-header {
+  align-items: baseline;
+  border-bottom: 1px solid var(--rly-color-border-1);
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-4) var(--rly-space-12);
+  padding: var(--rly-space-12) var(--rly-space-16);
 }
-.working .state {
-  color: var(--rly-color-success-ink);
+#totals {
+  color: var(--rly-color-text-2);
+  font-variant-numeric: tabular-nums;
 }
-.agent.blocked {
-  border-top-color: var(--rly-color-blocked-ink);
+#agents {
+  align-items: start;
+  display: grid;
+  gap: var(--rly-space-16);
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr));
+  list-style: none;
+  margin: 0;
+  padding: var(--rly-space-16);
+}
+/* Each agent is a flat card with an even border; its state leads as a word. */
+.agent {
+  background: var(--rly-color-surface-2);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
+  display: grid;
+  gap: var(--rly-space-4);
+  overflow-wrap: break-word;
+  padding: var(--rly-space-16);
+}
+.state {
+  font-weight: 600;
 }
 .blocked .state,
 .blocker {
@@ -121,30 +169,34 @@ button {
   font-weight: 600;
 }
 dl {
-  display: grid;
-  grid-template-columns: 1fr 1.3fr;
-  gap: 0.8rem;
   border-top: 1px solid var(--rly-color-border-1);
-  padding-top: 1.2rem;
-  font-size: 0.875rem;
+  display: grid;
+  font-size: var(--rly-type-label-size);
+  gap: var(--rly-space-8) var(--rly-space-12);
+  grid-template-columns: max-content minmax(0, 1fr);
+  margin: var(--rly-space-12) 0 0;
+  padding-top: var(--rly-space-12);
 }
 dd {
+  font-variant-numeric: tabular-nums;
   margin: 0;
-  font-family: var(--rly-font-mono);
+}
+.unpublished {
+  font-size: var(--rly-type-label-size);
+  margin-top: var(--rly-space-8);
 }
 footer {
-  margin-top: 3rem;
-  font-size: 0.875rem;
+  font-size: var(--rly-type-label-size);
+  margin-top: var(--rly-space-48);
 }
 [hidden] {
   display: none !important;
 }
 @media (max-width: 30rem) {
-  .toolbar {
-    align-items: start;
-    flex-direction: column;
+  body {
+    padding: var(--rly-space-16);
   }
-  .agent {
-    padding: 1rem;
+  #agents {
+    padding: var(--rly-space-12);
   }
 }
