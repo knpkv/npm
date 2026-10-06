@@ -7,7 +7,8 @@ import {
   globMatches,
   poolEntryMatches,
   ruleProgress,
-  workbenchQueue
+  workbenchQueue,
+  yourReviewCount
 } from "../src/client/components/workbench-queue.js"
 
 const NOW = new Date("2026-10-05T15:30:00Z")
@@ -65,10 +66,10 @@ describe("workbenchQueue", () => {
       "andrey",
       NOW
     )
-    expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["own", "yours"], [
-      "watched",
-      "watching"
-    ]])
+    expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([
+      ["own", "yours"],
+      ["watched", "watching"]
+    ])
   })
 
   it("reports Unknown, not an empty queue, when no caller identity resolved", () => {
@@ -227,6 +228,13 @@ describe("poolEntryMatches", () => {
     expect(poolEntryMatches("CodeCommitApprovers:111122223333:Reviewers/alice", session)).toBe(true)
   })
 
+  it("matches a role-only assumed-role ARN to every session of that role", () => {
+    expect(poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Reviewers", session)).toBe(true)
+    expect(
+      poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Reviewers", session.replace("Reviewers", "Operations"))
+    ).toBe(false)
+  })
+
   it("matches wildcards anywhere in a fully qualified ARN, and nothing else", () => {
     expect(poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Review*/alice", session)).toBe(true)
     expect(poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Review*/*", session)).toBe(true)
@@ -235,8 +243,7 @@ describe("poolEntryMatches", () => {
         "arn:aws:sts::111122223333:assumed-role/Review*/alice",
         session.replace("Reviewers", "Operations")
       )
-    )
-      .toBe(false)
+    ).toBe(false)
     expect(poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Reviewers/alice", session)).toBe(true)
     expect(poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Reviewers.alice", session)).toBe(false)
   })
@@ -313,8 +320,11 @@ describe("workbenchQueue with role pools", () => {
 
   it("leaves out wildcard entries whose fixed name part cannot be the user", () => {
     const groupFor = (entry: string) =>
-      workbenchQueue([make({ approvalRules: [rule("Pool", 1, ["x"], false, [entry])], id: "1" })], "alice", NOW).rows
-        .map((row) => row.group)
+      workbenchQueue(
+        [make({ approvalRules: [rule("Pool", 1, ["x"], false, [entry])], id: "1" })],
+        "alice",
+        NOW
+      ).rows.map((row) => row.group)
     expect(groupFor("arn:aws:sts::111122223333:assumed-role/Review*/bob")).toEqual([])
     expect(groupFor("arn:aws:sts::111122223333:assumed-role/Reviewers/b*")).toEqual([])
     expect(groupFor("arn:aws:sts::111122223333:assumed-role/Reviewers/a*")).toEqual(["pool"])
@@ -324,6 +334,30 @@ describe("workbenchQueue with role pools", () => {
     expect(groupFor("arn:aws:iam::111122223333:user/team/ali*")).toEqual(["pool"])
     expect(groupFor("arn:aws:iam::111122223333:user/team/bo*")).toEqual(["pool"])
     expect(groupFor("arn:aws:sts::111122223333:federated-user/b*")).toEqual([])
+  })
+
+  it("lists a role-only pool as open to a role pool and counts its sessions' approvals", () => {
+    const roleOnly = rule("Reviewers", 2, ["Reviewers"], false, ["arn:aws:sts::111122223333:assumed-role/Reviewers"])
+    const pullRequest = make({
+      approvalRules: [roleOnly],
+      approvedBy: ["jonas"],
+      approvedByArns: ["arn:aws:sts::111122223333:assumed-role/Reviewers/jonas"],
+      id: "1"
+    })
+    expect(ruleProgress(pullRequest)).toEqual({ approved: 1, name: "Reviewers", required: 2 })
+    expect(workbenchQueue([pullRequest], "alice", NOW).rows.map((row) => row.group)).toEqual(["pool"])
+  })
+
+  it("keeps a pool open when the user's same-name approval came from a role the pool does not count", () => {
+    const reviewers = rule("Reviewers", 1, ["*"], false, ["arn:aws:sts::111122223333:assumed-role/Reviewers/*"])
+    const groupWith = (approvalArn: string) =>
+      workbenchQueue(
+        [make({ approvalRules: [reviewers], approvedBy: ["alice"], approvedByArns: [approvalArn], id: "1" })],
+        "alice",
+        NOW
+      ).rows.map((row) => row.group)
+    expect(groupWith("arn:aws:sts::111122223333:assumed-role/Operations/alice")).toEqual(["pool"])
+    expect(groupWith("arn:aws:sts::111122223333:assumed-role/Reviewers/alice")).toEqual([])
   })
 
   it("puts an unsatisfied rule without a pool in Needs your review, since any approval counts", () => {
@@ -337,7 +371,10 @@ describe("workbenchQueue with role pools", () => {
       "andrey",
       NOW
     )
-    expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["open", "review"], ["own", "yours"]])
+    expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([
+      ["open", "review"],
+      ["own", "yours"]
+    ])
     expect(queue.summary._tag).toBe("Waiting")
   })
 
@@ -360,5 +397,25 @@ describe("formatSpan", () => {
     expect(formatSpan(2 * DAY + 6 * HOUR + 59 * 60_000)).toBe("2d 6h")
     expect(formatSpan(5 * HOUR)).toBe("5h")
     expect(formatSpan(40 * 60_000 + 59_000)).toBe("40m")
+  })
+})
+
+describe("yourReviewCount", () => {
+  it("counts exactly what the rail lists under Needs your review, so the header badge agrees", () => {
+    const prs = [
+      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], id: "named" }),
+      make({ approvalRules: [rule("Any one", 1, [], false)], id: "open-rule" }),
+      make({
+        approvalRules: [rule("Reviewers", 1, ["*"], false, ["arn:aws:sts::111122223333:assumed-role/Reviewers/*"])],
+        id: "role-pool"
+      }),
+      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], approvedBy: ["andrey"], id: "approved" }),
+      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], id: "merged", status: "MERGED" }),
+      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], author: "andrey", id: "own" })
+    ]
+    const queue = workbenchQueue(prs, "andrey", NOW)
+    expect(queue.summary).toMatchObject({ _tag: "Waiting", count: 2 })
+    expect(yourReviewCount(prs, "andrey")).toBe(2)
+    expect(yourReviewCount(prs, undefined)).toBe(0)
   })
 })

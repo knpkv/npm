@@ -50,6 +50,10 @@ overrides:
   devalue@>=5.0.0 <5.9.3: 5.9.4
   # GHSA-p98j-92pf-mc4p: dompurify 3.4.13–3.4.15 via packages/review > mermaid; keep 3.x
   dompurify@>=3.4.13 <3.4.16: 3.4.16
+  # GHSA-68fv-2mgg-jv7q: source-map-js <1.2.2 event-loop DoS (via tailwind and vitest coverage)
+  source-map-js@>=1.0.0 <1.2.2: 1.2.2
+  # GHSA-c8x8-7fp4-3x9w: prosemirror-view <1.42.3 XSS; @atlaskit/editor-prosemirror 9.0.0 pins 1.41.5
+  prosemirror-view@<1.42.3: 1.42.6
 
 # Security releases for the pinned overrides above; permit fixes before the age window expires.
 minimumReleaseAgeExclude:
@@ -76,3 +80,12 @@ auditConfig:
     # Dev-only path: root devDependency @effect/build-utils > micromatch > braces. Build tooling never receives untrusted patterns.
     # Remove when braces >3.0.3 ships or this path goes away.
     - GHSA-vfj7-8cjw-p6xm
+    # GHSA-rj75-hqrm-r3gf (2026-10-06): postcss-selector-parser <7.1.6 quadratic flat-selector parsing; only 7.1.6 is patched.
+    # Build-time paths only, parsing CSS authored in this repo: codecommit-web > @tailwindcss/typography (pins 6.0.10, also in its
+    # latest 0.5.20) and packages/docs > @expressive-code/core > postcss-nested ^6. Forcing 7.x is not safe: 7.0.0 changed how
+    # insertions during iteration behave, which both rewriters rely on. Remove when both accept postcss-selector-parser >=7.1.6.
+    - GHSA-rj75-hqrm-r3gf
+    # GHSA-238p-pmpm-9mq7 (2026-10-06, low): katex <0.18.2 trust checks can be bypassed only by an already-polluted
+    # Object.prototype; only 0.18.2+ is patched. Path: packages/review > mermaid > katex; mermaid 12.1.0 (latest) still
+    # requires ^0.16.47, and katex 0.x minors are breaking. Remove when mermaid accepts katex >=0.18.2.
+    - GHSA-238p-pmpm-9mq7

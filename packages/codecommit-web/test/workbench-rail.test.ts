@@ -7,8 +7,9 @@ import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 import { MemoryRouter } from "react-router"
 
+import { prListKey } from "../src/client/components/pr-list.js"
 import { workbenchQueue } from "../src/client/components/workbench-queue.js"
-import { type CurrentPullRequest, WorkbenchRailView } from "../src/client/components/workbench-rail.js"
+import { WorkbenchRailView } from "../src/client/components/workbench-rail.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -45,20 +46,34 @@ afterEach(async () => {
   root = undefined
 })
 
+const draw = (pullRequests: ReadonlyArray<PullRequest>, currentUser: string | undefined, currentKey?: string) =>
+  act(async () =>
+    root?.render(
+      createElement(
+        MemoryRouter,
+        null,
+        createElement(WorkbenchRailView, {
+          currentKey,
+          currentUser,
+          queue: workbenchQueue(pullRequests, currentUser, NOW)
+        })
+      )
+    )
+  )
+
 const render = async (
   pullRequests: ReadonlyArray<PullRequest>,
   currentUser: string | undefined,
-  current?: CurrentPullRequest
+  currentKey?: string
 ) => {
   const host = document.createElement("div")
   document.body.append(host)
   root = createRoot(host)
-  const queue = workbenchQueue(pullRequests, currentUser, NOW)
-  await act(async () =>
-    root?.render(createElement(MemoryRouter, null, createElement(WorkbenchRailView, { current, currentUser, queue })))
-  )
+  await draw(pullRequests, currentUser, currentKey)
   return host
 }
+
+const rowLinks = (host: HTMLElement) => [...host.querySelectorAll<HTMLAnchorElement>("a[data-row]")]
 
 describe("WorkbenchRailView", () => {
   it("says how many pull requests wait and lists them under titled groups", async () => {
@@ -117,7 +132,8 @@ describe("WorkbenchRailView", () => {
   })
 
   it("marks the open pull request and makes it the list's single tab stop", async () => {
-    const host = await render([make("1"), make("2")], "andrey", { accountId: "platform-prod", pullRequestId: "2" })
+    const two = make("2")
+    const host = await render([make("1"), two], "andrey", prListKey(two))
     const rows = [...host.querySelectorAll<HTMLAnchorElement>("a[data-row]")]
     expect(rows.map((row) => row.getAttribute("aria-current"))).toEqual([null, "page"])
     expect(rows.map((row) => row.tabIndex)).toEqual([-1, 0])
@@ -136,5 +152,21 @@ describe("WorkbenchRailView", () => {
     })
     expect(document.activeElement).toBe(rows[2])
     expect(rows.map((row) => row.tabIndex)).toEqual([-1, -1, 0])
+  })
+
+  it("keeps exactly one tab stop when the arrow-selected row leaves the queue or the route changes", async () => {
+    const [one, two, three] = [make("1"), make("2"), make("3")]
+    const host = await render([one, two, three], "andrey", prListKey(one))
+    rowLinks(host)[0]?.focus()
+    await act(async () => {
+      rowLinks(host)[0]?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" }))
+    })
+    expect(rowLinks(host).map((row) => row.tabIndex)).toEqual([-1, 0, -1])
+
+    await draw([one, three], "andrey", prListKey(one))
+    expect(rowLinks(host).map((row) => row.tabIndex)).toEqual([0, -1])
+
+    await draw([one, three], "andrey", prListKey(three))
+    expect(rowLinks(host).map((row) => row.tabIndex)).toEqual([-1, 0])
   })
 })

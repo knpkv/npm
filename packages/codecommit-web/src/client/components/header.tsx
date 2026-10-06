@@ -24,9 +24,13 @@ import {
   ScrollTextIcon,
   SunIcon
 } from "lucide-react"
+import { useMemo } from "react"
 import { Link, useLocation, useNavigate } from "react-router"
 import { appStateAtom, notificationsSsoLogoutAtom, refreshAtom } from "../atoms/app.js"
 import { commandPaletteAtom } from "../atoms/ui.js"
+import { usePublishedBlockSize } from "../hooks/usePublishedBlockSize.js"
+import { queuePullRequests } from "../utils/queuePullRequests.js"
+import { yourReviewCount } from "./workbench-queue.js"
 import styles from "./header.module.css"
 import { useTheme } from "./theme-provider.js"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.js"
@@ -87,6 +91,7 @@ export function SyncStatus({ detail, label, state }: SyncStatusProps) {
 }
 
 export function Header() {
+  const headerRef = usePublishedBlockSize<HTMLElement>("--app-header-block-size")
   const state = useAtomValue(appStateAtom)
   const refresh = useAtomSet(refreshAtom)
   const ssoLogout = useAtomSet(notificationsSsoLogoutAtom)
@@ -97,7 +102,7 @@ export function Header() {
   const isLoading = state.status === "loading"
   const hasError = state.status === "error"
   const notifCount = state.unreadNotificationCount ?? 0
-  const reviewCount = state.pendingReviewCount ?? 0
+  const reviewCount = useMemo(() => yourReviewCount(queuePullRequests(state), state.currentUser), [state])
   const activeSandboxCount = (state.sandboxes ?? []).filter(
     (sandbox) =>
       sandbox.status === "running" ||
@@ -117,7 +122,7 @@ export function Header() {
   const ThemeIcon = theme === "dark" ? MoonIcon : theme === "light" ? SunIcon : MonitorIcon
 
   return (
-    <header className={styles.header}>
+    <header className={styles.header} ref={headerRef}>
       <Link aria-label="CodeCommit pull requests" className={styles.brand} to="/">
         <span aria-hidden="true" className={styles.brandMark}>
           <GitPullRequestIcon />

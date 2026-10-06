@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "types": ["node"]
+  },
+  "include": ["src"]
+}

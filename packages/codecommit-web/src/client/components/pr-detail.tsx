@@ -80,7 +80,11 @@ import { useComments } from "../hooks/useComments.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
 import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
-import { matchesCodeCommitPullRequestRoute, type CodeCommitPullRequestRouteCoordinates } from "../codecommit-route.js"
+import {
+  matchesCodeCommitPullRequestRoute,
+  pullRequestRouteCoordinates,
+  type CodeCommitPullRequestRouteCoordinates
+} from "../codecommit-route.js"
 import { encodePullRequestCoordinates } from "../../pull-request-coordinates.js"
 import {
   type ReviewCommentNavigation,
@@ -891,14 +895,10 @@ export function PRDetail() {
   const updateRule = useAtomSet(updateApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
   const routeSelection = useMemo(() => {
-    if (prId === undefined || prId.length === 0) return { pullRequest: null, ambiguous: false }
-    let route: CodeCommitPullRequestRouteCoordinates = { pullRequestId: prId }
-    if (accountId !== undefined) route = { ...route, accountId }
-    if (searchParams.has("region")) route = { ...route, region: searchParams.get("region") ?? "" }
-    if (searchParams.has("repository")) {
-      route = { ...route, repositoryName: searchParams.get("repository") ?? "" }
-    }
-    return selectCodeCommitPullRequest(state.pullRequests, route)
+    const route = pullRequestRouteCoordinates(accountId, prId, searchParams)
+    return route === undefined
+      ? { pullRequest: null, ambiguous: false }
+      : selectCodeCommitPullRequest(state.pullRequests, route)
   }, [accountId, prId, searchParams, state.pullRequests])
   const pr = routeSelection.pullRequest
   const routeHasPartialCoordinates = searchParams.has("repository") !== searchParams.has("region")

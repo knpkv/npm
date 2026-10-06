@@ -1,4 +1,4 @@
-/* Rail beside the pull request from 760px; the pull request alone below that. */
+/* Rail beside the pull request from 760px of content (an 800px window); the pull request alone below. */
 
 .container {
   container: workbench / inline-size;
@@ -29,7 +29,8 @@
 
   .rail {
     display: block;
-    inset-block-start: var(--rly-space-16);
+    /* Below the sticky app header, whose height grows when it wraps onto two rows. */
+    inset-block-start: calc(var(--app-header-block-size, 4.5rem) + var(--rly-space-16));
     position: sticky;
   }
 }

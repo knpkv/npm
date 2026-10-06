@@ -77,7 +77,7 @@ const serve = async (page: Page) => {
 
 const detail = (id: string) => `/accounts/production/prs/${id}?repository=infra-core&region=eu-west-1`
 
-// The rail sits beside the open pull request from 760px, groups the queue by what the viewer has
+// The rail sits beside the open pull request in windows 800px and wider, groups the queue by what the viewer has
 // to do, and marks the open pull request; a phone shows the pull request alone.
 test("shows the queue rail beside the pull request on wide screens", async ({ page }) => {
   await page.setViewportSize({ height: 900, width: 1280 })
@@ -114,4 +114,65 @@ test("walks the rail with the arrow keys and opens a row with Enter", async ({ p
   await page.keyboard.press("Enter")
   await expect(page.getByRole("heading", { level: 1, name: "Rotate signing keys" })).toBeVisible()
   await expect(rail.getByRole("link", { name: /Rotate signing keys/ })).toHaveAttribute("aria-current", "page")
+})
+
+test("shows the rail from an 800px window and keeps a 768px tablet on the phone layout", async ({ page }) => {
+  await serve(page)
+  const cases: ReadonlyArray<readonly [width: number, visible: boolean]> = [[768, false], [799, false], [800, true]]
+  for (const [width, visible] of cases) {
+    await page.setViewportSize({ height: 900, width })
+    await page.goto(detail("12"))
+    await expect(page.getByRole("heading", { level: 1, name: "Bound patch reads" })).toBeVisible()
+    const rail = page.getByRole("region", { name: /^Queue/ })
+    if (visible) await expect(rail).toBeVisible()
+    else await expect(rail).toBeHidden()
+  }
+})
+
+test("keeps the rail below the sticky header after scrolling, with one and two header rows", async ({ page }) => {
+  await serve(page)
+  for (const width of [1280, 1024]) {
+    await page.setViewportSize({ height: 700, width })
+    await page.goto(detail("12"))
+    const title = page.getByRole("heading", { level: 2, name: /^Queue/ })
+    await expect(title).toBeVisible()
+    await page.mouse.wheel(0, 1500)
+    await expect
+      .poll(async () => {
+        const header = await page.locator("header").first().boundingBox()
+        const heading = await title.boundingBox()
+        return header !== null && heading !== null && heading.y >= header.y + header.height
+      })
+      .toBe(true)
+  }
+})
+
+test("marks only the open pull request when two share a number in different regions", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  await page.route("**/api/events/", (route) =>
+    route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          accounts: [],
+          currentUser: "viewer",
+          enabledProfiles: ["production"],
+          pendingReviewCount: 2,
+          pullRequests: [
+            pullRequest("12", { title: "Bound patch reads" }),
+            {
+              ...pullRequest("12", { title: "Same number in Virginia" }),
+              account: { awsAccountId: "111122223333", profile: "production", region: "us-east-1" }
+            }
+          ],
+          sandboxes: [],
+          status: "idle"
+        })
+      }\n\n`,
+      contentType: "text/event-stream"
+    }))
+  await page.goto("/accounts/production/prs/12?repository=infra-core&region=us-east-1")
+  const rail = page.getByRole("region", { name: /^Queue/ })
+  await expect(rail.locator("a[aria-current='page']")).toHaveCount(1)
+  await expect(rail.getByRole("link", { name: /Same number in Virginia/ })).toHaveAttribute("aria-current", "page")
 })

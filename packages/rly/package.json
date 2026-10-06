@@ -97,6 +97,7 @@
   "devDependencies": {
     "@effect/platform-node": "4.0.0",
     "@effect/vitest": "4.0.0",
+    "@knpkv/storybook-config": "workspace:*",
     "@playwright/test": "1.63.0",
     "@storybook/addon-a11y": "10.6.1",
     "@storybook/addon-docs": "10.6.1",

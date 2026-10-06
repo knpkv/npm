@@ -7,7 +7,7 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   /* Fits the viewport beside a long pull request; the list scrolls inside a closed box. */
-  max-block-size: calc(100dvh - var(--rly-space-32));
+  max-block-size: calc(100dvh - var(--app-header-block-size, 4.5rem) - var(--rly-space-32));
   min-inline-size: 0;
 }
 
