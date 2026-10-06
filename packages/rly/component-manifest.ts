@@ -164,6 +164,29 @@ export const componentManifest = {
     }
   ],
   components: [
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RLY_REGION_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_REGION_VARIANTS" },
+        { kind: "value", name: "Region" },
+        { kind: "type", name: "RegionProps" },
+        { kind: "type", name: "RlyRegionHeadingLevel" },
+        { kind: "type", name: "RlyRegionTone" }
+      ],
+      name: "Region",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/Region.tsx",
+      status: "experimental",
+      styles: ["src/patterns/Region.module.css"],
+      variants: [{ defaultValue: "default", name: "tone", values: ["default", "tray"] }],
+      visual: {
+        story: "stories/patterns/Region.stories.tsx",
+        storyId: "patterns-region--states",
+        tests: ["test/patterns/Region.test.tsx"]
+      }
+    },
     // scaffold:components:insert
     {
       category: "diff",
