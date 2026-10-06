@@ -8,7 +8,9 @@ test("a tab without a session shows one screen that names jcf web login", async 
   await page.goto("/")
   await expect(page.getByText("This tab is not signed in")).toBeVisible()
   await expect(page.getByText("jcf web login", { exact: true })).toBeVisible()
-  await expect(page.getByRole("button")).toHaveCount(0)
+  // The only control is the one that copies the command.
+  await expect(page.getByRole("button")).toHaveCount(1)
+  await expect(page.getByRole("button", { name: "Copy jcf web login" })).toBeVisible()
   await expect(page.getByText(/saved|Missing or invalid owner session/u)).toHaveCount(0)
 })
 
@@ -31,8 +33,11 @@ test("a week without Jira says Jira is not connected and names the command", asy
   await page.goto(url)
   await expect(page.getByRole("heading", { name: "7–13 September 2026" })).toBeVisible()
   const jira = page.getByRole("group", { name: "Jira totals" })
-  await expect(jira).toContainText("Not connected. Run jcf auth jira token")
+  await expect(jira).toContainText("Jira not connected. Run jcf auth jira token")
+  await expect(jira.getByRole("button", { name: "Copy jcf auth jira token" })).toBeVisible()
   await expect(jira).not.toContainText("saved")
   await expect(page.getByRole("button", { name: /^Jira entries/u })).toHaveCount(0)
+  // ui-b: there is no Jira-only week to choose while Jira is not connected.
+  await expect(page.getByRole("button", { name: "Jira only" })).toHaveCount(0)
   await expect(page.getByRole("group", { name: "Clockify totals" })).toContainText("saved")
 })

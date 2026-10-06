@@ -1318,3 +1318,37 @@ body,
   margin-inline: auto;
   padding: var(--rly-space-48) var(--rly-space-16);
 }
+
+/* A first-run screen: one even-bordered surface, heading in text ink, the command to run. */
+.jcf-first-run {
+  display: grid;
+  gap: var(--rly-space-12);
+  padding: var(--rly-space-24);
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
+  color: var(--rly-color-text-1);
+}
+.jcf-first-run p {
+  margin: 0;
+}
+.jcf-commands {
+  display: grid;
+  gap: var(--rly-space-8);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* A command and its Copy button stay together; a long command wraps at its spaces. */
+.jcf-command {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rly-space-8);
+}
+.jcf-command code {
+  overflow-wrap: break-word;
+}
+.jcf-bar[hidden] {
+  display: none;
+}

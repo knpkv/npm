@@ -89,11 +89,46 @@ const incompleteWrite = (result: WriteResultResponse | null): boolean =>
     (outcome) => outcome._tag === "Refused" || outcome._tag === "NotLoggedIn" || outcome._tag === "PartiallyWritten"
   )
 
+/**
+ * A terminal command the reader has to run, with a Copy button: the one thing they must type, made
+ * one click. If the clipboard is unavailable the button says so and the command stays selectable.
+ */
+const Command = (props: { readonly command: string }) => {
+  const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle")
+  return (
+    <span className="jcf-command">
+      <code>{props.command}</code>
+      <Button
+        aria-label={`Copy ${props.command}`}
+        onClick={() => {
+          navigator.clipboard.writeText(props.command).then(
+            () => setCopied("copied"),
+            () => setCopied("failed")
+          )
+        }}
+        size="compact"
+      >
+        {copied === "copied" ? "Copied" : copied === "failed" ? "Select to copy" : "Copy"}
+      </Button>
+    </span>
+  )
+}
+
 /** A system jcf cannot read: its totals are unknown, not zero, and this says what connects it. */
 const NotConnected = (props: { readonly command: string }) => (
   <span className="jcf-not-connected">
-    — Not connected. Run <code>{props.command}</code>
+    not connected. Run <Command command={props.command} />
   </span>
+)
+
+/** A first-run screen: a heading in text ink and the step that gets past it. */
+const FirstRun = (props: { readonly title: string; readonly children: ReactNode }) => (
+  <section className="jcf-first-run" aria-labelledby="jcf-first-run-title">
+    <Text as="h2" id="jcf-first-run-title" variant="card-title">
+      {props.title}
+    </Text>
+    {props.children}
+  </section>
 )
 
 /**
@@ -115,19 +150,15 @@ const SignedOut = (props: { readonly theme: RlyTheme }) => {
         <Text as="h1" variant="section-title">
           Jira and Clockify week
         </Text>
-        <StatePanel
-          title="This tab is not signed in"
-          description={
-            <>
-              <p>
-                In a terminal on this machine, run <code>jcf web login</code> and open the link it prints.
-              </p>
-              <p>
-                A link works once, within a minute. If jcf-web is not running, start it with <code>jcf-web</code>.
-              </p>
-            </>
-          }
-        />
+        <FirstRun title="This tab is not signed in">
+          <p>In a terminal on this machine, run this and open the link it prints:</p>
+          <p>
+            <Command command="jcf web login" />
+          </p>
+          <p className="jcf-muted">
+            A link works once, within a minute. If jcf-web is not running, start it with <code>jcf-web</code>.
+          </p>
+        </FirstRun>
       </main>
     </ThemeProvider>
   )
@@ -236,23 +267,22 @@ export const App = () => {
         <ReadStatus key={startedAt} progress={progress} startedAt={startedAt} onCancel={cancel} mode={readMode} />
       ) : null}
       {nothingConnected && sources !== null ? (
-        <StatePanel
-          title="Connect Jira or Clockify"
-          description={
-            <>
-              <p>
-                Nothing is connected yet. In a terminal on this machine, run <code>{sources.jira.connect}</code> for
-                Jira, <code>{sources.clockify.connect}</code> for Clockify, or both.
-              </p>
-              <p>Then choose Refresh totals.</p>
-            </>
-          }
-          action={
-            <Button onClick={retry} size="compact">
-              Refresh totals
+        <FirstRun title="Connect Jira or Clockify">
+          <p>Nothing is connected yet. In a terminal on this machine, run one or both:</p>
+          <ul className="jcf-commands">
+            <li>
+              Jira: <Command command={sources.jira.connect} />
+            </li>
+            <li>
+              Clockify: <Command command={sources.clockify.connect} />
+            </li>
+          </ul>
+          <p>
+            <Button onClick={retry} size="compact" variant="primary">
+              Show my week
             </Button>
-          }
-        />
+          </p>
+        </FirstRun>
       ) : readFailure === null ? null : (
         <StatePanel
           announce="assertive"
@@ -323,7 +353,13 @@ export const App = () => {
             </p>
             <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} value={theme} />
           </header>
-          <div className="jcf-bar" role="toolbar" aria-label="Week controls" inert={sheetOpen}>
+          <div
+            className="jcf-bar"
+            role="toolbar"
+            aria-label="Week controls"
+            inert={sheetOpen}
+            hidden={nothingConnected}
+          >
             <div className="jcf-bar-group" role="group" aria-label="Week">
               <Button
                 aria-label="Previous week"
@@ -346,21 +382,27 @@ export const App = () => {
               </Button>
             </div>
             <div className="jcf-bar-group" role="group" aria-label="Systems to reconcile">
-              {scopeLabels.map((option) => (
-                <Button
-                  aria-pressed={scope === option.scope}
-                  disabled={busy}
-                  key={option.scope}
-                  onClick={() => {
-                    setOpen(null)
-                    chooseScope(option.scope)
-                  }}
-                  size="compact"
-                  variant={option.scope === scope ? "primary" : "quiet"}
-                >
-                  {option.label}
-                </Button>
-              ))}
+              {scopeLabels
+                .filter(
+                  (option) =>
+                    // A system that is not connected has no week of its own to show.
+                    (option.scope !== "jira" || jiraConnected) && (option.scope !== "clockify" || clockifyConnected)
+                )
+                .map((option) => (
+                  <Button
+                    aria-pressed={scope === option.scope}
+                    disabled={busy}
+                    key={option.scope}
+                    onClick={() => {
+                      setOpen(null)
+                      chooseScope(option.scope)
+                    }}
+                    size="compact"
+                    variant={option.scope === scope ? "primary" : "quiet"}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
             </div>
             <div className="jcf-bar-group jcf-bar-primary">
               <span hidden id="jcf-log-time-reason">
