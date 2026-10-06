@@ -130,25 +130,30 @@ test("shows the rail from an 800px window and keeps a 768px tablet on the phone 
 
 // Scrolls to the very bottom: there the rail's grid ends above the page's bottom padding, the worst
 // case for a sticky box. A fixed wheel distance stopped short of it wherever the page ran longer
-// (fonts), so the check passed locally and failed in CI.
+// (fonts). The page keeps growing while the pull request loads, so every poll scrolls to the bottom
+// it has now and measures in the same task, instantly, with no smooth-scroll settling in between.
 test("keeps the rail below the sticky header after scrolling, with one and two header rows", async ({ page }) => {
   await serve(page)
   for (const width of [1280, 1024]) {
     await page.setViewportSize({ height: 700, width })
     await page.goto(detail("12"))
-    const title = page.getByRole("heading", { level: 2, name: /^Queue/ })
-    await expect(title).toBeVisible()
-    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
-    await expect.poll(() => page.evaluate(() => window.scrollY + window.innerHeight)).toBeGreaterThanOrEqual(
-      await page.evaluate(() => document.documentElement.scrollHeight - 1)
-    )
+    await expect(page.getByRole("heading", { level: 2, name: /^Queue/ })).toBeVisible()
     await expect
-      .poll(async () => {
-        const header = await page.locator("header").first().boundingBox()
-        const heading = await title.boundingBox()
-        return header !== null && heading !== null && heading.y >= header.y + header.height
-      })
-      .toBe(true)
+      .poll(() =>
+        page.evaluate(() => {
+          const root = document.documentElement
+          window.scrollTo({ behavior: "instant", top: root.scrollHeight })
+          const header = document.querySelector("header")?.getBoundingClientRect()
+          const title = [...document.querySelectorAll("h2")]
+            .find((heading) => heading.textContent?.startsWith("Queue") === true)
+            ?.getBoundingClientRect()
+          return {
+            atBottom: Math.ceil(window.scrollY + window.innerHeight) >= root.scrollHeight - 1,
+            belowHeader: header !== undefined && title !== undefined && title.top >= header.bottom
+          }
+        })
+      )
+      .toEqual({ atBottom: true, belowHeader: true })
   }
 })
 
