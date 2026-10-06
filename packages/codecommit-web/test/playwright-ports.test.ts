@@ -7,7 +7,8 @@ import {
   keepLastRunAt,
   playwrightPort,
   PlaywrightPortVariableError,
-  pruneStaleRunDirectories
+  pruneStaleRunDirectories,
+  removeIfStale
 } from "../../../playwright-ports.ts"
 
 const variable = "PLAYWRIGHT_PORTS_TEST_PORT"
@@ -74,6 +75,10 @@ describe("pruneStaleRunDirectories", () => {
     } finally {
       rmSync(parent, { force: true, recursive: true })
     }
+  })
+
+  it("skips a folder another run removed after it was listed", () => {
+    expect(removeIfStale(join(tmpdir(), "playwright-runs-gone-0", "suite-41000"), 1, Date.now())).toBe(false)
   })
 
   it("does nothing when the parent folder does not exist yet", () => {

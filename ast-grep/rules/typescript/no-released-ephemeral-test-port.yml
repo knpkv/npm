@@ -41,6 +41,15 @@ rule:
                 has:
                   pattern: $RESOLVE($VALUE)
                   stopBy: end
+                  # A handed-on value (`port`, `address.port`), not `resolve(undefined)`.
+                  has:
+                    field: arguments
+                    has:
+                      any:
+                        - kind: identifier
+                          not:
+                            regex: "^undefined$"
+                        - kind: member_expression
 
 files:
   - "packages/*/test/**/*.ts"

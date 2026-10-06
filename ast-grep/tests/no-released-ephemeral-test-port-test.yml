@@ -49,6 +49,10 @@ valid:
         server.close(() => done())
       })
     })
+  - |
+    new Promise<void>((resolve, reject) => {
+      server.listen(0, host, () => server.close((error) => (error ? reject(error) : resolve(undefined))))
+    })
 invalid:
   - |
     new Promise<number>((resolve, reject) => {

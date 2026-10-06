@@ -104,9 +104,26 @@ export const pruneStaleRunDirectories = (
     if (!entry.isDirectory() || !entry.name.startsWith(prefix) || !/^\d+$/.test(entry.name.slice(prefix.length))) {
       return []
     }
-    const path = join(parent, entry.name)
-    if (now - statSync(path).mtimeMs <= maxAgeMillis) return []
-    rmSync(path, { force: true, recursive: true })
-    return [entry.name]
+    return removeIfStale(join(parent, entry.name), maxAgeMillis, now) ? [entry.name] : []
   })
+}
+
+const isMissing = Schema.is(Schema.Struct({ code: Schema.Literal("ENOENT") }))
+
+/**
+ * Removes `path` when nothing has written to it for `maxAgeMillis`. A folder
+ * another run removed first is simply gone: it returns false, never throws.
+ */
+export const removeIfStale = (path: string, maxAgeMillis: number, now: number): boolean => {
+  const modified = (() => {
+    try {
+      return statSync(path).mtimeMs
+    } catch (cause) {
+      if (isMissing(cause)) return null
+      throw cause
+    }
+  })()
+  if (modified === null || now - modified <= maxAgeMillis) return false
+  rmSync(path, { force: true, recursive: true })
+  return true
 }

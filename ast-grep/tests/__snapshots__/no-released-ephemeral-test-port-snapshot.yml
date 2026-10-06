@@ -29,6 +29,14 @@ snapshots:
         style: secondary
         start: 24
         end: 215
+      - source: port
+        style: secondary
+        start: 197
+        end: 201
+      - source: port
+        style: secondary
+        start: 197
+        end: 201
       - source: resolve(port)
         style: secondary
         start: 189
@@ -89,6 +97,14 @@ snapshots:
         style: secondary
         start: 0
         end: 187
+      - source: selected
+        style: secondary
+        start: 169
+        end: 177
+      - source: selected
+        style: secondary
+        start: 169
+        end: 177
       - source: resolve(selected)
         style: secondary
         start: 161
@@ -147,6 +163,14 @@ snapshots:
         style: secondary
         start: 0
         end: 228
+      - source: address.port
+        style: secondary
+        start: 190
+        end: 202
+      - source: address.port
+        style: secondary
+        start: 190
+        end: 202
       - source: resolve(address.port)
         style: secondary
         start: 182
@@ -207,6 +231,14 @@ snapshots:
         style: secondary
         start: 0
         end: 246
+      - source: address.port
+        style: secondary
+        start: 207
+        end: 219
+      - source: address.port
+        style: secondary
+        start: 207
+        end: 219
       - source: resolve(address.port)
         style: secondary
         start: 199
