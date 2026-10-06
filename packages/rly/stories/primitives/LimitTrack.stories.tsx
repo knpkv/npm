@@ -7,12 +7,15 @@ import { Text } from "../../src/primitives/Text.js"
 import { TrackKey } from "../../src/primitives/TrackKey.js"
 import { forcedColoursActive, pageStyle, stackStyle } from "./storyStyles.js"
 
-const rowStyle: CSSProperties = {
+// One grid for every row, so all tracks share one width and one 0–100% scale; the value column
+// wraps rather than pushing the page wider than a phone.
+const gridStyle: CSSProperties = {
   alignItems: "center",
   display: "grid",
-  gap: "var(--rly-space-12)",
-  gridTemplateColumns: "minmax(7rem, 10rem) minmax(8rem, 1fr) minmax(4ch, auto)"
+  gap: "var(--rly-space-8) var(--rly-space-12)",
+  gridTemplateColumns: "minmax(0, 10rem) minmax(4rem, 1fr) auto"
 }
+const rowStyle: CSSProperties = { display: "contents" }
 
 const limits = [
   { name: "5-hour window", state: "ok", value: 42, text: "42%" },
@@ -35,17 +38,24 @@ const Limits = () => (
       Limits
     </Text>
     <div style={stackStyle}>
-      {limits.map((limit) => (
-        <div data-limit={limit.name} data-state={limit.state} key={limit.name} style={rowStyle}>
-          <Text variant="label">{limit.name}</Text>
-          <LimitTrack
-            {...("projected" in limit ? { projected: limit.projected } : {})}
-            stale={"stale" in limit}
-            value={limit.value}
-          />
-          <Text variant="label">{limit.text}</Text>
+      <div style={gridStyle}>
+        {limits.map((limit) => (
+          <div data-limit={limit.name} data-state={limit.state} key={limit.name} style={rowStyle}>
+            <Text variant="label">{limit.name}</Text>
+            <LimitTrack
+              {...("projected" in limit ? { projected: limit.projected } : {})}
+              stale={"stale" in limit}
+              value={limit.value}
+            />
+            <Text variant="label">{limit.text}</Text>
+          </div>
+        ))}
+        <div data-limit="Dense row" style={rowStyle}>
+          <Text variant="label">Dense row</Text>
+          <LimitTrack size="slim" value={57} />
+          <Text variant="label">57%</Text>
         </div>
-      ))}
+      </div>
       <TrackKey
         items={[
           { label: "80%, near the limit", mark: "near" },
@@ -54,11 +64,6 @@ const Limits = () => (
         ]}
         label="What the track marks mean"
       />
-      <div data-limit="Dense row" style={rowStyle}>
-        <Text variant="label">Dense row</Text>
-        <LimitTrack size="slim" value={57} />
-        <Text variant="label">57%</Text>
-      </div>
     </div>
     <ChartLegend
       items={[

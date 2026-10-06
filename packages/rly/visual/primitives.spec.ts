@@ -51,6 +51,23 @@ test("keeps state explanations readable without horizontal overflow at 320 pixel
   expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
 })
 
+test("draws every gallery track on one scale and fits a 320 pixel screen", async ({ page }) => {
+  for (const width of [1000, 320]) {
+    await page.setViewportSize({ height: 900, width })
+    await page.goto(story("primitives-limittrack--gallery"))
+    const widths = await page.locator("[data-limit] [data-tone]").evaluateAll((tracks) =>
+      tracks.map((track) => Math.round(track.getBoundingClientRect().width))
+    )
+    expect(widths.length).toBeGreaterThan(1)
+    expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1)
+    const dimensions = await page.evaluate(() => ({
+      client: document.documentElement.clientWidth,
+      scroll: document.documentElement.scrollWidth
+    }))
+    expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
+  }
+})
+
 test("preserves stale readings and their key in forced colours", async ({ page }) => {
   await page.goto(story("primitives-limittrack--gallery"))
   const stale = page.locator("[data-limit=\"Codex weekly\"] [data-part=\"fill\"]")

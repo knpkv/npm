@@ -80,9 +80,11 @@ export const LimitTrack = ({
 }: LimitTrackProps): ReactElement => {
   const value = readingOf(rawValue)
   const nearMark = requireFinite(near, "LimitTrack near")
-  const accessible = !decorative && label !== undefined && valueText !== undefined
-  const accessibleLabel = accessible ? requireText(label, "LimitTrack label") : undefined
-  const accessibleValueText = accessible ? requireText(valueText, "LimitTrack valueText") : undefined
+  // An explicit `decorative={false}` is a promise to announce the track; a missing label or value
+  // text (possible from untyped callers) throws instead of quietly hiding it.
+  const accessible = !decorative
+  const accessibleLabel = accessible ? requireText(label ?? "", "LimitTrack label") : undefined
+  const accessibleValueText = accessible ? requireText(valueText ?? "", "LimitTrack valueText") : undefined
   const meter = accessible && value !== null
   const projection =
     value !== null && projected !== undefined && Number.isFinite(projected) && projected > value

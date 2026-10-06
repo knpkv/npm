@@ -201,8 +201,16 @@ mode collapses the series to `CanvasText`.
 ```tsx
 import { ChartLegend, LimitTrack, TrackKey } from "@knpkv/rly/primitives"
 
-<LimitTrack projected={103} value={84} />
-<TrackKey label="What the track marks mean" items={[{ mark: "near", label: "80%, near the limit" }]} />
+<p>
+  Weekly <LimitTrack projected={103} value={84} /> 84%, about 103% at reset
+</p>
+<TrackKey
+  label="What the track marks mean"
+  items={[
+    { mark: "near", label: "80%, near the limit" },
+    { mark: "projected", label: "Where it is heading at reset" }
+  ]}
+/>
 <ChartLegend label="Bookings by colour" items={[{ id: "b1", label: "RLY-142", series: 1 }]} />
 ```
 

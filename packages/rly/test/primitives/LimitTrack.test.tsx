@@ -2,7 +2,12 @@
 
 import type { ReactElement } from "react"
 import { describe, expect, it } from "vitest"
-import { LimitTrack, limitTrackTone, RLY_LIMIT_TRACK_VARIANTS } from "../../src/primitives/LimitTrack.js"
+import {
+  LimitTrack,
+  type LimitTrackProps,
+  limitTrackTone,
+  RLY_LIMIT_TRACK_VARIANTS
+} from "../../src/primitives/LimitTrack.js"
 import { render as renderRoot } from "./render.js"
 
 const render = (element: ReactElement): HTMLElement => {
@@ -59,6 +64,20 @@ describe("LimitTrack", () => {
     expect(meter.getAttribute("aria-valuetext")).toBe("62% used")
     expect(meter.getAttribute("aria-hidden")).toBeNull()
     expect(() => render(<LimitTrack decorative={false} label=" " value={1} valueText="1%" />)).toThrow()
+    // An untyped JavaScript caller can drop the label or value text; that throws rather than hiding
+    // the track. The guard stands in for that caller, admitting props TypeScript would reject.
+    interface UntypedTrackProps {
+      readonly decorative: boolean
+      readonly label?: string
+      readonly value: number
+      readonly valueText?: string
+    }
+    const fromJavaScript = (props: UntypedTrackProps): props is UntypedTrackProps & LimitTrackProps => !props.decorative
+    const noLabel: UntypedTrackProps = { decorative: false, value: 1, valueText: "1%" }
+    const noValueText: UntypedTrackProps = { decorative: false, label: "Weekly", value: 1 }
+    if (!fromJavaScript(noLabel) || !fromJavaScript(noValueText)) throw new Error("fixtures must be props")
+    expect(() => render(<LimitTrack {...noLabel} />)).toThrow("LimitTrack label must contain visible text")
+    expect(() => render(<LimitTrack {...noValueText} />)).toThrow("LimitTrack valueText must contain visible text")
   })
 
   it("describes an unknown reading without claiming a numeric meter value", () => {

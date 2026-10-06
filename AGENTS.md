@@ -184,6 +184,10 @@ updates inside an already-mounted status/live region from dynamically inserted
 alerts, which may announce immediately; never claim every live region is silent on
 insertion.
 
+Decorative `LimitTrack` examples in `packages/rly/README.md` and `packages/rly/stories/**` must
+show adjacent text carrying the value, its age, and any projection, and every mark they draw must
+have a matching `TrackKey` item; otherwise use a labelled `decorative={false}` track.
+
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 
 Security-sensitive canonical-payload documentation and code examples must name the persisted representation and every identity input. Raw provider secrets must not be described as durable payload fields, and idempotency examples must include every identity component used by production.
