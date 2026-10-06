@@ -28,14 +28,13 @@
   },
   "files": [
     "dist",
-    "!dist/*.tsbuildinfo",
     "README.md"
   ],
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b tsconfig.build.json",
+    "build": "tsc -b tsconfig.build.json --force",
     "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run"

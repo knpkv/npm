@@ -1477,7 +1477,6 @@ class PackageScriptPortabilityError extends Data.TaggedError("PackageScriptPorta
 
 const PackageManifest = Schema.fromJsonString(
   Schema.Struct({
-    name: Schema.optional(Schema.String),
     scripts: Schema.optional(Schema.Record(Schema.String, Schema.String)),
     dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
     devDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String))
@@ -1615,68 +1614,109 @@ export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependenci
   return result
 }
 
-// A package built from another package's lifecycle hook (`pnpm --filter <name> build`) is rebuilt
-// by every such hook, and under a recursive run those hooks overlap with packages compiling against
-// its output. A forced build rewrites that output each time, so a reader can see a half-written
-// `dist`; an incremental build writes nothing when it is up to date. Its buildinfo must live under
-// the output it describes, so deleting `dist` still forces a real rebuild.
-const lifecycleBuildTarget = /\bpnpm\s+--filter\s+"?(@[\w.-]+\/[\w.-]+)"?\s+build\b/gu
-const lifecycleBuildTargets = (scripts) =>
-  Object.values(scripts ?? {}).flatMap((command) =>
-    [...command.matchAll(lifecycleBuildTarget)].map((match) => match[1])
-  )
-export const findForcedLifecycleBuildTargets = (manifests) => {
-  const targets = new Set(manifests.flatMap(({ scripts }) => lifecycleBuildTargets(scripts)))
-  return manifests
-    .filter(
-      ({ name, scripts }) =>
-        name !== undefined && targets.has(name) && /(?:^|\s)--force(?:\s|$)/u.test(scripts?.build ?? "")
-    )
-    .map(
-      ({ location, name }) =>
-        `${location}: scripts.build must not use --force: ${name} is rebuilt from other packages' lifecycle hooks, and a forced build rewrites its output while they compile against it`
-    )
-}
+// Package lifecycle hooks rebuild workspace dependencies for standalone runs (`pnpm --filter X check`
+// on a fresh checkout). Inside a recursive root run those hooks overlap with sibling packages
+// compiling against the same dependency output: a forced rebuild rewrites `dist` while they read it.
+// The recursive root runs already order dependencies (`--sort`, or a prior `pnpm build`), so every
+// recursive `run build` or `run check` from the root manifest disables pre/post hooks.
+const prePostScriptsOff = "--config.enable-pre-post-scripts=false"
+const recursiveLifecycleRunsWithHooks = (command) =>
+  shellCommandSegments(command).flatMap((segment) => {
+    const words = shellWords(segment.text) ?? []
+    const runIndex = words.indexOf("run")
+    const isRecursivePnpmRun =
+      words[0] === "pnpm" &&
+      (words.includes("--recursive") || words.includes("-r")) &&
+      runIndex !== -1 &&
+      ["build", "check"].includes(words[runIndex + 1] ?? "")
+    return isRecursivePnpmRun && !words.slice(0, runIndex).includes(prePostScriptsOff) ? [segment.text.trim()] : []
+  })
+export const findRecursiveRunsWithLifecycleHooks = (manifestPath, scripts) =>
+  manifestPath !== "package.json"
+    ? []
+    : Object.entries(scripts ?? {}).flatMap(([name, command]) =>
+        recursiveLifecycleRunsWithHooks(command).map(
+          (run) =>
+            `${manifestPath}: scripts.${name} runs "${run}" with package lifecycle hooks; pass ${prePostScriptsOff} so hooks that rebuild a dependency cannot rewrite it while siblings compile against it`
+        )
+      )
 
 assert.deepEqual(
-  findForcedLifecycleBuildTargets([
-    {
-      location: "packages/shared/package.json",
-      name: "@knpkv/shared",
-      scripts: { build: "tsc -b tsconfig.build.json --force" }
-    },
-    {
-      location: "packages/app/package.json",
-      name: "@knpkv/app",
-      scripts: { precheck: "pnpm --filter @knpkv/shared build" }
-    }
-  ]),
+  findRecursiveRunsWithLifecycleHooks("package.json", {
+    build: 'tsc -b tsconfig.build.json && pnpm --recursive --sort --filter "./packages/**/*" run build'
+  }),
   [
-    "packages/shared/package.json: scripts.build must not use --force: @knpkv/shared is rebuilt from other packages' lifecycle hooks, and a forced build rewrites its output while they compile against it"
+    'package.json: scripts.build runs "pnpm --recursive --sort --filter "./packages/**/*" run build" with package lifecycle hooks; pass --config.enable-pre-post-scripts=false so hooks that rebuild a dependency cannot rewrite it while siblings compile against it'
   ]
 )
 assert.deepEqual(
-  findForcedLifecycleBuildTargets([
-    {
-      location: "packages/shared/package.json",
-      name: "@knpkv/shared",
-      scripts: { build: "tsc -b tsconfig.build.json" }
-    },
-    {
-      location: "packages/app/package.json",
-      name: "@knpkv/app",
-      scripts: { precheck: 'pnpm --filter "@knpkv/shared" build' }
-    }
-  ]),
+  findRecursiveRunsWithLifecycleHooks("package.json", {
+    check: "pnpm build && pnpm -r --config.enable-pre-post-scripts=false --filter './packages/**/*' run check",
+    // Logging the command is not running it.
+    note: "echo 'pnpm --recursive run build'",
+    // Standalone and non-build recursive runs keep their hooks.
+    "test:pack": 'pnpm --recursive --filter "./packages/**/*" --if-present run test:pack'
+  }),
   []
 )
-// Only packages other hooks build are constrained: a standalone `rimraf dist && tsc -b --force` stays valid.
 assert.deepEqual(
-  findForcedLifecycleBuildTargets([
-    { location: "packages/leaf/package.json", name: "@knpkv/leaf", scripts: { build: "rimraf dist && tsc -b --force" } }
-  ]),
+  findRecursiveRunsWithLifecycleHooks("packages/codecommit/package.json", { build: "pnpm -r run build" }),
   []
 )
+
+// The recursive root runs above switch hooks off on one assumption: every package pre/post hook
+// around build, check and test only builds workspace dependencies, which those runs already order.
+// A hook doing anything else (codegen, cleanup, a copy step) would silently stop running there.
+const recursiveLifecycleHookNames = new Set(
+  ["build", "check", "test"].flatMap((lifecycle) => [`pre${lifecycle}`, `post${lifecycle}`])
+)
+const workspaceDependencySelector = /^@[\w.-]+\/[\w.-]+(?:\.\.\.)?$/u
+const isDependencyBuild = (segment) => {
+  const words = shellWords(segment.text)
+  return (
+    (segment.operator === undefined || segment.operator === "&&") &&
+    words !== undefined &&
+    words.length === 4 &&
+    words[0] === "pnpm" &&
+    words[1] === "--filter" &&
+    workspaceDependencySelector.test(words[2] ?? "") &&
+    words[3] === "build"
+  )
+}
+export const findNonDependencyLifecycleHooks = (manifestPath, scripts) =>
+  manifestPath === "package.json"
+    ? []
+    : Object.entries(scripts ?? {})
+        .filter(([name]) => recursiveLifecycleHookNames.has(name))
+        .filter(([, command]) => {
+          const segments = shellCommandSegments(command)
+          return segments.length === 0 || !segments.every(isDependencyBuild)
+        })
+        .map(
+          ([name]) =>
+            `${manifestPath}: scripts.${name} may only build workspace dependencies (pnpm --filter <package> build, joined by &&): recursive root runs skip pre/post hooks`
+        )
+
+assert.deepEqual(
+  findNonDependencyLifecycleHooks("packages/app/package.json", {
+    prebuild: "pnpm --filter @knpkv/shared build && node scripts/codegen.mjs",
+    posttest: "rimraf coverage"
+  }),
+  [
+    "packages/app/package.json: scripts.prebuild may only build workspace dependencies (pnpm --filter <package> build, joined by &&): recursive root runs skip pre/post hooks",
+    "packages/app/package.json: scripts.posttest may only build workspace dependencies (pnpm --filter <package> build, joined by &&): recursive root runs skip pre/post hooks"
+  ]
+)
+assert.deepEqual(
+  findNonDependencyLifecycleHooks("packages/app/package.json", {
+    precheck: "pnpm --filter @knpkv/shared build",
+    pretest: 'pnpm --filter "@knpkv/review..." build && pnpm --filter @knpkv/shared build',
+    // Hooks outside the recursive lifecycles, and the root manifest's own hooks, are not constrained.
+    prestart: "node scripts/prepare.mjs"
+  }),
+  []
+)
+assert.deepEqual(findNonDependencyLifecycleHooks("package.json", { pretest: "node scripts/setup.mjs" }), [])
 
 // Artifact-importing tests need deterministic setup from every test and coverage entry point.
 for (const manifest of ["package.json", "packages/review/package.json"]) {
@@ -3093,7 +3133,6 @@ const program = Effect.gen(function* () {
   const manifestPaths = yield* workspaceManifestPaths(fileSystem, path, repositoryRoot, workspace.packages)
 
   const diagnostics = []
-  const lifecycleManifests = []
   let checked = 0
   for (const manifestPath of manifestPaths) {
     if (!(yield* fileSystem.exists(manifestPath))) continue
@@ -3105,9 +3144,10 @@ const program = Effect.gen(function* () {
         (cause) => new PackageScriptPortabilityError({ cause, reason: `${location}: invalid package manifest` })
       )
     )
-    lifecycleManifests.push({ location, name: manifest.name, scripts: manifest.scripts })
     diagnostics.push(
       ...findNonPortableBuildScripts(location, manifest.scripts),
+      ...findRecursiveRunsWithLifecycleHooks(location, manifest.scripts),
+      ...findNonDependencyLifecycleHooks(location, manifest.scripts),
       ...findCodeCommitWebLifecycleGaps(location, manifest.scripts, manifest.dependencies, manifest.devDependencies)
     )
     const hasStorybookConfig = yield* fileSystem.exists(
@@ -3119,7 +3159,6 @@ const program = Effect.gen(function* () {
     checked += 1
   }
 
-  diagnostics.push(...findForcedLifecycleBuildTargets(lifecycleManifests))
   if (diagnostics.length > 0) {
     return yield* Effect.fail(new PackageScriptPortabilityError({ reason: diagnostics.join("\n") }))
   }
