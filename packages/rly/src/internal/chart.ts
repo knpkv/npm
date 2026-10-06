@@ -53,11 +53,18 @@ export const chooseBinSize = (width: number, count: number, minBar = 6): number 
   return Math.max(1, Math.ceil(count / bars / DAY)) * DAY
 }
 
-/** Group columns into bins of `size`, merging segments by id in first-appearance order. */
+/**
+ * Group columns into bins of `size`, merging segments by id in first-appearance order. A short
+ * trailing remainder joins the bin before it, so the last bar is never narrower than the rest.
+ */
 export const binColumns = (columns: ReadonlyArray<RlyChartColumn>, size: number): ReadonlyArray<RlyChartBin> => {
   const bins: Array<RlyChartBin> = []
-  for (let first = 0; first < columns.length; first += size) {
-    const group = columns.slice(first, first + size)
+  const remainder = columns.length % size
+  const starts: Array<number> = []
+  for (let first = 0; first < columns.length; first += size) starts.push(first)
+  if (remainder > 0 && starts.length > 1) starts.pop()
+  for (const [index, first] of starts.entries()) {
+    const group = columns.slice(first, starts[index + 1] ?? columns.length)
     const values = new Map<string, RlyChartSegment>()
     for (const segment of group.flatMap((column) => column.segments)) {
       if (segment.value <= 0) continue

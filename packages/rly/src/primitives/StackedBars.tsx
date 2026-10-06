@@ -61,10 +61,20 @@ export type StackedBarsProps = StackedBarsBaseProps & {
 const LABEL_WIDTH = 72
 const ANNOUNCE_AFTER = 500
 
-/** Hand an element (or null on detach) to a caller's object or callback ref, as Dialog does. */
-const assignRef = (ref: Ref<HTMLDivElement> | undefined, element: HTMLDivElement | null): void => {
-  if (Predicate.isFunction(ref)) ref(element)
-  else if (ref !== null && ref !== undefined) ref.current = element
+/**
+ * Hand the element to a caller's object or callback ref and return how to detach it: a React 19
+ * callback ref's own cleanup when it returns one, otherwise the ref called (or set) with null.
+ */
+const attachRef = (ref: Ref<HTMLDivElement> | undefined, element: HTMLDivElement): (() => void) => {
+  if (Predicate.isFunction(ref)) {
+    const cleanup = ref(element)
+    return Predicate.isFunction(cleanup) ? cleanup : () => ref(null)
+  }
+  if (ref === null || ref === undefined) return () => undefined
+  ref.current = element
+  return () => {
+    ref.current = null
+  }
 }
 
 /** Measures the root's inline size while still handing the root to the caller's ref. */
@@ -75,15 +85,15 @@ const useInlineSize = (
   const [size, setSize] = useState(fallback)
   const ref = useCallback(
     (element: HTMLDivElement | null) => {
-      assignRef(callerRef, element)
       if (element === null) return
+      const detach = attachRef(callerRef, element)
       const observer = new ResizeObserver(([entry]) => {
         if (entry !== undefined) setSize(entry.contentRect.width)
       })
       observer.observe(element)
       return () => {
         observer.disconnect()
-        assignRef(callerRef, null)
+        detach()
       }
     },
     [callerRef]
@@ -184,12 +194,14 @@ export const StackedBars = ({
   const bins = useMemo(() => binColumns(columns, binSize), [columns, binSize])
   const max = Math.max(0, ...bins.map(({ total }) => total))
   const ticks = chartTicks(bins.length, width, LABEL_WIDTH)
-  const [focus, setFocus] = useState<number | null>(null)
+  // The keyboard cursor is a column, so a click or a resize that rebins keeps it on the same time.
+  const [cursor, setCursor] = useState<number | null>(null)
   const [pendingTap, setPendingTap] = useState<number | null>(null)
   // Only a touch tap may extend by tapping again; a mouse extends with Shift.
   const pointerType = useRef("mouse")
   const [announcement, setAnnouncement] = useState("")
-  const binOf = (column: number): number => Math.floor(column / binSize)
+  const binOf = (column: number): number => Math.min(bins.length - 1, Math.floor(column / binSize))
+  const focus = cursor === null ? null : binOf(cursor)
 
   useEffect(() => {
     const timer = setTimeout(() => setAnnouncement(describeSelection(selection)), ANNOUNCE_AFTER)
@@ -200,7 +212,7 @@ export const StackedBars = ({
     if (event.key === "Escape") {
       if (selection === null) return
       event.preventDefault()
-      setFocus(null)
+      setCursor(null)
       onSelectionChange(null)
       return
     }
@@ -210,7 +222,7 @@ export const StackedBars = ({
     const next = moveFocus(event.key, current, bins.length - 1)
     if (next === null) return
     event.preventDefault()
-    setFocus(next)
+    setCursor(bins[next]?.first ?? null)
     onSelectionChange(selectBin(selection, bins, next, event.shiftKey))
   }
 
@@ -240,7 +252,7 @@ export const StackedBars = ({
         aria-label={requireText(label, "StackedBars label")}
         aria-roledescription="chart"
         className={style("plot")}
-        onBlur={() => setFocus(null)}
+        onBlur={() => setCursor(null)}
         onKeyDown={onKeyDown}
         role="group"
         style={{ blockSize: `${height}px` }}
@@ -272,6 +284,7 @@ export const StackedBars = ({
                   const touch = pointerType.current === "touch"
                   const extend = event.shiftKey || (touch && pendingTap !== null && pendingTap !== index)
                   onSelectionChange(selectBin(selection, bins, index, extend))
+                  setCursor(bin.first)
                   setPendingTap(touch && !extend ? index : null)
                 }}
                 onPointerDown={(event) => {

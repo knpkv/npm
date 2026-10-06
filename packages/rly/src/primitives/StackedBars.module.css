@@ -81,6 +81,14 @@
     stroke-width: 1px;
     vector-effect: non-scaling-stroke;
   }
+  .windowEdge {
+    fill: none;
+    pointer-events: none;
+    stroke: var(--rly-color-focus);
+    stroke-dasharray: 3 3;
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
   .windowKey {
     align-items: center;
     color: var(--rly-color-text-2);
@@ -129,6 +137,7 @@
       stroke: Canvas;
     }
     .window,
+    .windowEdge,
     .selection {
       fill: none;
       stroke: CanvasText;

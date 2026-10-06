@@ -28,7 +28,10 @@ describe("chart model", () => {
   })
 
   it("merges a bin's segments by id in the order the series first appear, offsetting each on the last", () => {
-    const bins = binColumns([column(0, { a: 2, rest: 1 }), column(1, { b: 3, a: 1 }), column(2, { b: 1 })], 2)
+    const bins = binColumns(
+      [column(0, { a: 2, rest: 1 }), column(1, { b: 3, a: 1 }), column(2, { b: 1 }), column(3, { b: 1 })],
+      2
+    )
     expect(bins).toHaveLength(2)
     const [first, second] = bins
     expect(first).toMatchObject({ end: 2 * hour, first: 0, last: 1, start: 0, total: 7 })
@@ -37,7 +40,26 @@ describe("chart model", () => {
       { id: "rest", offset: 3, series: "other", value: 1 },
       { id: "b", offset: 4, series: 1, value: 3 }
     ])
-    expect(second).toMatchObject({ first: 2, last: 2, total: 1 })
+    expect(second).toMatchObject({ first: 2, last: 3, total: 2 })
+  })
+
+  it("folds a short trailing remainder into the bin before it, so no bar is narrower than the rest", () => {
+    const columns = Array.from({ length: 25 }, (_, index) => column(index, { a: 1 }))
+    const bins = binColumns(columns, 2)
+    expect(bins).toHaveLength(12)
+    expect(bins.at(-1)).toMatchObject({ first: 22, last: 24 })
+    // Every bar at the chosen size keeps the 6px minimum on a time-proportional axis, remainder included.
+    const cases: ReadonlyArray<readonly [width: number, count: number]> = [[100, 25], [320, 1009], [100, 24]]
+    for (const [width, count] of cases) {
+      const size = chooseBinSize(width, count)
+      const narrowest = Math.min(
+        ...binColumns(Array.from({ length: count }, (_, index) => column(index, { a: 1 })), size).map(
+          (bin) => ((bin.last - bin.first + 1) / count) * width
+        )
+      )
+      expect(narrowest).toBeGreaterThanOrEqual(6)
+    }
+    expect(binColumns(columns.slice(0, 1), 2)).toHaveLength(1)
   })
 
   it("drops empty and negative segments rather than drawing them", () => {

@@ -179,9 +179,9 @@ describe("StackedBars", () => {
     expect(ticks.at(-1)?.textContent).toBe("5h")
   })
 
-  it("draws a short final bin on the same time scale as the window over it", async () => {
+  it("draws a folded final bin on the same time scale as the window over its last hour", async () => {
     vi.stubGlobal("ResizeObserver", TestResizeObserver)
-    // 25 hourly columns at 100px bin in pairs: the last bin holds one hour.
+    // 25 hourly columns at 100px bin in pairs; the odd last hour joins the bin before it.
     const root = await mount(
       <StackedBars {...props} columns={hours(25)} window={{ from: 24 * hour, label: "Last hour", to: 25 * hour }} />
     )
@@ -190,10 +190,11 @@ describe("StackedBars", () => {
     const last = bars?.querySelectorAll("[class*='hit']")
     const final = last?.[last.length - 1]
     const window = bars?.querySelector('[data-part="window"]')
-    expect(last).toHaveLength(13)
-    expect(numeric(final, "x")).toBeCloseTo(numeric(window, "x"))
-    expect(numeric(final, "width")).toBeCloseTo(numeric(window, "width"))
-    expect(numeric(final, "width")).toBeCloseTo(numeric(last?.[0], "width") / 2)
+    expect(last).toHaveLength(12)
+    // The last bar spans hours 22–24 and ends exactly where the window over hour 24 ends.
+    expect(numeric(final, "width")).toBeCloseTo((numeric(last?.[0], "width") * 3) / 2)
+    expect(numeric(final, "x") + numeric(final, "width")).toBeCloseTo(numeric(window, "x") + numeric(window, "width"))
+    expect(numeric(window, "x")).toBeGreaterThan(numeric(final, "x"))
   })
 
   it("keeps a controlled selection visible when a resize rebins it", async () => {
@@ -216,11 +217,59 @@ describe("StackedBars", () => {
     const seen: Array<HTMLDivElement | null> = []
     await mount(<StackedBars {...props} ref={object} />)
     await mount(<StackedBars {...props} ref={(element) => void seen.push(element)} />)
+    // A React 19 callback ref that returns a cleanup gets that cleanup instead of a null call.
+    const cleanups: Array<string> = []
+    const attached: Array<HTMLDivElement | null> = []
+    await mount(
+      <StackedBars
+        {...props}
+        ref={(element) => {
+          attached.push(element)
+          return () => void cleanups.push("released")
+        }}
+      />
+    )
     expect(object.current?.querySelector('[role="group"]')).not.toBeNull()
     expect(seen[0]?.querySelector('[role="group"]')).not.toBeNull()
     for (const root of roots.splice(0)) await act(async () => root.unmount())
     expect(object.current).toBeNull()
     expect(seen.at(-1)).toBeNull()
+    expect(cleanups).toEqual(["released"])
+    expect(attached).toHaveLength(1)
+  })
+
+  it("moves the keyboard cursor from the last clicked bar and keeps it on its column across a rebin", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const onSelectionChange = vi.fn()
+    const Owner = (): ReactElement => {
+      const [selection, setSelection] = useState<RlyChartSelection | null>(null)
+      return (
+        <StackedBars
+          {...props}
+          columns={hours(30)}
+          onSelectionChange={(next) => {
+            onSelectionChange(next)
+            setSelection(next)
+          }}
+          selection={selection}
+        />
+      )
+    }
+    const root = await mount(<Owner />)
+    await resizeTo(720)
+    const plot = root.querySelector('[role="group"]')
+    const press = (key: string): void =>
+      act(() => void plot?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key })))
+    const bar = (index: number): Element | undefined => root.querySelectorAll("svg:not([class*='band']) g")[index]
+    press("Home")
+    act(() => void bar(3)?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    press("ArrowRight")
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 4, to: 4 })
+    press("ArrowRight")
+    // At 80px the columns bin in threes; the cursor on column 5 is now bin 1 (columns 3–5).
+    await resizeTo(80)
+    press("ArrowRight")
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 6, to: 8 })
   })
 
   it("leaves Home, End and the arrows to the browser when there is nothing to move to", async () => {
