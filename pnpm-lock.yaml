@@ -1601,6 +1601,9 @@ importers:
       playwright:
         specifier: 1.63.0
         version: 1.63.0
+      postcss:
+        specifier: 8.5.23
+        version: 8.5.23
       react:
         specifier: ^19.3.0
         version: 19.3.0

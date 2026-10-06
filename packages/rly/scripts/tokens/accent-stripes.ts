@@ -17,6 +17,8 @@
  * per declaration with a reasoned comment on the same line: `/* stripe-ok: drawn chevron *\/`.
  */
 
+import postcss, { type Declaration, type Rule } from "postcss"
+
 export interface AccentStripeViolation {
   readonly column: number
   readonly line: number
@@ -197,18 +199,158 @@ const isStripe = (property: string, value: string, rule: string): boolean => {
   return !isNeutralHairline(value)
 }
 
+type EdgeName = "top" | "right" | "bottom" | "left"
+const EDGES: ReadonlyArray<EdgeName> = ["top", "right", "bottom", "left"]
+const INLINE: ReadonlySet<EdgeName> = new Set(["left", "right"])
+
+/** One edge of a rule's border as its declarations leave it, and the declaration that set it last. */
+interface Edge {
+  readonly width: string
+  readonly style: string
+  readonly color: string
+  readonly by: Declaration | undefined
+}
+
+type EdgePart = "width" | "style" | "color"
+
+/** Which edges a border property name addresses; logical inline sides map to left/right, block to top/bottom. */
+const edgesOf = (side: string): ReadonlyArray<EdgeName> => {
+  switch (side) {
+    case "":
+      return EDGES
+    case "top":
+    case "block-start":
+      return ["top"]
+    case "bottom":
+    case "block-end":
+      return ["bottom"]
+    case "left":
+    case "inline-start":
+      return ["left"]
+    case "right":
+    case "inline-end":
+      return ["right"]
+    case "inline":
+      return ["left", "right"]
+    case "block":
+      return ["top", "bottom"]
+    default:
+      return []
+  }
+}
+
+/** Spreads a 1–4 value list over top/right/bottom/left, or a 1–2 value list over a logical pair. */
+const spread = (values: ReadonlyArray<string>, edges: ReadonlyArray<EdgeName>): ReadonlyArray<string> => {
+  if (edges.length === 4) {
+    const [top = "", right = top, bottom = top, left = right] = values
+    return [top, right, bottom, left]
+  }
+  const [first = "", second = first] = values
+  return edges.length === 2 ? [first, second] : [first]
+}
+
+/** The width, style and colour parts of a border shorthand, with CSS initial values for omitted parts. */
+/** A border shorthand's three parts. */
+interface BorderParts {
+  readonly width: string
+  readonly style: string
+  readonly color: string
+}
+
+const shorthandParts = (value: string): BorderParts => {
+  const tokens = splitTopLevel(value, /\s/)
+  return {
+    color: tokens.find((token) => !STYLE.test(token) && !LENGTH.test(token) && !/^(?:thin|medium|thick)$/i.test(token))
+      ?? "currentcolor",
+    style: tokens.find((token) => STYLE.test(token)) ?? "none",
+    width: tokens.find((token) => LENGTH.test(token) || /^(?:thin|medium|thick)$/i.test(token)) ?? "medium"
+  }
+}
+
+/** Applies a rule's own border declarations, in order, to its four edges. */
+const ruleEdges = (rule: Rule): ReadonlyMap<EdgeName, Edge> => {
+  const edges = new Map<EdgeName, Edge>(
+    EDGES.map((name) => [name, { by: undefined, color: "currentcolor", style: "none", width: "medium" }])
+  )
+  const set = (name: EdgeName, part: EdgePart, value: string, by: Declaration): void => {
+    const edge = edges.get(name)
+    if (edge !== undefined) edges.set(name, { ...edge, [part]: value, by })
+  }
+  for (const node of rule.nodes ?? []) {
+    if (node.type !== "decl" || node.prop.startsWith("--")) continue
+    const match =
+      /^border(?:-(top|right|bottom|left|inline-start|inline-end|block-start|block-end|inline|block))?(?:-(width|style|color))?$/i
+        .exec(node.prop.toLowerCase())
+    if (match === null) continue
+    const targets = edgesOf(match[1] ?? "")
+    const part = match[2]
+    const value = node.value.trim()
+    if (part === "width" || part === "style" || part === "color") {
+      const values = spread(splitTopLevel(value, /\s/), targets)
+      targets.forEach((name, index) => set(name, part, values[index] ?? "", node))
+    } else {
+      const parts = shorthandParts(value)
+      for (const name of targets) {
+        set(name, "width", parts.width, node)
+        set(name, "style", parts.style, node)
+        set(name, "color", parts.color, node)
+      }
+    }
+  }
+  return edges
+}
+
+const visible = (edge: Edge): boolean =>
+  !/^(?:none|hidden)$/i.test(edge.style) && !ZERO_LENGTH.test(edge.width) && !/^transparent$/i.test(edge.color)
+const thick = (edge: Edge): boolean => !HAIRLINE.test(edge.width)
+const neutral = (edge: Edge): boolean => NEUTRAL_COLOR.test(edge.color)
+
+/**
+ * The declaration that makes one inline edge of a rule a stripe, whatever mix of shorthands and
+ * longhands draws it: the only visible inline edge when it is thick or coloured, or the one inline
+ * edge thicker, or more colourful, than the other visible edges. Block edges alone are underlines.
+ */
+const edgeStripe = (rule: Rule): Declaration | undefined => {
+  const edges = ruleEdges(rule)
+  const shown = EDGES.flatMap((name) => {
+    const edge = edges.get(name)
+    return edge !== undefined && visible(edge) ? [{ edge, name }] : []
+  })
+  const lone = (items: ReadonlyArray<{ readonly edge: Edge; readonly name: EdgeName }>) =>
+    items.length === 1 && items[0] !== undefined && INLINE.has(items[0].name) ? items[0].edge.by : undefined
+  if (shown.length === 1) {
+    const [only] = shown
+    return only !== undefined && INLINE.has(only.name) && (thick(only.edge) || !neutral(only.edge))
+      ? only.edge.by
+      : undefined
+  }
+  return lone(shown.filter(({ edge }) => thick(edge)))
+    ?? (shown.some(({ edge }) => neutral(edge)) ? lone(shown.filter(({ edge }) => !neutral(edge))) : undefined)
+}
+
 /** Every one-sided accent stripe declared in a CSS source, with its 1-based position. */
 export const findAccentStripes = (path: string, source: string): ReadonlyArray<AccentStripeViolation> => {
   const comparable = stripComments(source)
   const lines = source.split("\n")
   const violations: Array<AccentStripeViolation> = []
+  const report = (line: number, column: number, declaration: string): void => {
+    if (EXEMPT.test(lines[line - 1] ?? "")) return
+    if (violations.some((seen) => seen.line === line && seen.column === column)) return
+    violations.push({ column, declaration, line, path })
+  }
   for (const match of comparable.matchAll(DECLARATION)) {
     const [declaration, property, value] = match
     if (property === undefined || value === undefined || declaration === undefined) continue
     if (!isStripe(property, withoutPriority(value.trim()), ruleAround(comparable, match.index))) continue
     const at = position(comparable, match.index)
-    if (EXEMPT.test(lines[at.line - 1] ?? "")) continue
-    violations.push({ ...at, declaration: declaration.trim(), path })
+    report(at.line, at.column, declaration.trim())
   }
-  return violations
+  // The same policy per rule and edge, so longhands (`border-style: none none none solid`) cannot assemble a stripe.
+  postcss.parse(source).walkRules((rule) => {
+    const by = edgeStripe(rule)
+    const start = by?.source?.start
+    if (by === undefined || start === undefined) return
+    report(start.line, start.column, `${by.prop}: ${by.value}${by.important ? " !important" : ""}`)
+  })
+  return violations.sort((left, right) => left.line - right.line || left.column - right.column)
 }

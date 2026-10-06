@@ -114,6 +114,7 @@
     "effect": "4.0.0",
     "happy-dom": "20.14.5",
     "playwright": "1.63.0",
+    "postcss": "8.5.23",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "rimraf": "^6.1.3",

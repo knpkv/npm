@@ -580,25 +580,70 @@ const validateVariants = (component: ComponentRecord, source: string): ReadonlyA
 /**
  * A component can forward another's axis without a catalog of its own (ThemeSelect passes Select's
  * `size`). Any prop it defaults whose name is a registry axis elsewhere (`size`, `tone`, …) must
- * then be listed among its manifest variants, or consumers never learn its values or default.
+ * then be listed among its manifest variants, or consumers never learn its values or default. A
+ * listed forwarded axis is checked against its owner: a fallback read from another component's
+ * defaults constant must agree with that owner's catalog values and default.
  */
 const validateForwardedAxes = (
   component: ComponentRecord,
   source: string,
-  axisNames: ReadonlySet<string>
+  axisNames: ReadonlySet<string>,
+  owners: ReadonlyMap<string, SourceVariants>
 ): ReadonlyArray<string> => {
-  const listed = new Set(component.variants.map((variant) => variant.name))
-  return [...axisNames]
-    .filter((axis) => !listed.has(axis))
-    .filter((axis) => (destructuredFallbacks(source, component.source, component.name, axis) ?? []).length > 0)
-    .map((axis) => `component ${component.name} defaults its ${axis} prop but the manifest lists no ${axis} variant`)
+  const failures: Array<string> = []
+  const listed = new Map(component.variants.map((variant) => [variant.name, variant]))
+  const local = sourceVariants(source, component.source)
+  for (const axis of axisNames) {
+    const fallbacks = destructuredFallbacks(source, component.source, component.name, axis) ?? []
+    const variant = listed.get(axis)
+    if (variant === undefined) {
+      if (fallbacks.length > 0) {
+        failures.push(`component ${component.name} defaults its ${axis} prop but the manifest lists no ${axis} variant`)
+      }
+      continue
+    }
+    // An axis with a local catalog is validateVariants' job.
+    if ((local.axes.get(axis) ?? []).length > 0) continue
+    for (const fallback of fallbacks) {
+      if (fallback._tag === "Literal" && fallback.value !== variant.defaultValue) {
+        failures.push(
+          `variant ${component.name}.${axis} defaults to ${variant.defaultValue} but source forwards ${fallback.value}`
+        )
+      }
+      if (fallback._tag !== "Defaults" || local.defaultConstants.has(fallback.constant)) continue
+      const owner = owners.get(fallback.constant)
+      const ownerDefault = owner?.defaults.get(fallback.axis)?.[0]
+      const ownerValues = owner?.axes.get(fallback.axis)?.[0]
+      if (owner === undefined || ownerDefault === undefined || ownerValues === undefined) {
+        failures.push(
+          `component ${component.name} forwards ${axis} from ${fallback.constant}.${fallback.axis}, which no registry catalog declares`
+        )
+        continue
+      }
+      if (ownerDefault !== variant.defaultValue) {
+        failures.push(
+          `variant ${component.name}.${axis} defaults to ${variant.defaultValue} but its owner ${fallback.constant} defaults to ${ownerDefault}`
+        )
+      }
+      const values = new Set(variant.values)
+      if (values.size !== ownerValues.size || [...ownerValues].some((value) => !values.has(value))) {
+        failures.push(
+          `variant ${component.name}.${axis} lists ${variant.values.join("|")} but its owner declares ${
+            [...ownerValues].join("|")
+          }`
+        )
+      }
+    }
+  }
+  return failures
 }
 
 const validateComponent = (
   component: ComponentRecord,
   metadata: RegistryMetadata | undefined,
   files: ReadonlyMap<string, string>,
-  axisNames: ReadonlySet<string>
+  axisNames: ReadonlySet<string>,
+  owners: ReadonlyMap<string, SourceVariants>
 ): ReadonlyArray<string> => {
   const failures: Array<string> = []
   if (metadata === undefined) failures.push(`missing registry metadata ${component.name}`)
@@ -610,7 +655,7 @@ const validateComponent = (
       if (!exports.has(declaration.name)) failures.push(`missing export ${declaration.name} in ${component.source}`)
     }
     for (const failure of validateVariants(component, source)) failures.push(failure)
-    for (const failure of validateForwardedAxes(component, source, axisNames)) failures.push(failure)
+    for (const failure of validateForwardedAxes(component, source, axisNames, owners)) failures.push(failure)
   }
   for (const style of component.styles) {
     const contents = files.get(style)
@@ -676,9 +721,17 @@ export const findRegistrySourceFailures = (
 ): ReadonlyArray<string> => {
   const registryComponents = manifest.components.filter(({ registry }) => registry)
   const axisNames = new Set(registryComponents.flatMap((component) => component.variants.map(({ name }) => name)))
+  // Each defaults constant mapped to the catalog of the source that declares it, for forwarded axes.
+  const owners = new Map<string, SourceVariants>()
+  for (const component of registryComponents) {
+    const source = files.get(component.source)
+    if (source === undefined) continue
+    const variants = sourceVariants(source, component.source)
+    for (const constant of variants.defaultConstants) owners.set(constant, variants)
+  }
   return [
     ...registryComponents.flatMap((component) =>
-      validateComponent(component, manifest.registryMetadata[component.name], files, axisNames)
+      validateComponent(component, manifest.registryMetadata[component.name], files, axisNames, owners)
     ),
     ...validateImports(files)
   ].sort((left, right) => left.localeCompare(right))

@@ -9,7 +9,7 @@ rule:
   kind: pseudo_class_selector
   has:
     kind: class_name
-    regex: "^dir$"
+    regex: "(?i)^dir$"
 
 files:
   - "packages/rly/src/**/*.css"

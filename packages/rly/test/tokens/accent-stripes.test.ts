@@ -34,6 +34,22 @@ describe("findAccentStripes", () => {
     expect(declarations(".a { border-inline-start-width: thick; }")).toHaveLength(1)
   })
 
+  it("flags a stripe assembled from border longhands, per edge", () => {
+    expect(
+      declarations(".card { border: 4px solid red; border-style: none; border-inline-start-style: solid; }")
+    ).toEqual(["border-inline-start-style: solid"])
+    expect(declarations(".card { border-width: 4px; border-style: none none none solid; }")).toEqual([
+      "border-style: none none none solid"
+    ])
+    expect(
+      declarations(".card { border: 4px solid transparent; border-color: transparent transparent transparent red; }")
+    )
+      .toEqual(["border-color: transparent transparent transparent red"])
+    expect(declarations(".grid { border: 1px solid var(--rly-color-border-1); }")).toEqual([])
+    expect(declarations(".box { border: 2px solid var(--rly-color-held-ink); }")).toEqual([])
+    expect(declarations(".tab { border-style: none none solid; border-width: 3px; }")).toEqual([])
+  })
+
   it("allows a neutral 1px inset divider and flags a coloured or thick one", () => {
     expect(declarations(".col { box-shadow: inset 1px 0 0 var(--rly-color-border-1); }")).toEqual([])
     expect(declarations(".col { box-shadow: inset -1px 0 0 var(--rly-color-border-2); }")).toEqual([])

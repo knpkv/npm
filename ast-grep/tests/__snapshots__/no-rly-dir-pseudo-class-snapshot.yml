@@ -22,3 +22,25 @@ snapshots:
         style: secondary
         start: 9
         end: 12
+  ? |
+    .x:DIR(rtl) { color: red; }
+  : labels:
+      - source: .x:DIR(rtl)
+        style: primary
+        start: 0
+        end: 11
+      - source: DIR
+        style: secondary
+        start: 3
+        end: 6
+  ? |
+    .x:Dir(rtl) { color: red; }
+  : labels:
+      - source: .x:Dir(rtl)
+        style: primary
+        start: 0
+        end: 11
+      - source: Dir
+        style: secondary
+        start: 3
+        end: 6

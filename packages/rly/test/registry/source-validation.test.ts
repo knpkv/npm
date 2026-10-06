@@ -231,14 +231,21 @@ describe("registry source validation", () => {
       return component
     }
     const themeSelect = pick("ThemeSelect")
-    const manifest = (withSize: boolean): ComponentManifest => ({
+    const manifest = (withSize: boolean, sizeDefault = "dense"): ComponentManifest => ({
       ...componentManifest,
       components: componentManifest.components
         .filter((component) => component.name === "ThemeSelect" || component.name === "Select")
         .map((component) =>
-          component.name === "ThemeSelect" && !withSize
-            ? { ...component, variants: component.variants.filter((variant) => variant.name !== "size") }
-            : component
+          component.name !== "ThemeSelect"
+            ? component
+            : withSize
+            ? {
+              ...component,
+              variants: component.variants.map((variant) =>
+                variant.name === "size" ? { ...variant, defaultValue: sizeDefault } : variant
+              )
+            }
+            : { ...component, variants: component.variants.filter((variant) => variant.name !== "size") }
         )
     })
     const focusedFiles = new Map(
@@ -255,6 +262,10 @@ describe("registry source validation", () => {
     expect(
       findRegistrySourceFailures(manifest(false), focusedFiles)
     ).toContain("component ThemeSelect defaults its size prop but the manifest lists no size variant")
+    // A listed forwarded axis must agree with the owner it forwards from.
+    expect(findRegistrySourceFailures(manifest(true, "compact"), focusedFiles)).toContain(
+      "variant ThemeSelect.size defaults to compact but its owner RLY_SELECT_DEFAULT_VARIANTS defaults to dense"
+    )
   })
 
   it("rejects a destructured fallback that disagrees with the declared default", () => {
