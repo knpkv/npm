@@ -167,6 +167,29 @@ export const componentManifest = {
     {
       category: "pattern",
       exports: [
+        { kind: "value", name: "RLY_REGION_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_REGION_VARIANTS" },
+        { kind: "value", name: "Region" },
+        { kind: "type", name: "RegionProps" },
+        { kind: "type", name: "RlyRegionHeadingLevel" },
+        { kind: "type", name: "RlyRegionTone" }
+      ],
+      name: "Region",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/Region.tsx",
+      status: "experimental",
+      styles: ["src/patterns/Region.module.css"],
+      variants: [{ defaultValue: "default", name: "tone", values: ["default", "tray"] }],
+      visual: {
+        story: "stories/patterns/Region.stories.tsx",
+        storyId: "patterns-region--states",
+        tests: ["test/patterns/Region.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
         { kind: "value", name: "Hero" },
         { kind: "value", name: "HeroWord" },
         { kind: "value", name: "RLY_HERO_DEFAULT_VARIANTS" },
@@ -1497,8 +1520,9 @@ export const componentManifest = {
       source: "src/patterns/StageRail.tsx",
       status: "stable",
       styles: ["src/patterns/StageRail.module.css"],
-      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default", "words"] }],
       visual: {
+        coverageStoryIds: ["patterns-stagerail--words"],
         story: "stories/patterns/StageRail.stories.tsx",
         storyId: "patterns-stagerail--states",
         tests: ["test/patterns/StageRail.test.tsx"]

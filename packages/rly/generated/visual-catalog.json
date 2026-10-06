@@ -587,6 +587,23 @@
       ]
     },
     {
+      "name": "Region",
+      "paths": {
+        "source": "packages/rly/src/patterns/Region.tsx",
+        "story": "packages/rly/stories/patterns/Region.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/Region.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/Region.test.tsx"
+        ]
+      },
+      "storyId": "patterns-region--states",
+      "storyIds": [
+        "patterns-region--states"
+      ]
+    },
+    {
       "name": "RelationshipChain",
       "paths": {
         "source": "packages/rly/src/patterns/RelationshipChain.tsx",
@@ -794,7 +811,8 @@
       },
       "storyId": "patterns-stagerail--states",
       "storyIds": [
-        "patterns-stagerail--states"
+        "patterns-stagerail--states",
+        "patterns-stagerail--words"
       ]
     },
     {
