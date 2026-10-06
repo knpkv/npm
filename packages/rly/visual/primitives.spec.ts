@@ -55,6 +55,7 @@ test("draws every gallery track on one scale and fits a 320 pixel screen", async
   for (const width of [1000, 320]) {
     await page.setViewportSize({ height: 900, width })
     await page.goto(story("primitives-limittrack--gallery"))
+    await expect(page.locator("[data-limit] [data-tone]").first()).toBeVisible()
     const widths = await page.locator("[data-limit] [data-tone]").evaluateAll((tracks) =>
       tracks.map((track) => Math.round(track.getBoundingClientRect().width))
     )
