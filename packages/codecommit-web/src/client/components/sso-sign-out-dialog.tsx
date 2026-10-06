@@ -53,7 +53,7 @@ export function SsoSignOutDialog({
             Cancel
           </Button>
           <Button onClick={signOut} variant="destructive">
-            Sign out of all profiles
+            Sign out of all SSO sessions
           </Button>
         </DialogFooter>
       </DialogContent>

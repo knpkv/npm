@@ -32,11 +32,13 @@ test("asks before signing out of AWS SSO, and only confirming sends the request"
   await page.getByRole("button", { name: "Sign out of AWS SSO on this machine" }).click()
   const dialog = page.getByRole("dialog", { name: "Sign out of AWS SSO on this machine?" })
   await expect(dialog).toContainText("signs out of AWS SSO for all profiles on this machine")
+  // Cancel takes the initial focus, so Enter on open never signs out.
+  await expect(dialog.getByRole("button", { name: "Cancel" })).toBeFocused()
   await dialog.getByRole("button", { name: "Cancel" }).click()
   await expect(dialog).toHaveCount(0)
   expect(logouts).toEqual([])
 
   await page.getByRole("button", { name: "Sign out of AWS SSO on this machine" }).click()
-  await page.getByRole("button", { name: "Sign out of all profiles" }).click()
+  await page.getByRole("button", { name: "Sign out of all SSO sessions" }).click()
   await expect.poll(() => logouts).toEqual(["POST"])
 })
