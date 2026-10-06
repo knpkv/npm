@@ -15,7 +15,7 @@
  */
 import { Button, Field } from "@knpkv/rly/primitives"
 import { useAtomValue } from "@effect/atom-react"
-import { useEffect, useState } from "react"
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { UnattributedDayResponse, WeekRowResponse, WriteTargetsRequest } from "../server/Api.js"
 import { consumedFromWeekBlocks, prepareProposal } from "../shared/writePlanning.js"
 import { duration, formatDuration, parseDuration, signalMeaning, spanRange } from "./format.js"
@@ -33,6 +33,7 @@ const TextField = (props: {
   readonly maxLength?: number
   readonly loading?: boolean
   readonly multiline?: boolean
+  readonly textareaRef?: RefObject<HTMLTextAreaElement | null>
 }) => (
   <Field
     className={props.wide === true ? "jcf-field jcf-field-wide" : "jcf-field"}
@@ -43,6 +44,7 @@ const TextField = (props: {
       props.multiline === true ? (
         <textarea
           {...control}
+          ref={props.textareaRef}
           rows={4}
           onChange={(event) => props.onChange(event.target.value)}
           placeholder={props.placeholder}
@@ -142,6 +144,13 @@ export const ConfirmPanel = (props: {
     if (!props.descriptionDisabled && draft.status === "idle" && !draft.edited) void props.description.load()
   }, [props.description, props.descriptionDisabled, draft.status, draft.edited])
   const note = draft.text
+  // A suggestion that lands while the person is already in the field arrives selected, in the same
+  // task as its commit, so the next keystroke replaces it instead of being appended after it.
+  const noteRef = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const field = noteRef.current
+    if (draft.status === "ready" && !draft.edited && field !== null && document.activeElement === field) field.select()
+  }, [draft.status, draft.edited])
   const suggesting =
     !draft.edited && !props.descriptionDisabled && (draft.status === "loading" || draft.status === "idle")
   const [chosenTargets, setTargets] = useState({ jira: true, clockify: true })
@@ -230,6 +239,7 @@ export const ConfirmPanel = (props: {
           onChange={props.description.edit}
           placeholder={suggesting ? "Agent is writing a description…" : "Describe this work"}
           value={note}
+          textareaRef={noteRef}
           wide
         />
         <div className="jcf-field-wide jcf-muted" role="status" aria-label="Description suggestion">
