@@ -54,4 +54,26 @@ describe("makeInFlight", () => {
     await expect(after).resolves.toBe("new state")
     expect(calls).toEqual(["old", "fresh"])
   })
+
+  // The approvers card polls while an edit is pending; polls during one slow refresh must not queue
+  // a refresh each. A fresh read still waiting to start begins after every ask that joins it.
+  it("lets fresh asks made while a fresh read waits to start share that one read", async () => {
+    const { fresh } = makeInFlight<string>()
+    const calls: Array<string> = []
+    let finishOld: (value: string) => void = () => {}
+    const slow = (label: string) => () => {
+      calls.push(label)
+      return label === "old" ? new Promise<string>((resolve) => (finishOld = resolve)) : Promise.resolve(label)
+    }
+    void fresh("pr-44", slow("old"))
+    const first = fresh("pr-44", slow("poll 1"))
+    expect(fresh("pr-44", slow("poll 2"))).toBe(first)
+    finishOld("old state")
+    await expect(first).resolves.toBe("poll 1")
+    expect(calls).toEqual(["old", "poll 1"])
+    // Once that read has started, a later fresh ask may have changed state after it began.
+    const second = fresh("pr-44", slow("poll 3"))
+    expect(second).not.toBe(first)
+    await expect(second).resolves.toBe("poll 3")
+  })
 })

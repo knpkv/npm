@@ -4,13 +4,17 @@
  * - `share`: while a request for the key is pending, return that same promise instead of starting
  *   another, so overlapping triggers (a mount refresh, the Refresh button) cannot cancel each other.
  * - `fresh`: after a change, a pending request may have read the old state, so wait for it and then
- *   start a new one. Later `share` asks join the fresh request.
+ *   start a new one. Asks made while that new read waits to start join it, since it begins after all
+ *   of them; polling during one slow request therefore queues one read, not one per poll.
  *
  * Once a request settles, the next ask starts afresh.
  */
 export const makeInFlight = <A>() => {
   const pending = new Map<string, Promise<A>>()
-  const track = (key: string, started: Promise<A>): Promise<A> => {
+  // A `fresh` read queued behind a pending request, until it starts.
+  const waiting = new Map<string, Promise<A>>()
+  const start = (key: string, run: () => Promise<A>): Promise<A> => {
+    const started = run()
     pending.set(key, started)
     void started.finally(() => {
       if (pending.get(key) === started) pending.delete(key)
@@ -18,10 +22,19 @@ export const makeInFlight = <A>() => {
     return started
   }
   return {
-    share: (key: string, run: () => Promise<A>): Promise<A> => pending.get(key) ?? track(key, run()),
+    share: (key: string, run: () => Promise<A>): Promise<A> => waiting.get(key) ?? pending.get(key) ?? start(key, run),
     fresh: (key: string, run: () => Promise<A>): Promise<A> => {
+      const queued = waiting.get(key)
+      if (queued !== undefined) return queued
       const prior = pending.get(key)
-      return track(key, prior === undefined ? run() : prior.then(run, run))
+      if (prior === undefined) return start(key, run)
+      const begin = () => {
+        waiting.delete(key)
+        return start(key, run)
+      }
+      const next = prior.then(begin, begin)
+      waiting.set(key, next)
+      return next
     }
   }
 }
