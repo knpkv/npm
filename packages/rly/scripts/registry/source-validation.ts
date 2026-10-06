@@ -301,24 +301,40 @@ interface SourceVariants {
   readonly defaultConstants: ReadonlySet<string>
   /** Axes whose default is written as something other than a string literal. */
   readonly unreadableDefaults: ReadonlySet<string>
+  /** `defineVariants` calls whose argument is not an object literal the registry can read. */
+  readonly unreadableCatalogs: ReadonlySet<string>
 }
 
 /** Literal variant axes and defaults a component source declares through `defineVariants`. */
+/** Looks through parentheses, `as`, `satisfies` and non-null wrappers to the expression they hold. */
+const unwrap = (expression: TypeScript.Expression): TypeScript.Expression =>
+  TypeScript.isParenthesizedExpression(expression)
+    || TypeScript.isAsExpression(expression)
+    || TypeScript.isSatisfiesExpression(expression)
+    || TypeScript.isNonNullExpression(expression)
+    ? unwrap(expression.expression)
+    : expression
+
 const sourceVariants = (source: string, fileName: string): SourceVariants => {
   const axes = new Map<string, Array<ReadonlySet<string>>>()
   const defaults = new Map<string, Array<string>>()
   const defaultConstants = new Set<string>()
   const unreadableDefaults = new Set<string>()
+  const unreadableCatalogs = new Set<string>()
   const sourceFile = TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true)
   for (const statement of sourceFile.statements) {
     if (!TypeScript.isVariableStatement(statement)) continue
     for (const declaration of statement.declarationList.declarations) {
-      const initializer = declaration.initializer
-      if (!TypeScript.isIdentifier(declaration.name) || initializer === undefined) continue
+      if (!TypeScript.isIdentifier(declaration.name) || declaration.initializer === undefined) continue
+      const initializer = unwrap(declaration.initializer)
       if (!TypeScript.isCallExpression(initializer) || !TypeScript.isIdentifier(initializer.expression)) continue
       if (initializer.expression.text !== "defineVariants") continue
-      const [argument] = initializer.arguments
-      if (argument === undefined || !TypeScript.isObjectLiteralExpression(argument)) continue
+      const [rawArgument] = initializer.arguments
+      const argument = rawArgument === undefined ? undefined : unwrap(rawArgument)
+      if (argument === undefined || !TypeScript.isObjectLiteralExpression(argument)) {
+        unreadableCatalogs.add(declaration.name.text)
+        continue
+      }
       const isDefaults = declaration.name.text.endsWith("_DEFAULT_VARIANTS")
       if (isDefaults) defaultConstants.add(declaration.name.text)
       for (const property of argument.properties) {
@@ -328,9 +344,11 @@ const sourceVariants = (source: string, fileName: string): SourceVariants => {
           defaults.set(axis, [...(defaults.get(axis) ?? []), property.initializer.text])
         } else if (isDefaults) {
           unreadableDefaults.add(axis)
-        } else if (!isDefaults && TypeScript.isObjectLiteralExpression(property.initializer)) {
+        } else if (!isDefaults && TypeScript.isObjectLiteralExpression(unwrap(property.initializer))) {
           const values = new Set<string>()
-          for (const value of property.initializer.properties) {
+          const catalog = unwrap(property.initializer)
+          if (!TypeScript.isObjectLiteralExpression(catalog)) continue
+          for (const value of catalog.properties) {
             const name = propertyName(value)
             if (name !== undefined) values.add(name)
           }
@@ -339,7 +357,7 @@ const sourceVariants = (source: string, fileName: string): SourceVariants => {
       }
     }
   }
-  return { axes, defaultConstants, defaults, unreadableDefaults }
+  return { axes, defaultConstants, defaults, unreadableCatalogs, unreadableDefaults }
 }
 
 /**
@@ -389,7 +407,13 @@ const destructuredFallbacks = (source: string, fileName: string, prop: string): 
  */
 const validateVariants = (component: ComponentRecord, source: string): ReadonlyArray<string> => {
   const failures: Array<string> = []
-  const { axes, defaultConstants, defaults, unreadableDefaults } = sourceVariants(source, component.source)
+  const { axes, defaultConstants, defaults, unreadableCatalogs, unreadableDefaults } = sourceVariants(
+    source,
+    component.source
+  )
+  for (const catalog of unreadableCatalogs) {
+    failures.push(`component ${component.name} declares ${catalog} in a form the registry cannot read`)
+  }
   const where = (axis: string) => `variant ${component.name}.${axis}`
   for (const variant of component.variants) {
     const declared = axes.get(variant.name) ?? []

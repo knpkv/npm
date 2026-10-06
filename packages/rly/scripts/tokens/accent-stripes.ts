@@ -86,20 +86,20 @@ const isNeutralHairline = (value: string): boolean => {
   const tokens = splitTopLevel(value.trim(), /\s/)
   const width = tokens.filter((token) => !STYLE.test(token) && !NEUTRAL_COLOR.test(token))
   const colors = tokens.filter((token) => !STYLE.test(token) && !HAIRLINE.test(token))
+  // The colour must be stated too: an omitted one is currentColor, which is whatever the text is.
   return (
     tokens.some((token) => HAIRLINE.test(token)) &&
+    tokens.some((token) => NEUTRAL_COLOR.test(token)) &&
     width.every((token) => HAIRLINE.test(token)) &&
     colors.every((token) => NEUTRAL_COLOR.test(token))
   )
 }
 
-/** `border-width` with one edge thicker than a hairline and every other edge zero. */
+/** `border-width` with exactly one edge thicker than a hairline, whether the others are zero or hairlines. */
 const isOneSidedWidth = (value: string): boolean => {
   const [top, right = top, bottom = top, left = right] = splitTopLevel(value.trim(), /\s/)
   const edges = [top, right, bottom, left]
-  const thick = edges.filter((edge) => edge !== undefined && !HAIRLINE.test(edge))
-  const zero = edges.filter((edge) => edge !== undefined && ZEROED.test(edge))
-  return thick.length === 1 && zero.length === 3
+  return edges.filter((edge) => edge !== undefined && !HAIRLINE.test(edge)).length === 1
 }
 
 const isStripe = (property: string, value: string): boolean => {

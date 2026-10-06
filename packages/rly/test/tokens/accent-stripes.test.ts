@@ -40,6 +40,11 @@ describe("findAccentStripes", () => {
     ])
     expect(declarations(".a { border-left: solid var(--rly-color-border-1); }")).toHaveLength(1)
     expect(declarations(".a { border-width: 1px; border-width: 0 1px 1px 0; }")).toEqual([])
+    expect(declarations(".card { border: solid var(--rly-color-border-1); border-width: 1px 1px 1px 4px; }")).toEqual([
+      "border-width: 1px 1px 1px 4px"
+    ])
+    // An omitted colour is currentColor, so a coloured text tints the side.
+    expect(declarations(".card { color: var(--rly-color-blocked-ink); border-left: 1px solid; }")).toHaveLength(1)
   })
 
   it("lets a drawn shape opt out per declaration, with a reason", () => {

@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-rly-dir-pseudo-class
+language: css
+severity: error
+message: "rly stylesheets must not use :dir(); the build lowers it to a :lang() list"
+
+rule:
+  kind: pseudo_class_selector
+  has:
+    kind: class_name
+    regex: "^dir$"
+
+files:
+  - "packages/rly/src/**/*.css"
+  - "packages/rly/stories/**/*.css"
+
+note: |
+  Vite's default CSS target predates :dir() support, so lightningcss rewrites
+  `.x:dir(rtl)` as `.x:is(:lang(ar), :lang(he), …)`. An English page with
+  dir="rtl" then never matches. Mirror with logical properties, or select the
+  direction attribute: `:where([dir="rtl"]) .x`.

@@ -204,21 +204,41 @@ test("shows the complete 500-file inventory and compact forced-color states", as
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("diff-inventory-320.png") })
 })
 
-test("draws the directory chevron on the inline-end edge, so it mirrors in right-to-left text", async ({ page }) => {
+test("turns the directory chevron toward the inline end, mirrored in right-to-left text", async ({ page }) => {
   await page.goto(story("diff-difffiletree--file-states"))
-  const chevron = page.locator("[aria-expanded] [class*=\"chevron\"]").first()
+  const button = page.locator("button[aria-expanded]").first()
+  const chevron = button.locator("[class*=\"chevron\"]")
   await expect(chevron).toBeAttached()
-  const edges = () =>
+  // Which edges are drawn and how far the square turns decides where the corner points.
+  const chevronTurn = () =>
     chevron.evaluate((element) => {
       const style = getComputedStyle(element)
+      const matrix = new DOMMatrixReadOnly(style.transform)
       return {
-        left: Number.parseFloat(style.borderLeftWidth) > 0,
-        right: Number.parseFloat(style.borderRightWidth) > 0
+        angle: Math.round((Math.atan2(matrix.b, matrix.a) * 180) / Math.PI),
+        leftEdge: Number.parseFloat(style.borderLeftWidth) > 0
       }
     })
-  expect(await edges()).toEqual({ left: false, right: true })
+  const states = async () => {
+    const first = { expanded: await button.getAttribute("aria-expanded"), ...(await chevronTurn()) }
+    await button.click()
+    await page.waitForTimeout(300)
+    const second = { expanded: await button.getAttribute("aria-expanded"), ...(await chevronTurn()) }
+    await button.click()
+    await page.waitForTimeout(300)
+    return [first, second].sort((left, right) => String(left.expanded).localeCompare(String(right.expanded)))
+  }
+  // LTR: right and bottom edges; open turns 45° (points down), shut turns -45° (points right).
+  expect(await states()).toEqual([
+    { angle: -45, expanded: "false", leftEdge: false },
+    { angle: 45, expanded: "true", leftEdge: false }
+  ])
   await page.evaluate(() => {
     document.documentElement.dir = "rtl"
   })
-  expect(await edges()).toEqual({ left: true, right: false })
+  // RTL: left and bottom edges; open turns -45° (points down), shut turns 45° (points left).
+  expect(await states()).toEqual([
+    { angle: 45, expanded: "false", leftEdge: true },
+    { angle: -45, expanded: "true", leftEdge: true }
+  ])
 })

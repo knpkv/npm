@@ -109,6 +109,32 @@ describe("registry source validation", () => {
       .toContain(
         "component Button destructures size from RLY_ICON_DEFAULT_VARIANTS.size, not its own default"
       )
+    // A parenthesized catalog is read through; one built some other way fails instead of being skipped.
+    const parenthesized = source.replace(
+      "RLY_BUTTON_VARIANTS = defineVariants({",
+      "RLY_BUTTON_VARIANTS = defineVariants(({"
+    )
+    expect(parenthesized).not.toBe(source)
+    expect(
+      mutate(
+        parenthesized.replace(
+          "\n})\nexport const RLY_BUTTON_DEFAULT_VARIANTS",
+          "\n}))\nexport const RLY_BUTTON_DEFAULT_VARIANTS"
+        ).replace("    dense: {\n      className: style(\"dense\")", "    roomy: {\n      className: style(\"dense\")")
+      )
+    ).toContain(
+      "variant Button.size lists dense|compact|default|principal but source declares roomy|compact|default|principal"
+    )
+    expect(
+      mutate(
+        source.replace(
+          "RLY_BUTTON_VARIANTS = defineVariants({",
+          "RLY_BUTTON_VARIANTS = defineVariants(buttonCatalog, {"
+        )
+      )
+    ).toContain(
+      "component Button declares RLY_BUTTON_VARIANTS in a form the registry cannot read"
+    )
     expect(mutate(source.replace("size: \"dense\" })", "size: (`dense`) })"))).toContain(
       "variant Button.size has a source default the registry cannot read; write it as a string"
     )

@@ -158,6 +158,18 @@
     transform: rotate(-45deg);
   }
 
+  /*
+   * In right-to-left text the edges sit on the left, so the turns mirror: down when open, left when shut.
+   * Selects the dir attribute: the build lowers :dir() to a :lang() list.
+   */
+  :where([dir="rtl"]) .chevron {
+    transform: rotate(-45deg) translate(1px, -1px);
+  }
+
+  :where([dir="rtl"]) .directoryButton[aria-expanded="false"] .chevron {
+    transform: rotate(45deg);
+  }
+
   .directoryName {
     font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
       var(--rly-type-code-font);

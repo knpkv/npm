@@ -1,0 +1,11 @@
+id: no-rly-dir-pseudo-class
+valid:
+  - |
+    :where([dir="rtl"]) .chevron { transform: rotate(-45deg); }
+  - |
+    .chevron:hover { color: red; }
+invalid:
+  - |
+    .chevron:dir(rtl) { transform: rotate(-45deg); }
+  - |
+    .button[aria-expanded="false"] .chevron:dir(rtl) { transform: rotate(45deg); }
