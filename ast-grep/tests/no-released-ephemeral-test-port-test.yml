@@ -27,6 +27,14 @@ valid:
       }
       resolve(probe)
     })
+  - |
+    probe.listen(0, host, () => {
+      if (probe.address() === null) {
+        probe.close(() => reject(new MissingPortError()))
+        return
+      }
+      resolve(probe)
+    })
 invalid:
   - |
     const reserve = () =>

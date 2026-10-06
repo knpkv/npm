@@ -29,9 +29,13 @@ rule:
               stopBy: end
               has:
                 field: arguments
+                # A direct port value (`port`, `address.port`), not any text
+                # mentioning a port, such as `reject(new MissingPortError())`.
                 has:
-                  regex: "(?i)port"
-                  stopBy: end
+                  any:
+                    - kind: identifier
+                    - kind: member_expression
+                  regex: "(?i)port$"
 
 files:
   - "packages/*/test/**/*.ts"
