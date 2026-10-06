@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
+import type { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 
-const pullRequest = (id: string, title: string, approval: Record<string, unknown>) => ({
+const pullRequest = (id: string, title: string, approval: Pick<PullRequest, "approvalUnknown" | "isApproved">) => ({
   account: { profile: "production", region: "eu-west-1", awsAccountId: "111122223333" },
   approvalRules: [],
   approvedBy: [],
