@@ -30,6 +30,8 @@ overrides:
   diff@>=6.0.0 <8.0.3: 8.0.3
   devalue@>=5.0.0 <5.9.3: 5.9.4
   dompurify@>=3.4.13 <3.4.16: 3.4.16
+  source-map-js@>=1.0.0 <1.2.2: 1.2.2
+  prosemirror-view@<1.42.3: 1.42.6
 
 patchedDependencies:
   '@pierre/diffs@1.5.1': ce17810cfea58efa02eb4e70947801afb36c9f8a08a8bb4c810297c24c2e7a25
@@ -7350,9 +7352,6 @@ packages:
       prosemirror-model: ^1.19.2
       prosemirror-state: ^1.4.3
 
-  prosemirror-view@1.41.5:
-    resolution: {integrity: sha512-UDQbIPnDrjE8tqUBbPmCOZgtd75htE6W3r0JCmY9bL6W1iemDM37MZEKC49d+tdQ0v/CKx4gjxLoLsfkD2NiZA==}
-
   prosemirror-view@1.42.6:
     resolution: {integrity: sha512-3g25f6hKV2bBxo3puH3EcYWmmVNSH0iWmNsMVT7sugDSpA025jgpOLarcDWr39SdzPjYMaiYtRdNtXialPSjEQ==}
 
@@ -7739,10 +7738,6 @@ packages:
     peerDependenciesMeta:
       '@types/react':
         optional: true
-
-  source-map-js@1.2.1:
-    resolution: {integrity: sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA==}
-    engines: {node: '>=0.10.0'}
 
   source-map-js@1.2.2:
     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
@@ -8835,7 +8830,7 @@ snapshots:
       prosemirror-state: 1.4.4
       prosemirror-transform: 1.10.5
       prosemirror-utils: 1.2.2(prosemirror-model@1.25.4)(prosemirror-state@1.4.4)
-      prosemirror-view: 1.41.5
+      prosemirror-view: 1.42.6
 
   '@atlaskit/feature-gate-js-client@6.0.2(react@18.3.1)':
     dependencies:
@@ -11427,7 +11422,7 @@ snapshots:
       jiti: 2.7.0
       lightningcss: 1.32.0
       magic-string: 0.30.21
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
       tailwindcss: 4.3.3
 
   '@tailwindcss/oxide-android-arm64@4.3.3':
@@ -13845,7 +13840,7 @@ snapshots:
     dependencies:
       '@babel/parser': 7.29.8
       '@babel/types': 7.29.8
-      source-map-js: 1.2.1
+      source-map-js: 1.2.2
 
   magicast@0.5.5:
     dependencies:
@@ -14829,12 +14824,6 @@ snapshots:
       prosemirror-model: 1.25.4
       prosemirror-state: 1.4.4
 
-  prosemirror-view@1.41.5:
-    dependencies:
-      prosemirror-model: 1.25.12
-      prosemirror-state: 1.4.4
-      prosemirror-transform: 1.12.2
-
   prosemirror-view@1.42.6:
     dependencies:
       prosemirror-model: 1.25.12
@@ -15417,8 +15406,6 @@ snapshots:
       react-dom: 19.3.0(react@19.3.0)
     optionalDependencies:
       '@types/react': 19.3.0
-
-  source-map-js@1.2.1: {}
 
   source-map-js@1.2.2: {}
 

@@ -106,23 +106,28 @@ const nameCompatible = (entry: string, name: string): boolean => {
   const named = entry.startsWith("arn:") ? segments.slice(1) : segments
   const last = named.at(-1) ?? ""
   const wanted = name.trim().toLowerCase().split(/[/:]/).at(-1) ?? ""
+  if (isRoleOnly(entry)) return true
   const sessionIsLast = entry.startsWith("arn:") &&
     ((segments[0] === "assumed-role" && named.length >= 2) || segments[0] === "federated-user")
   if (last.includes("*") && !sessionIsLast) return `/${wanted}`.endsWith(last.slice(last.lastIndexOf("*") + 1))
   return globMatches(last, wanted)
 }
 
+/** `arn:aws:sts::ACCOUNT:assumed-role/RoleName`: CodeCommit's documented form for "any session of this role". */
+const isRoleOnly = (entry: string): boolean => /^arn:aws[\w-]*:sts::[^:]*:assumed-role\/[^/]+$/.test(entry)
+
 const approverArn = /^arn:aws[\w-]*:(?:iam|sts)::(\d+):(?:user|federated-user|assumed-role)\/(.+)$/
 
 /**
  * One approval-pool entry against one approver ARN, with CodeCommit's semantics: a fully
- * qualified ARN matches the whole ARN; the `CodeCommitApprovers:ACCOUNT:RESOURCE` shorthand
+ * qualified ARN matches the whole ARN, and a role-only `assumed-role/RoleName` ARN matches every
+ * session of that role; the `CodeCommitApprovers:ACCOUNT:RESOURCE` shorthand
  * matches an IAM user, federated user or role session in that account whose name (after
  * `user/`, `federated-user/` or `assumed-role/`) matches RESOURCE. Both accept `*` anywhere.
  */
 export const poolEntryMatches = (entry: string, arn: string): boolean => {
   const shorthand = /^CodeCommitApprovers:(\d+):(.+)$/.exec(entry)
-  if (shorthand === null) return globMatches(entry, arn)
+  if (shorthand === null) return globMatches(entry, arn) || (isRoleOnly(entry) && globMatches(`${entry}/*`, arn))
   const approver = approverArn.exec(arn)
   return approver !== null && approver[1] === shorthand[1] && globMatches(shorthand[2] ?? "", approver[2] ?? "")
 }
@@ -156,13 +161,13 @@ const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule)
  * rule has no pool, so any approval counts. `member` means an entry without a wildcard names the
  * caller: by user name, as core's `needsMyReview` and the pending-review count decide; the role
  * and account in that entry are not checked, because the client has no caller ARN. `maybe` means
- * only a wildcard entry could match, and its fixed name part does not rule the caller out.
+ * only a wildcard or role-only entry could match, and its fixed name part does not rule the caller out.
  */
 const poolStanding = (rule: Domain.ApprovalRule, currentUser: string): "member" | "maybe" | "open" | "out" => {
   const entries = poolEntries(rule)
   if (entries.length === 0) return "open"
   const possible = entries.filter((entry) => nameCompatible(entry, currentUser))
-  if (possible.some((entry) => !entry.includes("*"))) return "member"
+  if (possible.some((entry) => !entry.includes("*") && !isRoleOnly(entry))) return "member"
   return possible.length > 0 ? "maybe" : "out"
 }
 
@@ -179,9 +184,10 @@ export const ruleProgress = (pullRequest: Domain.PullRequest): RuleProgress | un
   }))
   const unsatisfied = progress
     .filter((rule) => !rule.satisfied)
-    .sort((a, b) =>
-      a.approved / Math.max(1, a.required) - b.approved / Math.max(1, b.required) ||
-      (b.required - b.approved) - (a.required - a.approved)
+    .sort(
+      (a, b) =>
+        a.approved / Math.max(1, a.required) - b.approved / Math.max(1, b.required) ||
+        b.required - b.approved - (a.required - a.approved)
     )
   const chosen = unsatisfied[0] ?? progress[0]
   return chosen === undefined ? undefined : { approved: chosen.approved, name: chosen.name, required: chosen.required }
@@ -199,12 +205,25 @@ const stuckReason = (pullRequest: Domain.PullRequest, quietMs: number): StuckRea
  * Yours first; then, unless the caller already approved, `review` when some unsatisfied rule
  * certainly counts their approval (named member, or no pool at all) and `pool` when one only might.
  */
+/**
+ * Whether the caller already approved toward this rule. With approver ARNs, only a same-name
+ * approval that the rule's pool counts does, so `Operations/alice` approving leaves a
+ * `Reviewers/*` rule open for alice; without ARNs, any same-name approval does.
+ */
+const approvedToward = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule, currentUser: string): boolean => {
+  if (pullRequest.approvedByArns.length === 0 || rule.poolMemberArns.length === 0) {
+    return pullRequest.approvedBy.some((approver) => identityMatches(currentUser, approver))
+  }
+  return pullRequest.approvedByArns.some(
+    (arn) => identityMatches(currentUser, arn) && rule.poolMemberArns.some((entry) => poolEntryMatches(entry, arn))
+  )
+}
+
 const groupOf = (pullRequest: Domain.PullRequest, currentUser: string): WorkbenchGroup | undefined => {
   if (identityMatches(currentUser, pullRequest.author)) return "yours"
-  const approved = pullRequest.approvedBy.some((approver) => identityMatches(currentUser, approver))
-  const standings = approved
-    ? []
-    : pullRequest.approvalRules.filter((rule) => !rule.satisfied).map((rule) => poolStanding(rule, currentUser))
+  const standings = pullRequest.approvalRules
+    .filter((rule) => !rule.satisfied && !approvedToward(pullRequest, rule, currentUser))
+    .map((rule) => poolStanding(rule, currentUser))
   if (standings.some((standing) => standing === "member" || standing === "open")) return "review"
   if (standings.includes("maybe")) return "pool"
   if (pullRequest.commentedBy.some((name) => identityMatches(currentUser, name))) return "watching"
@@ -232,14 +251,16 @@ export const workbenchQueue = (
       const group = known ? groupOf(pullRequest, currentUser) : "unsorted"
       if (group === undefined) return []
       const quietMs = Math.max(0, now.getTime() - pullRequest.lastModifiedDate.getTime())
-      return [{
-        group,
-        openMs: Math.max(0, now.getTime() - pullRequest.creationDate.getTime()),
-        pullRequest,
-        quietMs,
-        rule: ruleProgress(pullRequest),
-        stuck: group === "yours" ? stuckReason(pullRequest, quietMs) : undefined
-      }]
+      return [
+        {
+          group,
+          openMs: Math.max(0, now.getTime() - pullRequest.creationDate.getTime()),
+          pullRequest,
+          quietMs,
+          rule: ruleProgress(pullRequest),
+          stuck: group === "yours" ? stuckReason(pullRequest, quietMs) : undefined
+        }
+      ]
     })
     .sort((a, b) => groupOrder[a.group] - groupOrder[b.group] || b.openMs - a.openMs)
   if (!known) return { rows, summary: WorkbenchSummary.Unknown() }
