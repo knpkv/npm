@@ -405,5 +405,46 @@
     "op": "replace",
     "path": "/components/schemas/TimeEntryWithRatesDtoV1/properties/hourlyRate",
     "value": { "anyOf": [{ "$ref": "#/components/schemas/RateDtoV1" }, { "type": "null" }] }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/WorkspaceDtoV1/properties/featureSubscriptionType",
+    "value": {
+      "type": "string",
+      "description": "The workspace's subscription plan, e.g. FREE_2026. The upstream spec references FeaturePlan, an object, but the API returns this string; it is left open because Clockify adds plan names."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/WorkspaceDtoV1/properties/features",
+    "value": {
+      "type": "array",
+      "description": "The workspace's enabled features, e.g. TIME_TRACKING. The upstream spec references Feature, which has no type, but the API returns these strings; they are left open because Clockify adds features.",
+      "items": { "type": "string" }
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/WorkspaceDtoV1/properties/workspaceSettings",
+    "value": {
+      "type": "object",
+      "description": "Workspace settings, not modelled: the upstream schema disagrees with live responses on many nullable and enum fields.",
+      "additionalProperties": {}
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/MembershipDtoV1/properties/costRate",
+    "value": { "anyOf": [{ "$ref": "#/components/schemas/RateDtoV1" }, { "type": "null" }] }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/MembershipDtoV1/properties/hourlyRate",
+    "value": { "anyOf": [{ "$ref": "#/components/schemas/HourlyRateDtoV1" }, { "type": "null" }] }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/WorkspaceSubdomainDtoV1/properties/name",
+    "value": { "anyOf": [{ "type": "string" }, { "type": "null" }], "description": "Represents subdomain name" }
   }
 ]
