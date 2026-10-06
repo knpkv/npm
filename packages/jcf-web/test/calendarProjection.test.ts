@@ -160,7 +160,7 @@ it("reserves the drawn card height without changing saved entry duration", () =>
 })
 
 // Restored evidence is immutable: filtering short blocks must not renumber a later confirmation target.
-it("suppresses sixteen-second and sub-fifteen-minute suggestions while preserving original block indexes", () => {
+it("suppresses sixteen-second and sub-minute suggestions while preserving original block indexes", () => {
   const base = fixtureWeek()
   const startMs = new Date(`${base.monday}T11:00:00`).getTime()
   const plan = {
@@ -169,7 +169,7 @@ it("suppresses sixteen-second and sub-fifteen-minute suggestions while preservin
       ...row,
       proposal: row.proposal === undefined ? undefined : {
         ...row.proposal,
-        blocks: [16, 899, 900].map((seconds, index) => ({
+        blocks: [16, 59, 60].map((seconds, index) => ({
           consumed: { clockify: 0, jira: 0 },
           startMs: startMs + index * 3600000,
           endMs: startMs + index * 3600000 + seconds * 1000,
@@ -185,20 +185,20 @@ it("suppresses sixteen-second and sub-fifteen-minute suggestions while preservin
   expect(suggestions?.[0]?.block).toMatchObject({
     id: "row-one:gap:2",
     blockIndex: 2,
-    seconds: 900,
+    seconds: 60,
     startMs: startMs + 7200000,
-    endMs: startMs + 8100000
+    endMs: startMs + 7260000
   })
   expect(projection.counts).toEqual({ jira: 0, clockify: 1, available: 1, overlapping: 0 })
   expect(plan).toEqual(before)
-  expect(weekTotals(plan)).toMatchObject({ jiraSuggested: 900, clockifySuggested: 900 })
+  expect(weekTotals(plan)).toMatchObject({ jiraSuggested: 60, clockifySuggested: 60 })
 })
 
 // Credit and wall range each need the floor. Neither can be padded to make a card actionable.
 it.each([
-  { credited: 16, duration: 900 },
-  { credited: 900, duration: 16 },
-  { credited: 899, duration: 1800 }
+  { credited: 16, duration: 60 },
+  { credited: 60, duration: 16 },
+  { credited: 59, duration: 1800 }
 ])("suppresses a $credited-second credit over a $duration-second range", ({ credited, duration }) => {
   const base = fixtureWeek()
   const startMs = new Date(`${base.monday}T11:00:00`).getTime()
@@ -217,7 +217,7 @@ it.each([
 })
 
 // A large hidden-provider delta cannot keep a tiny remainder in the selected provider visible.
-it.each([16, 899, 900])("applies the suggestion floor to the selected provider's %s-second remainder", (remaining) => {
+it.each([16, 59, 60])("applies the suggestion floor to the selected provider's %s-second remainder", (remaining) => {
   const base = fixtureWeek()
   const plan = {
     ...base,
@@ -234,9 +234,9 @@ it.each([16, 899, 900])("applies the suggestion floor to the selected provider's
   const both = projectCalendar(plan, [])
   expect(both.counts.available).toBe(2)
   const clockify = projectCalendar(plan, [], { ...defaultCalendarLayers, jira: false })
-  expect(clockify.counts.available).toBe(remaining >= 900 ? 2 : 0)
+  expect(clockify.counts.available).toBe(remaining >= 60 ? 2 : 0)
   expect(clockify.placements.get(plan.monday)?.filter(({ block }) => block.kind === "proposable")).toHaveLength(
-    remaining >= 900 ? 2 : 0
+    remaining >= 60 ? 2 : 0
   )
   expect(clockify.visibleHours).toEqual(both.visibleHours)
   expect(clockify.days).toEqual(both.days)
@@ -245,7 +245,7 @@ it.each([16, 899, 900])("applies the suggestion floor to the selected provider's
   expect(jira.placements.get(plan.monday)?.[0]?.block).toMatchObject({ deltaSeconds: 1800 })
   expect(projectCalendar(plan, [], { ...defaultCalendarLayers, clockify: false, jira: false }).counts.available).toBe(0)
   // Scope also limits authority when a restored plan contains a delta for an excluded provider.
-  expect(projectCalendar({ ...plan, scope: "clockify" }, []).counts.available).toBe(remaining >= 900 ? 2 : 0)
+  expect(projectCalendar({ ...plan, scope: "clockify" }, []).counts.available).toBe(remaining >= 60 ? 2 : 0)
   expect(weekTotals(plan)).toMatchObject({ jiraSuggested: 1800, clockifySuggested: remaining })
   expect(weekTotals({ ...plan, scope: "clockify" }).jiraSuggested).toBe(0)
   const queued = previewWrite({ plan, entries: [] }, {
@@ -260,7 +260,7 @@ it.each([16, 899, 900])("applies the suggestion floor to the selected provider's
   ).toBe(remaining)
 })
 
-it("hides a block when its selected provider has less than fifteen executable minutes", () => {
+it("hides a block when its selected provider has less than one executable minute", () => {
   const base = fixtureWeek()
   const row = base.rows[0]!
   const plan = {
@@ -271,11 +271,11 @@ it("hides a block when its selected provider has less than fifteen executable mi
       intervals: row.intervals.map((interval): typeof row.intervals[number] => ({ ...interval, source: "jira" })),
       proposal: row.proposal === undefined ? undefined : {
         ...row.proposal,
-        clockifyDelta: 3900,
+        clockifyDelta: 3659,
         jiraDelta: 3600,
         blocks: row.proposal.blocks.map((block, index) => ({
           ...block,
-          consumed: { clockify: index === 0 ? 3300 : 0, jira: 0 }
+          consumed: { clockify: index === 0 ? 3541 : 0, jira: 0 }
         }))
       }
     }]
@@ -283,7 +283,7 @@ it("hides a block when its selected provider has less than fifteen executable mi
   const clockify = projectCalendar(plan, [], { ...defaultCalendarLayers, jira: false })
   const suggestions = clockify.placements.get(plan.monday)?.filter(({ block }) => block.kind === "proposable")
   expect(suggestions?.map(({ block }) => block.id)).toEqual(["row-one:gap:1"])
-  expect(weekTotals(plan).clockifySuggested).toBe(3900)
+  expect(weekTotals(plan).clockifySuggested).toBe(3659)
 })
 
 it("keeps an exact-threshold block for its provider without reviving the shorter side or hiding saved time", () => {
@@ -305,11 +305,11 @@ it("keeps an exact-threshold block for its provider without reviving the shorter
       intervals: row.intervals.map((interval): typeof row.intervals[number] => ({ ...interval, source: "jira" })),
       proposal: row.proposal === undefined ? undefined : {
         ...row.proposal,
-        clockifyDelta: 4500,
-        jiraDelta: 300,
+        clockifyDelta: 3660,
+        jiraDelta: 59,
         blocks: row.proposal.blocks.map((block, index) => ({
           ...block,
-          consumed: { clockify: index === 0 ? 2700 : 0, jira: index === 0 ? 3300 : 0 }
+          consumed: { clockify: index === 0 ? 3540 : 0, jira: index === 0 ? 3541 : 0 }
         }))
       }
     }]
@@ -318,15 +318,15 @@ it("keeps an exact-threshold block for its provider without reviving the shorter
   const jira = projectCalendar(plan, [], { ...defaultCalendarLayers, clockify: false })
   const suggestions = clockify.placements.get(plan.monday)?.filter(({ block }) => block.kind === "proposable")
   expect(suggestions?.map(({ block }) => block.id)).toEqual(["row-one:gap:0", "row-one:gap:1"])
-  expect(suggestions?.[0]?.block).toMatchObject({ deltaSeconds: 900 })
+  expect(suggestions?.[0]?.block).toMatchObject({ deltaSeconds: 60 })
   expect(jira.placements.get(plan.monday)?.filter(({ block }) => block.kind === "proposable")).toEqual([])
   expect(
     clockify.placements.get(plan.monday)?.some(({ block }) => block.kind === "logged" && block.source === "clockify")
   ).toBe(true)
-  expect(weekTotals(plan)).toMatchObject({ clockify: 16, clockifySuggested: 4500, jiraSuggested: 300 })
+  expect(weekTotals(plan)).toMatchObject({ clockify: 16, clockifySuggested: 3660, jiraSuggested: 0 })
 })
 
-// The fifteen-minute policy governs offers, never real Jira or Clockify records, including ticketless time.
+// The one-minute policy governs offers, never real Jira or Clockify records, including ticketless time.
 it("retains sixteen-second provider records when all remaining suggestions are too short", () => {
   const base = fixtureWeek()
   const startMs = new Date(`${base.monday}T11:00:00`).getTime()

@@ -1,6 +1,12 @@
 import { Effect, Exit, Predicate } from "effect"
 import { Atom, AtomRegistry } from "effect/reactivity"
-import type { ReadProgress, WeekPlanResponse, WeekScopeName, WriteResultResponse } from "../shared/contracts.js"
+import {
+  MAX_CONFIRM_BATCH,
+  type ReadProgress,
+  type WeekPlanResponse,
+  type WeekScopeName,
+  type WriteResultResponse
+} from "../shared/contracts.js"
 import * as Api from "./api.js"
 import { type CalendarLayers, defaultCalendarLayers } from "./calendarProjection.js"
 import {
@@ -10,6 +16,7 @@ import {
   type SavedEntryEdit,
   type WeekWrite
 } from "./weekAtoms.js"
+import { withIgnoreDecision } from "./writeHolds.js"
 
 export interface AgentActivity {
   readonly batch: number
@@ -35,10 +42,15 @@ export interface WeekTransport {
   readonly readWeek: typeof Api.readWeek
   readonly refreshRecordedTime: typeof Api.refreshRecordedTime
   readonly confirmRow: typeof Api.confirmRow
+  /** Absent in a transport without the batch route; the queue then confirms one at a time. */
+  readonly confirmRows?: typeof Api.confirmRows | undefined
   readonly logManual: typeof Api.logManual
   readonly updateSavedEntry: typeof Api.updateSavedEntry
   readonly mapStandingAttribution: typeof Api.mapStandingAttribution
   readonly markTicketMine: typeof Api.markTicketMine
+  readonly setTicketIgnored: typeof Api.setTicketIgnored
+  readonly deleteSavedEntry: typeof Api.deleteSavedEntry
+  readonly promoteWithheld: typeof Api.promoteWithheld
 }
 
 export interface WeekPreferences {
@@ -282,54 +294,83 @@ export const makeWeekReview = (
     update({ actionFailure: previous === null ? message : `${previous}\n${message}` })
   }
 
-  /** Dispatch ready items in click order; a provider write is never interrupted or retried. */
+  /** What one written approval reports to the person: provider failures, or nothing on success. */
+  const writeFailures = (written: WriteResultResponse): ReadonlyArray<string> =>
+    (["jira", "clockify"] satisfies ReadonlyArray<"jira" | "clockify">).flatMap((provider) => {
+      const outcome = written[provider]
+      const label = provider === "jira" ? "Jira" : "Clockify"
+      if (outcome._tag === "NotLoggedIn") return [`${label} is not logged in`]
+      if (outcome._tag === "PartiallyWritten") {
+        return [
+          outcome.failure._tag === "NotLoggedIn"
+            ? `${label} wrote ${String(outcome.seconds)}s, then was not logged in`
+            : `${label} wrote ${String(outcome.seconds)}s, then failed: ${outcome.failure.message}`
+        ]
+      }
+      return outcome._tag === "Refused" ? [`${label}: ${outcome.message}`] : []
+    })
+
+  /**
+   * Take every ready approval at the head of the queue, in click order, narrowed to the systems still
+   * allowed. Approvals left with no system leave the queue unwritten. Bounded to one server batch.
+   */
+  const takeReady = (): ReadonlyArray<QueuedConfirmation> => {
+    const batch: Array<QueuedConfirmation> = []
+    while (batch.length < MAX_CONFIRM_BATCH) {
+      // Items already taken are `saving` at the head, so the next candidate sits right after them.
+      const item = registry.get(atoms.queued)[batch.length]
+      if (item === undefined || item.status !== "queued" || !ready.has(item.id)) break
+      ready.delete(item.id)
+      const allowed = registry.get(state).writeTargets
+      const requested = item.request.targets
+      const targets = {
+        jira: allowed.jira && requested?.jira === true,
+        clockify: allowed.clockify && requested?.clockify === true
+      }
+      if (!targets.jira && !targets.clockify) {
+        registry.update(atoms.queued, (items) => items.filter((held) => held.id !== item.id))
+        continue
+      }
+      const saving: QueuedConfirmation = {
+        ...item,
+        status: "saving",
+        request: { ...item.request, targets },
+        entries: item.entries.filter((entry) => targets[entry.source])
+      }
+      registry.update(atoms.queued, (items) => items.map((held) => held.id === item.id ? saving : held))
+      batch.push(saving)
+    }
+    return batch
+  }
+
+  /**
+   * Dispatch ready items in click order; a provider write is never interrupted or retried. Ready
+   * approvals go as one batch under a single provider re-read, so a long queue costs one read per
+   * batch rather than one per approval.
+   */
   const dispatchQueue = async () => {
     if (disposed || dispatching) return
     dispatching = true
     update({ queueRunning: true })
     try {
       while (!disposed) {
-        const item = registry.get(atoms.queued)[0]
-        if (item === undefined || !ready.has(item.id)) break
-        ready.delete(item.id)
-        const allowed = registry.get(state).writeTargets
-        const requested = item.request.targets
-        const targets = {
-          jira: allowed.jira && requested?.jira === true,
-          clockify: allowed.clockify && requested?.clockify === true
-        }
-        if (!targets.jira && !targets.clockify) {
-          registry.update(atoms.queued, (items) => items.filter((held) => held.id !== item.id))
-          continue
-        }
-        const saving: QueuedConfirmation = {
-          ...item,
-          status: "saving",
-          request: { ...item.request, targets },
-          entries: item.entries.filter((entry) => targets[entry.source])
-        }
-        registry.update(atoms.queued, (items) => items.map((held) => held.id === item.id ? saving : held))
+        const batch = takeReady()
+        if (batch.length === 0) break
         queueNeedsRefresh = true
         try {
-          registry.set(atoms.writeQueued, saving)
-          const written = await Effect.runPromise(
-            AtomRegistry.getResult(registry, atoms.writeQueued, { suspendOnWaiting: true })
+          registry.set(atoms.writeQueuedBatch, batch)
+          const outcomes = await Effect.runPromise(
+            AtomRegistry.getResult(registry, atoms.writeQueuedBatch, { suspendOnWaiting: true })
           )
-          update({ written })
-          const failures = (["jira", "clockify"] satisfies ReadonlyArray<keyof typeof targets>).flatMap((provider) => {
-            const outcome = written[provider]
-            const label = provider === "jira" ? "Jira" : "Clockify"
-            if (outcome._tag === "NotLoggedIn") return [`${label} is not logged in`]
-            if (outcome._tag === "PartiallyWritten") {
-              return [
-                outcome.failure._tag === "NotLoggedIn"
-                  ? `${label} wrote ${String(outcome.seconds)}s, then was not logged in`
-                  : `${label} wrote ${String(outcome.seconds)}s, then failed: ${outcome.failure.message}`
-              ]
+          for (const outcome of outcomes) {
+            if (outcome._tag === "Failed") {
+              recordQueueFailure(outcome.message)
+              continue
             }
-            return outcome._tag === "Refused" ? [`${label}: ${outcome.message}`] : []
-          })
-          if (failures.length > 0) recordQueueFailure(failures.join("; "))
+            update({ written: outcome.result })
+            const failures = writeFailures(outcome.result)
+            if (failures.length > 0) recordQueueFailure(failures.join("; "))
+          }
         } catch (cause) {
           recordQueueFailure(messageOf(cause))
         }
@@ -470,6 +511,22 @@ export const makeWeekReview = (
         await Effect.runPromise(AtomRegistry.getResult(registry, atoms.editSaved, { suspendOnWaiting: true }))
         update({ fresh: false })
       })
+      // A failed ticket change may still have created its replacement, so a ticket change re-reads either way.
+      if (accepted || edit.request.ticketKey !== undefined) void refreshRecorded()
+      return accepted
+    },
+    promoteWithheld: (request: Parameters<typeof Api.promoteWithheld>[0]) =>
+      mutate(async () => {
+        const promoted = await transport.promoteWithheld(request)
+        registry.set(atoms.source, { ...registry.get(atoms.source), plan: promoted })
+      }),
+    deleteSaved: async (request: Parameters<typeof Api.deleteSavedEntry>[0]) => {
+      if (!registry.get(state).writeTargets[request.source]) return false
+      const accepted = await mutate(async () => {
+        await transport.deleteSavedEntry(request)
+        update({ fresh: false })
+      })
+      // The server already dropped the entry locally; a provider read confirms it and re-offers its time.
       if (accepted) void refreshRecorded()
       return accepted
     },
@@ -481,6 +538,18 @@ export const makeWeekReview = (
     markMine: (request: Parameters<typeof Api.markTicketMine>[0]) =>
       mutate(async () => {
         await transport.markTicketMine(request)
+        update({ configurationChanged: true })
+      }),
+    setIgnored: (request: Parameters<typeof Api.setTicketIgnored>[0]) =>
+      mutate(async () => {
+        const saved = await transport.setTicketIgnored(request)
+        const current = registry.get(atoms.source)
+        if (current.plan !== null) {
+          registry.set(atoms.source, {
+            ...current,
+            plan: withIgnoreDecision(current.plan, request.ticketKey, saved.ignoredTickets)
+          })
+        }
         update({ configurationChanged: true })
       })
   }

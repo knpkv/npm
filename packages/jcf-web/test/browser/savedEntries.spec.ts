@@ -142,6 +142,9 @@ test("rolls back a failed edit without moving the calendar or discarding the dra
   const note = editor.getByRole("textbox", { name: "What was done (optional)" })
   await note.fill("Retain this draft")
   await editor.getByLabel(/^End/).fill("2026-09-07T10:30")
+  // Measure after Save is in view: the click's own scroll-into-view is not the app moving the calendar.
+  const save = editor.getByRole("button", { name: "Save changes", exact: true })
+  await save.scrollIntoViewIfNeeded()
   const before = await page.getByRole("region", { name: "Week calendar", exact: true }).boundingBox()
   const saving = gate()
   await page.route("**/api/entries/update", async (route) => {
@@ -152,7 +155,7 @@ test("rolls back a failed edit without moving the calendar or discarding the dra
       body: JSON.stringify({ message: "Provider temporarily unavailable" })
     })
   })
-  await editor.getByRole("button", { name: "Save changes", exact: true }).click()
+  await save.click()
   const pending = page.locator(".jcf-block-logged[data-source=\"jira\"][data-pending=\"true\"]")
   await expect(pending).toHaveCount(1)
   expect(await page.getByRole("region", { name: "Week calendar", exact: true }).boundingBox()).toEqual(before)

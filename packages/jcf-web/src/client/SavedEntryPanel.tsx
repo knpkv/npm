@@ -22,12 +22,16 @@ export const SavedEntryPanel = (props: {
   readonly unavailable: boolean
   readonly descriptionDisabled: boolean
   readonly onSave: (request: UpdateSavedEntryRequest) => Promise<void>
+  /** Delete this provider entry for good; asked for only after an explicit second confirmation. */
+  readonly onDelete: () => Promise<void>
   readonly onCancel: () => void
 }) => {
   const { entry } = props
   const [start, setStart] = useState(localDateTime(entry.startMs))
   const [end, setEnd] = useState(localDateTime(entry.endMs))
   const [description, setDescription] = useState(entry.description ?? "")
+  const [ticketKey, setTicketKey] = useState(entry.ticketKey ?? "")
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [generationStatus, setGenerationStatus] = useState<string | null>(null)
   const revision = useRef(0)
@@ -51,14 +55,18 @@ export const SavedEntryPanel = (props: {
   const startMs = parsedStart._tag === "Valid" ? parsedStart.instantMs : NaN
   const endMs = parsedEnd._tag === "Valid" ? parsedEnd.instantMs : NaN
   const changedTime = startMs !== entry.startMs || endMs !== entry.endMs
+  const nextTicket = ticketKey.trim().toUpperCase()
+  const retargeted = nextTicket !== (entry.ticketKey ?? "")
   const invalid =
-    parsedStart._tag === "Invalid" || parsedEnd._tag === "Invalid"
-      ? "Choose local times that exist only once."
-      : endMs <= startMs
-        ? "End must be after start."
-        : entry.source === "jira" && changedTime && endMs - startMs < 60_000
-          ? "Jira time must be at least one minute."
-          : undefined
+    retargeted && !/^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(nextTicket)
+      ? "That is not an Issue Key."
+      : parsedStart._tag === "Invalid" || parsedEnd._tag === "Invalid"
+        ? "Choose local times that exist only once."
+        : endMs <= startMs
+          ? "End must be after start."
+          : entry.source === "jira" && changedTime && endMs - startMs < 60_000
+            ? "Jira time must be at least one minute."
+            : undefined
   const provider = entry.source === "jira" ? "Jira" : "Clockify"
 
   const generate = async () => {
@@ -113,7 +121,8 @@ export const SavedEntryPanel = (props: {
           revision: entry.revision,
           startMs,
           endMs,
-          description
+          description,
+          ...(retargeted && { ticketKey: nextTicket })
         })
       }}
     >
@@ -122,6 +131,9 @@ export const SavedEntryPanel = (props: {
       </h2>
       <p className="jcf-muted">Editing the saved {provider} entry. Changes apply only to this entry.</p>
       <div className="jcf-fields">
+        <Field className="jcf-field jcf-field-wide" label="Issue key">
+          {(control) => <input {...control} value={ticketKey} onChange={(event) => setTicketKey(event.target.value)} />}
+        </Field>
         <Field className="jcf-field jcf-field-wide" label="Start" required>
           {(control) => (
             <input
@@ -198,7 +210,40 @@ export const SavedEntryPanel = (props: {
         <Button type="button" onClick={props.onCancel} disabled={props.busy}>
           Cancel
         </Button>
+        {confirmingDelete ? null : (
+          <Button
+            type="button"
+            variant="quiet"
+            disabled={props.unavailable || props.busy || !props.targetVisible}
+            onClick={() => setConfirmingDelete(true)}
+          >
+            Delete entry
+          </Button>
+        )}
       </div>
+      {retargeted && invalid === undefined ? (
+        <p className="jcf-note" data-tone="warning">
+          {`Saving creates the entry under ${nextTicket} and then deletes the ${provider} entry under ${entry.ticketKey ?? "no ticket"}.`}
+        </p>
+      ) : null}
+      {confirmingDelete ? (
+        <div className="jcf-note" data-tone="failure" role="alertdialog" aria-label="Confirm delete">
+          <p>{`Delete this ${provider} entry? This cannot be undone; its session time will be suggested again.`}</p>
+          <div className="jcf-actions">
+            <Button
+              type="button"
+              variant="primary"
+              disabled={props.unavailable || props.busy}
+              onClick={() => void props.onDelete()}
+            >
+              {props.busy ? "Deleting…" : `Delete from ${provider}`}
+            </Button>
+            <Button type="button" onClick={() => setConfirmingDelete(false)} disabled={props.busy}>
+              Keep it
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </form>
   )
 }

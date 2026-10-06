@@ -69,6 +69,15 @@ const setup = (overrides: Partial<WeekTransport> = {}, delay?: (milliseconds: nu
     mapStandingAttribution: vi.fn<WeekTransport["mapStandingAttribution"]>(
       overrides.mapStandingAttribution ?? (async () => ({ sessionTicketMap: {} }))
     ),
+    promoteWithheld: vi.fn<WeekTransport["promoteWithheld"]>(
+      overrides.promoteWithheld ?? (async () => fixtureWeek())
+    ),
+    deleteSavedEntry: vi.fn<WeekTransport["deleteSavedEntry"]>(
+      overrides.deleteSavedEntry ?? (async (request) => ({ planId: request.planId }))
+    ),
+    setTicketIgnored: vi.fn<WeekTransport["setTicketIgnored"]>(
+      overrides.setTicketIgnored ?? (async () => ({ ignoredTickets: [] }))
+    ),
     markTicketMine: vi.fn<WeekTransport["markTicketMine"]>(
       overrides.markTicketMine ?? (async () => ({ ownershipOverrides: [] }))
     )
@@ -490,6 +499,45 @@ it("serializes quick writes, accepts other blocks while saving, and refreshes to
   expect(fixture.transport.refreshRecordedTime).toHaveBeenCalledTimes(2)
   expect(fixture.transport.readWeek).not.toHaveBeenCalled()
   expect(fixture.state().optimisticEntries).toEqual([])
+})
+
+// A long queue used to pay one provider re-read per approval. Ready approvals now go as one batch.
+it("sends every ready approval as one batch and settles each from its own outcome", async () => {
+  const clock = timer()
+  const fixture = setup({}, clock.delay)
+  const confirmRows = vi.fn<NonNullable<WeekTransport["confirmRows"]>>(async (requests) =>
+    requests.map((_, index) =>
+      index === 0
+        ? { _tag: "Written", result: written }
+        : { _tag: "Failed", message: "Those blocks are not part of this row any more — reload the week", reload: true }
+    )
+  )
+  const review = makeWeekReview(
+    fixture.registry,
+    { week: fixture.plan.monday, scope: "both", now: () => 0, rememberWeek: vi.fn(), rememberScope: vi.fn() },
+    { ...fixture.transport, confirmRows },
+    clock.delay
+  )
+  cleanups.push(review.dispose)
+  cleanups.push(fixture.registry.mount(review.state))
+  await review.initialize()
+  expect(review.queueConfirm({ rowId: "row-one", blocks: [0] })).toBe(true)
+  expect(review.queueConfirm({ rowId: "row-one", blocks: [1] })).toBe(true)
+  const drained = new Promise<void>((resolve) => {
+    const stop = fixture.registry.subscribe(review.state, (state) => {
+      if (!state.queueActive && state.queued.length === 0) {
+        stop()
+        resolve()
+      }
+    })
+  })
+  clock.release(1)
+  clock.release(0)
+  await drained
+  expect(confirmRows).toHaveBeenCalledTimes(1)
+  expect(confirmRows.mock.calls[0]?.[0].map((request) => request.blocks)).toEqual([[0], [1]])
+  expect(fixture.transport.confirmRow).not.toHaveBeenCalled()
+  expect(fixture.registry.get(review.state).actionFailure).toContain("reload the week")
 })
 
 it("keeps ready approvals undoable behind a saving write and locks replacement/manual actions", async () => {

@@ -395,5 +395,15 @@
     "value": {
       "description": "Represents a custom field value."
     }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/TimeEntryWithRatesDtoV1/properties/costRate",
+    "value": { "anyOf": [{ "$ref": "#/components/schemas/RateDtoV1" }, { "type": "null" }] }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/TimeEntryWithRatesDtoV1/properties/hourlyRate",
+    "value": { "anyOf": [{ "$ref": "#/components/schemas/RateDtoV1" }, { "type": "null" }] }
   }
 ]

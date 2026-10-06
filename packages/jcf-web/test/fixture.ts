@@ -13,6 +13,8 @@ export const fixtureWeek = (monday = "2026-09-07", scope: WeekPlanResponse["scop
   return {
     attributorAvailable: true,
     attributorCalls: 1,
+    ignored: [],
+    ignoredTickets: [],
     days: Array.from({ length: 7 }, (_, index) => day(index)),
     excludedDays: [],
     monday,

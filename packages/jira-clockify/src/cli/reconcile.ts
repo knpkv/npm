@@ -377,6 +377,8 @@ export const agentReportJson = (options: {
     withheld: options.report.withheld.map(withSummary),
     ownershipWithheld: options.ownershipWithheld.map(withSummary),
     unattributed: options.report.unattributed,
+    ignored: options.report.ignored,
+    ignoredTickets: options.report.ignoredTickets,
     excludedDays: options.report.excludedDays
   }
 }
