@@ -171,6 +171,27 @@ describe("ruleProgress", () => {
     expect(ruleProgress(pullRequest)).toEqual({ approved: 2, name: "Reviewers", required: 3 })
   })
 
+  it("lets ARNs decide over shared names: another role's alice does not count, the pool's alice does", () => {
+    const pool = [
+      "arn:aws:sts::111122223333:assumed-role/Reviewers/alice",
+      "arn:aws:sts::111122223333:assumed-role/Reviewers/bob"
+    ]
+    const otherRole = make({
+      approvalRules: [rule("Reviewers", 2, ["alice", "bob"], false, pool)],
+      approvedBy: ["alice"],
+      approvedByArns: ["arn:aws:sts::111122223333:assumed-role/Operations/alice"],
+      id: "1"
+    })
+    expect(ruleProgress(otherRole)).toEqual({ approved: 0, name: "Reviewers", required: 2 })
+    const sameRole = make({
+      approvalRules: [rule("Reviewers", 2, ["alice", "bob"], false, pool)],
+      approvedBy: ["alice"],
+      approvedByArns: [pool[0] ?? ""],
+      id: "2"
+    })
+    expect(ruleProgress(sameRole)).toEqual({ approved: 1, name: "Reviewers", required: 2 })
+  })
+
   it("reports a satisfied rule as complete", () => {
     const pullRequest = make({ approvalRules: [rule("Reviewers", 2, ["*"], true)], id: "1" })
     expect(ruleProgress(pullRequest)).toEqual({ approved: 2, name: "Reviewers", required: 2 })
@@ -178,6 +199,43 @@ describe("ruleProgress", () => {
 
   it("is undefined when the PR has no approval rules", () => {
     expect(ruleProgress(make({ id: "1" }))).toBeUndefined()
+  })
+})
+
+describe("workbenchQueue with role pools", () => {
+  const reviewers = rule("Reviewers", 1, ["*"], false, ["arn:aws:sts::111122223333:assumed-role/Reviewers/*"])
+
+  it("lists a PR waiting on a wildcard pool as open to a role pool, and does not report Clear as empty", () => {
+    const queue = workbenchQueue([make({ approvalRules: [reviewers], id: "1" })], "andrey", NOW)
+    expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["1", "pool"]])
+    expect(queue.summary).toMatchObject({ _tag: "Clear", pooled: 1 })
+  })
+
+  it("leaves it out once the user approved, the rule is satisfied, or the user wrote it", () => {
+    const queue = workbenchQueue(
+      [
+        make({ approvalRules: [reviewers], approvedBy: ["andrey"], id: "approved" }),
+        make({ approvalRules: [{ ...reviewers, satisfied: true }], id: "satisfied" })
+      ],
+      "andrey",
+      NOW
+    )
+    expect(queue.rows).toEqual([])
+    const own = workbenchQueue([make({ approvalRules: [reviewers], author: "andrey", id: "own" })], "andrey", NOW)
+    expect(own.rows.map((row) => row.group)).toEqual(["yours"])
+  })
+
+  it("keeps a named pool membership in Needs your review ahead of role pools", () => {
+    const queue = workbenchQueue(
+      [
+        make({ approvalRules: [reviewers], id: "pooled" }),
+        make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], id: "named" })
+      ],
+      "andrey",
+      NOW
+    )
+    expect(queue.rows.map((row) => row.group)).toEqual(["review", "pool"])
+    expect(queue.summary._tag).toBe("Waiting")
   })
 })
 

@@ -1,6 +1,6 @@
 /**
  * The review Workbench's queue: which open pull requests belong to the current user and why, in
- * three groups (needs your review, yours, watching), plus the one-line summary above them.
+ * groups (needs your review, open to a role pool, yours, watching), plus the one-line summary above them.
  *
  * Pure: callers pass the already account-filtered list (`queuePullRequests`) and `now`.
  *
@@ -18,14 +18,17 @@ const DAY_MS = 86_400_000
 export const QUIET_AFTER_MS = 7 * DAY_MS
 
 /**
+ * `pool` holds pull requests waiting on a wildcard role pool (`…/Reviewers/*`): the client knows
+ * the caller only by user name, not role, so it cannot tell whether the caller is in that pool.
  * `unsorted` holds every open pull request when no caller identity resolved: membership cannot
  * be decided, so nothing is presented as needing the user's review.
  */
-export type WorkbenchGroup = "review" | "yours" | "watching" | "unsorted"
+export type WorkbenchGroup = "review" | "pool" | "yours" | "watching" | "unsorted"
 
 /**
  * Why one of your own pull requests is not merged yet; the worst reason only. `unverified` means
- * every rule reads satisfied but the approval state itself could not be evaluated.
+ * every rule reads satisfied while the pull request as a whole is not approved, so the two
+ * provider answers disagree.
  */
 export type StuckReason = "conflicts" | "quiet" | "approvals" | "unverified" | "ready"
 
@@ -49,7 +52,7 @@ export interface WorkbenchRow {
 export type WorkbenchSummary = Data.TaggedEnum<{
   Unknown: {}
   Waiting: { readonly count: number; readonly oldest: WorkbenchRow }
-  Clear: { readonly next: WorkbenchRow | undefined }
+  Clear: { readonly next: WorkbenchRow | undefined; readonly pooled: number }
 }>
 
 /** Constructors and exhaustive `$match` for {@link WorkbenchSummary}. */
@@ -66,20 +69,25 @@ const arnMatches = (pattern: string, arn: string): boolean =>
 
 /**
  * Approvals that count toward one rule. A satisfied rule is complete by definition; a rule with
- * no pool accepts any approver; otherwise an approver counts when their ARN matches a pool ARN
- * (wildcards included) or, for exact names, when the normalized identities match.
+ * no pool accepts any approver. Otherwise ARNs decide whenever both sides carry them (wildcards
+ * included), because names are lossy: `Operations/alice` and `Reviewers/alice` share one. Names
+ * only count when ARN evidence is missing, and never against a wildcard member.
  */
 const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule): number => {
   if (rule.satisfied) return rule.requiredApprovals
   if (rule.poolMembers.length === 0 && rule.poolMemberArns.length === 0) return pullRequest.approvedBy.length
-  const byArn =
-    pullRequest.approvedByArns.filter((arn) => rule.poolMemberArns.some((pattern) => arnMatches(pattern, arn)))
+  if (rule.poolMemberArns.length > 0 && pullRequest.approvedByArns.length > 0) {
+    return pullRequest.approvedByArns.filter((arn) => rule.poolMemberArns.some((pattern) => arnMatches(pattern, arn)))
       .length
+  }
   const exactMembers = rule.poolMembers.filter((member) => !member.includes("*"))
-  const byName =
-    pullRequest.approvedBy.filter((approver) => exactMembers.some((member) => identityMatches(approver, member))).length
-  return Math.max(byArn, byName)
+  return pullRequest.approvedBy.filter((approver) => exactMembers.some((member) => identityMatches(approver, member)))
+    .length
 }
+
+const hasWildcardPool = (rule: Domain.ApprovalRule): boolean =>
+  rule.poolMembers.some((member) => member.includes("*")) ||
+  rule.poolMemberArns.some((pattern) => pattern.endsWith("*"))
 
 /**
  * The rule furthest from being met: lowest share approved, then most approvals still missing, so
@@ -113,11 +121,15 @@ const stuckReason = (pullRequest: Domain.PullRequest, quietMs: number): StuckRea
 const groupOf = (pullRequest: Domain.PullRequest, currentUser: string): WorkbenchGroup | undefined => {
   if (identityMatches(currentUser, pullRequest.author)) return "yours"
   if (needsMyReview(pullRequest, currentUser)) return "review"
+  const approved = pullRequest.approvedBy.some((approver) => identityMatches(currentUser, approver))
+  if (!approved && pullRequest.approvalRules.some((rule) => !rule.satisfied && hasWildcardPool(rule))) return "pool"
   if (pullRequest.commentedBy.some((name) => identityMatches(currentUser, name))) return "watching"
   return undefined
 }
 
-const groupOrder = { review: 0, yours: 1, watching: 2, unsorted: 3 } satisfies Readonly<Record<WorkbenchGroup, number>>
+const groupOrder = { review: 0, pool: 1, yours: 2, watching: 3, unsorted: 4 } satisfies Readonly<
+  Record<WorkbenchGroup, number>
+>
 
 /**
  * Builds the queue for one user. Only open pull requests take part; within a group the longest
@@ -152,7 +164,10 @@ export const workbenchQueue = (
   return {
     rows,
     summary: oldest === undefined
-      ? WorkbenchSummary.Clear({ next: rows.find((row) => row.group === "yours") })
+      ? WorkbenchSummary.Clear({
+        next: rows.find((row) => row.group === "yours"),
+        pooled: rows.filter((row) => row.group === "pool").length
+      })
       : WorkbenchSummary.Waiting({ count: waiting.length, oldest })
   }
 }
