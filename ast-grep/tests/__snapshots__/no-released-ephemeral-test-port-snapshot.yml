@@ -69,6 +69,18 @@ snapshots:
         style: secondary
         start: 117
         end: 209
+      - source: port
+        style: secondary
+        start: 197
+        end: 201
+      - source: port
+        style: secondary
+        start: 197
+        end: 201
+      - source: resolve(port)
+        style: secondary
+        start: 189
+        end: 202
   ? |
     new Promise((resolve) => {
       const probe = createServer()
@@ -137,6 +149,10 @@ snapshots:
         style: secondary
         start: 89
         end: 183
+      - source: const selected = probe.address().port
+        style: secondary
+        start: 101
+        end: 138
   ? |
     new Promise((resolve, reject) => {
       reservation.listen(0, "127.0.0.1", function() {
@@ -203,6 +219,18 @@ snapshots:
         style: secondary
         start: 72
         end: 224
+      - source: address.port
+        style: secondary
+        start: 190
+        end: 202
+      - source: address.port
+        style: secondary
+        start: 190
+        end: 202
+      - source: resolve(address.port)
+        style: secondary
+        start: 182
+        end: 203
   ? |
     new Promise<number>((resolve, reject) => {
       const probe = createServer()
@@ -271,6 +299,18 @@ snapshots:
         style: secondary
         start: 105
         end: 242
+      - source: address.port
+        style: secondary
+        start: 207
+        end: 219
+      - source: address.port
+        style: secondary
+        start: 207
+        end: 219
+      - source: resolve(address.port)
+        style: secondary
+        start: 199
+        end: 220
   ? |
     reservation.listen(0, "127.0.0.1", function() {
       const address = reservation.address()

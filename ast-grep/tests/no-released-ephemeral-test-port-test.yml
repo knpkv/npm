@@ -53,6 +53,13 @@ valid:
     new Promise<void>((resolve, reject) => {
       server.listen(0, host, () => server.close((error) => (error ? reject(error) : resolve(undefined))))
     })
+  - |
+    new Promise((resolve) => {
+      server.listen(0, host, async () => {
+        const body = await request(`http://${host}:${server.address().port}/`)
+        server.close(() => resolve(body))
+      })
+    })
 invalid:
   - |
     new Promise<number>((resolve, reject) => {

@@ -50,6 +50,26 @@ rule:
                           not:
                             regex: "^undefined$"
                         - kind: member_expression
+    # The handed-on value is the port: `x.port`, a variable named for it, or an
+    # alias assigned from `.port`. `resolve(body)` after a real request is not.
+    - any:
+        - has:
+            stopBy: end
+            pattern: $RESOLVE($VALUE)
+            has:
+              field: arguments
+              has:
+                any:
+                  - kind: member_expression
+                    regex: "\\.port$"
+                  - kind: identifier
+                    regex: "(?i)port$"
+        - has:
+            stopBy: end
+            pattern: const $VALUE = $OBJ.port
+        - has:
+            stopBy: end
+            pattern: let $VALUE = $OBJ.port
 
 files:
   - "packages/*/test/**/*.ts"
