@@ -29,9 +29,20 @@ const goal = (index: number): WorkGoal => {
   }
 }
 
+// `?long` gives the first listed goal (goal-2, blocked) an unbroken branch and a long title, to prove they wrap inside the page.
+const longNames = new URL(window.location.href).searchParams.has("long")
+const named = (entry: WorkGoal): WorkGoal =>
+  longNames && entry.id === "goal-2"
+    ? {
+        ...entry,
+        repository: { branch: "feat/implementWorkCheckpointRecoveryAndReconciliation", repository: "npm" },
+        title: "Work checkpoint recovery and reconciliation for the fleet coordinator"
+      }
+    : entry
+
 const snapshot = (window: WorkSnapshot["window"]): WorkSnapshot => ({
   asOf: 1_000,
-  goals: Array.from({ length: 47 }, (_, index) => goal(index + 1)),
+  goals: Array.from({ length: 47 }, (_, index) => named(goal(index + 1))),
   observedAt: 1_000,
   window
 })

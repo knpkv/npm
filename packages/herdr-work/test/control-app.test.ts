@@ -399,11 +399,31 @@ describe("Work control app", () => {
     expect(markup).toContain("Activity")
     expect(markup).toContain("Approve the package shipment")
     expect(markup).toContain("Waiting for the fresh package review")
-    expect(markup).toContain("Shipment path")
+    expect(markup).toContain("aria-label=\"Delivery of Daily fleet Work\"")
     expect(markup).toContain("href=\"/connect/?agent=agent-work-owner&amp;host=SER8\"")
     expect(markup).toContain(
       "href=\"https://ser8.example.test/?tab=approvals&amp;approvalHost=SER8&amp;approvalJob=approval-job-42\""
     )
+  })
+
+  it("links a goal-level approval target that no request carries, and only records it on a read-only view", () => {
+    const legacy = Schema.decodeUnknownSync(WorkGoal)({ ...workGoalInput, requests: [] })
+    const legacySnapshots: WorkSnapshots = {
+      ...snapshots,
+      now: { ...snapshotFor("now"), goals: [legacy] }
+    }
+    const href =
+      "href=\"https://ser8.example.test/?tab=approvals&amp;approvalHost=SER8&amp;approvalJob=approval-job-42\""
+    const linked = renderToStaticMarkup(
+      createElement(WorkBoard, { initialGoalId: legacy.id, snapshots: legacySnapshots })
+    )
+    expect(linked).toContain(href)
+    expect(linked).toContain("Open SER8 approval")
+    const readOnly = renderToStaticMarkup(
+      createElement(WorkBoard, { externalLinks: "disabled", initialGoalId: legacy.id, snapshots: legacySnapshots })
+    )
+    expect(readOnly).not.toContain(href)
+    expect(readOnly).toContain("Approval target recorded on SER8.")
   })
 
   it("bounds a crowded board while retaining a deep-linked goal", () => {
