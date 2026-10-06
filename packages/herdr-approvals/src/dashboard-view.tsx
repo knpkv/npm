@@ -437,6 +437,7 @@ export const DashboardView = ({
       record.status !== "queued" &&
       record.status !== "running"
   )
+  const AppColumn = showHeader ? "main" : "div"
   const pullLabel = pull.refreshing ? "Refreshing" : pull.ready ? "Release to refresh" : "Pull to refresh"
   const approvalDecision = snapshot.approvalsEnabled ? onDecision : undefined
   const moveAgendaFocus = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -477,7 +478,8 @@ export const DashboardView = ({
         <span>↓</span>
         <strong>{pullLabel}</strong>
       </div>
-      <main className="app">
+      {/* Inside the fleet shell, which owns the page's <main>, this is a plain column. */}
+      <AppColumn className="app">
         {showHeader ? (
           <header className="app-header">
             <div className="fleet-mark" aria-hidden="true">
@@ -523,6 +525,7 @@ export const DashboardView = ({
             onDecision={approvalDecision}
             onLoadHistory={onLoadHistory}
             onLoadPending={onLoadPending}
+            onRevalidate={onRefresh}
             pendingLoading={pendingLoading}
             sending={sendingDecision}
             snapshot={snapshot}
@@ -630,7 +633,7 @@ export const DashboardView = ({
           />
         )}
         <Machines snapshot={snapshot} />
-      </main>
+      </AppColumn>
     </div>
   )
 }

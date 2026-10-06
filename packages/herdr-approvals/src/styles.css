@@ -259,9 +259,9 @@
   }
 
   .summary-grid strong {
-    font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / var(--rly-type-page-title-line-height)
-      var(--rly-type-page-title-font);
-    letter-spacing: var(--rly-type-page-title-tracking);
+    font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
+      var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
+    letter-spacing: var(--rly-type-section-title-tracking);
   }
 
   .summary-grid .summary-branch {
@@ -896,6 +896,12 @@
     gap: var(--rly-space-16);
   }
 
+  .countdown-title {
+    font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
+      var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
+    margin: 0;
+  }
+
   .countdown-announcer {
     block-size: 1px;
     clip-path: inset(50%);
@@ -967,9 +973,9 @@
     background: var(--rly-color-surface-2);
   }
 
+  /* Selection is the row's background and aria-current, never an edge stripe. */
   .countdown-row[aria-current="true"] {
-    background: var(--rly-color-surface-2);
-    box-shadow: inset 2px 0 0 var(--rly-color-text-1);
+    background: var(--rly-color-surface-3);
   }
 
   .countdown-row:focus-visible {

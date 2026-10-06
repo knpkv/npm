@@ -128,7 +128,8 @@ export const tickInterval = (expiries: ReadonlyArray<number | null>, now: number
 
 /**
  * Requests whose clock crossed into the last minute between two readings, for one polite
- * announcement each. Ticking text is never announced.
+ * announcement each; not once the deadline has passed (a late or resumed timer), where only the
+ * hub's own record may speak. Ticking text is never announced.
  */
 export const crossedIntoLastMinute = (
   facts: ReadonlyArray<PendingFacts>,
@@ -136,7 +137,8 @@ export const crossedIntoLastMinute = (
   now: number
 ): ReadonlyArray<PendingFacts> =>
   facts.filter(
-    ({ expiresAt }) => expiresAt !== null && expiresAt - previousNow >= IMMINENT_MS && expiresAt - now < IMMINENT_MS
+    ({ expiresAt }) =>
+      expiresAt !== null && expiresAt - previousNow >= IMMINENT_MS && expiresAt - now < IMMINENT_MS && expiresAt > now
   )
 
 /** "52s ago", "4m ago", "2h 5m ago", for decisions and request ages. */
@@ -178,6 +180,8 @@ export type DecisionAnswer = Data.TaggedEnum<{
   Accepted: { readonly decision: "approve" | "reject"; readonly record: SanitizedJobRecord }
   Refused: { readonly status: number }
   Uncertain: { readonly status: number | null }
+  /** The hub answered 2xx but its confirmation could not be read. */
+  Unreadable: {}
 }>
 
 /** Constructors and exhaustive `$match` for {@link DecisionAnswer}. */
@@ -191,7 +195,8 @@ export const answerForStatus = (status: number): DecisionAnswer =>
  * Whether the answer settles the request from this page: accepted, or refused by the hub. The bar
  * stays off for it until the queue shows its current state; an uncertain answer leaves it usable.
  */
-export const answerSettles = (answer: DecisionAnswer): boolean => answer._tag !== "Uncertain"
+export const answerSettles = (answer: DecisionAnswer): boolean =>
+  answer._tag === "Accepted" || answer._tag === "Refused"
 
 /** The hub's answer in words. It says only what the response proves, never that nothing ran. */
 export const answerText = (answer: DecisionAnswer): string =>
@@ -210,6 +215,8 @@ export const answerText = (answer: DecisionAnswer): string =>
         : status === 404
         ? "The hub no longer has this request."
         : `The hub refused the decision (HTTP ${String(status)}).`,
+    Unreadable: () =>
+      "The hub answered, but its confirmation couldn't be read. The list refreshes with its current state.",
     Uncertain: ({ status }) =>
       status === null
         ? "Couldn't reach the hub, so the decision may not have arrived. The list refreshes with its current state."

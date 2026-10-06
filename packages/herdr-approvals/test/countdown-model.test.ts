@@ -129,6 +129,9 @@ describe("countdown model", () => {
     expect(crossedIntoLastMinute(facts, 39_000, 41_000).map(({ id }) => id)).toEqual(["one"])
     expect(crossedIntoLastMinute(facts, 41_000, 42_000)).toEqual([])
     expect(crossedIntoLastMinute(facts, 30_000, 39_000)).toEqual([])
+    // A late or resumed timer past the deadline announces nothing; the hub's record speaks.
+    expect(crossedIntoLastMinute(facts, 30_000, 110_000)).toEqual([])
+    expect(crossedIntoLastMinute(facts, 30_000, 100_000)).toEqual([])
   })
 
   it("words the hub's answer by what it proves, never that nothing ran", () => {
@@ -140,6 +143,8 @@ describe("countdown model", () => {
     expect(answerText(DecisionAnswer.Uncertain({ status: null }))).toContain("may not have arrived")
     expect(answerSettles(answerForStatus(503))).toBe(false)
     expect(answerSettles(answerForStatus(409))).toBe(true)
+    expect(answerText(DecisionAnswer.Unreadable())).toContain("couldn't be read")
+    expect(answerSettles(DecisionAnswer.Unreadable())).toBe(false)
     expect(answerText(DecisionAnswer.Accepted({ decision: "approve", record: record("x", { status: "queued" }) })))
       .toBe("The hub recorded your approval; the job is queued.")
     expect(answerText(DecisionAnswer.Accepted({ decision: "reject", record: record("x", { status: "rejected" }) })))

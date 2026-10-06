@@ -66,6 +66,7 @@ const mount = (initial: Props) => {
   document.body.append(container)
   const root = createRoot(container)
   const decisions: Array<ApprovalDecision> = []
+  const revalidations = { count: 0 }
   const render = (props: Props) =>
     act(() =>
       root.render(
@@ -75,6 +76,9 @@ const mount = (initial: Props) => {
           onDecision={(decision) => decisions.push(decision)}
           onLoadHistory={undefined}
           onLoadPending={undefined}
+          onRevalidate={() => {
+            revalidations.count += 1
+          }}
           pendingLoading={false}
           sending={props.sending ?? null}
           snapshot={props.snapshot}
@@ -93,7 +97,7 @@ const mount = (initial: Props) => {
     act(() => root.unmount())
     container.remove()
   }
-  return { bar, container, decisions, press, render, unmount }
+  return { bar, container, decisions, press, render, revalidations, unmount }
 }
 
 describe("ApprovalsCountdown", () => {
@@ -503,6 +507,66 @@ describe("ApprovalsCountdown", () => {
       snapshot: snapshot({ pendingApprovals: pending })
     })
     expect(view.container.querySelector(".countdown-announcer")?.textContent).toBe("The hub recorded your approval.")
+    view.unmount()
+  })
+
+  it("asks the hub once when a deadline passes, instead of expiring it locally", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1", { approvalExpiresAt: Date.now() - 1_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    expect(view.revalidations.count).toBe(1)
+    expect(view.bar()?.dataset["state"]).toBe("ready")
+    view.render({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1", { approvalExpiresAt: Date.now() - 1_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    expect(view.revalidations.count).toBe(1)
+    view.unmount()
+  })
+
+  it("replaces an uncertain answer with the outcome a later read proves", () => {
+    const view = mount({ snapshot: snapshot() })
+    const status = {
+      jobId: "job-1",
+      observedAt: Date.now(),
+      settles: false,
+      text: "The hub didn't confirm the decision."
+    }
+    view.render({ decisionStatus: status, snapshot: snapshot() })
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("The hub didn't confirm the decision.")
+    view.render({
+      decisionStatus: status,
+      snapshot: snapshot({
+        pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] },
+        records: [record("job-1", { expiredAt: Date.now(), status: "expired" })]
+      })
+    })
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("Expired just now. Nothing was applied.")
+    view.unmount()
+  })
+
+  it("keeps list semantics on the styled lists", () => {
+    const view = mount({
+      snapshot: snapshot({
+        records: [record("old", { approvedAt: Date.now(), approvedBy: "owner@example.com", status: "queued" })]
+      })
+    })
+    const lists = [...view.container.querySelectorAll(".countdown-rows")]
+    expect(lists.length).toBe(2)
+    expect(lists.every((list) => list.getAttribute("role") === "list")).toBe(true)
     view.unmount()
   })
 })

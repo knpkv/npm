@@ -291,6 +291,7 @@ export const ApprovalsCountdown = ({
   onDecision,
   onLoadHistory,
   onLoadPending,
+  onRevalidate,
   pendingLoading,
   sending,
   snapshot
@@ -300,6 +301,8 @@ export const ApprovalsCountdown = ({
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
   readonly onLoadHistory: (() => void) | undefined
   readonly onLoadPending: (() => void) | undefined
+  /** Re-reads the hub; called once per request when its deadline passes, so the hub decides expiry. */
+  readonly onRevalidate: (() => void) | undefined
   readonly pendingLoading: boolean
   readonly sending: ApprovalDecision | null
   readonly snapshot: DashboardSnapshot
@@ -383,13 +386,28 @@ export const ApprovalsCountdown = ({
     if (decisionStatus !== null && !ownBar) setAnnouncement(decisionStatus.text)
   }, [decisionStatus])
 
-  // Your own decision keeps the hub's answer, also after the request leaves the queue; any other
-  // departure says why.
+  // When a request's deadline passes on the clock, ask the hub once; its record, not the clock,
+  // turns the request into "expired". Also runs when a hidden page becomes visible again.
+  const revalidated = useRef(new Set<string>())
+  useEffect(() => {
+    if (onRevalidate === undefined) return
+    const due = facts.filter(
+      (entry) => entry.expiresAt !== null && entry.expiresAt <= now && !revalidated.current.has(itemKey(entry))
+    )
+    if (due.length === 0) return
+    for (const entry of due) revalidated.current.add(itemKey(entry))
+    onRevalidate()
+  }, [facts, now, onRevalidate])
+
+  // Your own decision keeps the hub's answer, also after the request leaves the queue, unless the
+  // answer was uncertain and a later read proves what happened; any other departure says why.
   const answer =
     selected === undefined || selectedId === null
       ? undefined
       : selected._tag === "Local" && decisionStatus?.jobId === selectedId
-        ? decisionStatus.text
+        ? !decisionStatus.settles && departure !== null
+          ? departure
+          : decisionStatus.text
         : (departure ?? undefined)
 
   // Deciding pins the decided request, so the bar and its status stay on it when it leaves the queue.
@@ -454,6 +472,7 @@ export const ApprovalsCountdown = ({
 
   return (
     <div className="countdown" onKeyDown={onShortcut}>
+      <h1 className="countdown-title">Approvals</h1>
       <ApprovalHero now={now} snapshot={snapshot} soonest={facts[0]} waiting={items.length} />
       <p aria-atomic="true" aria-live="polite" className="countdown-announcer">
         {announcement}
@@ -480,7 +499,7 @@ export const ApprovalsCountdown = ({
           {items.length === 0 ? (
             <p className="countdown-empty">Nothing is waiting for your decision.</p>
           ) : (
-            <ul className="countdown-rows" onKeyDown={moveRowFocus}>
+            <ul className="countdown-rows" onKeyDown={moveRowFocus} role="list">
               {items.map((item, index) => {
                 const row = facts[index]
                 if (row === undefined) return null
@@ -559,7 +578,7 @@ export const ApprovalsCountdown = ({
           {decided.length === 0 ? (
             <p className="countdown-empty">No decisions yet.</p>
           ) : (
-            <ul className="countdown-rows countdown-decided-rows">
+            <ul className="countdown-rows countdown-decided-rows" role="list">
               {decided.map(({ at, by, outcome, record }) => (
                 <li className="countdown-decided-row" key={record.id}>
                   <span className="countdown-outcome" data-outcome={outcome}>

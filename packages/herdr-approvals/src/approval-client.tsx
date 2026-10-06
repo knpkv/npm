@@ -151,9 +151,15 @@ const decisionAnswerOf = (
 ): DecisionAnswer => {
   if (Exit.isSuccess(exit)) return DecisionAnswer.Accepted({ decision: decision.decision, record: exit.value })
   const failure = Cause.findErrorOption(exit.cause)
-  return Option.isSome(failure) && failure.value._tag === "BrowserStatusError"
-    ? answerForStatus(failure.value.status)
-    : DecisionAnswer.Uncertain({ status: null })
+  if (Option.isNone(failure)) return DecisionAnswer.Uncertain({ status: null })
+  switch (failure.value._tag) {
+    case "BrowserStatusError":
+      return answerForStatus(failure.value.status)
+    case "BrowserJsonError":
+      return DecisionAnswer.Unreadable()
+    case "BrowserNetworkError":
+      return DecisionAnswer.Uncertain({ status: null })
+  }
 }
 
 const loadChat = fetchJson(ChatHistory, "/v1/chat")
