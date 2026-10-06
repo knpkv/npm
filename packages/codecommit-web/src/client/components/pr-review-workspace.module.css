@@ -317,7 +317,8 @@
 }
 
 .agentTitle > small {
-  color: var(--rly-color-text-3);
+  /* text-2: tertiary ink on the pane's surface-2 header fell below 4.5:1 in light. */
+  color: var(--rly-color-text-2);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
   padding-inline-start: calc(var(--rly-space-16) + var(--rly-space-8));
