@@ -143,6 +143,8 @@ html[data-review-fonts="loading"] body {
   min-width: 0;
   padding: var(--rly-space-48) clamp(1rem, 4vw, 4rem);
   max-width: 108rem;
+  /* Paths and identifiers in prose are single long words; inherited, so every paragraph wraps them. */
+  overflow-wrap: break-word;
 }
 .review-header {
   padding-block-end: var(--rly-space-32);
@@ -392,6 +394,10 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   margin-block: var(--rly-space-16);
   align-items: baseline;
 }
+/* Flex items keep their longest word as a minimum width; let them shrink so long paths and names wrap. */
+.review-issues li > * {
+  min-width: 0;
+}
 .review-issues .review-issue-location {
   font-size: var(--rly-type-meta-size);
   color: var(--rly-color-text-2);
@@ -401,6 +407,7 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
 .review-issues a code {
   display: inline-block;
   max-width: 100%;
+  overflow-wrap: break-word;
 }
 .review-usage {
   margin-block-start: var(--rly-space-24);

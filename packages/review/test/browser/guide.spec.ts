@@ -22,6 +22,11 @@ const guideHtml = (longIdentifiers = false) => {
     guide.sections[0].title = "verifySignedApprovalAgainstRequestedRevisionBeforeShipping"
   }
   const findings = JSON.parse(rename(readFileSync("examples/approval-guide/findings.json", "utf8")))
+  if (longIdentifiers) {
+    // A finding at an unbroken camelCase file, whose summary names an unbroken identifier.
+    findings.issues[0].file = "src/verifySignedApprovalAgainstRequestedRevisionBeforeShipping.ts"
+    findings.issues[0].summary = "`verifySignedApprovalAgainstRequestedRevisionBeforeShipping` ignores the revision."
+  }
   return Effect.runPromise(exportGuide({ guide, findings, patch: rename(patch) })).then((page) => page.html)
 }
 
@@ -42,6 +47,15 @@ for (const width of [320, 390]) {
   test(`long identifiers wrap inside the page at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 800 })
     await load(page, await guideHtml(true), testInfo)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
+  })
+
+  // Review finding: a long finding location or summary identifier widened the Review tab.
+  test(`long finding paths and names wrap on the Review tab at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 800 })
+    await load(page, await guideHtml(true), testInfo)
+    await page.getByRole("tab", { name: /^Review/u }).click()
+    await page.locator(".review-issue-location").first().waitFor()
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
   })
 }
