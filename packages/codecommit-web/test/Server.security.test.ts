@@ -476,11 +476,40 @@ describe("CodeCommit web security boundary", () => {
       expect(yield* resolveCodeCommitPublicOrigin(undefined, 3000)).toBe(authorityOrigin)
       const unsupported = yield* Effect.result(resolveCodeCommitPublicOrigin("http://localhost:4173", 3000))
       expect(Result.isFailure(unsupported) && unsupported.failure._tag).toBe("UnsafeLoopbackAddressError")
-      expect(yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3001)).toBe(
-        "http://127.0.0.1:3001"
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3001, "http://127.0.0.1:3001")
+      ).toBe("http://127.0.0.1:3001")
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3000, "http://127.0.0.1:3000")
+      ).toBe("http://localhost:5173")
+      // The dev proxy forwards to 127.0.0.1 only, so it cannot be advertised for another bind host.
+      const proxyForLocalhost = yield* Effect.result(
+        resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3000, "http://localhost:3000")
       )
-      expect(yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3000)).toBe(
-        "http://localhost:5173"
+      expect(Result.isFailure(proxyForLocalhost) && proxyForLocalhost.failure._tag).toBe("UnsafeLoopbackAddressError")
+      // The server's own origin in another spelling is still its own origin, not a proxy.
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://LOCALHOST:3000/", 3000, 3000, "http://localhost:3000")
+      ).toBe("http://localhost:3000")
+      // `codecommit web --port 3001` while the proxy forwards to PORT 3000: advertise the direct origin.
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3001, "http://127.0.0.1:3001")
+      ).toBe("http://127.0.0.1:3001")
+      // A configured direct origin names the first port; after a retry the new port is advertised.
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://127.0.0.1:3000", 3000, 3001, "http://127.0.0.1:3001")
+      ).toBe("http://127.0.0.1:3001")
+      const unsupportedOnBind = yield* Effect.result(
+        resolveCodeCommitPublicOriginForBind("http://localhost:4173", 3000, 3000, "http://127.0.0.1:3000")
+      )
+      expect(Result.isFailure(unsupportedOnBind) && unsupportedOnBind.failure._tag).toBe("UnsafeLoopbackAddressError")
+      // `:80` is HTTP's default port, so 127.0.0.1:80 is exactly the proxy's backend.
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 80, 80, "http://127.0.0.1:80")
+      ).toBe("http://localhost:5173")
+      // `--hostname localhost` advertises the host it was asked to bind, not 127.0.0.1.
+      expect(yield* resolveCodeCommitPublicOriginForBind(undefined, 3000, 3000, "http://localhost:3000")).toBe(
+        "http://localhost:3000"
       )
     }))
 
