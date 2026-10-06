@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { type Result, Schema } from "effect"
 import { isTerminalWorkState, WorkGoalCheckpoint } from "../model.js"
 import type {
   WorkActivity,
@@ -56,7 +56,10 @@ const goalActivityLimit = 128
  * candidate always yields the same checkpoint. A blocker cannot outlive a
  * finished goal, so it is cleared; the activity names the observation.
  */
-export const terminalCheckpoint = (candidate: TerminalCandidate, eventId: string): WorkGoalCheckpointType => {
+export const terminalCheckpoint = (
+  candidate: TerminalCandidate,
+  eventId: string
+): Result.Result<WorkGoalCheckpointType, Schema.SchemaError> => {
   const { head, pullRequest } = candidate
   const merged = pullRequest.state === "merged"
   const occurredAt = Math.max(pullRequest.closedAt ?? 0, head.goal.updatedAt + 1)
@@ -78,7 +81,7 @@ export const terminalCheckpoint = (candidate: TerminalCandidate, eventId: string
     activity,
     updatedAt: occurredAt
   }
-  return Schema.decodeUnknownSync(WorkGoalCheckpoint)({
+  return Schema.decodeUnknownResult(WorkGoalCheckpoint)({
     version: "herdr.work.event.v1",
     eventId,
     occurredAt,

@@ -1,6 +1,6 @@
 import { agentConnectTarget, fleetResponseBodyMaxBytes, workReassignActivitySummary } from "@knpkv/herdr-fleet"
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Clock, Crypto, Effect, Equal, Option, Schema } from "effect"
+import { Clock, Crypto, Effect, Equal, Option, Result, Schema } from "effect"
 import { Hex } from "effect/encoding"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { makeWorkAgentBinding } from "./agent-binding.js"
@@ -1252,6 +1252,15 @@ const readLaneOperationLedgerTotals = (database: DatabaseSync) =>
     ).get()
   )
 type AppendRejection = WorkCheckpointConflictError | WorkGoalRevisionConflictError | WorkProjectionError
+
+/** What a reconciler write was planned from, and the history it must leave free. */
+interface ReconcilerGuard {
+  readonly head: WorkGoalCheckpointType
+  readonly fact: { readonly subject: string; readonly observationId: string }
+  readonly reserve: number
+}
+
+const ObservationIdRow = Schema.Struct({ observationId: Schema.String })
 type AppendDecision =
   | { readonly _tag: "inserted"; readonly changes: bigint | number }
   | { readonly _tag: "replayed"; readonly event: WorkGoalCheckpointType }
@@ -1935,6 +1944,8 @@ export interface WorkStoreService {
     readonly failures: ReadonlyArray<WorkObservedFailureType>
     /** Each activity an approved Fleet job wrote, with that job's id. */
     readonly approvals: ReadonlyArray<WorkApprovedActivity>
+    /** The reconciler's checkpoints; their ids are its activities' ids. */
+    readonly reconcilerEvents: ReadonlyArray<{ readonly goalId: string; readonly eventId: string }>
     readonly logicalObservedAt: number | null
   }, WorkStoreError>
 }
@@ -3544,11 +3555,20 @@ export class WorkStore implements WorkStoreService {
   private readonly appendAt = Effect.fn("WorkStore.append")(function*(
     this: WorkStore,
     event: WorkGoalCheckpointType,
-    expectedHead: WorkGoalCheckpointType | null
+    guard: ReconcilerGuard | null
   ) {
     const decoded = yield* Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
       Effect.mapError(storeError("append.decode"))
     )
+    // The reconciler's event and activity ids are its provenance; no other
+    // writer may use them.
+    if (guard === null && decoded.eventId.startsWith(reconcilerEventPrefix)) {
+      return yield* new WorkProjectionError({
+        cause: decoded.eventId,
+        detail: `event ids starting with ${reconcilerEventPrefix} are reserved for the reconciler`,
+        reason: "malformed"
+      })
+    }
     yield* this.secureFiles()
     const decision = yield* Effect.try({
       try: () => {
@@ -3569,21 +3589,13 @@ export class WorkStore implements WorkStoreService {
               )
               .all(decoded.eventId, decoded.goal.id, decoded.occurredAt)
           ).map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
-          if (collisions.length > 0) {
-            if (collisions.every((existing) => Equal.equals(existing, decoded))) {
-              this.#database.exec("ROLLBACK")
-              transaction = false
-              return { _tag: "replayed", event: decoded } satisfies AppendDecision
-            }
-            return reject(
-              new WorkCheckpointConflictError({
-                eventId: decoded.eventId,
-                goalId: decoded.goal.id,
-                occurredAt: decoded.occurredAt
-              })
-            )
+          if (collisions.length > 0 && collisions.every((existing) => Equal.equals(existing, decoded))) {
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return { _tag: "replayed", event: decoded } satisfies AppendDecision
           }
-          if (expectedHead !== null) {
+          if (guard !== null) {
+            // Planned from this head and this fact: if either moved, the plan is stale.
             const headRow = this.#database.prepare(
               `SELECT record FROM work_goal_events WHERE goal_id = ?
                ORDER BY occurred_at DESC, event_id DESC LIMIT 1`
@@ -3591,17 +3603,42 @@ export class WorkStore implements WorkStoreService {
             const head = headRow === undefined ? null : Schema.decodeUnknownSync(WorkGoalCheckpoint)(
               JSON.parse(Schema.decodeUnknownSync(StoredEventRow)(headRow).record)
             )
-            if (head?.eventId !== expectedHead.eventId) {
+            const factRow = this.#database.prepare(
+              "SELECT observation_id AS observationId FROM work_observed_facts WHERE subject = ?"
+            ).get(guard.fact.subject)
+            const fact = factRow === undefined ? null : Schema.decodeUnknownSync(ObservationIdRow)(factRow)
+            if (head?.eventId !== guard.head.eventId || fact?.observationId !== guard.fact.observationId) {
               return reject(
                 new WorkGoalRevisionConflictError({
                   actualEventId: head?.eventId ?? null,
                   actualUpdatedAt: head?.goal.updatedAt ?? null,
-                  expectedEventId: expectedHead.eventId,
-                  expectedUpdatedAt: expectedHead.goal.updatedAt,
+                  expectedEventId: guard.head.eventId,
+                  expectedUpdatedAt: guard.head.goal.updatedAt,
                   goalId: decoded.goal.id
                 })
               )
             }
+            const count = Schema.decodeUnknownSync(CountRow)(
+              this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_events").get()
+            ).count
+            if (count + 1 > workHistoryMaxEvents - guard.reserve) {
+              return reject(
+                new WorkProjectionError({
+                  cause: count,
+                  detail: `the reconciler leaves ${guard.reserve} of ${workHistoryMaxEvents} checkpoints free`,
+                  reason: "capacity_exceeded"
+                })
+              )
+            }
+          }
+          if (collisions.length > 0) {
+            return reject(
+              new WorkCheckpointConflictError({
+                eventId: decoded.eventId,
+                goalId: decoded.goal.id,
+                occurredAt: decoded.occurredAt
+              })
+            )
           }
           const eventCount = Schema.decodeUnknownSync(CountRow)(
             this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_events").get()
@@ -3708,6 +3745,14 @@ export class WorkStore implements WorkStoreService {
       Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
         Effect.mapError(storeError("appendMany.decode.event"))
       ))
+    const reserved = decoded.find(({ eventId }) => eventId.startsWith(reconcilerEventPrefix))
+    if (reserved !== undefined) {
+      return yield* new WorkProjectionError({
+        cause: reserved.eventId,
+        detail: `event ids starting with ${reconcilerEventPrefix} are reserved for the reconciler`,
+        reason: "malformed"
+      })
+    }
     if (decoded.length === 0) {
       return yield* new WorkProjectionError({
         cause: events,
@@ -4826,9 +4871,14 @@ export class WorkStore implements WorkStoreService {
     let logicalObservedAt: number | null = null
     // An approved job's activity id is its operation (recovery), the operation
     // plus `.admission` (prospective admission), or the job id (reassignment).
-    const approvals: Array<WorkApprovedActivity> = Schema.decodeUnknownSync(Schema.Array(ReassignmentApprovalRow))(
+    const reassignmentRows = yield* Schema.decodeUnknownEffect(Schema.Array(ReassignmentApprovalRow))(
       source.reassignments
-    ).map(({ approvalJobId, goalId }) => ({ activityId: approvalJobId, approvalJobId, goalId }))
+    ).pipe(Effect.mapError(storeError("snapshot-input.decode-reassignments")))
+    const approvals: Array<WorkApprovedActivity> = reassignmentRows.map(({ approvalJobId, goalId }) => ({
+      activityId: approvalJobId,
+      approvalJobId,
+      goalId
+    }))
     for (const row of bindingRows) {
       const binding = yield* Effect.try({
         try: () => Schema.decodeUnknownSync(WorkAgentBinding)(JSON.parse(row.record)),
@@ -4901,7 +4951,10 @@ export class WorkStore implements WorkStoreService {
     if (misfiled !== undefined) {
       return yield* new WorkStoreError({ cause: misfiled.subject, operation: "snapshot-input.fact-subject" })
     }
-    return { approvals, events, facts, failures, logicalObservedAt }
+    const reconcilerEvents = events.flatMap(({ eventId, goal }) =>
+      eventId.startsWith(reconcilerEventPrefix) ? [{ eventId, goalId: goal.id }] : []
+    )
+    return { approvals, events, facts, failures, logicalObservedAt, reconcilerEvents }
   })
 
   readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore) {
@@ -4913,10 +4966,15 @@ export class WorkStore implements WorkStoreService {
         reason: "capacity_exceeded"
       })
     }
-    const recorded = new Set(source.events.map(({ eventId }) => eventId))
+    // A goal is stamped by the reconciler at most once, whatever its facts
+    // look like later: a reopened goal stays the owner's.
+    const stamped = new Map(
+      source.events.flatMap(({ eventId, goal }) =>
+        eventId.startsWith(reconcilerEventPrefix) ? [[goal.id, eventId]] : []
+      )
+    )
     const cryptoService = this.#cryptoService
-    const appendAt = (checkpoint: WorkGoalCheckpointType, head: WorkGoalCheckpointType) =>
-      this.appendAt(checkpoint, head)
+    const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) => this.appendAt(checkpoint, guard)
     return yield* Effect.forEach(
       terminalCandidates(source.events, source.facts),
       Effect.fnUntraced(function*(candidate): Effect.fn.Return<
@@ -4924,14 +4982,26 @@ export class WorkStore implements WorkStoreService {
         WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
       > {
         const goalId = candidate.head.goal.id
+        const previous = stamped.get(goalId)
+        if (previous !== undefined) return { _tag: "recorded", eventId: previous, goalId }
         const digest = yield* cryptoService.digest(
           "SHA-256",
           utf8.encode(`${candidate.fact.observationId}\u0000${goalId}`)
         ).pipe(Effect.mapError(storeError("reconcile.digest")))
         const eventId = `${reconcilerEventPrefix}${Hex.encode(digest)}`
-        if (recorded.has(eventId)) return { _tag: "recorded", eventId, goalId }
         const checkpoint = terminalCheckpoint(candidate, eventId)
-        return yield* appendAt(checkpoint, candidate.head).pipe(
+        if (Result.isFailure(checkpoint)) {
+          return yield* new WorkProjectionError({
+            cause: checkpoint.failure,
+            detail: `goal ${goalId} cannot take a terminal checkpoint`,
+            reason: "malformed"
+          })
+        }
+        return yield* appendAt(checkpoint.success, {
+          fact: { observationId: candidate.fact.observationId, subject: candidate.fact.subject },
+          head: candidate.head,
+          reserve: workReconcilerHeadroom
+        }).pipe(
           Effect.as<WorkReconcileOutcome>({
             _tag: "applied",
             eventId,

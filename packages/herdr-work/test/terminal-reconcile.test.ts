@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Crypto, Deferred, Effect, Fiber, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -9,7 +9,10 @@ import {
   makeWorkService,
   withActivityProvenance,
   type WorkGoal,
+  type WorkGoalCheckpoint,
+  workHistoryMaxEvents,
   type WorkPullRequestObservation,
+  workReconcilerHeadroom,
   WorkSnapshots,
   WorkStore
 } from "../src/index.js"
@@ -17,17 +20,42 @@ import {
 // @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
-const fixture = Effect.gen(function*() {
-  yield* TestClock.setTime(100_000)
-  const root = mkdtempSync(join(tmpdir(), "herdr-terminal-reconcile-"))
-  yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { recursive: true, force: true })))
-  const store = yield* Effect.acquireRelease(
-    WorkStore.open(join(root, "work.sqlite")),
-    (opened) => Effect.sync(() => opened.close())
-  )
-  const work = yield* makeWorkService(store)
-  return { store, work }
-}).pipe(provideNodeServices)
+const fixtureWith = (configureCrypto?: (base: Crypto.Crypto) => Crypto.Crypto) =>
+  Effect.gen(function*() {
+    yield* TestClock.setTime(100_000)
+    const root = mkdtempSync(join(tmpdir(), "herdr-terminal-reconcile-"))
+    yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { recursive: true, force: true })))
+    const baseCrypto = yield* Crypto.Crypto
+    const store = yield* Effect.acquireRelease(
+      WorkStore.open(join(root, "work.sqlite")).pipe(
+        Effect.provideService(Crypto.Crypto, configureCrypto?.(baseCrypto) ?? baseCrypto)
+      ),
+      (opened) => Effect.sync(() => opened.close())
+    )
+    const work = yield* makeWorkService(store)
+    return { store, work }
+  }).pipe(provideNodeServices)
+
+const fixture = fixtureWith()
+
+/** Crypto that, while `suspend` is set, parks each digest until `release`, after signalling `entered`. */
+const suspendingFixture = Effect.gen(function*() {
+  const suspend = yield* Ref.make(false)
+  const entered = yield* Deferred.make<void>()
+  const release = yield* Deferred.make<void>()
+  const opened = yield* fixtureWith((baseCrypto) => ({
+    ...baseCrypto,
+    digest: (algorithm, data) =>
+      Effect.gen(function*() {
+        if (yield* Ref.get(suspend)) {
+          yield* Deferred.succeed(entered, undefined)
+          yield* Deferred.await(release)
+        }
+        return yield* baseCrypto.digest(algorithm, data)
+      })
+  }))
+  return { ...opened, entered, release, suspend }
+})
 
 const goal = (overrides: Partial<WorkGoal> = {}): WorkGoal => ({
   blocker: null,
@@ -98,7 +126,7 @@ describe("terminal reconcile", () => {
 
   it.effect("covers provenance a whole goal at a time within the response budget, and never guesses the rest", () =>
     Effect.scoped(Effect.gen(function*() {
-      const { work } = yield* fixture
+      const { store, work } = yield* fixture
       for (const number of [7, 8, 9]) {
         yield* record(
           work,
@@ -122,14 +150,15 @@ describe("terminal reconcile", () => {
       }
       yield* work.reconcile()
       const snapshots = yield* work.snapshots(100_000)
+      const { reconcilerEvents } = yield* store.snapshotInput()
       const { activityProvenance: _provenance, activityProvenanceGoals: _goals, ...bare } = snapshots.now
       const base = { ...snapshots, now: bare }
       const size = (value: WorkSnapshots) =>
         new TextEncoder().encode(JSON.stringify(Schema.encodeSync(WorkSnapshots)(value))).byteLength
-      const full = withActivityProvenance(base, [], 10_000_000)
+      const full = withActivityProvenance(base, [], reconcilerEvents, 10_000_000)
       expect(full.now.activityProvenanceGoals).toHaveLength(3)
       const budget = size(base) + 128 + Math.floor((size(full) - size(base)) / 2)
-      const trimmed = withActivityProvenance(base, [], budget)
+      const trimmed = withActivityProvenance(base, [], reconcilerEvents, budget)
       const covered = trimmed.now.activityProvenanceGoals ?? []
       expect(covered.length).toBeGreaterThan(0)
       expect(covered).toEqual(full.now.activityProvenanceGoals?.slice(0, covered.length))
@@ -137,7 +166,7 @@ describe("terminal reconcile", () => {
       expect(trimmed.now.activityProvenance?.every(({ goalId }) => covered.includes(goalId))).toBe(true)
       expect(size(trimmed)).toBeLessThanOrEqual(budget)
       // Not even empty lists fit: no provenance at all, so every goal reads as unknown.
-      expect(withActivityProvenance(base, [], size(base))).toEqual(base)
+      expect(withActivityProvenance(base, [], reconcilerEvents, size(base))).toEqual(base)
     })))
 
   it.effect("records a pull request closed without merging as abandoned", () =>
@@ -187,4 +216,108 @@ describe("terminal reconcile", () => {
       expect(yield* work.reconcile()).toEqual([])
       expect(yield* store.list()).toEqual(history)
     })))
+
+  it.effect("keeps the reconciler's ids to itself and never credits it with an owner's activity", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      expect(yield* Effect.flip(record(work, "reconciler.forged", goal()))).toMatchObject({
+        _tag: "WorkProjectionError",
+        reason: "malformed"
+      })
+      yield* record(
+        work,
+        "goal-pr7.1",
+        goal({
+          activity: [{ id: "reconciler.owner-note", kind: "note", occurredAt: 1_000, summary: "Owner note" }]
+        })
+      )
+      const now = (yield* work.snapshots(100_000)).now
+      expect(now.activityProvenance).toEqual([])
+      expect(now.activityProvenanceGoals).toEqual(["goal-pr7"])
+    })))
+
+  it.effect("stamps a goal once even after its pull request's checks change", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{
+        observation: pullRequest({ checks: "pending", closedAt: 5_000, state: "merged" }),
+        observedAt: 6_000
+      }])
+      const [applied] = yield* work.reconcile()
+      yield* record(work, "goal-pr7.3", goal({ state: "working", updatedAt: 7_000 }))
+      yield* work.observe([{
+        observation: pullRequest({ checks: "passing", closedAt: 5_000, state: "merged" }),
+        observedAt: 8_000
+      }])
+      const history = yield* store.list()
+      expect(yield* work.reconcile()).toEqual([{
+        _tag: "recorded",
+        eventId: applied?._tag === "applied" ? applied.eventId : "",
+        goalId: "goal-pr7"
+      }])
+      expect(yield* store.list()).toEqual(history)
+    })))
+
+  it.effect("reports a conflict, not a stale stamp, when the fact changes while it plans", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { entered, release, store, suspend, work } = yield* suspendingFixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 6_000 }])
+      const history = yield* store.list()
+      yield* Ref.set(suspend, true)
+      const pending = yield* work.reconcile().pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      yield* Ref.set(suspend, false)
+      yield* work.observe([{ observation: pullRequest(), observedAt: 7_000 }])
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(pending)).toEqual([{ _tag: "conflict", goalId: "goal-pr7" }])
+      expect(yield* store.list()).toEqual(history)
+    })))
+
+  it.effect("reports a conflict when an owner writes at the planned time while it plans", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { entered, release, suspend, work } = yield* suspendingFixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "merged" }), observedAt: 6_000 }])
+      yield* Ref.set(suspend, true)
+      const pending = yield* work.reconcile().pipe(Effect.forkScoped)
+      yield* Deferred.await(entered)
+      yield* Ref.set(suspend, false)
+      yield* record(work, "goal-pr7.2", goal({ updatedAt: 5_000 }))
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(pending)).toEqual([{ _tag: "conflict", goalId: "goal-pr7" }])
+      expect((yield* currentGoal(work))?.state).toBe("review")
+    })))
+
+  it.effect(
+    "leaves the reserved history free: a pass at the reserve boundary writes nothing",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { store, work } = yield* fixture
+        const filler = Array.from(
+          { length: workHistoryMaxEvents - workReconcilerHeadroom - 1 },
+          (_, index): WorkGoalCheckpoint => {
+            const at = 1_000 + index
+            return {
+              eventId: `filler.${index}`,
+              goal: goal({ id: "goal-filler", review: null, updatedAt: at }),
+              occurredAt: at,
+              version: "herdr.work.event.v1"
+            }
+          }
+        )
+        yield* work.recordMany("filler", filler)
+        yield* record(work, "goal-pr7.1", goal())
+        yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "merged" }), observedAt: 6_000 }])
+        const before = (yield* store.list()).length
+        expect(before).toBe(workHistoryMaxEvents - workReconcilerHeadroom)
+        expect(yield* Effect.flip(work.reconcile())).toMatchObject({
+          _tag: "WorkProjectionError",
+          reason: "capacity_exceeded"
+        })
+        expect((yield* store.list()).length).toBe(before)
+      })),
+    120_000
+  )
 })

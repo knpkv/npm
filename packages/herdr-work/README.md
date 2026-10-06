@@ -56,15 +56,19 @@ history: a goal whose pull request is observed merged becomes `completed`
 (delivery `merged`), and one closed without merging becomes `abandoned`. The
 checkpoint is stamped with the pull request's close time, or one millisecond
 after the goal's latest checkpoint when an owner wrote later, so the same fact
-always yields the same checkpoint. It is written only if that latest checkpoint
-is still the one it was planned from, a goal is never stamped twice (even after
-its owner reopens it), and 256 checkpoints of history are always left free.
-Its event and activity ids start with `reconciler.`. `isTerminalWorkState`
+always yields the same checkpoint. It is written only if, inside the write's
+transaction, the goal's latest checkpoint and the pull request's fact are still
+the ones it was planned from (otherwise that goal is reported as a conflict) and
+256 checkpoints of history stay free. A goal is stamped by the reconciler at
+most once, whatever its facts look like later, so a goal its owner reopens stays
+reopened. Its event and activity ids start with `reconciler.`, a prefix no other
+writer may use. `isTerminalWorkState`
 names the finished states: `completed`, `deployed` and `abandoned`.
 
 The `now` window also says who wrote each activity that is not the owner's:
 `activityProvenance` lists reconciler and approved-job activities (with the
-job id), and `activityProvenanceGoals` lists the goals whose such activities
+job id), credited from what actually wrote them (an approved job's record, or a
+reconciler checkpoint with that id) and never from an activity id alone, and `activityProvenanceGoals` lists the goals whose such activities
 are all present. In a covered goal an unlisted activity is the owner's; a goal
 left out to stay within the response budget is counted in
 `activityProvenanceOmitted` and its provenance is unknown.

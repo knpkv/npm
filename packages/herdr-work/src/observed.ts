@@ -245,8 +245,10 @@ export const reconcilerEventPrefix = "reconciler."
 export const withActivityProvenance = (
   snapshots: WorkSnapshots,
   approvals: ReadonlyArray<WorkApprovedActivity>,
+  reconcilerEvents: ReadonlyArray<{ readonly goalId: string; readonly eventId: string }>,
   maxBytes: number
 ): WorkSnapshots => {
+  const reconciler = new Set(reconcilerEvents.map(({ eventId, goalId }) => `${goalId}\u0000${eventId}`))
   const approvalJob = new Map(
     approvals.map(({ activityId, approvalJobId, goalId }) => [`${goalId}\u0000${activityId}`, approvalJobId])
   )
@@ -257,11 +259,13 @@ export const withActivityProvenance = (
   const covered: Array<string> = []
   for (const goal of snapshots.now.goals) {
     const entries = (goal.activity ?? []).flatMap(({ id }): ReadonlyArray<WorkActivityProvenance> => {
-      if (id.startsWith(reconcilerEventPrefix)) {
-        return [{ activityId: id, approvalJobId: null, goalId: goal.id, provenance: "reconciler" }]
-      }
+      // Authorship comes from what wrote the activity, never from its id alone:
+      // an approved job's own record first, then the reconciler's checkpoint.
       const job = approvalJob.get(`${goal.id}\u0000${id}`)
-      return job === undefined ? [] : [{ activityId: id, approvalJobId: job, goalId: goal.id, provenance: "approval" }]
+      if (job !== undefined) return [{ activityId: id, approvalJobId: job, goalId: goal.id, provenance: "approval" }]
+      return reconciler.has(`${goal.id}\u0000${id}`)
+        ? [{ activityId: id, approvalJobId: null, goalId: goal.id, provenance: "reconciler" }]
+        : []
     })
     const bytes = encodedBytes(goal.id) + 3 +
       entries.reduce((sum, entry) => sum + encodedBytes(Schema.encodeSync(WorkActivityProvenance)(entry)) + 1, 0)
