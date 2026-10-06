@@ -28,8 +28,8 @@ const baselinePath = "docs/debt.baseline.json"
 const lintKinds = [
   ["eslint", /^eslint-disable(?:-next-line|-line)?(?=\s|$)/u],
   ["oxlint", /^oxlint-disable(?:-next-line|-line)?(?=\s|$)/u],
-  // ast-grep honours any `ast-grep-ignore` prefix, including `ast-grep-ignore-file`.
-  ["ast-grep", /^ast-grep-ignore/u]
+  // ast-grep honours any `ast-grep-ignore` prefix, with or without `@`, including `-file`.
+  ["ast-grep", /^@?ast-grep-ignore/u]
 ]
 
 // TypeScript's own comment-directive rules (its scanner's commentDirectiveRegEx*): a `//` or `///`
@@ -46,6 +46,20 @@ const singleLinePragma = /^\/\/\/?\s*@([^\s:]+)((?:[^\S\r\n]|:).*)?$/mu
 // file, so a directive inside a string literal is active too and is counted wherever it appears.
 const effectDirective =
   /@effect-diagnostics(?:-next-line)?(?:\s(?:[a-zA-Z0-9/]+|\*):(?:off|warning|error|message|suggestion|skip-file))+/gmu
+
+// Line breaks as TypeScript counts them: LF, CRLF, bare CR and the Unicode line and paragraph separators.
+const lineBreak = /\r\n|[\n\r\u2028\u2029]/u
+const lineStartBefore = (text, index) => {
+  let start = 0
+  for (const match of text.slice(0, index).matchAll(new RegExp(lineBreak.source, "gu"))) {
+    start = match.index + match[0].length
+  }
+  return start
+}
+const lineEndFrom = (text, index) => {
+  const found = text.slice(index).search(lineBreak)
+  return found === -1 ? text.length : index + found
+}
 
 const scannedFile = /\.(?:[cm]?[jt]sx?)$/u
 const typeScriptFile = /\.(?:[cm]?ts|tsx)$/u
@@ -74,7 +88,7 @@ const commentBody = (raw) =>
     ? raw.replace(/^\/\/\/?/u, "").trim()
     : raw
         .slice(2, -2)
-        .split("\n")
+        .split(lineBreak)
         .map((line) => line.replace(/^\s*\*?/u, "").trim())
         .filter((line) => line.length > 0)
         .join(" ")
@@ -108,7 +122,7 @@ const lintKindOf = (body) => lintKinds.find(([, pattern]) => pattern.test(body))
 // The line a TypeScript suppression lives on, when the comment is one TypeScript honours.
 const typeScriptDirectiveLine = (raw) => {
   if (raw.startsWith("//")) return tsSingleLine.test(raw) ? raw : undefined
-  const lastLine = raw.slice(raw.lastIndexOf("\n") + 1).trimStart()
+  const lastLine = raw.slice(lineStartBefore(raw, raw.length)).trimStart()
   return tsLastLine.test(lastLine) ? lastLine : undefined
 }
 
@@ -127,10 +141,10 @@ const hasDashReason = (rest) => /(?:^|\s)--\s+\S/u.test(rest)
 
 // A `//` comment on the line directly above that is not itself a directive counts as the reason.
 const hasReasonAbove = (text, start) => {
-  const lineStart = text.lastIndexOf("\n", start - 1) + 1
+  const lineStart = lineStartBefore(text, start)
   if (lineStart === 0) return false
-  const previousStart = text.lastIndexOf("\n", lineStart - 2) + 1
-  const previous = text.slice(previousStart, lineStart - 1).trim()
+  const previousEnd = text.slice(0, lineStart).search(/(?:\r\n|[\n\r\u2028\u2029])$/u)
+  const previous = text.slice(lineStartBefore(text, previousEnd), previousEnd).trim()
   if (!previous.startsWith("//")) return false
   return commentBody(previous).length > 0 && !isDirectiveComment(previous)
 }
@@ -148,17 +162,16 @@ const commentDirective = (file, text, range) => {
   const body = commentBody(raw)
   const reasonAbove = hasReasonAbove(text, range.pos)
   const typeScriptLine = typeScriptDirectiveLine(raw)
-  if (typeScriptLine !== undefined) {
-    const rest = typeScriptLine
-      .slice(typeScriptLine.search(tsDirective))
-      .replace(tsDirective, "")
-      .replace(/\*\/\s*$/u, "")
-      .replace(/^:/u, "")
-      .trim()
-    return [directive(file, "typescript", body, rest.length > 0 || reasonAbove)]
-  }
   const lintKind = lintKindOf(body)
-  return lintKind === undefined ? [] : [directive(file, lintKind, body, hasDashReason(body) || reasonAbove)]
+  const lint = lintKind === undefined ? [] : [directive(file, lintKind, body, hasDashReason(body) || reasonAbove)]
+  if (typeScriptLine === undefined) return lint
+  const rest = typeScriptLine
+    .slice(typeScriptLine.search(tsDirective))
+    .replace(tsDirective, "")
+    .replace(/\*\/\s*$/u, "")
+    .replace(/^:/u, "")
+    .trim()
+  return [...lint, directive(file, "typescript", body, rest.length > 0 || hasDashReason(rest) || reasonAbove)]
 }
 
 // `@ts-nocheck` pragmas, read only where TypeScript reads them: single-line comments leading the file.
@@ -175,8 +188,7 @@ const noCheckDirectives = (file, text) =>
 
 const effectDirectives = (file, text) =>
   [...text.matchAll(effectDirective)].map((match) => {
-    const lineEnd = text.indexOf("\n", match.index)
-    const rest = text.slice(match.index + match[0].length, lineEnd === -1 ? text.length : lineEnd)
+    const rest = text.slice(match.index + match[0].length, lineEndFrom(text, match.index))
     return directive(file, "effect-diagnostics", match[0], hasDashReason(rest) || hasReasonAbove(text, match.index))
   })
 
@@ -349,16 +361,27 @@ const trackedFiles = Effect.fn("DebtLedger.trackedFiles")(function* (repositoryR
   return stdout.split("\0").filter((file) => file.length > 0 && isLedgerSource(file))
 })
 
+/**
+ * Scan tracked files through `read`, which returns `undefined` for a file deleted from the working tree
+ * but not yet staged. Such a file has no source to scan, so it is skipped; any other read failure fails.
+ */
+export const scanSources = (files, read) =>
+  Effect.forEach(
+    files,
+    (file) => Effect.map(read(file), (text) => (text === undefined ? [] : scanDirectives(file, text))),
+    { concurrency: 16 }
+  ).pipe(Effect.map((scanned) => scanned.flat()))
+
 const currentDirectives = Effect.fn("DebtLedger.currentDirectives")(function* (repositoryRoot) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const files = yield* trackedFiles(repositoryRoot)
-  const scanned = yield* Effect.forEach(
-    files,
-    (file) => fs.readFileString(path.join(repositoryRoot, file)).pipe(Effect.map((text) => scanDirectives(file, text))),
-    { concurrency: 16 }
-  )
-  return scanned.flat()
+  return yield* scanSources(files, (file) => {
+    const absolute = path.join(repositoryRoot, file)
+    return fs
+      .exists(absolute)
+      .pipe(Effect.flatMap((exists) => (exists ? fs.readFileString(absolute) : Effect.succeed(undefined))))
+  })
 })
 
 const program = Effect.gen(function* () {

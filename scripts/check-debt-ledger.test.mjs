@@ -1,13 +1,16 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import * as Effect from "effect/Effect"
+
 import {
   compareToBaseline,
   isLedgerSource,
   makeBaseline,
   packageOf,
   renderLedger,
-  scanDirectives
+  scanDirectives,
+  scanSources
 } from "./check-debt-ledger.mjs"
 
 const scan = (text, file = "packages/demo/src/a.ts") => scanDirectives(file, text)
@@ -67,6 +70,53 @@ test("counts every ast-grep suppression the CLI honours", () => {
     scan("// ast-grep-ignore-file -- generated fixture\nexport {}").map(({ kind }) => kind),
     ["ast-grep"]
   )
+})
+
+test("counts a lint and a TypeScript escape that share one block comment", () => {
+  const found = scan(
+    "/* eslint-disable no-console -- adapter reason\n * @ts-expect-error type reason */\nexport const n: number = 1"
+  )
+  assert.deepEqual(found.map(({ kind }) => kind).sort(), ["eslint", "typescript"])
+  assert.deepEqual(
+    scan("/* eslint-disable no-console -- adapter reason */\nexport {}").map(({ kind }) => kind),
+    ["eslint"]
+  )
+})
+
+test("treats CR, CRLF and Unicode separators as line breaks, as TypeScript does", () => {
+  assert.deepEqual(
+    scan("/* reason\r @ts-ignore */\rexport const n: number = 1").map(({ kind }) => kind),
+    ["typescript"]
+  )
+  assert.deepEqual(
+    scan("/* reason\u2028 @ts-ignore */\nexport const n: number = 1").map(({ kind }) => kind),
+    ["typescript"]
+  )
+  assert.equal(scan("// The value is untyped.\r\n// @ts-expect-error\r\nexport const n: number = 1")[0]?.reasoned, true)
+})
+
+test("counts the @-prefixed ast-grep suppression and ignores prose about it", () => {
+  assert.deepEqual(
+    scan("// @ast-grep-ignore\nexport {}").map(({ kind }) => kind),
+    ["ast-grep"]
+  )
+  assert.deepEqual(
+    scan("// @ast-grep-ignore-file -- fixture\nexport {}").map(({ kind }) => kind),
+    ["ast-grep"]
+  )
+  assert.deepEqual(scan("// Prefer @ast-grep-ignore only as a last resort\nexport {}"), [])
+})
+
+test("skips a tracked file deleted from the working tree and still fails on other read errors", async () => {
+  const sources = { "packages/demo/src/a.ts": "// @ts-ignore\nexport {}" }
+  const read = (file) => Effect.succeed(sources[file])
+  const found = await Effect.runPromise(scanSources(["packages/demo/src/a.ts", "packages/demo/src/gone.ts"], read))
+  assert.deepEqual(
+    found.map(({ file }) => file),
+    ["packages/demo/src/a.ts"]
+  )
+  const failing = () => Effect.fail(new Error("permission denied"))
+  await assert.rejects(Effect.runPromise(scanSources(["packages/demo/src/a.ts"], failing)), /permission denied/u)
 })
 
 test("counts an Effect directive wherever the language service reads it, strings included, in TypeScript files", () => {
