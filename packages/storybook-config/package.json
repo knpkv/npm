@@ -1,0 +1,30 @@
+{
+  "name": "@knpkv/storybook-config",
+  "version": "0.0.0",
+  "private": true,
+  "description": "One Storybook setup for rly and every web package: addons, rly catalog environment, theme and viewport toolbars.",
+  "type": "module",
+  "exports": {
+    "./main": "./src/main.ts",
+    "./preview": "./src/preview.tsx",
+    "./catalog-environment": "./src/catalog-environment.tsx"
+  },
+  "scripts": {
+    "check": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@storybook/react-vite": "10.6.1",
+    "effect": "4.0.0",
+    "react": "*",
+    "storybook": "10.6.1",
+    "vite": "*"
+  },
+  "devDependencies": {
+    "@storybook/react-vite": "10.6.1",
+    "@types/react": "^19.3.0",
+    "effect": "4.0.0",
+    "react": "^19.2.7",
+    "storybook": "10.6.1",
+    "vite": "^8.3.2"
+  }
+}
