@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Crypto, Deferred, Effect, Fiber, Ref, Schema } from "effect"
+import { Crypto, Deferred, Effect, Fiber, Ref, Result, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -320,4 +320,17 @@ describe("terminal reconcile", () => {
       })),
     120_000
   )
+
+  it.effect("accepts activity provenance only on the now window and only for covered goals", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "merged" }), observedAt: 6_000 }])
+      yield* work.reconcile()
+      const valid = Schema.encodeSync(WorkSnapshots)(yield* work.snapshots(100_000))
+      const decode = Schema.decodeUnknownResult(WorkSnapshots)
+      expect(Result.isSuccess(decode(valid))).toBe(true)
+      expect(Result.isFailure(decode({ ...valid, week: { ...valid.week, activityProvenanceGoals: [] } }))).toBe(true)
+      expect(Result.isFailure(decode({ ...valid, now: { ...valid.now, activityProvenanceGoals: [] } }))).toBe(true)
+    })))
 })

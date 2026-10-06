@@ -1019,11 +1019,22 @@ export const WorkSnapshots = Schema.Struct({
   month: WorkSnapshot
 }).check(Schema.makeFilter(
   ({ day, month, now, week }) =>
-    [day, week, month].every((window) => window.observed === undefined && window.observedOmitted === undefined) &&
+    [day, week, month].every((window) =>
+      window.observed === undefined && window.observedOmitted === undefined &&
+      window.activityProvenance === undefined && window.activityProvenanceGoals === undefined &&
+      window.activityProvenanceOmitted === undefined
+    ) &&
+    (now.activityProvenanceGoals === undefined ||
+      now.activityProvenanceGoals.every((goalId) => now.goals.some(({ id }) => id === goalId))) &&
+    (now.activityProvenance === undefined ||
+      now.activityProvenance.every(({ goalId }) => now.activityProvenanceGoals?.includes(goalId) === true)) &&
     (now.observed === undefined || (
       new Set(now.observed.map(({ goalId }) => goalId)).size === now.observed.length &&
       now.observed.every(({ goalId }) => now.goals.some(({ id }) => id === goalId))
     )),
-  { expected: "observed facts only on the now window, at most one entry per goal in that window" }
+  {
+    expected:
+      "observed facts and activity provenance only on the now window, for goals in that window and covered goals only"
+  }
 ))
 export interface WorkSnapshots extends Schema.Schema.Type<typeof WorkSnapshots> {}
