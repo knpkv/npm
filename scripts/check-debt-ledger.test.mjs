@@ -1,16 +1,23 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { compareToBaseline, makeBaseline, packageOf, renderLedger, scanDirectives } from "./check-debt-ledger.mjs"
+import {
+  compareToBaseline,
+  isLedgerSource,
+  makeBaseline,
+  packageOf,
+  renderLedger,
+  scanDirectives
+} from "./check-debt-ledger.mjs"
 
 const scan = (text, file = "packages/demo/src/a.ts") => scanDirectives(file, text)
 
-test("finds every directive spelling in comments", () => {
+test("finds every directive spelling", () => {
   const found = scan(
     [
       "// @effect-diagnostics-next-line strictEffectProvide:off",
       "/* @effect-diagnostics leakingRequirements:off */",
-      "// @effect-diagnostics-skip-file",
+      "/** @effect-diagnostics floatingEffect:skip-file */",
       "// @ts-expect-error the caller boundary is untyped",
       "// @ts-ignore",
       "// @ts-nocheck",
@@ -22,22 +29,43 @@ test("finds every directive spelling in comments", () => {
       "export {}"
     ].join("\n")
   )
+  assert.deepEqual(found.map(({ kind }) => kind).sort(), [
+    "ast-grep",
+    "effect-diagnostics",
+    "effect-diagnostics",
+    "effect-diagnostics",
+    "eslint",
+    "eslint",
+    "eslint",
+    "oxlint",
+    "typescript",
+    "typescript",
+    "typescript"
+  ])
+})
+
+test("counts TypeScript suppressions the way the compiler recognises them", () => {
+  const kinds = (text) => scan(text).map(({ kind }) => kind)
+  assert.deepEqual(kinds("/// @ts-expect-error the value is untyped\nexport const n: number = 1"), ["typescript"])
+  assert.deepEqual(kinds('/// <reference types="node" />\nexport {}'), [])
+  assert.deepEqual(kinds("/* The value is untyped.\n @ts-expect-error */\nexport const n: number = 1"), ["typescript"])
+  assert.deepEqual(kinds("/**\n * Never write @ts-expect-error here.\n */\nexport const n = 1"), [])
+})
+
+test("counts an Effect directive wherever the language service reads it, strings included, in TypeScript files", () => {
+  const marker = 'export const marker = "@effect-diagnostics floatingEffect:off"'
   assert.deepEqual(
-    found.map(({ kind }) => kind),
-    [
-      "effect-diagnostics",
-      "effect-diagnostics",
-      "effect-diagnostics",
-      "typescript",
-      "typescript",
-      "typescript",
-      "eslint",
-      "eslint",
-      "eslint",
-      "oxlint",
-      "ast-grep"
-    ]
+    scan(marker).map(({ kind }) => kind),
+    ["effect-diagnostics"]
   )
+  assert.deepEqual(scan('export const prose = "the @effect-diagnostics syntax"'), [])
+  assert.deepEqual(scan(marker, "scripts/tool.mjs"), [])
+})
+
+test("keeps vendored files out of the ledger", () => {
+  assert.equal(isLedgerSource("packages/demo/src/vendor/library.ts"), false)
+  assert.equal(isLedgerSource("packages/demo/src/vendored-names.ts"), true)
+  assert.equal(isLedgerSource("packages/demo/src/library.ts"), true)
 })
 
 test("ignores directive text inside string and template literals", () => {
@@ -71,10 +99,13 @@ test("recognises a reason after --, after @ts-expect-error, or on the comment li
       "export { a }"
     ].join("\n")
   )
-  assert.deepEqual(
-    found.map(({ reasoned }) => reasoned),
-    [true, true, true, false, false]
-  )
+  assert.deepEqual(found.map(({ kind, reasoned }) => `${kind}:${reasoned}`).sort(), [
+    "effect-diagnostics:false",
+    "effect-diagnostics:true",
+    "eslint:true",
+    "typescript:false",
+    "typescript:true"
+  ])
 })
 
 test("attributes files to their package", () => {

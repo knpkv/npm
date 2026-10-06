@@ -24,23 +24,39 @@ const fail = (reason) => new DebtLedgerError({ reason })
 const ledgerPath = "docs/debt.md"
 const baselinePath = "docs/debt.baseline.json"
 
-// Leading directive spellings, matched only at the start of a comment so prose that mentions one is not counted.
-const directiveKinds = [
-  ["effect-diagnostics", /^@effect-diagnostics(?:-next-line|-skip-file)?(?=\s|$)/u],
-  ["typescript", /^@ts-(?:expect-error|ignore|nocheck)(?=\s|:|$)/u],
+// Lint directives, matched only at the start of a comment so prose that mentions one is not counted.
+const lintKinds = [
   ["eslint", /^eslint-disable(?:-next-line|-line)?(?=\s|$)/u],
   ["oxlint", /^oxlint-disable(?:-next-line|-line)?(?=\s|$)/u],
   ["ast-grep", /^ast-grep-ignore(?=\s|:|$)/u]
 ]
 
+// TypeScript's own comment-directive rules (its scanner's commentDirectiveRegEx*): a `//` or `///`
+// comment, or the last line of a block comment. A JSDoc continuation line (` * @ts-expect-error`) is
+// not a directive, so it is not counted either.
+const tsSingleLine = /^\/\/\/?\s*@(?:ts-expect-error|ts-ignore)/u
+const tsLastLine = /^(?:\/|\*)*\s*@(?:ts-expect-error|ts-ignore)/u
+const tsDirective = /@(?:ts-expect-error|ts-ignore)/u
+const tsNoCheck = /^@ts-nocheck(?=\s|$)/u
+
+// The Effect language service's own directive pattern. It reads the whole source text of a TypeScript
+// file, so a directive inside a string literal is active too and is counted wherever it appears.
+const effectDirective =
+  /@effect-diagnostics(?:-next-line)?(?:\s(?:[a-zA-Z0-9/]+|\*):(?:off|warning|error|message|suggestion|skip-file))+/gmu
+
 const scannedFile = /\.(?:[cm]?[jt]sx?)$/u
+const typeScriptFile = /\.(?:[cm]?ts|tsx)$/u
 
 /** Whether a tracked path belongs in the ledger: source and tests, never vendored, generated or built output. */
 export const isLedgerSource = (file) =>
   scannedFile.test(file) &&
   !file.startsWith("repos/") &&
   !file.startsWith("tools/oxlint/anti-slop/") &&
-  !file.split("/").some((segment) => segment === "generated" || segment === "dist" || segment === "node_modules")
+  !file
+    .split("/")
+    .some(
+      (segment) => segment === "generated" || segment === "dist" || segment === "node_modules" || segment === "vendor"
+    )
 
 /** The workspace package a path is counted under: `packages/<name>`, `scripts`, or `(root)`. */
 export const packageOf = (file) => {
@@ -52,7 +68,7 @@ export const packageOf = (file) => {
 
 const commentBody = (raw) =>
   raw.startsWith("//")
-    ? raw.slice(2).trim()
+    ? raw.replace(/^\/\/\/?/u, "").trim()
     : raw
         .slice(2, -2)
         .split("\n")
@@ -84,13 +100,22 @@ const commentRanges = (file, text) => {
   return [...ranges.values()].sort((left, right) => left.pos - right.pos)
 }
 
-const kindOf = (body) => directiveKinds.find(([, pattern]) => pattern.test(body))
+const lintKindOf = (body) => lintKinds.find(([, pattern]) => pattern.test(body))?.[0]
 
-const hasInlineReason = (kind, body) => {
-  if (/\s--\s+\S/u.test(body)) return true
-  if (kind !== "typescript") return false
-  return body.replace(directiveKinds[1][1], "").replace(/^:/u, "").trim().length > 0
+// The line a TypeScript suppression lives on, when the comment is one TypeScript honours.
+const typeScriptDirectiveLine = (raw) => {
+  if (raw.startsWith("//")) return tsSingleLine.test(raw) ? raw : undefined
+  const lastLine = raw.slice(raw.lastIndexOf("\n") + 1)
+  return tsLastLine.test(lastLine) ? lastLine : undefined
 }
+
+const isDirectiveComment = (raw) =>
+  typeScriptDirectiveLine(raw) !== undefined ||
+  tsNoCheck.test(commentBody(raw)) ||
+  lintKindOf(commentBody(raw)) !== undefined ||
+  new RegExp(effectDirective.source, "u").test(raw)
+
+const hasDashReason = (rest) => /(?:^|\s)--\s+\S/u.test(rest)
 
 // A `//` comment on the line directly above that is not itself a directive counts as the reason.
 const hasReasonAbove = (text, start) => {
@@ -99,30 +124,58 @@ const hasReasonAbove = (text, start) => {
   const previousStart = text.lastIndexOf("\n", lineStart - 2) + 1
   const previous = text.slice(previousStart, lineStart - 1).trim()
   if (!previous.startsWith("//")) return false
-  const body = previous.slice(2).trim()
-  return body.length > 0 && kindOf(body) === undefined
+  return commentBody(previous).length > 0 && !isDirectiveComment(previous)
 }
 
-/**
- * Every escape directive in one file. `reasoned` is true when the directive explains itself
- * (` -- reason`, free text after `@ts-expect-error`, or a comment line directly above).
- */
-export const scanDirectives = (file, text) =>
-  commentRanges(file, text).flatMap((range) => {
-    const body = commentBody(text.slice(range.pos, range.end))
-    const match = kindOf(body)
-    if (match === undefined) return []
-    const [kind] = match
-    return [
-      {
-        file,
-        package: packageOf(file),
-        kind,
-        text: body.replace(/\s+/gu, " "),
-        reasoned: hasInlineReason(kind, body) || hasReasonAbove(text, range.pos)
-      }
-    ]
+const directive = (file, kind, directiveText, reasoned) => ({
+  file,
+  package: packageOf(file),
+  kind,
+  text: directiveText.replace(/\s+/gu, " ").trim(),
+  reasoned
+})
+
+const commentDirective = (file, text, range) => {
+  const raw = text.slice(range.pos, range.end)
+  const body = commentBody(raw)
+  const reasonAbove = hasReasonAbove(text, range.pos)
+  const typeScriptLine = typeScriptDirectiveLine(raw)
+  if (typeScriptLine !== undefined || tsNoCheck.test(body)) {
+    const line = typeScriptLine ?? body
+    const rest = line
+      .slice(line.search(/@ts-/u))
+      .replace(/^@ts-(?:expect-error|ignore|nocheck)/u, "")
+      .replace(/\*\/\s*$/u, "")
+      .replace(/^:/u, "")
+      .trim()
+    return [directive(file, "typescript", tsDirective.test(line) ? body : line, rest.length > 0 || reasonAbove)]
+  }
+  const lintKind = lintKindOf(body)
+  return lintKind === undefined ? [] : [directive(file, lintKind, body, hasDashReason(body) || reasonAbove)]
+}
+
+const effectDirectives = (file, text) =>
+  [...text.matchAll(effectDirective)].map((match) => {
+    const lineEnd = text.indexOf("\n", match.index)
+    const rest = text.slice(match.index + match[0].length, lineEnd === -1 ? text.length : lineEnd)
+    return directive(file, "effect-diagnostics", match[0], hasDashReason(rest) || hasReasonAbove(text, match.index))
   })
+
+/**
+ * Every escape directive in one file, recognised the way the tool that reads it does:
+ * lint directives at the start of a comment, TypeScript suppressions by the compiler's comment rules,
+ * and Effect diagnostics by the language service's pattern over the whole text of a TypeScript file.
+ * `reasoned` is true when the directive explains itself (` -- reason`, free text after
+ * `@ts-expect-error`, or a comment line directly above).
+ *
+ * Not counted: TypeScript or lint directives inside string and template literals. A test that writes a
+ * throwaway source file (jcf-web's packed-consumer `verify.ts`) compiles it outside this repository's
+ * checks, so its suppressions are fixture data rather than escapes from them.
+ */
+export const scanDirectives = (file, text) => [
+  ...commentRanges(file, text).flatMap((range) => commentDirective(file, text, range)),
+  ...(typeScriptFile.test(file) ? effectDirectives(file, text) : [])
+]
 
 const groupKey = ({ kind, package: name }) => `${name}\u0000${kind}`
 const directiveKey = ({ file, text }) => `${file}\u0000${text}`
