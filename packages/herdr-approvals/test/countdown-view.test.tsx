@@ -115,6 +115,7 @@ describe("ApprovalsCountdown", () => {
       /^\dm \d\ds left on Apply Nix configuration, expires soon$/
     )
     expect(view.container.querySelectorAll("[data-rly-decision-bar]")).toHaveLength(1)
+    expect(view.container.querySelector("[aria-label='What the track marks mean']")?.textContent).toBe("5 minutes left")
     expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("sooner")
     view.unmount()
   })

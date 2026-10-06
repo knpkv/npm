@@ -11,7 +11,7 @@
  * @module
  */
 import { DecisionBar, Hero, HeroWord, type RlyDecisionBarState, Region } from "@knpkv/rly/patterns"
-import { Button, LimitTrack, Notice } from "@knpkv/rly/primitives"
+import { Button, LimitTrack, Notice, TrackKey } from "@knpkv/rly/primitives"
 import { Predicate } from "effect"
 import { type KeyboardEvent, type ReactElement, type ReactNode, useEffect, useRef, useState } from "react"
 import { jobTitle } from "./activity-history.js"
@@ -455,6 +455,14 @@ export const ApprovalsCountdown = ({
               })}
             </ul>
           )}
+          {facts.some(({ createdAt, expiresAt }) => windowUsed(createdAt, expiresAt, now) !== null) ? (
+            // Once per list: the near tick every row's track draws.
+            <TrackKey
+              className="countdown-track-key"
+              items={[{ label: "5 minutes left", mark: "near" }]}
+              label="What the track marks mean"
+            />
+          ) : null}
           {snapshot.pendingApprovals.nextCursors.length === 0 ? null : (
             <div className="countdown-more">
               <Button loading={pendingLoading} onClick={onLoadPending} type="button" variant="quiet">

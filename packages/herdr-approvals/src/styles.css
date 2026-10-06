@@ -1015,6 +1015,11 @@
     margin-block: var(--rly-space-6) var(--rly-space-2);
   }
 
+  .countdown-track-key {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    padding: var(--rly-space-8) var(--rly-space-16);
+  }
+
   .countdown-row-caption {
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
