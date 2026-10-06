@@ -5,6 +5,7 @@
 
 import { Clock, DateTime, Effect, Match, Option, Ref, Result, Schema, SubscriptionRef } from "effect"
 import { AwsClient, type CallerIdentity } from "../AwsClient/index.js"
+import { isThrottlingError } from "../AwsClient/internal.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import { PullRequestRepo, type PullRequestRepoContract } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
@@ -84,7 +85,9 @@ const unresolved = (reason: CallerIdentityUnresolvedReason): CallerIdentityState
 export const unresolvedReasonOf = (error: AwsClientError): CallerIdentityUnresolvedReason =>
   Match.valueTags(error, {
     AwsCredentialError: (): CallerIdentityUnresolvedReason => ({ _tag: "CredentialsUnavailable" }),
-    AwsApiError: (): CallerIdentityUnresolvedReason => ({ _tag: "StsRejected" }),
+    // The identity adapter wraps exhausted throttling in AwsApiError, so its cause decides.
+    AwsApiError: (apiError): CallerIdentityUnresolvedReason =>
+      isThrottlingError(apiError.cause) ? { _tag: "Throttled" } : { _tag: "StsRejected" },
     AwsThrottleError: (): CallerIdentityUnresolvedReason => ({ _tag: "Throttled" })
   })
 
@@ -175,7 +178,9 @@ export const resolveAccounts = (state: PRState) =>
           ...s,
           status: idleStatus,
           lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)),
-          unevaluatedPullRequests: []
+          unevaluatedPullRequests: [],
+          // A profile with no key is not enabled, so no identity, and no ARN, outlives disabling it.
+          callerIdentities: {}
         })
       )
       return undefined
@@ -187,6 +192,9 @@ export const resolveAccounts = (state: PRState) =>
     if (firstAccount === undefined) return undefined
     const firstRegion = primaryRegion(firstAccount)
 
+    // What each identity was when resolution began: an entry that changes meanwhile (an SSO logout)
+    // is newer than what this resolution saw, and must not be overwritten by it.
+    const identitiesAtStart = (yield* SubscriptionRef.get(state)).callerIdentities ?? {}
     const firstIdentity = yield* resolveIdentity(
       accountIdRef,
       firstAccount,
@@ -209,7 +217,18 @@ export const resolveAccounts = (state: PRState) =>
       [firstAccount.profile, firstIdentity],
       ...remainingIdentities
     ])
-    yield* SubscriptionRef.update(state, (s) => ({ ...s, callerIdentities }))
+    yield* SubscriptionRef.update(state, (s) => {
+      const current = s.callerIdentities ?? {}
+      const merged: CallerIdentities = Object.fromEntries(
+        Object.entries(callerIdentities).map(([profile, resolvedNow]) => [
+          profile,
+          current[profile] !== identitiesAtStart[profile] && current[profile] !== undefined
+            ? current[profile]
+            : resolvedNow
+        ])
+      )
+      return { ...s, callerIdentities: merged }
+    })
 
     const accountIdMap = yield* Ref.get(accountIdRef)
 

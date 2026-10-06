@@ -9,8 +9,13 @@
  * @module
  */
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
-import { AwsRegion, type CallerIdentities, type CallerIdentityState } from "@knpkv/codecommit-core/Domain.js"
-import { Duration, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
+import {
+  type AppState,
+  AwsRegion,
+  type CallerIdentities,
+  type CallerIdentityState
+} from "@knpkv/codecommit-core/Domain.js"
+import { Data, Duration, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
@@ -36,6 +41,28 @@ const signedOut = (identities: CallerIdentities): CallerIdentities =>
 
 const exitCode = (cmd: ChildProcess.Command) =>
   Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) => spawner.exitCode(cmd))
+
+/** `aws sso logout` exited non-zero, so the SSO sessions are still active. */
+export class SsoLogoutFailedError extends Data.TaggedError("SsoLogoutFailedError")<{ readonly exitCode: number }> {}
+
+/**
+ * Run a logout, then mark the caller signed out of every account: `aws sso logout` ends every SSO
+ * session. A non-zero exit fails instead and leaves the state as it was, because nothing was signed out.
+ */
+export const signOutAfter = <E, R>(
+  logout: Effect.Effect<number, E, R>,
+  state: SubscriptionRef.SubscriptionRef<AppState>
+) =>
+  logout.pipe(
+    Effect.flatMap((code) =>
+      code === 0
+        ? SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => ({
+          ...rest,
+          ...(rest.callerIdentities !== undefined && { callerIdentities: signedOut(rest.callerIdentities) })
+        }))
+        : Effect.fail(new SsoLogoutFailedError({ exitCode: code }))
+    )
+  )
 
 export const NotificationsLive = HttpApiBuilder.group(
   CodeCommitApi,
@@ -138,17 +165,7 @@ export const NotificationsLive = HttpApiBuilder.group(
             })
             yield* Effect.forkIn(
               ssoSemaphore.withPermits(1)(
-                exitCode(cmd).pipe(
-                  Effect.timeout(SSO_TIMEOUT),
-                  // `aws sso logout` signs out every SSO session, so no account's identity holds.
-                  Effect.tap(() =>
-                    SubscriptionRef.update(prService.state, ({ currentUser: _, ...rest }) => ({
-                      ...rest,
-                      ...(rest.callerIdentities !== undefined && {
-                        callerIdentities: signedOut(rest.callerIdentities)
-                      })
-                    }))
-                  ),
+                signOutAfter(exitCode(cmd).pipe(Effect.timeout(SSO_TIMEOUT)), prService.state).pipe(
                   Effect.catchIf(() => true, (e) =>
                     Effect.logWarning("SSO logout failed", e).pipe(
                       Effect.andThen(notificationRepo.addSystem({

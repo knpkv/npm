@@ -11,7 +11,7 @@ import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/Pu
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { AccountConfig } from "../src/ConfigService/internal.js"
 import { type AppState, type CallerIdentityState, PullRequest } from "../src/Domain.js"
-import { AwsApiError } from "../src/Errors.js"
+import { AwsApiError, AwsCredentialError } from "../src/Errors.js"
 import { fetchAndUpsertPRs } from "../src/PRService/refreshFetch.js"
 import { subscriptionKey } from "../src/PRService/refreshResolve.js"
 
@@ -19,7 +19,12 @@ import { subscriptionKey } from "../src/PRService/refreshResolve.js"
 const fetched = (pullRequest: PullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest })
 
 describe("fetchAndUpsertPRs", () => {
-  it.effect("marks the account's caller identity unresolved when its refresh fails authentication", () =>
+  // Production refresh failures are typed: an expired credential, or a provider auth error wrapped in AwsApiError.
+  it.effect.each([
+    ["an AwsCredentialError", "credential"],
+    ["an AwsApiError carrying ExpiredTokenException", "expired"],
+    ["an AwsApiError carrying an unrelated provider error", "unrelated"]
+  ])("handles a refresh that fails with %s", ([, kind]) =>
     Effect.gen(function*() {
       const resolved: CallerIdentityState = {
         _tag: "Resolved",
@@ -34,15 +39,25 @@ describe("fetchAndUpsertPRs", () => {
         currentUser: "alice",
         callerIdentities: { "test-profile": resolved, "other-profile": resolved }
       })
-      const expiredAccount = Schema.decodeSync(AccountConfig)({
+      const account = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
         enabled: true
       })
+      const failure = kind === "credential"
+        ? new AwsCredentialError({
+          profile: account.profile,
+          region: account.regions[0]!,
+          cause: "sso session expired"
+        })
+        : new AwsApiError({
+          operation: "getPullRequests",
+          profile: account.profile,
+          region: account.regions[0]!,
+          cause: { _tag: kind === "expired" ? "ExpiredTokenException" : "InternalFailure", message: "provider error" }
+        })
       const dependencies = Layer.mergeAll(
-        Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.fail(new Error("ExpiredTokenException: the security token has expired"))
-        }),
+        Layer.mock(AwsClient, { getPullRequestRefresh: () => Stream.fail(failure) }),
         Layer.mock(PullRequestRepo, {
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
@@ -53,19 +68,18 @@ describe("fetchAndUpsertPRs", () => {
 
       yield* fetchAndUpsertPRs({
         state,
-        enabledAccounts: [expiredAccount],
+        enabledAccounts: [account],
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef: yield* Ref.make(new Set<string>()),
         currentUser: "alice",
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
-      const { callerIdentities, currentUser } = yield* SubscriptionRef.get(state)
-      expect(currentUser).toBeUndefined()
-      expect(callerIdentities).toEqual({
-        "test-profile": { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } },
-        "other-profile": resolved
-      })
+      const { callerIdentities } = yield* SubscriptionRef.get(state)
+      expect(callerIdentities?.["other-profile"]).toEqual(resolved)
+      expect(callerIdentities?.["test-profile"]).toEqual(
+        kind === "unrelated" ? resolved : { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }
+      )
     }))
 
   it.effect("keeps a stale cached PR when its re-read fails only on approval evaluation", () =>

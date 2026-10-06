@@ -25,6 +25,23 @@ import type { AwsClientError } from "../Errors.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
 
+/** Provider error tags that mean the account's credentials no longer work. */
+const providerAuthErrors = new Set([
+  "ExpiredTokenException",
+  "ExpiredToken",
+  "UnrecognizedClientException",
+  "InvalidClientTokenId",
+  "InvalidSignatureException",
+  "UnauthorizedException",
+  "AuthFailure"
+])
+
+/** Whether a refresh failure means the account's credentials no longer work, decided from its type. */
+const isAuthFailure = (error: AwsClientError): boolean =>
+  error._tag === "AwsCredentialError" ||
+  (error._tag === "AwsApiError" && Predicate.hasProperty(error.cause, "_tag") &&
+    Predicate.isString(error.cause._tag) && providerAuthErrors.has(error.cause._tag))
+
 const refreshAuthFailed: CallerIdentityState = { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }
 
 /** A pull-request read that failed only because its approval rules could not be evaluated. */
@@ -129,7 +146,8 @@ export const fetchAndUpsertPRs = (params: {
               region,
               cause: causeStr
             })
-            const isAuthError = /ExpiredToken|Unauthorized|AuthFailure|credentials/i.test(causeStr)
+            const isAuthError = isAuthFailure(error) ||
+              /ExpiredToken|Unauthorized|AuthFailure|credentials/i.test(causeStr)
             return Stream.fromEffectDrain(
               Effect.gen(function*() {
                 yield* Ref.update(successfullyFetchedScopes, (scopes) => {
@@ -145,7 +163,7 @@ export const fetchAndUpsertPRs = (params: {
                   deduplicate: true
                 }).pipe(Effect.catch(() => Effect.void))
                 if (isAuthError) {
-                  // The auth check is a text match on the provider error (see isAuthError above).
+                  // Typed first (credential failure, or a provider auth error), with the older text match as fallback.
                   yield* SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => ({
                     ...rest,
                     callerIdentities: {
