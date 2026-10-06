@@ -96,7 +96,6 @@ const serve = async (page: Page) => {
           accounts: [],
           currentUser: "viewer",
           enabledProfiles: ["production"],
-          pendingReviewCount: 2,
           pullRequests,
           sandboxes: [],
           status: "idle"

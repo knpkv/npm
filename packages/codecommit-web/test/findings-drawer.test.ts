@@ -5,6 +5,7 @@ import { act, createElement, useState } from "react"
 import { createRoot } from "react-dom/client"
 
 import { FindingsDrawer, findingsPlacement } from "../src/client/components/findings-drawer.js"
+import { insideOpenDialog } from "../src/client/components/pr-detail.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -52,5 +53,20 @@ describe("FindingsDrawer", () => {
     await act(async () => close?.click())
     expect(dialog?.open).toBe(false)
     await act(async () => root.unmount())
+  })
+})
+
+describe("insideOpenDialog", () => {
+  it("claims keys from inside an open dialog only", () => {
+    const dialog = document.createElement("dialog")
+    const button = document.createElement("button")
+    dialog.append(button)
+    document.body.append(dialog)
+    expect(insideOpenDialog(button)).toBe(false)
+    dialog.setAttribute("open", "")
+    expect(insideOpenDialog(button)).toBe(true)
+    expect(insideOpenDialog(document.body)).toBe(false)
+    expect(insideOpenDialog(null)).toBe(false)
+    dialog.remove()
   })
 })

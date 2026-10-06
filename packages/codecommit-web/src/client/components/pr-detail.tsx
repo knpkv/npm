@@ -218,6 +218,13 @@ export const ownsEnterKey = (target: EventTarget | null): boolean => {
   return tagName === "A" || tagName === "BUTTON" || tagName === "SELECT" || tagName === "SUMMARY"
 }
 
+/**
+ * True when the key event comes from inside an open `<dialog>`: Esc there closes the dialog, so the
+ * PR page's own shortcuts (Esc back to the queue, Enter/o console, `.` sandbox) must stay out of it.
+ */
+export const insideOpenDialog = (target: EventTarget | null): boolean =>
+  target instanceof Element && target.closest("dialog[open]") !== null
+
 const formatRelativeDate = (dateStr: string): string => {
   const date = new Date(dateStr)
   const abs = date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -1282,7 +1289,7 @@ export function PRDetail() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isTextInputTarget(e.target)) return
+      if (isTextInputTarget(e.target) || insideOpenDialog(e.target)) return
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")
