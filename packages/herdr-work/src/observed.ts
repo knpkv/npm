@@ -1,3 +1,4 @@
+import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
 import { Schema } from "effect"
 import { WorkGoalObservedEntry, WorkSnapshots } from "./model.js"
 import type {
@@ -150,6 +151,12 @@ export const observeGoal = (
   failures: ReadonlyArray<WorkObservedFailure>,
   now: number
 ): WorkGoalObserved => observeWith(goal, bySubject(facts), bySubject(failures), now)
+
+/**
+ * The encoded size the overlay may bring a snapshot up to: the Fleet response
+ * limit less the newline the HTTP route appends after the JSON body.
+ */
+export const workSnapshotBudgetBytes = fleetResponseBodyMaxBytes - "\n".length
 
 const utf8 = new TextEncoder()
 const encodedBytes = (value: Schema.Json): number => utf8.encode(JSON.stringify(value)).byteLength

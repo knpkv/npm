@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
 import type {
   WorkAgentObservation,
   WorkGoal,
@@ -6,7 +7,7 @@ import type {
   WorkObservedFailure,
   WorkPullRequestObservation
 } from "../src/model.js"
-import { observationSubject, observeGoal, staleOwnerAfterMillis } from "../src/observed.js"
+import { observationSubject, observeGoal, staleOwnerAfterMillis, workSnapshotBudgetBytes } from "../src/observed.js"
 
 const hour = 60 * 60 * 1_000
 const head = "a".repeat(40)
@@ -171,5 +172,9 @@ describe("observeGoal", () => {
     })
     expect(observeGoal(older, [fact(agent("working"), 60)], [], 100).agent?.fact.status).toBe("working")
     expect(observeGoal(older, [fact(agent("working", { agentId: "agent-other" }), 60)], [], 100).agent).toBeNull()
+  })
+
+  it("leaves room for the newline the HTTP route appends after the snapshot", () => {
+    expect(workSnapshotBudgetBytes + "\n".length).toBe(fleetResponseBodyMaxBytes)
   })
 })
