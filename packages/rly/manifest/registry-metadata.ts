@@ -317,10 +317,14 @@ export const COMPONENT_REGISTRY_METADATA = {
     "service",
     "system"
   ], ["audit", "timeline"]),
-  TrackKey: registryMetadata("Explain the marks a set of limit tracks draws", ["near", "projected", "stale"], [
-    "present",
-    "explain"
-  ]),
+  TrackKey: registryMetadata(
+    "Explain the marks a set of limit tracks draws",
+    ["near", "projected", "stale", "unknown"],
+    [
+      "present",
+      "explain"
+    ]
+  ),
   Verdict: registryMetadata("State a release verdict with text, icon, and color-independent tone", [
     "caution",
     "critical",

@@ -7,18 +7,19 @@ const meta = { component: TrackKey, tags: ["autodocs"], title: "Primitives/Track
 export default meta
 type Story = StoryObj<typeof meta>
 
-/** Every mark, for tracks that also draw a projection. */
+/** Every mark, for tracks that also draw a projection and a missing reading. */
 export const AllMarks: Story = {
   args: {
     items: [
       { label: "80%, near the limit", mark: "near" },
       { label: "Estimated level at reset", mark: "projected" },
-      { label: "Old reading", mark: "stale" }
+      { label: "Old reading", mark: "stale" },
+      { label: "No reading", mark: "unknown" }
     ],
     label: "What the track marks mean"
   },
   play: async ({ canvas }) => {
-    await expect(canvas.getAllByRole("listitem")).toHaveLength(3)
+    await expect(canvas.getAllByRole("listitem")).toHaveLength(4)
   },
   render: (args) => (
     <main style={pageStyle}>

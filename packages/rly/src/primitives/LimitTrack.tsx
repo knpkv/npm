@@ -64,7 +64,8 @@ export type LimitTrackProps = LimitTrackBaseProps & {
  * everything it draws, so that adjacent text must also say when the reading is old and what the
  * projection is (for example "61%, old reading" or "84%, about 103% at reset"). Pass
  * `decorative={false}` with a label and the caller's own words for the value to expose it as a meter.
- * An unknown reading is a named image with the label and value description, without a numeric range.
+ * An unknown reading draws a faint full-width hatch in a dashed edge, never an empty (0%) track, and
+ * when announced is a named image with the label and value description, without a numeric range.
  */
 export const LimitTrack = ({
   className,

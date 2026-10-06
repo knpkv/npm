@@ -92,6 +92,33 @@ test("preserves stale readings and their key in forced colours", async ({ page }
   expect((await stale.boundingBox())?.width).toBe(normalWidth)
 })
 
+test("keeps the track scale in forced colours and draws no reading unlike an empty or stale track", async ({ page }) => {
+  await page.goto(story("primitives-limittrack--gallery"))
+  const track = (name: string) => page.locator(`[data-limit="${name}"] [data-tone]`)
+  const unknown = track("Codex 5-hour")
+  const unknownKey = page.locator("[data-mark=\"unknown\"]")
+  const modes: ReadonlyArray<"none" | "active"> = ["none", "active"]
+  for (const forcedColors of modes) {
+    await page.emulateMedia({ forcedColors })
+    // No reading is never the plain empty track a 0% reading would show.
+    await expect(unknown).not.toHaveCSS("background-image", "none")
+    await expect(unknownKey).not.toHaveCSS("background-image", "none")
+    await expect(track("5-hour window")).toHaveCSS("background-image", "none")
+    if (forcedColors === "active") {
+      // The empty part is Canvas on Canvas, so the inset edge is what keeps the scale.
+      for (const name of ["5-hour window", "Weekly, large model", "Codex weekly", "Codex 5-hour"]) {
+        await expect(track(name)).toHaveCSS("outline-width", "1px")
+      }
+      await expect(unknown).toHaveCSS("outline-style", "dashed")
+      await expect(track("5-hour window")).toHaveCSS("outline-style", "solid")
+      await expect(unknownKey).toHaveCSS("outline-style", "dashed")
+      await expect(page.locator("[data-mark=\"stale\"]")).toHaveCSS("outline-style", "solid")
+    } else {
+      await expect(unknown).toHaveCSS("outline-style", "dashed")
+    }
+  }
+})
+
 test("keeps the near mark two-toned over the empty track and over a full fill, in forced colours too", async ({ page }) => {
   await page.goto(story("primitives-limittrack--gallery"))
   const marks = [

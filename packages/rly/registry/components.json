@@ -5343,7 +5343,8 @@
         "default",
         "near",
         "projected",
-        "stale"
+        "stale",
+        "unknown"
       ],
       "status": "experimental",
       "variants": []

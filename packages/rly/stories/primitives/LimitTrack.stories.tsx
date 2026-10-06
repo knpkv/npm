@@ -20,7 +20,7 @@ const rowStyle: CSSProperties = { display: "contents" }
 const limits = [
   { name: "5-hour window", state: "ok", value: 42, text: "42%" },
   { name: "Weekly", state: "near", value: 84, projected: 103, text: "84%, about 103% at reset" },
-  { name: "Weekly, large model", state: "full", value: 100, text: "100%" },
+  { name: "Weekly, large model", state: "full", value: 100, text: "100%, at the limit" },
   { name: "Codex weekly", state: "stale", value: 61, stale: true, text: "61%, old reading" },
   { name: "Codex 5-hour", state: "unknown", value: null, text: "No reading" }
 ] satisfies ReadonlyArray<{
@@ -60,7 +60,8 @@ const Limits = () => (
         items={[
           { label: "80%, near the limit", mark: "near" },
           { label: "Estimated level at reset", mark: "projected" },
-          { label: "Old reading", mark: "stale" }
+          { label: "Old reading", mark: "stale" },
+          { label: "No reading", mark: "unknown" }
         ]}
         label="What the track marks mean"
       />

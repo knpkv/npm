@@ -4,7 +4,12 @@ import styles from "./TrackKey.module.css"
 
 const style = (name: string): string => cssClass(styles, name)
 /** The marks a LimitTrack can draw. */
-export const RLY_TRACK_KEY_MARKS: readonly ["near", "projected", "stale"] = ["near", "projected", "stale"]
+export const RLY_TRACK_KEY_MARKS: readonly ["near", "projected", "stale", "unknown"] = [
+  "near",
+  "projected",
+  "stale",
+  "unknown"
+]
 export type RlyTrackKeyMark = (typeof RLY_TRACK_KEY_MARKS)[number]
 
 /** One mark and the caller's words for it. */

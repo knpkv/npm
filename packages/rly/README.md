@@ -186,7 +186,8 @@ a dotted extension shows a `projected` level the application computed, and a
 estimates a projection. The track is decorative by default because the number sits
 beside it, so that text must also carry the age and the projection ("61%, old
 reading", "84%, about 103% at reset"). A non-finite `value` is drawn as no reading,
-and a non-finite `near` throws. Pass `decorative={false}` with a `label` and the caller's `valueText`
+and a non-finite `near` throws. No reading draws a faint full-width hatch in a dashed edge, so it
+never reads as 0%. Under forced colours the track keeps a `CanvasText` edge. Pass `decorative={false}` with a `label` and the caller's `valueText`
 to expose it as a meter instead. With `value={null}`, it is a named image whose
 accessible label combines `label` and `valueText`, without a numeric range.
 

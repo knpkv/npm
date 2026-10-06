@@ -36,6 +36,16 @@
     border-radius: var(--rly-radius-tag);
     inline-size: var(--rly-space-16);
   }
+  /* Same faint hatch and dashed edge as a LimitTrack with no reading. */
+  .unknown {
+    background: repeating-linear-gradient(45deg, var(--rly-color-border-2) 0 1px, transparent 1px 5px)
+      var(--rly-color-surface-3);
+    block-size: var(--rly-space-8);
+    border-radius: var(--rly-radius-tag);
+    inline-size: var(--rly-space-16);
+    outline: 1px dashed var(--rly-color-border-2);
+    outline-offset: -1px;
+  }
   @media (forced-colors: active) {
     /* Keep the halo: forced colours drop box-shadow, and the tokens already map to system colours. */
     .near {
@@ -45,6 +55,13 @@
     .stale {
       background: repeating-linear-gradient(135deg, CanvasText 0 3px, Canvas 3px 6px);
       forced-color-adjust: none;
+      outline: 1px solid CanvasText;
+      outline-offset: -1px;
+    }
+    .unknown {
+      background: repeating-linear-gradient(45deg, CanvasText 0 1px, Canvas 1px 5px);
+      forced-color-adjust: none;
+      outline: 1px dashed CanvasText;
     }
   }
 }
