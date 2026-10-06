@@ -887,6 +887,188 @@
     padding: var(--rly-space-12);
   }
 
+  /*
+   * Approvals countdown: the hero, then "Waiting for you" beside the selected request on wide
+   * screens. On phones the request comes first, so the decision sits right under the hero.
+   */
+  .countdown {
+    display: grid;
+    gap: var(--rly-space-16);
+  }
+
+  .countdown-announcer {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    margin: 0;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+  }
+
+  .countdown-regions {
+    align-items: start;
+    display: grid;
+    gap: var(--rly-space-16);
+    grid-template-columns: minmax(0, 1fr) minmax(20rem, 28rem);
+    grid-template-areas:
+      "waiting selected"
+      "decided selected";
+  }
+
+  .countdown-regions[data-has-selection="false"] {
+    grid-template-areas: "waiting decided";
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .countdown-waiting {
+    grid-area: waiting;
+  }
+
+  .countdown-selected {
+    grid-area: selected;
+  }
+
+  .countdown-decided {
+    grid-area: decided;
+  }
+
+  .countdown-rows {
+    display: grid;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .countdown-rows > li + li {
+    border-block-start: 1px solid var(--rly-color-border-1);
+  }
+
+  .countdown-row {
+    background: transparent;
+    border: 0;
+    color: var(--rly-color-text-1);
+    column-gap: var(--rly-space-12);
+    cursor: pointer;
+    display: grid;
+    font: inherit;
+    grid-template-areas:
+      "meta clock"
+      "title clock"
+      "caption caption";
+    grid-template-columns: minmax(0, 1fr) auto;
+    inline-size: 100%;
+    padding: var(--rly-space-12) var(--rly-space-16);
+    text-align: start;
+  }
+
+  .countdown-row:hover {
+    background: var(--rly-color-surface-2);
+  }
+
+  .countdown-row[aria-current="true"] {
+    background: var(--rly-color-surface-2);
+    box-shadow: inset 2px 0 0 var(--rly-color-text-1);
+  }
+
+  .countdown-row:focus-visible {
+    outline: 2px solid var(--rly-color-focus);
+    outline-offset: -2px;
+  }
+
+  .countdown-row-meta {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    grid-area: meta;
+  }
+
+  .countdown-row-title {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    grid-area: title;
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .countdown-row-clock {
+    align-self: center;
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    font-variant-numeric: tabular-nums;
+    grid-area: clock;
+  }
+
+  /* The word carries urgency; ink only reinforces it. */
+  .countdown-row-clock[data-urgency="soon"] {
+    color: var(--rly-color-held-ink);
+  }
+
+  .countdown-row-clock[data-urgency="imminent"],
+  .countdown-row-clock[data-urgency="due"] {
+    color: var(--rly-color-blocked-ink);
+  }
+
+  .countdown-row-caption {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    grid-area: caption;
+  }
+
+  .countdown-decided-row {
+    display: grid;
+    gap: var(--rly-space-4);
+    padding: var(--rly-space-12) var(--rly-space-16);
+  }
+
+  .countdown-outcome {
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+
+  .countdown-detail {
+    display: grid;
+    gap: var(--rly-space-12);
+    padding: var(--rly-space-16);
+  }
+
+  .countdown-kicker,
+  .countdown-requested {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    margin: 0;
+  }
+
+  .countdown-detail-title {
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    margin: 0;
+  }
+
+  .countdown-empty {
+    color: var(--rly-color-text-2);
+    margin: 0;
+    padding: var(--rly-space-16);
+  }
+
+  .countdown-more {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    padding: var(--rly-space-8) var(--rly-space-16);
+  }
+
+  @media (max-width: 52rem) {
+    .countdown-regions,
+    .countdown-regions[data-has-selection="false"] {
+      grid-template-areas:
+        "selected"
+        "waiting"
+        "decided";
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
   .app-error {
     color: var(--rly-color-text-1);
   }

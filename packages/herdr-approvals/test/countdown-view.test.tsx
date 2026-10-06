@@ -1,0 +1,208 @@
+// @vitest-environment happy-dom
+
+import { describe, expect, it } from "@effect/vitest"
+import { act } from "react"
+import { createRoot } from "react-dom/client"
+import type { ApprovalDecision } from "../src/approval-decision.js"
+import { ApprovalsCountdown, type DecisionStatus } from "../src/countdown-view.js"
+import type { DashboardSnapshot } from "../src/dashboard-model.js"
+
+Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
+
+type JobRecord = DashboardSnapshot["records"][number]
+
+const record = (id: string, overrides: Partial<JobRecord> = {}): JobRecord => ({
+  actor: "submitter@example.com",
+  approvalAvailable: true,
+  approvalExpiresAt: Date.now() + 4 * 60_000,
+  approvalNonce: "nonce",
+  approvedAt: null,
+  approvedBy: null,
+  createdAt: Date.now() - 60_000,
+  error: null,
+  expiredAt: null,
+  hash: "hash",
+  id,
+  payload: { kind: "nix.apply", ref: "main" },
+  rejectedAt: null,
+  rejectedBy: null,
+  result: null,
+  status: "pending_approval",
+  updatedAt: Date.now(),
+  ...overrides
+})
+
+const snapshot = (overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot => ({
+  approvalApp: { canonical: true, canonicalUrl: "https://hub.example.test/", chatEnabled: false, pushEnabled: false },
+  approvalsEnabled: true,
+  chat: null,
+  directory: null,
+  historyNextCursor: null,
+  host: "ALPHA",
+  observedAt: Date.now(),
+  pendingApprovals: { failures: [], local: [record("job-1")], nextCursors: [], remote: [] },
+  records: [],
+  status: {
+    applyConfigured: true,
+    branch: "main",
+    dirty: false,
+    herdr: { agents: [], available: true, error: null },
+    host: "ALPHA",
+    repository: "/repo",
+    revision: "abc"
+  },
+  work: null,
+  ...overrides
+})
+
+interface Props {
+  readonly decisionStatus?: DecisionStatus | null
+  readonly sending?: ApprovalDecision | null
+  readonly snapshot: DashboardSnapshot
+}
+
+const mount = (initial: Props) => {
+  const container = document.createElement("div")
+  document.body.append(container)
+  const root = createRoot(container)
+  const decisions: Array<ApprovalDecision> = []
+  const render = (props: Props) =>
+    act(() =>
+      root.render(
+        <ApprovalsCountdown
+          decisionStatus={props.decisionStatus ?? null}
+          historyLoading={false}
+          onDecision={(decision) => decisions.push(decision)}
+          onLoadHistory={undefined}
+          onLoadPending={undefined}
+          pendingLoading={false}
+          sending={props.sending ?? null}
+          snapshot={props.snapshot}
+        />
+      )
+    )
+  render(initial)
+  const bar = () => container.querySelector<HTMLElement>("[data-rly-decision-bar]")
+  const press = (key: string, shift = false) =>
+    act(() => {
+      container
+        .querySelector(".countdown")
+        ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key, shiftKey: shift }))
+    })
+  const unmount = () => {
+    act(() => root.unmount())
+    container.remove()
+  }
+  return { bar, container, decisions, press, render, unmount }
+}
+
+describe("ApprovalsCountdown", () => {
+  it("leads with the soonest request and mounts a single decision bar", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [
+            record("later", { approvalExpiresAt: Date.now() + 20 * 60_000 }),
+            record("sooner", { approvalExpiresAt: Date.now() + 2 * 60_000 })
+          ],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    expect(view.container.querySelector("[aria-label='Approval summary'] p")?.textContent).toMatch(
+      /^\dm \d\ds until Apply Nix configuration expires, expires soon$/
+    )
+    expect(view.container.querySelectorAll("[data-rly-decision-bar]")).toHaveLength(1)
+    expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("sooner")
+    view.unmount()
+  })
+
+  it("says unchecked hosts in the fact itself when nothing reachable is pending", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: { failures: [{ host: "BETA", reason: "offline" }], local: [], nextCursors: [], remote: [] }
+      })
+    })
+    const hero = view.container.querySelector("[aria-label='Approval summary']")
+    expect(hero?.querySelector("p")?.textContent).toBe("Nothing to approve on reachable hosts; 1 host unchecked")
+    view.unmount()
+  })
+
+  it("decides by shortcut only when the bar could", () => {
+    const off = mount({ snapshot: snapshot({ approvalsEnabled: false }) })
+    off.press("Enter")
+    expect(off.decisions).toEqual([])
+    expect(off.bar()?.dataset["state"]).toBe("off")
+    off.unmount()
+
+    const ready = mount({ snapshot: snapshot() })
+    ready.press("Backspace", true)
+    expect(ready.decisions).toEqual([{ decision: "reject", jobId: "job-1" }])
+    ready.unmount()
+  })
+
+  it("keeps a remote request off with its owning host's link", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [],
+          nextCursors: [],
+          remote: [
+            {
+              approval: {
+                actor: "ops@example.com",
+                approvalExpiresAt: Date.now() + 3 * 60_000,
+                createdAt: Date.now(),
+                id: "remote-1",
+                payload: { kind: "nix.check", ref: "main" },
+                status: "pending_approval"
+              },
+              approvalUrl: "https://beta.example.test/approve/remote-1",
+              host: "BETA"
+            }
+          ]
+        }
+      })
+    })
+    expect(view.bar()?.dataset["state"]).toBe("off")
+    expect(view.bar()?.textContent).toContain("Decided on BETA.")
+    expect(view.container.querySelector("a[href='https://beta.example.test/approve/remote-1']")?.textContent).toBe(
+      "Review on BETA"
+    )
+    view.press("Enter")
+    expect(view.decisions).toEqual([])
+    view.unmount()
+  })
+
+  it("waits for the hub while sending, then shows its answer", () => {
+    const view = mount({ sending: { decision: "approve", jobId: "job-1" }, snapshot: snapshot() })
+    expect(view.bar()?.dataset["state"]).toBe("sending")
+    view.press("Enter")
+    expect(view.decisions).toEqual([])
+    view.render({
+      decisionStatus: { jobId: "job-1", text: "The hub refused: this request already changed." },
+      snapshot: snapshot()
+    })
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe(
+      "The hub refused: this request already changed."
+    )
+    view.unmount()
+  })
+
+  it("keeps the bar mounted and announces an expiry the hub reports", () => {
+    const view = mount({ snapshot: snapshot() })
+    act(() => view.container.querySelector<HTMLButtonElement>("[data-countdown-row]")?.click())
+    view.render({
+      snapshot: snapshot({
+        pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] },
+        records: [record("job-1", { expiredAt: Date.now(), status: "expired" })]
+      })
+    })
+    expect(view.bar()?.dataset["state"]).toBe("off")
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("Expired just now. Nothing was applied.")
+    view.unmount()
+  })
+})

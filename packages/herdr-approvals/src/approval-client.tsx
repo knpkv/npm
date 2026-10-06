@@ -43,6 +43,8 @@ import {
 import { FleetShell, FleetWorkPanel, fleetWorkRequestStateFromResult, fleetWorkStateFromRequest } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 import { SanitizedJobRecord } from "./approval-request.js"
+import { answerText, DecisionAnswer } from "./countdown-model.js"
+import type { DecisionStatus } from "./countdown-view.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
@@ -134,10 +136,22 @@ const loadPendingApprovalTarget = Effect.fn("Dashboard.loadPendingApprovalTarget
 })
 
 const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecision) {
-  yield* fetchJson(SanitizedJobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
+  return yield* fetchJson(SanitizedJobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
     method: "POST"
   })
 })
+
+/** The hub's answer to one decision: the record it returned, its refusal status, or no answer. */
+const decisionAnswerOf = (
+  decision: ApprovalDecision,
+  exit: Exit.Exit<SanitizedJobRecord, BrowserNetworkError | BrowserStatusError | BrowserJsonError>
+): DecisionAnswer => {
+  if (Exit.isSuccess(exit)) return DecisionAnswer.Accepted({ decision: decision.decision, record: exit.value })
+  const failure = Cause.findErrorOption(exit.cause)
+  return Option.isSome(failure) && failure.value._tag === "BrowserStatusError"
+    ? DecisionAnswer.Refused({ status: failure.value.status })
+    : DecisionAnswer.Unreachable()
+}
 
 const loadChat = fetchJson(ChatHistory, "/v1/chat")
 const sendChat = Effect.fn("CoordinatorChat.send")(function* (request: ChatRequest) {
@@ -399,6 +413,8 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     mode: "promiseExit"
   })
   const [busyJobId, setBusyJobId] = useAtom(atoms.busyJob)
+  const [sendingDecision, setSendingDecision] = useState<ApprovalDecision | null>(null)
+  const [decisionStatus, setDecisionStatus] = useState<DecisionStatus | null>(null)
   const [busyChat, setBusyChat] = useAtom(atoms.busyChat)
   const [pull, setPull] = useAtom(atoms.pull)
   const [deepLinkTarget, setDeepLinkTarget] = useState<PendingApprovalTargetType | null>(null)
@@ -448,8 +464,12 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   }
   const onDecision = async (decision: ApprovalDecision): Promise<void> => {
     setBusyJobId(decision.jobId)
+    setSendingDecision(decision)
+    setDecisionStatus(null)
     const exit = await runDecision(decision)
     setBusyJobId(null)
+    setSendingDecision(null)
+    setDecisionStatus({ jobId: decision.jobId, text: answerText(decisionAnswerOf(decision, exit)) })
     if (Exit.isSuccess(exit)) {
       setDeepLinkTarget(null)
       refreshDashboard()
@@ -627,6 +647,8 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       approvalOnly={canonical}
       busyJobId={busyJobId}
       chatBusy={busyChat}
+      decisionStatus={decisionStatus}
+      sendingDecision={sendingDecision}
       historyLoading={historyBusy}
       pendingLoading={pendingBusy}
       notificationState={notificationState}
