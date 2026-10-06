@@ -2,6 +2,10 @@ import { expect, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { RelayReviewProfile, RelayReviewResult } from "../src/server/Api.js"
 
+// Wide enough that Relay stays a column beside the diff next to the queue rail; the mid-width
+// drawer has its own spec (findings-drawer.spec.ts).
+test.use({ viewport: { height: 1080, width: 1920 } })
+
 declare global {
   interface Window {
     emitReviewWorkspaceEvent?: (data: string) => number
@@ -1119,7 +1123,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
       return delivered
     }
   })
-  await page.setViewportSize({ height: 900, width: 1440 })
+  await page.setViewportSize({ height: 1080, width: 1920 })
   await routeReviewWorkspace(page, "review", reviewGate.promise, undefined, {
     commentCount: () => 0
   })

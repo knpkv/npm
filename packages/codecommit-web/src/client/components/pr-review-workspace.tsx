@@ -25,6 +25,8 @@ import {
   TestTube2Icon
 } from "lucide-react"
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useInlineSize } from "../hooks/useInlineSize.js"
+import { FindingsDrawer, findingsPlacement } from "./findings-drawer.js"
 import { useNavigate } from "react-router"
 
 import {
@@ -661,6 +663,12 @@ const ReviewFindings = ({
       </ol>
     </section>
   )
+}
+
+/** The root font size in pixels, so rem thresholds match the stylesheet's. */
+const rootFontSizePx = (): number => {
+  const size = Number.parseFloat(getComputedStyle(document.documentElement).fontSize)
+  return Number.isFinite(size) && size > 0 ? size : 16
 }
 
 const ReadyReviewWorkspace = ({
@@ -1486,6 +1494,272 @@ const ReadyReviewWorkspace = ({
   const selectedTurns =
     conversationFindingId === null ? [] : turns.filter(({ findingId }) => findingId === conversationFindingId)
   const visibleProgress = progress.slice(-4)
+  const [workbenchRef, workbenchWidth] = useInlineSize<HTMLDivElement>()
+  const placement = findingsPlacement(workbenchWidth, rootFontSizePx())
+  const [findingsOpen, setFindingsOpen] = useState(false)
+  useEffect(() => {
+    if (placement !== "drawer") setFindingsOpen(false)
+  }, [placement])
+  const findingsLabel = review === null ? "Relay" : `Findings (${String(review.result.findings.length)})`
+
+  const relayPane = (
+    <aside aria-label="Relay findings" className={styles.agentPane}>
+      <header>
+        <div className={styles.agentTitle}>
+          <span>
+            <BotIcon aria-hidden="true" />
+            <Text as="h2" variant="section-title">
+              Relay
+            </Text>
+          </span>
+          <small>
+            {isReviewing
+              ? "Reviewing the exact revision"
+              : review === null
+                ? "Review findings and discuss evidence"
+                : `${String(review.result.findings.length)} actionable ${
+                    review.result.findings.length === 1 ? "finding" : "findings"
+                  }`}
+          </small>
+        </div>
+        {isReviewing ? (
+          <StateLabel label="running" size="compact" tone="progress" />
+        ) : review === null ? null : (
+          <StateLabel label={review.kind} size="compact" tone="progress" />
+        )}
+      </header>
+      <section aria-label="Relay controls" className={styles.relayControls}>
+        <label className={styles.profileChoice}>
+          <span>Profile</span>
+          <select
+            disabled={isReviewing || !AsyncResult.isSuccess(config)}
+            onChange={(event) => {
+              const profile = profiles.find(({ id }) => id === event.target.value)
+              setSelectedProfileId(event.target.value)
+              if (profile !== undefined) setKind(profile.kind)
+            }}
+            value={selectedProfile?.id ?? ""}
+          >
+            {AsyncResult.isSuccess(config) && selectedProfile === undefined && selectedProfileId !== null ? (
+              <option value="">Selected profile unavailable</option>
+            ) : AsyncResult.isSuccess(config) ? null : (
+              <option value="">{AsyncResult.isFailure(config) ? "Profiles unavailable" : "Loading profiles…"}</option>
+            )}
+            {profiles.map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <Button
+          disabled={isReviewing || diff.files.length === 0 || selectedProfile === undefined}
+          loading={isReviewing}
+          onClick={() => void executeReview()}
+          size="compact"
+          variant="primary"
+        >
+          {isReviewing ? "Relay reviewing…" : review === null ? "Run Relay" : "Run again"}
+        </Button>
+        {isReviewing ? null : (
+          <div aria-label="Relay review focus" className={styles.focusChoices} role="group">
+            {reviewFocuses.map((focus) => {
+              const Icon = focus.icon
+              return (
+                <button
+                  aria-pressed={selectedKind === focus.kind}
+                  key={focus.kind}
+                  onClick={() => setKind(focus.kind)}
+                  title={focus.description}
+                  type="button"
+                >
+                  <Icon aria-hidden="true" />
+                  {focus.label}
+                </button>
+              )
+            })}
+          </div>
+        )}
+      </section>
+
+      {AsyncResult.isFailure(config) ? (
+        <div className={styles.reviewFailure}>
+          <StatePanel
+            action={
+              <Button onClick={() => void navigate(0)} size="compact" variant="secondary">
+                Reload
+              </Button>
+            }
+            announce="assertive"
+            description={failureMessage(config.cause, "Check the server connection, then reload this page to retry.")}
+            title="Relay profiles unavailable"
+            tone="critical"
+          />
+        </div>
+      ) : profilesLoading ? (
+        <div className={styles.reviewFailure}>
+          <StatePanel
+            announce="polite"
+            description="Loading the configured review methodology before Relay can run."
+            title="Loading Relay profiles"
+            tone="progress"
+          />
+        </div>
+      ) : null}
+
+      {visibleProgress.length === 0 ? null : (
+        <ol aria-label="Relay progress" aria-live="polite" className={styles.progressRail}>
+          {visibleProgress.map((event, index) => (
+            <li
+              aria-current={index === visibleProgress.length - 1 ? "step" : undefined}
+              key={`${event.phase}:${String(index)}`}
+            >
+              <span aria-hidden="true" />
+              <small>{event.phase}</small>
+              <strong>{event.message}</strong>
+              {event.detail === undefined ? null : <em>{event.detail}</em>}
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {reviewIsStale ? (
+        <div className={styles.staleReview}>
+          <span>
+            This finding deck reviewed {completedReview?.value.headCommit.slice(0, 12)}; current head is{" "}
+            {diff.headCommit.slice(0, 12)}.
+          </span>
+          <Button
+            disabled={isReviewing || selectedProfile === undefined}
+            onClick={() => void executeReview()}
+            size="compact"
+            variant="secondary"
+          >
+            Re-review latest
+          </Button>
+        </div>
+      ) : null}
+
+      {reviewFailure === null ? null : (
+        <div className={styles.reviewFailure}>
+          {reviewFailure.description.startsWith("Previous result retained.") ? (
+            <Text tone="secondary" variant="label">
+              Previous result
+            </Text>
+          ) : null}
+          <StatePanel
+            announce="polite"
+            description={reviewFailure.description}
+            title={reviewFailure.title}
+            tone="critical"
+          />
+        </div>
+      )}
+
+      {navigationNotice === null ? null : (
+        <div className={styles.reviewFailure}>
+          <StatePanel
+            announce="polite"
+            description={navigationNotice}
+            title="Comment link unavailable"
+            tone="caution"
+          />
+        </div>
+      )}
+      <ReviewFindings
+        canPost={!reviewIsStale}
+        dispositions={dispositions}
+        isReviewing={isReviewing}
+        onAcknowledge={(finding) =>
+          setDispositions((current) => applyFindingDecision(current, finding.id, "acknowledged"))
+        }
+        onPost={(finding) => void postFinding(finding)}
+        onReject={(finding) => setDispositions((current) => applyFindingDecision(current, finding.id, "rejected"))}
+        onSelect={selectFinding}
+        review={review}
+        selectedFindingId={selectedFindingId}
+      />
+      {conversationFindingId === null ? null : (
+        <section
+          aria-label={`Conversation about ${conversationFindingId}`}
+          className={styles.conversation}
+          data-collapsed={conversationCollapsed ? "true" : undefined}
+        >
+          <header>
+            <span>
+              <MessageSquareMoreIcon aria-hidden="true" />
+              <span className={styles.conversationTitle}>
+                <strong>{selectedFinding === null ? "Discuss withdrawn finding" : "Discuss finding"}</strong>
+                <small>
+                  {selectedFinding === null
+                    ? `${conversationFindingId} is no longer in the current deck`
+                    : selectedFinding.title}
+                </small>
+              </span>
+            </span>
+            <button
+              aria-expanded={!conversationCollapsed}
+              onClick={() => setConversationCollapsed((current) => !current)}
+              type="button"
+            >
+              {conversationCollapsed ? <ChevronUpIcon aria-hidden="true" /> : <ChevronDownIcon aria-hidden="true" />}
+              {conversationCollapsed ? "Open" : "Collapse"}
+            </button>
+          </header>
+          {conversationCollapsed ? null : (
+            <>
+              <div
+                aria-label={`Conversation history about ${conversationFindingId}`}
+                aria-live="polite"
+                className={styles.conversationHistory}
+                role="log"
+              >
+                {selectedTurns.length === 0 ? (
+                  <small>Ask Relay to verify, refine, or withdraw this finding.</small>
+                ) : (
+                  <ol>
+                    {selectedTurns.map((turn, index) => (
+                      <li data-role={turn.role} key={`${turn.role}:${String(index)}`}>
+                        <b>{turn.role === "user" ? "You" : "Relay"}</b>
+                        {turn.message}
+                      </li>
+                    ))}
+                  </ol>
+                )}
+              </div>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  const submitted = message.trim()
+                  if (submitted.length > 0 && !isReviewing && !reviewIsStale) {
+                    void continueReview(conversationFindingId, submitted)
+                  }
+                }}
+              >
+                <textarea
+                  aria-label="Message Relay"
+                  disabled={isReviewing || reviewIsStale}
+                  maxLength={8_000}
+                  onChange={(event) => setMessage(event.target.value)}
+                  placeholder="Ask Relay about this finding…"
+                  rows={2}
+                  value={message}
+                />
+                <Button
+                  disabled={isReviewing || reviewIsStale || message.trim().length === 0}
+                  size="compact"
+                  type="submit"
+                  variant="secondary"
+                >
+                  Send
+                </Button>
+              </form>
+            </>
+          )}
+        </section>
+      )}
+    </aside>
+  )
 
   return (
     <>
@@ -1515,6 +1789,17 @@ const ReadyReviewWorkspace = ({
               {diff.headCommit.slice(0, 12)}
             </Text>
           </div>
+          {placement === "drawer" ? (
+            <Button
+              aria-expanded={findingsOpen}
+              aria-haspopup="dialog"
+              onClick={() => setFindingsOpen(true)}
+              size="compact"
+              variant="secondary"
+            >
+              {findingsLabel}
+            </Button>
+          ) : null}
         </header>
 
         {diffFailure === null ? null : (
@@ -1528,7 +1813,7 @@ const ReadyReviewWorkspace = ({
           </div>
         )}
 
-        <div className={styles.workbench}>
+        <div className={styles.workbench} data-findings={placement} ref={workbenchRef}>
           <DiffFileTree
             className={styles.fileTree}
             data={inventory}
@@ -1590,278 +1875,15 @@ const ReadyReviewWorkspace = ({
             </div>
           </section>
 
-          <aside aria-label="Relay findings" className={styles.agentPane}>
-            <header>
-              <div className={styles.agentTitle}>
-                <span>
-                  <BotIcon aria-hidden="true" />
-                  <Text as="h2" variant="section-title">
-                    Relay
-                  </Text>
-                </span>
-                <small>
-                  {isReviewing
-                    ? "Reviewing the exact revision"
-                    : review === null
-                      ? "Review findings and discuss evidence"
-                      : `${String(review.result.findings.length)} actionable ${
-                          review.result.findings.length === 1 ? "finding" : "findings"
-                        }`}
-                </small>
-              </div>
-              {isReviewing ? (
-                <StateLabel label="running" size="compact" tone="progress" />
-              ) : review === null ? null : (
-                <StateLabel label={review.kind} size="compact" tone="progress" />
-              )}
-            </header>
-            <section aria-label="Relay controls" className={styles.relayControls}>
-              <label className={styles.profileChoice}>
-                <span>Profile</span>
-                <select
-                  disabled={isReviewing || !AsyncResult.isSuccess(config)}
-                  onChange={(event) => {
-                    const profile = profiles.find(({ id }) => id === event.target.value)
-                    setSelectedProfileId(event.target.value)
-                    if (profile !== undefined) setKind(profile.kind)
-                  }}
-                  value={selectedProfile?.id ?? ""}
-                >
-                  {AsyncResult.isSuccess(config) && selectedProfile === undefined && selectedProfileId !== null ? (
-                    <option value="">Selected profile unavailable</option>
-                  ) : AsyncResult.isSuccess(config) ? null : (
-                    <option value="">
-                      {AsyncResult.isFailure(config) ? "Profiles unavailable" : "Loading profiles…"}
-                    </option>
-                  )}
-                  {profiles.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <Button
-                disabled={isReviewing || diff.files.length === 0 || selectedProfile === undefined}
-                loading={isReviewing}
-                onClick={() => void executeReview()}
-                size="compact"
-                variant="primary"
-              >
-                {isReviewing ? "Relay reviewing…" : review === null ? "Run Relay" : "Run again"}
-              </Button>
-              {isReviewing ? null : (
-                <div aria-label="Relay review focus" className={styles.focusChoices} role="group">
-                  {reviewFocuses.map((focus) => {
-                    const Icon = focus.icon
-                    return (
-                      <button
-                        aria-pressed={selectedKind === focus.kind}
-                        key={focus.kind}
-                        onClick={() => setKind(focus.kind)}
-                        title={focus.description}
-                        type="button"
-                      >
-                        <Icon aria-hidden="true" />
-                        {focus.label}
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </section>
-
-            {AsyncResult.isFailure(config) ? (
-              <div className={styles.reviewFailure}>
-                <StatePanel
-                  action={
-                    <Button onClick={() => void navigate(0)} size="compact" variant="secondary">
-                      Reload
-                    </Button>
-                  }
-                  announce="assertive"
-                  description={failureMessage(
-                    config.cause,
-                    "Check the server connection, then reload this page to retry."
-                  )}
-                  title="Relay profiles unavailable"
-                  tone="critical"
-                />
-              </div>
-            ) : profilesLoading ? (
-              <div className={styles.reviewFailure}>
-                <StatePanel
-                  announce="polite"
-                  description="Loading the configured review methodology before Relay can run."
-                  title="Loading Relay profiles"
-                  tone="progress"
-                />
-              </div>
-            ) : null}
-
-            {visibleProgress.length === 0 ? null : (
-              <ol aria-label="Relay progress" aria-live="polite" className={styles.progressRail}>
-                {visibleProgress.map((event, index) => (
-                  <li
-                    aria-current={index === visibleProgress.length - 1 ? "step" : undefined}
-                    key={`${event.phase}:${String(index)}`}
-                  >
-                    <span aria-hidden="true" />
-                    <small>{event.phase}</small>
-                    <strong>{event.message}</strong>
-                    {event.detail === undefined ? null : <em>{event.detail}</em>}
-                  </li>
-                ))}
-              </ol>
-            )}
-
-            {reviewIsStale ? (
-              <div className={styles.staleReview}>
-                <span>
-                  This finding deck reviewed {completedReview?.value.headCommit.slice(0, 12)}; current head is{" "}
-                  {diff.headCommit.slice(0, 12)}.
-                </span>
-                <Button
-                  disabled={isReviewing || selectedProfile === undefined}
-                  onClick={() => void executeReview()}
-                  size="compact"
-                  variant="secondary"
-                >
-                  Re-review latest
-                </Button>
-              </div>
-            ) : null}
-
-            {reviewFailure === null ? null : (
-              <div className={styles.reviewFailure}>
-                {reviewFailure.description.startsWith("Previous result retained.") ? (
-                  <Text tone="secondary" variant="label">
-                    Previous result
-                  </Text>
-                ) : null}
-                <StatePanel
-                  announce="polite"
-                  description={reviewFailure.description}
-                  title={reviewFailure.title}
-                  tone="critical"
-                />
-              </div>
-            )}
-
-            {navigationNotice === null ? null : (
-              <div className={styles.reviewFailure}>
-                <StatePanel
-                  announce="polite"
-                  description={navigationNotice}
-                  title="Comment link unavailable"
-                  tone="caution"
-                />
-              </div>
-            )}
-            <ReviewFindings
-              canPost={!reviewIsStale}
-              dispositions={dispositions}
-              isReviewing={isReviewing}
-              onAcknowledge={(finding) =>
-                setDispositions((current) => applyFindingDecision(current, finding.id, "acknowledged"))
-              }
-              onPost={(finding) => void postFinding(finding)}
-              onReject={(finding) =>
-                setDispositions((current) => applyFindingDecision(current, finding.id, "rejected"))
-              }
-              onSelect={selectFinding}
-              review={review}
-              selectedFindingId={selectedFindingId}
-            />
-            {conversationFindingId === null ? null : (
-              <section
-                aria-label={`Conversation about ${conversationFindingId}`}
-                className={styles.conversation}
-                data-collapsed={conversationCollapsed ? "true" : undefined}
-              >
-                <header>
-                  <span>
-                    <MessageSquareMoreIcon aria-hidden="true" />
-                    <span className={styles.conversationTitle}>
-                      <strong>{selectedFinding === null ? "Discuss withdrawn finding" : "Discuss finding"}</strong>
-                      <small>
-                        {selectedFinding === null
-                          ? `${conversationFindingId} is no longer in the current deck`
-                          : selectedFinding.title}
-                      </small>
-                    </span>
-                  </span>
-                  <button
-                    aria-expanded={!conversationCollapsed}
-                    onClick={() => setConversationCollapsed((current) => !current)}
-                    type="button"
-                  >
-                    {conversationCollapsed ? (
-                      <ChevronUpIcon aria-hidden="true" />
-                    ) : (
-                      <ChevronDownIcon aria-hidden="true" />
-                    )}
-                    {conversationCollapsed ? "Open" : "Collapse"}
-                  </button>
-                </header>
-                {conversationCollapsed ? null : (
-                  <>
-                    <div
-                      aria-label={`Conversation history about ${conversationFindingId}`}
-                      aria-live="polite"
-                      className={styles.conversationHistory}
-                      role="log"
-                    >
-                      {selectedTurns.length === 0 ? (
-                        <small>Ask Relay to verify, refine, or withdraw this finding.</small>
-                      ) : (
-                        <ol>
-                          {selectedTurns.map((turn, index) => (
-                            <li data-role={turn.role} key={`${turn.role}:${String(index)}`}>
-                              <b>{turn.role === "user" ? "You" : "Relay"}</b>
-                              {turn.message}
-                            </li>
-                          ))}
-                        </ol>
-                      )}
-                    </div>
-                    <form
-                      onSubmit={(event) => {
-                        event.preventDefault()
-                        const submitted = message.trim()
-                        if (submitted.length > 0 && !isReviewing && !reviewIsStale) {
-                          void continueReview(conversationFindingId, submitted)
-                        }
-                      }}
-                    >
-                      <textarea
-                        aria-label="Message Relay"
-                        disabled={isReviewing || reviewIsStale}
-                        maxLength={8_000}
-                        onChange={(event) => setMessage(event.target.value)}
-                        placeholder="Ask Relay about this finding…"
-                        rows={2}
-                        value={message}
-                      />
-                      <Button
-                        disabled={isReviewing || reviewIsStale || message.trim().length === 0}
-                        size="compact"
-                        type="submit"
-                        variant="secondary"
-                      >
-                        Send
-                      </Button>
-                    </form>
-                  </>
-                )}
-              </section>
-            )}
-          </aside>
+          {placement === "drawer" ? null : relayPane}
         </div>
         <footer className={styles.workspaceFooter}>
           Relay is advisory. Accept posts immediately; acknowledge and reject stay local to this review session.
         </footer>
       </Surface>
+      <FindingsDrawer onClose={() => setFindingsOpen(false)} open={findingsOpen} title={findingsLabel}>
+        {placement === "drawer" ? relayPane : null}
+      </FindingsDrawer>
     </>
   )
 }
