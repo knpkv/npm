@@ -106,15 +106,14 @@ const ApprovalHero = ({
       .sort((left, right) => right.at - left.at)[0]
     return (
       <Hero
+        // Which hosts couldn't be checked is said once, in the notice under the hero.
         caption={
-          unchecked > 0
-            ? `Couldn't check ${snapshot.pendingApprovals.failures.map(failureText).join(", ")}.`
-            : last === undefined
-              ? "No requests yet."
-              : `Last: ${factsLabel(last.record.payload.kind, snapshot.host)}, ${last.outcome.toLowerCase()} ${agoText(
-                  last.at,
-                  now
-                )}.`
+          last === undefined
+            ? "No requests yet."
+            : `Last: ${factsLabel(last.record.payload.kind, snapshot.host)}, ${last.outcome.toLowerCase()} ${agoText(
+                last.at,
+                now
+              )}.`
         }
         fact={
           unchecked > 0
@@ -489,15 +488,22 @@ export const ApprovalsCountdown = ({
       <div className="countdown-regions" data-has-selection={selected !== undefined}>
         <Region
           className="countdown-waiting"
-          count={
-            unchecked.length > 0 || snapshot.pendingApprovals.nextCursors.length > 0
-              ? `${String(items.length)}+`
-              : items.length
-          }
+          {...(items.length === 0 && unchecked.length > 0
+            ? {}
+            : {
+                count:
+                  unchecked.length > 0 || snapshot.pendingApprovals.nextCursors.length > 0
+                    ? `${String(items.length)}+`
+                    : items.length
+              })}
           title="Waiting for you"
         >
           {items.length === 0 ? (
-            <p className="countdown-empty">Nothing is waiting for your decision.</p>
+            <p className="countdown-empty">
+              {unchecked.length > 0
+                ? "Nothing is waiting on the hosts that answered."
+                : "Nothing is waiting for your decision."}
+            </p>
           ) : (
             <ul className="countdown-rows" onKeyDown={moveRowFocus} role="list">
               {items.map((item, index) => {

@@ -995,7 +995,8 @@
       var(--rly-type-label-font);
     grid-area: title;
     min-inline-size: 0;
-    overflow-wrap: anywhere;
+    /* Words wrap whole; only an unbreakable token (an email, a job id) may break. */
+    overflow-wrap: break-word;
   }
 
   .countdown-row-clock {
@@ -1024,6 +1025,11 @@
   .countdown-track-key {
     border-block-start: 1px solid var(--rly-color-border-1);
     padding: var(--rly-space-8) var(--rly-space-16);
+  }
+
+  .countdown-row-caption,
+  .countdown-row-meta {
+    overflow-wrap: break-word;
   }
 
   .countdown-row-caption {
@@ -1096,6 +1102,18 @@
   .countdown-more {
     border-block-start: 1px solid var(--rly-color-border-1);
     padding: var(--rly-space-8) var(--rly-space-16);
+  }
+
+  /* On narrow screens the outcome word sits above what was decided, so titles keep their width. */
+  @media (max-width: 30rem) {
+    .countdown-decided-row {
+      grid-template-areas:
+        "outcome"
+        "title"
+        "caption"
+        "request";
+      grid-template-columns: minmax(0, 1fr);
+    }
   }
 
   @media (max-width: 52rem) {
