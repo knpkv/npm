@@ -22,7 +22,10 @@ const summary = "Implemented approval queue with Undo"
 
 interface RouteCalls {
   readonly updates: Array<SavedEntries.SavedEntryUpdate>
+  readonly removes: Array<SavedEntries.SavedEntryRemove>
   failure: SavedEntries.SavedEntryError["reason"] | null
+  /** Simulate a ticket change whose replacement was created but whose original delete failed. */
+  partial: boolean
 }
 
 const transcript = (sessionId: string, hour: number, ticketKey = "PROJ-5662") =>
@@ -46,6 +49,8 @@ const makeApplication = async (options: {
   readonly afterRefresh?: () => Effect.Effect<void>
   readonly afterScan?: () => Effect.Effect<void>
   readonly legacy?: boolean
+  /** A provider review hold the engine read reports, as an unlinked earlier entry would. */
+  readonly writeBlocked?: ReconcileService.SessionProposalReport["writeBlocked"]
   readonly nowMs?: number
 } = {}) => {
   const nowMs = options.nowMs
@@ -75,6 +80,8 @@ const makeApplication = async (options: {
   })
   const calls: RouteCalls = {
     updates: new Array<SavedEntries.SavedEntryUpdate>(),
+    removes: new Array<SavedEntries.SavedEntryRemove>(),
+    partial: false,
     failure: null
   }
   const updates = Layer.effect(
@@ -84,10 +91,24 @@ const makeApplication = async (options: {
       return SavedEntries.SavedEntries.of({
         update: Effect.fn("Test.savedUpdate")(function*(input) {
           calls.updates.push(input)
+          if (calls.partial && input.ticketKey !== undefined) {
+            return yield* new SavedEntries.SavedEntryError({
+              reason: "partial",
+              message: "test partial",
+              replacement: { ...input.expected, id: `${input.expected.id}-replacement`, ticketKey: input.ticketKey }
+            })
+          }
           if (calls.failure !== null) {
             return yield* new SavedEntries.SavedEntryError({ reason: calls.failure, message: `test ${calls.failure}` })
           }
           return yield* original.update(input)
+        }),
+        remove: Effect.fn("Test.savedRemove")(function*(input) {
+          calls.removes.push(input)
+          if (calls.failure !== null) {
+            return yield* new SavedEntries.SavedEntryError({ reason: calls.failure, message: `test ${calls.failure}` })
+          }
+          return yield* original.remove(input)
         })
       })
     })
@@ -128,7 +149,10 @@ const makeApplication = async (options: {
         proposeFromSessions: (period, request) =>
           original.proposeFromSessions(period, request).pipe(
             Effect.tap(() => options.afterScan?.() ?? Effect.void),
-            Effect.map((report) => options.legacy === true ? withoutMetadata(report) : report)
+            Effect.map((report) => options.legacy === true ? withoutMetadata(report) : report),
+            Effect.map((report) =>
+              options.writeBlocked === undefined ? report : { ...report, writeBlocked: options.writeBlocked }
+            )
           ),
         refreshRecordedTime: (period, previous) =>
           original.refreshRecordedTime(period, previous).pipe(
@@ -297,6 +321,138 @@ it.each<SavedEntry["source"]>(["jira", "clockify"])(
       expect(app.fake.world.jiraWorklogs).toHaveLength(0)
       expect(app.fake.world.updatedClockifyEntries).toHaveLength(source === "clockify" ? 2 : 0)
       expect(app.fake.world.updatedJiraWorklogs).toHaveLength(source === "jira" ? 2 : 0)
+    } finally {
+      await app.web.dispose()
+    }
+  }
+)
+
+// Deleting names the retained snapshot, never a browser-supplied one, and drops it from the week.
+it.each<SavedEntry["source"]>(["jira", "clockify"])(
+  "deletes a %s entry from the retained snapshot and refuses a stale revision",
+  async (source) => {
+    const app = await makeApplication({
+      fake: {
+        transcripts: { "repo/morning.jsonl": transcript("morning", 10) },
+        jiraWorklogs: { "PROJ-5662": [{ started: at(10), timeSpentSeconds: 3900 }] }
+      }
+    })
+    try {
+      const plan = await app.read()
+      const entry = entryFor(plan, source)
+      const stale = await app.post("/api/entries/delete", { ...identity(plan, entry), revision: "stale" })
+      expect(stale.status).toBe(409)
+      expect(app.calls.removes).toHaveLength(0)
+
+      app.calls.failure = "provider"
+      const refused = await app.post("/api/entries/delete", { ...identity(plan, entry), revision: entry.revision })
+      expect(refused.status).not.toBe(200)
+      expect(
+        (await app.retained()).plan?.rows.flatMap((row) => row.intervals).some((interval) =>
+          interval.entry?.source === source && interval.entry.id === entry.id
+        )
+      ).toBe(true)
+
+      app.calls.failure = null
+      const removed = app.calls.removes.length
+      const response = await app.post("/api/entries/delete", { ...identity(plan, entry), revision: entry.revision })
+      expect(response.status).toBe(200)
+      expect(app.calls.removes[removed]?.expected).toEqual(entry)
+      expect(
+        (await app.retained()).plan?.rows.flatMap((row) => row.intervals).some((interval) =>
+          interval.entry?.source === source && interval.entry.id === entry.id
+        )
+      ).toBe(false)
+    } finally {
+      await app.web.dispose()
+    }
+  }
+)
+
+it.each<SavedEntry["source"]>(["jira", "clockify"])(
+  "moves a %s entry to another ticket as a replacement and retains it under the new ticket",
+  async (source) => {
+    const app = await makeApplication({
+      fake: {
+        transcripts: { "repo/morning.jsonl": transcript("morning", 10) },
+        jiraWorklogs: { "PROJ-5662": [{ started: at(10), timeSpentSeconds: 3900 }] }
+      }
+    })
+    try {
+      const plan = await app.read()
+      const entry = entryFor(plan, source)
+      const description = source === "clockify" ? "[PROJ-9001] Moved" : "Moved"
+      const response = await app.post("/api/entries/update", {
+        ...edit(plan, entry, description),
+        ticketKey: "PROJ-9001"
+      })
+      expect(response.status).toBe(200)
+      const saved = await Schema.decodeUnknownPromise(UpdateSavedEntryResponse)(await response.json())
+      expect(app.calls.updates.at(-1)?.ticketKey).toBe("PROJ-9001")
+      expect(saved.entry.ticketKey).toBe("PROJ-9001")
+      const intervals = (await app.retained()).plan?.rows.flatMap((row) => row.intervals) ?? []
+      expect(intervals.some((interval) => interval.entry?.source === source && interval.entry.id === entry.id)).toBe(
+        saved.entry.id === entry.id
+      )
+      expect(
+        intervals.some((interval) => interval.entry?.id === saved.entry.id && interval.entry.ticketKey === "PROJ-9001")
+      )
+        .toBe(true)
+    } finally {
+      await app.web.dispose()
+    }
+  }
+)
+
+it.each<SavedEntry["source"]>(["jira", "clockify"])(
+  "refuses to delete or retarget a %s entry while that provider is held for review",
+  async (source) => {
+    const app = await makeApplication({
+      fake: {
+        transcripts: { "repo/morning.jsonl": transcript("morning", 10) },
+        jiraWorklogs: { "PROJ-5662": [{ started: at(10), timeSpentSeconds: 3900 }] }
+      },
+      writeBlocked: { [source]: "review required" }
+    })
+    try {
+      const plan = await app.read()
+      const entry = entryFor(plan, source)
+      const deleted = await app.post("/api/entries/delete", { ...identity(plan, entry), revision: entry.revision })
+      expect(deleted.status).toBe(422)
+      const moved = await app.post("/api/entries/update", { ...edit(plan, entry), ticketKey: "PROJ-9001" })
+      expect(moved.status).toBe(422)
+      expect(app.calls.removes).toHaveLength(0)
+      expect(app.calls.updates).toHaveLength(0)
+    } finally {
+      await app.web.dispose()
+    }
+  }
+)
+
+it.each<SavedEntry["source"]>(["jira", "clockify"])(
+  "names both %s entries when a ticket change created its replacement but could not delete the original",
+  async (source) => {
+    const app = await makeApplication({
+      fake: {
+        transcripts: { "repo/morning.jsonl": transcript("morning", 10) },
+        jiraWorklogs: { "PROJ-5662": [{ started: at(10), timeSpentSeconds: 3900 }] }
+      }
+    })
+    try {
+      const plan = await app.read()
+      const entry = entryFor(plan, source)
+      app.calls.partial = true
+      const response = await app.post("/api/entries/update", { ...edit(plan, entry), ticketKey: "PROJ-9001" })
+      expect(response.status).toBe(409)
+      const body = await response.json()
+      expect(body).toMatchObject({
+        _tag: "RetargetPartialError",
+        original: { source, id: entry.id, ticketKey: entry.ticketKey },
+        replacement: { source, id: `${entry.id}-replacement`, ticketKey: "PROJ-9001" }
+      })
+      const ids = ((await app.retained()).plan?.rows.flatMap((row) => row.intervals) ?? [])
+        .flatMap((interval) => interval.entry?.source === source ? [interval.entry.id] : [])
+      expect(ids).toEqual(expect.arrayContaining([entry.id, `${entry.id}-replacement`]))
     } finally {
       await app.web.dispose()
     }

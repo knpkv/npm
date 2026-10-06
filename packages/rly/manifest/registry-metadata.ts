@@ -13,6 +13,29 @@ const registryMetadata = (
 
 /** Curated, fail-closed guidance keyed one-to-one with registry component names. */
 export const COMPONENT_REGISTRY_METADATA = {
+  Region: registryMetadata(
+    "Frame one main page region as a surface with a single header: title, plain count, actions",
+    [
+      "default",
+      "tray"
+    ],
+    ["compose", "present"]
+  ),
+  Hero: registryMetadata("State the one fact a screen leads with as a sentence, with an optional caption", [
+    "heading",
+    "line",
+    "display"
+  ], ["present", "status"]),
+  DecisionBar: registryMetadata(
+    "Approve or reject one named target, with an off reason, a clock and the server's answer",
+    [
+      "ready",
+      "off",
+      "sending",
+      "sticky"
+    ],
+    ["decide", "present"]
+  ),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"
@@ -251,7 +274,8 @@ export const COMPONENT_REGISTRY_METADATA = {
     "blocked",
     "building",
     "compact",
-    "complete"
+    "complete",
+    "words"
   ], ["delivery", "progress"]),
   StateLabel: registryMetadata("Name a compact state using text and color-independent tone", [
     "caution",
@@ -315,7 +339,8 @@ export const COMPONENT_REGISTRY_METADATA = {
     "agent",
     "human",
     "service",
-    "system"
+    "system",
+    "provenance"
   ], ["audit", "timeline"]),
   TrackKey: registryMetadata(
     "Explain the marks a set of limit tracks draws",

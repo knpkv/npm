@@ -45,3 +45,159 @@ test("keeps named collaborator roles and controlled overflow clear at 320 pixels
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("people-320.png") })
 })
+
+test(
+  "keeps region headers on one rule and the content inside the frame at 320 pixels, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_200, width: 320 })
+      await page.goto(story("patterns-region--states", forcedColors))
+
+      const findings = page.getByRole("region", { name: "Findings 2" })
+      await expect(findings).toBeVisible()
+      await expect(findings.getByRole("button", { name: "Acknowledge all" })).toBeVisible()
+      const frame = await findings.boundingBox()
+      const button = await findings.getByRole("button", { name: "Acknowledge all" }).boundingBox()
+      expect(frame).not.toBeNull()
+      expect(button).not.toBeNull()
+      if (frame !== null && button !== null) expect(button.x + button.width).toBeLessThanOrEqual(frame.x + frame.width)
+      const border = await findings.evaluate((element) => getComputedStyle(element).borderTopStyle)
+      expect(border).toBe("solid")
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`region-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
+
+test(
+  "keeps stage words inside 320 pixels, with ink on the blocking state and its weight kept in forced colors",
+  async ({
+    page
+  }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 900, width: 320 })
+      await page.goto(story("patterns-stagerail--words", forcedColors))
+
+      const rail = page.getByRole("list", { name: "Relay 2.4 stages" })
+      await expect(rail).toBeVisible()
+      await expect(page.getByRole("region")).toHaveCount(0)
+      await expect(rail.locator("[data-rly-stage-marker]")).toHaveCount(0)
+      const style = (selector: string) =>
+        rail
+          .locator(selector)
+          .first()
+          .evaluate((element) => ({
+            color: getComputedStyle(element).color,
+            weight: Number(getComputedStyle(element).fontWeight)
+          }))
+      const [blocked, quiet] = await Promise.all([
+        style("[data-rly-stage-word='blocked']"),
+        style("[data-rly-stage-word='quiet']")
+      ])
+      expect(blocked.weight).toBeGreaterThanOrEqual(600)
+      expect(quiet.weight).toBeLessThan(600)
+      if (forcedColors === "auto") expect(blocked.color).not.toBe(quiet.color)
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`stage-words-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
+
+test(
+  "keeps every hero size inside 320 pixels and the state word in its ink, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_400, width: 320 })
+      await page.goto(story("patterns-hero--states", forcedColors))
+
+      await expect(page.getByRole("region", { name: "Work summary" })).toHaveText(/3 goals need you, 2 blocked/)
+      const word = page.getByText("blocked", { exact: true }).first()
+      await expect(word).toBeVisible()
+      if (forcedColors === "auto") {
+        const [wordInk, sentenceInk] = await word.evaluate((element) => [
+          getComputedStyle(element).color,
+          getComputedStyle(element.parentElement ?? element).color
+        ])
+        expect(wordInk).not.toBe(sentenceInk)
+      } else {
+        expect(await word.evaluate((element) => getComputedStyle(element).textDecorationLine)).toBe("underline")
+      }
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`hero-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
+
+test(
+  "keeps the decision target, both actions and the off reason inside 320 pixels, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_200, width: 320 })
+      await page.goto(story("patterns-decisionbar--states", forcedColors))
+
+      const off = page.getByRole("button", { name: "Approve: Apply nix config to luna" })
+      await expect(off).toHaveAttribute("aria-disabled", "true")
+      await expect(off).toHaveAccessibleDescription(/hub is unreachable/)
+      await off.focus()
+      await expect(off).toBeFocused()
+      if (forcedColors === "active") {
+        expect(await off.evaluate((element) => getComputedStyle(element).borderTopStyle)).toBe("dashed")
+      }
+      await expect(page.getByText("Reassign Rotate signing keys from arch to arch-b, 4m 12s left")).toBeVisible()
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`decision-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
+
+test(
+  "keeps every provenance shape distinct and labelled at 320 pixels, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_400, width: 320 })
+      await page.goto(story("patterns-timelinerow--provenance", forcedColors))
+
+      const look = (kind: string) =>
+        page.locator(`ol [data-rly-timeline-provenance='${kind}']`).evaluate((element) => {
+          const css = getComputedStyle(element)
+          return {
+            clipped: css.clipPath !== "none",
+            filled: css.backgroundColor !== "rgba(0, 0, 0, 0)" || css.backgroundImage !== "none",
+            hatched: css.backgroundImage !== "none",
+            rotated: css.rotate === "45deg",
+            round: css.borderTopLeftRadius !== "0px"
+          }
+        })
+      // Each shape stays distinct in both modes: that is what carries provenance without colour.
+      expect(await look("auto")).toMatchObject({ clipped: false, filled: false, rotated: false, round: true })
+      expect(await look("approved")).toMatchObject({ filled: true, hatched: false, rotated: false, round: true })
+      expect(await look("pending")).toMatchObject({ filled: true, rotated: true })
+      expect(await look("flag")).toMatchObject({ clipped: true, filled: true })
+      expect(await look("unknown")).toMatchObject({ hatched: true, round: false })
+      await expect(page.getByRole("list", { name: "Observation key" })).toBeVisible()
+      await expect(page.getByText("Not applied: GitHub rate limit, retrying at 05:12")).toBeVisible()
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`timeline-provenance-320-${forcedColors}.png`)
+      })
+    }
+  }
+)

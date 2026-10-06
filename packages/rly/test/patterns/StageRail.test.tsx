@@ -71,7 +71,7 @@ describe("StageRail", () => {
 
   it("publishes only meaningful density metadata", () => {
     expect(RLY_STAGE_RAIL_DEFAULT_VARIANTS).toEqual({ size: "default" })
-    expect(Object.keys(RLY_STAGE_RAIL_VARIANTS.size)).toEqual(["compact", "default"])
+    expect(Object.keys(RLY_STAGE_RAIL_VARIANTS.size)).toEqual(["compact", "default", "words"])
     const compact = render(<StageRail heading="Compact" size="compact" stages={stages} />)
     expect(compact?.className).toContain(RLY_STAGE_RAIL_VARIANTS.size.compact.className)
   })
@@ -108,5 +108,22 @@ describe("StageRail", () => {
     expect(() => renderToStaticMarkup(<StageRail heading="Stages" stages={[duplicate, duplicate]} />)).toThrow(
       "StageRail stage ids must be unique"
     )
+  })
+
+  it("reads as words in the words size: no markers, connectors or owners, ink only on blocked and held", () => {
+    const markup = renderToStaticMarkup(<StageRail heading="Relay 2.4 stages" size="words" stages={stages} />)
+    expect(markup).toContain(RLY_STAGE_RAIL_VARIANTS.size.words.className)
+    expect(markup).not.toContain("data-rly-stage-marker")
+    expect(markup).not.toContain("data-rly-stage-connector")
+    expect(markup).not.toContain("Avery Diaz")
+    expect(markup.match(/data-rly-stage-word="blocked"/g)).toHaveLength(1)
+    expect(markup.match(/data-rly-stage-word="held"/g)).toHaveLength(1)
+    expect(markup.match(/data-rly-stage-word="quiet"/g)).toHaveLength(4)
+    expect(markup).toContain(">Build <span")
+    expect(markup).toContain(">: Compiling release artifacts.</span>,</li>")
+    expect(markup).not.toContain("aria-labelledby")
+    expect(markup).not.toContain("<h2")
+    expect(markup).toContain('<ol aria-label="Relay 2.4 stages"')
+    expect(markup).toMatch(/Ready<\/span><\/li><\/ol>/)
   })
 })

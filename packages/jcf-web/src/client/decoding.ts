@@ -2,19 +2,27 @@
 import { SessionAgentSettings } from "@knpkv/jira-clockify/agent/agentSettings.js"
 import * as Schema from "effect/Schema"
 import {
+  ConfirmBatchResult,
+  DeleteSavedEntryResponse,
   DescribeRowResponse,
   DescribeSavedEntryResponse,
+  IgnoreResult,
   OwnershipResult,
   SavedWeek,
   StandingResult,
   UpdateSavedEntryResponse,
+  WeekPlan,
   WeekReadEvent,
   WriteResult
 } from "../shared/contracts.js"
 
 export const decodeWeekEvent = Schema.decodeUnknownPromise(Schema.fromJsonString(WeekReadEvent))
 export const decodeWriteResult = Schema.decodeUnknownPromise(WriteResult)
+export const decodeConfirmBatch = Schema.decodeUnknownPromise(ConfirmBatchResult)
 export const decodeOwnershipResult = Schema.decodeUnknownPromise(OwnershipResult)
+export const decodeIgnoreResult = Schema.decodeUnknownPromise(IgnoreResult)
+export const decodeSavedEntryDelete = Schema.decodeUnknownPromise(DeleteSavedEntryResponse)
+export const decodeWeekPlan = Schema.decodeUnknownPromise(WeekPlan)
 export const decodeStandingResult = Schema.decodeUnknownPromise(StandingResult)
 export const decodeDescription = Schema.decodeUnknownPromise(DescribeRowResponse)
 export const decodeSavedEntryDescription = Schema.decodeUnknownPromise(DescribeSavedEntryResponse)

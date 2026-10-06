@@ -69,6 +69,12 @@ import {
 } from "./internal/decision-handoff-migration.js"
 import { workHistoryError } from "./internal/history-validation.js"
 import {
+  LaneOperationLedgerRow,
+  LaneOperationTotalsRow,
+  planLegacyLaneOperations,
+  resolveLegacyLaneClaim
+} from "./internal/legacy-lane-claim.js"
+import {
   WorkAdmissionTarget,
   WorkAgentBinding,
   WorkAgentBindingRequest,
@@ -589,6 +595,8 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
       })
     })
     : []
+  // Lanes the running bindings of legacy handoffs recorded; see resolveLegacyLaneClaim.
+  const bindingLanes: Array<WorkLaneClaimed> = []
   const decisions = decisionColumns.length > 0 && !decisionColumns.includes("session_id")
     ? Schema.decodeUnknownSync(Schema.Array(LegacyDecisionStoredRow))(
       database.prepare("SELECT handoff_id AS handoffId, record FROM work_decision_handoffs").all()
@@ -694,6 +702,7 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           operation: "open.migrate.legacy-handoff-lane-revision"
         })
       }
+      bindingLanes.push(bindingDecision.binding.lane)
       requireBindingCompanions(bindingDecision.binding, "open.migrate.legacy-agent-binding")
       requireLifecycleAuthority(
         bindingDecision.binding.request.dispatchRequestId,
@@ -712,6 +721,7 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
       })
     })
     : []
+  const migratedClaims = lanes.map((lane) => resolveLegacyLaneClaim(lane, bindingLanes))
   if (laneColumns.length > 0 && !laneColumns.includes("goal_id")) {
     database.exec("ALTER TABLE work_lane_claims ADD COLUMN goal_id TEXT")
     database.exec("ALTER TABLE work_lane_claims ADD COLUMN operation_id TEXT")
@@ -719,7 +729,56 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
     const update = database.prepare(
       "UPDATE work_lane_claims SET goal_id = ?, operation_id = ?, phase = ?, record = ? WHERE lane_id = ?"
     )
-    for (const lane of lanes) update.run(lane.goalId, lane.operationId, lane.phase, JSON.stringify(lane), lane.laneId)
+    // An existing lane-operation ledger is not backfilled later, so record each
+    // migrated claim's operation here; the claim's readback requires it.
+    // Without a ledger, schema creation below creates it and backfills every
+    // claim, so the same bound applies to an empty ledger.
+    const hasLedger = tables.includes("work_lane_operations")
+    const operations = planLegacyLaneOperations(
+      migratedClaims.map(({ lane }) => lane),
+      new Map(
+        hasLedger
+          ? migratedClaims.flatMap(({ lane }) => {
+            const matches = database.prepare(
+              `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId, phase, revision, record
+               FROM work_lane_operations WHERE CAST(operation_id AS TEXT) = ?`
+            ).all(lane.operationId)
+            const rows = Schema.decodeUnknownSync(Schema.Array(LaneOperationLedgerRow))(matches)
+            // A key stored as a blob, or twice, is a collision even when its bytes match.
+            const found = rows.find(({ operationId }) => operationId !== lane.operationId) ?? rows[0]
+            return found === undefined ? [] : [[lane.operationId, found]]
+          })
+          : []
+      ),
+      hasLedger
+        ? Schema.decodeUnknownSync(LaneOperationTotalsRow)(
+          database.prepare(
+            `SELECT COUNT(*) AS count, COALESCE(SUM(
+               length(CAST(operation_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+             FROM work_lane_operations`
+          ).get()
+        )
+        : { bytes: 0, count: 0 },
+      { bytes: workLaneOperationMaxBytes, records: workLaneOperationMaxRecords }
+    )
+    if (operations._tag === "collision") {
+      throw new WorkStoreError({ cause: operations, operation: "open.migrate.lane-operation-collision" })
+    }
+    if (operations._tag === "capacity") {
+      throw new WorkStoreError({ cause: operations, operation: "open.migrate.lane-operation-capacity" })
+    }
+    for (const { lane } of migratedClaims) {
+      update.run(lane.goalId, lane.operationId, lane.phase, JSON.stringify(lane), lane.laneId)
+    }
+    if (hasLedger && operations.inserts.length > 0) {
+      const recordOperation = database.prepare(
+        `INSERT INTO work_lane_operations
+           (operation_id, lane_id, goal_id, phase, revision, record) VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      for (const lane of operations.inserts) {
+        recordOperation.run(lane.operationId, lane.laneId, lane.goalId, lane.phase, lane.revision, JSON.stringify(lane))
+      }
+    }
   }
   if (decisionColumns.length > 0 && !decisionColumns.includes("session_id")) {
     database.exec("ALTER TABLE work_decision_handoffs ADD COLUMN session_id TEXT")
@@ -1054,6 +1113,16 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         })
       }
     }
+  }
+  // Reported after capacity: lane CAS allows one binding per revision, so
+  // several mean the file is inconsistent rather than merely large.
+  const ambiguousClaims = migratedClaims.filter(({ _tag }) => _tag === "ambiguous")
+  if (ambiguousClaims.length > 0) {
+    throw new WorkStoreError({ cause: { claims: ambiguousClaims }, operation: "open.migrate.lane-binding-ambiguous" })
+  }
+  const mismatchedClaims = migratedClaims.filter(({ _tag }) => _tag === "mismatch")
+  if (mismatchedClaims.length > 0) {
+    throw new WorkStoreError({ cause: { claims: mismatchedClaims }, operation: "open.migrate.lane-binding-mismatch" })
   }
   if (tables.includes("orchestrator_dispatch_metadata") && coordinatorDispatchColumns.includes("is_routed")) {
     const pageSize = 512

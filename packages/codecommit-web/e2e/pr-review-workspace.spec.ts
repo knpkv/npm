@@ -1082,7 +1082,7 @@ test("releases a changed finding after its active publication fails", async ({ p
   expect(postAttempts).toBe(1)
 })
 
-test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
+test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) => {
   test.setTimeout(30_000)
   const reviewGate = Promise.withResolvers<void>()
   await page.addInitScript(() => {
@@ -1242,7 +1242,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByText("Verify this again.")).toHaveCount(1)
   await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(5)
 
-  await page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })
+  await page.screenshot({ fullPage: true, path: testInfo.outputPath("pr-review-workspace.png") })
   await page.setViewportSize({ height: 844, width: 390 })
   await expect(page.getByRole("heading", { exact: true, name: "Diff" })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)

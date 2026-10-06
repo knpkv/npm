@@ -21,26 +21,20 @@
  *
  * @module
  */
-import {
-  type AuthenticatedClockifyApi,
-  ClockifyApi,
-  type ClockifyApiConfigContract,
-  make as makeClockifyApi
-} from "@knpkv/clockify-api-client"
-import { JiraApiClient, make as makeJiraApi } from "@knpkv/jira-api-client"
+import { ClockifyApi } from "@knpkv/clockify-api-client"
+import type { make as makeJiraApi } from "@knpkv/jira-api-client"
+import { JiraApiClient } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
-import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
-import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import {
   activeWindows,
@@ -50,9 +44,11 @@ import {
   buildSessionProposals,
   deterministicAttribution,
   expandHomePath,
+  mergeSpansWithinDays,
   type ReconcileSides,
   type SessionProposal,
   splitCredits,
+  splitSessionAttribution,
   type TicketDayCredit,
   type UnattributedDayCredit
 } from "../agent/sessions.js"
@@ -60,17 +56,32 @@ import * as SourceConsumption from "../agent/sourceConsumption.js"
 import * as WriterGuard from "../cli/writerGuard.js"
 import { localDay, nextLocalMidnight, splitIntervalByLocalDay } from "../utils/time.js"
 import { AgentSessionReader } from "./AgentSessionReader.js"
-import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
 import { HomeDirectory } from "./HomeDirectory.js"
 import { postJiraWorklog } from "./internal/JiraWorklogPost.js"
+import { retryTransport } from "./internal/retryTransport.js"
 import { readJiraDeletionEvidence } from "./ProviderDeletion.js"
+import {
+  type ClockifyWriteSnapshot,
+  type JiraWriteSnapshot,
+  type JiraWriteState,
+  make as makeProviderSnapshots
+} from "./ProviderSnapshots.js"
 import { jiraWorklogDescription, type RecordedEntry } from "./SavedEntries.js"
-import { type AttributionChoice, SessionAttributor, type SessionDescribeAnswer } from "./SessionAttributor.js"
+import {
+  type AttributionChoice,
+  type CandidateFact,
+  SessionAttributor,
+  type SessionDescribeAnswer
+} from "./SessionAttributor.js"
 import { type SourceBinding, type SourceIdentity, SourceLedger } from "./SourceLedger.js"
+import { candidateFact, type RankingFacts, readRankingFacts, ticketPriority } from "./TicketRanking.js"
 import { type JiraWorklogOutcome, TimerService } from "./TimerService.js"
 
 export type { RecordedEntry } from "./SavedEntries.js"
+
+/** Concurrent Jira worklog reads per tally. Bounded so a large week does not trip rate limits. */
+const JIRA_WORKLOG_READ_CONCURRENCY = 8
 
 /** Server-private source evidence supplied only by the confirmed agent planner. */
 export interface SourceSegment {
@@ -341,6 +352,8 @@ export interface UnlinkedClockifyEntry {
 }
 
 export interface SessionProposalReport {
+  /** Review holds on the providers in this read, independent of readable source evidence. */
+  readonly writeBlocked?: SessionProposal["writeBlocked"]
   /** Original per-session activity windows, before ticket/day merging; retained for saved-entry correlation. */
   readonly sessionEvidence?: ReadonlyArray<{
     readonly sessionId: string
@@ -373,6 +386,10 @@ export interface SessionProposalReport {
   readonly withheld: ReadonlyArray<TicketDayCredit>
   /** Hours no Attribution Signal could place. */
   readonly unattributed: ReadonlyArray<UnattributedDayCredit>
+  /** Raw active windows unioned per ignored ticket/day before sharing. These hours are explanatory, not additive. */
+  readonly ignored: ReadonlyArray<{ readonly ticketKey: string; readonly day: string; readonly seconds: number }>
+  /** Sorted global ignore policy applied by this read, including tickets with no activity in the period. */
+  readonly ignoredTickets: ReadonlyArray<string>
   readonly excludedDays: ReadonlyArray<ExcludedDay>
   /** False when a Coding Agent was needed for at least one session but could not be reached. */
   readonly attributorAvailable: boolean
@@ -393,6 +410,26 @@ export interface SessionProposalReport {
    * question the first pass could already answer would be the only alternative.
    */
   readonly digests: ReadonlyMap<string, string>
+}
+
+/** Raw ignored presence, unioned per ticket/day so parallel sessions on one key never duplicate it. */
+const ignoredCredits = (
+  evidence: NonNullable<SessionProposalReport["sessionEvidence"]>,
+  ignoredTickets: ReadonlySet<string>
+): SessionProposalReport["ignored"] => {
+  const windowsByTicket = new Map<string, Array<{ readonly startMs: number; readonly endMs: number }>>()
+  for (const window of evidence) {
+    if (window.ticketKey === null || !ignoredTickets.has(window.ticketKey)) continue
+    windowsByTicket.set(window.ticketKey, [...(windowsByTicket.get(window.ticketKey) ?? []), ...window.spans])
+  }
+  return [...windowsByTicket].flatMap(([ticketKey, spans]) => {
+    const secondsByDay = new Map<string, number>()
+    for (const span of mergeSpansWithinDays(spans)) {
+      const day = localDay(new Date(span.startMs))
+      secondsByDay.set(day, (secondsByDay.get(day) ?? 0) + (span.endMs - span.startMs) / 1000)
+    }
+    return [...secondsByDay].map(([day, seconds]) => ({ ticketKey, day, seconds: Math.floor(seconds) }))
+  }).sort((a, b) => a.ticketKey.localeCompare(b.ticketKey) || a.day.localeCompare(b.day))
 }
 
 /**
@@ -717,10 +754,8 @@ const toRawWorklog = <UnparsedInput>(value: UnparsedInput): RawWorklog | null =>
 export const layer = Layer.effect(
   ReconcileService,
   Effect.gen(function*() {
-    const clockifyAuth = yield* ClockifyAuth
     const jira = yield* JiraApiClient
     const jiraAuth = yield* JiraAuth
-    const httpClient = yield* HttpClient.HttpClient
     const config = yield* ConfigService
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -737,94 +772,11 @@ export const layer = Layer.effect(
         Effect.provideService(Path.Path, path)
       )
 
-    const getAuth = clockifyAuth.getConfig.pipe(
-      Effect.mapError((e) => new ReconcileError({ message: e.message }))
+    const providerSnapshots = yield* makeProviderSnapshots
+    const clockifyWriteSnapshot = providerSnapshots.clockify.pipe(
+      Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
     )
-
-    interface ClockifyWriteSnapshot {
-      readonly auth: ClockifyApiConfigContract
-      readonly client: AuthenticatedClockifyApi
-      readonly scope: string
-      readonly legacyScope: string
-    }
-
-    interface JiraWriteSnapshot {
-      readonly client: ReturnType<typeof makeJiraApi>
-      readonly ledgerScope: string
-      readonly heldScope: string
-      readonly accountId: string
-      readonly cloudId: string
-      readonly siteUrl: string
-    }
-
-    type JiraWriteState =
-      | { readonly availability: "verified"; readonly snapshot: JiraWriteSnapshot }
-      | { readonly availability: "not-logged-in" | "unverified"; readonly snapshot: null }
-
-    /** One decoded credential and endpoint back every Clockify read and write in this operation. */
-    const clockifyWriteSnapshot: Effect.Effect<ClockifyWriteSnapshot, ReconcileError> = Effect.gen(function*() {
-      const auth = yield* getAuth
-      const endpoint = yield* Effect.try({
-        try: () => new URL(auth.baseUrl),
-        catch: (cause) => new ReconcileError({ message: "Configured Clockify endpoint is invalid", cause })
-      })
-      if (
-        !["https:", "http:"].includes(endpoint.protocol) || endpoint.username !== "" ||
-        endpoint.password !== "" || endpoint.search !== "" || endpoint.hash !== ""
-      ) return yield* new ReconcileError({ message: "Configured Clockify endpoint is invalid" })
-      const canonicalEndpoint = `${endpoint.origin}${endpoint.pathname.replace(/\/+$/u, "")}`
-      const pinnedAuth = { ...auth, baseUrl: canonicalEndpoint }
-      const client = makeClockifyApi(httpClient, pinnedAuth)
-      const user = yield* client.getLoggedUser(undefined).pipe(
-        Effect.mapError((cause) => new ReconcileError({ message: "Cannot verify the Clockify account", cause }))
-      )
-      if (user.id === "" || auth.userId !== user.id || auth.workspaceId === "" || auth.baseUrl === "") {
-        return yield* new ReconcileError({ message: "Configured Clockify account does not match the credential" })
-      }
-      return {
-        auth: pinnedAuth,
-        client,
-        scope: JSON.stringify(["clockify-v3", canonicalEndpoint, auth.workspaceId, user.id]),
-        legacyScope: JSON.stringify([auth.workspaceId, user.id])
-      }
-    })
-
-    /** Bind verification and worklog POST to one OAuth credential and selected site. */
-    const jiraWriteState: Effect.Effect<JiraWriteState> = Effect.gen(function*() {
-      const login = yield* Effect.result(jiraAuth.isLoggedIn())
-      if (login._tag === "Failure") return { availability: "unverified", snapshot: null }
-      if (!login.success) return { availability: "not-logged-in", snapshot: null }
-      const tokenResult = yield* Effect.result(jiraAuth.getAccessToken())
-      const profileResult = yield* Effect.result(jiraAuth.getActiveProfile())
-      if (tokenResult._tag === "Failure" || profileResult._tag === "Failure") {
-        return { availability: "unverified", snapshot: null }
-      }
-      const token = tokenResult.success
-      const profile = profileResult.success
-      if (
-        profile === null || profile.token.cloud_id === "" || profile.token.site_url === "" ||
-        profile.token.access_token !== Redacted.value(token)
-      ) return { availability: "unverified", snapshot: null }
-      const client = makeJiraApi(httpClient, {
-        baseUrl: "",
-        auth: { type: "oauth2", accessToken: token, cloudId: profile.token.cloud_id }
-      })
-      const live = yield* client.getCurrentUser({}).pipe(Effect.orElseSucceed(() => null))
-      if (live?.accountId === undefined || live.accountId === "") {
-        return { availability: "unverified", snapshot: null }
-      }
-      return {
-        availability: "verified",
-        snapshot: {
-          client,
-          ledgerScope: JSON.stringify([profile.token.cloud_id, live.accountId]),
-          heldScope: JSON.stringify([profile.token.cloud_id, profile.token.site_url, live.accountId]),
-          accountId: live.accountId,
-          cloudId: profile.token.cloud_id,
-          siteUrl: profile.token.site_url
-        }
-      }
-    })
+    const jiraWriteState = providerSnapshots.jira
     const jiraWriteSnapshot: Effect.Effect<JiraWriteSnapshot | null> = jiraWriteState.pipe(
       Effect.map((state) => state.snapshot)
     )
@@ -939,9 +891,9 @@ export const layer = Layer.effect(
       let nextStartAt = 0
       let expectedTotal: number | undefined
       for (;;) {
-        const page = yield* client.getIssueWorklog(issueKey, {
+        const page = yield* retryTransport(client.getIssueWorklog(issueKey, {
           params: { startAt: nextStartAt, startedAfter, startedBefore }
-        }).pipe(
+        })).pipe(
           Effect.mapError((cause) =>
             new ReconcileError({ message: `Jira worklog fetch failed for ${issueKey}: ${String(cause)}`, cause })
           )
@@ -985,7 +937,12 @@ export const layer = Layer.effect(
     const jiraTally = (
       period: ReconcilePeriod,
       requiredIssueKeys: ReadonlyArray<string> = [],
-      pinned: JiraWriteSnapshot | null | undefined = undefined
+      pinned: JiraWriteSnapshot | null | undefined = undefined,
+      /**
+       * `window` searches every issue I logged in the period and adds the required keys;
+       * `required-only` reads just the required keys, to top up a tally that already searched.
+       */
+      scope: "window" | "required-only" = "window"
     ) =>
       Effect.gen(function*() {
         // A verified snapshot pins the account, site and credential-backed client for every page.
@@ -1026,14 +983,14 @@ export const layer = Layer.effect(
         // already holds. A window of more than a hundred distinct issues is an ordinary week.
         const jql = `worklogAuthor = currentUser() AND worklogDate >= "${fromDay}" AND worklogDate <= "${toDay}"`
         const searchPage = (pageToken: string | undefined) =>
-          client.searchIssuesUsingJql({
+          retryTransport(client.searchIssuesUsingJql({
             params: {
               jql,
               maxResults: 100,
               fields: ["key"],
               ...((pageToken !== undefined) && { nextPageToken: pageToken })
             }
-          }).pipe(
+          })).pipe(
             Effect.mapError((e) => new ReconcileError({ message: `Jira search failed: ${String(e)}`, cause: e }))
           )
 
@@ -1041,7 +998,7 @@ export const layer = Layer.effect(
         let pageToken: string | undefined = undefined
         // Bounded so a server that keeps handing back a token cannot spin here for ever; hitting the
         // bound fails the run rather than proceeding on a partial tally.
-        for (let page = 0; page < 50; page++) {
+        for (let page = 0; scope === "window" && page < 50; page++) {
           const result: unknown = yield* searchPage(pageToken)
           const issues: unknown = Predicate.isObject(result) ? result["issues"] : undefined
           // A page with no `issues` at all is not an empty page. The generated success schema makes
@@ -1094,8 +1051,16 @@ export const layer = Layer.effect(
           endMs: number
         }> = []
 
-        for (const issueKey of issueKeys) {
-          const worklogs = yield* readJiraWorklogs(client, issueKey, lookupFromMs - 1, toMs)
+        // Every issue's worklogs are read before any is tallied, a few at a time: a week of forty
+        // tickets read one after another made every confirmation wait on forty round trips. Tallying
+        // stays in issue order, so the result is the same as a sequential read.
+        const worklogsByIssue = yield* Effect.forEach(
+          issueKeys,
+          (issueKey) => readJiraWorklogs(client, issueKey, lookupFromMs - 1, toMs),
+          { concurrency: JIRA_WORKLOG_READ_CONCURRENCY }
+        )
+        for (const [issueIndex, issueKey] of issueKeys.entries()) {
+          const worklogs = worklogsByIssue[issueIndex] ?? []
 
           for (const wl of worklogs) {
             // Only this user's worklogs (the JQL narrows issues, not individual worklog authors).
@@ -1136,12 +1101,15 @@ export const layer = Layer.effect(
         }
         return tally
       })
+    type JiraTallyRows = Effect.Success<ReturnType<typeof jiraTally>>
 
     const readRecorded = (
       period: ReconcilePeriod,
       options?: {
         readonly sides?: ReconcileSides | undefined
         readonly jiraIssueKeys?: ReadonlyArray<string> | undefined
+        /** A Jira tally this read already took under the same snapshot, so Jira is read once. */
+        readonly jiraPreRead?: JiraTallyRows | undefined
         readonly clockifySnapshot?: ClockifyWriteSnapshot | undefined
         readonly jiraSnapshot?: JiraWriteSnapshot | null | undefined
         /** Keep an unavailable Jira side read-only while independently verified providers proceed. */
@@ -1153,9 +1121,11 @@ export const layer = Layer.effect(
         // A side that is out is not called at all. That is the point of the option for someone who
         // tracks in one system: no Clockify workspace to configure, no Jira login to keep alive, and
         // no request whose failure could stop a run that never needed it.
-        const jiraSideRead = sides.jira
-          ? jiraTally(period, options?.jiraIssueKeys, options?.jiraSnapshot)
-          : Effect.succeed([])
+        const jiraSideRead = !sides.jira
+          ? Effect.succeed([])
+          : options?.jiraPreRead !== undefined
+          ? Effect.succeed(options.jiraPreRead)
+          : jiraTally(period, options?.jiraIssueKeys, options?.jiraSnapshot)
         const [clockifySide, jiraSide] = yield* Effect.all(
           [
             sides.clockify
@@ -1814,9 +1784,12 @@ export const layer = Layer.effect(
       }>,
       options: {
         readonly standingMap: Record<string, string>
+        readonly ignoredTickets: ReadonlySet<string>
         readonly confidenceFloor: number
         readonly mode: AttributionMode
         readonly onProgress: (progress: SessionProposalProgress) => Effect.Effect<void>
+        /** Ranking facts shown beside each candidate; absent when Jira could not answer. */
+        readonly candidateFact?: ((ticketKey: string) => CandidateFact | undefined) | undefined
       }
     ) =>
       Effect.gen(function*() {
@@ -1825,7 +1798,7 @@ export const layer = Layer.effect(
         const needsAgent = options.mode === "deterministic" ?
           [] :
           sessions.filter((session) =>
-            deterministicAttribution(session, { standingMap: options.standingMap }) === null &&
+            deterministicAttribution(session, options) === null &&
             session.candidateKeys.length > 0
           )
 
@@ -1848,7 +1821,11 @@ export const layer = Layer.effect(
               batch.map((session) => ({
                 sessionId: session.sessionId,
                 candidateKeys: session.candidateKeys,
-                digest: session.digest
+                digest: session.digest,
+                candidateFacts: new Map(session.candidateKeys.flatMap((key) => {
+                  const fact = options.candidateFact?.(key)
+                  return fact === undefined ? [] : [[key, fact] satisfies readonly [string, CandidateFact]]
+                }))
               })),
               (activity) =>
                 options.onProgress({
@@ -1862,7 +1839,10 @@ export const layer = Layer.effect(
                 const bySession = new Map(answers.map((answer) => [answer.sessionId, answer.choice]))
                 return batch.map((session) => {
                   const declined: AttributionChoice = { _tag: "None" }
-                  const choice = bySession.get(session.sessionId) ?? declined
+                  const answer = bySession.get(session.sessionId) ?? declined
+                  const choice = answer._tag === "Chosen" && options.ignoredTickets.has(answer.ticketKey)
+                    ? declined
+                    : answer
                   return {
                     session,
                     choice,
@@ -1930,7 +1910,8 @@ export const layer = Layer.effect(
           attributeSession(session, {
             standingMap: options.standingMap,
             agentChoice: chosen.get(session.sessionId) ?? null,
-            confidenceFloor: options.confidenceFloor
+            confidenceFloor: options.confidenceFloor,
+            ignoredTickets: options.ignoredTickets
           })
         )
 
@@ -1976,21 +1957,46 @@ export const layer = Layer.effect(
     /** Both first reads and post-write refreshes subtract live totals through the same path. */
     const refreshRecordedTime = Effect.fn("ReconcileService.refreshRecordedTime")(function*(
       period: ReconcilePeriod,
-      previous: Omit<SessionProposalReport, "proposals" | "recorded" | "unlinkedClockify" | "excludedDays">,
-      options?: RefreshRecordedOptions
+      cached: Omit<SessionProposalReport, "proposals" | "recorded" | "unlinkedClockify" | "excludedDays">,
+      options?: RefreshRecordedOptions,
+      /** A Jira write state the caller already resolved, so one read never verifies twice. */
+      pinnedJiraState?: JiraWriteState,
+      /**
+       * A Jira tally taken under `pinnedJiraState` earlier in the same read, with the issue keys it
+       * was required to cover. Reused only when it covers every key this refresh needs.
+       */
+      preReadJira?: { readonly tally: JiraTallyRows; readonly requiredKeys: ReadonlyArray<string> }
     ) {
+      const ignoredTickets = new Set((yield* config.get).sessionIgnoredTickets)
+      const ignored = [...new Map([
+        ...ignoredCredits(cached.sessionEvidence ?? [], ignoredTickets),
+        ...cached.ignored.filter((entry) => ignoredTickets.has(entry.ticketKey))
+      ].map((entry) => [`${entry.ticketKey}:${entry.day}`, entry])).values()]
+      const previous = {
+        ...cached,
+        attributed: cached.attributed.filter((row) => !ignoredTickets.has(row.ticketKey)),
+        withheld: cached.withheld.filter((row) => !ignoredTickets.has(row.ticketKey)),
+        ignoredTickets: [...ignoredTickets].sort(),
+        ignored
+      }
       const { sides } = previous
+      const writeBlocked: Partial<Record<"clockify" | "jira", string>> = {}
       const stored = yield* sourceLedger.read.pipe(
         Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
       )
       const clockifySnapshot = sides.clockify ? yield* clockifyWriteSnapshot : null
       if (clockifySnapshot !== null) {
         yield* sourceLedger.assertNoLegacyClockify(clockifySnapshot.legacyScope).pipe(
+          Effect.catchTag("SourceLedgerError", (cause) => {
+            if (cause.reason !== "review-required") return Effect.fail(cause)
+            writeBlocked.clockify = cause.message
+            return Effect.void
+          }),
           Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
         )
       }
       const clockifyScope = clockifySnapshot?.scope ?? null
-      const jiraState = sides.jira ? yield* jiraWriteState : undefined
+      const jiraState = sides.jira ? pinnedJiraState ?? (yield* jiraWriteState) : undefined
       const jiraSnapshot = jiraState?.snapshot ?? null
       // Compatibility reads may still render Jira totals, but only one verified snapshot may grant
       // durable source authority. Independent Clockify work remains executable while Jira is held.
@@ -2025,10 +2031,31 @@ export const layer = Layer.effect(
           ...(options?.jiraIssueKeys ?? [])
         ])
       ]
+      // Covered means read directly or found holding my time; anything else is read fresh, so reuse
+      // is an optimization the result never depends on.
+      const covered = new Set([
+        ...(preReadJira?.requiredKeys ?? []),
+        ...(preReadJira?.tally ?? []).map((row) => row.ticketKey)
+      ])
+      // Keys the pre-read did not cover — usually tickets the agent or a split chose — are read on
+      // their own and merged. They held none of my time in the pre-read's search, so their rows
+      // cannot duplicate it. If the top-up fails, the refresh falls back to a full read.
+      const missingKeys = jiraIssueKeys.filter((key) => !covered.has(key))
+      const topUp = preReadJira === undefined || pinnedJiraState === undefined || missingKeys.length === 0
+        ? undefined
+        : yield* Effect.result(jiraTally(period, missingKeys, jiraSnapshot, "required-only"))
+      const jiraPreRead = preReadJira === undefined || pinnedJiraState === undefined
+        ? undefined
+        : missingKeys.length === 0
+        ? preReadJira.tally
+        : topUp?._tag === "Success"
+        ? [...preReadJira.tally, ...topUp.success]
+        : undefined
       const [{ recorded, unlinkedClockify }, excludedDays] = yield* Effect.all([
         readRecorded(period, {
           sides,
           jiraIssueKeys,
+          jiraPreRead,
           clockifySnapshot: clockifySnapshot ?? undefined,
           jiraSnapshot,
           tolerateUnavailableJira: jiraState?.availability !== "verified"
@@ -2119,26 +2146,30 @@ export const layer = Layer.effect(
           verified,
           provider === "clockify" ? clockifySnapshot?.legacyScope : undefined
         ).pipe(
+          Effect.catchTag("SourceLedgerError", (cause) => {
+            if (cause.reason !== "review-required") return Effect.fail(cause)
+            writeBlocked[provider] = cause.message
+            return Effect.void
+          }),
           Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
         )
       }
       const verifiedLedger = yield* sourceLedger.read.pipe(
         Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
       )
-      if (
-        previous.attributed.length > 0 &&
-        entries.some((entry) => {
+      if (previous.attributed.length > 0) {
+        for (const entry of entries) {
           const scope = entry.source === "clockify" ? clockifyScope : jiraScope
-          return scope !== null && entry.description !== null &&
+          if (
+            scope !== null && entry.description !== null &&
             SourceConsumption.markers(entry.description).length > 0 &&
             !verifiedLedger.bindings.some((binding) =>
               binding.provider === entry.source && binding.entryId === entry.id && binding.scope === scope
             )
-        })
-      ) {
-        return yield* new ReconcileError({
-          message: "An unlinked source marker needs private manual review before session writes"
-        })
+          ) {
+            writeBlocked[entry.source] = "An unlinked source marker needs private manual review before session writes"
+          }
+        }
       }
       const sourceEntries: ReadonlyArray<SourceConsumption.ResolvedEntry> = verifiedLedger.bindings.filter((binding) =>
         binding.provider === "clockify" ? binding.scope === clockifyScope : binding.scope === jiraScope
@@ -2158,6 +2189,7 @@ export const layer = Layer.effect(
       const executableRecorded = recordedForExecution(recorded, jiraState?.availability)
       return {
         ...previous,
+        writeBlocked,
         proposals: buildSessionProposals(previous.attributed, executableRecorded, {
           minimumSeconds: MINIMUM_PROPOSAL_SECONDS,
           excludedDays: excludedDays.map((excluded) => excluded.day),
@@ -2167,7 +2199,7 @@ export const layer = Layer.effect(
             day: slice.day,
             intervals: slice.entry === undefined ? [] : [{ entry: slice.entry }]
           }))
-        }),
+        }).map((proposal) => ({ ...proposal, writeBlocked })),
         recorded,
         unlinkedClockify,
         sourceEntries,
@@ -2188,16 +2220,92 @@ export const layer = Layer.effect(
       Effect.gen(function*() {
         const onProgress = options?.onProgress ?? (() => Effect.void)
         const cfg = yield* config.get
+        const ignoredTickets = new Set(cfg.sessionIgnoredTickets)
+        const standingMap = expandedStandingMap(cfg.sessionTicketMap, home)
         const sessions = yield* sessionReader.read(period).pipe(
           Effect.mapError((error) => new ReconcileError({ message: error.message, cause: error }))
         )
         yield* onProgress({ _tag: "SessionsRead", count: sessions.length })
 
-        const { attributions, attributorAvailable, attributorCalls } = yield* attributeSessions(sessions, {
-          standingMap: expandedStandingMap(cfg.sessionTicketMap, home),
-          confidenceFloor: cfg.sessionConfidenceFloor,
-          mode: options?.attribution ?? "full",
-          onProgress
+        const sides = options?.sides ?? bothSides
+        // Only a run about Jira reads Jira to rank: a Clockify-only week makes no Jira request. The
+        // verified profile's client, so a sprint is never read from a different account's site.
+        // Resolved once for the whole read: ranking and the first recorded refresh must see the
+        // same verified authority, and resolving twice can observe two different answers. The pin
+        // never outlives the read: every write path refreshes without it and verifies afresh.
+        const jiraState = sides.jira ? yield* jiraWriteState : undefined
+        const rankingSnapshot = jiraState?.snapshot ?? undefined
+        // The Jira tally is read before attribution, so ranking and the attribution prompt see who
+        // logged what, and the first refresh reuses it. Branch, path and standing targets and
+        // ledger-bound tickets are required reads; any other candidate the tally lacks is unlogged.
+        const preReadJira = rankingSnapshot === undefined ? undefined : yield* Effect.gen(function*() {
+          const stored = yield* sourceLedger.read.pipe(
+            Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
+          )
+          const requiredKeys = [
+            ...new Set([
+              ...sessions.flatMap((session) => {
+                const target = deterministicAttribution(session, { standingMap })
+                return target === null || ignoredTickets.has(target.ticketKey) ? [] : [target.ticketKey]
+              }),
+              ...stored.bindings.filter((binding) =>
+                binding.provider === "jira" && binding.scope === rankingSnapshot.ledgerScope
+              ).map((binding) => binding.ticketKey)
+            ])
+          ]
+          const tally = yield* Effect.result(jiraTally(period, requiredKeys, rankingSnapshot))
+          return tally._tag === "Success" ? { tally: tally.success, requiredKeys } : undefined
+        })
+        const ranking = rankingSnapshot !== undefined
+          ? yield* readRankingFacts(
+            (jql, nextPageToken) =>
+              retryTransport(rankingSnapshot.client.searchIssuesUsingJql({
+                params: {
+                  jql,
+                  maxResults: 100,
+                  fields: ["key"],
+                  ...((nextPageToken !== undefined) && { nextPageToken })
+                }
+              })),
+            preReadJira?.tally
+          )
+          : {
+            _tag: "Unknown",
+            reason: sides.jira ? "Jira account is not verified" : "Jira is out of scope"
+          } satisfies RankingFacts
+
+        const ignoredBySession = new Map(sessions.flatMap((session) => {
+          const original = deterministicAttribution(session, { standingMap })
+          return original === null || !ignoredTickets.has(original.ticketKey)
+            ? []
+            : [[session.sessionId, original.ticketKey] satisfies readonly [string, string]]
+        }))
+        const { attributions: primaryAttributions, attributorAvailable, attributorCalls } = yield* attributeSessions(
+          sessions.map((session) => ({
+            ...session,
+            candidateKeys: session.candidateKeys.filter((key) => !ignoredTickets.has(key))
+          })),
+          {
+            standingMap,
+            ignoredTickets,
+            confidenceFloor: cfg.sessionConfidenceFloor,
+            mode: options?.attribution ?? "full",
+            onProgress,
+            candidateFact: candidateFact(ranking)
+          }
+        )
+        // A split is a guess from mention counts: a deterministic read reports the session unplaced
+        // instead, so an unattended watch never downgrades a branch-placed row to `split`.
+        const attributions = primaryAttributions.map((attribution, index) => {
+          const session = sessions[index]
+          return session === undefined || options?.attribution === "deterministic" ?
+            attribution :
+            splitSessionAttribution(
+              session,
+              attribution,
+              ranking._tag === "Known" && jiraState?.availability === "verified" ? ranking.sprint : undefined,
+              ignoredTickets
+            )
         })
 
         // Windows first, then attribution, then sharing — in that order, because time is divided
@@ -2215,28 +2323,53 @@ export const layer = Layer.effect(
             )
           )
         })
-        const split = splitCredits(windows, attributions, {
+        const attributionBySession = new Map(attributions.map((attribution) => [attribution.sessionId, attribution]))
+        const ignored = ignoredCredits(
+          windows.map((window) => ({
+            ...window,
+            ticketKey: ignoredBySession.get(window.sessionId) ?? null
+          })),
+          ignoredTickets
+        )
+        const eligibleWindows = windows.filter((window) => {
+          const key = attributionBySession.get(window.sessionId)?.ticketKey
+          return !ignoredBySession.has(window.sessionId) ||
+            (attributionBySession.get(window.sessionId)?.targets?.length ?? 0) > 0 ||
+            (key !== null && key !== undefined && !ignoredTickets.has(key))
+        })
+        const split = splitCredits(eligibleWindows, attributions, {
           cwdBySession: new Map(sessions.map((session) => [session.sessionId, session.cwd])),
-          dwellSeconds: cfg.sessionDwellSeconds
+          dwellSeconds: cfg.sessionDwellSeconds,
+          priority: ticketPriority(ranking),
+          ignoredTickets
         })
 
-        const sides = options?.sides ?? bothSides
         yield* onProgress({ _tag: "ReadingRecordedTime", sides })
-        return yield* refreshRecordedTime(period, {
-          attributed: split.attributed,
-          sessionEvidence: windows.map((window) => ({
-            ...window,
-            ticketKey: attributions.find((attribution) => attribution.sessionId === window.sessionId)?.ticketKey ?? null
-          })),
-          sides,
-          withheld: split.withheld,
-          unattributed: split.unattributed,
-          attributorAvailable,
-          sessionCount: sessions.length,
-          sessionRootCount: cfg.sessionRoots.length,
-          attributorCalls,
-          digests: new Map(sessions.map((session) => [session.sessionId, session.digest]))
-        })
+        return yield* refreshRecordedTime(
+          period,
+          {
+            attributed: split.attributed,
+            sessionEvidence: windows.flatMap((window) => {
+              const attribution = attributionBySession.get(window.sessionId)
+              const keys = attribution?.targets?.map((target) => target.ticketKey) ??
+                [attribution?.ticketKey ?? ignoredBySession.get(window.sessionId) ?? null]
+              return keys.map((ticketKey) => ({ ...window, ticketKey }))
+            }),
+            sides,
+            withheld: split.withheld,
+            unattributed: split.unattributed,
+            ignored,
+            ignoredTickets: [...ignoredTickets].sort(),
+            attributorAvailable,
+            sessionCount: sessions.length,
+            sessionRootCount: cfg.sessionRoots.length,
+            attributorCalls,
+            digests: new Map(sessions.map((session) => [session.sessionId, session.digest]))
+          },
+          undefined,
+          jiraState,
+          preReadJira
+        )
       })
 
     return {

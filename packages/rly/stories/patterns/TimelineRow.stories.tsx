@@ -2,7 +2,13 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { CSSProperties, ReactElement } from "react"
 import { expect, userEvent } from "storybook/test"
 import { Person } from "../../src/patterns/Person.js"
-import { type RlyTimelineActorKind, type RlyTimelineEvent, TimelineRow } from "../../src/patterns/TimelineRow.js"
+import {
+  type RlyTimelineActorKind,
+  type RlyTimelineEvent,
+  type RlyTimelineProvenanceKind,
+  TimelineProvenanceKey,
+  TimelineRow
+} from "../../src/patterns/TimelineRow.js"
 import { Text } from "../../src/primitives/Text.js"
 import { pageStyle, stackStyle } from "../primitives/storyStyles.js"
 
@@ -117,4 +123,68 @@ export const CompactForcedColors: Story = {
     canvasElement.dataset.timelineRowCompactPlayComplete = "true"
   },
   render: () => <CompactForcedColorsCatalog />
+}
+
+const provenanceEvents: ReadonlyArray<{
+  readonly kind: RlyTimelineProvenanceKind
+  readonly label: string
+  readonly time: string
+  readonly title: string
+}> = [
+  {
+    kind: "pending",
+    label: "Waiting for your approval",
+    title: "coord asked to move this goal from arch to arch-b",
+    time: "4m ago"
+  },
+  {
+    kind: "unknown",
+    label: "Not applied: GitHub rate limit, retrying at 05:12",
+    title: "Could not read PR #483",
+    time: "2m ago"
+  },
+  { kind: "auto", label: "Applied automatically, from GitHub", title: "CI passed on 7d41c0e", time: "2h ago" },
+  {
+    kind: "flag",
+    label: "Flag only, from hostd; ownership unchanged",
+    title: "Owner gone for over 24h",
+    time: "2h ago"
+  },
+  { kind: "approved", label: "Approved by andrey (phone)", title: "Admitted the goal", time: "9h ago" }
+]
+
+/** Provenance by shape and words: automatic, approved, waiting, couldn't read, and flag only. */
+export const Provenance: Story = {
+  args: { continued: false, event: eventAt(0) },
+  play: async ({ canvas, canvasElement }) => {
+    for (const kind of ["auto", "approved", "pending", "unknown", "flag"]) {
+      await expect(canvasElement.querySelectorAll(`ol li [data-rly-timeline-provenance='${kind}']`)).toHaveLength(1)
+    }
+    await expect(canvas.getByText("Waiting for your approval")).toBeVisible()
+    const key = canvas.getByRole("list", { name: "Observation key" })
+    await expect(key).toBeVisible()
+    await expect(key.querySelectorAll("li")).toHaveLength(5)
+  },
+  render: () => (
+    <main style={pageStyle}>
+      <ol aria-label="Observations" style={listStyle}>
+        {provenanceEvents.map((item, index) => (
+          <TimelineRow
+            continued={index < provenanceEvents.length - 1}
+            event={{
+              actorKind: item.kind === "approved" || item.kind === "pending" ? "human" : "system",
+              dateTime: `2026-10-06T0${index}:00:00Z`,
+              detail: "Goal: Rotate signing keys",
+              id: `provenance-${item.kind}`,
+              provenance: { kind: item.kind, label: item.label },
+              time: item.time,
+              title: item.title
+            }}
+            key={item.kind}
+          />
+        ))}
+      </ol>
+      <TimelineProvenanceKey label="Observation key" />
+    </main>
+  )
 }

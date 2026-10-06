@@ -227,6 +227,34 @@
     },
     {
       "capabilities": [
+        "decide",
+        "present"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "DecisionBar",
+      "states": [
+        "default",
+        "off",
+        "ready",
+        "sending",
+        "sticky"
+      ],
+      "terms": [
+        "decide",
+        "decisionbar",
+        "inline",
+        "off",
+        "pattern",
+        "placement",
+        "present",
+        "ready",
+        "sending",
+        "sticky"
+      ]
+    },
+    {
+      "capabilities": [
         "confirm",
         "overlay"
       ],
@@ -630,6 +658,34 @@
     },
     {
       "capabilities": [
+        "present",
+        "status"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "Hero",
+      "states": [
+        "default",
+        "display",
+        "heading",
+        "line"
+      ],
+      "terms": [
+        "blocked",
+        "display",
+        "heading",
+        "held",
+        "hero",
+        "line",
+        "pattern",
+        "present",
+        "size",
+        "status",
+        "tone"
+      ]
+    },
+    {
+      "capabilities": [
         "symbol"
       ],
       "category": "foundation",
@@ -825,6 +881,28 @@
         "foundation",
         "overlay",
         "portalprovider"
+      ]
+    },
+    {
+      "capabilities": [
+        "compose",
+        "present"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "Region",
+      "states": [
+        "default",
+        "tray"
+      ],
+      "terms": [
+        "compose",
+        "default",
+        "pattern",
+        "present",
+        "region",
+        "tone",
+        "tray"
       ]
     },
     {
@@ -1129,7 +1207,8 @@
         "building",
         "compact",
         "complete",
-        "default"
+        "default",
+        "words"
       ],
       "terms": [
         "blocked",
@@ -1141,7 +1220,8 @@
         "pattern",
         "progress",
         "size",
-        "stagerail"
+        "stagerail",
+        "words"
       ]
     },
     {
@@ -1367,6 +1447,7 @@
         "agent",
         "default",
         "human",
+        "provenance",
         "service",
         "system"
       ],
@@ -1375,6 +1456,7 @@
         "audit",
         "human",
         "pattern",
+        "provenance",
         "service",
         "system",
         "timeline",

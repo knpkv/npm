@@ -41,9 +41,32 @@ export const retainedEntryRevision = (plan: HeldPlan, entry: ReconcileService.Re
 }
 
 /** Rebuild provider slices and proposal deltas locally so a failed totals refresh cannot undo a save. */
-export const replaceSavedEntry = (plan: HeldPlan, entry: SavedEntry): HeldPlan => {
+export const replaceSavedEntry = (plan: HeldPlan, entry: SavedEntry): HeldPlan =>
+  changeSavedEntries(plan, [{ source: entry.source, id: entry.id }], entry)
+
+/** The same local rebuild after a delete: the entry's slices leave the week and its time is owed again. */
+export const removeSavedEntry = (
+  plan: HeldPlan,
+  entry: { readonly source: SavedEntry["source"]; readonly id: string }
+) => changeSavedEntries(plan, [entry], undefined)
+
+/**
+ * Remove provider entries from the retained week and optionally add one, rebuilding totals and
+ * proposals locally. A ticket change removes the original and adds its replacement under a new id.
+ *
+ * The added entry inherits the source claims of `inheritFrom` — by default the single removed entry —
+ * so corrected evidence the original was consuming stays consumed under the replacement until the
+ * next provider read. A partial ticket change names the original as `inheritFrom` without removing it.
+ */
+export const changeSavedEntries = (
+  plan: HeldPlan,
+  removed: ReadonlyArray<{ readonly source: SavedEntry["source"]; readonly id: string }>,
+  added: SavedEntry | undefined,
+  inheritFrom: { readonly source: SavedEntry["source"]; readonly id: string } | undefined =
+    added === undefined || removed.length !== 1 ? undefined : removed[0]
+): HeldPlan => {
   const matches = (candidate: ReconcileService.RecordedEntry | undefined) =>
-    candidate?.source === entry.source && candidate.id === entry.id
+    candidate !== undefined && removed.some((entry) => entry.source === candidate.source && entry.id === candidate.id)
   const seconds = (interval: { readonly startMs: number; readonly endMs: number }) =>
     Math.round((interval.endMs - interval.startMs) / 1000)
   const tally = (source: SavedEntry["source"]): Array<ReconcileService.DayTally[number]> =>
@@ -72,12 +95,14 @@ export const replaceSavedEntry = (plan: HeldPlan, entry: SavedEntry): HeldPlan =
   const clockify = tally("clockify")
   const jira = tally("jira")
   const unlinked = plan.report.unlinkedClockify.filter((slice) => !matches(slice.entry))
+  const entry = added
   for (
-    const { day, endMs, seconds: sliceSeconds, startMs } of Time.splitIntervalByLocalDay(
+    const { day, endMs, seconds: sliceSeconds, startMs } of entry === undefined ? [] : Time.splitIntervalByLocalDay(
       entry.startMs,
       entry.endMs
     )
   ) {
+    if (entry === undefined) continue
     const slice = {
       entry,
       startMs,
@@ -94,11 +119,15 @@ export const replaceSavedEntry = (plan: HeldPlan, entry: SavedEntry): HeldPlan =
     }
   }
   const recorded = ReconcileService.buildReconcileRows(clockify, jira)
-  const sourceEntries = plan.report.sourceEntries?.map((source) =>
-    source.source === entry.source && source.id === entry.id
-      ? { ...source, startMs: entry.startMs, endMs: entry.endMs }
-      : source
-  )
+  const isRemoved = (source: { readonly source: string; readonly id: string }) =>
+    removed.some((gone) => gone.source === source.source && gone.id === source.id)
+  const sourceEntries = plan.report.sourceEntries?.flatMap((source) => {
+    const inherited = entry !== undefined && inheritFrom !== undefined &&
+      source.source === inheritFrom.source && source.id === inheritFrom.id
+    const moved = inherited ? [{ ...source, id: entry.id, startMs: entry.startMs, endMs: entry.endMs }] : []
+    // The original keeps its claim only while it still exists, as after a partial ticket change.
+    return isRemoved(source) || (inherited && source.id === entry.id) ? moved : [source, ...moved]
+  })
   const report = {
     ...plan.report,
     recorded,
@@ -113,7 +142,7 @@ export const replaceSavedEntry = (plan: HeldPlan, entry: SavedEntry): HeldPlan =
         day: slice.day,
         intervals: slice.entry === undefined ? [] : [{ entry: slice.entry }]
       }))
-    })
+    }).map((proposal) => ({ ...proposal, writeBlocked: plan.report.writeBlocked }))
   }
   return buildWeekPlan({
     planId: plan.planId,
@@ -125,11 +154,13 @@ export const replaceSavedEntry = (plan: HeldPlan, entry: SavedEntry): HeldPlan =
     jiraReceiptIssueKeys: plan.jiraReceiptIssueKeys,
     ownership: plan.ownership,
     entryRevision: (candidate) =>
-      matches(candidate) ? entry.revision : findSavedEntry(plan, {
-        planId: plan.planId,
-        source: candidate.source,
-        entryId: candidate.id
-      })?.revision ?? plan.planId,
+      entry !== undefined && candidate.source === entry.source && candidate.id === entry.id
+        ? entry.revision
+        : findSavedEntry(plan, {
+          planId: plan.planId,
+          source: candidate.source,
+          entryId: candidate.id
+        })?.revision ?? plan.planId,
     report
   })
 }
@@ -172,6 +203,15 @@ export const savedEntryFailure = (error: SavedEntries.SavedEntryError) => {
       return new PlanExpiredError({ message: error.message })
     case "provider":
       return new ApiError({ message: error.message })
+    case "partial":
+      // The replacement exists and the original could not be removed: both are in the provider now.
+      return new ApiError({
+        message: error.replacement === undefined
+          ? error.message
+          : `${error.message} The new entry was created under ${
+            error.replacement.ticketKey ?? "no ticket"
+          }; delete the original by hand.`
+      })
   }
 }
 
@@ -205,3 +245,52 @@ export const describeSavedEntry = Effect.fn("SavedEntryOperations.describe")(fun
   const note = `${prefix}${summary.slice(0, Math.max(0, 500 - prefix.length - reserved))}`
   return { note: suffix === "" ? note : `${note}\n${suffix}`, sessionCount: ids.length }
 })
+
+/**
+ * True when the row already carries an attributed credit. Promoting into it would put two credits
+ * on one row id, and the later would replace the existing suggestion; callers refuse instead.
+ */
+export const promotionCollides = (plan: HeldPlan, ticketKey: string, day: string): boolean =>
+  plan.report.attributed.some((row) => row.ticketKey === ticketKey && row.day === day)
+
+/**
+ * Promote one low-confidence match into the week's suggestions, at the person's explicit request.
+ *
+ * Only the named `(ticket, day)` credit moves; nothing else is re-shared. It then becomes an ordinary
+ * suggestion that is confirmed — and checked against provider totals — like any other. A rescan
+ * recomputes attribution and may withhold it again.
+ */
+export const promoteWithheld = (plan: HeldPlan, ticketKey: string, day: string): HeldPlan | undefined => {
+  const credit = plan.report.withheld.find((row) => row.ticketKey === ticketKey && row.day === day)
+  if (credit === undefined) return undefined
+  const attributed = [...plan.report.attributed, credit]
+  const report = {
+    ...plan.report,
+    attributed,
+    withheld: plan.report.withheld.filter((row) => row !== credit),
+    proposals: AgentSessions.buildSessionProposals(attributed, plan.report.recorded, {
+      minimumSeconds: MINIMUM_WRITE_SECONDS,
+      excludedDays: plan.report.excludedDays.map((excluded) => excluded.day),
+      sides: plan.report.sides,
+      sourceEntries: plan.report.sourceEntries,
+      consumptionRows: plan.report.unlinkedClockify.map((slice) => ({
+        day: slice.day,
+        intervals: slice.entry === undefined ? [] : [{ entry: slice.entry }]
+      }))
+    }).map((proposal) => ({ ...proposal, writeBlocked: plan.report.writeBlocked }))
+  }
+  return buildWeekPlan({
+    planId: plan.planId,
+    createdAtMillis: plan.createdAtMillis,
+    monday: new Date(`${plan.plan.monday}T00:00:00`),
+    scope: plan.plan.scope,
+    sessionScanAvailable: plan.plan.sessionScanAvailable,
+    consumption: plan.consumption,
+    jiraReceiptIssueKeys: plan.jiraReceiptIssueKeys,
+    ownership: plan.ownership,
+    entryRevision: (candidate) =>
+      findSavedEntry(plan, { planId: plan.planId, source: candidate.source, entryId: candidate.id })?.revision ??
+        plan.planId,
+    report
+  })
+}
