@@ -8,6 +8,7 @@ import { SandboxView } from "./components/sandbox-view.js"
 import { SandboxesPage } from "./components/sandboxes-page.js"
 import { SettingsPage } from "./components/settings-page.js"
 import { StatsPage } from "./components/stats-page.js"
+import { WorkbenchLayout } from "./components/workbench-layout.js"
 import * as Predicate from "effect/Predicate"
 
 interface RouteHandle {
@@ -26,7 +27,10 @@ export const router = createBrowserRouter([
     element: <AppLayout />,
     children: [
       { index: true, element: <PRList /> },
-      { path: "accounts/:accountId/prs/:prId", element: <PRDetail /> },
+      {
+        element: <WorkbenchLayout />,
+        children: [{ path: "accounts/:accountId/prs/:prId", element: <PRDetail /> }]
+      },
       { path: "sandboxes", element: <SandboxesPage /> },
       { path: "sandbox/:sandboxId", element: <SandboxView />, handle: { fullWidth: true } },
       { path: "settings/:tab?", element: <SettingsPage /> },

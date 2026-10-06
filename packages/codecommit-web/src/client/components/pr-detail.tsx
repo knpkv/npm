@@ -205,6 +205,15 @@ const isTextInputTarget = (target: EventTarget | null): boolean => {
   return tagName === "INPUT" || tagName === "TEXTAREA"
 }
 
+/**
+ * True when Enter on the focused element already does something (follow a link, press a button),
+ * so the page-wide Enter shortcut must not also fire. Used by the PR page's keydown handler.
+ */
+export const ownsEnterKey = (target: EventTarget | null): boolean => {
+  const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
+  return tagName === "A" || tagName === "BUTTON" || tagName === "SELECT" || tagName === "SUMMARY"
+}
+
 const formatRelativeDate = (dateStr: string): string => {
   const date = new Date(dateStr)
   const abs = date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
@@ -1277,7 +1286,7 @@ export function PRDetail() {
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")
-      } else if ((e.key === "Enter" || e.key === "o") && consoleUrl.length > 0) {
+      } else if ((e.key === "o" || (e.key === "Enter" && !ownsEnterKey(e.target))) && consoleUrl.length > 0) {
         handleOpen()
       } else if (e.key === "." && pr !== null) {
         e.preventDefault()

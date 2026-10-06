@@ -1,0 +1,35 @@
+/* Rail beside the pull request from 760px; the pull request alone below that. */
+
+.container {
+  container: workbench / inline-size;
+}
+
+.workbench {
+  align-items: start;
+  display: grid;
+  gap: var(--rly-space-24);
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.rail {
+  display: none;
+  min-inline-size: 0;
+}
+
+/* The pull request page and its review workspace size themselves to this column, not the window. */
+.main {
+  container: pr-column / inline-size;
+  min-inline-size: 0;
+}
+
+@container workbench (width >= 760px) {
+  .workbench {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+
+  .rail {
+    display: block;
+    inset-block-start: var(--rly-space-16);
+    position: sticky;
+  }
+}
