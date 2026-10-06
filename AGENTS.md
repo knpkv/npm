@@ -185,8 +185,10 @@ alerts, which may announce immediately; never claim every live region is silent 
 insertion.
 
 Decorative `LimitTrack` examples in `packages/rly/README.md` and `packages/rly/stories/**` must
-show adjacent text carrying the value, its age, and any projection, and every mark they draw must
-have a matching `TrackKey` item; otherwise use a labelled `decorative={false}` track.
+show adjacent text carrying everything the track draws: the value, that the reading is old when it
+is stale (the hatch, for example "61%, old reading"), and any projection. Every mark they draw must
+have a matching `TrackKey` item; otherwise use a labelled `decorative={false}` track. A fresh reading
+needs no freshness wording.
 
 Public motion-ownership props must document their default, affected surfaces and presentations, sampling or update lifetime, exit behavior, and reduced-motion interaction. Cover both intrinsic and externally owned entry with browser-backed component examples.
 
