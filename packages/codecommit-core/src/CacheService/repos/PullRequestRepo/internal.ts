@@ -106,7 +106,11 @@ export const UpsertInput = Schema.Struct({
   link: Schema.String,
   approvedBy: Schema.Array(Schema.String),
   approvedByArns: Schema.Array(Schema.String),
-  approvalRules: Schema.Array(ApprovalRule).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([])))
+  // The rule's plain shape, not the class: callers pass the provider's rules as plain objects, and the
+  // cache stores them as JSON either way.
+  approvalRules: Schema.Array(Schema.Struct(ApprovalRule.fields)).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed([]))
+  )
 })
 
 export type UpsertInput = typeof UpsertInput.Type
