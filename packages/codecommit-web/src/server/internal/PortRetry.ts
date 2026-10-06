@@ -5,7 +5,7 @@ import { Effect, Ref, Schema } from "effect"
  * cause carries `EADDRINUSE`; Bun's as a defect whose message names the port.
  */
 const PortTaken = Schema.Union([
-  Schema.Struct({ _tag: Schema.Literal("ServeError"), cause: Schema.Struct({ code: Schema.Literal("EADDRINUSE") }) }),
+  Schema.TaggedStruct("ServeError", { cause: Schema.Struct({ code: Schema.Literal("EADDRINUSE") }) }),
   Schema.Struct({ message: Schema.String.check(Schema.isPattern(/port/u)) })
 ])
 const portTaken = Schema.is(PortTaken)
