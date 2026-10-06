@@ -3289,7 +3289,7 @@
         "storyId": "patterns-region--states",
         "storyPath": "?path=/story/patterns-region--states"
       },
-      "example": "import { RLY_REGION_DEFAULT_VARIANTS } from \"@knpkv/rly/patterns\"",
+      "example": "import { Region } from \"@knpkv/rly/patterns\"",
       "exports": [
         {
           "kind": "value",
@@ -5463,7 +5463,7 @@
         "storyId": "patterns-timelinerow--actor-kinds",
         "storyPath": "?path=/story/patterns-timelinerow--actor-kinds"
       },
-      "example": "import { TimelineProvenanceKey } from \"@knpkv/rly/patterns\"",
+      "example": "import { TimelineRow } from \"@knpkv/rly/patterns\"",
       "exports": [
         {
           "kind": "type",
