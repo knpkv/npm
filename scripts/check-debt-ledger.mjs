@@ -28,16 +28,19 @@ const baselinePath = "docs/debt.baseline.json"
 const lintKinds = [
   ["eslint", /^eslint-disable(?:-next-line|-line)?(?=\s|$)/u],
   ["oxlint", /^oxlint-disable(?:-next-line|-line)?(?=\s|$)/u],
-  ["ast-grep", /^ast-grep-ignore(?=\s|:|$)/u]
+  // ast-grep honours any `ast-grep-ignore` prefix, including `ast-grep-ignore-file`.
+  ["ast-grep", /^ast-grep-ignore/u]
 ]
 
 // TypeScript's own comment-directive rules (its scanner's commentDirectiveRegEx*): a `//` or `///`
-// comment, or the last line of a block comment. A JSDoc continuation line (` * @ts-expect-error`) is
-// not a directive, so it is not counted either.
+// comment, or the last line of a block comment after trimming its leading whitespace, so a JSDoc
+// closing line ` * @ts-ignore */` counts while a mention on an earlier line of the block does not.
 const tsSingleLine = /^\/\/\/?\s*@(?:ts-expect-error|ts-ignore)/u
 const tsLastLine = /^(?:\/|\*)*\s*@(?:ts-expect-error|ts-ignore)/u
 const tsDirective = /@(?:ts-expect-error|ts-ignore)/u
-const tsNoCheck = /^@ts-nocheck(?=\s|$)/u
+// TypeScript's single-line pragma pattern. `@ts-nocheck` is honoured only in the comments leading the
+// file, with its name compared case-insensitively and an optional `:` suffix.
+const singleLinePragma = /^\/\/\/?\s*@([^\s:]+)((?:[^\S\r\n]|:).*)?$/mu
 
 // The Effect language service's own directive pattern. It reads the whole source text of a TypeScript
 // file, so a directive inside a string literal is active too and is counted wherever it appears.
@@ -105,13 +108,18 @@ const lintKindOf = (body) => lintKinds.find(([, pattern]) => pattern.test(body))
 // The line a TypeScript suppression lives on, when the comment is one TypeScript honours.
 const typeScriptDirectiveLine = (raw) => {
   if (raw.startsWith("//")) return tsSingleLine.test(raw) ? raw : undefined
-  const lastLine = raw.slice(raw.lastIndexOf("\n") + 1)
+  const lastLine = raw.slice(raw.lastIndexOf("\n") + 1).trimStart()
   return tsLastLine.test(lastLine) ? lastLine : undefined
+}
+
+const noCheckPragma = (raw) => {
+  const match = singleLinePragma.exec(raw)
+  return match !== null && match[1].toLowerCase() === "ts-nocheck" ? match : undefined
 }
 
 const isDirectiveComment = (raw) =>
   typeScriptDirectiveLine(raw) !== undefined ||
-  tsNoCheck.test(commentBody(raw)) ||
+  noCheckPragma(raw) !== undefined ||
   lintKindOf(commentBody(raw)) !== undefined ||
   new RegExp(effectDirective.source, "u").test(raw)
 
@@ -140,19 +148,30 @@ const commentDirective = (file, text, range) => {
   const body = commentBody(raw)
   const reasonAbove = hasReasonAbove(text, range.pos)
   const typeScriptLine = typeScriptDirectiveLine(raw)
-  if (typeScriptLine !== undefined || tsNoCheck.test(body)) {
-    const line = typeScriptLine ?? body
-    const rest = line
-      .slice(line.search(/@ts-/u))
-      .replace(/^@ts-(?:expect-error|ignore|nocheck)/u, "")
+  if (typeScriptLine !== undefined) {
+    const rest = typeScriptLine
+      .slice(typeScriptLine.search(tsDirective))
+      .replace(tsDirective, "")
       .replace(/\*\/\s*$/u, "")
       .replace(/^:/u, "")
       .trim()
-    return [directive(file, "typescript", tsDirective.test(line) ? body : line, rest.length > 0 || reasonAbove)]
+    return [directive(file, "typescript", body, rest.length > 0 || reasonAbove)]
   }
   const lintKind = lintKindOf(body)
   return lintKind === undefined ? [] : [directive(file, lintKind, body, hasDashReason(body) || reasonAbove)]
 }
+
+// `@ts-nocheck` pragmas, read only where TypeScript reads them: single-line comments leading the file.
+const noCheckDirectives = (file, text) =>
+  (ts.getLeadingCommentRanges(text, 0) ?? [])
+    .filter((range) => range.kind === ts.SyntaxKind.SingleLineCommentTrivia)
+    .flatMap((range) => {
+      const raw = text.slice(range.pos, range.end)
+      const match = noCheckPragma(raw)
+      if (match === undefined) return []
+      const rest = (match[2] ?? "").replace(/^:/u, "").trim()
+      return [directive(file, "typescript", commentBody(raw), rest.length > 0 || hasReasonAbove(text, range.pos))]
+    })
 
 const effectDirectives = (file, text) =>
   [...text.matchAll(effectDirective)].map((match) => {
@@ -174,6 +193,7 @@ const effectDirectives = (file, text) =>
  */
 export const scanDirectives = (file, text) => [
   ...commentRanges(file, text).flatMap((range) => commentDirective(file, text, range)),
+  ...noCheckDirectives(file, text),
   ...(typeScriptFile.test(file) ? effectDirectives(file, text) : [])
 ]
 

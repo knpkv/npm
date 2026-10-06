@@ -52,6 +52,23 @@ test("counts TypeScript suppressions the way the compiler recognises them", () =
   assert.deepEqual(kinds("/**\n * Never write @ts-expect-error here.\n */\nexport const n = 1"), [])
 })
 
+test("follows TypeScript for indented block suppressions and the ts-nocheck pragma", () => {
+  const kinds = (text) => scan(text).map(({ kind }) => kind)
+  assert.deepEqual(kinds("/**\n * @ts-ignore */\nexport const n: number = 1"), ["typescript"])
+  assert.deepEqual(kinds("/**\n * @ts-expect-error */\nexport const n: number = 1"), ["typescript"])
+  assert.deepEqual(kinds("// @TS-NOCHECK: legacy integration\nexport const n = 1"), ["typescript"])
+  assert.deepEqual(kinds("export const n = 1\n// @ts-nocheck"), [])
+  assert.deepEqual(kinds("/* @ts-nocheck */\nexport const n = 1"), [])
+  assert.equal(scan("// @ts-nocheck: legacy integration\nexport {}")[0]?.reasoned, true)
+})
+
+test("counts every ast-grep suppression the CLI honours", () => {
+  assert.deepEqual(
+    scan("// ast-grep-ignore-file -- generated fixture\nexport {}").map(({ kind }) => kind),
+    ["ast-grep"]
+  )
+})
+
 test("counts an Effect directive wherever the language service reads it, strings included, in TypeScript files", () => {
   const marker = 'export const marker = "@effect-diagnostics floatingEffect:off"'
   assert.deepEqual(
