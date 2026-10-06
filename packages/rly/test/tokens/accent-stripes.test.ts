@@ -34,6 +34,27 @@ describe("findAccentStripes", () => {
     expect(declarations(".a { border-inline-start-width: thick; }")).toHaveLength(1)
   })
 
+  it("follows CSS priority, ignores quoted text, and exempts only the declaration a reason sits beside", () => {
+    expect(
+      declarations(
+        ".card { border: 0; border-style: none none none solid !important; border-style: none; border-width: 4px; border-color: red; }"
+      )
+    ).toHaveLength(1)
+    expect(
+      declarations(
+        ".card { border: 0; border-style: none none none solid; border-style: none; border-width: 4px; border-color: red; }"
+      )
+    ).toEqual([])
+    expect(declarations(".example::before { content: \"border-left: 4px solid red\"; }")).toEqual([])
+    expect(
+      declarations(
+        ".shape { border-inline-end: 2px solid currentcolor; /* stripe-ok: drawn chevron */ border-inline-start: 4px solid red; }"
+      )
+    ).toEqual(["border-inline-start: 4px solid red"])
+    expect(declarations(".shape { border-inline-end: 2px solid currentcolor; /* stripe-ok: drawn chevron */ }"))
+      .toEqual([])
+  })
+
   it("flags a thin coloured bar element, like ServiceMark's old rail, and allows neutral or horizontal lines", () => {
     expect(
       declarations(

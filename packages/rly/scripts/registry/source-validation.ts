@@ -447,12 +447,15 @@ const destructuredFallbacks = (
   const sourceFile = TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true)
   const implementation = componentImplementation(sourceFile, component)
   if (implementation.length === 0) return undefined
-  const fallbackOf = (initializer: TypeScript.Expression): Fallback =>
-    TypeScript.isStringLiteral(initializer)
+  const fallbackOf = (raw: TypeScript.Expression): Fallback => {
+    // Read through parentheses, `as`, `satisfies` and non-null wrappers to the literal or constant inside.
+    const initializer = unwrap(raw)
+    return TypeScript.isStringLiteral(initializer)
       ? { _tag: "Literal", value: initializer.text }
       : TypeScript.isPropertyAccessExpression(initializer) && TypeScript.isIdentifier(initializer.expression)
       ? { _tag: "Defaults", constant: initializer.expression.text, axis: initializer.name.text }
       : { _tag: "Unsupported", text: initializer.getText(sourceFile) }
+  }
   /** The binding for `prop` in a props pattern, aliased (`size: chosen = …`) or not. */
   const collect = (pattern: TypeScript.BindingName): void => {
     if (!TypeScript.isObjectBindingPattern(pattern)) return
@@ -605,6 +608,13 @@ const validateForwardedAxes = (
     // An axis with a local catalog is validateVariants' job.
     if ((local.axes.get(axis) ?? []).length > 0) continue
     for (const fallback of fallbacks) {
+      // A forwarded default the registry cannot read fails, as it does for a local catalog.
+      if (fallback._tag === "Unsupported") {
+        failures.push(
+          `component ${component.name} forwards ${axis} = ${fallback.text}, which the registry cannot check`
+        )
+        continue
+      }
       if (fallback._tag === "Literal" && fallback.value !== variant.defaultValue) {
         failures.push(
           `variant ${component.name}.${axis} defaults to ${variant.defaultValue} but source forwards ${fallback.value}`

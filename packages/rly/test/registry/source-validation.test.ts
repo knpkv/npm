@@ -266,6 +266,20 @@ describe("registry source validation", () => {
     expect(findRegistrySourceFailures(manifest(true, "compact"), focusedFiles)).toContain(
       "variant ThemeSelect.size defaults to compact but its owner RLY_SELECT_DEFAULT_VARIANTS defaults to dense"
     )
+    // A wrapped literal is read through; a computed default fails closed.
+    const themePath = themeSelect.source
+    const themeSource = focusedFiles.get(themePath) ?? ""
+    const withFallback = (fallback: string) =>
+      new Map([...focusedFiles, [
+        themePath,
+        themeSource.replace("size = RLY_SELECT_DEFAULT_VARIANTS.size", `size = ${fallback}`)
+      ]])
+    expect(findRegistrySourceFailures(manifest(true), withFallback("(\"compact\" as const)"))).toContain(
+      "variant ThemeSelect.size defaults to dense but source forwards compact"
+    )
+    expect(findRegistrySourceFailures(manifest(true), withFallback("pickSize()"))).toContain(
+      "component ThemeSelect forwards size = pickSize(), which the registry cannot check"
+    )
   })
 
   it("rejects a destructured fallback that disagrees with the declared default", () => {
