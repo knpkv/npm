@@ -60,6 +60,7 @@ describe("SSO logout", () => {
         return applyIdentityEvent(started, IdentityEvent.ResolutionFinished({ generation }))
       })
       yield* signInAfterLogin(
+        Effect.succeed(0),
         Effect.succeed({
           accountId: "111111111111",
           arn: "arn:aws:sts::111111111111:assumed-role/R/alice",
@@ -81,11 +82,38 @@ describe("SSO logout", () => {
       const refreshes = yield* Ref.make(0)
       // The lookup found no identity.
       const noIdentity: ResolvedIdentity | undefined = undefined
-      yield* signInAfterLogin(Effect.succeed(noIdentity), "alpha", state, Ref.update(refreshes, (n) => n + 1))
+      yield* signInAfterLogin(
+        Effect.succeed(0),
+        Effect.succeed(noIdentity),
+        "alpha",
+        state,
+        Ref.update(refreshes, (n) => n + 1)
+      )
       expect((yield* SubscriptionRef.get(state)).identityLifecycle?.generation).toBe(before + 1)
       // The login may have changed the principal, so the old identity and current user are not kept.
       expect((yield* SubscriptionRef.get(state)).callerIdentities?.["alpha"]).toBeUndefined()
       expect((yield* SubscriptionRef.get(state)).currentUser).toBeUndefined()
       expect(yield* Ref.get(refreshes)).toBe(1)
+    }))
+
+  it.effect("changes nothing and does not refresh when the login exits non-zero", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make(signedIn())
+      const refreshes = yield* Ref.make(0)
+      const lookups = yield* Ref.make(0)
+      const exit = yield* Effect.exit(
+        signInAfterLogin(
+          Effect.succeed(1),
+          Ref.update(lookups, (n) => n + 1).pipe(
+            Effect.as({ accountId: "1", arn: "arn:aws:sts::1:assumed-role/R/x", username: "x" })
+          ),
+          "alpha",
+          state,
+          Ref.update(refreshes, (n) => n + 1)
+        )
+      )
+      expect(Exit.isFailure(exit)).toBe(true)
+      expect(yield* SubscriptionRef.get(state)).toEqual(signedIn())
+      expect([yield* Ref.get(lookups), yield* Ref.get(refreshes)]).toEqual([0, 0])
     }))
 })

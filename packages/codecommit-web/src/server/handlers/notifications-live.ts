@@ -44,18 +44,23 @@ export const signOutAfter = <E, R>(
     )
   )
 
+/** `aws sso login` exited non-zero, so nothing was signed in. */
+export class SsoLoginFailedError extends Data.TaggedError("SsoLoginFailedError")<{ readonly exitCode: number }> {}
+
 /**
- * After a successful `aws sso login`: sign in with the looked-up identity, if any, then refresh. Signing in
+ * Run a login; when it exits 0, sign in with the looked-up identity, if any, then refresh. Signing in
  * makes the refresh in flight stale, including its end, so only a fresh refresh resolves the other
- * accounts and finishes the first resolution.
+ * accounts and finishes the first resolution. A non-zero exit fails instead and changes nothing.
  */
-export const signInAfterLogin = <R>(
-  lookup: Effect.Effect<ResolvedIdentity | undefined, never, R>,
+export const signInAfterLogin = <E, R, R2>(
+  login: Effect.Effect<number, E, R>,
+  lookup: Effect.Effect<ResolvedIdentity | undefined, never, R2>,
   profile: string,
   state: SubscriptionRef.SubscriptionRef<AppState>,
   refresh: Effect.Effect<void>
 ) =>
-  lookup.pipe(
+  login.pipe(
+    Effect.flatMap((code) => code === 0 ? lookup : Effect.fail(new SsoLoginFailedError({ exitCode: code }))),
     // Even without an identity the session changed, so the sign-in still makes in-flight work stale.
     Effect.flatMap((identity) => SubscriptionRef.update(state, (s) => signInState(s, profile, identity))),
     Effect.andThen(refresh)
@@ -108,24 +113,21 @@ export const NotificationsLive = HttpApiBuilder.group(
             })
             yield* Effect.forkIn(
               ssoSemaphore.withPermits(1)(
-                exitCode(cmd).pipe(
-                  Effect.timeout(SSO_TIMEOUT),
-                  Effect.tap(() =>
-                    signInAfterLogin(
-                      Effect.gen(function*() {
-                        const state = yield* SubscriptionRef.get(prService.state)
-                        const account = state.accounts.find((a) => a.profile === payload.profile)
-                        const region = account?.region ?? Schema.decodeSync(AwsRegion)("us-east-1")
-                        // The login itself succeeded; without an identity the refresh resolves it.
-                        return yield* awsClient.getCallerIdentity({ profile: payload.profile, region }).pipe(
-                          Effect.orElseSucceed(() => undefined)
-                        )
-                      }),
-                      payload.profile,
-                      prService.state,
-                      prService.refresh
+                signInAfterLogin(
+                  exitCode(cmd).pipe(Effect.timeout(SSO_TIMEOUT)),
+                  Effect.gen(function*() {
+                    const state = yield* SubscriptionRef.get(prService.state)
+                    const account = state.accounts.find((a) => a.profile === payload.profile)
+                    const region = account?.region ?? Schema.decodeSync(AwsRegion)("us-east-1")
+                    // The login itself succeeded; without an identity the refresh resolves it.
+                    return yield* awsClient.getCallerIdentity({ profile: payload.profile, region }).pipe(
+                      Effect.orElseSucceed(() => undefined)
                     )
-                  ),
+                  }),
+                  payload.profile,
+                  prService.state,
+                  prService.refresh
+                ).pipe(
                   // The sign-in and refresh above already ran, so a notification that fails to persist
                   // cannot skip them.
                   Effect.tap(() =>
