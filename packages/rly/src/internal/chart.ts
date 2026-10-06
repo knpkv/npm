@@ -70,9 +70,8 @@ export const chooseBinSize = (width: number, columns: ReadonlyArray<RlyChartColu
   if (columns.length === 0) return 1
   const preferred = BIN_SIZES.find((size) => narrowestBar(columns, size, width) >= minBar)
   if (preferred !== undefined) return preferred
-  // Whole days from an estimate of the bars that fit, stepping up only while a bar is still too narrow.
-  const bars = Math.max(1, Math.floor(width / minBar))
-  for (let days = Math.max(2, Math.floor(columns.length / bars / DAY)); days * DAY < columns.length; days += 1) {
+  // Whole days, smallest first, so the finest size that keeps every bar wide enough wins.
+  for (let days = 2; days * DAY < columns.length; days += 1) {
     if (narrowestBar(columns, days * DAY, width) >= minBar) return days * DAY
   }
   return columns.length

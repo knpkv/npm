@@ -58,6 +58,25 @@ describe("chart model", () => {
     expect(binColumns(uneven, 2)).toHaveLength(1)
   })
 
+  it("picks the finest whole-day bin whose every bar is wide enough, never an estimate above it", () => {
+    const day = 24
+    const narrowest = (columns: ReadonlyArray<RlyChartColumn>, size: number, width: number): number => {
+      const span = (columns.at(-1)?.end ?? 0) - (columns[0]?.start ?? 0)
+      return Math.min(...binColumns(columns, size).map((bin) => ((bin.end - bin.start) / span) * width))
+    }
+    const cases: ReadonlyArray<readonly [width: number, columns: number]> = [
+      [320, 2000],
+      [200, 1500],
+      [480, 4000]
+    ]
+    for (const [width, count] of cases) {
+      const columns = hourly(count)
+      const size = chooseBinSize(width, columns)
+      expect(narrowest(columns, size, width)).toBeGreaterThanOrEqual(6)
+      if (size > 2 * day && size < count) expect(narrowest(columns, size - day, width)).toBeLessThan(6)
+    }
+  })
+
   it("turns each bin's total into a rate per nominal bin, so a folded bin is not taller for holding more time", () => {
     const columns = hourly(25)
     const bins = binColumns(columns, 2)

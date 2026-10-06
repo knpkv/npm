@@ -146,39 +146,42 @@ const day = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short"
 
 // Each band's intervals as rows: the levels the bands draw, with when each starts and ends.
 const BandTable = () => (
-  <table style={{ borderCollapse: "collapse", fontVariantNumeric: "tabular-nums" }}>
-    <caption style={{ textAlign: "start" }}>Limit levels over time</caption>
-    <thead>
-      <tr>
-        <th scope="col" style={headStyle}>
-          Limit
-        </th>
-        <th scope="col" style={headStyle}>
-          From
-        </th>
-        <th scope="col" style={headStyle}>
-          To
-        </th>
-        <th scope="col" style={cellStyle}>
-          Level
-        </th>
-      </tr>
-    </thead>
-    <tbody>
-      {bands.flatMap((band) =>
-        band.segments.map((segment) => (
-          <tr key={`${band.id}:${segment.from}`}>
-            <th scope="row" style={headStyle}>
-              {band.label}
-            </th>
-            <td style={headStyle}>{day.format(segment.from)}</td>
-            <td style={headStyle}>{day.format(segment.to)}</td>
-            <td style={cellStyle}>{segment.level === null ? "No reading" : `${segment.level}%`}</td>
-          </tr>
-        ))
-      )}
-    </tbody>
-  </table>
+  // Scrolls inside its own box at phone widths instead of widening the page, like the daily table.
+  <div aria-label="Limit levels table" role="region" style={{ overflowX: "auto" }} tabIndex={0}>
+    <table style={{ borderCollapse: "collapse", fontVariantNumeric: "tabular-nums" }}>
+      <caption style={{ textAlign: "start" }}>Limit levels over time</caption>
+      <thead>
+        <tr>
+          <th scope="col" style={headStyle}>
+            Limit
+          </th>
+          <th scope="col" style={headStyle}>
+            From
+          </th>
+          <th scope="col" style={headStyle}>
+            To
+          </th>
+          <th scope="col" style={cellStyle}>
+            Level
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {bands.flatMap((band) =>
+          band.segments.map((segment) => (
+            <tr key={`${band.id}:${segment.from}`}>
+              <th scope="row" style={headStyle}>
+                {band.label}
+              </th>
+              <td style={headStyle}>{day.format(segment.from)}</td>
+              <td style={headStyle}>{day.format(segment.to)}</td>
+              <td style={cellStyle}>{segment.level === null ? "No reading" : `${segment.level}%`}</td>
+            </tr>
+          ))
+        )}
+      </tbody>
+    </table>
+  </div>
 )
 
 // The selected span's spend per booking, so arrowing through the plot reaches each period's numbers.
@@ -295,6 +298,17 @@ export const Week: Story = {
       1 + bands.reduce((sum, band) => sum + band.segments.length, 0)
     )
     await expect(within(levels).getByText("No reading")).toBeVisible()
+    // The scale caption lets a click through to the bar under it.
+    const caption = canvasElement.querySelector<HTMLElement>("[class*='scale']")
+    if (caption !== null) {
+      const box = caption.getBoundingClientRect()
+      const hit = canvasElement.ownerDocument.elementFromPoint(box.left + 4, box.top + box.height / 2)
+      await expect(caption.contains(hit)).toBe(false)
+    }
+    // Both tables scroll inside their own boxes, so the page never scrolls sideways.
+    await expect(canvasElement.ownerDocument.documentElement.scrollWidth).toBeLessThanOrEqual(
+      canvasElement.ownerDocument.documentElement.clientWidth
+    )
   },
   render: () => <Chart columns={week} />
 }
