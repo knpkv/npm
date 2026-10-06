@@ -1554,9 +1554,13 @@ export const componentManifest = {
     {
       category: "pattern",
       exports: [
+        { kind: "value", name: "TimelineProvenanceKey" },
         { kind: "value", name: "TimelineRow" },
         { kind: "type", name: "RlyTimelineActorKind" },
         { kind: "type", name: "RlyTimelineEvent" },
+        { kind: "type", name: "RlyTimelineProvenance" },
+        { kind: "type", name: "RlyTimelineProvenanceKind" },
+        { kind: "type", name: "TimelineProvenanceKeyProps" },
         { kind: "type", name: "TimelineRowProps" }
       ],
       name: "TimelineRow",
@@ -1567,6 +1571,7 @@ export const componentManifest = {
       styles: ["src/patterns/TimelineRow.module.css"],
       variants: [],
       visual: {
+        coverageStoryIds: ["patterns-timelinerow--provenance"],
         story: "stories/patterns/TimelineRow.stories.tsx",
         storyId: "patterns-timelinerow--actor-kinds",
         tests: ["test/patterns/TimelineRow.test.tsx"]

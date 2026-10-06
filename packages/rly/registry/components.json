@@ -5275,7 +5275,7 @@
         "storyId": "patterns-timelinerow--actor-kinds",
         "storyPath": "?path=/story/patterns-timelinerow--actor-kinds"
       },
-      "example": "import { TimelineRow } from \"@knpkv/rly/patterns\"",
+      "example": "import { TimelineProvenanceKey } from \"@knpkv/rly/patterns\"",
       "exports": [
         {
           "kind": "type",
@@ -5284,6 +5284,22 @@
         {
           "kind": "type",
           "name": "RlyTimelineEvent"
+        },
+        {
+          "kind": "type",
+          "name": "RlyTimelineProvenance"
+        },
+        {
+          "kind": "type",
+          "name": "RlyTimelineProvenanceKind"
+        },
+        {
+          "kind": "value",
+          "name": "TimelineProvenanceKey"
+        },
+        {
+          "kind": "type",
+          "name": "TimelineProvenanceKeyProps"
         },
         {
           "kind": "value",
@@ -5309,15 +5325,19 @@
       "props": {
         "defaults": {},
         "types": [
+          "TimelineProvenanceKeyProps",
           "TimelineRowProps"
         ]
       },
       "purpose": "Present one attributable human, agent, system, or service event",
-      "slots": [],
+      "slots": [
+        "TimelineProvenanceKey"
+      ],
       "states": [
         "agent",
         "default",
         "human",
+        "provenance",
         "service",
         "system"
       ],

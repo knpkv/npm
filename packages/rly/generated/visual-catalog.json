@@ -963,7 +963,8 @@
       },
       "storyId": "patterns-timelinerow--actor-kinds",
       "storyIds": [
-        "patterns-timelinerow--actor-kinds"
+        "patterns-timelinerow--actor-kinds",
+        "patterns-timelinerow--provenance"
       ]
     },
     {
