@@ -1,4 +1,9 @@
-import { loopbackOrigin, resolvePublicOrigin, UnsafeLoopbackAddressError } from "@knpkv/browser-pairing/owner-session"
+import {
+  loopbackOrigin,
+  requireLoopbackOrigin,
+  resolvePublicOrigin,
+  UnsafeLoopbackAddressError
+} from "@knpkv/browser-pairing/owner-session"
 import { Effect } from "effect"
 
 /** Resolve the advertised origin for one concrete server bind attempt. */
@@ -21,13 +26,16 @@ export const resolveCodeCommitPublicOriginForBind = Effect.fn("CodeCommitServer.
     authorityOrigin: string
   ) {
     const originOverride = requestedPort === actualPort ? configuredOrigin : undefined
+    // Compare canonical origins: `http://localhost:3000/` is the server's own origin, not a proxy.
+    const advertised = yield* resolvePublicOrigin(originOverride, authorityOrigin)
+    const authority = yield* requireLoopbackOrigin(authorityOrigin)
     const proxyTarget = loopbackOrigin("127.0.0.1", actualPort)
-    if (originOverride !== undefined && originOverride !== authorityOrigin && authorityOrigin !== proxyTarget) {
+    if (advertised !== authority && authority !== proxyTarget) {
       return yield* new UnsafeLoopbackAddressError({
-        address: originOverride,
-        message: `The dev proxy forwards to ${proxyTarget}; it cannot reach a server bound at ${authorityOrigin}`
+        address: advertised,
+        message: `The dev proxy forwards to ${proxyTarget}; it cannot reach a server bound at ${authority}`
       })
     }
-    return yield* resolvePublicOrigin(originOverride, authorityOrigin)
+    return advertised
   }
 )

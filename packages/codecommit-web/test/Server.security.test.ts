@@ -487,6 +487,10 @@ describe("CodeCommit web security boundary", () => {
         resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3000, "http://localhost:3000")
       )
       expect(Result.isFailure(proxyForLocalhost) && proxyForLocalhost.failure._tag).toBe("UnsafeLoopbackAddressError")
+      // The server's own origin in another spelling is still its own origin, not a proxy.
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://LOCALHOST:3000/", 3000, 3000, "http://localhost:3000")
+      ).toBe("http://localhost:3000")
       // `--hostname localhost` advertises the host it was asked to bind, not 127.0.0.1.
       expect(yield* resolveCodeCommitPublicOriginForBind(undefined, 3000, 3000, "http://localhost:3000")).toBe(
         "http://localhost:3000"
