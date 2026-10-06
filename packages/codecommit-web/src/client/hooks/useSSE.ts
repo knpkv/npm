@@ -25,7 +25,8 @@ import {
   AwsRegion,
   CallerIdentities,
   PullRequest,
-  PullRequestStatus
+  PullRequestStatus,
+  UnevaluatedPullRequest
 } from "@knpkv/codecommit-core/Domain.js"
 import { Effect, Schema } from "effect"
 import { useEffect, useRef, useState } from "react"
@@ -122,6 +123,7 @@ const SsePayload = Schema.Struct({
   currentUser: Schema.optional(Schema.String),
   // Declared here too: a field missing from this client schema is silently dropped.
   callerIdentities: Schema.optional(CallerIdentities),
+  unevaluatedPullRequests: Schema.optional(Schema.Array(UnevaluatedPullRequest)),
   unreadNotificationCount: Schema.optional(Schema.Number),
   notifications: Schema.optional(Schema.Struct({
     items: Schema.Array(NotificationWire),
@@ -167,6 +169,8 @@ const toAppState = (payload: typeof SsePayload.Type): AppState => {
     ...((payload.lastUpdated !== undefined) && { lastUpdated: payload.lastUpdated }),
     ...((payload.currentUser !== undefined) && { currentUser: payload.currentUser }),
     ...((payload.callerIdentities !== undefined) && { callerIdentities: payload.callerIdentities }),
+    ...((payload.unevaluatedPullRequests !== undefined) &&
+      { unevaluatedPullRequests: payload.unevaluatedPullRequests }),
     ...((payload.unreadNotificationCount !== undefined) &&
       { unreadNotificationCount: payload.unreadNotificationCount }),
     ...((notifications !== undefined) && { notifications }),

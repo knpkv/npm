@@ -67,6 +67,11 @@ export interface AppState {
    * `Resolved` identity; absent, a missing key, or `Unresolved` means membership is unknown.
    */
   readonly callerIdentities?: Domain.CallerIdentities
+  /**
+   * Pull requests the last refresh kept from cache because their approval rules failed to
+   * evaluate; their approval state may be out of date. Absent before the first refresh.
+   */
+  readonly unevaluatedPullRequests?: ReadonlyArray<Domain.UnevaluatedPullRequest>
   readonly unreadNotificationCount?: number
   readonly notifications?: {
     readonly items: ReadonlyArray<NotificationItem>

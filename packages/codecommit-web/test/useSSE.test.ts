@@ -119,3 +119,23 @@ describe("SSE caller identities", () => {
     expect(state.callerIdentities).toEqual(callerIdentities)
   })
 })
+
+describe("SSE unevaluated pull requests", () => {
+  it("keeps the pull requests a refresh could not re-evaluate from the wire snapshot", () => {
+    const unevaluatedPullRequests = [{
+      profile: "alpha",
+      region: "eu-west-1",
+      pullRequestId: "8",
+      repositoryName: "payments",
+      message: "EvaluatePullRequestApprovalRules failed for pull request 8: not authorized"
+    }]
+    const state = decodeSseState(JSON.stringify({
+      pullRequests: [],
+      accounts: [],
+      status: "idle",
+      unevaluatedPullRequests
+    }))
+
+    expect(state.unevaluatedPullRequests).toEqual(unevaluatedPullRequests)
+  })
+})

@@ -650,14 +650,17 @@ export type CallerIdentities = typeof CallerIdentities.Type
  *
  * @category Domain
  */
-export interface UnevaluatedPullRequest {
-  readonly profile: AwsProfileName
-  readonly region: AwsRegion
-  readonly pullRequestId: string
-  readonly repositoryName: string
+export const UnevaluatedPullRequest = Schema.Struct({
+  profile: AwsProfileName,
+  region: AwsRegion,
+  pullRequestId: Schema.String,
+  repositoryName: Schema.String,
   /** Names the failed operation and the provider's reason. */
-  readonly message: string
-}
+  message: Schema.String
+})
+
+/** @category Domain */
+export type UnevaluatedPullRequest = typeof UnevaluatedPullRequest.Type
 
 /**
  * Application state.
