@@ -182,7 +182,7 @@ const WorkbenchHarness = ({
   const [layout, setLayout] = useState<RlyDiffLayout>(presentation === "compact" ? "stacked" : "split")
   const [isWrapped, setIsWrapped] = useState(presentation === "compact")
   const [findingFilter, setFindingFilter] = useState<RlyDiffFindingFilter>("all")
-  const [notice, setNotice] = useState("3 renderable sources · 3 exceptional files remain visible")
+  const [notice, setNotice] = useState("3 renderable sources and 3 exceptional files remain visible")
   const visibleFindings = findings.filter((finding) => {
     if (findingFilter === "all") return true
     if (findingFilter === "unresolved") return finding.status === "open"
@@ -212,7 +212,7 @@ const WorkbenchHarness = ({
       header={
         <DiffHeader
           findingFilter={findingFilter}
-          heading="PR-184 · Payment retries"
+          heading="PR-184: Payment retries"
           indexedCount={6}
           isWrapped={isWrapped}
           layout={layout}
@@ -362,7 +362,7 @@ export const StaticFindingsOverflow: Story = {
           id: finding.id
         }))}
         findingsLabel="Historical findings"
-        header={<header>PR-184 · preserved review evidence</header>}
+        header={<header>PR-184: preserved review evidence</header>}
         inventory={<nav>Six changed files</nav>}
         label="Static findings keyboard review"
         scope={{ label: "All 6 changed files", mode: "all-files" }}

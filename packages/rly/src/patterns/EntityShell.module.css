@@ -65,7 +65,7 @@
   }
 
   .slotLabel {
-    color: var(--rly-color-text-2);
+    color: var(--rly-color-text-1);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     text-transform: uppercase;

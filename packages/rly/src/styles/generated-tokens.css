@@ -17,7 +17,7 @@
     --rly-color-action-foreground: light-dark(#FFFFFF, #17181B);
     --rly-color-focus: light-dark(#006DFF, #89B7FF);
     --rly-color-agent: light-dark(#6741A5, #BD9CF0);
-    --rly-color-success-ink: light-dark(#187A3A, #66D38B);
+    --rly-color-success-ink: light-dark(#16753A, #66D38B);
     --rly-color-success-tint: light-dark(#EAF6ED, #153222);
     --rly-color-blocked-ink: light-dark(#B42318, #FF8B82);
     --rly-color-blocked-tint: light-dark(#FDECEA, #3A1918);
@@ -149,7 +149,7 @@
     --rly-color-action-foreground: light-dark(#FFFFFF, #17181B);
     --rly-color-focus: light-dark(#006DFF, #89B7FF);
     --rly-color-agent: light-dark(#6741A5, #BD9CF0);
-    --rly-color-success-ink: light-dark(#187A3A, #66D38B);
+    --rly-color-success-ink: light-dark(#16753A, #66D38B);
     --rly-color-success-tint: light-dark(#EAF6ED, #153222);
     --rly-color-blocked-ink: light-dark(#B42318, #FF8B82);
     --rly-color-blocked-tint: light-dark(#FDECEA, #3A1918);
@@ -189,8 +189,8 @@
     --rly-color-text-3: CanvasText;
     --rly-color-border-1: ButtonBorder;
     --rly-color-border-2: ButtonBorder;
-    --rly-color-action-background: ButtonText;
-    --rly-color-action-foreground: ButtonFace;
+    --rly-color-action-background: ButtonFace;
+    --rly-color-action-foreground: ButtonText;
     --rly-color-focus: Highlight;
     --rly-color-agent: LinkText;
     --rly-color-success-ink: CanvasText;
@@ -229,8 +229,8 @@
     --rly-color-text-3: CanvasText;
     --rly-color-border-1: ButtonBorder;
     --rly-color-border-2: ButtonBorder;
-    --rly-color-action-background: ButtonText;
-    --rly-color-action-foreground: ButtonFace;
+    --rly-color-action-background: ButtonFace;
+    --rly-color-action-foreground: ButtonText;
     --rly-color-focus: Highlight;
     --rly-color-agent: LinkText;
     --rly-color-success-ink: CanvasText;

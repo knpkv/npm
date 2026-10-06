@@ -15,7 +15,7 @@ const proposal = {
     avatarFallback: "RA"
   },
   capability: "Start a production CodePipeline execution",
-  context: "Release v2.4.0 · Copper Finch · PR-184 · six Jira items",
+  context: "Release v2.4.0 · Copper Finch · PR-\u2060184 · six Jira items",
   evidence: [
     { id: "commit", label: "CodeCommit revision", reference: "8fa21c71af41ed69947f9b9f8c7cd4a8d614a760" },
     { id: "approval", label: "Jira approval", reference: "ENG-6307 / approval-119" }
@@ -105,9 +105,12 @@ export const CompactForcedColors: Story = {
     canvasElement.dataset.agentProposalCompactPlayComplete = "true"
   },
   render: (args): ReactElement => (
-    <main data-agent-proposal-compact="" style={{ ...pageStyle, ...narrowStyle }}>
-      <div style={stackStyle}>
-        <AgentProposal {...args} />
+    <main style={pageStyle}>
+      {/* The 320px slot sits inside the page padding, so the canary is 320px at every viewport. */}
+      <div data-agent-proposal-compact="" style={{ display: "grid", gap: "var(--rly-space-24)", ...narrowStyle }}>
+        <div style={stackStyle}>
+          <AgentProposal {...args} />
+        </div>
       </div>
     </main>
   )

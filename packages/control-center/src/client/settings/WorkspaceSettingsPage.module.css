@@ -32,8 +32,9 @@
 }
 
 .notice {
-  border-left: 2px solid var(--rly-color-border-2);
-  padding-left: var(--rly-space-32);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
+  padding: var(--rly-space-12) var(--rly-space-16);
 }
 
 .governance {
@@ -82,7 +83,8 @@
 }
 
 .checkbox > span {
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .field > small {

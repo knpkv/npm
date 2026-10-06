@@ -147,7 +147,10 @@ export const ReleaseRelay = ({
       </span>
       <figcaption className={style("identity")}>
         <span className={style("codename")}>{visibleCodename}</span>
-        <span className={style("algorithm")}>Identity algorithm: {visibleAlgorithm}</span>
+        {/* Only the value is code; it stays on one line so an id never splits at its hyphen. */}
+        <span className={style("algorithm")}>
+          Identity algorithm: <code className={style("algorithmValue")}>{visibleAlgorithm}</code>
+        </span>
       </figcaption>
     </figure>
   )

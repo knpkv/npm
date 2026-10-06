@@ -151,7 +151,7 @@ test("keeps the six-file bird-eye review, people, and stale evidence visible", a
   await expect(workbench.locator("[data-rly-diff-finding-source='human']")).toHaveCount(1)
   await expect(workbench.locator("[data-rly-diff-finding-source='agent']")).toHaveCount(2)
   await expect(workbench.locator("[data-rly-diff-finding-anchor='stale']")).toHaveCount(1)
-  await expect(workbench.getByText("Agent finding · not an approval").first()).toBeVisible()
+  await expect(workbench.getByText("Agent finding, not an approval").first()).toBeVisible()
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("diff-workbench.png") })
 })
@@ -190,7 +190,7 @@ test("shows the complete 500-file inventory and compact forced-color states", as
   await expect(page.locator("[data-rly-diff-file-id='inventory-file-1']")).toBeVisible()
   await expect(page.locator("[data-rly-diff-file-id='inventory-file-500']")).toBeAttached()
   await expect(page.locator("[data-rly-catalog] pre")).toHaveCount(0)
-  await expect(page.getByText("500/500")).toBeVisible()
+  await expect(page.getByText("500 files", { exact: true })).toBeVisible()
 
   await page.setViewportSize({ height: 1_100, width: 320 })
   await page.goto(story("diff-difffiletree--compact-forced-colors", "active"))
@@ -247,4 +247,28 @@ test("turns the directory chevron toward the inline end, mirrored in right-to-le
     { angle: -45, expanded: "false", leftEdge: false },
     { angle: 45, expanded: "true", leftEdge: false }
   ])
+})
+
+test("split patch cells keep their add and remove signs in forced colours", async ({ page }) => {
+  const signs = () =>
+    page.evaluate(() => {
+      // Every distinct ::before across a column's code cells; context rows contribute "none".
+      const before = (selector: string) =>
+        [
+          ...new Set([...document.querySelectorAll(selector)].map((code) => getComputedStyle(code, "::before").content))
+        ].sort()
+      return {
+        added: before("[data-rly-patch-diff] tr td:nth-child(4) > code"),
+        removed: before("[data-rly-patch-diff] tr td:nth-child(2) > code")
+      }
+    })
+
+  await page.goto(story("diff-patchdiffview--split"))
+  await expect(page.locator("[data-rly-patch-diff] table")).toBeVisible()
+  expect(await signs()).toEqual({ added: ["none"], removed: ["none"] })
+
+  await page.emulateMedia({ forcedColors: "active" })
+  await page.goto(story("diff-patchdiffview--split", "active"))
+  await expect(page.locator("[data-rly-patch-diff] table")).toBeVisible()
+  expect(await signs()).toEqual({ added: ["\"+ \" / \"\"", "none"], removed: ["\"− \" / \"\"", "none"] })
 })

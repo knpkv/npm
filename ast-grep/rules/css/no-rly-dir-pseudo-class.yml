@@ -3,7 +3,7 @@
 id: no-rly-dir-pseudo-class
 language: css
 severity: error
-message: "rly stylesheets must not use :dir(); the build lowers it to a :lang() list"
+message: "Stylesheets must not use :dir(); the Vite build lowers it to a :lang() list"
 
 rule:
   kind: pseudo_class_selector
@@ -12,7 +12,7 @@ rule:
     regex: "(?i)^dir$"
 
 files:
-  - "packages/rly/src/**/*.css"
+  - "packages/*/src/**/*.css"
   - "packages/rly/stories/**/*.css"
 
 note: |

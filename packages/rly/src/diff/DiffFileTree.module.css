@@ -32,7 +32,6 @@
     overflow-wrap: break-word;
   }
 
-  .eyebrow,
   .notice,
   .empty,
   .error,
@@ -42,14 +41,10 @@
       var(--rly-type-meta-font);
   }
 
-  .eyebrow {
-    text-transform: uppercase;
-  }
-
   .count {
-    color: var(--rly-color-text-1);
-    font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / 0.8 var(--rly-type-page-title-font);
-    letter-spacing: var(--rly-type-page-title-tracking);
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
     white-space: nowrap;
   }
 
@@ -176,9 +171,8 @@
   .directoryName {
     font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
       var(--rly-type-code-font);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: break-word;
   }
 
   .directoryCount {
@@ -223,11 +217,11 @@
     min-inline-size: var(--rly-space-0);
   }
 
+  /* A path is the file's identity: it wraps after a slash (or, for one long name, inside it), never ellipsised. */
   .path,
   .previousPath {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: break-word;
   }
 
   .path {
@@ -266,10 +260,6 @@
   @container (max-width: 24rem) {
     .header {
       align-items: start;
-    }
-
-    .count {
-      font-size: var(--rly-type-section-title-size);
     }
 
     .file {

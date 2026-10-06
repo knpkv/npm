@@ -118,7 +118,7 @@ describe("DiffFileTree", () => {
     expect(tree?.querySelectorAll("[data-rly-diff-file-id]")).toHaveLength(500)
     expect(tree?.querySelector("[data-rly-diff-file-id='file-500']")?.textContent).toContain("feature-500.ts")
     expect(tree?.querySelectorAll("pre")).toHaveLength(0)
-    expect(tree?.textContent).toContain("500/500")
+    expect(tree?.textContent).toContain("500 files")
   })
 
   it("retains indexed paths during loading and error states", () => {

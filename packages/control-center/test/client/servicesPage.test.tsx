@@ -686,6 +686,24 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("AWS account Secondary account")
   })
 
+  it("offers one retry for a page-wide connection failure, not one per card", async () => {
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.reject(new Error("overview unavailable")),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(host.textContent).toContain("Connections unavailable")
+    expect(host.querySelectorAll("article")).toHaveLength(5)
+    expect(host.querySelectorAll("article button")).toHaveLength(0)
+    expect([...host.querySelectorAll("button")].filter((button) => button.textContent === "Try again")).toHaveLength(1)
+  })
+
   it("keeps every service visible while the authenticated overview is still loading", async () => {
     const transport: ConnectionTestTransport = {
       create: vi.fn(),
@@ -702,7 +720,9 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("Jira")
     expect(host.textContent).toContain("Confluence")
     expect(host.textContent).toContain("Clockify")
-    expect(host.textContent).toContain("Loading connections")
+    // Each card says it is loading in words; none offers an action until connections arrive.
+    expect(host.textContent?.match(/Loading/g)).toHaveLength(5)
+    expect(host.querySelectorAll("article button")).toHaveLength(0)
   })
 
   it("shows every available service before the browser is paired", async () => {

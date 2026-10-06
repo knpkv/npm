@@ -65,9 +65,15 @@
       var(--rly-type-meta-font);
   }
 
-  .state,
+  /* Severity is one word in its ink, the only colour in the finding. */
   .severity {
-    text-transform: uppercase;
+    font-weight: var(--rly-type-label-weight);
+  }
+  .severity[data-rly-diff-finding-severity="critical"] {
+    color: var(--rly-color-blocked-ink);
+  }
+  .severity[data-rly-diff-finding-severity="warning"] {
+    color: var(--rly-color-held-ink);
   }
 
   .body {
@@ -145,11 +151,9 @@
       var(--rly-type-meta-font);
   }
 
+  /* The enforcement layer is a code word, not a pill. */
   .prevention summary code {
-    border: 1px solid var(--rly-color-agent);
-    border-radius: var(--rly-radius-round);
-    color: var(--rly-color-agent);
-    padding: var(--rly-space-4) var(--rly-space-8);
+    color: var(--rly-color-text-1);
   }
 
   .prevention dl {
@@ -173,7 +177,7 @@
   }
 
   .prevention dt {
-    text-transform: uppercase;
+    color: var(--rly-color-text-2);
   }
 
   .prevention dd {
@@ -207,7 +211,7 @@
   }
 
   .anchorDetails dt {
-    text-transform: uppercase;
+    color: var(--rly-color-text-2);
   }
 
   .anchorDetails dd {

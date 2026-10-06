@@ -61,15 +61,18 @@ export const DiffHeader = ({
   return (
     <header {...props} className={classNames(style("root"), className)} data-rly-diff-layout={layout}>
       <section className={style("thesis")}>
-        <span className={style("eyebrow")}>Complete diff</span>
         <h1>{visibleHeading}</h1>
         <p>{selectedFileLabel === undefined ? "All changed files" : selectedFileLabel}</p>
       </section>
 
       <section aria-labelledby={progressId} className={style("progress")}>
+        {/* One line of words in the flow, never a display figure that can run over the title. */}
         <span className={style("progressCopy")} id={progressId}>
-          <strong>{indexedCount}</strong>
-          <span>of {totalCount} files indexed</span>
+          {totalCount === 0
+            ? "No files to index"
+            : indexedCount === totalCount
+              ? `All ${totalCount} files indexed`
+              : `${indexedCount} of ${totalCount} files indexed`}
         </span>
         <progress max={Math.max(totalCount, 1)} value={indexedCount} />
       </section>

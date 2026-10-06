@@ -2,7 +2,6 @@
   .root {
     background: var(--rly-color-surface-1);
     border: 1px solid var(--rly-color-border-1);
-    border-block-start: var(--rly-space-4) solid var(--rly-color-agent);
     border-radius: var(--rly-radius-group);
     container-type: inline-size;
     display: grid;

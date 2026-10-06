@@ -220,3 +220,51 @@ test("keeps the near mark two-toned over the empty track and over a full fill, i
     }
   }
 })
+
+test("keeps primary and pressed button labels readable in forced colours", async ({ page }) => {
+  await page.goto(story("primitives-button--states"))
+  // Scoped to the story: Storybook's own chrome has buttons too.
+  const primary = page.locator("#storybook-root :is([data-rly-button-variant='primary'], button[class*='primary'])")
+    .first()
+  await expect(primary).toBeVisible()
+  // A pressed secondary button, as a filter toggle would be.
+  await page.locator("#storybook-root button:not([class*='primary'])").first().evaluate((element) =>
+    element.setAttribute("aria-pressed", "true")
+  )
+  const pressed = page.locator("#storybook-root button[aria-pressed='true']").first()
+  const modes: ReadonlyArray<"none" | "active"> = ["none", "active"]
+  for (const forcedColors of modes) {
+    await page.emulateMedia({ forcedColors })
+    for (const button of [primary, pressed]) {
+      const [label, fill] = await button.evaluate((element) => [
+        getComputedStyle(element).color,
+        getComputedStyle(element).backgroundColor
+      ])
+      expect(label).not.toBe(fill)
+    }
+  }
+  // Filled variants opt out of adjustment: Chromium's Canvas backplate otherwise hides the label.
+  for (const button of [primary, pressed]) await expect(button).toHaveCSS("forced-color-adjust", "none")
+})
+
+test("keeps a primary icon button marked and readable in forced colours", async ({ page }) => {
+  await page.emulateMedia({ forcedColors: "active" })
+  await page.goto(story("primitives-iconbutton--states"))
+  const primary = page.locator("#storybook-root [data-icon-button-variant='primary']").first()
+  await expect(primary).toBeVisible()
+  const [label, fill] = await primary.evaluate((element) => [
+    getComputedStyle(element).color,
+    getComputedStyle(element).backgroundColor
+  ])
+  expect(label).not.toBe(fill)
+  await expect(primary).toHaveCSS("forced-color-adjust", "none")
+})
+
+test("keeps the selected toggle option marked in forced colours", async ({ page }) => {
+  await page.emulateMedia({ forcedColors: "active" })
+  await page.goto(story("primitives-togglegroup--interaction"))
+  const selected = page.locator("#storybook-root [role='radio'][data-state='checked']").first()
+  await expect(selected).toBeVisible()
+  await expect(selected).toHaveCSS("outline-style", "solid")
+  await expect(selected).toHaveCSS("outline-width", "2px")
+})
