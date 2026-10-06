@@ -17,13 +17,13 @@ import { useMemo } from "react"
 import { Link } from "react-router"
 import { pullRequestRowDecision, pullRequestRowTimeLabel, pullRequestRowTimestamp } from "./pr-row-presentation.js"
 import styles from "./review-queue.module.css"
-import { needsYourReview } from "./workbench-queue.js"
+import { type Caller, needsYourReview } from "./workbench-queue.js"
 
 interface PRRowProps {
   readonly pr: PullRequest
   readonly to: string
   readonly showUpdated?: boolean
-  readonly currentUser?: string | undefined
+  readonly caller: Caller
 }
 
 interface StatusPresentation {
@@ -50,8 +50,8 @@ const scoreClassName = (tier: ReturnType<typeof getScoreTier>): string => {
   }
 }
 
-export function PRRow({ currentUser, pr, showUpdated, to }: PRRowProps) {
-  const reviewRequested = needsYourReview(pr, currentUser)
+export function PRRow({ caller, pr, showUpdated, to }: PRRowProps) {
+  const reviewRequested = needsYourReview(pr, caller)
   const score: HealthScore | undefined = useMemo(
     () => Option.getOrUndefined(calculateHealthScore(pr, new Date())),
     [pr]

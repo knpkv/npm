@@ -39,6 +39,25 @@ describe("semantic token contract", () => {
     }
   })
 
+  it("orders eight distinct chart series plus a neutral remainder", () => {
+    const series = colorTokenSource.filter(({ purpose }) => purpose === "series")
+    expect(series.map(({ name }) => name)).toEqual([
+      "series-1",
+      "series-2",
+      "series-3",
+      "series-4",
+      "series-5",
+      "series-6",
+      "series-7",
+      "series-8",
+      "series-other"
+    ])
+    const css = renderTokenCss()
+    expect(css).toContain("--rly-color-series-1: light-dark(")
+    expect(new Set(series.map(({ light }) => light)).size).toBe(series.length)
+    expect(new Set(series.map(({ dark }) => dark)).size).toBe(series.length)
+  })
+
   it("keeps provenance and readiness in separate semantic groups", () => {
     const services = colorTokenSource.filter(({ name }) => name.startsWith("service-"))
     expect(services).toHaveLength(5)

@@ -44,6 +44,17 @@ export const COMPONENT_REGISTRY_METADATA = {
     "agent",
     "overlay"
   ]),
+  ChartLegend: registryMetadata("Say which colour is which series, a square swatch before each label", [
+    "series",
+    "other"
+  ], ["present", "explain"]),
+  LimitTrack: registryMetadata("Show how full a limit is, with a near mark, a projection, and a stale hatch", [
+    "near",
+    "full",
+    "projected",
+    "stale",
+    "unknown"
+  ], ["present", "measure"]),
   RelayDock: registryMetadata("Present one adapter-owned Relay thread in explicit page context", [
     "collapsed",
     "empty",
@@ -331,6 +342,14 @@ export const COMPONENT_REGISTRY_METADATA = {
     "system",
     "provenance"
   ], ["audit", "timeline"]),
+  TrackKey: registryMetadata(
+    "Explain the marks a set of limit tracks draws",
+    ["near", "projected", "stale", "unknown"],
+    [
+      "present",
+      "explain"
+    ]
+  ),
   Verdict: registryMetadata("State a release verdict with text, icon, and color-independent tone", [
     "caution",
     "critical",

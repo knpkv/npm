@@ -30,7 +30,7 @@ import { appStateAtom, notificationsSsoLogoutAtom, refreshAtom } from "../atoms/
 import { commandPaletteAtom } from "../atoms/ui.js"
 import { usePublishedBlockSize } from "../hooks/usePublishedBlockSize.js"
 import { queuePullRequests } from "../utils/queuePullRequests.js"
-import { yourReviewCount } from "./workbench-queue.js"
+import { callerOf, yourReviewCount } from "./workbench-queue.js"
 import styles from "./header.module.css"
 import { useTheme } from "./theme-provider.js"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.js"
@@ -102,7 +102,7 @@ export function Header() {
   const isLoading = state.status === "loading"
   const hasError = state.status === "error"
   const notifCount = state.unreadNotificationCount ?? 0
-  const reviewCount = useMemo(() => yourReviewCount(queuePullRequests(state), state.currentUser), [state])
+  const reviewCount = useMemo(() => yourReviewCount(queuePullRequests(state), callerOf(state)), [state])
   const activeSandboxCount = (state.sandboxes ?? []).filter(
     (sandbox) =>
       sandbox.status === "running" ||
