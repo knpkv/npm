@@ -336,3 +336,12 @@ export const addOversizedLegacyHandoffs = (database: DatabaseSync, count: number
   }
   database.exec("COMMIT")
 }
+
+/** Advances `legacyLane`'s claim one revision past its binding, as a lane that moved on after dispatch. */
+export const advanceLegacyClaim = (database: DatabaseSync): void => {
+  database.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?").run(
+    legacyLane.revision + 1,
+    JSON.stringify({ ...legacyLane, expectedRevision: legacyLane.revision, revision: legacyLane.revision + 1 }),
+    legacyLane.laneId
+  )
+}

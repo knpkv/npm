@@ -3032,15 +3032,21 @@ database.close()`,
       const concurrentDispatchRequestId = `dispatch:${concurrentHandoff.id}`
       const concurrentBinding = migrationBinding(
         concurrentDispatchRequestId,
+        // The concurrent dispatch claims the lane's next revision, as lane CAS requires.
         Schema.decodeUnknownSync(WorkLaneClaimed)({
           ...legacyClaim,
-          expectedRevision: legacyClaim.expectedRevision,
+          expectedRevision: legacyClaim.revision,
           goalId: concurrentHandoff.goalId,
           operationId: concurrentDispatchRequestId,
-          revision: legacyClaim.revision
+          revision: legacyClaim.revision + 1
         }),
         concurrentHandoff.occurredAt
       )
+      const concurrentClaim = {
+        ...legacyClaim,
+        expectedRevision: legacyClaim.revision,
+        revision: legacyClaim.revision + 1
+      }
       const writer = spawn(
         execPath,
         [
@@ -3051,9 +3057,12 @@ const database = new DatabaseSync(process.argv[1])
 const handoff = JSON.parse(process.argv[2])
 const expectedRevision = Number(process.argv[3])
 const binding = JSON.parse(process.argv[4])
+const claim = JSON.parse(process.argv[5])
 const dispatchRequestId = "dispatch:" + handoff.id
 const lineage = ["dispatch:lineage:" + handoff.id]
 database.exec("BEGIN IMMEDIATE")
+database.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?")
+  .run(claim.revision, JSON.stringify(claim), claim.laneId)
 database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
   .run(handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
 database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
@@ -3091,8 +3100,9 @@ database.exec("COMMIT")
 database.close()`,
           path,
           JSON.stringify(concurrentHandoff),
-          String(legacyClaim.expectedRevision),
-          JSON.stringify(concurrentBinding)
+          String(legacyClaim.revision),
+          JSON.stringify(concurrentBinding),
+          JSON.stringify(concurrentClaim)
         ],
         { stdio: ["ignore", "pipe", "pipe"] }
       )
@@ -3118,7 +3128,8 @@ database.close()`,
       const opened = yield* openScopedStore(path)
       const service = yield* makeWorkService(opened.store)
       expect(yield* service.currentClaim(legacyClaim.laneId)).toMatchObject({
-        value: { goalId: legacyClaim.laneId, operationId: legacyClaim.laneId, revision: 1 }
+        // The claim takes the lane its running binding recorded at the claim's revision.
+        value: { goalId: legacyClaim.laneId, operationId: concurrentDispatchRequestId, revision: 2 }
       })
       expect(yield* service.coordinatorHandoff(legacyHandoff.id)).toMatchObject({
         value: {

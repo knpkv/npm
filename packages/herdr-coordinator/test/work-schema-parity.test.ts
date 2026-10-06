@@ -19,7 +19,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import { isDeepStrictEqual } from "node:util"
-import { addOversizedLegacyHandoffs, writePreV2WorkFile } from "./fixtures/legacy-work.js"
+import { addOversizedLegacyHandoffs, advanceLegacyClaim, writePreV2WorkFile } from "./fixtures/legacy-work.js"
 
 // @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
@@ -192,6 +192,23 @@ const tableRows = (path: string): ReadonlyMap<string, ReadonlyArray<Schema.Json>
   }
 }
 
+const LaneClaimRow = Schema.Struct({
+  record: Schema.fromJsonString(Schema.Struct({
+    operationId: Schema.String,
+    revision: Schema.Number
+  }))
+})
+
+/** The migrated claim of `goal:legacy`. */
+const laneClaim = (path: string) => {
+  const database = new DatabaseSync(path)
+  try {
+    return rows(LaneClaimRow, database, "SELECT record FROM work_lane_claims WHERE lane_id = 'goal:legacy'")[0]?.record
+  } finally {
+    database.close()
+  }
+}
+
 const withRoot = <A, E, R>(use: (root: string) => Effect.Effect<A, E, R>) =>
   Effect.scoped(
     Effect.gen(function*() {
@@ -291,8 +308,7 @@ const legacyOwnership: Ownership = {
 const expectSameResult = (
   storePath: string,
   bridgePath: string,
-  ownership: Ownership = freshOwnership,
-  rowDivergences: ReadonlyArray<string> = []
+  ownership: Ownership = freshOwnership
 ) => {
   const store = objects(schemaSnapshot(storePath))
   const bridge = objects(schemaSnapshot(bridgePath))
@@ -304,15 +320,14 @@ const expectSameResult = (
   const rowMismatches = [...storeRows]
     .filter(([table, contents]) => bridgeRows.has(table) && !isDeepStrictEqual(bridgeRows.get(table), contents))
     .map(([table]) => table)
-  expect(rowMismatches).toEqual(rowDivergences)
+  expect(rowMismatches).toEqual([])
 }
 
 /** Copies `legacy` once per driver, opens each copy with its driver, and compares the results. */
 const migrateWithBoth = (
   root: string,
   legacy: string,
-  ownership: Ownership,
-  rowDivergences: ReadonlyArray<string> = []
+  ownership: Ownership
 ) =>
   Effect.gen(function*() {
     const storePath = join(root, "store.sqlite")
@@ -321,7 +336,10 @@ const migrateWithBoth = (
     copyFileSync(legacy, bridgePath)
     yield* drivers.store(storePath)
     yield* drivers.bridge(bridgePath)
-    expectSameResult(storePath, bridgePath, ownership, rowDivergences)
+    expectSameResult(storePath, bridgePath, ownership)
+    // A migrated file must also reopen: the first open alone skips current-schema checks.
+    yield* drivers.store(storePath)
+    yield* drivers.bridge(bridgePath)
   })
 
 describe("Work schema parity between WorkStore and the SQL bridge", () => {
@@ -389,40 +407,113 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
       })
     ))
 
-  // Known defect: both drivers migrate a pre-session claim with the lane id as
-  // its operation id, while the running binding's lane carries the dispatch's
-  // operation id at the same revision. The migration succeeds, but every later
-  // open, by either driver, rejects that binding. Flip when the migration keeps
-  // the bound operation id.
-  it.effect("cannot reopen a migrated pre-session file that has a running binding", () =>
+  it.effect("reopens a migrated pre-session file that has a running binding, in any driver order", () =>
     withRoot((root) =>
       Effect.gen(function*() {
         const legacy = join(root, "legacy.sqlite")
         writeFixture(legacy, writePreV2WorkFile)
-        const reopenFailures = {
-          bridge: {
-            failure: { _tag: "WorkStoreError", operation: "sql-work.initialize.current-agent-binding.lane-revision" }
-          },
-          store: {
-            failure: {
-              _tag: "WorkStoreError",
-              cause: { operation: "open.migrate.current-agent-binding.lane-revision" },
-              operation: "open.database"
-            }
-          }
+        const orders = {
+          "bridge then bridge": [drivers.bridge, drivers.bridge],
+          "bridge then store": [drivers.bridge, drivers.store],
+          "store then bridge": [drivers.store, drivers.bridge],
+          "store then store": [drivers.store, drivers.store]
         }
+        for (const [name, [first, second]] of Object.entries(orders)) {
+          const path = join(root, `${name.replaceAll(" ", "-")}.sqlite`)
+          copyFileSync(legacy, path)
+          yield* first(path)
+          yield* second(path)
+          // The claim takes the operation the running binding recorded for it.
+          expect(laneClaim(path), name).toMatchObject({ operationId: "dispatch:legacy-sol", revision: 1 })
+        }
+        // Production order: WorkStore migrates and stays open while the bridge initializes.
+        const held = join(root, "held.sqlite")
+        copyFileSync(legacy, held)
+        yield* whileStoreHolds(held, drivers.bridge(held))
+        yield* whileStoreHolds(held, drivers.bridge(held))
+      })
+    ))
+
+  it.effect("keeps the lane id as operation id when the claim moved past its binding", () =>
+    withRoot((root) =>
+      Effect.gen(function*() {
+        const legacy = join(root, "legacy.sqlite")
+        writeFixture(legacy, (database) => {
+          writePreV2WorkFile(database)
+          advanceLegacyClaim(database)
+        })
         for (const [name, open] of Object.entries(drivers)) {
           const path = join(root, `${name}.sqlite`)
           copyFileSync(legacy, path)
           yield* open(path)
-          expect(yield* Effect.result(open(path)), name).toMatchObject(
-            name === "store" ? reopenFailures.store : reopenFailures.bridge
-          )
+          yield* open(path)
+          expect(laneClaim(path), name).toMatchObject({ operationId: "goal:legacy", revision: 2 })
         }
-        // Production order hits the same rejection while WorkStore holds the file.
-        const held = join(root, "held.sqlite")
-        copyFileSync(legacy, held)
-        expect(yield* whileStoreHolds(held, Effect.result(drivers.bridge(held)))).toMatchObject(reopenFailures.bridge)
+      })
+    ))
+
+  it.effect("rejects a pre-session file whose claim two running bindings hold, leaving it unchanged", () =>
+    withRoot((root) =>
+      Effect.gen(function*() {
+        const legacy = join(root, "legacy.sqlite")
+        writeFixture(legacy, (database) => {
+          writePreV2WorkFile(database)
+          // One more running dispatch bound to the same lane at the same revision.
+          addOversizedLegacyHandoffs(database, 1)
+        })
+        const before = { rows: tableRows(legacy), schema: schemaSnapshot(legacy) }
+        const storePath = join(root, "store.sqlite")
+        const bridgePath = join(root, "bridge.sqlite")
+        copyFileSync(legacy, storePath)
+        copyFileSync(legacy, bridgePath)
+        expect(yield* Effect.result(drivers.store(storePath))).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            cause: { _tag: "WorkStoreError", operation: "open.migrate.lane-binding-ambiguous" },
+            operation: "open.database"
+          }
+        })
+        expect(yield* Effect.result(drivers.bridge(bridgePath))).toMatchObject({
+          failure: { _tag: "WorkStoreError", operation: "sql-work.initialize.lane-binding-ambiguous" }
+        })
+        for (const path of [storePath, bridgePath]) {
+          expect(schemaSnapshot(path), path).toEqual(before.schema)
+          expect(tableRows(path), path).toEqual(before.rows)
+        }
+      })
+    ))
+
+  it.effect("rejects a pre-session claim that disagrees with its running binding's lane, leaving it unchanged", () =>
+    withRoot((root) =>
+      Effect.gen(function*() {
+        const legacy = join(root, "legacy.sqlite")
+        writeFixture(legacy, (database) => {
+          writePreV2WorkFile(database)
+          // The binding recorded the lane in implementation; the claim says validation.
+          database.exec(`
+            UPDATE work_lane_claims SET record = json_set(record, '$.phase', 'validation')
+            WHERE lane_id = 'goal:legacy'
+          `)
+        })
+        const before = { rows: tableRows(legacy), schema: schemaSnapshot(legacy) }
+        const storePath = join(root, "store.sqlite")
+        const bridgePath = join(root, "bridge.sqlite")
+        copyFileSync(legacy, storePath)
+        copyFileSync(legacy, bridgePath)
+        expect(yield* Effect.result(drivers.store(storePath))).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            cause: { _tag: "WorkStoreError", operation: "open.migrate.lane-binding-mismatch" },
+            operation: "open.database"
+          }
+        })
+        expect(yield* Effect.result(drivers.bridge(bridgePath))).toMatchObject({
+          failure: { _tag: "WorkStoreError", operation: "sql-work.initialize.lane-binding-mismatch" }
+        })
+        for (const path of [storePath, bridgePath]) {
+          expect(schemaSnapshot(path), path).toEqual(before.schema)
+          expect(tableRows(path), path).toEqual(before.rows)
+        }
       })
     ))
 
@@ -431,9 +522,7 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
       Effect.gen(function*() {
         const legacy = join(root, "legacy.sqlite")
         writeFixture(legacy, writePreV2WorkFile)
-        // Known drift: when the lane-operation table already exists, WorkStore
-        // does not record an operation for the migrated claim; the bridge does.
-        yield* migrateWithBoth(root, legacy, legacyOwnership, ["work_lane_operation_totals", "work_lane_operations"])
+        yield* migrateWithBoth(root, legacy, legacyOwnership)
       })
     ))
 
@@ -446,11 +535,7 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
         writeFixture(current, writePreV2WorkFile)
         yield* drivers.store(current)
         writeFixture(current, (database) => {
-          // Point the claim at its binding's operation, as the bound lane recorded it;
-          // a migrated file is not reopenable otherwise (see the reopen case below).
           database.exec(`
-            UPDATE work_lane_claims SET operation_id = 'dispatch:legacy-sol',
-              record = json_set(record, '$.operationId', 'dispatch:legacy-sol');
             UPDATE work_decision_handoffs SET record = json_set(
               json_remove(record, '$.expectedRevision'), '$.version', 'herdr.work.decision.v1'
             );

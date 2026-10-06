@@ -46,6 +46,7 @@ import {
   workDispatchLineageContainedBy,
   workDispatchLineageEquivalent
 } from "./internal/decision-handoff-migration.js"
+import { resolveLegacyLaneClaim } from "./internal/legacy-lane-claim.js"
 import {
   WorkAgentBinding,
   type WorkAgentBinding as WorkAgentBindingType,
@@ -938,6 +939,15 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           )
         })
       }, { discard: true })
+      // Lanes the running bindings of legacy handoffs recorded; see resolveLegacyLaneClaim.
+      const legacyBindingLanes = legacyDecisions.flatMap((handoff) => {
+        const dispatch = legacyDispatches.find(({ handoffId }) => handoffId === handoff.id)
+        const binding = dispatch === undefined
+          ? undefined
+          : legacyBindings.find(({ request }) => request.dispatchRequestId === dispatch.dispatchRequestId)
+        return binding === undefined ? [] : [binding.lane]
+      })
+      const migratedClaims = legacyLanes.map((lane) => resolveLegacyLaneClaim(lane, legacyBindingLanes))
       if (
         legacyLanes.length > 0 || legacyDecisions.length > 0 ||
         !laneColumns.some(({ name }) => name === "goal_id") ||
@@ -948,8 +958,8 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           yield* sql`ALTER TABLE work_lane_claims ADD COLUMN operation_id TEXT`
           yield* sql`ALTER TABLE work_lane_claims ADD COLUMN phase TEXT`
           yield* Effect.forEach(
-            legacyLanes,
-            (lane) =>
+            migratedClaims,
+            ({ lane }) =>
               sql`UPDATE work_lane_claims SET goal_id = ${lane.goalId}, operation_id = ${lane.operationId},
                   phase = ${lane.phase}, record = ${JSON.stringify(lane)} WHERE lane_id = ${lane.laneId}`,
             { discard: true }
@@ -1378,6 +1388,21 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             operation: "sql-work.initialize.handoff-capacity"
           })
         }
+      }
+      // Reported after capacity, matching WorkStore.
+      const ambiguousClaims = migratedClaims.filter(({ _tag }) => _tag === "ambiguous")
+      if (ambiguousClaims.length > 0) {
+        return yield* new WorkStoreError({
+          cause: { claims: ambiguousClaims },
+          operation: "sql-work.initialize.lane-binding-ambiguous"
+        })
+      }
+      const mismatchedClaims = migratedClaims.filter(({ _tag }) => _tag === "mismatch")
+      if (mismatchedClaims.length > 0) {
+        return yield* new WorkStoreError({
+          cause: { claims: mismatchedClaims },
+          operation: "sql-work.initialize.lane-binding-mismatch"
+        })
       }
       if (
         metadataTablePresent &&
