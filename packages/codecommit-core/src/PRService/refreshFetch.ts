@@ -42,20 +42,20 @@ const credentialInvalidTags = new Set([
   "AuthFailure"
 ])
 
-const tagOf = (value: unknown, key: "_tag" | "errorTag"): string =>
+const tagOf = <Value>(value: Value, key: "_tag" | "errorTag"): string =>
   Predicate.hasProperty(value, key) && Predicate.isString(value[key]) ? value[key] : ""
 
 /**
- * Whether a refresh failure means the account's credentials no longer work, decided from its type: a
- * credential failure, or a provider error whose tag (or, for an error the provider client doesn't
- * know, whose wire tag) says the credentials are invalid.
+ * Whether a provider error says the credentials are invalid: its tag, or, for an error the provider
+ * client doesn't know, its wire tag.
  */
+const isCredentialInvalidCause = <Cause>(cause: Cause): boolean =>
+  credentialInvalidTags.has(tagOf(cause, "_tag")) ||
+  (tagOf(cause, "_tag") === "UnknownAwsError" && credentialInvalidTags.has(tagOf(cause, "errorTag")))
+
+/** Whether a refresh failure means the account's credentials no longer work, decided from its type. */
 const isAuthFailure = (error: AwsClientError): boolean =>
-  error._tag === "AwsCredentialError" ||
-  (error._tag === "AwsApiError" && (
-    credentialInvalidTags.has(tagOf(error.cause, "_tag")) ||
-    (tagOf(error.cause, "_tag") === "UnknownAwsError" && credentialInvalidTags.has(tagOf(error.cause, "errorTag")))
-  ))
+  error._tag === "AwsCredentialError" || (error._tag === "AwsApiError" && isCredentialInvalidCause(error.cause))
 
 const refreshAuthFailed: CallerIdentityState = { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }
 
@@ -141,6 +141,27 @@ export const fetchAndUpsertPRs = (params: {
         return next
       })
 
+    /**
+     * The account's credentials stopped working during this refresh: its resolved identity becomes
+     * RefreshAuthFailed, and currentUser goes if this account is where it came from. Skipped once a
+     * login or logout has moved the generation, since the failure then belongs to an older session.
+     */
+    const markAuthFailed = (profile: string) =>
+      SubscriptionRef.update(state, (current) => {
+        if ((current.identityGeneration ?? 0) !== generationAtStart) return current
+        // currentUser comes from the first enabled account; another account's failure leaves it.
+        const ownsCurrentUser = profile === enabledAccounts[0]?.profile
+        const { currentUser, ...rest } = current
+        return {
+          ...(!ownsCurrentUser && currentUser !== undefined && { currentUser }),
+          ...rest,
+          // Only a resolved identity becomes RefreshAuthFailed; an earlier lookup failure keeps its reason.
+          ...(rest.callerIdentities?.[profile]?._tag === "Resolved" && {
+            callerIdentities: { ...rest.callerIdentities, [profile]: refreshAuthFailed }
+          })
+        }
+      })
+
     const accountLabels = enabledAccounts.flatMap((a) => (a.regions ?? []).map((r) => `${a.profile}(${r})`))
     yield* SubscriptionRef.update(state, (s) => ({
       ...s,
@@ -179,23 +200,8 @@ export const fetchAndUpsertPRs = (params: {
                   profile: account.profile,
                   deduplicate: true
                 }).pipe(Effect.catch(() => Effect.void))
-                if (isAuthError) {
-                  // Typed first (credential failure, or a provider auth error), with the older text match as fallback.
-                  yield* SubscriptionRef.update(state, (current) => {
-                    if ((current.identityGeneration ?? 0) !== generationAtStart) return current
-                    // currentUser comes from the first enabled account; another account's failure leaves it.
-                    const ownsCurrentUser = account.profile === enabledAccounts[0]?.profile
-                    const { currentUser, ...rest } = current
-                    return {
-                      ...(!ownsCurrentUser && currentUser !== undefined && { currentUser }),
-                      ...rest,
-                      // Only a resolved identity becomes RefreshAuthFailed; an earlier lookup failure keeps its reason.
-                      ...(rest.callerIdentities?.[account.profile]?._tag === "Resolved" && {
-                        callerIdentities: { ...rest.callerIdentities, [account.profile]: refreshAuthFailed }
-                      })
-                    }
-                  })
-                }
+                // Typed first (credential failure, or a provider auth error), with the older text match as fallback.
+                if (isAuthError) yield* markAuthFailed(account.profile)
               })
             )
           })
@@ -236,6 +242,8 @@ export const fetchAndUpsertPRs = (params: {
       Stream.runForEach(({ awsAccountId, item, label, profile, region }) =>
         Effect.gen(function*() {
           if (item._tag === "EvaluationFailed") {
+            // An evaluation that failed because the credentials stopped working is an auth failure too.
+            if (isCredentialInvalidCause(item.error.cause)) yield* markAuthFailed(profile)
             // Only this pull request is unknown: its cached row stays as it was, the account's other
             // pull requests carry on, and the account's refresh counts as partial rather than successful.
             yield* Ref.update(unevaluated, (all) => [...all, {

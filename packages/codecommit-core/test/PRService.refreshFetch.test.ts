@@ -158,6 +158,66 @@ describe("fetchAndUpsertPRs", () => {
       })
   )
 
+  it.effect.each([
+    ["expired credentials", "expired", { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }],
+    ["a missing grant", "denied", "resolved"]
+  ])("handles an approval evaluation that fails with %s", ([, kind, expected]) =>
+    Effect.gen(function*() {
+      const resolved: CallerIdentityState = {
+        _tag: "Resolved",
+        accountId: "123456789012",
+        arn: "arn:aws:sts::123456789012:assumed-role/R/alice",
+        username: "alice"
+      }
+      const state = yield* SubscriptionRef.make<AppState>({
+        pullRequests: [],
+        accounts: [],
+        status: "loading",
+        currentUser: "alice",
+        callerIdentities: { "test-profile": resolved }
+      })
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequestRefresh: () =>
+            Stream.make({
+              _tag: "EvaluationFailed",
+              pullRequestId: "36",
+              repositoryName: "example-repository",
+              error: new ApprovalEvaluationError({
+                pullRequestId: "36",
+                revisionId: "revision-36",
+                cause: kind === "expired"
+                  ? new AwsErrors.ExpiredTokenException({
+                    message: "The security token included in the request is expired"
+                  })
+                  : new AwsErrors.AccessDeniedException({ message: "not authorized" })
+              })
+            })
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: "alice",
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+      expect((yield* SubscriptionRef.get(state)).callerIdentities?.["test-profile"])
+        .toEqual(expected === "resolved" ? resolved : expected)
+    }))
+
   // Production refresh failures are typed: an expired credential, or a provider auth error wrapped in AwsApiError.
   it.effect.each([
     ["an AwsCredentialError", "credential"],

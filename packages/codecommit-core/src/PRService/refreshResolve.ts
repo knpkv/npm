@@ -205,10 +205,16 @@ export const resolveAccounts = (state: PRState) =>
       firstAccount,
       firstRegion,
       {
-        clearCurrentUser: SubscriptionRef.update(state, ({ currentUser: _, ...rest }) =>
-          rest),
+        clearCurrentUser: SubscriptionRef.update(state, (s) => {
+          if (!unchangedSinceStart(s)) {
+            return s
+          }
+          const { currentUser: _, ...rest } = s
+          return rest
+        }),
         updateCurrentUser: (username) =>
-          SubscriptionRef.update(state, (s) => unchangedSinceStart(s) ? { ...s, currentUser: username } : s)
+          SubscriptionRef.update(state, (s) =>
+            unchangedSinceStart(s) ? { ...s, currentUser: username } : s)
       }
     ).pipe(Effect.flatMap(publish(firstAccount.profile)))
     yield* Effect.forEach(

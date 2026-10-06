@@ -6,7 +6,14 @@ import { PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../src/ConfigService/index.js"
 import { TuiConfig } from "../src/ConfigService/internal.js"
-import { type AppState, AwsProfileName, AwsRegion, type CallerIdentityState, signOutState } from "../src/Domain.js"
+import {
+  type AppState,
+  AwsProfileName,
+  AwsRegion,
+  type CallerIdentityState,
+  signInState,
+  signOutState
+} from "../src/Domain.js"
 import { AwsApiError, AwsCredentialError, AwsThrottleError } from "../src/Errors.js"
 import { resolveAccounts } from "../src/PRService/refreshResolve.js"
 
@@ -229,5 +236,46 @@ describe("resolveAccounts caller identities", () => {
       yield* Deferred.succeed(betaMayAnswer, undefined)
       yield* Fiber.join(resolving)
       expect((yield* SubscriptionRef.get(state)).callerIdentities?.["beta"]?._tag).toBe("Resolved")
+    }))
+
+  it.effect("does not let a lookup that fails after an SSO login clear the login's current user", () =>
+    Effect.gen(function*() {
+      const lookupStarted = yield* Deferred.make<void>()
+      const lookupMayFail = yield* Deferred.make<void>()
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "idle" })
+      const login = { accountId: "111111111111", arn: "arn:aws:sts::111111111111:assumed-role/R/new", username: "new" }
+      const failing = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getCallerIdentity: (account) =>
+            Deferred.succeed(lookupStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(lookupMayFail)),
+              Effect.andThen(
+                Effect.fail(new AwsCredentialError({ profile: account.profile, region, cause: "old session" }))
+              )
+            )
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([]) }),
+        Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
+        Layer.mock(ConfigService, {
+          load: Effect.succeed(
+            Schema.decodeSync(TuiConfig)({ accounts: [{ profile: "alpha", regions: ["us-east-1"], enabled: true }] })
+          ),
+          detectProfiles: Effect.succeed([])
+        })
+      )
+      // Test entry point: this case's own failing transport is provided once here.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      const resolving = yield* resolveAccounts(state).pipe(
+        Effect.provide(failing),
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* Deferred.await(lookupStarted)
+      yield* SubscriptionRef.update(state, (s) => signInState(s, "alpha", login))
+      yield* Deferred.succeed(lookupMayFail, undefined)
+      yield* Fiber.join(resolving)
+      const after = yield* SubscriptionRef.get(state)
+      expect(after.currentUser).toBe("new")
+      expect(after.callerIdentities?.["alpha"]).toEqual({ _tag: "Resolved", ...login })
     }))
 })
