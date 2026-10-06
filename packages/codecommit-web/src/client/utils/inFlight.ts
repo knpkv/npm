@@ -1,16 +1,28 @@
 /**
- * Share one in-flight request per key. While a request for a key is pending, asking again returns the
- * same promise instead of starting another, so overlapping triggers (a mount refresh, an approval-rule
- * change, the Refresh button) cannot cancel each other. Once it settles, the next ask starts fresh.
+ * One in-flight request per key.
+ *
+ * - `share`: while a request for the key is pending, return that same promise instead of starting
+ *   another, so overlapping triggers (a mount refresh, the Refresh button) cannot cancel each other.
+ * - `fresh`: after a change, a pending request may have read the old state, so wait for it and then
+ *   start a new one. Later `share` asks join the fresh request.
+ *
+ * Once a request settles, the next ask starts afresh.
  */
 export const makeInFlight = <A>() => {
   const pending = new Map<string, Promise<A>>()
-  return (key: string, run: () => Promise<A>): Promise<A> => {
-    const existing = pending.get(key)
-    if (existing !== undefined) return existing
-    const started = run().finally(() => pending.delete(key))
+  const track = (key: string, started: Promise<A>): Promise<A> => {
     pending.set(key, started)
+    void started.finally(() => {
+      if (pending.get(key) === started) pending.delete(key)
+    }).catch(() => {})
     return started
+  }
+  return {
+    share: (key: string, run: () => Promise<A>): Promise<A> => pending.get(key) ?? track(key, run()),
+    fresh: (key: string, run: () => Promise<A>): Promise<A> => {
+      const prior = pending.get(key)
+      return track(key, prior === undefined ? run() : prior.then(run, run))
+    }
   }
 }
 

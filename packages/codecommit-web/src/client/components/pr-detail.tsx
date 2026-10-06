@@ -918,11 +918,12 @@ export function PRDetail() {
   const refreshAccountId = pr === null ? accountId : reviewApiAccountId(pr)
   const refreshRepositoryName = pr === null ? (searchParams.get("repository") ?? undefined) : String(pr.repositoryName)
   const refreshRegion = pr === null ? (searchParams.get("region") ?? undefined) : String(pr.account.region)
+  // Keyed by the route, so the mount refresh and a later click share one request even after the
+  // loaded PR replaces the account id and coordinates the request uses. `fresh` waits for a pending
+  // request (it may have read the state before a change) and then reads again.
   const requestRefresh = useCallback(
-    (requestAccountId: string, id: string) =>
-      // Keyed by the route, so the mount refresh and a later click share one request even after the
-      // loaded PR replaces the account id and coordinates the request uses.
-      shareRefresh(refreshKey, () =>
+    (requestAccountId: string, id: string, policy: "share" | "fresh" = "share") =>
+      shareRefresh[policy](refreshKey, () =>
         refreshSingleWithResult({
           params: { awsAccountId: requestAccountId, prId: PullRequestId.make(id) },
           query:
@@ -1139,7 +1140,8 @@ export function PRDetail() {
   const refreshAfterApprovalMutation = useCallback(() => {
     if (refreshAccountId === undefined || refreshAccountId.length === 0 || prId === undefined || prId.length === 0)
       return
-    void requestRefresh(refreshAccountId, prId).then(
+    // A refresh already in flight may have read the rules before this change, so read again after it.
+    void requestRefresh(refreshAccountId, prId, "fresh").then(
       (refreshed) => invalidateReview(refreshed, false),
       () => {}
     )

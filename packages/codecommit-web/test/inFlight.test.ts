@@ -3,7 +3,7 @@ import { makeInFlight, pullRequestRefreshKey } from "../src/client/utils/inFligh
 
 describe("makeInFlight", () => {
   it("shares one pending request per key, and starts afresh once it settles", async () => {
-    const share = makeInFlight<string>()
+    const { share } = makeInFlight<string>()
     let started = 0
     let finish: (value: string) => void = () => {}
     const run = () => {
@@ -22,7 +22,7 @@ describe("makeInFlight", () => {
   })
 
   it("lets a failed request be retried", async () => {
-    const share = makeInFlight<string>()
+    const { share } = makeInFlight<string>()
     await expect(share("pr-44", () => Promise.reject(new Error("boom")))).rejects.toThrow("boom")
     await expect(share("pr-44", () => Promise.resolve("again"))).resolves.toBe("again")
   })
@@ -32,5 +32,26 @@ describe("makeInFlight", () => {
       .not.toBe(pullRequestRefreshKey("prod", "44", "payments", "eu-west-1"))
     expect(pullRequestRefreshKey("dev", "44", "payments", "eu-west-1"))
       .toBe(pullRequestRefreshKey("dev", "44", "payments", "eu-west-1"))
+  })
+
+  // After a change (an approval rule edit), a read already in flight may have read the old state.
+  it("starts a fresh request after the pending one, and lets later asks share the fresh one", async () => {
+    const { fresh, share } = makeInFlight<string>()
+    const calls: Array<string> = []
+    let finishOld: (value: string) => void = () => {}
+    const old = share("pr-44", () => {
+      calls.push("old")
+      return new Promise<string>((resolve) => (finishOld = resolve))
+    })
+    const after = fresh("pr-44", () => {
+      calls.push("fresh")
+      return Promise.resolve("new state")
+    })
+    expect(share("pr-44", () => Promise.resolve("never"))).toBe(after)
+    expect(calls).toEqual(["old"])
+    finishOld("old state")
+    await expect(old).resolves.toBe("old state")
+    await expect(after).resolves.toBe("new state")
+    expect(calls).toEqual(["old", "fresh"])
   })
 })
