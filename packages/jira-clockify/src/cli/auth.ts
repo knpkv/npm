@@ -57,8 +57,8 @@ const isRejectedKey = (error: HttpClientError.HttpClientError | Schema.SchemaErr
  * The account behind an API key: who it is and which workspaces it can use. An empty list is a real
  * answer; any failure is typed, so setup never reports "no workspaces" for a request that failed.
  */
-export const loadClockifyAccount = (client: ReturnType<typeof makeClockifyApi>) =>
-  Effect.gen(function*() {
+export const loadClockifyAccount = Effect.fn("ClockifyAuth.loadClockifyAccount")(
+  function*(client: ReturnType<typeof makeClockifyApi>) {
     const user = yield* client.getLoggedUser(undefined).pipe(
       Effect.flatMap(decodeClockifyUser),
       Effect.mapError((cause) =>
@@ -76,7 +76,8 @@ export const loadClockifyAccount = (client: ReturnType<typeof makeClockifyApi>) 
       )
     )
     return { user, workspaces }
-  })
+  }
+)
 
 // ---------------------------------------------------------------------------
 // Jira OAuth
@@ -252,9 +253,7 @@ export const clockifySetup = Command.make(
 
       yield* Console.log("")
       yield* Console.log("Clockify configured! Saved to ~/.jcf/clockify.json")
-    }).pipe(
-      Effect.catch((e) => Console.log(`Error: ${Predicate.hasProperty(e, "message") ? String(e.message) : String(e)}`))
-    )
+    })
 )
 
 const clockifyStatus = Command.make(

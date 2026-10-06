@@ -60,4 +60,17 @@ describe("generated workspace schema", () => {
       expect(workspace.featureSubscriptionType).toBe("FREE_2026")
       expect(workspace.features).toEqual(["TIME_TRACKING"])
     }))
+
+  it.effect.each([42, "oops", [], true])(
+    "rejects workspace settings that are not an object: %s",
+    (settings) =>
+      Effect.gen(function*() {
+        const failure = yield* Schema.decodeUnknownEffect(WorkspaceDtoV1)({
+          id: "workspace-1",
+          name: "Delivery",
+          workspaceSettings: settings
+        }).pipe(Effect.flip)
+        expect(failure._tag).toBe("SchemaError")
+      })
+  )
 })
