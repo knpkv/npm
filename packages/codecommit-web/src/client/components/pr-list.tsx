@@ -171,7 +171,13 @@ export function PRList() {
   const listContent = (() => {
     // Before the first snapshot only the connection is known; after it, the snapshot says why it's empty.
     if (sorted.length === 0) {
-      const cause = emptyQueueCause({ cachedPullRequests: prs.length, connection, enabledAccounts, snapshotSeen })
+      const cause = emptyQueueCause({
+        cachedPullRequests: prs.length,
+        connection,
+        detectedAccounts: appState.accounts.length,
+        enabledAccounts,
+        snapshotSeen
+      })
       switch (cause._tag) {
         case "Connecting":
           return (
@@ -218,6 +224,19 @@ export function PRList() {
               className={styles.queueState}
               description="Add an AWS profile that can read CodeCommit, and its open pull requests appear here."
               title="No AWS profiles yet"
+            />
+          )
+        case "NoneSwitchedOn":
+          return (
+            <StatePanel
+              action={
+                <Button onClick={() => navigate("/settings")} size="compact" variant="primary">
+                  Choose accounts
+                </Button>
+              }
+              className={styles.queueState}
+              description={`${String(cause.detected)} AWS ${cause.detected === 1 ? "profile was" : "profiles were"} found, but none is switched on.`}
+              title="No account is switched on"
             />
           )
         case "Filtered":
@@ -369,7 +388,7 @@ export function PRList() {
       </header>
 
       {/* Nothing to count until an account exists: no row of zeros on a first run. */}
-      {snapshotSeen && enabledAccounts === 0 ? null : (
+      {snapshotSeen && enabledAccounts === 0 && appState.pullRequests.length === 0 ? null : (
         <div aria-label="Pull request facets" className={styles.facets} role="group">
           {facets.map((facet) => (
             <button
@@ -406,7 +425,7 @@ export function PRList() {
         </div>
 
         {/* Search and filters only once there is something to search. */}
-        {snapshotSeen && enabledAccounts > 0 ? (
+        {snapshotSeen && (enabledAccounts > 0 || appState.pullRequests.length > 0) ? (
           <div className={styles.controls}>
             <SearchBar />
             <FilterSidebar />

@@ -23,9 +23,7 @@ export type StreamConnection =
   | { readonly _tag: "Failed"; readonly cause: string; readonly retryAt: number | null }
 
 /** What the probe after a stream error learned. */
-export type StreamProbe =
-  | { readonly _tag: "Status"; readonly status: number }
-  | { readonly _tag: "Unreachable" }
+export type StreamProbe = { readonly _tag: "Status"; readonly status: number } | { readonly _tag: "Unreachable" }
 
 /** The state after a stream error, given the probe and when the next try would start. */
 export const connectionAfterProbe = (probe: StreamProbe, retryAt: number | null): StreamConnection => {
@@ -61,8 +59,10 @@ export const connectionDetail = (connection: StreamConnection): string | null =>
     case "Live":
       return null
     case "Unauthenticated":
-      return connection.detail ??
-        "Run codecommit web again and open the link it prints; each link works once, within 60 seconds."
+      return (
+        connection.detail ??
+          "Run codecommit web again and open the link it prints; each link works once, within 60 seconds."
+      )
     case "Failed":
       return connection.retryAt === null ? `${connection.cause} Retries stopped.` : connection.cause
   }
@@ -83,6 +83,8 @@ export type EmptyQueueCause =
   | { readonly _tag: "Unauthenticated"; readonly detail: string }
   | { readonly _tag: "Failed"; readonly cause: string; readonly retrying: boolean }
   | { readonly _tag: "NoAccounts" }
+  /** Profiles were found, but every one is switched off. */
+  | { readonly _tag: "NoneSwitchedOn"; readonly detected: number }
   | { readonly _tag: "Filtered"; readonly cached: number }
   | { readonly _tag: "NothingOpen"; readonly accounts: number }
 
@@ -95,6 +97,7 @@ export const emptyQueueCause = (input: {
   readonly snapshotSeen: boolean
   readonly cachedPullRequests: number
   readonly enabledAccounts: number
+  readonly detectedAccounts: number
 }): EmptyQueueCause => {
   if (!input.snapshotSeen) {
     switch (input.connection._tag) {
@@ -108,6 +111,10 @@ export const emptyQueueCause = (input: {
     }
   }
   if (input.cachedPullRequests > 0) return { _tag: "Filtered", cached: input.cachedPullRequests }
-  if (input.enabledAccounts === 0) return { _tag: "NoAccounts" }
+  if (input.enabledAccounts === 0) {
+    return input.detectedAccounts > 0
+      ? { _tag: "NoneSwitchedOn", detected: input.detectedAccounts }
+      : { _tag: "NoAccounts" }
+  }
   return { _tag: "NothingOpen", accounts: input.enabledAccounts }
 }

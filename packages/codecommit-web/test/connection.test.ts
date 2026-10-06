@@ -52,35 +52,33 @@ describe("stream connection", () => {
 
 describe("empty queue cause", () => {
   const live: Parameters<typeof emptyQueueCause>[0]["connection"] = { _tag: "Live" }
+  const cause = (input: Partial<Parameters<typeof emptyQueueCause>[0]>) =>
+    emptyQueueCause({
+      cachedPullRequests: 0,
+      connection: live,
+      detectedAccounts: 0,
+      enabledAccounts: 0,
+      snapshotSeen: true,
+      ...input
+    })
 
   it("knows only the connection before the first snapshot, never 'no accounts'", () => {
-    expect(
-      emptyQueueCause({
-        cachedPullRequests: 0,
-        connection: { _tag: "Unauthenticated", detail: null },
-        enabledAccounts: 0,
-        snapshotSeen: false
-      })._tag
-    ).toBe("Unauthenticated")
-    expect(
-      emptyQueueCause({ cachedPullRequests: 0, connection: live, enabledAccounts: 0, snapshotSeen: false })._tag
-    ).toBe("Connecting")
+    expect(cause({ connection: { _tag: "Unauthenticated", detail: null }, snapshotSeen: false })._tag).toBe(
+      "Unauthenticated"
+    )
+    expect(cause({ snapshotSeen: false })._tag).toBe("Connecting")
   })
 
-  it("sends a first run with no accounts to setup, and an empty view to its filters", () => {
-    expect(emptyQueueCause({ cachedPullRequests: 0, connection: live, enabledAccounts: 0, snapshotSeen: true }))
-      .toEqual({
-        _tag: "NoAccounts"
-      })
-    expect(emptyQueueCause({ cachedPullRequests: 3, connection: live, enabledAccounts: 1, snapshotSeen: true }))
-      .toEqual({
-        _tag: "Filtered",
-        cached: 3
-      })
-    expect(emptyQueueCause({ cachedPullRequests: 0, connection: live, enabledAccounts: 2, snapshotSeen: true }))
-      .toEqual({
-        _tag: "NothingOpen",
-        accounts: 2
-      })
+  it("tells no profiles apart from profiles that are all switched off", () => {
+    expect(cause({})).toEqual({ _tag: "NoAccounts" })
+    expect(cause({ detectedAccounts: 3 })).toEqual({ _tag: "NoneSwitchedOn", detected: 3 })
+  })
+
+  it("sends an empty view to its filters, and otherwise says nothing is open", () => {
+    expect(cause({ cachedPullRequests: 3, detectedAccounts: 1, enabledAccounts: 1 })).toEqual({
+      _tag: "Filtered",
+      cached: 3
+    })
+    expect(cause({ detectedAccounts: 2, enabledAccounts: 2 })).toEqual({ _tag: "NothingOpen", accounts: 2 })
   })
 })
