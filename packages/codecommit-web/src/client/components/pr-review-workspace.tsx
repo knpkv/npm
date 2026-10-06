@@ -631,7 +631,7 @@ const ReviewFindings = ({
                   size="compact"
                   variant="primary"
                 >
-                  Accept · post
+                  Accept and post
                 </Button>
                 <button
                   disabled={
@@ -1512,7 +1512,7 @@ const ReadyReviewWorkspace = ({
               Diff
             </Text>
             <Text tone="secondary" variant="meta">
-              {diff.files.length} changed {diff.files.length === 1 ? "file" : "files"} · head{" "}
+              {diff.files.length} changed {diff.files.length === 1 ? "file" : "files"} at head{" "}
               {diff.headCommit.slice(0, 12)}
             </Text>
           </div>

@@ -314,7 +314,7 @@ export function PRList() {
           </Text>
           <Text aria-live="polite" tone="tertiary" variant="meta">
             {sorted.length} {sorted.length === 1 ? "result" : "results"}
-            {accountCount > 0 ? ` · ${accountCount} ${accountCount === 1 ? "AWS account" : "AWS accounts"}` : ""}
+            {accountCount > 0 ? `, ${accountCount} ${accountCount === 1 ? "AWS account" : "AWS accounts"}` : ""}
           </Text>
         </div>
 

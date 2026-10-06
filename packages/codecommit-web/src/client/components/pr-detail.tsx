@@ -223,12 +223,12 @@ const formatRelativeDate = (dateStr: string): string => {
   const abs = date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
   const diffMs = Date.now() - date.getTime()
   const diffMins = Math.floor(diffMs / 60_000)
-  if (diffMins < 1) return `${abs} · just now`
-  if (diffMins < 60) return `${abs} · ${diffMins}m ago`
+  if (diffMins < 1) return `${abs}, just now`
+  if (diffMins < 60) return `${abs}, ${diffMins}m ago`
   const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${abs} · ${diffHours}h ago`
+  if (diffHours < 24) return `${abs}, ${diffHours}h ago`
   const diffDays = Math.floor(diffHours / 24)
-  return `${abs} · ${diffDays}d ago`
+  return `${abs}, ${diffDays}d ago`
 }
 
 const earliestDate = (loc: { readonly comments: ReadonlyArray<CommentThreadJsonEncoded> }): number => {
@@ -1403,7 +1403,7 @@ export function PRDetail() {
             </RlyButton>
           </div>
           <Text tone="tertiary" variant="meta">
-            Enter or O opens CodeCommit · . opens the sandbox · Esc returns to the list
+            Enter or O opens CodeCommit. Period opens the sandbox. Esc returns to the list.
           </Text>
         </aside>
       </section>
