@@ -11,7 +11,9 @@
  *   exact action in the dock, `host` waits for a herdr Approval. The harness enforces the class; the
  *   product never sees an unconfirmed write.
  * - **A {@link RelayEvent} is the only thing the dock renders.** Every event carries the session and a
- *   monotonic `seq`. A dock that reconnects receives a `Snapshot` first and the events after it.
+ *   `seq` that counts up within one subscription. A dock that reconnects starts a new subscription: a
+ *   `Snapshot` first (with any run in flight and any pending confirmation), then live events. `seq` is not
+ *   comparable across subscriptions; render the Snapshot rather than deduplicating by `seq`.
  *
  * @module
  */
@@ -32,8 +34,8 @@ export const ObjectRef = Schema.Struct({
 })
 export interface ObjectRef extends Schema.Schema.Type<typeof ObjectRef> {}
 
-/** The key a session is stored under. Unique per product, kind and id. */
-export const objectRefKey = (ref: ObjectRef): string => `${ref.product}\u0000${ref.kind}\u0000${ref.id}`
+/** The key a session is stored under. Unique per product, kind and id: JSON-encoded, so no field can contain the separator. */
+export const objectRefKey = (ref: ObjectRef): string => JSON.stringify([ref.product, ref.kind, ref.id])
 
 /** How much a capability may do without a person deciding first. */
 export const CapabilityEffect = Schema.Literals(["read", "write", "host"])
@@ -99,7 +101,7 @@ const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 const eventFields = { session: Name, seq: Seq }
 
-/** Everything the dock renders. `seq` is monotonic per session; a reconnect starts from a `Snapshot`. */
+/** Everything the dock renders. `seq` counts up within one subscription; a reconnect starts from a `Snapshot`. */
 export const RelayEvent = Schema.TaggedUnion({
   Snapshot: {
     ...eventFields,

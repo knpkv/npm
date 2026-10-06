@@ -32,12 +32,13 @@ export type EffectRunner<Requirements> = <A, E>(
 
 /** The dock-facing side of the gate: ask a person about one call and wait for the answer. */
 export interface ConfirmationBroker {
+  /** Resolves with the person's answer; rejects when `signal` aborts (the run was cancelled). */
   readonly ask: (request: {
     readonly conversationId: string
     readonly callId: string
     readonly action: PendingAction
     readonly reversible: boolean
-  }) => Promise<boolean>
+  }, signal: AbortSignal | undefined) => Promise<boolean>
 }
 
 const decodeJson = Schema.decodeUnknownOption(Schema.Json)
@@ -100,7 +101,7 @@ export const relayExtension = <Requirements>(
           callId: call.id,
           action: action.value,
           reversible: capability.reversible
-        })
+        }, context.abortSignal)
         return api.memo(memoKey, allowed, context)
       })()
       return decision ? undefined : { block: declined(call.name) }

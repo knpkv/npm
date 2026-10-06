@@ -2,10 +2,11 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
-import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Schedule, Schema, Stream } from "effect"
+import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Predicate, Schedule, Schema, Stream } from "effect"
+import { AiError } from "effect/ai"
 import type { LanguageModel } from "effect/ai"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { defineCapability, layer, ObjectRef, register, RelayHarness } from "../src/index.js"
+import { defineCapability, layer, ObjectRef, objectRefKey, register, RelayHarness } from "../src/index.js"
 import type { RelayEvent } from "../src/index.js"
 import { relayModels, relayProvider } from "../src/piProvider.js"
 
@@ -83,7 +84,9 @@ const sendAndCollect = (
     const collecting = yield* Effect.forkChild(
       events.pipe(
         Stream.tap((event) => (event._tag === "Snapshot" ? Deferred.succeed(attached, undefined) : onEvent(event))),
-        Stream.takeUntil((event) => event._tag === "RunFinished" || event._tag === "RunFailed"),
+        Stream.takeUntil((event) =>
+          event._tag === "RunFinished" || event._tag === "RunFailed" || event._tag === "Cancelled"
+        ),
         Stream.runCollect
       )
     )
@@ -151,7 +154,8 @@ describe("RelayHarness", () => {
         Stream.takeUntil((event) => event._tag === "RunFinished"),
         Stream.runCollect
       )
-      expect(second.slice(0, 2).map((event) => event._tag)).toEqual(["Snapshot", "ConfirmationRequired"])
+      // The reconnecting dock sees the run as it stands: the waiting call, then its card.
+      expect(second.slice(0, 3).map((event) => event._tag)).toEqual(["Snapshot", "ToolStarted", "ConfirmationRequired"])
       expect(commentCalls).toEqual(["ship it"])
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
 
@@ -207,4 +211,154 @@ describe("crash safety", () => {
       expect(resumed).toContain("RESUMED_AND_ANSWERED")
       expect(yield* fs.readFileString(marker)).toBe("posted LGTM\n")
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)), 60_000)
+})
+
+/** A model whose turns come from `script`, in order; a string is an error with that text. */
+const scripted = (script: ReadonlyArray<string | { readonly reply: string }>) => {
+  let calls = 0
+  const model = makeDeterministicLanguageModel(() => {
+    const step = script[Math.min(calls, script.length - 1)] ?? "script is empty"
+    calls += 1
+    return Predicate.isString(step)
+      ? {
+        _tag: "failure",
+        failure: AiError.make({
+          method: "generateText",
+          module: "test",
+          reason: new AiError.UnknownError({ description: step })
+        })
+      }
+      : { _tag: "response", parts: [{ type: "text", text: JSON.stringify({ reply: step.reply, toolCalls: [] }) }] }
+  })
+  return { layer: model.layer, calls: () => calls }
+}
+
+describe("run outcomes", () => {
+  it.live("retries a transient backend failure on the live clock and finishes", () =>
+    Effect.gen(function*() {
+      const store = yield* tempStore
+      const model = scripted(["overloaded 503", { reply: "Back." }])
+      const relay = yield* relayIn(harnessLayer(model.layer, store))
+      const events = yield* sendAndCollect(relay.events(pr), relay.send(pr, "Hi", "req-retry")).pipe(
+        Effect.timeout("20 seconds")
+      )
+      expect(model.calls()).toBe(2)
+      expect(events.at(-1)?._tag).toBe("RunFinished")
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)), 30_000)
+
+  it.effect("reports a backend that can't answer as RunFailed with its cause", () =>
+    Effect.gen(function*() {
+      const store = yield* tempStore
+      const model = scripted(["SignedOut: sign in to Claude Code first"])
+      const relay = yield* relayIn(harnessLayer(model.layer, store))
+      const events = yield* sendAndCollect(relay.events(pr), relay.send(pr, "Hi", "req-fail"))
+      const last = events.at(-1)
+      expect(last?._tag).toBe("RunFailed")
+      expect(last?._tag === "RunFailed" && last.cause).toContain("sign in")
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("cancelling while a confirmation waits ends the run as Cancelled and withdraws the card", () =>
+    Effect.gen(function*() {
+      commentCalls.length = 0
+      const store = yield* tempStore
+      const model = toolThenAnswer("post_comment", { pr: "42", body: "never" })
+      const relay = yield* relayIn(harnessLayer(model.layer, store))
+      const events = yield* sendAndCollect(
+        relay.events(pr),
+        relay.send(pr, "Comment never", "req-cancel"),
+        (event) => event._tag === "ConfirmationRequired" ? relay.cancel(pr).pipe(Effect.orDie) : Effect.void
+      ).pipe(Effect.timeout("10 seconds"))
+      expect(events.at(-1)?._tag).toBe("Cancelled")
+      expect(commentCalls).toEqual([])
+      const reconnect = yield* relay.events(pr).pipe(Stream.take(1), Stream.runCollect)
+      expect(reconnect.map((event) => event._tag)).toEqual(["Snapshot"])
+      const after = yield* relay.events(pr).pipe(
+        Stream.takeUntil((event) => event._tag === "Snapshot"),
+        Stream.runCollect
+      )
+      expect(after.some((event) => event._tag === "ConfirmationRequired")).toBe(false)
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+})
+
+describe("tool results", () => {
+  const broken = defineCapability({
+    name: "get_approvals",
+    description: "Approval count of a pull request",
+    input: Schema.Struct({ pr: Schema.String }),
+    output: Schema.Struct({ approvals: Schema.Number }),
+    effect: "read",
+    reversible: true,
+    describe: () => ({ verb: "read approvals", target: pr, args: {} }),
+    cites: () => [pr],
+    handler: () => Effect.fail({ _tag: "AwsDenied", message: "AccessDenied" })
+  })
+
+  it.effect("reports a failed or declined call as ok: false", () =>
+    Effect.gen(function*() {
+      const store = yield* tempStore
+      const model = toolThenAnswer("get_approvals", { pr: "42" })
+      const relay = yield* relayIn(layer({
+        storePath: store,
+        instructions: "You are Relay.",
+        capabilities: [register(broken)],
+        backends: [{ id: "claude-code", name: "Claude Code", model: model.layer }]
+      }))
+      const events = yield* sendAndCollect(relay.events(pr), relay.send(pr, "Approvals?", "req-broken"))
+      expect(events.find((event) => event._tag === "ToolFinished")).toMatchObject({ ok: false })
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+
+  it.effect("replays a call still running to a dock that attaches mid-run", () =>
+    Effect.gen(function*() {
+      const store = yield* tempStore
+      const started = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const slow = defineCapability({
+        name: "get_approvals",
+        description: "Approval count of a pull request",
+        input: Schema.Struct({ pr: Schema.String }),
+        output: Schema.Struct({ approvals: Schema.Number }),
+        effect: "read",
+        reversible: true,
+        describe: () => ({ verb: "read approvals", target: pr, args: {} }),
+        cites: () => [pr],
+        handler: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as({ approvals: 2 })
+          )
+      })
+      const model = toolThenAnswer("get_approvals", { pr: "42" })
+      const relay = yield* relayIn(layer({
+        storePath: store,
+        instructions: "You are Relay.",
+        capabilities: [register(slow)],
+        backends: [{ id: "claude-code", name: "Claude Code", model: model.layer }]
+      }))
+      yield* relay.send(pr, "Approvals?", "req-slow")
+      yield* Deferred.await(started)
+      const attached = yield* Deferred.make<void>()
+      const late = yield* Effect.forkChild(
+        relay.events(pr).pipe(
+          Stream.tap((event) => (event._tag === "Snapshot" ? Deferred.succeed(attached, undefined) : Effect.void)),
+          Stream.takeUntil((event) => event._tag === "RunFinished"),
+          Stream.runCollect
+        )
+      )
+      yield* Deferred.await(attached)
+      yield* Deferred.succeed(release, undefined)
+      const events = yield* Fiber.join(late)
+      const tags = events.map((event) => event._tag)
+      expect(tags.slice(0, 2)).toEqual(["Snapshot", "ToolStarted"])
+      expect(events.find((event) => event._tag === "ToolStarted")).toMatchObject({ input: { pr: "42" } })
+      expect(tags).toContain("ToolFinished")
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+})
+
+describe("objectRefKey", () => {
+  it("keeps refs whose fields contain separators apart", () => {
+    const a = ObjectRef.make({ product: "codecommit", kind: "a\u0000b", id: "c" })
+    const b = ObjectRef.make({ product: "codecommit", kind: "a", id: "b\u0000c" })
+    expect(objectRefKey(a)).not.toBe(objectRefKey(b))
+    expect(objectRefKey(pr)).toBe(objectRefKey(ObjectRef.make({ ...pr })))
+  })
 })

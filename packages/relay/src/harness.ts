@@ -18,7 +18,7 @@
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { Message } from "@earendil-works/pi-ai"
 import { createRegistry, defineDoc, Harness, watchEvents } from "@earendil-works/pi-durable"
-import type { AgentEvent, Conversation, ConversationId } from "@earendil-works/pi-durable"
+import type { AgentEvent, Conversation, ConversationId, SubmissionId } from "@earendil-works/pi-durable"
 import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite"
 import { createClient } from "@libsql/client"
 import {
@@ -168,9 +168,10 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
     Effect.runPromiseExitWith(services)(effect, signal === undefined ? undefined : { signal })
   const runPromise = Effect.runPromiseWith(services)
   const cryptoService = yield* Crypto.Crypto
-  const nowMillis = yield* Clock.currentTimeMillis
-  let clock = nowMillis
-  const now = () => clock
+  // Pi sleeps until `now()` reaches persisted deadlines (retry backoff, deferred polls), so it reads the
+  // live clock on every call, never a cached value.
+  const clockService = yield* Clock.Clock
+  const now = () => clockService.currentTimeMillisUnsafe()
   // Each backend's model is built once, with the harness, and reused by every turn.
   const providers = yield* Effect.forEach(
     options.backends,
@@ -197,7 +198,7 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
     [...pending.values()].flatMap(({ event }) => (event.session === session ? [event] : []))
   const confirmations = yield* PubSub.unbounded<{ readonly conversationId: string; readonly event: Unsequenced }>()
   const broker: ConfirmationBroker = {
-    ask: (request) =>
+    ask: (request, signal) =>
       runPromise(
         Effect.gen(function*() {
           const decision = yield* Deferred.make<boolean>()
@@ -211,7 +212,11 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
           pending.set(request.callId, { decision, event })
           yield* PubSub.publish(confirmations, { conversationId: request.conversationId, event })
           return yield* Deferred.await(decision)
-        })
+        }).pipe(
+          // A cancelled run aborts the call: the card goes away with it, answered or not.
+          Effect.ensuring(Effect.sync(() => pending.delete(request.callId)))
+        ),
+        signal === undefined ? undefined : { signal }
       )
   }
 
@@ -222,7 +227,7 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
   const harness = yield* Effect.acquireRelease(
     promise(
       "start the Relay harness",
-      () => Harness.open(storage, { models, registry, now: () => clock }, BACKGROUND_CONTEXT)
+      () => Harness.open(storage, { models, registry, now }, BACKGROUND_CONTEXT)
     ),
     (opened) => Effect.promise(() => opened.close(BACKGROUND_CONTEXT))
   )
@@ -255,11 +260,6 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
       return created
     }))
 
-  const touch = Effect.flatMap(Clock.currentTimeMillis, (millis) =>
-    Effect.sync(() => {
-      clock = millis
-    }))
-
   return RelayHarness.of({
     tools: options.capabilities.map((capability) => ({
       name: capability.name,
@@ -268,7 +268,6 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
     })),
     send: (ref, text, requestId) =>
       Effect.gen(function*() {
-        yield* touch
         const conversation = yield* conversationFor(ref)
         yield* promise("send the message", () =>
           conversation.submit({ type: "input", content: text, requestId }, BACKGROUND_CONTEXT))
@@ -345,22 +344,53 @@ const sessionEvents = (
       ? [{ _tag: "TextDelta", session, text: full.slice(before.length) }]
       : []
   }
+  // A dock that attaches mid-run sees the run as it stands: the partial answer so far, then the tools
+  // still running, with their arguments from the call that started them.
+  const inFlight = (snapshot: Extract<AgentEvent, { readonly type: "snapshot" }>): ReadonlyArray<Unsequenced> => {
+    const calls = new Map<string, Schema.Json>()
+    for (const entry of snapshot.entries) {
+      for (const message of entry.model ?? []) {
+        if (message.role !== "assistant") continue
+        for (const block of message.content) if (block.type === "toolCall") calls.set(block.id, block.arguments)
+      }
+    }
+    const partial =
+      snapshot.generation?.message?.content.flatMap((block, index) =>
+        block.type === "text" ? textFrom(index, block.text) : []
+      ) ?? []
+    const running = snapshot.tools.flatMap((slot): ReadonlyArray<Unsequenced> =>
+      slot.status === "done"
+        ? []
+        : [{
+          _tag: "ToolStarted",
+          session,
+          call: slot.callId,
+          capability: slot.name,
+          input: calls.get(slot.callId) ?? {}
+        }]
+    )
+    return [...partial, ...running]
+  }
   const toRelay = (event: AgentEvent): ReadonlyArray<Unsequenced> => {
     switch (event.type) {
       case "snapshot":
-        return [{
-          _tag: "Snapshot",
-          session,
-          messages: event.entries.flatMap((
-            entry
-          ): ReadonlyArray<{ readonly role: "user" | "relay"; readonly text: string }> =>
-            entry.kind === "pi.user"
-              ? [{ role: "user", text: entryText(entry.model) }]
-              : entry.kind === "pi.assistant"
-              ? [{ role: "relay", text: entryText(entry.model) }]
-              : []
-          )
-        }, ...pendingFor(session)]
+        return [
+          {
+            _tag: "Snapshot",
+            session,
+            messages: event.entries.flatMap((
+              entry
+            ): ReadonlyArray<{ readonly role: "user" | "relay"; readonly text: string }> =>
+              entry.kind === "pi.user"
+                ? [{ role: "user", text: entryText(entry.model) }]
+                : entry.kind === "pi.assistant"
+                ? [{ role: "relay", text: entryText(entry.model) }]
+                : []
+            )
+          },
+          ...inFlight(event),
+          ...pendingFor(session)
+        ]
       case "message_start":
         sent.clear()
         // A turn that finished before its first commit arrives whole here, with no updates after it.
@@ -396,10 +426,19 @@ const sessionEvents = (
       case "tool_execution_end": {
         const cited = cites.get(event.toolCallId) ?? []
         cites.delete(event.toolCallId)
-        return [{ _tag: "ToolFinished", session, call: event.toolCallId, ok: event.entry !== undefined, cites: cited }]
+        // Pi writes a result entry for blocked, declined, failed and interrupted calls too; only a result
+        // that is not an error is a success.
+        const failed = (event.entry?.model ?? []).some((message) =>
+          message.role === "toolResult" && message.isError === true
+        )
+        return [{
+          _tag: "ToolFinished",
+          session,
+          call: event.toolCallId,
+          ok: event.entry !== undefined && !failed,
+          cites: cited
+        }]
       }
-      case "run_end":
-        return [{ _tag: "RunFinished", session }]
       case "task_failed":
         return [{
           _tag: "RunFailed",
@@ -411,12 +450,36 @@ const sessionEvents = (
         return []
     }
   }
+  // A run's end says only which inputs it ran; each input's submission record says how it ended.
+  const runEnded = (inputs: ReadonlyArray<SubmissionId>): Effect.Effect<Unsequenced, RelayStoreFailed> =>
+    promise("read how the run ended", async () => {
+      const records = await Promise.all(
+        inputs.map(async (id) => (await harness.submission(id, BACKGROUND_CONTEXT))?.status(BACKGROUND_CONTEXT))
+      )
+      const unanswered = records.find((record) => record?.status === "unanswered")
+      if (unanswered === undefined || unanswered.status !== "unanswered") return { _tag: "RunFinished", session }
+      // An abort is the person's cancellation; any other reason is a failure the dock must explain.
+      return /abort/iu.test(unanswered.reason)
+        ? { _tag: "Cancelled", session }
+        : {
+          _tag: "RunFailed",
+          session,
+          // `reason` is Pi's code (`model_error`); `detail` carries the backend's own message when there is one.
+          cause: Predicate.isString(unanswered.detail) ? unanswered.detail : unanswered.reason,
+          fix: "Check the backend in Relay setup (installed and signed in), then send the message again."
+        }
+    })
   const gate = Stream.fromPubSub(confirmations).pipe(
     Stream.filter(({ conversationId }) => conversationId === session),
     Stream.map(({ event }) => event)
   )
   let seq = 0
-  return Stream.merge(Stream.flatMap(fromPi, (event) => Stream.fromIterable(toRelay(event))), gate).pipe(
+  const relayed = Stream.flatMap(
+    fromPi,
+    (event) =>
+      event.type === "run_end" ? Stream.fromEffect(runEnded(event.inputs)) : Stream.fromIterable(toRelay(event))
+  )
+  return Stream.merge(relayed, gate).pipe(
     Stream.map((event): RelayEvent => ({ ...event, seq: seq++ }))
   )
 }
