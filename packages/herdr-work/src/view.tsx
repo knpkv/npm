@@ -1,5 +1,13 @@
 import { Button, StateLabel, Text, type RlyStateTone } from "@knpkv/rly/primitives"
-import { Hero, Region, StageRail, TimelineRow, type RlyStage } from "@knpkv/rly/patterns"
+import {
+  DecisionBar,
+  Hero,
+  Region,
+  StageRail,
+  TimelineRow,
+  type RlyDecisionBarState,
+  type RlyStage
+} from "@knpkv/rly/patterns"
 import { useEffect, useRef, useState, type ReactElement } from "react"
 import type {
   DeliveryStage,
@@ -15,6 +23,7 @@ import type {
   WorkBlocker
 } from "./model.js"
 import { decodeWorkBoardNavigationGoal, encodeWorkBoardNavigationGoal } from "./navigation.js"
+import { workRequestClockText, workRequestDecidability, type WorkRequestDecisions } from "./request-decision.js"
 import {
   type WorkTriageSummary,
   workTriage,
@@ -23,6 +32,8 @@ import {
   workTriageSentence,
   type WorkTriageTense
 } from "./work-triage.js"
+
+export type { WorkRequestAnswer, WorkRequestDecision, WorkRequestDecisions } from "./request-decision.js"
 
 const windows: ReadonlyArray<WorkSnapshotWindow> = ["now", "day", "week", "month"]
 const stageOrder: ReadonlyArray<DeliveryStage> = ["local", "review", "pull_request", "merged", "deployed"]
@@ -150,12 +161,28 @@ interface WorkRowCaption {
   readonly blocking: boolean
 }
 
-const rowCaption = (goal: WorkGoal): WorkRowCaption => {
+const rowCaption = (goal: WorkGoal, decisions: WorkRequestDecisions | undefined): WorkRowCaption => {
   const open = requestsFor(goal).filter(({ state }) => state === "open")
   if (open.length > 0) {
+    // The soonest clock among requests this page can decide, beside the request it belongs to.
+    const soonest = open
+      .map((request) => ({ decidability: workRequestDecidability(request, decisions), request }))
+      .flatMap(({ decidability, request }) =>
+        decidability._tag === "Here" && decidability.expiresAt !== null
+          ? [{ expiresAt: decidability.expiresAt, request }]
+          : []
+      )
+      .toSorted((left, right) => left.expiresAt - right.expiresAt)[0]
+    const clock =
+      soonest === undefined || decisions === undefined
+        ? ""
+        : `, ${workRequestClockText(soonest.expiresAt, decisions.now)}${soonest.expiresAt > decisions.now ? " left" : ""}`
     return {
       blocking: false,
-      text: open.length === 1 ? `Needs approval: ${open[0]?.summary ?? ""}` : `${open.length} requests need approval`
+      text:
+        open.length === 1
+          ? `Needs approval: ${open[0]?.summary ?? ""}${clock}`
+          : `${open.length} requests need approval${clock}`
     }
   }
   const blockers = blockersFor(goal)
@@ -181,12 +208,51 @@ const summaryCaption = (summary: WorkTriageSummary, tense: WorkTriageTense): str
   }
 }
 
+/**
+ * The DecisionBar for a request this page can decide, or `null` to keep its hub link. The bar stays
+ * mounted once this page sent a decision for it, so the hub's answer is announced there even after
+ * the request leaves the queue; the hub decides expiry, never this page's clock.
+ */
+const decisionBarFor = (request: WorkRequest, decisions: WorkRequestDecisions | undefined): ReactElement | null => {
+  const decidability = workRequestDecidability(request, decisions)
+  if (decidability._tag === "Elsewhere" || decisions === undefined) return null
+  const { expiresAt, jobId } = decidability
+  const pending = decisions.expiresAt(jobId) !== undefined && request.state === "open"
+  const state: RlyDecisionBarState =
+    decisions.sending?.jobId === jobId
+      ? { _tag: "sending", action: decisions.sending.decision }
+      : decisions.sending !== null
+        ? { _tag: "off", reason: "Another decision is waiting for the hub." }
+        : pending
+          ? { _tag: "ready" }
+          : { _tag: "off", reason: "The hub no longer lists this request as waiting." }
+  const decide = (decision: "approve" | "reject") => () => {
+    if (state._tag === "ready") decisions.onDecision({ decision, jobId })
+  }
+  return (
+    <DecisionBar
+      {...(expiresAt === null || !pending
+        ? {}
+        : {
+            clock: `${workRequestClockText(expiresAt, decisions.now)}${expiresAt > decisions.now ? " left" : ""}`
+          })}
+      onApprove={decide("approve")}
+      onReject={decide("reject")}
+      state={state}
+      {...(decisions.answer?.jobId === jobId ? { status: decisions.answer.text } : {})}
+      target={request.summary}
+    />
+  )
+}
+
 /** Everything about one goal, in reading order: what it is, where it is, what blocks it, what happened. */
 const GoalDetail = ({
+  decisions,
   externalLinks,
   goal,
   snapshot
 }: {
+  readonly decisions: WorkRequestDecisions | undefined
   readonly externalLinks: "disabled" | "enabled"
   readonly goal: WorkGoal
   readonly snapshot: WorkSnapshot
@@ -272,17 +338,18 @@ const GoalDetail = ({
                     {requestPresentation[request.state].label}
                   </span>
                 </span>
-                {request.state !== "open" ? null : request.approvalTarget === null ? (
-                  <Text tone="secondary" variant="meta">
-                    No approval link recorded.
-                  </Text>
-                ) : externalLinks === "disabled" ? (
-                  <Text tone="secondary" variant="meta">
-                    Approve this on the hub ({request.approvalTarget.host}).
-                  </Text>
-                ) : (
-                  exactLink(request.approvalTarget, `Approve on ${request.approvalTarget.host}`)
-                )}
+                {decisionBarFor(request, externalLinks === "enabled" ? decisions : undefined) ??
+                  (request.state !== "open" ? null : request.approvalTarget === null ? (
+                    <Text tone="secondary" variant="meta">
+                      No approval link recorded.
+                    </Text>
+                  ) : externalLinks === "disabled" ? (
+                    <Text tone="secondary" variant="meta">
+                      Approve this on the hub ({request.approvalTarget.host}).
+                    </Text>
+                  ) : (
+                    exactLink(request.approvalTarget, `Approve on ${request.approvalTarget.host}`)
+                  ))}
               </li>
             ))}
           </ul>
@@ -400,6 +467,7 @@ const withFragment = (href: string, fragment: string): string => {
 }
 
 export const WorkBoard = ({
+  decisions,
   externalLinks = "enabled",
   initialGoalId,
   initialWindow = "now",
@@ -407,6 +475,11 @@ export const WorkBoard = ({
   snapshots
 }: {
   readonly snapshots: WorkSnapshots
+  /**
+   * Lets the reader decide approval requests in place, with their clock. Omit it (the LAN view, a
+   * host that is not the hub) and every request links to the hub instead.
+   */
+  readonly decisions?: WorkRequestDecisions
   readonly externalLinks?: "disabled" | "enabled"
   readonly initialGoalId?: string | null
   readonly initialWindow?: WorkSnapshotWindow
@@ -477,7 +550,7 @@ export const WorkBoard = ({
   }, [selectedFilteredGoalIndex, selectedId])
 
   const goalRow = (goal: WorkGoal): ReactElement => {
-    const caption = rowCaption(goal)
+    const caption = rowCaption(goal, externalLinks === "enabled" ? decisions : undefined)
     const content = (
       <>
         <span className="work-row-title">
@@ -735,7 +808,7 @@ export const WorkBoard = ({
               ref={detailsRef}
               title={selected.title}
             >
-              <GoalDetail externalLinks={externalLinks} goal={selected} snapshot={snapshot} />
+              <GoalDetail decisions={decisions} externalLinks={externalLinks} goal={selected} snapshot={snapshot} />
             </Region>
           )}
         </div>
