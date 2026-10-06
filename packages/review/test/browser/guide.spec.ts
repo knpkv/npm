@@ -46,6 +46,39 @@ for (const width of [320, 390]) {
   })
 }
 
+/** The illustrative guide with a 20-step top-down flowchart, far taller than the diagram frame. */
+const tallDiagramHtml = () => {
+  const guide = JSON.parse(readFileSync("examples/approval-guide/guide.json", "utf8"))
+  const steps = Array.from({ length: 20 }, (_, index) => `S${index}[Step ${index}]`)
+  const chart = ["flowchart TD", ...steps.slice(1).map((step, index) => `${steps[index]} --> ${step}`)].join("\n")
+  guide.sections[0].overview = `Before the diagram.\n\n\`\`\`mermaid\n${chart}\n\`\`\``
+  const findings = JSON.parse(readFileSync("examples/approval-guide/findings.json", "utf8"))
+  return Effect.runPromise(exportGuide({ guide, findings, patch })).then((page) => page.html)
+}
+
+// Review finding: centring an overflowing diagram put its top above the frame's scroll origin.
+test("a diagram taller than its frame shows its first and last steps by scrolling", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await load(page, await tallDiagramHtml(), testInfo)
+  await diagramDrawn(page)
+  const frame = page.locator(".review-diagram .mermaid").first()
+  const reach = (label: string) =>
+    frame.evaluate((element, text) => {
+      const node = [...element.querySelectorAll(".node")].find((candidate) => candidate.textContent?.trim() === text)
+      if (node === undefined) return null
+      const box = element.getBoundingClientRect()
+      const rect = node.getBoundingClientRect()
+      return rect.top >= box.top - 1 && rect.bottom <= box.bottom + 1
+    }, label)
+  expect(await reach("Step 0")).toBe(true)
+  await frame.evaluate((element) => element.scrollTo({ top: element.scrollHeight }))
+  expect(await reach("Step 19")).toBe(true)
+
+  await page.emulateMedia({ media: "print" })
+  const clipped = await frame.evaluate((element) => element.scrollHeight - element.clientHeight)
+  expect(clipped).toBeLessThanOrEqual(1)
+})
+
 // QA-71: callouts drew a 3px coloured bar on their inline-start edge.
 test("callouts and panels draw no one-sided stripe", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 })

@@ -248,7 +248,8 @@ html[data-review-fonts="loading"] body {
   display: grid;
   margin: 0;
   overflow: auto;
-  place-items: center;
+  /* safe: a diagram taller or wider than the frame starts at its top-left, where scrolling can reach it. */
+  place-items: safe center;
   white-space: pre-wrap;
 }
 /* Once scripts run, the source waits unseen in its reserved space instead of flashing as text. */
@@ -517,6 +518,11 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   }
   .review-prose .mermaid[data-diagram-theme="dark"] {
     background: var(--rly-color-surface-1);
+  }
+  /* Paper has no scrolling: the frame grows to the whole diagram. */
+  .review-prose .review-diagram .mermaid {
+    block-size: auto;
+    overflow: visible;
   }
   .review-guide .review-reading > [role="tabpanel"][data-state="inactive"] {
     display: block;
