@@ -169,6 +169,19 @@ export const startRefresh = (state: AppState, enabled: ReadonlyArray<string>): r
   return [lifecycle.generation, project(state, lifecycle)]
 }
 
+/**
+ * A login that just succeeded, before its identity is known: apply `SignedIn` without an identity and
+ * return the new generation. The identity found afterwards is applied as a `LookupSucceeded` of that
+ * generation, so a logout during the lookup still wins. For use with `SubscriptionRef.modify`.
+ */
+export const beginSignIn = (state: AppState, profile: string): readonly [number, AppState] => {
+  const lifecycle = transition(
+    state.identityLifecycle ?? initialIdentityLifecycle,
+    IdentityEvent.SignedIn({ profile, identity: undefined })
+  )
+  return [lifecycle.generation, project(state, lifecycle)]
+}
+
 /** The state after a successful SSO login to one account, with its identity when the lookup found it. */
 export const signInState = (state: AppState, profile: string, identity: ResolvedIdentity | undefined): AppState =>
   applyIdentityEvent(state, IdentityEvent.SignedIn({ profile, identity }))

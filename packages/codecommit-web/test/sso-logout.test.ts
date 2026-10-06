@@ -6,8 +6,14 @@ import {
   type ResolvedIdentity,
   startRefresh
 } from "@knpkv/codecommit-core/IdentityLifecycle.js"
-import { Effect, Exit, Ref, SubscriptionRef } from "effect"
-import { signInAfterLogin, signOutAfter } from "../src/server/handlers/notifications-live.js"
+import { Cause, Deferred, Effect, Exit, Fiber, Ref, SubscriptionRef } from "effect"
+import {
+  signInAfterLogin,
+  signOutAfter,
+  ssoFailureMessage,
+  SsoLoginFailedError,
+  SsoLogoutFailedError
+} from "../src/server/handlers/notifications-live.js"
 
 /** Signed in to "alpha", reached through the identity lifecycle's own events. */
 const signedIn = (): AppState => {
@@ -115,5 +121,52 @@ describe("SSO logout", () => {
       expect(Exit.isFailure(exit)).toBe(true)
       expect(yield* SubscriptionRef.get(state)).toEqual(signedIn())
       expect([yield* Ref.get(lookups), yield* Ref.get(refreshes)]).toEqual([0, 0])
+    }))
+
+  it("names what ran and why it failed in the notification", () => {
+    expect(ssoFailureMessage("aws sso logout", new SsoLogoutFailedError({ exitCode: 255 })))
+      .toBe("aws sso logout exited with code 255; see the terminal running codecommit for its output.")
+    expect(ssoFailureMessage("aws sso login --profile dev", new SsoLoginFailedError({ exitCode: 1 })))
+      .toBe("aws sso login --profile dev exited with code 1; see the terminal running codecommit for its output.")
+    expect(ssoFailureMessage("aws sso logout", new Cause.TimeoutError()))
+      .toBe("aws sso logout didn't finish within 3m; it was stopped.")
+    expect(ssoFailureMessage("aws sso logout", { message: "spawn aws ENOENT" }))
+      .toBe("aws sso logout could not run: spawn aws ENOENT.")
+  })
+
+  it.effect("makes in-flight work stale as soon as the login exits, before its identity lookup returns", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make(signedIn())
+      const before = (yield* SubscriptionRef.get(state)).identityLifecycle?.generation ?? -1
+      const lookupStarted = yield* Deferred.make<void>()
+      const lookupMayReturn = yield* Deferred.make<void>()
+      const fresh: ResolvedIdentity = {
+        accountId: "111111111111",
+        arn: "arn:aws:sts::111111111111:assumed-role/R/new",
+        username: "new"
+      }
+      const signingIn = yield* signInAfterLogin(
+        Effect.succeed(0),
+        Deferred.succeed(lookupStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(lookupMayReturn)),
+          Effect.as(fresh)
+        ),
+        "alpha",
+        state,
+        Effect.void
+      ).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(lookupStarted)
+      const during = yield* SubscriptionRef.get(state)
+      // The session already changed: the old principal is gone and an older refresh's event is stale.
+      expect(during.identityLifecycle?.generation).toBe(before + 1)
+      expect(during.callerIdentities?.["alpha"]).toBeUndefined()
+      const stale = applyIdentityEvent(
+        during,
+        IdentityEvent.LookupSucceeded({ generation: before, profile: "alpha", identity: fresh })
+      )
+      expect(stale.callerIdentities?.["alpha"]).toBeUndefined()
+      yield* Deferred.succeed(lookupMayReturn, undefined)
+      yield* Fiber.join(signingIn)
+      expect((yield* SubscriptionRef.get(state)).currentUser).toBe("new")
     }))
 })

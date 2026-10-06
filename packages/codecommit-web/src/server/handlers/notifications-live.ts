@@ -10,8 +10,14 @@
  */
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
 import { type AppState, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
-import { type ResolvedIdentity, signInState, signOutState } from "@knpkv/codecommit-core/IdentityLifecycle.js"
-import { Data, Duration, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
+import {
+  applyIdentityEvent,
+  beginSignIn,
+  IdentityEvent,
+  type ResolvedIdentity,
+  signOutState
+} from "@knpkv/codecommit-core/IdentityLifecycle.js"
+import { type Cause, Data, Duration, Effect, Predicate, Schema, Semaphore, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
@@ -60,11 +66,38 @@ export const signInAfterLogin = <E, R, R2>(
   refresh: Effect.Effect<void>
 ) =>
   login.pipe(
-    Effect.flatMap((code) => code === 0 ? lookup : Effect.fail(new SsoLoginFailedError({ exitCode: code }))),
-    // Even without an identity the session changed, so the sign-in still makes in-flight work stale.
-    Effect.flatMap((identity) => SubscriptionRef.update(state, (s) => signInState(s, profile, identity))),
+    Effect.flatMap((code) => code === 0 ? Effect.void : Effect.fail(new SsoLoginFailedError({ exitCode: code }))),
+    // The session changed the moment the login succeeded: in-flight work goes stale before the lookup.
+    Effect.andThen(SubscriptionRef.modify(state, (s) => beginSignIn(s, profile))),
+    Effect.flatMap((generation) =>
+      lookup.pipe(
+        Effect.flatMap((identity) =>
+          identity === undefined
+            ? Effect.void
+            : SubscriptionRef.update(
+              state,
+              (s) => applyIdentityEvent(s, IdentityEvent.LookupSucceeded({ generation, profile, identity }))
+            )
+        )
+      )
+    ),
     Effect.andThen(refresh)
   )
+
+/**
+ * The notification text for a failed SSO command: what ran and why it failed, so the user can act on
+ * it. Provider output went to the terminal (stdio is inherited), so the exit code is the cause known
+ * here.
+ */
+export const ssoFailureMessage = (
+  command: string,
+  error: SsoLoginFailedError | SsoLogoutFailedError | Cause.TimeoutError | { readonly message?: string }
+): string =>
+  Predicate.isTagged(error, "SsoLogoutFailedError") || Predicate.isTagged(error, "SsoLoginFailedError")
+    ? `${command} exited with code ${error.exitCode}; see the terminal running codecommit for its output.`
+    : Predicate.isTagged(error, "TimeoutError")
+    ? `${command} didn't finish within ${Duration.format(SSO_TIMEOUT)}; it was stopped.`
+    : `${command} could not run${error.message === undefined || error.message === "" ? "" : `: ${error.message}`}.`
 
 export const NotificationsLive = HttpApiBuilder.group(
   CodeCommitApi,
@@ -142,8 +175,8 @@ export const NotificationsLive = HttpApiBuilder.group(
                     Effect.logWarning("SSO login failed", e).pipe(
                       Effect.andThen(notificationRepo.addSystem({
                         type: "error",
-                        title: "SSO Login Failed",
-                        message: "SSO login failed — check credentials",
+                        title: "SSO sign-in failed",
+                        message: ssoFailureMessage(`aws sso login --profile ${payload.profile}`, e),
                         profile: payload.profile
                       }))
                     ))
@@ -164,12 +197,19 @@ export const NotificationsLive = HttpApiBuilder.group(
             yield* Effect.forkIn(
               ssoSemaphore.withPermits(1)(
                 signOutAfter(exitCode(cmd).pipe(Effect.timeout(SSO_TIMEOUT)), prService.state, prService.refresh).pipe(
+                  Effect.andThen(
+                    notificationRepo.addSystem({
+                      type: "success",
+                      title: "Signed out of AWS SSO",
+                      message: "Signed out of AWS SSO for all profiles on this machine. Sign in again from Accounts."
+                    }).pipe(Effect.catch((error) => Effect.logWarning("SSO logout notification failed", error)))
+                  ),
                   Effect.catchIf(() => true, (e) =>
                     Effect.logWarning("SSO logout failed", e).pipe(
                       Effect.andThen(notificationRepo.addSystem({
                         type: "error",
-                        title: "SSO Logout Failed",
-                        message: "SSO logout failed"
+                        title: "SSO sign-out failed",
+                        message: `${ssoFailureMessage("aws sso logout", e)} Your SSO sessions are still active.`
                       }))
                     ))
                 )
