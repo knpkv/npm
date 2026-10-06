@@ -4499,6 +4499,10 @@
       "exports": [
         {
           "kind": "type",
+          "name": "RlyBandMark"
+        },
+        {
+          "kind": "type",
           "name": "RlyChartBin"
         },
         {

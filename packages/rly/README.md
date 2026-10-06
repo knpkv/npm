@@ -208,7 +208,8 @@ a stretch with `level: null`. Zero, negative and non-finite values draw nothing.
 Series colours are the tokens `--rly-color-series-1` to `-8` plus
 `--rly-color-series-other` for folded series. Use `rlySeriesColor(series)` in SVG
 fills, and keep an id on the same slot while it is visible. Colour is never the only
-carrier: every chart ships a labelled key and a table equivalent, and forced-colours
+carrier: every chart ships a labelled key and a table equivalent (a readable-resolution
+table, each band's intervals, and a selection announcement naming every series' value), and forced-colours
 mode collapses the series to `CanvasText`.
 
 ```tsx

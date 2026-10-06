@@ -444,6 +444,80 @@ describe("StackedBars", () => {
     expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 1, to: 5 })
   })
 
+  it("starts a fresh touch span after the keyboard moves the selection", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const onSelectionChange = vi.fn()
+    const Owner = (): ReactElement => {
+      const [selection, setSelection] = useState<RlyChartSelection | null>(null)
+      return (
+        <StackedBars
+          {...props}
+          onSelectionChange={(next) => {
+            onSelectionChange(next)
+            setSelection(next)
+          }}
+          selection={selection}
+        />
+      )
+    }
+    const root = await mount(<Owner />)
+    const bar = (index: number): Element | undefined => root.querySelectorAll("svg:not([class*='band']) g")[index]
+    const tap = (index: number): void =>
+      act(() => {
+        bar(index)?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }))
+        bar(index)?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      })
+    tap(1)
+    act(
+      () =>
+        void root
+          .querySelector('[role="group"]')
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "ArrowRight" }))
+    )
+    tap(4)
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 4, to: 4 })
+  })
+
+  it("never draws the plot under a 24px pointer target, whatever height it is given", () => {
+    const plot = (height: number) => render({ height }).querySelector<HTMLElement>('[role="group"]')
+    expect(plot(10)?.style.blockSize).toBe("24px")
+    expect(plot(24)?.style.blockSize).toBe("24px")
+    expect(plot(180)?.style.blockSize).toBe("180px")
+  })
+
+  it("keeps list semantics on its markerless key", () => {
+    const root = render({ window: { from: 0, label: "Current window", to: hour } })
+    expect(root.querySelector("ul")?.getAttribute("role")).toBe("list")
+  })
+
+  it("announces a return to the last announced selection again", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    vi.useFakeTimers()
+    try {
+      const container = document.createElement("div")
+      document.body.append(container)
+      const root = createRoot(container)
+      roots.push(root)
+      const describe = (selection: RlyChartSelection | null): string =>
+        selection === null ? "None" : `Columns ${selection.from}–${selection.to}`
+      const view = (from: number) => (
+        <StackedBars {...props} describeSelection={describe} selection={{ from, to: from }} />
+      )
+      const region = () => container.querySelector('[aria-live="polite"]')?.textContent
+      await act(async () => root.render(view(2)))
+      await act(async () => vi.advanceTimersByTime(600))
+      expect(region()).toBe("Columns 2–2")
+      await act(async () => root.render(view(3)))
+      // Moving away empties the region, so the same words coming back are a change it announces.
+      expect(region()).toBe("")
+      await act(async () => root.render(view(2)))
+      await act(async () => vi.advanceTimersByTime(600))
+      expect(region()).toBe("Columns 2–2")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it("announces a settled selection even while its owner keeps re-rendering", async () => {
     vi.stubGlobal("ResizeObserver", TestResizeObserver)
     vi.useFakeTimers()

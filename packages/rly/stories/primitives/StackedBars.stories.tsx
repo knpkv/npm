@@ -144,6 +144,56 @@ const DataTable = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn
 
 const day = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short", hour: "2-digit", minute: "2-digit" })
 
+// Each band's intervals as rows: the levels the bands draw, with when each starts and ends.
+const BandTable = () => (
+  <table style={{ borderCollapse: "collapse", fontVariantNumeric: "tabular-nums" }}>
+    <caption style={{ textAlign: "start" }}>Limit levels over time</caption>
+    <thead>
+      <tr>
+        <th scope="col" style={headStyle}>
+          Limit
+        </th>
+        <th scope="col" style={headStyle}>
+          From
+        </th>
+        <th scope="col" style={headStyle}>
+          To
+        </th>
+        <th scope="col" style={cellStyle}>
+          Level
+        </th>
+      </tr>
+    </thead>
+    <tbody>
+      {bands.flatMap((band) =>
+        band.segments.map((segment) => (
+          <tr key={`${band.id}:${segment.from}`}>
+            <th scope="row" style={headStyle}>
+              {band.label}
+            </th>
+            <td style={headStyle}>{day.format(segment.from)}</td>
+            <td style={headStyle}>{day.format(segment.to)}</td>
+            <td style={cellStyle}>{segment.level === null ? "No reading" : `${segment.level}%`}</td>
+          </tr>
+        ))
+      )}
+    </tbody>
+  </table>
+)
+
+// The selected span's spend per booking, so arrowing through the plot reaches each period's numbers.
+const spendIn = (columns: ReadonlyArray<RlyChartColumn>, span: RlyChartSelection): string =>
+  bookings
+    .map((booking) => {
+      const total = columns
+        .slice(span.from, span.to + 1)
+        .flatMap((column) => column.segments)
+        .filter((segment) => segment.id === booking.id)
+        .reduce((sum, segment) => sum + segment.value, 0)
+      return `${booking.label} ${dollars(total)}`
+    })
+    .join(", ")
+
 const Chart = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> }) => {
   const [selection, setSelection] = useState<RlyChartSelection | null>(null)
   const describe = useCallback(
@@ -151,7 +201,7 @@ const Chart = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> })
       // Names the period, so moving between equal-sized spans is announced too.
       span === null
         ? "No span selected"
-        : `${day.format(columns[span.from]?.start ?? 0)} to ${day.format(columns[span.to]?.end ?? 0)}, ${span.to - span.from + 1} hours selected`,
+        : `${day.format(columns[span.from]?.start ?? 0)} to ${day.format(columns[span.to]?.end ?? 0)}, ${span.to - span.from + 1} hours selected: ${spendIn(columns, span)}`,
     [columns]
   )
   return (
@@ -184,6 +234,7 @@ const Chart = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> })
         />
         <ChartLegend items={bookings} label="Bookings by colour" />
         {columns.length === 0 ? null : <DataTable columns={columns} />}
+        {columns.length === 0 ? null : <BandTable />}
       </div>
     </main>
   )
@@ -238,6 +289,12 @@ export const Week: Story = {
     await expect(within(table).getByRole("columnheader", { name: "5-hour window peak" })).toBeVisible()
     await expect(within(table).getByRole("rowheader", { name: "Tue 29 Sept" })).toBeVisible()
     await expect(within(table).getAllByText("96%, partly no reading")).toHaveLength(1)
+    // Band intervals are a table too: every stretch the bands draw, the gap included.
+    const levels = canvas.getByRole("table", { name: "Limit levels over time" })
+    await expect(within(levels).getAllByRole("row")).toHaveLength(
+      1 + bands.reduce((sum, band) => sum + band.segments.length, 0)
+    )
+    await expect(within(levels).getByText("No reading")).toBeVisible()
   },
   render: () => <Chart columns={week} />
 }

@@ -41,6 +41,7 @@ export { RLY_SKELETON_DEFAULT_VARIANTS, RLY_SKELETON_VARIANTS, Skeleton } from "
 export type { RlySkeletonVariant, SkeletonProps } from "./Skeleton.js"
 export { StackedBars } from "./StackedBars.js"
 export type {
+  RlyBandMark,
   RlyChartBin,
   RlyChartColumn,
   RlyChartSegment,

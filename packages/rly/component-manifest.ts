@@ -293,6 +293,7 @@ export const componentManifest = {
         { kind: "value", name: "StackedBars" },
         { kind: "type", name: "StackedBarsProps" },
         { kind: "type", name: "RlyStepBand" },
+        { kind: "type", name: "RlyBandMark" },
         { kind: "type", name: "RlyChartBin" },
         { kind: "type", name: "RlyChartColumn" },
         { kind: "type", name: "RlyChartSegment" },

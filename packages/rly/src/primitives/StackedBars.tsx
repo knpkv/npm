@@ -66,7 +66,7 @@ export type StackedBarsProps = StackedBarsBaseProps & {
   readonly onSelectionChange: (selection: RlyChartSelection | null) => void
   /** What the selection means, announced politely once it settles. */
   readonly describeSelection: (selection: RlyChartSelection | null) => string
-  /** Plot height in pixels, without bands and axis. */
+  /** Plot height in pixels, without bands and axis; never under 24, since every bar is a pointer target. */
   readonly height?: number
 }
 
@@ -194,7 +194,9 @@ const Band = ({
  * bin periods so every bar stays at least 24px wide, a full pointer target; the selection keeps its columns across rebinning.
  * One tab stop: ←/→ move and select, Shift extends, Home/End jump, Escape clears. Click selects;
  * Shift+click, or a second touch tap elsewhere, extends. The SVG is hidden from assistive technology,
- * so callers render a table of the same columns (and band readings) beside it.
+ * so callers render the same data beside it: a table at a readable resolution (a row per day for a
+ * week of hours), a table of each band's intervals, and a `describeSelection` that names every
+ * series' value in the span, so arrowing through the plot reaches each period's numbers.
  */
 export const StackedBars = ({
   bands = [],
@@ -251,6 +253,9 @@ export const StackedBars = ({
   const focus = cursor === null ? null : binOf(cursor)
 
   useEffect(() => {
+    // Empty the region while the new words settle, so returning to the last announced selection is
+    // announced again rather than left as an unchanged region.
+    setAnnouncement("")
     const timer = setTimeout(() => setAnnouncement(description), ANNOUNCE_AFTER)
     return () => clearTimeout(timer)
   }, [description])
@@ -271,6 +276,8 @@ export const StackedBars = ({
     if (next === null) return
     event.preventDefault()
     setCursor(bins[next]?.first ?? null)
+    // The keyboard now owns the anchor, so a later tap starts a new touch span.
+    setPendingTap(null)
     onSelectionChange(selectBin(selection, bins, next, event.shiftKey))
   }
 
@@ -303,7 +310,7 @@ export const StackedBars = ({
         onBlur={() => setCursor(null)}
         onKeyDown={onKeyDown}
         role="group"
-        style={{ blockSize: `${height}px` }}
+        style={{ blockSize: `${Math.max(MIN_TARGET, height)}px` }}
         tabIndex={0}
       >
         <span className={style("scale")}>{formatScale(max, binSize)}</span>
@@ -397,7 +404,8 @@ export const StackedBars = ({
         })}
       </div>
       {window === undefined && nearLabels.length === 0 && noReading === undefined ? null : (
-        <ul className={style("keys")}>
+        // Markerless flex lists lose list semantics in WebKit, so the role is restated.
+        <ul className={style("keys")} role="list">
           {window === undefined ? null : (
             <li className={style("windowKey")}>
               <span aria-hidden="true" className={style("windowSwatch")} />
