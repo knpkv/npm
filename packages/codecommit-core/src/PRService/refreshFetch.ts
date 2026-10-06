@@ -91,6 +91,13 @@ export const fetchAndUpsertPRs = (params: {
         )
       )
     )
+    // A scope whose listing completed but where some pull requests could not be re-evaluated: its stale
+    // rows still reconcile (the listing is complete), but the refresh does not count as successful.
+    const partialScopes = yield* Ref.make(new Set<string>())
+    // Pull requests the listing returned whose evaluation failed: known to be open, so not stale.
+    const evaluationFailedPullRequests = yield* Ref.make(new Set<string>())
+    const pullRequestKey = (profile: string, region: string, id: string, repositoryName: string) =>
+      `${accountRegionKey(profile, region)}\0${id}\0${repositoryName}`
     const withholdScopeSuccess = (profile: string, region: string) =>
       Ref.update(successfullyFetchedScopes, (scopes) => {
         const next = new Set(scopes)
@@ -187,7 +194,11 @@ export const fetchAndUpsertPRs = (params: {
               repositoryName: item.repositoryName,
               message: item.error.message
             }])
-            yield* withholdScopeSuccess(profile, region)
+            yield* Ref.update(partialScopes, (scopes) => new Set(scopes).add(accountRegionKey(profile, region)))
+            yield* Ref.update(
+              evaluationFailedPullRequests,
+              (keys) => new Set(keys).add(pullRequestKey(profile, region, item.pullRequestId, item.repositoryName))
+            )
             return
           }
           const pr = item.pullRequest
@@ -266,13 +277,15 @@ export const fetchAndUpsertPRs = (params: {
 
     // Transition stale OPEN PRs: re-fetch to discover if they were merged/closed
     const successfulScopes = yield* Ref.get(successfullyFetchedScopes)
+    const listedButUnevaluated = yield* Ref.get(evaluationFailedPullRequests)
     yield* prRepo.findStaleOpen(staleThreshold).pipe(
       Effect.flatMap((stalePRs) =>
         Effect.forEach(
           stalePRs.filter(
             (pr) =>
               accountIdMap.get(pr.accountProfile) === pr.awsAccountId &&
-              successfulScopes.has(accountRegionKey(pr.accountProfile, pr.accountRegion))
+              successfulScopes.has(accountRegionKey(pr.accountProfile, pr.accountRegion)) &&
+              !listedButUnevaluated.has(pullRequestKey(pr.accountProfile, pr.accountRegion, pr.id, pr.repositoryName))
           ),
           (pr) =>
             awsClient
@@ -339,7 +352,10 @@ export const fetchAndUpsertPRs = (params: {
     // Propagate repoAccountId from any PR that has it to all PRs that don't
     yield* prRepo.propagateRepoAccountId().pipe(Effect.catch(() => Effect.void))
 
-    const reconciledScopes = yield* Ref.get(successfullyFetchedScopes)
+    const partial = yield* Ref.get(partialScopes)
+    const reconciledScopes = new Set(
+      [...(yield* Ref.get(successfullyFetchedScopes))].filter((key) => !partial.has(key))
+    )
     return enabledAccounts.flatMap((account) =>
       (account.regions ?? []).flatMap((region) => {
         const awsAccountId = accountIdMap.get(account.profile)

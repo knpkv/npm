@@ -55,4 +55,21 @@ describe("NotificationRepo.addSystem", () => {
         { title: "alpha: approval evaluation", message: "3 pull requests in us-east-1, eu-west-1" }
       ])
     })))
+
+  it.effect("keeps the unread summary when its replacement cannot be written", () =>
+    withRepo(Effect.gen(function*() {
+      const repo = yield* NotificationRepo
+      const sql = yield* SqlClient.SqlClient
+      const summary = { type: "error", profile: "alpha", title: "alpha: approval evaluation", replaceUnread: true }
+      yield* repo.addSystem({ ...summary, message: "1 pull request in us-east-1" })
+      yield* sql`
+        CREATE TRIGGER reject_replacement BEFORE INSERT ON notifications
+        WHEN NEW.message = 'rejected' BEGIN SELECT RAISE(ABORT, 'rejected'); END
+      `
+      const exit = yield* Effect.exit(repo.addSystem({ ...summary, message: "rejected" }))
+      expect(exit._tag).toBe("Failure")
+      expect(yield* unreadSystemNotifications).toEqual([
+        { title: "alpha: approval evaluation", message: "1 pull request in us-east-1" }
+      ])
+    })))
 })

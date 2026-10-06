@@ -161,21 +161,25 @@ const makeNotificationRepo = Effect.gen(function*() {
       /** Replace an existing unread notification with the same profile, type and title, so a summary stays current. */
       readonly replaceUnread?: boolean
     }) => {
-      const insert = add_({
+      const insertRow = add_({
         pullRequestId: "",
         awsAccountId: "",
         type: n.type,
         message: n.message,
         title: n.title,
         profile: n.profile ?? ""
-      }).pipe(Effect.tap(() => publish))
+      })
+      const insert = insertRow.pipe(Effect.tap(() => publish))
 
       if (n.replaceUnread === true) {
-        return sql`
-          DELETE FROM notifications
-          WHERE profile = ${n.profile ?? ""} AND type = ${n.type} AND title = ${n.title}
-            AND pull_request_id = '' AND read = 0
-        `.pipe(Effect.andThen(insert), cacheError("addSystem"))
+        // One transaction: a failed insert keeps the summary it would have replaced.
+        return sql.withTransaction(
+          sql`
+            DELETE FROM notifications
+            WHERE profile = ${n.profile ?? ""} AND type = ${n.type} AND title = ${n.title}
+              AND pull_request_id = '' AND read = 0
+          `.pipe(Effect.andThen(insertRow))
+        ).pipe(Effect.andThen(publish), cacheError("addSystem"))
       }
 
       if (n.deduplicate !== true) {
