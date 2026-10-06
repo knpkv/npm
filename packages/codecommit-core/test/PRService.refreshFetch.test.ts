@@ -11,24 +11,56 @@ import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { AccountConfig } from "../src/ConfigService/internal.js"
-import { type AppState, type CallerIdentityState, PullRequest, signInState } from "../src/Domain.js"
+import {
+  type AppState,
+  type CallerIdentityState,
+  type CallerIdentityUnresolvedReason,
+  PullRequest
+} from "../src/Domain.js"
 import { AwsApiError, AwsCredentialError } from "../src/Errors.js"
+import {
+  applyIdentityEvent,
+  IdentityEvent,
+  type LookupFailureReason,
+  signInState,
+  startRefresh
+} from "../src/IdentityLifecycle.js"
 import { fetchAndUpsertPRs } from "../src/PRService/refreshFetch.js"
 import { subscriptionKey } from "../src/PRService/refreshResolve.js"
 
 /** A provider pull request as the refresh stream delivers it. */
 const fetched = (pullRequest: PullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest })
 
+const lookupReason = (reason: CallerIdentityUnresolvedReason): LookupFailureReason | undefined =>
+  reason._tag === "CredentialsUnavailable" || reason._tag === "StsRejected" || reason._tag === "Throttled"
+    ? reason
+    : undefined
+
+/**
+ * State after a refresh at generation 1 resolved these identities, reached through the lifecycle's own
+ * events. The first profile is the owner, so it decides `currentUser`.
+ */
+const seeded = (identities: Readonly<Record<string, CallerIdentityState>>): AppState => {
+  const [generation, started] = startRefresh(
+    { pullRequests: [], accounts: [], status: "loading" },
+    Object.keys(identities)
+  )
+  return Object.entries(identities).reduce((state, [profile, identity]) => {
+    if (identity._tag === "Resolved") {
+      return applyIdentityEvent(state, IdentityEvent.LookupSucceeded({ generation, profile, identity }))
+    }
+    const reason = lookupReason(identity.reason)
+    return reason === undefined
+      ? state
+      : applyIdentityEvent(state, IdentityEvent.LookupFailed({ generation, profile, reason }))
+  }, started)
+}
+
 describe("fetchAndUpsertPRs", () => {
   it.effect("keeps an identity's earlier lookup failure when its refresh then fails authentication", () =>
     Effect.gen(function*() {
       const lookupFailed: CallerIdentityState = { _tag: "Unresolved", reason: { _tag: "CredentialsUnavailable" } }
-      const state = yield* SubscriptionRef.make<AppState>({
-        pullRequests: [],
-        accounts: [],
-        status: "loading",
-        callerIdentities: { "test-profile": lookupFailed }
-      })
+      const state = yield* SubscriptionRef.make<AppState>(seeded({ "test-profile": lookupFailed }))
       const account = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
@@ -54,6 +86,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef: yield* Ref.make(new Set<string>()),
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
       expect((yield* SubscriptionRef.get(state)).callerIdentities?.["test-profile"]).toEqual(lookupFailed)
@@ -61,7 +94,14 @@ describe("fetchAndUpsertPRs", () => {
 
   it.effect("does not let an older refresh's auth failure undo a login that landed meanwhile", () =>
     Effect.gen(function*() {
-      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const state = yield* SubscriptionRef.make<AppState>(seeded({
+        "test-profile": {
+          _tag: "Resolved",
+          accountId: "123456789012",
+          arn: "arn:aws:sts::123456789012:assumed-role/R/bob",
+          username: "bob"
+        }
+      }))
       const account = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
@@ -97,6 +137,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef: yield* Ref.make(new Set<string>()),
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
       const after = yield* SubscriptionRef.get(state)
@@ -117,13 +158,9 @@ describe("fetchAndUpsertPRs", () => {
           arn: `arn:aws:sts::${accountId}:assumed-role/R/${name}`,
           username: name
         })
-        const state = yield* SubscriptionRef.make<AppState>({
-          pullRequests: [],
-          accounts: [],
-          status: "loading",
-          currentUser: "alice",
-          callerIdentities: { alpha: identity("111111111111", "alice"), beta: identity("222222222222", "bob") }
-        })
+        const state = yield* SubscriptionRef.make<AppState>(
+          seeded({ alpha: identity("111111111111", "alice"), beta: identity("222222222222", "bob") })
+        )
         const accounts = ["alpha", "beta"].map((profile) =>
           Schema.decodeSync(AccountConfig)({ profile, regions: ["us-east-1"], enabled: true })
         )
@@ -150,6 +187,7 @@ describe("fetchAndUpsertPRs", () => {
           accountIdMap: new Map([["alpha", "111111111111"], ["beta", "222222222222"]]),
           subscribedRef: yield* Ref.make(new Set<string>()),
           currentUser: "alice",
+          identityGeneration: 1,
           staleThreshold: "2026-08-03T00:00:00Z"
         }).pipe(Effect.provide(dependencies))
         const after = yield* SubscriptionRef.get(state)
@@ -169,13 +207,7 @@ describe("fetchAndUpsertPRs", () => {
         arn: "arn:aws:sts::123456789012:assumed-role/R/alice",
         username: "alice"
       }
-      const state = yield* SubscriptionRef.make<AppState>({
-        pullRequests: [],
-        accounts: [],
-        status: "loading",
-        currentUser: "alice",
-        callerIdentities: { "test-profile": resolved }
-      })
+      const state = yield* SubscriptionRef.make<AppState>(seeded({ "test-profile": resolved }))
       const account = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
@@ -212,6 +244,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef: yield* Ref.make(new Set<string>()),
         currentUser: "alice",
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
       expect((yield* SubscriptionRef.get(state)).callerIdentities?.["test-profile"])
@@ -235,13 +268,9 @@ describe("fetchAndUpsertPRs", () => {
         arn: "arn:aws:sts::123456789012:assumed-role/Reviewers/alice",
         username: "alice"
       }
-      const state = yield* SubscriptionRef.make<AppState>({
-        pullRequests: [],
-        accounts: [],
-        status: "loading",
-        currentUser: "alice",
-        callerIdentities: { "test-profile": resolved, "other-profile": resolved }
-      })
+      const state = yield* SubscriptionRef.make<AppState>(
+        seeded({ "test-profile": resolved, "other-profile": resolved })
+      )
       const account = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
@@ -289,6 +318,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef: yield* Ref.make(new Set<string>()),
         currentUser: "alice",
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -347,6 +377,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef: yield* Ref.make(new Set<string>()),
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -456,6 +487,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(
         Effect.provide(dependencies),
@@ -517,6 +549,7 @@ describe("fetchAndUpsertPRs", () => {
         ]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -555,6 +588,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "210987654321"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -595,6 +629,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -639,6 +674,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -683,6 +719,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -720,6 +757,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -776,6 +814,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef: yield* Ref.make(new Set<string>()),
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -816,6 +855,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -861,6 +901,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -899,6 +940,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -933,6 +975,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map(),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -982,6 +1025,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef: yield* Ref.make(new Set<string>()),
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -1042,6 +1086,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef: yield* Ref.make(new Set<string>()),
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -1082,6 +1127,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
@@ -1122,6 +1168,7 @@ describe("fetchAndUpsertPRs", () => {
         accountIdMap: new Map([["test-profile", "123456789012"]]),
         subscribedRef,
         currentUser: undefined,
+        identityGeneration: 1,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 

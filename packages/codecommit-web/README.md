@@ -18,7 +18,9 @@ cookie.
 The authenticated event stream carries `callerIdentities`, the caller's identity
 per configured account and keyed by AWS profile. Each entry is either `Resolved`
 (`accountId`, `arn`, `username`) or `Unresolved` with a typed `reason`
-(`CredentialsUnavailable`, `StsRejected`, `Throttled` or `RefreshAuthFailed`). It gives the client what it needs to match wildcard approval pools (`…/Reviewers/*`)
+(`CredentialsUnavailable`, `StsRejected`, `Throttled`, `RefreshAuthFailed`, or
+`SignedOut` after `aws sso logout` until the next refresh resolves the account again; that
+includes accounts whose credentials are not SSO). It gives the client what it needs to match wildcard approval pools (`…/Reviewers/*`)
 against the exact `arn` of the account a pull request lives in. That ARN is a client-visible identifier:
 for SSO sessions its last segment is usually the person's email. It travels only
 to the owner it describes, over the owner-cookie-authenticated stream. It is never

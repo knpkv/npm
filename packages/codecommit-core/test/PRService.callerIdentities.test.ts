@@ -6,15 +6,9 @@ import { PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../src/ConfigService/index.js"
 import { TuiConfig } from "../src/ConfigService/internal.js"
-import {
-  type AppState,
-  AwsProfileName,
-  AwsRegion,
-  type CallerIdentityState,
-  signInState,
-  signOutState
-} from "../src/Domain.js"
+import { type AppState, AwsProfileName, AwsRegion, type CallerIdentityState } from "../src/Domain.js"
 import { AwsApiError, AwsCredentialError, AwsThrottleError } from "../src/Errors.js"
+import { signInState, signOutState } from "../src/IdentityLifecycle.js"
 import { resolveAccounts } from "../src/PRService/refreshResolve.js"
 
 const region = Schema.decodeSync(AwsRegion)("us-east-1")
@@ -174,10 +168,9 @@ describe("resolveAccounts caller identities", () => {
       const after = yield* SubscriptionRef.get(state)
       expect(after.currentUser).toBeUndefined()
       // Alpha was published before the logout, which then signed it out; beta, found after it, is never published.
-      expect(after.callerIdentities).toEqual({
-        alpha: { _tag: "Unresolved", reason: { _tag: "CredentialsUnavailable" } }
-      })
-      expect(after.identityGeneration).toBe(1)
+      expect(after.callerIdentities).toEqual({ alpha: { _tag: "Unresolved", reason: { _tag: "SignedOut" } } })
+      // The refresh's start, then the logout.
+      expect(after.identityLifecycle?.generation).toBe(2)
     }))
 
   it.effect("publishes a failed account as soon as its lookup ends, while another is still resolving", () =>

@@ -20,8 +20,9 @@ import {
 } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
-import type { CallerIdentityState, PullRequestRefreshScope, UnevaluatedPullRequest } from "../Domain.js"
+import type { PullRequestRefreshScope, UnevaluatedPullRequest } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
+import { applyIdentityEvent, IdentityEvent } from "../IdentityLifecycle.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
 
@@ -56,8 +57,6 @@ const isCredentialInvalidCause = <Cause>(cause: Cause): boolean =>
 /** Whether a refresh failure means the account's credentials no longer work, decided from its type. */
 const isAuthFailure = (error: AwsClientError): boolean =>
   error._tag === "AwsCredentialError" || (error._tag === "AwsApiError" && isCredentialInvalidCause(error.cause))
-
-const refreshAuthFailed: CallerIdentityState = { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }
 
 /** A pull-request read that failed only because its approval rules could not be evaluated. */
 const failedOnlyOnApprovalEvaluation = (error: AwsClientError | CacheError): boolean =>
@@ -99,6 +98,8 @@ export const fetchAndUpsertPRs = (params: {
   readonly accountIdMap: Map<string, string>
   readonly subscribedRef: Ref.Ref<Set<string>>
   readonly currentUser: string | undefined
+  /** The refresh's identity generation, from `resolveAccounts`. */
+  readonly identityGeneration: number
   readonly staleThreshold: string
 }): Effect.Effect<
   ReadonlyArray<PullRequestRefreshScope>,
@@ -111,9 +112,8 @@ export const fetchAndUpsertPRs = (params: {
     const notificationRepo = yield* NotificationRepo
     const subscriptionRepo = yield* SubscriptionRepo
 
-    const { accountIdMap, currentUser, enabledAccounts, staleThreshold, state, subscribedRef } = params
-    // A login or logout during this refresh bumps the generation; its auth failures are then stale.
-    const generationAtStart = (yield* SubscriptionRef.get(state)).identityGeneration ?? 0
+    const { accountIdMap, currentUser, enabledAccounts, identityGeneration, staleThreshold, state, subscribedRef } =
+      params
 
     // Stale rows are safe to reconcile only when their owning list operation
     // completed successfully. A failed account stream says nothing about which
@@ -141,26 +141,13 @@ export const fetchAndUpsertPRs = (params: {
         return next
       })
 
-    /**
-     * The account's credentials stopped working during this refresh: its resolved identity becomes
-     * RefreshAuthFailed, and currentUser goes if this account is where it came from. Skipped once a
-     * login or logout has moved the generation, since the failure then belongs to an older session.
-     */
+    // The account's credentials stopped working during this refresh: an identity event of this
+    // refresh's generation, so it does nothing once a newer refresh, login or logout has happened.
     const markAuthFailed = (profile: string) =>
-      SubscriptionRef.update(state, (current) => {
-        if ((current.identityGeneration ?? 0) !== generationAtStart) return current
-        // currentUser comes from the first enabled account; another account's failure leaves it.
-        const ownsCurrentUser = profile === enabledAccounts[0]?.profile
-        const { currentUser, ...rest } = current
-        return {
-          ...(!ownsCurrentUser && currentUser !== undefined && { currentUser }),
-          ...rest,
-          // Only a resolved identity becomes RefreshAuthFailed; an earlier lookup failure keeps its reason.
-          ...(rest.callerIdentities?.[profile]?._tag === "Resolved" && {
-            callerIdentities: { ...rest.callerIdentities, [profile]: refreshAuthFailed }
-          })
-        }
-      })
+      SubscriptionRef.update(
+        state,
+        (s) => applyIdentityEvent(s, IdentityEvent.RefreshAuthFailed({ generation: identityGeneration, profile }))
+      )
 
     const accountLabels = enabledAccounts.flatMap((a) => (a.regions ?? []).map((r) => `${a.profile}(${r})`))
     yield* SubscriptionRef.update(state, (s) => ({

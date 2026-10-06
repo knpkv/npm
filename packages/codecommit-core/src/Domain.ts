@@ -41,6 +41,7 @@
  * @module
  */
 import { Data, Effect, Schema, SchemaGetter, SchemaIssue } from "effect"
+import type { IdentityLifecycle } from "./IdentityLifecycle.js"
 
 // ---------------------------------------------------------------------------
 // Branded Types
@@ -612,7 +613,9 @@ export const CallerIdentityUnresolvedReason = Schema.TaggedUnion({
   /** STS was still throttling after retries. */
   Throttled: {},
   /** The pull-request refresh hit an authentication error after the identity had resolved. */
-  RefreshAuthFailed: {}
+  RefreshAuthFailed: {},
+  /** `aws sso logout` succeeded and nothing has resolved since. */
+  SignedOut: {}
 })
 
 /** @category Domain */
@@ -662,44 +665,6 @@ export const UnevaluatedPullRequest = Schema.Struct({
 /** @category Domain */
 export type UnevaluatedPullRequest = typeof UnevaluatedPullRequest.Type
 
-/** One account's identity after an SSO logout: its credentials are gone. */
-const signedOutIdentity: CallerIdentityState = { _tag: "Unresolved", reason: { _tag: "CredentialsUnavailable" } }
-
-/**
- * The state after a successful SSO logout, which ends every SSO session: no current user, every known
- * account's identity unavailable, and a new identity generation so lookups already in flight publish
- * nothing.
- *
- * @category Domain
- */
-export const signOutState = ({ currentUser: _, ...state }: AppState): AppState => ({
-  ...state,
-  identityGeneration: (state.identityGeneration ?? 0) + 1,
-  ...(state.callerIdentities !== undefined && {
-    callerIdentities: Object.fromEntries(
-      Object.keys(state.callerIdentities).map((profile) => [profile, signedOutIdentity])
-    )
-  })
-})
-
-/**
- * The state after a successful SSO login to one account: that account's identity and the current
- * user, under a new identity generation, so a refresh that started before the login cannot overwrite
- * them with its older failure.
- *
- * @category Domain
- */
-export const signInState = (
-  state: AppState,
-  profile: string,
-  identity: { readonly accountId: string; readonly arn: string; readonly username: string }
-): AppState => ({
-  ...state,
-  currentUser: identity.username,
-  identityGeneration: (state.identityGeneration ?? 0) + 1,
-  callerIdentities: { ...state.callerIdentities, [profile]: { _tag: "Resolved", ...identity } }
-})
-
 /**
  * Application state.
  *
@@ -713,13 +678,13 @@ export interface AppState {
   readonly error?: string | undefined
   readonly lastUpdated?: Date
   readonly currentUser?: string
-  /** Per-account caller identity; absent until the first refresh has resolved identities. */
-  readonly callerIdentities?: CallerIdentities
   /**
-   * Bumped by every SSO logout. An identity lookup that started under an older generation publishes
-   * nothing, so a lookup in flight cannot sign a logged-out user back in.
+   * Per-account caller identity; absent until something is known. Written only by
+   * `IdentityLifecycle.applyIdentityEvent`, like `currentUser`.
    */
-  readonly identityGeneration?: number
+  readonly callerIdentities?: CallerIdentities
+  /** The identity state machine's own slice; not sent to clients. */
+  readonly identityLifecycle?: IdentityLifecycle
   /** Pull requests the last refresh kept from cache because their approval rules failed to evaluate. */
   readonly unevaluatedPullRequests?: ReadonlyArray<UnevaluatedPullRequest>
   /**

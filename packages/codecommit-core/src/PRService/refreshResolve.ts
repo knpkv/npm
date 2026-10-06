@@ -4,21 +4,16 @@
  */
 
 import { Clock, DateTime, Effect, Match, Option, Ref, Result, Schema, SubscriptionRef } from "effect"
-import { AwsClient, type CallerIdentity } from "../AwsClient/index.js"
+import { AwsClient } from "../AwsClient/index.js"
 import { isThrottlingError } from "../AwsClient/internal.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import { PullRequestRepo, type PullRequestRepoContract } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
-import {
-  type AppState,
-  type AppStatus,
-  AwsRegion,
-  type CallerIdentityState,
-  type CallerIdentityUnresolvedReason
-} from "../Domain.js"
+import { type AppStatus, AwsRegion } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
+import { applyIdentityEvent, IdentityEvent, type LookupFailureReason, startRefresh } from "../IdentityLifecycle.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
 import { enabledProfilesOf, retainEnabledAccountRows } from "./visibility.js"
 
@@ -67,49 +62,39 @@ export interface ResolvedAccounts {
   readonly accountIdMap: Map<string, string>
   readonly subscribedRef: Ref.Ref<Set<string>>
   readonly currentUser: string | undefined
+  /** This refresh's identity generation; every identity event it produces carries it. */
+  readonly identityGeneration: number
 }
-
-const resolved = (identity: CallerIdentity): CallerIdentityState => ({
-  _tag: "Resolved",
-  accountId: identity.accountId,
-  arn: identity.arn,
-  username: identity.username
-})
-
-const unresolved = (reason: CallerIdentityUnresolvedReason): CallerIdentityState => ({ _tag: "Unresolved", reason })
 
 /**
  * Why an identity lookup failed, decided by the error's type alone. Every AWS client error has a
  * reason and there is no default branch, so a new error type fails to compile until it gets one.
  */
-export const unresolvedReasonOf = (error: AwsClientError): CallerIdentityUnresolvedReason =>
+export const unresolvedReasonOf = (error: AwsClientError): LookupFailureReason =>
   Match.valueTags(error, {
-    AwsCredentialError: (): CallerIdentityUnresolvedReason => ({ _tag: "CredentialsUnavailable" }),
+    AwsCredentialError: (): LookupFailureReason => ({ _tag: "CredentialsUnavailable" }),
     // The identity adapter wraps exhausted throttling in AwsApiError, so its cause decides.
-    AwsApiError: (apiError): CallerIdentityUnresolvedReason =>
+    AwsApiError: (apiError): LookupFailureReason =>
       isThrottlingError(apiError.cause) ? { _tag: "Throttled" } : { _tag: "StsRejected" },
-    AwsThrottleError: (): CallerIdentityUnresolvedReason => ({ _tag: "Throttled" })
+    AwsThrottleError: (): LookupFailureReason => ({ _tag: "Throttled" })
   })
 
-/** Look up the caller in one account: record its AWS account id, and say who they are or why not. */
+/**
+ * Look up the caller in one account: record its AWS account id, and apply the outcome as an identity
+ * event of this refresh's generation.
+ */
 const resolveIdentity = (
+  state: PRState,
+  generation: number,
   accountIdRef: Ref.Ref<Map<string, string>>,
-  account: AccountConfig,
-  region: AwsRegion,
-  options?: {
-    readonly updateCurrentUser?: (username: string) => Effect.Effect<void>
-    readonly clearCurrentUser?: Effect.Effect<void>
-  }
+  account: AccountConfig
 ) =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient
     const notificationRepo = yield* NotificationRepo
-    const { clearCurrentUser, updateCurrentUser } = options ?? {}
+    const region = primaryRegion(account)
 
-    const lookup = yield* awsClient.getCallerIdentity({
-      profile: account.profile,
-      region
-    }).pipe(Effect.result)
+    const lookup = yield* awsClient.getCallerIdentity({ profile: account.profile, region }).pipe(Effect.result)
 
     if (Result.isFailure(lookup)) {
       yield* notificationRepo.addSystem({
@@ -119,14 +104,19 @@ const resolveIdentity = (
         profile: account.profile,
         deduplicate: true
       })
-      if (clearCurrentUser !== undefined) yield* clearCurrentUser
-      return unresolved(unresolvedReasonOf(lookup.failure))
+      const reason = unresolvedReasonOf(lookup.failure)
+      return yield* SubscriptionRef.update(
+        state,
+        (s) => applyIdentityEvent(s, IdentityEvent.LookupFailed({ generation, profile: account.profile, reason }))
+      )
     }
 
     const identity = lookup.success
     yield* Ref.update(accountIdRef, (m) => new Map(m).set(account.profile, identity.accountId))
-    if (updateCurrentUser !== undefined) yield* updateCurrentUser(identity.username)
-    return resolved(identity)
+    yield* SubscriptionRef.update(
+      state,
+      (s) => applyIdentityEvent(s, IdentityEvent.LookupSucceeded({ generation, profile: account.profile, identity }))
+    )
   })
 
 export const resolveAccounts = (state: PRState) =>
@@ -168,9 +158,19 @@ export const resolveAccounts = (state: PRState) =>
     yield* SubscriptionRef.update(state, (s) => ({ ...s, accounts: accountsState }))
 
     const enabledAccounts = config.accounts.filter((a) => a.enabled)
+    // Disabled profiles' identities go now; a newer refresh, login or logout makes this one's events stale.
+    const generation = yield* SubscriptionRef.modify(
+      state,
+      (s) => startRefresh(s, enabledAccounts.map((account) => account.profile))
+    )
+    const finishResolution = SubscriptionRef.update(
+      state,
+      (s) => applyIdentityEvent(s, IdentityEvent.ResolutionFinished({ generation }))
+    )
 
     if (enabledAccounts.length === 0) {
       const now = yield* Clock.currentTimeMillis
+      yield* finishResolution
       yield* SubscriptionRef.update(
         state,
         // No account was refreshed, so none of the last refresh's unevaluated pull requests still apply.
@@ -178,62 +178,22 @@ export const resolveAccounts = (state: PRState) =>
           ...s,
           status: idleStatus,
           lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)),
-          unevaluatedPullRequests: [],
-          // A profile with no key is not enabled, so no identity, and no ARN, outlives disabling it.
-          callerIdentities: {}
+          unevaluatedPullRequests: []
         })
       )
       return undefined
     }
 
     // --- Phase 2: Resolve AWS account IDs ---
-    const accountIdRef = yield* Ref.make(new Map<string, string>())
-    const [firstAccount, ...remainingAccounts] = enabledAccounts
-    if (firstAccount === undefined) return undefined
-    const firstRegion = primaryRegion(firstAccount)
-
-    // A logout during resolution bumps the generation; then nothing this resolution found is published.
-    const generationAtStart = (yield* SubscriptionRef.get(state)).identityGeneration ?? 0
-    const unchangedSinceStart = (s: AppState) => (s.identityGeneration ?? 0) === generationAtStart
-    // Each account's outcome is published as soon as its own lookup completes, so a failed account is
+    // Each account's outcome is applied as soon as its own lookup completes, so a failed account is
     // never shown with its old identity while slower accounts are still resolving.
-    const publish = (profile: string) => (identity: CallerIdentityState) =>
-      SubscriptionRef.update(state, (s) =>
-        unchangedSinceStart(s) ? { ...s, callerIdentities: { ...s.callerIdentities, [profile]: identity } } : s)
-    yield* resolveIdentity(
-      accountIdRef,
-      firstAccount,
-      firstRegion,
-      {
-        clearCurrentUser: SubscriptionRef.update(state, (s) => {
-          if (!unchangedSinceStart(s)) {
-            return s
-          }
-          const { currentUser: _, ...rest } = s
-          return rest
-        }),
-        updateCurrentUser: (username) =>
-          SubscriptionRef.update(state, (s) =>
-            unchangedSinceStart(s) ? { ...s, currentUser: username } : s)
-      }
-    ).pipe(Effect.flatMap(publish(firstAccount.profile)))
+    const accountIdRef = yield* Ref.make(new Map<string, string>())
     yield* Effect.forEach(
-      remainingAccounts,
-      (account) =>
-        resolveIdentity(accountIdRef, account, primaryRegion(account)).pipe(Effect.flatMap(publish(account.profile))),
+      enabledAccounts,
+      (account) => resolveIdentity(state, generation, accountIdRef, account),
       { concurrency: 3, discard: true }
     )
-    // A profile with no key is not enabled: drop identities of accounts switched off since the last refresh.
-    const enabledProfiles = new Set<string>(enabledAccounts.map((account) => account.profile))
-    yield* SubscriptionRef.update(state, (s) =>
-      unchangedSinceStart(s) && s.callerIdentities !== undefined
-        ? {
-          ...s,
-          callerIdentities: Object.fromEntries(
-            Object.entries(s.callerIdentities).filter(([profile]) => enabledProfiles.has(profile))
-          )
-        }
-        : s)
+    yield* finishResolution
 
     const accountIdMap = yield* Ref.get(accountIdRef)
 
@@ -246,5 +206,11 @@ export const resolveAccounts = (state: PRState) =>
     )
     const currentUser = (yield* SubscriptionRef.get(state)).currentUser
 
-    return { accountIdMap, currentUser, enabledAccounts, subscribedRef } satisfies ResolvedAccounts
+    return {
+      accountIdMap,
+      currentUser,
+      enabledAccounts,
+      identityGeneration: generation,
+      subscribedRef
+    } satisfies ResolvedAccounts
   })

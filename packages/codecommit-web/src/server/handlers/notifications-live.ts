@@ -9,7 +9,8 @@
  * @module
  */
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
-import { type AppState, AwsRegion, signInState, signOutState } from "@knpkv/codecommit-core/Domain.js"
+import { type AppState, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
+import { type ResolvedIdentity, signInState, signOutState } from "@knpkv/codecommit-core/IdentityLifecycle.js"
 import { Data, Duration, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -25,19 +26,39 @@ const exitCode = (cmd: ChildProcess.Command) =>
 export class SsoLogoutFailedError extends Data.TaggedError("SsoLogoutFailedError")<{ readonly exitCode: number }> {}
 
 /**
- * Run a logout, then mark the caller signed out of every account: `aws sso logout` ends every SSO
- * session. A non-zero exit fails instead and leaves the state as it was, because nothing was signed out.
+ * Run a logout, then mark the caller signed out of every account (`aws sso logout` ends every SSO
+ * session) and refresh: signing out makes the refresh in flight stale, and accounts whose credentials
+ * are not SSO resolve again only on the next refresh. A non-zero exit fails instead and leaves the
+ * state as it was, because nothing was signed out.
  */
 export const signOutAfter = <E, R>(
   logout: Effect.Effect<number, E, R>,
-  state: SubscriptionRef.SubscriptionRef<AppState>
+  state: SubscriptionRef.SubscriptionRef<AppState>,
+  refresh: Effect.Effect<void>
 ) =>
   logout.pipe(
     Effect.flatMap((code) =>
       code === 0
-        ? SubscriptionRef.update(state, signOutState)
+        ? SubscriptionRef.update(state, signOutState).pipe(Effect.andThen(refresh))
         : Effect.fail(new SsoLogoutFailedError({ exitCode: code }))
     )
+  )
+
+/**
+ * After a successful `aws sso login`: sign in with the looked-up identity, if any, then refresh. Signing in
+ * makes the refresh in flight stale, including its end, so only a fresh refresh resolves the other
+ * accounts and finishes the first resolution.
+ */
+export const signInAfterLogin = <R>(
+  lookup: Effect.Effect<ResolvedIdentity | undefined, never, R>,
+  profile: string,
+  state: SubscriptionRef.SubscriptionRef<AppState>,
+  refresh: Effect.Effect<void>
+) =>
+  lookup.pipe(
+    // Even without an identity the session changed, so the sign-in still makes in-flight work stale.
+    Effect.flatMap((identity) => SubscriptionRef.update(state, (s) => signInState(s, profile, identity))),
+    Effect.andThen(refresh)
   )
 
 export const NotificationsLive = HttpApiBuilder.group(
@@ -90,28 +111,31 @@ export const NotificationsLive = HttpApiBuilder.group(
                 exitCode(cmd).pipe(
                   Effect.timeout(SSO_TIMEOUT),
                   Effect.tap(() =>
-                    Effect.gen(function*() {
-                      const state = yield* SubscriptionRef.get(prService.state)
-                      const account = state.accounts.find((a) => a.profile === payload.profile)
-                      const region = account?.region ?? Schema.decodeSync(AwsRegion)("us-east-1")
-                      const identity = yield* awsClient.getCallerIdentity({
-                        profile: payload.profile,
-                        region
-                      }).pipe(Effect.catchIf(() => true, () => Effect.succeed(undefined)))
-                      if (identity) {
-                        yield* SubscriptionRef.update(prService.state, (s) => signInState(s, payload.profile, identity))
-                      }
-                    })
+                    signInAfterLogin(
+                      Effect.gen(function*() {
+                        const state = yield* SubscriptionRef.get(prService.state)
+                        const account = state.accounts.find((a) => a.profile === payload.profile)
+                        const region = account?.region ?? Schema.decodeSync(AwsRegion)("us-east-1")
+                        // The login itself succeeded; without an identity the refresh resolves it.
+                        return yield* awsClient.getCallerIdentity({ profile: payload.profile, region }).pipe(
+                          Effect.orElseSucceed(() => undefined)
+                        )
+                      }),
+                      payload.profile,
+                      prService.state,
+                      prService.refresh
+                    )
                   ),
+                  // The sign-in and refresh above already ran, so a notification that fails to persist
+                  // cannot skip them.
                   Effect.tap(() =>
                     notificationRepo.addSystem({
                       type: "success",
                       title: payload.profile,
                       message: `SSO login successful for ${payload.profile}`,
                       profile: payload.profile
-                    })
+                    }).pipe(Effect.catch((error) => Effect.logWarning("SSO login notification failed", error)))
                   ),
-                  Effect.tap(() => prService.refresh),
                   Effect.catchIf(() => true, (e) =>
                     Effect.logWarning("SSO login failed", e).pipe(
                       Effect.andThen(notificationRepo.addSystem({
@@ -137,7 +161,7 @@ export const NotificationsLive = HttpApiBuilder.group(
             })
             yield* Effect.forkIn(
               ssoSemaphore.withPermits(1)(
-                signOutAfter(exitCode(cmd).pipe(Effect.timeout(SSO_TIMEOUT)), prService.state).pipe(
+                signOutAfter(exitCode(cmd).pipe(Effect.timeout(SSO_TIMEOUT)), prService.state, prService.refresh).pipe(
                   Effect.catchIf(() => true, (e) =>
                     Effect.logWarning("SSO logout failed", e).pipe(
                       Effect.andThen(notificationRepo.addSystem({
