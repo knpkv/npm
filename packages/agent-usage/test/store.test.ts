@@ -240,6 +240,34 @@ describe("UsageStore", () => {
         expect(report.unpriced.tokens).toBe(1_101)
       }))
 
+    it.effect("groups a range's usage per session, with each session's first and last request", () =>
+      Effect.gen(function*() {
+        const store = yield* UsageStore
+        const at = Date.parse("2026-09-02T10:00:00.000Z")
+        yield* store.commitChunk({
+          agent: "claude",
+          fileKey: "sessions.jsonl",
+          cursor,
+          events: [
+            event("sess-1", { machine: "sessions", sessionId: "a", occurredAt: at }),
+            event("sess-2", { machine: "sessions", sessionId: "a", occurredAt: at + 40 * 60_000 }),
+            event("sess-3", { machine: "sessions", sessionId: "b", occurredAt: at + 5_000 }),
+            event("sess-4", { machine: "sessions", sessionId: "b", occurredAt: at + 3 * 3_600_000 })
+          ],
+          snapshots: [],
+          balances: []
+        })
+        const groups = yield* store.sessionGroups({ from: at, to: at + 3_600_000, machine: "sessions", agent: "all" })
+        expect(yield* store.sessionGroups({ from: at, to: at + 3_600_000, machine: "sessions", agent: "codex" }))
+          .toEqual([])
+        expect(groups.map(({ firstAt, lastAt, requests, sessionId }) => ({ sessionId, firstAt, lastAt, requests })))
+          .toEqual([
+            { sessionId: "a", firstAt: at, lastAt: at + 40 * 60_000, requests: 2 },
+            { sessionId: "b", firstAt: at + 5_000, lastAt: at + 5_000, requests: 1 }
+          ])
+        expect(groups[0]?.attribution).toEqual({ cwd: "/w/app", branch: "feat/RPS-1", activeTicket: null })
+      }))
+
     it.effect("stores Unknown limit readings so a gap stays visible", () =>
       Effect.gen(function*() {
         const store = yield* UsageStore

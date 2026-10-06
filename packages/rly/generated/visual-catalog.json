@@ -881,6 +881,23 @@
       ]
     },
     {
+      "name": "ThemeSelect",
+      "paths": {
+        "source": "packages/rly/src/primitives/ThemeSelect.tsx",
+        "story": "packages/rly/stories/primitives/ThemeSelect.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/ThemeSelect.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/ThemeSelect.test.tsx"
+        ]
+      },
+      "storyId": "primitives-themeselect--gallery",
+      "storyIds": [
+        "primitives-themeselect--gallery"
+      ]
+    },
+    {
       "name": "TimelineRow",
       "paths": {
         "source": "packages/rly/src/patterns/TimelineRow.tsx",

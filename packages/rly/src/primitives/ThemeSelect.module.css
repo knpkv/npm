@@ -1,0 +1,7 @@
+@layer rly.components {
+  /* A header control sizes to its longest option instead of filling the row. */
+  .intrinsic {
+    inline-size: max-content;
+    min-inline-size: calc(var(--rly-space-96) + var(--rly-space-48));
+  }
+}
