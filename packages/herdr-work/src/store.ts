@@ -68,13 +68,13 @@ import {
   workDispatchLineageEquivalent
 } from "./internal/decision-handoff-migration.js"
 import { workHistoryError } from "./internal/history-validation.js"
-import { terminalCandidates, terminalCheckpoint } from "./internal/terminal-reconcile.js"
 import {
   LaneOperationLedgerRow,
   LaneOperationTotalsRow,
   planLegacyLaneOperations,
   resolveLegacyLaneClaim
 } from "./internal/legacy-lane-claim.js"
+import { terminalCandidates, terminalCheckpoint } from "./internal/terminal-reconcile.js"
 import {
   isTerminalWorkState,
   WorkAdmissionTarget,
@@ -106,6 +106,7 @@ import {
   workSnapshotMaxGoals
 } from "./model.js"
 import type {
+  WorkActivity as WorkActivityType,
   WorkAdmissionPreflight as WorkAdmissionPreflightType,
   WorkAdmissionTarget as WorkAdmissionTargetType,
   WorkAgentBinding as WorkAgentBindingType,
@@ -1944,13 +1945,16 @@ export interface WorkStoreService {
     readonly failures: ReadonlyArray<WorkObservedFailureType>
     /** Each activity an approved Fleet job wrote, with that job's id. */
     readonly approvals: ReadonlyArray<WorkApprovedActivity>
-    /** The reconciler's checkpoints; their ids are its activities' ids. */
+    /** The checkpoints the reconciler wrote, from its own record of them. */
     readonly reconcilerEvents: ReadonlyArray<{ readonly goalId: string; readonly eventId: string }>
+    /** Each activity's first checkpoint and content, keyed by goal id and activity id. */
+    readonly activityOrigins: ReadonlyMap<string, { readonly eventId: string; readonly activity: WorkActivityType }>
     readonly logicalObservedAt: number | null
   }, WorkStoreError>
 }
 
 const ReassignmentApprovalRow = Schema.Struct({ approvalJobId: Schema.String, goalId: Schema.String })
+const ReconcilerEventRow = Schema.Struct({ eventId: Schema.String, goalId: Schema.String })
 
 const ObservedFactRow = Schema.Struct({
   subject: Schema.String,
@@ -2237,6 +2241,10 @@ export class WorkStore implements WorkStoreService {
         );
         CREATE INDEX IF NOT EXISTS work_observed_facts_age
           ON work_observed_facts (confirmed_at, subject);
+        CREATE TABLE IF NOT EXISTS work_reconciler_events (
+          event_id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS work_observed_failures (
           subject TEXT PRIMARY KEY,
           source TEXT NOT NULL,
@@ -3708,6 +3716,14 @@ export class WorkStore implements WorkStoreService {
           const result = this.#database.prepare(
             "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
           ).run(decoded.eventId, decoded.goal.id, decoded.occurredAt, JSON.stringify(decoded))
+          // The reconciler's own record of what it wrote: its authorship and its
+          // once-per-goal rule come from this table, never from an id's spelling.
+          if (guard !== null) {
+            this.#database.prepare("INSERT INTO work_reconciler_events (event_id, goal_id) VALUES (?, ?)").run(
+              decoded.eventId,
+              decoded.goal.id
+            )
+          }
           this.#database.exec("COMMIT")
           transaction = false
           return { _tag: "inserted", changes: result.changes } satisfies AppendDecision
@@ -4833,12 +4849,15 @@ export class WorkStore implements WorkStoreService {
             `SELECT subject, source, reason, since, last_at AS lastAt
              FROM work_observed_failures ORDER BY subject ASC LIMIT ?`
           ).all(workObservedFactMaxRecords + 1)
+          const reconcilerRows = this.#database.prepare(
+            "SELECT event_id AS eventId, goal_id AS goalId FROM work_reconciler_events ORDER BY event_id ASC LIMIT ?"
+          ).all(workHistoryMaxEvents + 1)
           const reassignments = this.#database.prepare(
             "SELECT approval_job_id AS approvalJobId, goal_id AS goalId FROM work_goal_reassignments"
           ).all()
           this.#database.exec("COMMIT")
           inTransaction = false
-          return { bindings, events, facts, failures, laneOperations, reassignments }
+          return { bindings, events, facts, failures, laneOperations, reassignments, reconcilerRows }
         } catch (cause) {
           if (inTransaction) this.#database.exec("ROLLBACK")
           throw cause
@@ -4951,10 +4970,18 @@ export class WorkStore implements WorkStoreService {
     if (misfiled !== undefined) {
       return yield* new WorkStoreError({ cause: misfiled.subject, operation: "snapshot-input.fact-subject" })
     }
-    const reconcilerEvents = events.flatMap(({ eventId, goal }) =>
-      eventId.startsWith(reconcilerEventPrefix) ? [{ eventId, goalId: goal.id }] : []
-    )
-    return { approvals, events, facts, failures, logicalObservedAt, reconcilerEvents }
+    const reconcilerEvents = yield* Schema.decodeUnknownEffect(Schema.Array(ReconcilerEventRow))(source.reconcilerRows)
+      .pipe(Effect.mapError(storeError("snapshot-input.decode-reconciler-events")))
+    // Each activity's origin: the first checkpoint in its goal's history that
+    // holds it. Provenance holds only while the activity still reads as written.
+    const activityOrigins = new Map<string, { readonly eventId: string; readonly activity: WorkActivityType }>()
+    for (const event of events.toSorted((left, right) => left.occurredAt - right.occurredAt)) {
+      for (const activity of event.goal.activity ?? []) {
+        const key = `${event.goal.id}\u0000${activity.id}`
+        if (!activityOrigins.has(key)) activityOrigins.set(key, { activity, eventId: event.eventId })
+      }
+    }
+    return { activityOrigins, approvals, events, facts, failures, logicalObservedAt, reconcilerEvents }
   })
 
   readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore) {
@@ -4968,11 +4995,7 @@ export class WorkStore implements WorkStoreService {
     }
     // A goal is stamped by the reconciler at most once, whatever its facts
     // look like later: a reopened goal stays the owner's.
-    const stamped = new Map(
-      source.events.flatMap(({ eventId, goal }) =>
-        eventId.startsWith(reconcilerEventPrefix) ? [[goal.id, eventId]] : []
-      )
-    )
+    const stamped = new Map(source.reconcilerEvents.map(({ eventId, goalId }) => [goalId, eventId]))
     const cryptoService = this.#cryptoService
     const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) => this.appendAt(checkpoint, guard)
     return yield* Effect.forEach(

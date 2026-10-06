@@ -60,15 +60,16 @@ always yields the same checkpoint. It is written only if, inside the write's
 transaction, the goal's latest checkpoint and the pull request's fact are still
 the ones it was planned from (otherwise that goal is reported as a conflict) and
 256 checkpoints of history stay free. A goal is stamped by the reconciler at
-most once, whatever its facts look like later, so a goal its owner reopens stays
+most once (by its own record of what it wrote), whatever its facts look like later, so a goal its owner reopens stays
 reopened. Its event and activity ids start with `reconciler.`, a prefix no other
 writer may use. `isTerminalWorkState`
 names the finished states: `completed`, `deployed` and `abandoned`.
 
 The `now` window also says who wrote each activity that is not the owner's:
 `activityProvenance` lists reconciler and approved-job activities (with the
-job id), credited from what actually wrote them (an approved job's record, or a
-reconciler checkpoint with that id) and never from an activity id alone, and `activityProvenanceGoals` lists the goals whose such activities
+job id), credited from what actually wrote them (an approved job's record, or
+the reconciler's own record of its checkpoints) and only while the activity
+still reads exactly as first written, never from an activity id alone, and `activityProvenanceGoals` lists the goals whose such activities
 are all present. In a covered goal an unlisted activity is the owner's; a goal
 left out to stay within the response budget is counted in
 `activityProvenanceOmitted` and its provenance is unknown.

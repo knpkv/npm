@@ -2,6 +2,7 @@ import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
 import { Schema } from "effect"
 import { WorkActivityProvenance, WorkGoalObservedEntry, WorkSnapshots } from "./model.js"
 import type {
+  WorkActivity,
   WorkAgentObservation,
   WorkDisplayState,
   WorkGoal,
@@ -225,6 +226,10 @@ export const withObservedFacts = (
   }
 }
 
+const sameActivity = (left: WorkActivity, right: WorkActivity): boolean =>
+  left.id === right.id && left.kind === right.kind && left.summary === right.summary &&
+  left.occurredAt === right.occurredAt
+
 /** One activity an approved Fleet job wrote on a goal. */
 export interface WorkApprovedActivity {
   readonly goalId: string
@@ -246,6 +251,7 @@ export const withActivityProvenance = (
   snapshots: WorkSnapshots,
   approvals: ReadonlyArray<WorkApprovedActivity>,
   reconcilerEvents: ReadonlyArray<{ readonly goalId: string; readonly eventId: string }>,
+  activityOrigins: ReadonlyMap<string, { readonly eventId: string; readonly activity: WorkActivity }>,
   maxBytes: number
 ): WorkSnapshots => {
   const reconciler = new Set(reconcilerEvents.map(({ eventId, goalId }) => `${goalId}\u0000${eventId}`))
@@ -258,13 +264,18 @@ export const withActivityProvenance = (
   const provenance: Array<WorkActivityProvenance> = []
   const covered: Array<string> = []
   for (const goal of snapshots.now.goals) {
-    const entries = (goal.activity ?? []).flatMap(({ id }): ReadonlyArray<WorkActivityProvenance> => {
-      // Authorship comes from what wrote the activity, never from its id alone:
-      // an approved job's own record first, then the reconciler's checkpoint.
-      const job = approvalJob.get(`${goal.id}\u0000${id}`)
-      if (job !== undefined) return [{ activityId: id, approvalJobId: job, goalId: goal.id, provenance: "approval" }]
-      return reconciler.has(`${goal.id}\u0000${id}`)
-        ? [{ activityId: id, approvalJobId: null, goalId: goal.id, provenance: "reconciler" }]
+    const entries = (goal.activity ?? []).flatMap((activity): ReadonlyArray<WorkActivityProvenance> => {
+      // Authorship comes from what wrote the activity, never from its id alone,
+      // and holds only while the activity still reads exactly as written.
+      const key = `${goal.id}\u0000${activity.id}`
+      const origin = activityOrigins.get(key)
+      if (origin === undefined || !sameActivity(origin.activity, activity)) return []
+      const job = approvalJob.get(key)
+      if (job !== undefined) {
+        return [{ activityId: activity.id, approvalJobId: job, goalId: goal.id, provenance: "approval" }]
+      }
+      return reconciler.has(`${goal.id}\u0000${origin.eventId}`)
+        ? [{ activityId: activity.id, approvalJobId: null, goalId: goal.id, provenance: "reconciler" }]
         : []
     })
     const bytes = encodedBytes(goal.id) + 3 +

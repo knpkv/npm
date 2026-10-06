@@ -307,6 +307,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
         yield* projectWorkSnapshots(source.events, timestamp),
         source.approvals,
         source.reconcilerEvents,
+        source.activityOrigins,
         workSnapshotBudgetBytes
       ),
       source.facts,

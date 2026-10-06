@@ -5,6 +5,7 @@ import { TestClock } from "effect/testing"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import {
   makeWorkService,
   withActivityProvenance,
@@ -26,14 +27,15 @@ const fixtureWith = (configureCrypto?: (base: Crypto.Crypto) => Crypto.Crypto) =
     const root = mkdtempSync(join(tmpdir(), "herdr-terminal-reconcile-"))
     yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { recursive: true, force: true })))
     const baseCrypto = yield* Crypto.Crypto
+    const path = join(root, "work.sqlite")
     const store = yield* Effect.acquireRelease(
-      WorkStore.open(join(root, "work.sqlite")).pipe(
+      WorkStore.open(path).pipe(
         Effect.provideService(Crypto.Crypto, configureCrypto?.(baseCrypto) ?? baseCrypto)
       ),
       (opened) => Effect.sync(() => opened.close())
     )
     const work = yield* makeWorkService(store)
-    return { store, work }
+    return { path, store, work }
   }).pipe(provideNodeServices)
 
 const fixture = fixtureWith()
@@ -150,15 +152,15 @@ describe("terminal reconcile", () => {
       }
       yield* work.reconcile()
       const snapshots = yield* work.snapshots(100_000)
-      const { reconcilerEvents } = yield* store.snapshotInput()
+      const { activityOrigins, reconcilerEvents } = yield* store.snapshotInput()
       const { activityProvenance: _provenance, activityProvenanceGoals: _goals, ...bare } = snapshots.now
       const base = { ...snapshots, now: bare }
       const size = (value: WorkSnapshots) =>
         new TextEncoder().encode(JSON.stringify(Schema.encodeSync(WorkSnapshots)(value))).byteLength
-      const full = withActivityProvenance(base, [], reconcilerEvents, 10_000_000)
+      const full = withActivityProvenance(base, [], reconcilerEvents, activityOrigins, 10_000_000)
       expect(full.now.activityProvenanceGoals).toHaveLength(3)
       const budget = size(base) + 128 + Math.floor((size(full) - size(base)) / 2)
-      const trimmed = withActivityProvenance(base, [], reconcilerEvents, budget)
+      const trimmed = withActivityProvenance(base, [], reconcilerEvents, activityOrigins, budget)
       const covered = trimmed.now.activityProvenanceGoals ?? []
       expect(covered.length).toBeGreaterThan(0)
       expect(covered).toEqual(full.now.activityProvenanceGoals?.slice(0, covered.length))
@@ -166,7 +168,7 @@ describe("terminal reconcile", () => {
       expect(trimmed.now.activityProvenance?.every(({ goalId }) => covered.includes(goalId))).toBe(true)
       expect(size(trimmed)).toBeLessThanOrEqual(budget)
       // Not even empty lists fit: no provenance at all, so every goal reads as unknown.
-      expect(withActivityProvenance(base, [], reconcilerEvents, size(base))).toEqual(base)
+      expect(withActivityProvenance(base, [], reconcilerEvents, activityOrigins, size(base))).toEqual(base)
     })))
 
   it.effect("records a pull request closed without merging as abandoned", () =>
@@ -332,5 +334,52 @@ describe("terminal reconcile", () => {
       expect(Result.isSuccess(decode(valid))).toBe(true)
       expect(Result.isFailure(decode({ ...valid, week: { ...valid.week, activityProvenanceGoals: [] } }))).toBe(true)
       expect(Result.isFailure(decode({ ...valid, now: { ...valid.now, activityProvenanceGoals: [] } }))).toBe(true)
+    })))
+
+  it.effect("ignores a forged reconciler id: neither a stamp that blocks reconcile nor credited authorship", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { path, work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      const forged = goal({
+        activity: [{ id: "reconciler.forged", kind: "note", occurredAt: 1_500, summary: "Not the reconciler" }],
+        updatedAt: 1_500
+      })
+      const database = new DatabaseSync(path)
+      database.prepare("INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)").run(
+        "reconciler.forged",
+        "goal-pr7",
+        1_500,
+        JSON.stringify({
+          eventId: "reconciler.forged",
+          goal: forged,
+          occurredAt: 1_500,
+          version: "herdr.work.event.v1"
+        })
+      )
+      database.close()
+      expect((yield* work.snapshots(100_000)).now.activityProvenance).toEqual([])
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "merged" }), observedAt: 6_000 }])
+      expect((yield* work.reconcile())[0]).toMatchObject({ _tag: "applied", goalId: "goal-pr7" })
+    })))
+
+  it.effect("credits the reconciler only while its activity still reads as it wrote it", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "merged" }), observedAt: 6_000 }])
+      yield* work.reconcile()
+      const stamped = yield* currentGoal(work)
+      const shipment = stamped?.activity?.at(-1)
+      if (stamped === undefined || shipment === undefined) return expect.unreachable()
+      yield* record(work, "goal-pr7.2", { ...stamped, updatedAt: 7_000 })
+      expect((yield* work.snapshots(100_000)).now.activityProvenance?.map(({ provenance }) => provenance)).toEqual([
+        "reconciler"
+      ])
+      yield* record(work, "goal-pr7.3", {
+        ...stamped,
+        activity: [...(stamped.activity ?? []).slice(0, -1), { ...shipment, summary: "Rewritten by the owner" }],
+        updatedAt: 8_000
+      })
+      expect((yield* work.snapshots(100_000)).now.activityProvenance).toEqual([])
     })))
 })

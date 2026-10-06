@@ -287,6 +287,7 @@ const storeOnly = [
   "table work_goal_transactions",
   "table work_observed_facts",
   "table work_observed_failures",
+  "table work_reconciler_events",
   "trigger work_goal_transactions_after_insert"
 ]
 const bridgeOnly = ["index work_dispatch_handoffs_lane", "table work_dispatch_handoffs"]
