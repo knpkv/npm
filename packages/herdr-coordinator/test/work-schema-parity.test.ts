@@ -12,7 +12,7 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, expect, it } from "@effect/vitest"
 import { WorkStore } from "@knpkv/herdr-work"
 import { makeSqliteWorkBridge } from "@knpkv/herdr-work/sql"
-import { Effect, Option, Predicate, Schema } from "effect"
+import { Effect, Option, Predicate, Result, Schema } from "effect"
 import * as SqlClient from "effect/sql/SqlClient"
 import { copyFileSync, mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -280,9 +280,15 @@ const expectRejectedUnchanged = (
 /** Tables, indexes and triggers only one driver creates; both are required in production. */
 const storeOnly = [
   "index work_decision_handoffs_lane_time",
+  "index work_observed_facts_age",
+  "index work_observed_failures_age",
+  "table work_goal_abandonments",
   "table work_goal_reassignments",
   "table work_goal_transaction_totals",
   "table work_goal_transactions",
+  "table work_observed_facts",
+  "table work_observed_failures",
+  "table work_reconciler_events",
   "trigger work_goal_transactions_after_insert"
 ]
 const bridgeOnly = ["index work_dispatch_handoffs_lane", "table work_dispatch_handoffs"]
@@ -291,9 +297,9 @@ const bridgeOnly = ["index work_dispatch_handoffs_lane", "table work_dispatch_ha
  * Shared objects the two drivers still define differently. Both use
  * `IF NOT EXISTS`, so whichever opens a file first decides; in production
  * WorkStore opens first. Remove an entry when its definitions are unified.
- * - The bridge makes the handoff session index UNIQUE; WorkStore does not.
+ * None remain: both drivers now make the handoff session index UNIQUE.
  */
-const knownDivergences = ["index work_decision_handoffs_session"]
+const knownDivergences: ReadonlyArray<string> = []
 
 type Snapshot = ReturnType<typeof schemaSnapshot>
 type SchemaObject = readonly [key: string, definition: unknown]
@@ -424,6 +430,93 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
         // Apart from the known divergences, open order does not change the result.
         expect([...storeThenBridge.keys()].sort()).toEqual([...bridgeThenStore.keys()].sort())
         expect(differing(storeThenBridge, bridgeThenStore)).toEqual(knownDivergences)
+      })
+    ))
+
+  it.effect("makes a migrated file's plain session index unique through the bridge too, or fails closed on duplicates", () =>
+    withRoot((root) =>
+      Effect.gen(function*() {
+        // A file migrated from v1 handoffs: session_id was added by ALTER TABLE,
+        // so it has no column constraint and only a plain index under the name.
+        const migrated = join(root, "migrated.sqlite")
+        yield* drivers.store(migrated)
+        writeFixture(migrated, (database) => {
+          database.exec(`
+            DROP TABLE work_decision_handoffs;
+            CREATE TABLE work_decision_handoffs (
+              handoff_id TEXT PRIMARY KEY, session_id TEXT, lane_id TEXT NOT NULL,
+              occurred_at INTEGER NOT NULL, record TEXT NOT NULL
+            );
+            CREATE INDEX work_decision_handoffs_session ON work_decision_handoffs (session_id);
+          `)
+        })
+        const unique = (path: string) =>
+          rows(
+            Schema.Struct({ name: Schema.String, unique: Schema.Number }),
+            new DatabaseSync(path),
+            "PRAGMA index_list(work_decision_handoffs)"
+          )
+            .find(({ name }) => name === "work_decision_handoffs_session")?.unique
+        const clean = join(root, "clean.sqlite")
+        copyFileSync(migrated, clean)
+        yield* drivers.bridge(clean)
+        expect(unique(clean)).toBe(1)
+        const duplicated = join(root, "duplicated.sqlite")
+        copyFileSync(migrated, duplicated)
+        writeFixture(duplicated, (database) => {
+          database.exec(`
+            INSERT INTO work_decision_handoffs VALUES ('handoff:a', 'session:shared', 'lane:a', 1, '{}');
+            INSERT INTO work_decision_handoffs VALUES ('handoff:b', 'session:shared', 'lane:b', 2, '{}');
+          `)
+        })
+        expect(yield* Effect.result(drivers.bridge(duplicated))).toMatchObject({
+          failure: { _tag: "WorkStoreError", operation: "sql-work.initialize.session-index" }
+        })
+        expect(unique(duplicated)).toBe(0)
+      })
+    ))
+
+  it.effect("does not trust a composite unique index under the session index's name", () =>
+    withRoot((root) =>
+      Effect.gen(function*() {
+        const migrated = join(root, "composite.sqlite")
+        yield* drivers.store(migrated)
+        writeFixture(migrated, (database) => {
+          database.exec(`
+            DROP TABLE work_decision_handoffs;
+            CREATE TABLE work_decision_handoffs (
+              handoff_id TEXT PRIMARY KEY, session_id TEXT, lane_id TEXT NOT NULL,
+              occurred_at INTEGER NOT NULL, record TEXT NOT NULL
+            );
+            CREATE UNIQUE INDEX work_decision_handoffs_session ON work_decision_handoffs (session_id, handoff_id);
+          `)
+        })
+        const columns = (path: string) =>
+          rows(
+            Schema.Struct({ name: Schema.String }),
+            new DatabaseSync(path),
+            "PRAGMA index_info(work_decision_handoffs_session)"
+          ).map(({ name }) => name)
+        const openers: ReadonlyArray<readonly [string, (path: string) => ReturnType<typeof drivers.store>]> = [
+          ["store", drivers.store],
+          ["bridge", drivers.bridge]
+        ]
+        for (const [name, open] of openers) {
+          const clean = join(root, `${name}-clean.sqlite`)
+          copyFileSync(migrated, clean)
+          yield* open(clean)
+          expect(columns(clean)).toEqual(["session_id"])
+          const duplicated = join(root, `${name}-duplicated.sqlite`)
+          copyFileSync(migrated, duplicated)
+          writeFixture(duplicated, (database) => {
+            database.exec(`
+              INSERT INTO work_decision_handoffs VALUES ('handoff:a', 'session:shared', 'lane:a', 1, '{}');
+              INSERT INTO work_decision_handoffs VALUES ('handoff:b', 'session:shared', 'lane:b', 2, '{}');
+            `)
+          })
+          expect(Result.isFailure(yield* Effect.result(open(duplicated)))).toBe(true)
+          expect(columns(duplicated)).toEqual(["session_id", "handoff_id"])
+        }
       })
     ))
 

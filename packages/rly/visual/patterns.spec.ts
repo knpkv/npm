@@ -297,3 +297,26 @@ test("never splits a provider name inside a service mark, at any width", async (
     }
   }
 })
+
+test("keeps a region with an unbreakable title and body token inside 320 pixels", async ({ page }, testInfo) => {
+  await page.setViewportSize({ height: 1_000, width: 320 })
+  await page.goto(story("patterns-region--states"))
+  const region = page.locator("[data-rly-region]").first()
+  await expect(region).toBeVisible()
+  // Application text can hold a token with no break point: a branch, an id, a path.
+  await region.evaluate((element) => {
+    const token = "feat/implementWorkCheckpointRecoveryAndReconciliationForTheFleetCoordinator"
+    const title = element.querySelector("h2, h3")
+    if (title !== null) title.textContent = token
+    const body = element.lastElementChild
+    if (body !== null) body.append(Object.assign(document.createElement("code"), { textContent: token }))
+  })
+  await expectNoHorizontalOverflow(page)
+  const box = await region.boundingBox()
+  expect(box?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(320)
+  await page.screenshot({
+    animations: "disabled",
+    fullPage: true,
+    path: testInfo.outputPath("region-unbreakable-320.png")
+  })
+})

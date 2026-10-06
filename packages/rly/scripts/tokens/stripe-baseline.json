@@ -124,14 +124,6 @@
     "path": "packages/herdr-monitor/src/client/styles.css"
   },
   {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/herdr-work/src/styles.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/herdr-work/src/styles.css"
-  },
-  {
     "declaration": "border-left: 3px solid var(--rly-color-service-clockify)",
     "path": "packages/jcf-web/src/client/week.css"
   },
