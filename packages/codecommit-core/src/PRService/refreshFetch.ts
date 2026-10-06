@@ -146,6 +146,33 @@ export const fetchAndUpsertPRs = (params: {
     )
 
     const unevaluated = yield* Ref.make<ReadonlyArray<UnevaluatedPullRequest>>([])
+    // A stale row is reconciled only for an enabled account's scope, which supplies its profile and region.
+    const recordStaleUnevaluated = (
+      pr: {
+        readonly accountProfile: string
+        readonly accountRegion: string
+        readonly id: string
+        readonly repositoryName: string
+      },
+      message: string
+    ) =>
+      Effect.forEach(
+        enabledAccounts.filter((account) => account.profile === pr.accountProfile),
+        (account) =>
+          Effect.forEach(
+            (account.regions ?? []).filter((region) => region === pr.accountRegion),
+            (region) =>
+              Ref.update(unevaluated, (all) => [...all, {
+                profile: account.profile,
+                region,
+                pullRequestId: pr.id,
+                repositoryName: pr.repositoryName,
+                message
+              }]),
+            { discard: true }
+          ),
+        { discard: true }
+      )
 
     yield* Stream.mergeAll(streams, { concurrency: 2 }).pipe(
       Stream.runForEach(({ awsAccountId, item, label, profile, region }) =>
@@ -237,26 +264,6 @@ export const fetchAndUpsertPRs = (params: {
       )
     )
 
-    // Every refresh replaces the list: a pull request that evaluates again drops off it.
-    const unevaluatedPullRequests = yield* Ref.get(unevaluated)
-    yield* SubscriptionRef.update(state, (s) => ({ ...s, unevaluatedPullRequests }))
-    yield* Effect.forEach(
-      Object.values(Arr.groupBy(unevaluatedPullRequests, ({ profile, region }) => accountRegionKey(profile, region))),
-      (scope) => {
-        const first = Arr.headNonEmpty(scope)
-        return notificationRepo.addSystem({
-          type: "error",
-          title: `${first.profile} (${first.region})`,
-          message: `${scope.length} pull request${
-            scope.length === 1 ? "" : "s"
-          } couldn't be re-evaluated and kept their cached approval state: ${first.message}`,
-          profile: first.profile,
-          deduplicate: true
-        }).pipe(Effect.catch(() => Effect.void))
-      },
-      { discard: true }
-    )
-
     // Transition stale OPEN PRs: re-fetch to discover if they were merged/closed
     const successfulScopes = yield* Ref.get(successfullyFetchedScopes)
     yield* prRepo.findStaleOpen(staleThreshold).pipe(
@@ -292,18 +299,7 @@ export const fetchAndUpsertPRs = (params: {
                       // The pull request was read; only its approval enrichment failed. That is not
                       // evidence it is gone, so the row stays for the next refresh to settle.
                       failedOnlyOnApprovalEvaluation(error)
-                        ? notificationRepo.addSystem({
-                          type: "error",
-                          title: `${pr.accountProfile} (${pr.accountRegion})`,
-                          message: JSON.stringify({
-                            operation: "getPullRequest",
-                            profile: pr.accountProfile,
-                            region: pr.accountRegion,
-                            cause: approvalFailureMessage(error)
-                          }),
-                          profile: pr.accountProfile,
-                          deduplicate: true
-                        }).pipe(Effect.catch(() => Effect.void))
+                        ? recordStaleUnevaluated(pr, approvalFailureMessage(error))
                         : prRepo.deleteOne(pr.awsAccountId, pr.id, {
                           repositoryName: pr.repositoryName,
                           accountRegion: pr.accountRegion
@@ -316,6 +312,28 @@ export const fetchAndUpsertPRs = (params: {
         )
       ),
       Effect.catch(() => Ref.set(successfullyFetchedScopes, new Set()))
+    )
+
+    // Every refresh replaces the list, so a pull request that evaluates again drops off it. One
+    // notification per profile, because system notifications deduplicate by profile.
+    const unevaluatedPullRequests = yield* Ref.get(unevaluated)
+    yield* SubscriptionRef.update(state, (s) => ({ ...s, unevaluatedPullRequests }))
+    yield* Effect.forEach(
+      Object.values(Arr.groupBy(unevaluatedPullRequests, ({ profile }) => profile)),
+      (failures) => {
+        const first = Arr.headNonEmpty(failures)
+        const regions = [...new Set(failures.map(({ region }) => region))].join(", ")
+        return notificationRepo.addSystem({
+          type: "error",
+          title: first.profile,
+          message: `${failures.length} pull request${
+            failures.length === 1 ? "" : "s"
+          } in ${regions} couldn't be re-evaluated and kept their cached approval state: ${first.message}`,
+          profile: first.profile,
+          deduplicate: true
+        }).pipe(Effect.catch(() => Effect.void))
+      },
+      { discard: true }
     )
 
     // Propagate repoAccountId from any PR that has it to all PRs that don't
