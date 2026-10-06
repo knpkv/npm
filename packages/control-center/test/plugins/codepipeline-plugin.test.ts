@@ -32,7 +32,6 @@ import {
 import { CodePipelineReadClient } from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
 import {
   callPinnedCodePipelineMutationProvider,
-  codePipelineCredentialProviderOptions,
   CodePipelineCredentialResolver,
   CodePipelinePreDispatchFailure,
   CodePipelinePreDispatchTimeoutFailure,
@@ -982,11 +981,6 @@ describe("CodePipelinePlugin", () => {
       assert.isFalse(valid[0]?.hasMore)
       assert.strictEqual(valid[0]?.checkpointAfterPage.length, 2_048)
     }))
-
-  it("uses the default provider chain while keeping named AWS profiles explicit", () => {
-    assert.deepStrictEqual(codePipelineCredentialProviderOptions("default"), {})
-    assert.deepStrictEqual(codePipelineCredentialProviderOptions("production"), { profile: "production" })
-  })
 
   it.effect("pins identity verification and mutation to one acquired credential snapshot", () =>
     Effect.gen(function*() {
