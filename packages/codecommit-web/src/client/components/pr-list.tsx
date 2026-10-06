@@ -187,7 +187,7 @@ export function PRList() {
           return (
             <StatePanel
               className={styles.queueState}
-              description={`${cause.detail} Lost it? Run codecommit web again to print a new one.`}
+              description={cause.detail}
               title="This browser isn't signed in"
               tone="caution"
             />
@@ -224,6 +224,20 @@ export function PRList() {
         case "NothingOpen":
           break
       }
+    }
+
+    // A read waiting on the reader's answer is why nothing has loaded: say that, not "Loading".
+    const readPrompt = appState.permissionPrompt?.category === "read" ? appState.permissionPrompt : undefined
+    if (sorted.length === 0 && readPrompt !== undefined) {
+      return (
+        <StatePanel
+          announce="polite"
+          className={styles.queueState}
+          description={`${readPrompt.context} waits for your answer in the bar above: allow it once, or allow every read.`}
+          title="Waiting for your permission"
+          tone="caution"
+        />
+      )
     }
 
     if (sorted.length === 0 && isLoading) {

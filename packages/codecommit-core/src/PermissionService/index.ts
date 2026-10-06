@@ -15,6 +15,7 @@
  */
 import { Config, Context, Effect, Layer, Ref, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
+import { ConfigError } from "../Errors.js"
 import { allOperations, getOperationMeta, type OperationName, registerOperation } from "./operations.js"
 
 export type { BuiltinOperation, OperationMeta, OperationName } from "./operations.js"
@@ -71,9 +72,28 @@ const saveToDisk = (fs: FileSystem.FileSystem, path: string, config: Permissions
     yield* fs.rename(tmpPath, path)
   }).pipe(Effect.catch(() => Effect.void))
 
+/** Saves the whole file atomically (temp file, then rename); a failure names the path. */
+const writeToDisk = (
+  fs: FileSystem.FileSystem,
+  path: string,
+  config: PermissionsConfig
+): Effect.Effect<void, ConfigError> =>
+  Effect.gen(function*() {
+    yield* fs.makeDirectory(path.replace(/\/[^/]+$/, ""), { recursive: true })
+    const tmpPath = `${path}.tmp`
+    yield* fs.writeFileString(tmpPath, JSON.stringify(config, null, 2))
+    yield* fs.rename(tmpPath, path)
+  }).pipe(Effect.mapError((cause) => new ConfigError({ message: `Couldn't save ${path}`, cause })))
+
 export interface PermissionServiceContract {
   readonly check: (operation: OperationName) => Effect.Effect<PermissionState>
   readonly set: (operation: OperationName, state: PermissionState) => Effect.Effect<void>
+  /**
+   * Sets every operation of one category (for example all reads) in one atomic write, so first run can
+   * grant CodeCommit reads at once while writes keep prompting. Memory changes only after the file is
+   * saved; a failed save fails here instead of leaving a grant that disappears on restart.
+   */
+  readonly setCategory: (category: "read" | "write", state: PermissionState) => Effect.Effect<void, ConfigError>
   readonly getAll: () => Effect.Effect<Record<string, PermissionState>>
   readonly resetAll: () => Effect.Effect<void>
   readonly isAuditEnabled: () => Effect.Effect<boolean>
@@ -107,6 +127,19 @@ const makePermissionService = Effect.gen(function*() {
       yield* saveToDisk(fs, permPath, yield* Ref.get(configRef))
     })
 
+  const setCategory = (category: "read" | "write", state: PermissionState): Effect.Effect<void, ConfigError> =>
+    Effect.gen(function*() {
+      const current = yield* Ref.get(configRef)
+      const granted = Object.fromEntries(
+        allOperations()
+          .filter(([, meta]) => meta.category === category)
+          .map(([operation]) => [operation, state])
+      )
+      const next = { ...current, permissions: { ...current.permissions, ...granted } }
+      yield* writeToDisk(fs, permPath, next)
+      yield* Ref.set(configRef, next)
+    })
+
   const getAll = (): Effect.Effect<Record<string, PermissionState>> =>
     Ref.get(configRef).pipe(Effect.map((c) => c.permissions))
 
@@ -138,6 +171,7 @@ const makePermissionService = Effect.gen(function*() {
   return {
     check,
     set,
+    setCategory,
     getAll,
     resetAll,
     isAuditEnabled,

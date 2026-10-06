@@ -42,6 +42,11 @@ export const PermissionsLive = HttpApiBuilder.group(
             Effect.mapError((e) => new ApiError({ message: String(e) }))
           ))
         .handle("reset", () => permService.resetAll().pipe(Effect.map(() => "ok")))
+        .handle("updateCategory", ({ payload }) =>
+          permService.setCategory(payload.category, payload.state).pipe(
+            Effect.map(() => "ok"),
+            Effect.mapError((error) => new ApiError({ message: error.message }))
+          ))
         .handle("auditSettings", () =>
           Effect.all({
             enabled: permService.isAuditEnabled(),

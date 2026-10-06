@@ -41,7 +41,7 @@ describe("stream connection", () => {
   it("labels each state and says how to recover", () => {
     expect(connectionLabel({ _tag: "Unauthenticated", detail: null })).toBe("Not signed in")
     expect(connectionDetail({ _tag: "Unauthenticated", detail: null })).toBe(
-      "Open the sign-in link that codecommit web printed."
+      "Run codecommit web again and open the link it prints; each link works once, within 60 seconds."
     )
     expect(connectionLabel({ _tag: "Failed", cause: "x", retryAt: 1 })).toBe("Reconnecting")
     expect(connectionLabel({ _tag: "Failed", cause: "x", retryAt: null })).toBe("Disconnected")

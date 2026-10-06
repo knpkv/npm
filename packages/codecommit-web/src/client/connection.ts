@@ -61,7 +61,8 @@ export const connectionDetail = (connection: StreamConnection): string | null =>
     case "Live":
       return null
     case "Unauthenticated":
-      return connection.detail ?? "Open the sign-in link that codecommit web printed."
+      return connection.detail ??
+        "Run codecommit web again and open the link it prints; each link works once, within 60 seconds."
     case "Failed":
       return connection.retryAt === null ? `${connection.cause} Retries stopped.` : connection.cause
   }

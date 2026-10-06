@@ -926,6 +926,17 @@ export class PermissionsGroup extends HttpApiGroup.make("permissions")
     HttpApiEndpoint.post("reset", "/reset", { success: Schema.String })
   )
   .add(
+    // One grant for a whole category (first run: every read), so the first account isn't blocked by a modal per call.
+    HttpApiEndpoint.post("updateCategory", "/category", {
+      payload: Schema.Struct({
+        category: Schema.Literals(["read", "write"]),
+        state: PermissionStateSchema
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
+  )
+  .add(
     HttpApiEndpoint.get("auditSettings", "/audit", {
       success: Schema.Struct({
         enabled: Schema.Boolean,

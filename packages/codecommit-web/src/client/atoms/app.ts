@@ -217,6 +217,9 @@ export const refreshSinglePrAtom = ApiClient.mutation("prs", "refreshSingle")
 // Approval rule CRUD
 export const createApprovalRuleAtom = ApiClient.mutation("prs", "createApprovalRule")
 export const updateApprovalRuleAtom = ApiClient.mutation("prs", "updateApprovalRule")
+/** Sets one permission category (for example every read) in one step. */
+export const permissionsCategoryUpdateAtom = ApiClient.mutation("permissions", "updateCategory")
+
 export const deleteApprovalRuleAtom = ApiClient.mutation("prs", "deleteApprovalRule")
 
 // Permissions

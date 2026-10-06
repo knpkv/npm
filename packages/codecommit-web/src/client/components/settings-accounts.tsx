@@ -1,8 +1,10 @@
 import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { AwsProfileName } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
+import * as Cause from "effect/Cause"
+import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
-import { InfoIcon, LogInIcon, LogOutIcon, SearchIcon, ServerIcon, UserIcon } from "lucide-react"
+import { LogInIcon, LogOutIcon, SearchIcon, UserIcon } from "lucide-react"
 import { StatePanel } from "@knpkv/rly/primitives"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
@@ -86,6 +88,22 @@ export function SettingsAccounts() {
     [saveWithDebounce, overrides]
   )
 
+  const setAutoDetect = useCallback(
+    (autoDetect: boolean, data: ConfigData) => {
+      saveWithDebounce({
+        accounts: data.accounts.map((a) => ({
+          profile: a.profile,
+          regions: [...a.regions],
+          enabled: overrides[a.profile] ?? a.enabled
+        })),
+        autoDetect,
+        autoRefresh: data.autoRefresh,
+        refreshIntervalSeconds: data.refreshIntervalSeconds
+      })
+    },
+    [saveWithDebounce, overrides]
+  )
+
   return (
     <div className="space-y-4">
       <div>
@@ -96,7 +114,17 @@ export function SettingsAccounts() {
       {AsyncResult.builder(config)
         // Only the first load replaces the list; a re-detect keeps it (and its result line) on screen.
         .onInitial(() => <p className="text-sm text-muted-foreground">Loading...</p>)
-        .onDefect(() => <p className="text-sm text-destructive">Failed to load config</p>)
+        .onFailure((cause) => {
+          // Typed errors and defects alike stay here with their reason, never thrown into the router.
+          const error = Cause.squash(cause)
+          return (
+            <p className="text-sm" role="alert">
+              Couldn't read the CodeCommit settings:{" "}
+              {Predicate.isError(error) ? error.message : "the server didn't answer"}. Check ~/.codecommit/config.json,
+              or reload once the server is running.
+            </p>
+          )
+        })
         .onSuccess((data) => (
           <AccountsList
             currentUser={appState.currentUser}
@@ -107,6 +135,7 @@ export function SettingsAccounts() {
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             toggleAccount={toggleAccount}
+            setAutoDetect={setAutoDetect}
             onSsoLogin={(profile) => {
               try {
                 ssoLogin({ payload: { profile: Schema.decodeSync(AwsProfileName)(profile) } })
@@ -177,6 +206,7 @@ function AccountsList({
   onSsoLogout,
   overrides,
   search,
+  setAutoDetect,
   setSearch,
   setStatusFilter,
   statusFilter,
@@ -190,6 +220,7 @@ function AccountsList({
   readonly statusFilter: StatusFilter
   readonly setStatusFilter: (f: StatusFilter) => void
   readonly toggleAccount: (profile: string, data: ConfigData) => void
+  readonly setAutoDetect: (autoDetect: boolean, data: ConfigData) => void
   readonly onSsoLogin: (profile: string) => void
   readonly onSsoLogout: () => void
 }) {
@@ -280,28 +311,30 @@ function AccountsList({
             </ButtonGroup>
           </div>
           <div className="text-xs text-muted-foreground">
-            {enabledCount}/{accounts.length} enabled
-            {filtered.length !== accounts.length && ` · ${filtered.length} shown`}
+            {enabledCount} of {accounts.length} included
+            {filtered.length !== accounts.length && `, ${filtered.length} shown`}
           </div>
           <div className="divide-y rounded-md border">
             {filtered.map((account) => (
-              <div key={account.profile} className="flex items-center justify-between px-3 py-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <ServerIcon className="size-3.5 text-muted-foreground shrink-0" />
-                  <span className="text-sm font-medium truncate">{account.profile}</span>
-                  <span className="text-xs text-muted-foreground truncate">
-                    {account.regions.join(", ") || "default"}
+              // The whole row is the switch's label, so its name is what the row shows and it is easy to hit.
+              <label
+                key={account.profile}
+                className="flex min-h-11 cursor-pointer items-center justify-between gap-3 px-3 py-2"
+              >
+                <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                  <span className="text-sm font-medium break-words">{account.profile}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {account.regions.join(", ") || "default region"}
                   </span>
-                </div>
-                <Button
-                  variant={account.enabled ? "default" : "outline"}
-                  size="sm"
-                  className="ml-2 h-6 px-2 text-xs shrink-0"
-                  onClick={() => toggleAccount(account.profile, data)}
-                >
-                  {account.enabled ? "On" : "Off"}
-                </Button>
-              </div>
+                </span>
+                <input
+                  checked={account.enabled}
+                  className="size-5 shrink-0 cursor-pointer"
+                  onChange={() => toggleAccount(account.profile, data)}
+                  role="switch"
+                  type="checkbox"
+                />
+              </label>
             ))}
             {filtered.length === 0 && (
               <p className="px-3 py-4 text-center text-sm text-muted-foreground">No matching accounts</p>
@@ -309,10 +342,15 @@ function AccountsList({
           </div>
         </>
       )}
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-        <InfoIcon className="size-3" />
-        Auto-detect: {data.autoDetect ? "enabled" : "disabled"}
-      </div>
+      <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
+        <input
+          checked={data.autoDetect}
+          className="size-5 shrink-0 cursor-pointer"
+          onChange={() => setAutoDetect(!data.autoDetect, data)}
+          type="checkbox"
+        />
+        Add new profiles from your AWS configuration automatically
+      </label>
     </>
   )
 }
