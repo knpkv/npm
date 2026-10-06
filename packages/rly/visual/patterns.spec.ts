@@ -45,3 +45,26 @@ test("keeps named collaborator roles and controlled overflow clear at 320 pixels
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("people-320.png") })
 })
+
+test(
+  "keeps the decision target, both actions and the off reason inside 320 pixels, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_200, width: 320 })
+      await page.goto(story("patterns-decisionbar--states", forcedColors))
+
+      const off = page.getByRole("button", { name: "Approve: Apply nix config to luna" })
+      await expect(off).toHaveAttribute("aria-disabled", "true")
+      await expect(off).toHaveAccessibleDescription(/hub is unreachable/)
+      await off.focus()
+      await expect(off).toBeFocused()
+      await expect(page.getByText("Reassign Rotate signing keys from arch to arch-b, 4m 12s left")).toBeVisible()
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`decision-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
