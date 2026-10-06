@@ -17,9 +17,15 @@ export interface WorkRequestDecision {
   readonly decision: "approve" | "reject"
 }
 
-/** The hub's own words about the last decision sent from this page, for the job it decided. */
+/**
+ * The hub's own words about the last decision sent from this page, for the job it decided.
+ * `settled` is true when the hub answered (accepted or refused); false when the outcome is
+ * uncertain (the request failed in transit, a 5xx, an unreadable reply). An unsettled answer gives
+ * way to the outcome a later snapshot proves.
+ */
 export interface WorkRequestAnswer {
   readonly jobId: string
+  readonly settled: boolean
   readonly text: string
 }
 
@@ -33,7 +39,11 @@ export interface WorkRequestDecisions {
    * one, `undefined` when this host cannot decide the job (not pending here, or another host's).
    */
   readonly expiresAt: (jobId: string) => number | null | undefined
-  /** The host's clock, re-read while any clock is visible. */
+  /**
+   * Hub time: the snapshot's `observedAt` plus the time elapsed locally since it arrived, re-read
+   * while any clock is visible. Expiries are hub times, so a browser clock ahead or behind must not
+   * move them.
+   */
   readonly now: number
   /** The decision waiting for the hub, if any. */
   readonly sending: WorkRequestDecision | null
