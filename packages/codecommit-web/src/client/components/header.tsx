@@ -126,7 +126,7 @@ export function Header() {
           ? "error"
           : isLoading
             ? "loading"
-            : state.lastUpdated
+            : state.lastUpdated !== undefined
               ? "live"
               : "connecting"
   const statusLabel =
@@ -136,7 +136,7 @@ export function Header() {
         ? "Sync issue"
         : isLoading
           ? "Syncing"
-          : state.lastUpdated
+          : state.lastUpdated !== undefined
             ? "Live"
             : "Connecting"
   const statusDetail =
