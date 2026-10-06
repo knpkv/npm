@@ -224,9 +224,12 @@ export const ownsEnterKey = (target: EventTarget | null): boolean => {
  * must stay out of it.
  */
 export const insideOpenDialog = (path: ReadonlyArray<EventTarget>): boolean =>
-  path.some((node) =>
-    Predicate.hasProperty(node, "tagName") && node.tagName === "DIALOG" &&
-    Predicate.hasProperty(node, "open") && node.open === true
+  path.some(
+    (node) =>
+      Predicate.hasProperty(node, "tagName") &&
+      node.tagName === "DIALOG" &&
+      Predicate.hasProperty(node, "open") &&
+      node.open === true
   )
 
 const formatRelativeDate = (dateStr: string): string => {
