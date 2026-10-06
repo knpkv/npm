@@ -52,9 +52,7 @@ const FindingCard = ({
     {issue.explanation === undefined ? null : <Prose text={issue.explanation} />}
     {issue.status !== undefined || issue.recommendation === undefined ? null : (
       <>
-        <Text as="strong" variant="label">
-          Fix
-        </Text>
+        <h4 className="review-finding-fix">Fix</h4>
         <Prose text={issue.recommendation} />
       </>
     )}
@@ -110,7 +108,7 @@ export const GuideUsage = ({ usage }: { readonly usage: ReadonlyArray<Usage> | u
           </Text>
           <p className="review-muted">
             {run.scope}
-            {run.model === undefined ? "" : ` · ${run.model}`}
+            {run.model === undefined ? "" : `, ${run.model}`}
           </p>
           <dl className="review-metrics">
             <div>
@@ -134,7 +132,7 @@ export const GuideUsage = ({ usage }: { readonly usage: ReadonlyArray<Usage> | u
               <dd>
                 {run.cost === undefined
                   ? "Not recorded"
-                  : `${run.cost.currency} ${String(run.cost.amount)} · ${run.cost.basis}`}
+                  : `${run.cost.currency} ${String(run.cost.amount)}, ${run.cost.basis}`}
               </dd>
             </div>
           </dl>
@@ -145,11 +143,11 @@ export const GuideUsage = ({ usage }: { readonly usage: ReadonlyArray<Usage> | u
   return (
     <>
       <details className="review-usage" ref={ref}>
-        <summary>Execution · tokens, cost, and time</summary>
+        <summary>Execution: tokens, cost and time</summary>
         {receipt}
       </details>
       <section className="review-usage-print" aria-label="Execution evidence">
-        <h2>Execution · tokens, cost, and time</h2>
+        <h2>Execution: tokens, cost and time</h2>
         {receipt}
       </section>
     </>
@@ -219,40 +217,36 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
       <a className="review-skip" href={`#${fragmentId("content")}`}>
         Skip to changes
       </a>
-      <nav className="review-nav" aria-label="Guide chapters">
-        <Text as="p" variant="label">
-          CHANGE GUIDE & REVIEW
-        </Text>
-        <Text as="p" variant="body">
-          {guide.title}
-        </Text>
-        <ol>
-          {hasFindings ? (
-            <li>
-              <a href={`#${fragmentId("reading")}`} onClick={() => setReading("review")}>
-                Review
-              </a>
-            </li>
-          ) : null}
-          {guide.sections.map((section, index) => (
-            <li key={index}>
-              <a href={`#${fragmentId(`s${index + 1}`)}`}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                {section.title}
-              </a>
-            </li>
-          ))}
-          {guide.unplacedFiles.length > 0 ? (
-            <li>
-              <a href={`#${fragmentId("rest")}`}>Other files</a>
-            </li>
-          ) : null}
-          {general.length > 0 ? (
-            <li>
-              <a href={`#${fragmentId("general")}`}>Outside the diff</a>
-            </li>
-          ) : null}
-        </ol>
+      <div className="review-side">
+        <nav className="review-nav" aria-label="Guide chapters">
+          <Text as="p" className="review-nav-title" variant="label">
+            {guide.title}
+          </Text>
+          <ol>
+            {hasFindings ? (
+              <li>
+                <a href={`#${fragmentId("reading")}`} onClick={() => setReading("review")}>
+                  Review
+                </a>
+              </li>
+            ) : null}
+            {guide.sections.map((section, index) => (
+              <li key={index}>
+                <a href={`#${fragmentId(`s${index + 1}`)}`}>{section.title}</a>
+              </li>
+            ))}
+            {guide.unplacedFiles.length > 0 ? (
+              <li>
+                <a href={`#${fragmentId("rest")}`}>Other files</a>
+              </li>
+            ) : null}
+            {general.length > 0 ? (
+              <li>
+                <a href={`#${fragmentId("general")}`}>Outside the diff</a>
+              </li>
+            ) : null}
+          </ol>
+        </nav>
         <div className="review-controls">
           <Button size="compact" variant="secondary" onClick={() => setMode(mode === "split" ? "stacked" : "split")}>
             {mode === "split" ? "Unified view" : "Split view"}
@@ -272,7 +266,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
             </Button>
           </div>
         </div>
-      </nav>
+      </div>
       <main className="review-content" id={fragmentId("content")}>
         <header className="review-header">
           <div className="review-inline review-muted">
@@ -323,8 +317,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                           <a href={`#${fragmentId(`s${index + 1}`)}`}>{section.title}</a>
                           {section.diffs.length === 0 ? null : (
                             <span className="review-muted">
-                              {" "}
-                              · {section.diffs.length} file{section.diffs.length === 1 ? "" : "s"}
+                              , {section.diffs.length} file{section.diffs.length === 1 ? "" : "s"}
                             </span>
                           )}
                         </li>
@@ -335,7 +328,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
               },
               {
                 value: "review",
-                label: `Review${findings.issues.length === 0 ? "" : ` · ${findings.issues.length}`}`,
+                label: `Review${findings.issues.length === 0 ? "" : ` (${findings.issues.length})`}`,
                 forceMount: true,
                 content: (
                   <Surface as="section" id={fragmentId("verdict")} className="review-verdict">
@@ -345,7 +338,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                     {findings.source === undefined ? (
                       <p className="review-muted">No review source supplied.</p>
                     ) : (
-                      <p className="review-muted">From {findings.source}</p>
+                      <p className="review-muted">Source: {findings.source}</p>
                     )}
                     <dl className="review-checklist">
                       {findings.checklist.map((check, index) => (
@@ -387,12 +380,9 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
         </header>
         {guide.sections.map((section, index) => (
           <section className="review-chapter" id={fragmentId(`s${index + 1}`)} key={index}>
-            <header className="review-chapter-header">
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <Text as="h2" variant="section-title">
-                {section.title}
-              </Text>
-            </header>
+            <Text as="h2" variant="section-title">
+              {section.title}
+            </Text>
             <Prose text={section.overview} />
             {section.diffs.map((diff) => {
               const file = findFile(patch, diff.file)
@@ -422,8 +412,8 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                   <code>
                     {issue.file}
                     {issue.line === undefined ? "" : `:${issue.line}`}
-                  </code>{" "}
-                  ·{" "}
+                  </code>
+                  :{" "}
                   {reason === "no-line"
                     ? "no line given"
                     : reason === "outside-hunks"

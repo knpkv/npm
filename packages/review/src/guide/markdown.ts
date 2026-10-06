@@ -162,11 +162,17 @@ export const renderMarkdown = (source: string): Rendered => {
       index += 1 // closing fence
       if (lang === "mermaid") {
         mermaid = true
-        out.push(`<pre class="mermaid">${escapeHtml(body.join("\n"))}</pre>`)
+        // A framed instrument with its own caption bar and a fixed height, so drawing it cannot shift the page.
+        out.push(
+          `<figure class="review-diagram"><figcaption>Diagram</figcaption><pre class="mermaid" tabindex="0">${
+            escapeHtml(body.join("\n"))
+          }</pre></figure>`
+        )
       } else {
         const token = lang.replace(/[^a-zA-Z0-9_-]/g, "-")
         const cls = token === "" ? "" : ` class="lang-${token}"`
-        out.push(`<pre><code${cls}>${escapeHtml(body.join("\n"))}</code></pre>`)
+        // Focusable so a block that scrolls sideways can be scrolled from the keyboard.
+        out.push(`<pre tabindex="0"><code${cls}>${escapeHtml(body.join("\n"))}</code></pre>`)
       }
       continue
     }
@@ -230,10 +236,11 @@ export const renderMarkdown = (source: string): Rendered => {
       const kind = CALLOUT.exec(quoted[0] ?? "")
       if (kind !== null) {
         const label = kind[1] ?? "NOTE"
+        const name = `${label.charAt(0)}${label.slice(1).toLowerCase()}`
         const body = renderMarkdown(quoted.slice(1).join("\n"))
         mermaid ||= body.mermaid
         out.push(
-          `<aside class="callout callout-${label.toLowerCase()}"><span class="callout-label">${label}</span>${body.html}</aside>`
+          `<aside class="callout callout-${label.toLowerCase()}"><strong class="callout-label">${name}</strong>${body.html}</aside>`
         )
       } else {
         const body = renderMarkdown(quoted.join("\n"))
