@@ -348,4 +348,47 @@ describe("StackedBars", () => {
     await resizeTo(100)
     expect(formatScale).toHaveBeenLastCalledWith(2, 2)
   })
+
+  it("starts a fresh touch gesture after the selection clears, by Escape or by its owner", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const onSelectionChange = vi.fn()
+    const Owner = (): ReactElement => {
+      const [selection, setSelection] = useState<RlyChartSelection | null>(null)
+      return (
+        <StackedBars
+          {...props}
+          onSelectionChange={(next) => {
+            onSelectionChange(next)
+            setSelection(next)
+          }}
+          selection={selection}
+        />
+      )
+    }
+    const root = await mount(<Owner />)
+    const bar = (index: number): Element | undefined => root.querySelectorAll("svg:not([class*='band']) g")[index]
+    const tap = (index: number): void =>
+      act(() => {
+        bar(index)?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }))
+        bar(index)?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      })
+    tap(1)
+    act(
+      () =>
+        void root
+          .querySelector('[role="group"]')
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }))
+    )
+    tap(3)
+    tap(5)
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 3, to: 5 })
+  })
+
+  it("keeps time labels under their bars in right-to-left text, on the SVG's physical axis", () => {
+    const root = render({ dir: "rtl" })
+    const first = root.querySelector('[data-anchor="start"]')
+    expect(first?.getAttribute("style")).toContain("left:")
+    expect(first?.getAttribute("style")).not.toContain("inset-inline")
+    expect(root.querySelector('[data-anchor="end"]')?.getAttribute("style")).toContain("right:")
+  })
 })

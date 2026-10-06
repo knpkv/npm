@@ -235,6 +235,7 @@ export const StackedBars = ({
       if (selection === null) return
       event.preventDefault()
       setCursor(null)
+      setPendingTap(null)
       onSelectionChange(null)
       return
     }
@@ -304,7 +305,9 @@ export const StackedBars = ({
                 key={bin.first}
                 onClick={(event) => {
                   const touch = pointerType.current === "touch"
-                  const extend = event.shiftKey || (touch && pendingTap !== null && pendingTap !== index)
+                  // A second tap extends only a live selection; a cleared one starts a new gesture.
+                  const extend =
+                    event.shiftKey || (touch && selection !== null && pendingTap !== null && pendingTap !== index)
                   onSelectionChange(selectBin(selection, bins, index, extend))
                   setCursor(bin.first)
                   setPendingTap(touch && !extend ? index : null)
@@ -356,7 +359,8 @@ export const StackedBars = ({
               className={style("tick")}
               data-anchor={tick.anchor}
               key={tick.index}
-              style={tick.anchor === "end" ? { insetInlineEnd: 0 } : { insetInlineStart: `${x(bin.start) / 10}%` }}
+              // Physical sides, like the SVG's x axis, so labels stay under their bars in right-to-left text.
+              style={tick.anchor === "end" ? { right: 0 } : { left: `${x(bin.start) / 10}%` }}
             >
               {formatTick(bin, binSize)}
             </span>
