@@ -18,25 +18,27 @@ const clientSource = (name: string) =>
   })
 
 describe("style layer order", () => {
-  it.effect("loads the order statement before rly and Tailwind declare their own layers", () =>
-    Effect.gen(function*() {
-      const main = yield* clientSource("main.tsx")
-      const imports = [...main.matchAll(/^import\s+"([^"]+\.css)"/gm)].map((match) => match[1])
-      expect(imports[0]).toBe("./layers.css")
-      expect(imports).toContain("@knpkv/rly/styles.css")
-      expect(imports).toContain("./index.css")
-    }).pipe(Effect.provide(NodeServices.layer)))
+  it.layer(NodeServices.layer)((it) => {
+    it.effect("loads the order statement before rly and Tailwind declare their own layers", () =>
+      Effect.gen(function*() {
+        const main = yield* clientSource("main.tsx")
+        const imports = [...main.matchAll(/^import\s+"([^"]+\.css)"/gm)].map((match) => match[1])
+        expect(imports[0]).toBe("./layers.css")
+        expect(imports).toContain("@knpkv/rly/styles.css")
+        expect(imports).toContain("./index.css")
+      }))
 
-  it.effect("puts Tailwind's preflight under rly components and Tailwind utilities above them", () =>
-    Effect.gen(function*() {
-      const order = declaredOrder(yield* clientSource("layers.css"))
-      const at = (name: string) => order.indexOf(name)
-      for (const name of ["theme", "base", "rly.reset", "rly.components", "rly.state", "components", "utilities"]) {
-        expect(order).toContain(name)
-      }
-      expect(at("base")).toBeLessThan(at("rly.reset"))
-      expect(at("base")).toBeLessThan(at("rly.components"))
-      expect(at("rly.state")).toBeLessThan(at("components"))
-      expect(at("components")).toBeLessThan(at("utilities"))
-    }).pipe(Effect.provide(NodeServices.layer)))
+    it.effect("puts Tailwind's preflight under rly components and Tailwind utilities above them", () =>
+      Effect.gen(function*() {
+        const order = declaredOrder(yield* clientSource("layers.css"))
+        const at = (name: string) => order.indexOf(name)
+        for (const name of ["theme", "base", "rly.reset", "rly.components", "rly.state", "components", "utilities"]) {
+          expect(order).toContain(name)
+        }
+        expect(at("base")).toBeLessThan(at("rly.reset"))
+        expect(at("base")).toBeLessThan(at("rly.components"))
+        expect(at("rly.state")).toBeLessThan(at("components"))
+        expect(at("components")).toBeLessThan(at("utilities"))
+      }))
+  })
 })
