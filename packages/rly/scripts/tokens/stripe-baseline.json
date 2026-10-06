@@ -1,37 +1,5 @@
 [
   {
-    "declaration": "border-inline-start-color: LinkText",
-    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
-  },
-  {
-    "declaration": "border-inline-start: 2px solid var(--rly-color-border-1)",
-    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
-  },
-  {
-    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codecommit)",
-    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
-  },
-  {
-    "declaration": "border-inline-start: var(--rly-space-2) solid var(--rly-color-action-background)",
-    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
-  },
-  {
-    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-action-background)",
-    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
-  },
-  {
-    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-border-2)",
-    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
-  },
-  {
-    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink)",
-    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
-  },
-  {
-    "declaration": "box-shadow: inset var(--rly-space-4) 0 var(--rly-color-action-background)",
-    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
-  },
-  {
     "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-confluence)",
     "path": "packages/control-center/src/client/AgentPage.module.css"
   },

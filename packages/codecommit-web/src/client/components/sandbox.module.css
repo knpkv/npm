@@ -18,16 +18,10 @@
   gap: var(--rly-space-16);
 }
 
-.eyebrow {
-  display: block;
-  inline-size: fit-content;
-  color: var(--rly-color-text-2);
-  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
-    var(--rly-type-meta-font);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+/* How many sandboxes run, as plain words beside the title, not a status pill. */
+.running {
+  white-space: nowrap;
 }
-
 
 .title,
 .lede,

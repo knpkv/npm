@@ -140,7 +140,6 @@ export const ServiceMark = ({ className, service, size = "default", ...props }: 
       data-rly-service={service}
       role="img"
     >
-      <span aria-hidden="true" className={style("rail")} />
       <Glyph />
       <span aria-hidden="true" className={style("name")}>
         {name}

@@ -1336,27 +1336,19 @@ export function PRDetail() {
       </nav>
 
       <header className={styles.hero}>
-        <div className={styles.eyebrow}>
-          <ServiceMark service="codecommit" size="compact" />
-          <Text tone="secondary" variant="label">
-            Pull request {pr.id}
-          </Text>
-        </div>
         <Text as="h1" className={styles.title} variant="page-title">
           {pr.title}
         </Text>
         <div className={styles.heroMeta}>
-          <Link className={styles.textLink} to={`/?f=author:${encodeURIComponent(pr.author)}`}>
-            {pr.author}
-          </Link>
-          <span aria-hidden="true">·</span>
-          <time dateTime={pr.creationDate.toISOString()}>{DateUtils.formatDate(pr.creationDate)}</time>
-          {pr.fetchedAt && (
-            <>
-              <span aria-hidden="true">·</span>
-              <span>{DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}</span>
-            </>
-          )}
+          <ServiceMark service="codecommit" size="compact" />
+          <span>
+            Pull request {pr.id} by{" "}
+            <Link className={styles.textLink} to={`/?f=author:${encodeURIComponent(pr.author)}`}>
+              {pr.author}
+            </Link>
+            , opened <time dateTime={pr.creationDate.toISOString()}>{DateUtils.formatDate(pr.creationDate)}</time>.
+            {pr.fetchedAt !== undefined ? <> {DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}.</> : null}
+          </span>
         </div>
       </header>
 

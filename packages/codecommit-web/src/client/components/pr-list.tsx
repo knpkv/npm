@@ -10,7 +10,6 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
-import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import { LogInIcon } from "lucide-react"
 import { useCallback, useMemo } from "react"
@@ -283,12 +282,6 @@ export function PRList() {
   return (
     <div className={styles.page}>
       <header className={styles.hero}>
-        <div className={styles.eyebrow}>
-          <ServiceMark service="codecommit" size="compact" />
-          <Text tone="secondary" variant="meta">
-            Review queue
-          </Text>
-        </div>
         <Text as="h1" className={styles.title} variant="page-title">
           What needs a decision.
         </Text>

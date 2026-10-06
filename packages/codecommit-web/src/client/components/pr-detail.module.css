@@ -50,7 +50,6 @@
   max-inline-size: 68rem;
 }
 
-.eyebrow,
 .heroMeta,
 .actionHeading,
 .approverHeading,
@@ -65,12 +64,6 @@
   align-items: center;
   display: flex;
   flex-wrap: wrap;
-}
-
-.eyebrow {
-  gap: var(--rly-space-12);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .title {
@@ -748,4 +741,3 @@
     animation: none;
   }
 }
-

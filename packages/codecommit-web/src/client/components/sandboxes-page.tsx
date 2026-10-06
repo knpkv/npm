@@ -82,7 +82,6 @@ export function SandboxesPageView({
     <div className={styles.page}>
       <header className={styles.hero}>
         <div className={styles.heroCopy}>
-          <span className={styles.eyebrow}>Isolated review environments</span>
           <Text as="h1" className={styles.title} variant="page-title">
             Sandboxes
           </Text>
@@ -90,10 +89,9 @@ export function SandboxesPageView({
             Open a revision in its own authenticated workspace, then keep lifecycle and logs in view.
           </Text>
         </div>
-        <StateLabel
-          label={runningCount === 1 ? "1 running" : `${String(runningCount)} running`}
-          tone={runningCount > 0 ? "positive" : "neutral"}
-        />
+        <Text className={styles.running} tone="secondary">
+          {runningCount === 1 ? "1 running" : `${String(runningCount)} running`}
+        </Text>
       </header>
 
       {sandboxes.length === 0 ? (
