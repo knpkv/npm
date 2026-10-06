@@ -19,6 +19,21 @@ describe("scroll track", () => {
     expect(track.linesBack()).toBe(2)
   })
 
+  it("each frame acknowledges only the oldest scroll still in flight", () => {
+    const track = makeScrollTrack(() => cell)
+    track.pan(15)
+    expect(track.take()).toEqual({ direction: "up", lines: 1 })
+    track.pan(15)
+    expect(track.take()).toEqual({ direction: "up", lines: 1 })
+    track.frameArrived()
+    // One line is still in flight, so its 15 px stay drawn instead of snapping back.
+    expect(track.translate()).toBe(15)
+    track.frameArrived()
+    expect(track.translate()).toBe(0)
+    track.frameArrived()
+    expect(track.translate()).toBe(0)
+  })
+
   it("never scrolls past the latest output", () => {
     const track = makeScrollTrack(() => cell)
     track.pan(-50)

@@ -10,6 +10,13 @@
  * @module
  */
 
+/**
+ * One screen row as cells: entry `i` is column `i`'s text — `" "` for an empty cell and `""` for
+ * the second half of a wide character — so joining the cells gives the row's text and an index is
+ * always a terminal column, whatever wide characters or cursor-made gaps the row holds.
+ */
+export type ScreenRow = ReadonlyArray<string>
+
 /** A run of screen rows read as one line; `rowStarts[i]` is the text offset of row `firstRow + i`. */
 export interface LogicalLine {
   readonly firstRow: number
@@ -30,10 +37,26 @@ export interface ScreenCell {
   readonly row: number
 }
 
-const fillsRow = (row: string, cols: number): boolean => row.length >= cols && row[cols - 1] !== " "
+/** A row of plain single-width text, padded to `cols` — how tests and simple callers build rows. */
+export const textRow = (text: string, cols: number): ScreenRow => {
+  const cells = Array.from(text)
+  return [...cells, ...Array.from({ length: Math.max(0, cols - cells.length) }, () => " ")]
+}
 
-/** Group full-width rows with the row they wrap into. Rows are the screen's rows at full width. */
-export const logicalLines = (rows: ReadonlyArray<string>, cols: number): ReadonlyArray<LogicalLine> => {
+const textOf = (cells: ReadonlyArray<string>): string => cells.join("")
+
+/** Text offset of a column; the second half of a wide character belongs to the character itself. */
+const textOffset = (row: ScreenRow, col: number): number => {
+  let owner = col
+  while (owner > 0 && row[owner] === "") owner -= 1
+  return textOf(row.slice(0, owner)).length
+}
+
+// The second half of a wide character in the last column also fills the row.
+const fillsRow = (row: ScreenRow, cols: number): boolean => row.length >= cols && row[cols - 1] !== " "
+
+/** Group full-width rows with the row they wrap into. */
+export const logicalLines = (rows: ReadonlyArray<ScreenRow>, cols: number): ReadonlyArray<LogicalLine> => {
   const lines: Array<LogicalLine> = []
   let firstRow = 0
   let text = ""
@@ -42,7 +65,7 @@ export const logicalLines = (rows: ReadonlyArray<string>, cols: number): Readonl
     if (rowStarts.length === 0) firstRow = index
     rowStarts.push(text.length)
     const wraps = fillsRow(row, cols) && index < rows.length - 1
-    text += wraps ? row.slice(0, cols) : row.trimEnd()
+    text += wraps ? textOf(row.slice(0, cols)) : textOf(row).trimEnd()
     if (!wraps) {
       lines.push({ firstRow, rowStarts, text })
       text = ""
@@ -55,7 +78,7 @@ export const logicalLines = (rows: ReadonlyArray<string>, cols: number): Readonl
 
 /** Copy text for a selection from `start` to `end` inclusive: trailing spaces trimmed, wraps joined. */
 export const selectionText = (
-  rows: ReadonlyArray<string>,
+  rows: ReadonlyArray<ScreenRow>,
   cols: number,
   start: ScreenCell,
   end: ScreenCell
@@ -64,15 +87,14 @@ export const selectionText = (
     ? [start, end]
     : [end, start]
   const selected = rows.slice(from.row, to.row + 1).map((row, index, all) => {
-    const padded = row.padEnd(cols, " ")
     const left = index === 0 ? from.col : 0
     const right = index === all.length - 1 ? to.col + 1 : cols
-    return padded.slice(left, right)
+    return textOf(row.slice(left, right))
   })
   // Wrap decisions use the whole row, not the selected slice, so a partial first row still joins.
   const pieces: Array<string> = []
   selected.forEach((piece, index) => {
-    const row = rows[from.row + index] ?? ""
+    const row = rows[from.row + index] ?? []
     const wraps = index < selected.length - 1 && fillsRow(row, cols)
     pieces.push(wraps ? piece : `${piece.trimEnd()}\n`)
   })
@@ -119,11 +141,11 @@ export const findUrls = (text: string): ReadonlyArray<TerminalUrl> => {
 }
 
 /** The URL under a screen cell, following wrapped rows. */
-export const urlAt = (rows: ReadonlyArray<string>, cols: number, cell: ScreenCell): TerminalUrl | null => {
+export const urlAt = (rows: ReadonlyArray<ScreenRow>, cols: number, cell: ScreenCell): TerminalUrl | null => {
   const line = logicalLines(rows, cols).find((candidate) =>
     cell.row >= candidate.firstRow && cell.row < candidate.firstRow + candidate.rowStarts.length
   )
   if (line === undefined) return null
-  const offset = (line.rowStarts[cell.row - line.firstRow] ?? 0) + cell.col
+  const offset = (line.rowStarts[cell.row - line.firstRow] ?? 0) + textOffset(rows[cell.row] ?? [], cell.col)
   return findUrls(line.text).find((url) => offset >= url.start && offset < url.end) ?? null
 }

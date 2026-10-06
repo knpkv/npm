@@ -1,6 +1,6 @@
 /** Copy text and links come from rendered rows, so wrap joining and the scheme allowlist are the contract. */
 import { describe, expect, it } from "@effect/vitest"
-import { findUrls, logicalLines, safeUrl, selectionText, urlAt } from "../src/terminal-text.js"
+import { findUrls, logicalLines, safeUrl, selectionText, textRow, urlAt } from "../src/terminal-text.js"
 
 describe("safeUrl", () => {
   it("opens only http and https", () => {
@@ -50,14 +50,15 @@ describe("findUrls", () => {
 
 describe("wrapped rows", () => {
   const cols = 10
-  const rows = ["0123456789", "abc       ", "short     ", "full-width", "          "]
+  const rowsOf = (texts: ReadonlyArray<string>) => texts.map((text) => textRow(text, cols))
+  const rows = rowsOf(["0123456789", "abc", "short", "full-width", ""])
 
   it("joins a row that fills the width into the next one", () => {
     expect(logicalLines(rows, cols).map((line) => line.text)).toEqual(["0123456789abc", "short", "full-width"])
   })
 
   it("finds a URL that wraps across rows from a cell on either row", () => {
-    const wrapped = ["go https:/", "/a.test/x ", "next      "]
+    const wrapped = rowsOf(["go https:/", "/a.test/x", "next"])
     expect(urlAt(wrapped, cols, { row: 0, col: 4 })?.url).toBe("https://a.test/x")
     expect(urlAt(wrapped, cols, { row: 1, col: 3 })?.url).toBe("https://a.test/x")
     expect(urlAt(wrapped, cols, { row: 2, col: 1 })).toBeNull()
@@ -69,10 +70,21 @@ describe("wrapped rows", () => {
   })
 
   it("cannot join a wrap that lands on a space, which looks like a short line", () => {
-    expect(logicalLines(["four five ", "six       "], cols).map((line) => line.text)).toEqual(["four five", "six"])
+    expect(logicalLines(rowsOf(["four five ", "six"]), cols).map((line) => line.text)).toEqual(["four five", "six"])
   })
 
   it("orders a selection made backwards", () => {
     expect(selectionText(rows, cols, { row: 2, col: 4 }, { row: 2, col: 0 })).toBe("short")
+  })
+
+  // Cells, not string offsets: a wide character spans two columns and a cursor gap is real space.
+  it("keeps columns true after a wide character and across cursor-made gaps", () => {
+    const wide = [["中", "", "a", "b", "c", " ", " ", " ", " ", " "]]
+    expect(selectionText(wide, cols, { row: 0, col: 2 }, { row: 0, col: 4 })).toBe("abc")
+    const gap = [["A", " ", " ", " ", " ", "B", " ", " ", " ", " "]]
+    expect(selectionText(gap, cols, { row: 0, col: 0 }, { row: 0, col: 5 })).toBe("A    B")
+    const link = [["中", "", "h", "t", "t", "p", ":", "/", "/", "a"], [...textRow(".test", cols)]]
+    expect(urlAt(link, cols, { row: 1, col: 1 })?.url).toBe("http://a.test/")
+    expect(urlAt(link, cols, { row: 0, col: 1 })).toBeNull()
   })
 })

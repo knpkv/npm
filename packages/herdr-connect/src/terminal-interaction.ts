@@ -22,7 +22,7 @@ import {
   momentumStep,
   stopVelocity
 } from "./terminal-scroll.js"
-import { logicalLines, type ScreenCell, selectionText, urlAt } from "./terminal-text.js"
+import { logicalLines, type ScreenCell, type ScreenRow, selectionText, urlAt } from "./terminal-text.js"
 
 type TerminalScrollCommand = Extract<TerminalClientCommand, { readonly type: "terminal.scroll" }>
 
@@ -74,6 +74,8 @@ const frameKey = (data: Uint8Array): string => {
 
 /** Jump-to-latest stops after this many commands even if frames keep changing. */
 const maximumJumpCommands = 300
+/** Jump-to-latest gives up only after this long without a screen, so a slow host still gets there. */
+const jumpSilenceMs = 2_000
 
 const isCopyKey = (event: KeyboardEvent): boolean =>
   (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c"
@@ -106,10 +108,21 @@ export const bindTerminalInteraction = (
   // known exactly. Jumping scrolls down a page per frame until a frame comes back unchanged.
   let jump: { previous: string | null; sent: number; timer: ReturnType<typeof setTimeout> | null } | null = null
 
-  const visibleRows = (): ReadonlyArray<string> => {
+  // Cell by cell, not translateToString: that drops empty cells and counts a wide character as one
+  // column, so text after a CJK character or a cursor-made gap would land in the wrong column.
+  const visibleRows = (): ReadonlyArray<ScreenRow> => {
     const buffer = terminal.buffer.active
     const base = Math.max(0, buffer.length - terminal.rows)
-    return Array.from({ length: terminal.rows }, (_, row) => buffer.getLine(base + row)?.translateToString(false) ?? "")
+    return Array.from({ length: terminal.rows }, (_, row) => {
+      const line = buffer.getLine(base + row)
+      return Array.from({ length: terminal.cols }, (_, col) => {
+        const cell = line?.getCell(col)
+        if (cell === undefined) return " "
+        if (cell.getWidth() === 0) return ""
+        const chars = cell.getChars()
+        return chars === "" ? " " : chars
+      })
+    })
   }
   const cellAt = (clientX: number, clientY: number): ScreenCell | null => {
     const rect = canvas()?.getBoundingClientRect()
@@ -252,7 +265,7 @@ export const bindTerminalInteraction = (
   const jumpStep = (previous: string | null): void => {
     if (jump === null) return
     if (jump.timer !== null) clearTimeout(jump.timer)
-    jump = { previous, sent: jump.sent + 1, timer: setTimeout(endJump, 250) }
+    jump = { previous, sent: jump.sent + 1, timer: setTimeout(endJump, jumpSilenceMs) }
     sendLines({ direction: "down", lines: maximumLinesPerCommand })
   }
 

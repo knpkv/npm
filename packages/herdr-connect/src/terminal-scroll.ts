@@ -4,8 +4,9 @@
  * herdr owns the scrollback, so the client asks for whole lines and waits for a re-rendered
  * screen. To track the finger 1:1, the track keeps the finger's total travel, sends the whole
  * lines it covers, and draws the remainder — plus any lines sent but not yet rendered — as a
- * transform on the canvas. When a frame arrives the sent lines count as applied and the transform
- * shrinks by the same amount, so content does not jump.
+ * transform on the canvas. herdr answers each scroll with one screen, so each arriving frame counts
+ * the oldest command still in flight as applied and the transform shrinks by just that much. A
+ * frame that is only new output can acknowledge one command early, never every pending one.
  *
  * Pure: the client calls `pan` from gestures and momentum, `take` once per animation frame to
  * send at most one command, and `frameArrived` when output lands.
@@ -44,7 +45,7 @@ export interface ScrollTrack {
   readonly pan: (dy: number) => void
   /** Whole lines to request now, or null. Call at most once per animation frame. */
   readonly take: () => LineScroll | null
-  /** A screen arrived: every line requested so far is now on it. */
+  /** A screen arrived: the oldest scroll still in flight is now on it. */
   readonly frameArrived: () => void
   /** Round the remainder to the nearest line once motion ends, so no half row stays shifted. */
   readonly settle: () => void
@@ -60,6 +61,8 @@ export const makeScrollTrack = (cellHeight: () => number): ScrollTrack => {
   let travel = 0
   let requested = 0
   let applied = 0
+  // Signed line counts of the commands sent but not yet seen on a screen, oldest first.
+  let inFlight: ReadonlyArray<number> = []
   const cell = (): number => Math.max(1, cellHeight())
   return {
     pan: (dy) => {
@@ -70,11 +73,16 @@ export const makeScrollTrack = (cellHeight: () => number): ScrollTrack => {
       const difference = wanted - requested
       if (difference === 0) return null
       const lines = Math.min(maximumLinesPerCommand, Math.abs(difference))
-      requested += Math.sign(difference) * lines
+      const signed = Math.sign(difference) * lines
+      requested += signed
+      inFlight = [...inFlight, signed]
       return { direction: difference > 0 ? "up" : "down", lines }
     },
     frameArrived: () => {
-      applied = requested
+      const [oldest, ...rest] = inFlight
+      if (oldest === undefined) return
+      applied += oldest
+      inFlight = rest
     },
     settle: () => {
       travel = Math.round(travel / cell()) * cell()
@@ -88,6 +96,7 @@ export const makeScrollTrack = (cellHeight: () => number): ScrollTrack => {
       travel = 0
       requested = 0
       applied = 0
+      inFlight = []
     }
   }
 }
