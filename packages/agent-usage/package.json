@@ -47,9 +47,10 @@
     "test": "vitest",
     "lint": "eslint \"{src,test,stories,.storybook}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts playwright.config.ts",
     "dev": "AGENT_USAGE_PUBLIC_ORIGIN=http://localhost:5173 tsx watch src/main.ts serve & vite --clearScreen false",
-    "test:browser": "pnpm --filter '@knpkv/agent-usage^...' --sort run build && pnpm test:storybook && vite build && playwright test",
-    "storybook": "storybook dev --host 127.0.0.1 --port 6007 --exact-port --no-open --no-version-updates",
-    "test:storybook": "vitest run --config vitest.storybook.config.ts --project storybook"
+    "test:browser": "pnpm test:storybook && vite build && playwright test",
+    "storybook:deps": "pnpm --filter '@knpkv/agent-usage^...' --sort run build",
+    "storybook": "pnpm storybook:deps && storybook dev --host 127.0.0.1 --port 6007 --exact-port --no-open --no-version-updates",
+    "test:storybook": "pnpm storybook:deps && vitest run --config vitest.storybook.config.ts --project storybook"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0",

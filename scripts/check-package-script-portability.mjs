@@ -1505,10 +1505,15 @@ export const findNonPortableBuildScripts = (manifestPath, scripts) =>
 
 /** Storybook play and accessibility checks must run from the workspace browser gate. */
 export const findStorybookLifecycleGaps = (manifestPath, scripts, hasStorybookConfig) => {
-  if (!hasStorybookConfig || scripts?.["test:storybook"] === undefined) return []
-  return hasReachableLifecycleCommand(scripts?.["test:browser"] ?? "", storybookTestCommand)
-    ? []
-    : [`${manifestPath}: scripts.test:browser must invoke pnpm test:storybook`]
+  if (!hasStorybookConfig) return []
+  return [
+    ...(scripts?.["test:storybook"] === undefined
+      ? [`${manifestPath}: scripts.test:storybook must run the Storybook Vitest project`]
+      : []),
+    ...(hasReachableLifecycleCommand(scripts?.["test:browser"] ?? "", storybookTestCommand)
+      ? []
+      : [`${manifestPath}: scripts.test:browser must invoke pnpm test:storybook`])
+  ]
 }
 
 const storybookScripts = { "test:storybook": "vitest run --config vitest.storybook.config.ts --project storybook" }
@@ -1537,7 +1542,11 @@ for (const command of [
     []
   )
 }
-assert.deepEqual(findStorybookLifecycleGaps("packages/other/package.json", {}, true), [])
+assert.deepEqual(findStorybookLifecycleGaps("packages/other/package.json", {}, true), [
+  "packages/other/package.json: scripts.test:storybook must run the Storybook Vitest project",
+  "packages/other/package.json: scripts.test:browser must invoke pnpm test:storybook"
+])
+assert.deepEqual(findStorybookLifecycleGaps("packages/other/package.json", {}, false), [])
 assert.deepEqual(findStorybookLifecycleGaps("packages/other/package.json", storybookScripts, false), [])
 
 export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependencies, devDependencies) => {

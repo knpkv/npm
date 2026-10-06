@@ -19,6 +19,24 @@ describe("catalog environment", () => {
     })
   })
 
+  it("falls back for strings outside each toolbar's domain", () => {
+    expect(
+      resolveCatalogEnvironment({
+        density: "roomy",
+        forcedColors: "yes",
+        locale: "xx",
+        reducedMotion: "slow",
+        theme: "sepia"
+      })
+    ).toEqual({
+      density: "comfortable",
+      forcedColors: "auto",
+      locale: "en",
+      reducedMotion: "system",
+      theme: "system"
+    })
+  })
+
   it("projects all toolbar dimensions onto one isolated DOM boundary", () => {
     const values = resolveCatalogEnvironment({
       density: "compact",

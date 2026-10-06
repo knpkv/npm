@@ -1,28 +1,39 @@
+import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import type { ReactNode } from "react"
-import * as Predicate from "effect/Predicate"
-import type * as Schema from "effect/Schema"
+
+// The toolbar's closed domains (see preview.tsx). A URL can carry any string, so each global is
+// decoded against its domain and falls back to the default when it is outside it.
+const Density = Schema.Literals(["comfortable", "compact"])
+const ForcedColors = Schema.Literals(["auto", "active"])
+const Locale = Schema.Literals(["en", "nl"])
+const ReducedMotion = Schema.Literals(["system", "reduce", "no-preference"])
+const Theme = Schema.Literals(["system", "light", "dark"])
 
 /** Toolbar values normalized before a catalog story is rendered. */
 export interface CatalogEnvironmentValues {
-  readonly density: string
-  readonly forcedColors: string
-  readonly locale: string
-  readonly reducedMotion: string
-  readonly theme: string
+  readonly density: typeof Density.Type
+  readonly forcedColors: typeof ForcedColors.Type
+  readonly locale: typeof Locale.Type
+  readonly reducedMotion: typeof ReducedMotion.Type
+  readonly theme: typeof Theme.Type
 }
 
 interface CatalogGlobals extends Readonly<Record<string, Schema.Json | undefined>> {}
 
-const globalString = <UnparsedInput,>(value: UnparsedInput, fallback: string): string =>
-  Predicate.isString(value) ? value : fallback
+const decodeOr = <S extends Schema.Codec<string, string>>(
+  schema: S,
+  value: Schema.Json | undefined,
+  fallback: S["Type"]
+): S["Type"] => Option.getOrElse(Schema.decodeUnknownOption(schema)(value), () => fallback)
 
 /** Resolve Storybook globals without trusting values supplied through the URL. */
 export const resolveCatalogEnvironment = (globals: CatalogGlobals): CatalogEnvironmentValues => ({
-  density: globalString(globals.density, "comfortable"),
-  forcedColors: globalString(globals.forcedColors, "auto"),
-  locale: globalString(globals.locale, "en"),
-  reducedMotion: globalString(globals.reducedMotion, "system"),
-  theme: globalString(globals.theme, "system")
+  density: decodeOr(Density, globals.density, "comfortable"),
+  forcedColors: decodeOr(ForcedColors, globals.forcedColors, "auto"),
+  locale: decodeOr(Locale, globals.locale, "en"),
+  reducedMotion: decodeOr(ReducedMotion, globals.reducedMotion, "system"),
+  theme: decodeOr(Theme, globals.theme, "system")
 })
 
 /** Isolated preview boundary used by every catalog story. */
