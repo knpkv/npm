@@ -86,6 +86,17 @@ describe("AwsClient internals", () => {
   describe("parseRuleContent", () => {
     // The exact content codecommit-web creates for an "anyone may approve" rule, and the string form
     // ui2-b saw when the rule is read back.
+    // Real rules (QA-J73) also carry DestinationReferences as the string "*"; it is not read, and must
+    // not make the rule unreadable.
+    it("reads a rule whose DestinationReferences is the string \"*\"", () => {
+      const content = JSON.stringify({
+        Version: "2018-11-08",
+        DestinationReferences: "*",
+        Statements: [{ Type: "Approvers", NumberOfApprovalsNeeded: 1, ApprovalPoolMembers: "*" }]
+      })
+      expect(runParse(content)).toEqual({ requiredApprovals: 1, poolMembers: ["*"], poolMemberArns: ["*"] })
+    })
+
     it.each([
       ["the array the app writes", ["*"]],
       ["a single string", "*"]
