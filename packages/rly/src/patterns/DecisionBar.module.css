@@ -7,6 +7,10 @@
     min-inline-size: var(--rly-space-0);
   }
 
+  .inline {
+    position: static;
+  }
+
   .sticky {
     background: var(--rly-color-canvas);
     border-block-start: 1px solid var(--rly-color-border-1);
