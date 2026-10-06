@@ -370,6 +370,11 @@ export type PullRequestRefreshItem =
     readonly error: ApprovalEvaluationError
   }
 
+/** A pull request's details read in full, before its repository account is attached and it is decoded. */
+type DetailRead =
+  | { readonly _tag: "Read"; readonly pr: Effect.Success<ReturnType<typeof fetchPRDetails>> }
+  | Extract<PullRequestRefreshItem, { readonly _tag: "EvaluationFailed" }>
+
 /**
  * Stream every pull request of one account, isolating approval-evaluation failures per pull request.
  * Any other failure (listing, reading, decoding) still fails the stream with an `AwsApiError`.
@@ -402,33 +407,41 @@ export const getPullRequestRefresh = (
       ? listAllRepositories()
       : Stream.make(options.repositoryName)
 
-    const fetched = (id: string, repoName: string) =>
-      throttleRetry(fetchPRDetails(id, repoName)).pipe(
-        Effect.flatMap((pr) =>
-          getRepoAccount(pr.repoName).pipe(
-            Effect.flatMap((repoAcct) =>
-              decodePullRequest({
-                ...pr,
-                accountProfile: account.profile,
-                accountRegion: account.region,
-                repoAccountId: repoAcct
-              })
-            )
-          )
-        ),
-        Effect.map((pullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest })),
-        Effect.catchTag("ApprovalEvaluationError", (error) =>
-          Effect.succeed<PullRequestRefreshItem>({
-            _tag: "EvaluationFailed",
-            pullRequestId: id,
-            repositoryName: repoName,
-            error
-          }))
+    // The approval-evaluation failure becomes a value inside the retried effect: fetchApprovalEvaluation
+    // has already spent its own retries, and its message can still read like throttling.
+    const read = (id: string, repoName: string) =>
+      throttleRetry(
+        fetchPRDetails(id, repoName).pipe(
+          Effect.map((pr): DetailRead => ({ _tag: "Read", pr })),
+          Effect.catchTag("ApprovalEvaluationError", (error) =>
+            Effect.succeed<DetailRead>({
+              _tag: "EvaluationFailed",
+              pullRequestId: id,
+              repositoryName: repoName,
+              error
+            }))
+        )
       )
 
     const stream = repositories.pipe(
       Stream.flatMap((repoName) => listPullRequestIds(repoName, status), { concurrency: 2 }),
-      Stream.mapEffect(({ id, repoName }) => fetched(id, repoName), { concurrency: 3 }),
+      Stream.mapEffect(({ id, repoName }) => read(id, repoName), { concurrency: 3 }),
+      // Serial, as before: one GetRepository per repository, cached before the next pull request asks.
+      Stream.mapEffect((item): Effect.Effect<PullRequestRefreshItem, unknown, AwsStreamEnv> =>
+        item._tag !== "Read"
+          ? Effect.succeed(item)
+          : getRepoAccount(item.pr.repoName).pipe(
+            Effect.flatMap((repoAcct) =>
+              decodePullRequest({
+                ...item.pr,
+                accountProfile: account.profile,
+                accountRegion: account.region,
+                repoAccountId: repoAcct
+              })
+            ),
+            Effect.map((pullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest }))
+          )
+      ),
       Stream.mapError((cause) => makeApiError("getPullRequests", account.profile, account.region, cause))
     )
 
