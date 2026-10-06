@@ -149,11 +149,12 @@ describe("StackedBars", () => {
 
   it("draws limit bands on the same axis, with unknown stretches and the near mark", () => {
     const root = render({
+      noReadingLabel: "No reading",
       bands: [
         {
           id: "5h",
           label: "5-hour window",
-          near: 80,
+          near: { label: "Near the limit, 80%", level: 80 },
           segments: [
             { from: 0, level: 40, to: 3 * hour },
             { from: 3 * hour, level: null, to: 4 * hour },
@@ -171,6 +172,24 @@ describe("StackedBars", () => {
     expect(band?.querySelectorAll("rect")).toHaveLength(3)
     expect(band?.querySelector('[data-tone="near"]')).not.toBeNull()
     expect(band?.querySelectorAll("line")).toHaveLength(1)
+  })
+
+  it("names every band mark in the visible key, and requires no-reading copy when a band has a gap", () => {
+    const band = {
+      id: "5h",
+      label: "5-hour window",
+      near: { label: "Near the limit, 80%", level: 80 },
+      segments: [
+        { from: 0, level: 40, to: 3 * hour },
+        { from: 3 * hour, level: null, to: 6 * hour }
+      ]
+    }
+    const keys = [...render({ bands: [band], noReadingLabel: "No reading" }).querySelectorAll("li")]
+    expect(keys.map((item) => item.textContent)).toEqual(["Near the limit, 80%", "No reading"])
+    expect(() => render({ bands: [band] })).toThrow("noReadingLabel")
+    expect(() =>
+      render({ bands: [{ ...band, near: { label: " ", level: 80 } }], noReadingLabel: "No reading" })
+    ).toThrow("visible text")
   })
 
   it("ends the axis on an end-anchored tick", () => {
@@ -324,6 +343,7 @@ describe("StackedBars", () => {
 
   it("keeps the window's edge over a full or unknown band stretch", () => {
     const root = render({
+      noReadingLabel: "No reading",
       bands: [
         {
           id: "5h",

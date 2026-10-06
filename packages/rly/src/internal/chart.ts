@@ -4,6 +4,7 @@ import type { RlySeries } from "../primitives/ChartLegend.js"
 export interface RlyChartSegment {
   readonly id: string
   readonly series: RlySeries
+  /** A non-negative finite amount; zero, negative and non-finite values (`NaN`, ±Infinity) draw nothing. */
   readonly value: number
 }
 
@@ -87,8 +88,9 @@ export const binRates = (
   columns: ReadonlyArray<RlyChartColumn>,
   size: number
 ): ReadonlyArray<number> => {
-  const from = columns[0]?.start ?? 0
-  const average = Math.max(1, (columns[columns.length - 1]?.end ?? from) - from) / Math.max(1, columns.length)
+  // The mean of the columns' own lengths, so a gap between periods never inflates a rate.
+  const average = Math.max(1, columns.reduce((sum, column) => sum + Math.max(0, column.end - column.start), 0)) /
+    Math.max(1, columns.length)
   return bins.map((bin) => (average * size) / Math.max(1, bin.end - bin.start))
 }
 
@@ -103,7 +105,8 @@ export const binColumns = (columns: ReadonlyArray<RlyChartColumn>, size: number)
     const group = columns.slice(first, starts[index + 1] ?? columns.length)
     const values = new Map<string, RlyChartSegment>()
     for (const segment of group.flatMap((column) => column.segments)) {
-      if (segment.value <= 0) continue
+      // A failed reading (NaN, ±Infinity) is no reading, so it cannot poison the totals or the scale.
+      if (!Number.isFinite(segment.value) || segment.value <= 0) continue
       const seen = values.get(segment.id)
       values.set(segment.id, { ...segment, value: (seen?.value ?? 0) + segment.value })
     }
@@ -156,7 +159,8 @@ export const moveFocus = (key: string, current: number, last: number): number | 
 /**
  * Ticks at least `labelWidth` apart, from each bin's start in pixels on the shared time axis, so
  * uneven bins never crowd their labels. The last bin always gets an end-anchored tick, so the axis
- * says where it ends without a label clipping at the edge; ticks crowding it are dropped.
+ * says where it ends without a label clipping at the edge; ticks crowding it are dropped. One bin
+ * gets its start and end when both fit, else its start alone.
  */
 export const chartTicks = (
   starts: ReadonlyArray<number>,
@@ -164,7 +168,11 @@ export const chartTicks = (
   labelWidth: number
 ): ReadonlyArray<RlyChartTick> => {
   if (starts.length === 0) return []
-  if (starts.length === 1) return [{ anchor: "start", index: 0 }]
+  if (starts.length === 1) {
+    return width >= 2 * labelWidth
+      ? [{ anchor: "start", index: 0 }, { anchor: "end" }]
+      : [{ anchor: "start", index: 0 }]
+  }
   // Start ticks leave room for the end label, so no bin is labelled twice.
   const regular = starts.reduce<ReadonlyArray<{ readonly anchor: "start"; readonly index: number }>>(
     (ticks, x, index) => {

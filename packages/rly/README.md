@@ -199,6 +199,9 @@ extends, Home/End jump and Escape clears. Click selects, and Shift+click or a se
 tap elsewhere extends the span. The caller owns `selection` and words it through
 `describeSelection`, which is announced politely once the selection settles. Charts
 are presentation only: the application computes columns, bands and any projection.
+Everything the bands draw is named in that key in the caller's words: each band's
+`near: { level, label }` mark, and `noReadingLabel`, which is required once any band has
+a stretch with `level: null`. Zero, negative and non-finite values draw nothing.
 
 `TrackKey` explains the marks the tracks draw, listing only the marks in use.
 `ChartLegend` says which colour is which series, with the swatch before each label.

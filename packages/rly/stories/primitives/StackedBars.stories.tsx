@@ -38,7 +38,7 @@ const bands: ReadonlyArray<RlyStepBand> = [
   {
     id: "5h",
     label: "5-hour window",
-    near: 80,
+    near: { label: "Dashed line: near the limit, 80%", level: 80 },
     segments: [
       { from: start, level: 35, to: start + 60 * hour },
       { from: start + 60 * hour, level: 96, to: start + 65 * hour },
@@ -49,7 +49,7 @@ const bands: ReadonlyArray<RlyStepBand> = [
   {
     id: "week",
     label: "Weekly",
-    near: 80,
+    near: { label: "Dashed line: near the limit, 80%", level: 80 },
     segments: [
       { from: start, level: 30, to: start + 90 * hour },
       { from: start + 90 * hour, level: 84, to: start + 168 * hour }
@@ -178,6 +178,7 @@ const Chart = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> })
           formatTick={(at) => day.format(at)}
           instructions="Arrow keys move between bars and select them. Shift with an arrow extends the span. Escape clears it."
           label="Spend by booking, API-equivalent dollars"
+          noReadingLabel="Shaded: no reading"
           onSelectionChange={setSelection}
           selection={selection}
         />
@@ -225,6 +226,9 @@ export const Week: Story = {
     await expect(root).toHaveAttribute("data-selection", "none")
     await expect(canvasElement.querySelectorAll("[data-band]")).toHaveLength(2)
     await expect(canvas.getByText("Current 5-hour window")).toBeVisible()
+    // Every mark the bands draw is named in the visible key.
+    await expect(canvas.getByText("Dashed line: near the limit, 80%")).toBeVisible()
+    await expect(canvas.getByText("Shaded: no reading")).toBeVisible()
     await expect(canvasElement.querySelectorAll('[data-part="window"]')).toHaveLength(3)
     await expect(canvasElement.scrollWidth).toBeLessThanOrEqual(canvasElement.clientWidth + 1)
     // The table carries what the hidden SVG draws: every day, each booking's spend, each band's peak.

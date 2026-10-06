@@ -68,6 +68,20 @@ describe("chart model", () => {
     expect((bins.at(-1)?.total ?? 0) * (rates.at(-1) ?? 0)).toBeCloseTo(bins[0]?.total ?? 0)
   })
 
+  it("measures rates against the columns' own lengths, so a gap between periods changes nothing", () => {
+    const sparse = [column(0, { a: 1 }), column(9, { a: 1 })]
+    expect(binRates(binColumns(sparse, 1), sparse, 1)).toEqual([1, 1])
+  })
+
+  it("treats non-finite values as no reading, so one failed reading cannot poison the chart", () => {
+    const [bin] = binColumns(
+      [column(0, { a: Number.NaN, b: Number.POSITIVE_INFINITY, c: Number.NEGATIVE_INFINITY, d: 2 })],
+      1
+    )
+    expect(bin?.total).toBe(2)
+    expect(bin?.segments.map(({ id }) => id)).toEqual(["d"])
+  })
+
   it("merges a bin's segments by id in the order the series first appear, offsetting each on the last", () => {
     const bins = binColumns(
       [column(0, { a: 2, rest: 1 }), column(1, { b: 3, a: 1 }), column(2, { b: 1 }), column(3, { b: 1 })],
@@ -141,7 +155,9 @@ describe("chart model", () => {
     expect(indices(chartTicks([0, 10, 20, 400], 480, 70))).toEqual([0, "end"])
     // The end label is the axis end, never a second label for the last bin.
     expect(indices(chartTicks([0, 100], 1000, 72))).toEqual([0, 1, "end"])
-    expect(chartTicks([0], 480, 70)).toEqual([{ anchor: "start", index: 0 }])
+    // One bin names both ends when both fit, else its start alone.
+    expect(indices(chartTicks([0], 480, 70))).toEqual([0, "end"])
+    expect(indices(chartTicks([0], 100, 70))).toEqual([0])
     expect(chartTicks([], 480, 70)).toEqual([])
   })
 })

@@ -23,8 +23,14 @@ export interface RlyStepBand {
   readonly id: string
   readonly label: string
   readonly segments: ReadonlyArray<{ readonly from: number; readonly to: number; readonly level: number | null }>
-  /** Draw a dashed mark at this level, in percent. */
-  readonly near?: number
+  /** A dashed mark at `level` percent, named in the key under the axis by `label` ("Near the limit, 80%"). */
+  readonly near?: RlyBandMark
+}
+
+/** A level worth marking on a band, with the key text that names it. */
+export interface RlyBandMark {
+  readonly level: number
+  readonly label: string
 }
 
 /** A stretch of the time axis to shade behind the bars and bands, named in a key under the axis. */
@@ -46,6 +52,8 @@ export type StackedBarsProps = StackedBarsBaseProps & {
   readonly bands?: ReadonlyArray<RlyStepBand>
   /** A stretch of time to shade across the bands and bars, such as the current limit window. */
   readonly window?: RlyChartWindow
+  /** Key text for band stretches with no reading ("No reading"); required when any band has one. */
+  readonly noReadingLabel?: string
   /**
    * The caption for the scale: the tallest bar's rate per `binSize` columns. Bars plot rates, so a
    * folded or longer bin reads true against "per N hours".
@@ -128,6 +136,7 @@ const Band = ({
   readonly window: RlyChartWindow | undefined
 }) => {
   const x = (at: number): number => axisFraction(at, from, to) * 1000
+  const near = band.near?.level
   return (
     <div className={style("band")} data-band={band.id}>
       <span className={style("bandLabel")}>{requireText(band.label, "StackedBars band label")}</span>
@@ -152,7 +161,7 @@ const Band = ({
           return (
             <rect
               className={style("level")}
-              data-tone={level >= 100 ? "full" : band.near !== undefined && level >= band.near ? "near" : "ok"}
+              data-tone={level >= 100 ? "full" : near !== undefined && level >= near ? "near" : "ok"}
               height={level}
               key={segment.from}
               width={width}
@@ -161,8 +170,8 @@ const Band = ({
             />
           )
         })}
-        {band.near === undefined ? null : (
-          <line className={style("near")} x1={0} x2={1000} y1={100 - band.near} y2={100 - band.near} />
+        {near === undefined ? null : (
+          <line className={style("near")} x1={0} x2={1000} y1={100 - near} y2={100 - near} />
         )}
         {/* The window's edges again over the levels, so a full or unknown stretch never hides it. */}
         {window === undefined ? null : (
@@ -197,6 +206,7 @@ export const StackedBars = ({
   height = 180,
   instructions,
   label,
+  noReadingLabel,
   onSelectionChange,
   ref: callerRef,
   selection,
@@ -211,6 +221,16 @@ export const StackedBars = ({
   // Heights are rates per nominal bin, so a longer (folded) bin is not taller just for holding more time.
   const rates = binRates(bins, columns, binSize)
   const max = Math.max(0, ...bins.map(({ total }, index) => total * (rates[index] ?? 1)))
+  // Everything the bands draw is named in the key: each distinct near mark, and "no reading" if any.
+  const nearLabels = [
+    ...new Set(
+      bands.flatMap((band) => (band.near === undefined ? [] : [requireText(band.near.label, "StackedBars near label")]))
+    )
+  ]
+  const hasNoReading = bands.some((band) => band.segments.some((segment) => segment.level === null))
+  const noReading = hasNoReading
+    ? requireText(noReadingLabel ?? "", "StackedBars noReadingLabel (a band has a stretch with no reading)")
+    : undefined
   const axisStart = columns[0]?.start ?? 0
   const axisEnd = columns[columns.length - 1]?.end ?? axisStart
   const ticks = chartTicks(
@@ -376,11 +396,27 @@ export const StackedBars = ({
           )
         })}
       </div>
-      {window === undefined ? null : (
-        <p className={style("windowKey")}>
-          <span aria-hidden="true" className={style("windowSwatch")} />
-          {requireText(window.label, "StackedBars window label")}
-        </p>
+      {window === undefined && nearLabels.length === 0 && noReading === undefined ? null : (
+        <ul className={style("keys")}>
+          {window === undefined ? null : (
+            <li className={style("windowKey")}>
+              <span aria-hidden="true" className={style("windowSwatch")} />
+              {requireText(window.label, "StackedBars window label")}
+            </li>
+          )}
+          {nearLabels.map((text) => (
+            <li className={style("windowKey")} key={text}>
+              <span aria-hidden="true" className={style("nearSwatch")} />
+              {text}
+            </li>
+          ))}
+          {noReading === undefined ? null : (
+            <li className={style("windowKey")}>
+              <span aria-hidden="true" className={style("unknownSwatch")} />
+              {noReading}
+            </li>
+          )}
+        </ul>
       )}
       <p className={style("hidden")} id={instructionsId}>
         {requireText(instructions, "StackedBars instructions")}
