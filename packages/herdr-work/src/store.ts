@@ -106,6 +106,7 @@ import type {
   WorkAdmissionTarget as WorkAdmissionTargetType,
   WorkAgentBinding as WorkAgentBindingType,
   WorkAgentBindingRequest as WorkAgentBindingRequestType,
+  WorkAgentObservation as WorkAgentObservationType,
   WorkDecisionHandoff as WorkDecisionHandoffType,
   WorkExistingGoalRecovery as WorkExistingGoalRecoveryType,
   WorkGoalCheckpoint as WorkGoalCheckpointType,
@@ -118,6 +119,7 @@ import type {
   WorkObserveReport,
   WorkProspectiveAdmission as WorkProspectiveAdmissionType,
   WorkPullRequestLink as WorkPullRequestLinkType,
+  WorkPullRequestObservation as WorkPullRequestObservationType,
   WorkRecoveryPreflight as WorkRecoveryPreflightType,
   WorkRecoveryTarget as WorkRecoveryTargetType
 } from "./model.js"
@@ -1943,6 +1945,13 @@ type PreparedObservation =
     readonly observedAt: number
   }
 
+const canonicalObservation = (
+  observation: WorkPullRequestObservationType | WorkAgentObservationType
+): WorkPullRequestObservationType | WorkAgentObservationType =>
+  observation._tag === "agent"
+    ? { ...observation, host: observation.host.toLowerCase() }
+    : { ...observation, repository: observation.repository.toLowerCase() }
+
 /**
  * Applies each observation in one transaction, then evicts the oldest rows
  * until facts and failures are each within their bounds.
@@ -1972,7 +1981,18 @@ const writeObservations = (
     const confirmFact = database.prepare(
       "UPDATE work_observed_facts SET confirmed_at = max(confirmed_at, ?) WHERE subject = ?"
     )
-    const endFailures = database.prepare("DELETE FROM work_observed_failures WHERE subject = ? AND since <= ?")
+    // A good read ends a run of failures only if it is newer than the run's
+    // latest failure; a delayed good read only moves the run's start past it.
+    const clearFailures = database.prepare("DELETE FROM work_observed_failures WHERE subject = ? AND last_at <= ?")
+    const trimFailures = database.prepare(
+      "UPDATE work_observed_failures SET since = max(since, ? + 1) WHERE subject = ? AND last_at > ?"
+    )
+    const endFailures = {
+      run: (subject: string, observedAt: number) => {
+        clearFailures.run(subject, observedAt)
+        trimFailures.run(observedAt, subject, observedAt)
+      }
+    }
     // `since` is the earliest failure of the run; source and reason come from
     // the latest one, whatever order the failures arrive in.
     const recordFailure = database.prepare(
@@ -4804,8 +4824,16 @@ export class WorkStore implements WorkStoreService {
             subject
           } satisfies PreparedObservation
         }
-        // Encoding emits keys in schema field order, so equal facts give equal text and one id.
-        const record = JSON.stringify(Schema.encodeSync(WorkObservationEnvelope)(envelope).observation)
+        // Case-insensitive identities are lowercased so a spelling change is the
+        // same fact; encoding emits keys in schema field order, so equal facts
+        // give equal text and one id.
+        const record = JSON.stringify(
+          Schema.encodeSync(WorkObservationEnvelope)({
+            ...envelope,
+            observation: canonicalObservation(envelope.observation)
+          })
+            .observation
+        )
         const digest = yield* cryptoService.digest("SHA-256", utf8.encode(record)).pipe(
           Effect.mapError(storeError("observe.digest"))
         )

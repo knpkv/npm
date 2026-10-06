@@ -35,8 +35,12 @@ then the agent's working or blocked status, then an open pull request as
 `review`, then the goal's own state) and a `stale` flag for an owner whose agent
 has been gone for more than 24 hours on unfinished work. Entries are kept, most
 recently updated goals first, while the encoded snapshots fit the 1 MiB response
-budget; any left out are counted in `observedOmitted`. Earlier windows stay as
-recorded.
+budget; any left out are counted in `observedOmitted` (and when not even that
+count fits, the snapshots carry no overlay). A snapshot taken at an explicit
+time shows only facts first seen by then and failures that had started.
+Earlier windows stay as recorded. A goal's agent is its agent hierarchy, or its
+connect target on older goals; host and repository letter case never makes a
+new fact.
 
 `WorkStore.appendMany` validates a whole checkpoint batch before one SQLite
 transaction. Reusing its transaction ID with the same batch replays it. A

@@ -162,4 +162,13 @@ describe("observeGoal", () => {
     expect(observeGoal(goal({ review: null }), facts, failures.slice(0, 1), 200).unknown).toBeNull()
     expect(observeGoal(goal(), facts, [failure("github:knpkv/npm#8", 120)], 200).unknown).toBeNull()
   })
+
+  it("matches agent facts through the connect target of an older goal without an agent hierarchy", () => {
+    const older = goal({
+      agentHierarchy: undefined,
+      connectTarget: { agentId: "agent-owner", host: "SER8", url: "/connect/?agent=agent-owner&host=SER8" }
+    })
+    expect(observeGoal(older, [fact(agent("working"), 60)], [], 100).agent?.fact.status).toBe("working")
+    expect(observeGoal(older, [fact(agent("working", { agentId: "agent-other" }), 60)], [], 100).agent).toBeNull()
+  })
 })

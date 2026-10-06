@@ -45,10 +45,11 @@ const terminalStates: ReadonlySet<WorkDisplayState> = new Set(["completed", "dep
 
 const reviewUrl = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\/pull\/([1-9][0-9]*)$/
 
-/** The goal's own subjects: its pull request (from `review.url`) and its owner's agent. */
+/** The goal's own subjects: its pull request (from `review.url`) and its owner's agent (or connect target). */
 const goalSubjects = (goal: WorkGoal) => {
   const match = reviewUrl.exec(goal.review?.url ?? "")
-  const owner = goal.agentHierarchy?.agent
+  // Older goals carry only a connect target; it names the same agent.
+  const owner = goal.agentHierarchy?.agent ?? goal.connectTarget
   return {
     agent: owner === undefined || owner === null ? null : agentSubject(owner.host, owner.agentId),
     pullRequest: match?.[1] === undefined || match[2] === undefined
@@ -143,16 +144,31 @@ export const withObservedFacts = (
   failures: ReadonlyArray<WorkObservedFailure>,
   maxBytes: number
 ): WorkSnapshots => {
-  if (facts.length === 0 && failures.length === 0) return snapshots
-  const factMap = bySubject(facts)
-  const failureMap = bySubject(failures)
+  // A snapshot at time t shows only what was known at t: facts first seen by
+  // then (their confirmation clamped to t) and failures that had started.
+  const asOf = snapshots.observedAt
+  const factMap = bySubject(
+    facts.filter(({ observedAt }) => observedAt <= asOf).map((fact) => ({
+      ...fact,
+      confirmedAt: Math.min(fact.confirmedAt, asOf)
+    }))
+  )
+  const failureMap = bySubject(failures.filter(({ since }) => since <= asOf))
+  if (factMap.size === 0 && failureMap.size === 0) return snapshots
   const candidates: ReadonlyArray<WorkGoalObservedEntry> = snapshots.now.goals.flatMap((goal) => {
     const observed = observeWith(goal, factMap, failureMap, snapshots.observedAt)
     return observedSomething(observed) ? [{ goalId: goal.id, ...observed }] : []
   })
   if (candidates.length === 0) return snapshots
   const encode = Schema.encodeSync(WorkSnapshots)
-  // Room for `"observed":[…],"observedOmitted":N` on top of the bare snapshots.
+  const withEntries = (kept: ReadonlyArray<WorkGoalObservedEntry>): WorkSnapshots => {
+    const omitted = candidates.length - kept.length
+    if (omitted === 0) return { ...snapshots, now: { ...snapshots.now, observed: kept } }
+    if (kept.length === 0) return { ...snapshots, now: { ...snapshots.now, observedOmitted: omitted } }
+    return { ...snapshots, now: { ...snapshots.now, observed: kept, observedOmitted: omitted } }
+  }
+  // Estimate greedily, then check the real encoding and drop entries until it
+  // fits; if not even the omission count fits, return the bare snapshots.
   let used = encodedBytes(encode(snapshots)) + 64
   const kept: Array<WorkGoalObservedEntry> = []
   for (const entry of candidates) {
@@ -161,8 +177,10 @@ export const withObservedFacts = (
     kept.push(entry)
     used += bytes
   }
-  const omitted = candidates.length - kept.length
-  if (omitted === 0) return { ...snapshots, now: { ...snapshots.now, observed: kept } }
-  if (kept.length === 0) return { ...snapshots, now: { ...snapshots.now, observedOmitted: omitted } }
-  return { ...snapshots, now: { ...snapshots.now, observed: kept, observedOmitted: omitted } }
+  for (;;) {
+    const result = withEntries(kept)
+    if (encodedBytes(encode(result)) <= maxBytes) return result
+    if (kept.length === 0) return snapshots
+    kept.pop()
+  }
 }

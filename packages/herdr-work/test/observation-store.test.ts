@@ -298,8 +298,53 @@ describe("observed facts", () => {
       expect(trimmed.now.observed?.map(({ goalId }) => goalId)).toEqual(["goal-pr9", "goal-pr8"])
       expect(trimmed.now.observedOmitted).toBe(1)
       expect(size(trimmed)).toBeLessThanOrEqual(budget)
-      const none = withObservedFacts(base, facts, failures, size(base))
-      expect(none.now.observed).toBeUndefined()
-      expect(none.now.observedOmitted).toBe(3)
+      const countOnly = withObservedFacts(base, facts, failures, size(base) + 24)
+      expect(countOnly.now.observed).toBeUndefined()
+      expect(countOnly.now.observedOmitted).toBe(3)
+      expect(size(countOnly)).toBeLessThanOrEqual(size(base) + 24)
+      // Not even the count fits: the snapshots come back unchanged, never over budget.
+      expect(withObservedFacts(base, facts, failures, size(base))).toEqual(base)
+    })))
+
+  it.effect("keeps a failure newer than a delayed good read, and ends it only with a newer good read", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      const failed = (observedAt: number, reason: string) =>
+        at(observedAt, { _tag: "unknown", reason, source: "github", subject: "github:knpkv/npm#7" })
+      const unknownOf = Effect.map(work.snapshots(10_000), (snapshots) => snapshots.now.observed?.[0]?.unknown)
+      yield* work.record({ eventId: "goal-pr7.1", goal, occurredAt: 1_000, version: "herdr.work.event.v1" })
+      yield* work.observe([at(50, pullRequest())])
+      yield* work.observe([failed(100, "failed 100")])
+      yield* work.observe([failed(300, "failed 300")])
+      yield* work.observe([at(200, pullRequest())])
+      expect(yield* unknownOf).toEqual({ lastGoodAt: 200, reason: "failed 300", since: 201, source: "github" })
+      yield* work.observe([at(400, pullRequest())])
+      expect(yield* unknownOf).toBeNull()
+    })))
+
+  it.effect("shows a historical snapshot only what was known by its time", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* work.record({ eventId: "goal-pr7.1", goal, occurredAt: 1_000, version: "herdr.work.event.v1" })
+      yield* work.observe([at(3_000, pullRequest())])
+      yield* work.observe([at(5_000, pullRequest({ closedAt: 4_900, state: "merged" }))])
+      yield* work.observe([
+        at(6_000, { _tag: "unknown", reason: "gh: 502", source: "github", subject: "github:knpkv/npm#7" })
+      ])
+      expect((yield* work.snapshots(2_000)).now.observed).toBeUndefined()
+      const atMerge = (yield* work.snapshots(5_500)).now.observed?.[0]
+      expect(atMerge?.displayState).toBe("completed")
+      expect(atMerge?.unknown).toBeNull()
+      expect((yield* work.snapshots(7_000)).now.observed?.[0]?.unknown?.since).toBe(6_000)
+    })))
+
+  it.effect("treats a host or repository spelled in another letter case as the same facts", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* work.observe([at(100, agent("gone"))])
+      expect((yield* work.observe([at(200, { ...agent("gone"), host: "ser8" })])).outcomes[0]?._tag).toBe("unchanged")
+      yield* work.observe([at(300, pullRequest())])
+      expect((yield* work.observe([at(400, pullRequest({ repository: "KNPKV/npm" }))])).outcomes[0]?._tag)
+        .toBe("unchanged")
     })))
 })
