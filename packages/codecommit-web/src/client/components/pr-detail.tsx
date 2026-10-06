@@ -93,6 +93,7 @@ import {
 } from "../review-comment-navigation.js"
 import { StorageKeys } from "../storage-keys.js"
 import { extractScope } from "../utils/extractScope.js"
+import { makeInFlight } from "../utils/inFlight.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog.js"
@@ -889,8 +890,9 @@ export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
   const [searchParams] = useSearchParams()
   const state = useAtomValue(appStateAtom)
-  const refreshSingle = useAtomSet(refreshSinglePrAtom)
   const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom, { mode: "promise" })
+  // One refresh per pull request at a time: overlapping triggers share it instead of cancelling it.
+  const shareRefresh = useMemo(() => makeInFlight<Awaited<ReturnType<typeof refreshSingleWithResult>>>(), [])
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
@@ -906,6 +908,21 @@ export function PRDetail() {
   const refreshAccountId = pr === null ? accountId : reviewApiAccountId(pr)
   const refreshRepositoryName = pr === null ? (searchParams.get("repository") ?? undefined) : String(pr.repositoryName)
   const refreshRegion = pr === null ? (searchParams.get("region") ?? undefined) : String(pr.account.region)
+  const requestRefresh = useCallback(
+    (accountId: string, id: string) =>
+      // Keyed by the pull request, not the account's spelling: the route's account and the loaded
+      // PR's account id name the same pull request.
+      shareRefresh(`${id}:${refreshRepositoryName ?? ""}:${refreshRegion ?? ""}`, () =>
+        refreshSingleWithResult({
+          params: { awsAccountId: accountId, prId: PullRequestId.make(id) },
+          query:
+            refreshRepositoryName !== undefined && refreshRegion !== undefined
+              ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
+              : {}
+        })
+      ),
+    [refreshRegion, refreshRepositoryName, refreshSingleWithResult, shareRefresh]
+  )
 
   // Collect ALL known users from all PRs (authors, approvers, commenters, pool members)
   // Build CodeCommitApprovers:REPO_ACCT:username directly — no ARN needed
@@ -945,14 +962,8 @@ export function PRDetail() {
     const key = `${refreshAccountId}:${prId}:${refreshRepositoryName ?? ""}:${refreshRegion ?? ""}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    refreshSingle({
-      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
-      query:
-        refreshRepositoryName !== undefined && refreshRegion !== undefined
-          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
-          : {}
-    })
-  }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingle, routeAmbiguous])
+    void requestRefresh(refreshAccountId, prId).catch(() => {})
+  }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, requestRefresh, routeAmbiguous])
 
   const score: HealthScore | undefined = useMemo(
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
@@ -1118,17 +1129,11 @@ export function PRDetail() {
   const refreshAfterApprovalMutation = useCallback(() => {
     if (refreshAccountId === undefined || refreshAccountId.length === 0 || prId === undefined || prId.length === 0)
       return
-    void refreshSingleWithResult({
-      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
-      query:
-        refreshRepositoryName !== undefined && refreshRegion !== undefined
-          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
-          : {}
-    }).then(
+    void requestRefresh(refreshAccountId, prId).then(
       (refreshed) => invalidateReview(refreshed, false),
       () => {}
     )
-  }, [invalidateReview, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingleWithResult])
+  }, [invalidateReview, prId, refreshAccountId, requestRefresh])
   const handleRefresh = useCallback(() => {
     if (
       refreshAccountId === undefined ||
@@ -1139,13 +1144,7 @@ export function PRDetail() {
     )
       return
     setIsRefreshing(true)
-    void refreshSingleWithResult({
-      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
-      query:
-        refreshRepositoryName !== undefined && refreshRegion !== undefined
-          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
-          : {}
-    }).then(
+    void requestRefresh(refreshAccountId, prId).then(
       (refreshed) => {
         invalidateReview(refreshed, true)
         setIsRefreshing(false)
@@ -1157,15 +1156,7 @@ export function PRDetail() {
         })
       }
     )
-  }, [
-    invalidateReview,
-    isRefreshing,
-    prId,
-    refreshAccountId,
-    refreshRegion,
-    refreshRepositoryName,
-    refreshSingleWithResult
-  ])
+  }, [invalidateReview, isRefreshing, prId, refreshAccountId, requestRefresh])
 
   // Copy console URL
   const consoleUrl =

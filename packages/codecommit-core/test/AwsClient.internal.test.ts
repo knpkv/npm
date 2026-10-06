@@ -84,6 +84,19 @@ describe("AwsClient internals", () => {
   })
 
   describe("parseRuleContent", () => {
+    // The exact content codecommit-web creates for an "anyone may approve" rule, and the string form
+    // ui2-b saw when the rule is read back.
+    it.each([
+      ["the array the app writes", ["*"]],
+      ["a single string", "*"]
+    ])("reads ApprovalPoolMembers given as %s", (_, members) => {
+      const content = JSON.stringify({
+        Version: "2018-11-08",
+        Statements: [{ Type: "Approvers", NumberOfApprovalsNeeded: 1, ApprovalPoolMembers: members }]
+      })
+      expect(runParse(content)).toEqual({ requiredApprovals: 1, poolMembers: ["*"], poolMemberArns: ["*"] })
+    })
+
     it("parses valid AWS approval rule content", () => {
       const content = JSON.stringify({
         Version: "2018-11-08",
