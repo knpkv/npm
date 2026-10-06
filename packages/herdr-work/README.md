@@ -51,6 +51,32 @@ Earlier windows stay as recorded. A goal's agent is its agent hierarchy, or its
 connect target on older goals; host and repository letter case never makes a
 new fact.
 
+`reconcile` turns the one kind of observed fact that is final into goal
+history: a goal whose pull request is observed merged becomes `completed`
+(delivery `merged`), and one closed without merging becomes `abandoned`. The
+checkpoint is stamped with the pull request's close time, never later than the
+store's clock and one millisecond after the goal's latest checkpoint when an
+owner wrote later. It is written only if, inside the write's transaction, the
+goal's latest checkpoint and the pull request's fact are still the ones it was
+planned from (otherwise that goal is reported as a conflict), and 256
+checkpoints of history stay free. A goal is stamped at most once, by the
+reconciler's own record of what it wrote, so a goal its owner reopens stays
+reopened. The checkpoint adds a `reconciler.` activity unless the goal's
+activity list is full; owner activity is never dropped to make room.
+`isTerminalWorkState`
+names the finished states: `completed`, `deployed` and `abandoned`.
+
+The `now` window also says who wrote each activity that is not the owner's:
+`activityProvenance` lists reconciler and approved-job activities (with the
+job id). An activity is credited only when the checkpoint that started its
+current unchanged run is the writer's own: an approved operation's checkpoint
+(whose event id is the activity id), or one in the reconciler's record. A later
+owner rewrite or re-creation is the owner's. Authorship never comes from an id's
+spelling, and `activityProvenanceGoals` lists the goals whose such activities
+are all present. In a covered goal an unlisted activity is the owner's; a goal
+left out to stay within the response budget is counted in
+`activityProvenanceOmitted` and its provenance is unknown.
+
 `WorkStore.appendMany` validates a whole checkpoint batch before one SQLite
 transaction. Reusing its transaction ID with the same batch replays it. A
 changed event with an existing event ID or goal/timestamp returns
