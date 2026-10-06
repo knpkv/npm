@@ -776,6 +776,28 @@
     },
     {
       "capabilities": [
+        "compose",
+        "present"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "Region",
+      "states": [
+        "default",
+        "tray"
+      ],
+      "terms": [
+        "compose",
+        "default",
+        "pattern",
+        "present",
+        "region",
+        "tone",
+        "tray"
+      ]
+    },
+    {
+      "capabilities": [
         "relationship",
         "trace"
       ],
@@ -1076,7 +1098,8 @@
         "building",
         "compact",
         "complete",
-        "default"
+        "default",
+        "words"
       ],
       "terms": [
         "blocked",
@@ -1088,7 +1111,8 @@
         "pattern",
         "progress",
         "size",
-        "stagerail"
+        "stagerail",
+        "words"
       ]
     },
     {

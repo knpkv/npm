@@ -45,3 +45,68 @@ test("keeps named collaborator roles and controlled overflow clear at 320 pixels
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("people-320.png") })
 })
+
+test(
+  "keeps region headers on one rule and the content inside the frame at 320 pixels, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_200, width: 320 })
+      await page.goto(story("patterns-region--states", forcedColors))
+
+      const findings = page.getByRole("region", { name: "Findings 2" })
+      await expect(findings).toBeVisible()
+      await expect(findings.getByRole("button", { name: "Acknowledge all" })).toBeVisible()
+      const frame = await findings.boundingBox()
+      const button = await findings.getByRole("button", { name: "Acknowledge all" }).boundingBox()
+      expect(frame).not.toBeNull()
+      expect(button).not.toBeNull()
+      if (frame !== null && button !== null) expect(button.x + button.width).toBeLessThanOrEqual(frame.x + frame.width)
+      const border = await findings.evaluate((element) => getComputedStyle(element).borderTopStyle)
+      expect(border).toBe("solid")
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`region-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
+
+test(
+  "keeps stage words inside 320 pixels, with ink on the blocking state and its weight kept in forced colors",
+  async ({
+    page
+  }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 900, width: 320 })
+      await page.goto(story("patterns-stagerail--words", forcedColors))
+
+      const rail = page.getByRole("list", { name: "Relay 2.4 stages" })
+      await expect(rail).toBeVisible()
+      await expect(page.getByRole("region")).toHaveCount(0)
+      await expect(rail.locator("[data-rly-stage-marker]")).toHaveCount(0)
+      const style = (selector: string) =>
+        rail
+          .locator(selector)
+          .first()
+          .evaluate((element) => ({
+            color: getComputedStyle(element).color,
+            weight: Number(getComputedStyle(element).fontWeight)
+          }))
+      const [blocked, quiet] = await Promise.all([
+        style("[data-rly-stage-word='blocked']"),
+        style("[data-rly-stage-word='quiet']")
+      ])
+      expect(blocked.weight).toBeGreaterThanOrEqual(600)
+      expect(quiet.weight).toBeLessThan(600)
+      if (forcedColors === "auto") expect(blocked.color).not.toBe(quiet.color)
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`stage-words-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
