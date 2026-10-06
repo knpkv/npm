@@ -30,7 +30,20 @@ export const colorTokenSource = defineColors([
   { name: "service-codepipeline", light: "#8A42C2", dark: "#D69CFF", forced: "LinkText", purpose: "provenance" },
   { name: "service-jira", light: "#0C66E4", dark: "#75AEFF", forced: "LinkText", purpose: "provenance" },
   { name: "service-confluence", light: "#4758D6", dark: "#9EA9FF", forced: "LinkText", purpose: "provenance" },
-  { name: "service-clockify", light: "#0087C7", dark: "#64CCF2", forced: "LinkText", purpose: "provenance" }
+  { name: "service-clockify", light: "#0087C7", dark: "#64CCF2", forced: "LinkText", purpose: "provenance" },
+  // Chart series in assignment order: neighbours differ in hue and lightness, and orange sits sixth
+  // so a small chart does not read as provider provenance. Charts always ship a labelled key and a
+  // table equivalent, so colour is never the only carrier; forced colours collapse to CanvasText.
+  // Every series keeps 3:1 against the canvas and the first surface in both schemes (see below).
+  { name: "series-1", light: "#2A78D6", dark: "#3987E5", forced: "CanvasText", purpose: "series" },
+  { name: "series-2", light: "#008300", dark: "#2E9E2E", forced: "CanvasText", purpose: "series" },
+  { name: "series-3", light: "#C24F7C", dark: "#D55181", forced: "CanvasText", purpose: "series" },
+  { name: "series-4", light: "#9C6A00", dark: "#C98500", forced: "CanvasText", purpose: "series" },
+  { name: "series-5", light: "#118259", dark: "#199E70", forced: "CanvasText", purpose: "series" },
+  { name: "series-6", light: "#C4501E", dark: "#D95926", forced: "CanvasText", purpose: "series" },
+  { name: "series-7", light: "#4A3AA7", dark: "#9085E9", forced: "CanvasText", purpose: "series" },
+  { name: "series-8", light: "#D23D3C", dark: "#E66767", forced: "CanvasText", purpose: "series" },
+  { name: "series-other", light: "#777672", dark: "#7E7D79", forced: "CanvasText", purpose: "series" }
 ])
 
 /** Text and non-text contrast invariants for both schemes. */
@@ -43,5 +56,27 @@ export const contrastPairSource = defineContrastPairs([
   { name: "blocked state", foreground: "blocked-ink", background: "blocked-tint", minimum: 4.5 },
   { name: "held state", foreground: "held-ink", background: "held-tint", minimum: 4.5 },
   { name: "deploying state", foreground: "deploying-ink", background: "deploying-tint", minimum: 4.5 },
-  { name: "focus on canvas", foreground: "focus", background: "canvas", minimum: 3 }
+  { name: "focus on canvas", foreground: "focus", background: "canvas", minimum: 3 },
+  { name: "series 1 on canvas", foreground: "series-1", background: "canvas", minimum: 3 },
+  { name: "series 1 on surface-1", foreground: "series-1", background: "surface-1", minimum: 3 },
+  { name: "series 2 on canvas", foreground: "series-2", background: "canvas", minimum: 3 },
+  { name: "series 2 on surface-1", foreground: "series-2", background: "surface-1", minimum: 3 },
+  { name: "series 3 on canvas", foreground: "series-3", background: "canvas", minimum: 3 },
+  { name: "series 3 on surface-1", foreground: "series-3", background: "surface-1", minimum: 3 },
+  { name: "series 4 on canvas", foreground: "series-4", background: "canvas", minimum: 3 },
+  { name: "series 4 on surface-1", foreground: "series-4", background: "surface-1", minimum: 3 },
+  { name: "series 5 on canvas", foreground: "series-5", background: "canvas", minimum: 3 },
+  { name: "series 5 on surface-1", foreground: "series-5", background: "surface-1", minimum: 3 },
+  { name: "series 6 on canvas", foreground: "series-6", background: "canvas", minimum: 3 },
+  { name: "series 6 on surface-1", foreground: "series-6", background: "surface-1", minimum: 3 },
+  { name: "series 7 on canvas", foreground: "series-7", background: "canvas", minimum: 3 },
+  { name: "series 7 on surface-1", foreground: "series-7", background: "surface-1", minimum: 3 },
+  { name: "series 8 on canvas", foreground: "series-8", background: "canvas", minimum: 3 },
+  { name: "series 8 on surface-1", foreground: "series-8", background: "surface-1", minimum: 3 },
+  { name: "series other on canvas", foreground: "series-other", background: "canvas", minimum: 3 },
+  { name: "series other on surface-1", foreground: "series-other", background: "surface-1", minimum: 3 },
+  { name: "limit near mark on track", foreground: "text-1", background: "surface-3", minimum: 3 },
+  { name: "limit near halo on fill", foreground: "surface-1", background: "text-2", minimum: 3 },
+  { name: "limit near halo on near fill", foreground: "surface-1", background: "held-ink", minimum: 3 },
+  { name: "limit near halo on full fill", foreground: "surface-1", background: "blocked-ink", minimum: 3 }
 ])

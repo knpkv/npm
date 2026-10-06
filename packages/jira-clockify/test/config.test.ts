@@ -61,6 +61,7 @@ describe("jcf config reset", () => {
         sessionTicketMap: { [`${FAKE_HOME}/dev/work/docs`]: "PROJ-42" },
         sessionIdleCapSeconds: 900,
         sessionConfidenceFloor: 0.9,
+        sessionIgnoredTickets: ["PROJ-42"],
         sessionAgent: { provider: "codex", model: "custom-model", effort: "high" }
       })
 
@@ -69,6 +70,7 @@ describe("jcf config reset", () => {
       expect(stored.sessionIdleCapSeconds).toBe(300)
       expect(stored.sessionConfidenceFloor).toBe(0.7)
       expect(stored.sessionAgent).toEqual(defaultSessionAgentSettings)
+      expect(stored.sessionIgnoredTickets).toEqual([])
       expect(world.stdout.join("\n")).toContain("session roots")
     }))
 })
@@ -163,4 +165,59 @@ describe("standing attributions", () => {
     }))
     expect(parsed.sessionTicketMap).toEqual({ "/work/rel": "PROJ-42" })
   })
+})
+
+describe("session ignored tickets", () => {
+  it("retains only valid issue keys from stored ignored tickets", () => {
+    expect(parseConfigPatch(JSON.stringify({ sessionIgnoredTickets: ["PROJ-42", "bad", "", "ABC-7"] })))
+      .toMatchObject({ sessionIgnoredTickets: ["PROJ-42", "ABC-7"] })
+    expect(parseConfigPatch(JSON.stringify({ sessionIgnoredTickets: ["PROJ-42", 2] })).sessionIgnoredTickets)
+      .toBeUndefined()
+  })
+
+  it.effect("round-trips ignored tickets through the real file-backed config service", () => {
+    let saved = "{}"
+    const configLayer = ConfigLayer.pipe(
+      Layer.provide(Layer.succeed(HomeDirectory, { path: FAKE_HOME })),
+      Layer.provide(Path.layer),
+      Layer.provide(FileSystem.layerNoop({
+        exists: () => Effect.succeed(true),
+        readFileString: () => Effect.succeed(saved),
+        writeFileString: (_, contents) =>
+          Effect.sync(() => {
+            saved = contents
+          })
+      }))
+    )
+    return Effect.gen(function*() {
+      const config = yield* ConfigService
+      expect((yield* config.get).sessionIgnoredTickets).toEqual([])
+      yield* config.set({ sessionIgnoredTickets: ["PROJ-42"] })
+      expect((yield* config.get).sessionIgnoredTickets).toEqual(["PROJ-42"])
+      expect(parseConfigPatch(saved).sessionIgnoredTickets).toEqual(["PROJ-42"])
+    }).pipe(Effect.provide(configLayer))
+  })
+
+  it.effect("sets, lists, deduplicates and restores an ignored ticket through the CLI", () =>
+    Effect.gen(function*() {
+      const fake = makeFakeHeadless()
+      yield* Effect.gen(function*() {
+        const command = Command.runWith(root, { version: "0.0.0-test" })
+        yield* command(["config", "set", "session-ignore", "proj-42"])
+        yield* command(["config", "set", "session-ignore", "PROJ-42"])
+        const config = yield* ConfigService
+        expect((yield* config.get).sessionIgnoredTickets).toEqual(["PROJ-42"])
+        yield* command(["config"])
+        expect(fake.world.stdout.join("\n")).toContain("Ignored tickets: PROJ-42")
+        yield* command(["config", "unset", "session-ignore", "PROJ-42"])
+        expect((yield* config.get).sessionIgnoredTickets).toEqual([])
+      }).pipe(Effect.provide(fake.layer))
+    }))
+
+  it.effect("rejects malformed keys without changing the ignored list", () =>
+    Effect.gen(function*() {
+      const { stored, world } = yield* run(["config", "set", "session-ignore", "not-a-key"], {})
+      expect(stored.sessionIgnoredTickets).toEqual([])
+      expect(world.stdout.join("\n")).toContain("not an Issue Key")
+    }))
 })

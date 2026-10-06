@@ -138,6 +138,23 @@
       ]
     },
     {
+      "name": "ChartLegend",
+      "paths": {
+        "source": "packages/rly/src/primitives/ChartLegend.tsx",
+        "story": "packages/rly/stories/primitives/ChartLegend.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/ChartLegend.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/ChartLegend.test.tsx"
+        ]
+      },
+      "storyId": "primitives-chartlegend--all-series",
+      "storyIds": [
+        "primitives-chartlegend--all-series"
+      ]
+    },
+    {
       "name": "CollaboratorGroup",
       "paths": {
         "source": "packages/rly/src/patterns/CollaboratorGroup.tsx",
@@ -152,6 +169,23 @@
       "storyId": "patterns-collaboratorgroup--entity-roles",
       "storyIds": [
         "patterns-collaboratorgroup--entity-roles"
+      ]
+    },
+    {
+      "name": "DecisionBar",
+      "paths": {
+        "source": "packages/rly/src/patterns/DecisionBar.tsx",
+        "story": "packages/rly/stories/patterns/DecisionBar.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/DecisionBar.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/DecisionBar.test.tsx"
+        ]
+      },
+      "storyId": "patterns-decisionbar--states",
+      "storyIds": [
+        "patterns-decisionbar--states"
       ]
     },
     {
@@ -442,6 +476,23 @@
       ]
     },
     {
+      "name": "Hero",
+      "paths": {
+        "source": "packages/rly/src/patterns/Hero.tsx",
+        "story": "packages/rly/stories/patterns/Hero.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/Hero.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/Hero.test.tsx"
+        ]
+      },
+      "storyId": "patterns-hero--states",
+      "storyIds": [
+        "patterns-hero--states"
+      ]
+    },
+    {
       "name": "Icon",
       "paths": {
         "source": "packages/rly/src/foundations/Icon.tsx",
@@ -471,6 +522,23 @@
       "storyId": "primitives-iconbutton--states",
       "storyIds": [
         "primitives-iconbutton--states"
+      ]
+    },
+    {
+      "name": "LimitTrack",
+      "paths": {
+        "source": "packages/rly/src/primitives/LimitTrack.tsx",
+        "story": "packages/rly/stories/primitives/LimitTrack.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/LimitTrack.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/LimitTrack.test.tsx"
+        ]
+      },
+      "storyId": "primitives-limittrack--gallery",
+      "storyIds": [
+        "primitives-limittrack--gallery"
       ]
     },
     {
@@ -930,7 +998,8 @@
       },
       "storyId": "patterns-timelinerow--actor-kinds",
       "storyIds": [
-        "patterns-timelinerow--actor-kinds"
+        "patterns-timelinerow--actor-kinds",
+        "patterns-timelinerow--provenance"
       ]
     },
     {
@@ -948,6 +1017,23 @@
       "storyId": "primitives-togglegroup--interaction",
       "storyIds": [
         "primitives-togglegroup--interaction"
+      ]
+    },
+    {
+      "name": "TrackKey",
+      "paths": {
+        "source": "packages/rly/src/primitives/TrackKey.tsx",
+        "story": "packages/rly/stories/primitives/TrackKey.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/TrackKey.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/TrackKey.test.tsx"
+        ]
+      },
+      "storyId": "primitives-trackkey--all-marks",
+      "storyIds": [
+        "primitives-trackkey--all-marks"
       ]
     },
     {

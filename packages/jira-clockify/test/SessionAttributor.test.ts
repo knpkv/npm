@@ -86,6 +86,33 @@ describe("SessionAttributor provider selection", () => {
       expect(prompt).not.toContain("Issue: null")
     }))
 
+  // Parallel orchestration sessions name many issues; the marks steer a tie toward the sprint work
+  // that still needs time, while unmarked candidates stay choosable.
+  it.effect("marks sprint and unlogged candidates as tie-breakers", () =>
+    Effect.gen(function*() {
+      const settings = yield* Ref.make(defaultSessionAgentSettings)
+      const calls: Array<ChildProcess.StandardCommand> = []
+      yield* Effect.gen(function*() {
+        const attributor = yield* SessionAttributor
+        yield* attributor.attribute([{
+          sessionId: "session-1",
+          candidateKeys: ["PROJ-42", "PROJ-7", "PROJ-9"],
+          digest: "Fixed PROJ-42 validation",
+          candidateFacts: new Map([
+            ["PROJ-42", { inSprint: true, logged: false }],
+            ["PROJ-7", { inSprint: false, logged: true }]
+          ])
+        }])
+      }).pipe(Effect.provide(testRuntime(settings, calls)))
+      const input = calls[0]?.options.stdin
+      if (input === undefined || Predicate.isString(input) || !("stream" in input) || !Stream.isStream(input.stream)) {
+        return yield* Effect.die("Expected a prompt on stdin")
+      }
+      const prompt = yield* input.stream.pipe(Stream.decodeText(), Stream.mkString)
+      expect(prompt).toContain("Candidates: PROJ-42 [open sprint, not logged yet], PROJ-7, PROJ-9")
+      expect(prompt).toContain("Never choose an issue because of its marks alone.")
+    }))
+
   it.effect("preserves Claude defaults when model and effort are unset", () =>
     Effect.gen(function*() {
       const settings = yield* Ref.make(defaultSessionAgentSettings)

@@ -110,3 +110,94 @@ test(
     }
   }
 )
+
+test(
+  "keeps every hero size inside 320 pixels and the state word in its ink, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_400, width: 320 })
+      await page.goto(story("patterns-hero--states", forcedColors))
+
+      await expect(page.getByRole("region", { name: "Work summary" })).toHaveText(/3 goals need you, 2 blocked/)
+      const word = page.getByText("blocked", { exact: true }).first()
+      await expect(word).toBeVisible()
+      if (forcedColors === "auto") {
+        const [wordInk, sentenceInk] = await word.evaluate((element) => [
+          getComputedStyle(element).color,
+          getComputedStyle(element.parentElement ?? element).color
+        ])
+        expect(wordInk).not.toBe(sentenceInk)
+      } else {
+        expect(await word.evaluate((element) => getComputedStyle(element).textDecorationLine)).toBe("underline")
+      }
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`hero-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
+
+test(
+  "keeps the decision target, both actions and the off reason inside 320 pixels, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_200, width: 320 })
+      await page.goto(story("patterns-decisionbar--states", forcedColors))
+
+      const off = page.getByRole("button", { name: "Approve: Apply nix config to luna" })
+      await expect(off).toHaveAttribute("aria-disabled", "true")
+      await expect(off).toHaveAccessibleDescription(/hub is unreachable/)
+      await off.focus()
+      await expect(off).toBeFocused()
+      if (forcedColors === "active") {
+        expect(await off.evaluate((element) => getComputedStyle(element).borderTopStyle)).toBe("dashed")
+      }
+      await expect(page.getByText("Reassign Rotate signing keys from arch to arch-b, 4m 12s left")).toBeVisible()
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`decision-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
+
+test(
+  "keeps every provenance shape distinct and labelled at 320 pixels, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_400, width: 320 })
+      await page.goto(story("patterns-timelinerow--provenance", forcedColors))
+
+      const look = (kind: string) =>
+        page.locator(`ol [data-rly-timeline-provenance='${kind}']`).evaluate((element) => {
+          const css = getComputedStyle(element)
+          return {
+            clipped: css.clipPath !== "none",
+            filled: css.backgroundColor !== "rgba(0, 0, 0, 0)" || css.backgroundImage !== "none",
+            hatched: css.backgroundImage !== "none",
+            rotated: css.rotate === "45deg",
+            round: css.borderTopLeftRadius !== "0px"
+          }
+        })
+      // Each shape stays distinct in both modes: that is what carries provenance without colour.
+      expect(await look("auto")).toMatchObject({ clipped: false, filled: false, rotated: false, round: true })
+      expect(await look("approved")).toMatchObject({ filled: true, hatched: false, rotated: false, round: true })
+      expect(await look("pending")).toMatchObject({ filled: true, rotated: true })
+      expect(await look("flag")).toMatchObject({ clipped: true, filled: true })
+      expect(await look("unknown")).toMatchObject({ hatched: true, round: false })
+      await expect(page.getByRole("list", { name: "Observation key" })).toBeVisible()
+      await expect(page.getByText("Not applied: GitHub rate limit, retrying at 05:12")).toBeVisible()
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`timeline-provenance-320-${forcedColors}.png`)
+      })
+    }
+  }
+)

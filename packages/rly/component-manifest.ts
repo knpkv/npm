@@ -187,7 +187,106 @@ export const componentManifest = {
         tests: ["test/patterns/Region.test.tsx"]
       }
     },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "Hero" },
+        { kind: "value", name: "HeroWord" },
+        { kind: "value", name: "RLY_HERO_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_HERO_VARIANTS" },
+        { kind: "value", name: "RLY_HERO_WORD_VARIANTS" },
+        { kind: "type", name: "HeroProps" },
+        { kind: "type", name: "HeroWordProps" },
+        { kind: "type", name: "RlyHeroSize" },
+        { kind: "type", name: "RlyHeroWordTone" }
+      ],
+      name: "Hero",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/Hero.tsx",
+      status: "experimental",
+      styles: ["src/patterns/Hero.module.css"],
+      variants: [
+        { defaultValue: "heading", name: "size", values: ["heading", "line", "display"] },
+        { name: "tone", values: ["blocked", "held"] }
+      ],
+      visual: {
+        story: "stories/patterns/Hero.stories.tsx",
+        storyId: "patterns-hero--states",
+        tests: ["test/patterns/Hero.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "DecisionBar" },
+        { kind: "value", name: "RLY_DECISION_BAR_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_DECISION_BAR_VARIANTS" },
+        { kind: "type", name: "DecisionBarProps" },
+        { kind: "type", name: "RlyDecisionBarPlacement" },
+        { kind: "type", name: "RlyDecisionBarState" }
+      ],
+      name: "DecisionBar",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/DecisionBar.tsx",
+      status: "experimental",
+      styles: ["src/patterns/DecisionBar.module.css"],
+      variants: [{ defaultValue: "inline", name: "placement", values: ["inline", "sticky"] }],
+      visual: {
+        story: "stories/patterns/DecisionBar.stories.tsx",
+        storyId: "patterns-decisionbar--states",
+        tests: ["test/patterns/DecisionBar.test.tsx"]
+      }
+    },
     // scaffold:components:insert
+    {
+      category: "primitive",
+      exports: [
+        { kind: "value", name: "ChartLegend" },
+        { kind: "value", name: "RLY_SERIES" },
+        { kind: "value", name: "rlySeriesColor" },
+        { kind: "type", name: "ChartLegendProps" },
+        { kind: "type", name: "RlyChartLegendItem" },
+        { kind: "type", name: "RlySeries" }
+      ],
+      name: "ChartLegend",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/ChartLegend.tsx",
+      status: "experimental",
+      styles: ["src/primitives/ChartLegend.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/primitives/ChartLegend.stories.tsx",
+        storyId: "primitives-chartlegend--all-series",
+        tests: ["test/primitives/ChartLegend.test.tsx"]
+      }
+    },
+    {
+      category: "primitive",
+      exports: [
+        { kind: "value", name: "LimitTrack" },
+        { kind: "value", name: "RLY_LIMIT_TRACK_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_LIMIT_TRACK_VARIANTS" },
+        { kind: "value", name: "limitTrackTone" },
+        { kind: "type", name: "LimitTrackProps" },
+        { kind: "type", name: "RlyLimitTrackSize" },
+        { kind: "type", name: "RlyLimitTrackTone" }
+      ],
+      name: "LimitTrack",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/LimitTrack.tsx",
+      status: "experimental",
+      styles: ["src/primitives/LimitTrack.module.css"],
+      variants: [{ defaultValue: "default", name: "size", values: ["default", "slim"] }],
+      visual: {
+        story: "stories/primitives/LimitTrack.stories.tsx",
+        storyId: "primitives-limittrack--gallery",
+        tests: ["test/primitives/LimitTrack.test.tsx"]
+      }
+    },
     {
       category: "diff",
       exports: [
@@ -1508,9 +1607,13 @@ export const componentManifest = {
     {
       category: "pattern",
       exports: [
+        { kind: "value", name: "TimelineProvenanceKey" },
         { kind: "value", name: "TimelineRow" },
         { kind: "type", name: "RlyTimelineActorKind" },
         { kind: "type", name: "RlyTimelineEvent" },
+        { kind: "type", name: "RlyTimelineProvenance" },
+        { kind: "type", name: "RlyTimelineProvenanceKind" },
+        { kind: "type", name: "TimelineProvenanceKeyProps" },
         { kind: "type", name: "TimelineRowProps" }
       ],
       name: "TimelineRow",
@@ -1521,9 +1624,32 @@ export const componentManifest = {
       styles: ["src/patterns/TimelineRow.module.css"],
       variants: [],
       visual: {
+        coverageStoryIds: ["patterns-timelinerow--provenance"],
         story: "stories/patterns/TimelineRow.stories.tsx",
         storyId: "patterns-timelinerow--actor-kinds",
         tests: ["test/patterns/TimelineRow.test.tsx"]
+      }
+    },
+    {
+      category: "primitive",
+      exports: [
+        { kind: "value", name: "RLY_TRACK_KEY_MARKS" },
+        { kind: "value", name: "TrackKey" },
+        { kind: "type", name: "RlyTrackKeyItem" },
+        { kind: "type", name: "RlyTrackKeyMark" },
+        { kind: "type", name: "TrackKeyProps" }
+      ],
+      name: "TrackKey",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/TrackKey.tsx",
+      status: "experimental",
+      styles: ["src/primitives/TrackKey.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/primitives/TrackKey.stories.tsx",
+        storyId: "primitives-trackkey--all-marks",
+        tests: ["test/primitives/TrackKey.test.tsx"]
       }
     },
     {

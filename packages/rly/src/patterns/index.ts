@@ -29,6 +29,8 @@ export {
   RLY_COLLABORATOR_GROUP_VARIANTS
 } from "./CollaboratorGroup.js"
 export type { CollaboratorGroupProps, RlyCollaboratorCategory, RlyCollaboratorGroupSize } from "./CollaboratorGroup.js"
+export { DecisionBar, RLY_DECISION_BAR_DEFAULT_VARIANTS, RLY_DECISION_BAR_VARIANTS } from "./DecisionBar.js"
+export type { DecisionBarProps, RlyDecisionBarPlacement, RlyDecisionBarState } from "./DecisionBar.js"
 export { EntityShell } from "./EntityShell.js"
 export type { EntityShellProps } from "./EntityShell.js"
 export { EntityTable, RLY_ENTITY_TABLE_DEFAULT_VARIANTS, RLY_ENTITY_TABLE_VARIANTS } from "./EntityTable.js"
@@ -48,6 +50,8 @@ export { FreshnessStamp, RLY_FRESHNESS_STAMP_DEFAULT_VARIANTS, RLY_FRESHNESS_STA
 export type { FreshnessStampProps, RlyFreshnessStampSize, RlyFreshnessState } from "./FreshnessStamp.js"
 export { GovernedActionReview } from "./GovernedActionReview.js"
 export type { GovernedActionReviewProps, RlyGovernedActionState } from "./GovernedActionReview.js"
+export { Hero, HeroWord, RLY_HERO_DEFAULT_VARIANTS, RLY_HERO_VARIANTS, RLY_HERO_WORD_VARIANTS } from "./Hero.js"
+export type { HeroProps, HeroWordProps, RlyHeroSize, RlyHeroWordTone } from "./Hero.js"
 export { PeopleStrip, RLY_PEOPLE_STRIP_DEFAULT_VARIANTS, RLY_PEOPLE_STRIP_VARIANTS } from "./PeopleStrip.js"
 export type { PeopleStripProps, RlyPeopleStripSize } from "./PeopleStrip.js"
 export { Person, RLY_PERSON_DEFAULT_VARIANTS, RLY_PERSON_VARIANTS } from "./Person.js"
@@ -106,8 +110,15 @@ export { RLY_SERVICE_MARK_DEFAULT_VARIANTS, RLY_SERVICE_MARK_VARIANTS, ServiceMa
 export type { RlyService, RlyServiceMarkSize, ServiceMarkProps } from "./ServiceMark.js"
 export { RLY_STAGE_RAIL_DEFAULT_VARIANTS, RLY_STAGE_RAIL_VARIANTS, StageRail } from "./StageRail.js"
 export type { RlyStage, RlyStageRailSize, StageRailProps } from "./StageRail.js"
-export { TimelineRow } from "./TimelineRow.js"
-export type { RlyTimelineActorKind, RlyTimelineEvent, TimelineRowProps } from "./TimelineRow.js"
+export { TimelineProvenanceKey, TimelineRow } from "./TimelineRow.js"
+export type {
+  RlyTimelineActorKind,
+  RlyTimelineEvent,
+  RlyTimelineProvenance,
+  RlyTimelineProvenanceKind,
+  TimelineProvenanceKeyProps,
+  TimelineRowProps
+} from "./TimelineRow.js"
 export { RLY_VERDICT_VARIANTS, Verdict } from "./Verdict.js"
 export type { RlyVerdictTone, VerdictProps } from "./Verdict.js"
 export { WorksetCard } from "./WorksetCard.js"

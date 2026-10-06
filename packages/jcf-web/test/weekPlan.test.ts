@@ -2,6 +2,12 @@ import { describe, expect, it } from "@effect/vitest"
 import { type AgentSessions, type IssueFacts, type ReconcileService, SourceConsumption } from "@knpkv/jira-clockify"
 import { Schema } from "effect"
 import {
+  changeSavedEntries,
+  promoteWithheld,
+  promotionCollides,
+  removeSavedEntry
+} from "../src/server/SavedEntryOperations.js"
+import {
   buildWeekPlan,
   evidenceBlockKey,
   isOwnedByMe,
@@ -52,6 +58,8 @@ const report = (
   overrides: Partial<ReconcileService.SessionProposalReport>
 ): ReconcileService.SessionProposalReport => ({
   attributed: [],
+  ignored: [],
+  ignoredTickets: [],
   attributorAvailable: true,
   attributorCalls: 0,
   digests: new Map(),
@@ -612,5 +620,129 @@ describe("proposeWrite", () => {
       requested: undefined,
       targets: { clockify: false, jira: true }
     })).toEqual({ _tag: "NothingOwed" })
+  })
+})
+
+// A low-confidence match becomes a suggestion only when the person names it, and only that one.
+describe("promoteWithheld", () => {
+  const credit = (ticketKey: string, confidence: number): AgentSessions.TicketDayCredit => ({
+    activeSeconds: 1800,
+    blocks: [{
+      allocationIndex: 0,
+      endMs: at(16, 10) + 1_800_000,
+      seconds: 1800,
+      sourceStartMs: at(16, 10),
+      startMs: at(16, 10)
+    }],
+    confidence,
+    day: "2025-06-16",
+    seconds: 1800,
+    sessionIds: [`s-${ticketKey}`],
+    settlementEndMs: at(16, 10) + 1_800_000,
+    signal: "agent",
+    sourceStartMs: at(16, 10),
+    ticketKey
+  })
+
+  it("offers only the named match and leaves the others withheld", () => {
+    const held = build({ withheld: [credit("PROJ-7", 0.55), credit("PROJ-8", 0.4)] })
+    expect(held.plan.rows.some((row) => row.proposal !== undefined)).toBe(false)
+    const promoted = promoteWithheld(held, "PROJ-7", "2025-06-16")
+    expect(promoted?.plan.rows.find((row) => row.ticketKey === "PROJ-7")?.proposal?.maxSeconds).toBe(1800)
+    expect(promoted?.plan.rows.find((row) => row.ticketKey === "PROJ-8")?.proposal).toBeUndefined()
+    expect(promoted?.plan.withheld.map((row) => row.ticketKey)).toEqual(["PROJ-8"])
+    expect(promoteWithheld(held, "PROJ-9", "2025-06-16")).toBeUndefined()
+  })
+
+  it("flags a promotion onto a row that already has an attributed suggestion", () => {
+    const held = build({
+      attributed: [credit("PROJ-7", 0.9)],
+      withheld: [credit("PROJ-7", 0.55), credit("PROJ-8", 0.4)]
+    })
+    expect(promotionCollides(held, "PROJ-7", "2025-06-16")).toBe(true)
+    expect(promotionCollides(held, "PROJ-8", "2025-06-16")).toBe(false)
+  })
+
+  it("keeps a provider review hold on every locally rebuilt suggestion", () => {
+    const held = build({
+      writeBlocked: { clockify: "needs review" },
+      attributed: [credit("PROJ-6", 0.9)],
+      withheld: [credit("PROJ-7", 0.55)]
+    })
+    const holds = (plan: typeof held | undefined) =>
+      plan?.plan.rows.flatMap((row) => row.proposal === undefined ? [] : [row.proposal.writeBlocked])
+    expect(holds(promoteWithheld(held, "PROJ-7", "2025-06-16"))).toEqual([
+      { clockify: "review-required" },
+      { clockify: "review-required" }
+    ])
+    expect(holds(removeSavedEntry(held, { source: "jira", id: "gone" }))).toEqual([{ clockify: "review-required" }])
+  })
+})
+
+// A ticket change replaces the provider id. Evidence the original consumed must stay consumed under
+// the replacement before any provider re-read; a delete releases it; a partial change keeps both.
+describe("saved entry claims across a ticket change", () => {
+  const sourceStartMs = at(16, 9)
+  const block = { allocationIndex: 0, endMs: at(16, 11), seconds: 3600, sourceStartMs, startMs: at(16, 10) }
+  const sourceRow = rowId("PROJ-1", "2025-06-16")
+  const credit: AgentSessions.TicketDayCredit = {
+    activeSeconds: 3600,
+    blocks: [block],
+    confidence: null,
+    day: "2025-06-16",
+    seconds: 3600,
+    sessionIds: ["s1"],
+    settlementEndMs: block.endMs,
+    signal: "branch",
+    sourceStartMs,
+    ticketKey: "PROJ-1"
+  }
+  const saved: ReconcileService.RecordedEntry = {
+    description: "corrected",
+    endMs: block.endMs,
+    id: "entry-b",
+    source: "clockify",
+    startMs: block.startMs,
+    ticketKey: "PROJ-2"
+  }
+  const report_ = report({
+    attributed: [credit],
+    recorded: [recorded({
+      clockifySeconds: 3600,
+      day: "2025-06-16",
+      intervals: [{ entry: saved, endMs: block.endMs, source: "clockify", startMs: block.startMs }],
+      ticketKey: "PROJ-2"
+    })],
+    sourceEntries: [{
+      endMs: block.endMs,
+      id: saved.id,
+      rowId: sourceRow,
+      source: "clockify",
+      sourceStartMs,
+      startMs: block.startMs
+    }]
+  })
+  const held = buildWeekPlan({
+    createdAtMillis: 0,
+    monday,
+    planId: "plan-1",
+    report: report_,
+    scope: "both",
+    consumption: reconcileConsumption(report_)
+  })
+  const consumed = (plan: typeof held) => plan.consumption.get(evidenceBlockKey(sourceRow, block))?.clockify ?? 0
+  const replacement = { ...saved, id: "entry-c", ticketKey: "PROJ-3", revision: "r2" }
+
+  it("keeps the original's evidence consumed under the replacement id", () => {
+    expect(consumed(held)).toBe(3600)
+    const moved = changeSavedEntries(held, [{ source: "clockify", id: saved.id }], replacement)
+    expect(consumed(moved)).toBe(3600)
+    expect(moved.report.sourceEntries?.map((entry) => entry.id)).toEqual(["entry-c"])
+  })
+
+  it("releases the evidence on delete and keeps both claims after a partial change", () => {
+    expect(consumed(removeSavedEntry(held, { source: "clockify", id: saved.id }))).toBe(0)
+    const partial = changeSavedEntries(held, [], replacement, { source: "clockify", id: saved.id })
+    expect(partial.report.sourceEntries?.map((entry) => entry.id).sort()).toEqual(["entry-b", "entry-c"])
   })
 })

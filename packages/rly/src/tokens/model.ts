@@ -4,7 +4,7 @@ export interface ColorTokenSource {
   readonly forced: string
   readonly light: `#${string}`
   readonly name: string
-  readonly purpose: "content" | "state" | "provenance"
+  readonly purpose: "content" | "state" | "provenance" | "series"
 }
 
 /** A named typography role. */

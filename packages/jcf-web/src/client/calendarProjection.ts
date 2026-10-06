@@ -1,4 +1,5 @@
 import type { ProposalBlockResponse, SavedEntry, WeekPlanResponse, WeekRowResponse } from "../shared/contracts.js"
+import { MINIMUM_WRITE_SECONDS } from "../shared/writePlanning.js"
 import { dayBounds, hourWindow, placeBlocks } from "./layout.js"
 import { type OptimisticEntry, previewWrite } from "./weekAtoms.js"
 
@@ -6,8 +7,8 @@ import { type OptimisticEntry, previewWrite } from "./weekAtoms.js"
 export const minutePixels = 2
 export const minimumBlockPixels = 24
 
-/** A suggestion needs fifteen minutes of real range, credited work, and room in a selected provider. */
-const minimumSuggestionSeconds = 15 * 60
+/** A suggestion needs a writable minute of real range, credit, and room in a selected provider. */
+const minimumSuggestionSeconds = MINIMUM_WRITE_SECONDS
 
 const isSuggestionBlock = (block: ProposalBlockResponse): boolean =>
   block.seconds >= minimumSuggestionSeconds && block.endMs - block.startMs >= minimumSuggestionSeconds * 1000
@@ -174,6 +175,80 @@ const visibleDays = (plan: WeekPlanResponse, blocks: ReadonlyArray<GridBlock>): 
   return plan.days.filter((day, index) => index < 5 || withUnplaced.has(day))
 }
 
+export type ProposableBlock = Extract<GridBlock, { readonly kind: "proposable" }>
+
+/**
+ * Back-to-back suggestions too short to draw on their own, shown as one card over their stretch.
+ *
+ * A packed stretch of parallel work hands each ticket a few minutes in turn. Drawn one card per
+ * ticket, every card is taller than its time and the calendar pushes them into side-by-side lanes
+ * that read as overlap, although none of them overlap at all.
+ */
+export interface StretchBlock {
+  readonly kind: "stretch"
+  readonly id: string
+  readonly startMs: number
+  readonly endMs: number
+  /** In packed order; each stays individually reviewable and approvable. */
+  readonly members: ReadonlyArray<ProposableBlock>
+}
+
+export type CalendarBlock = GridBlock | StretchBlock
+
+/** Gap tolerated between two packed blocks: they are written back to back, to the second. */
+const PACKED_JOIN_MS = 1000
+
+/**
+ * Group runs of two or more consecutive short suggestions into stretches. Long suggestions and
+ * saved entries are never grouped, and a single short suggestion stays its own card.
+ */
+export const groupStretches = (
+  blocks: ReadonlyArray<GridBlock>,
+  shortMs: number
+): ReadonlyArray<CalendarBlock> => {
+  const proposable = blocks
+    .filter((block): block is ProposableBlock => block.kind === "proposable")
+    .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs)
+  const grouped: Array<CalendarBlock> = blocks.filter((block) => block.kind !== "proposable")
+  let run: Array<ProposableBlock> = []
+  const flush = () => {
+    const first = run[0]
+    const last = run.at(-1)
+    if (first !== undefined && last !== undefined && run.length >= 2) {
+      grouped.push({
+        kind: "stretch",
+        id: `stretch-${first.id}`,
+        startMs: first.startMs,
+        endMs: last.endMs,
+        members: run
+      })
+    } else {
+      for (const single of run) grouped.push(single)
+    }
+    run = []
+  }
+  for (const block of proposable) {
+    const previous = run.at(-1)
+    // A stretch is drawn on every day it touches, so a block crossing midnight stays its own card.
+    const crossesMidnight = new Date(block.startMs).toDateString() !== new Date(block.endMs - 1).toDateString()
+    if (block.endMs - block.startMs >= shortMs || crossesMidnight) {
+      flush()
+      grouped.push(block)
+      continue
+    }
+    // Only back-to-back blocks on one local day join: overlapping ones keep their own lanes.
+    const runEndMs = Math.max(...run.map((member) => member.endMs))
+    if (
+      previous !== undefined &&
+      (Math.abs(block.startMs - runEndMs) > PACKED_JOIN_MS ||
+        new Date(block.startMs).toDateString() !== new Date(previous.startMs).toDateString())
+    ) flush()
+    run.push(block)
+  }
+  flush()
+  return grouped
+}
+
 /** Project saved time and pending writes into the same layers, counts and day placements for both presentations. */
 export const projectCalendar = (
   plan: WeekPlanResponse,
@@ -230,7 +305,12 @@ export const projectCalendar = (
     visibleHours,
     days,
     hours,
-    placements: new Map(days.map((day) => [day, placeBlocks(visible, day, minimumBlockPixels / minutePixels)]))
+    placements: new Map(days.map((day) => [day, placeBlocks(visible, day, minimumBlockPixels / minutePixels)])),
+    /** The calendar's own placement, with packed short suggestions grouped into stretches. */
+    calendarPlacements: new Map(days.map((day) => {
+      const minimumMinutes = minimumBlockPixels / minutePixels
+      return [day, placeBlocks(groupStretches(visible, minimumMinutes * 60_000), day, minimumMinutes)]
+    }))
   }
 }
 

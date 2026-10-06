@@ -101,3 +101,122 @@ test("keeps state explanations readable without horizontal overflow at 320 pixel
   }))
   expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
 })
+
+test("draws every gallery track on one scale and fits a 320 pixel screen", async ({ page }) => {
+  for (const width of [1000, 320]) {
+    await page.setViewportSize({ height: 900, width })
+    await page.goto(story("primitives-limittrack--gallery"))
+    await expect(page.locator("[data-limit] [data-tone]").first()).toBeVisible()
+    const widths = await page.locator("[data-limit] [data-tone]").evaluateAll((tracks) =>
+      tracks.map((track) => Math.round(track.getBoundingClientRect().width))
+    )
+    expect(widths.length).toBeGreaterThan(1)
+    expect(Math.max(...widths) - Math.min(...widths)).toBeLessThanOrEqual(1)
+    const dimensions = await page.evaluate(() => ({
+      client: document.documentElement.clientWidth,
+      scroll: document.documentElement.scrollWidth
+    }))
+    expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
+  }
+})
+
+test("preserves stale readings and their key in forced colours", async ({ page }) => {
+  await page.goto(story("primitives-limittrack--gallery"))
+  const stale = page.locator("[data-limit=\"Codex weekly\"] [data-part=\"fill\"]")
+  const fresh = page.locator("[data-limit=\"5-hour window\"] [data-part=\"fill\"]")
+  const staleKey = page.locator("[data-mark=\"stale\"]")
+  const unknown = page.locator("[data-limit=\"Codex 5-hour\"] [data-part=\"fill\"]")
+  await expect(stale).toBeVisible()
+  await expect(staleKey).toBeVisible()
+  await expect(stale).not.toHaveCSS("background-image", "none")
+  await expect(fresh).toHaveCSS("background-image", "none")
+  await expect(unknown).toHaveCount(0)
+  const normalWidth = (await stale.boundingBox())?.width
+
+  await page.emulateMedia({ forcedColors: "active" })
+  await expect(stale).toHaveCSS("forced-color-adjust", "none")
+  await expect(staleKey).toHaveCSS("forced-color-adjust", "none")
+  await expect(stale).not.toHaveCSS("background-image", "none")
+  await expect(staleKey).not.toHaveCSS("background-image", "none")
+  await expect(fresh).toHaveCSS("background-image", "none")
+  await expect(unknown).toHaveCount(0)
+  expect((await stale.boundingBox())?.width).toBe(normalWidth)
+})
+
+test("keeps the track scale in forced colours and draws no reading unlike an empty or stale track", async ({ page }) => {
+  await page.goto(story("primitives-limittrack--gallery"))
+  const track = (name: string) => page.locator(`[data-limit="${name}"] [data-tone]`)
+  const unknown = track("Codex 5-hour")
+  const unknownKey = page.locator("[data-mark=\"unknown\"]")
+  const modes: ReadonlyArray<"none" | "active"> = ["none", "active"]
+  for (const forcedColors of modes) {
+    await page.emulateMedia({ forcedColors })
+    // No reading is never the plain empty track a 0% reading would show.
+    await expect(unknown).not.toHaveCSS("background-image", "none")
+    await expect(unknownKey).not.toHaveCSS("background-image", "none")
+    await expect(track("5-hour window")).toHaveCSS("background-image", "none")
+    if (forcedColors === "active") {
+      // The empty part is Canvas on Canvas, so the inset edge is what keeps the scale.
+      for (const name of ["5-hour window", "Weekly, large model", "Codex weekly", "Codex 5-hour"]) {
+        await expect(track(name)).toHaveCSS("outline-width", "1px")
+      }
+      await expect(unknown).toHaveCSS("outline-style", "dashed")
+      await expect(track("5-hour window")).toHaveCSS("outline-style", "solid")
+      await expect(unknownKey).toHaveCSS("outline-style", "dashed")
+      await expect(page.locator("[data-mark=\"stale\"]")).toHaveCSS("outline-style", "solid")
+    } else {
+      await expect(unknown).toHaveCSS("outline-style", "dashed")
+    }
+  }
+})
+
+test("shows a stale 0% reading's age, distinct from a fresh empty track and from no reading", async ({ page }) => {
+  await page.goto(story("primitives-limittrack--gallery"))
+  const track = (name: string) => page.locator(`[data-limit="${name}"] [data-tone]`)
+  const image = (name: string) => track(name).evaluate((element) => getComputedStyle(element).backgroundImage)
+  const modes: ReadonlyArray<"none" | "active"> = ["none", "active"]
+  for (const forcedColors of modes) {
+    await page.emulateMedia({ forcedColors })
+    const staleZero = await image("Codex daily")
+    expect(staleZero).not.toBe("none")
+    expect(staleZero).not.toBe(await image("Codex 5-hour"))
+    expect(await image("5-hour window")).toBe("none")
+  }
+})
+
+test("draws the track edge when the Storybook toolbar turns forced colours on", async ({ page }) => {
+  await page.goto(story("primitives-limittrack--gallery").replace("forcedColors:auto", "forcedColors:active"))
+  const partial = page.locator("[data-limit=\"5-hour window\"] [data-tone]")
+  await expect(partial).toHaveCSS("outline-style", "solid")
+  await expect(partial).toHaveCSS("outline-width", "1px")
+  await expect(page.locator("[data-limit=\"Codex 5-hour\"] [data-tone]")).toHaveCSS("outline-style", "dashed")
+  await expect(page.locator("[data-mark=\"unknown\"]")).toHaveCSS("outline-style", "dashed")
+  // The default story keeps its normal styling: no edge on a known track.
+  await page.goto(story("primitives-limittrack--gallery"))
+  await expect(page.locator("[data-limit=\"5-hour window\"] [data-tone]")).toHaveCSS("outline-style", "none")
+})
+
+test("keeps the near mark two-toned over the empty track and over a full fill, in forced colours too", async ({ page }) => {
+  await page.goto(story("primitives-limittrack--gallery"))
+  const marks = [
+    page.locator("[data-limit=\"5-hour window\"] [data-part=\"near\"]"),
+    page.locator("[data-limit=\"Weekly, large model\"] [data-part=\"near\"]"),
+    page.locator("[data-mark=\"near\"]")
+  ]
+  const tones = (mark: (typeof marks)[number]) =>
+    mark.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { adjust: style.forcedColorAdjust, core: style.backgroundColor, shadow: style.boxShadow }
+    })
+  const modes: ReadonlyArray<"none" | "active"> = ["none", "active"]
+  for (const forcedColors of modes) {
+    await page.emulateMedia({ forcedColors })
+    for (const mark of marks) {
+      await expect(mark).toBeVisible()
+      const { adjust, core, shadow } = await tones(mark)
+      expect(shadow).not.toBe("none")
+      expect(shadow).not.toContain(core)
+      if (forcedColors === "active") expect(adjust).toBe("none")
+    }
+  }
+})

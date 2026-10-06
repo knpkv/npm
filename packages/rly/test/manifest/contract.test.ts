@@ -131,11 +131,13 @@ describe("component manifest contract", () => {
       "src/patterns/AgentProposal.module.css",
       "src/patterns/AgentThread.module.css",
       "src/patterns/CollaboratorGroup.module.css",
+      "src/patterns/DecisionBar.module.css",
       "src/patterns/EntityShell.module.css",
       "src/patterns/EntityTable.module.css",
       "src/patterns/EvidenceStamp.module.css",
       "src/patterns/FreshnessStamp.module.css",
       "src/patterns/GovernedActionReview.module.css",
+      "src/patterns/Hero.module.css",
       "src/patterns/PeopleStrip.module.css",
       "src/patterns/Person.module.css",
       "src/patterns/Region.module.css",
@@ -152,10 +154,12 @@ describe("component manifest contract", () => {
       "src/patterns/WorksetCard.module.css",
       "src/primitives/Avatar.module.css",
       "src/primitives/Button.module.css",
+      "src/primitives/ChartLegend.module.css",
       "src/primitives/Dialog.module.css",
       "src/primitives/Divider.module.css",
       "src/primitives/Field.module.css",
       "src/primitives/IconButton.module.css",
+      "src/primitives/LimitTrack.module.css",
       "src/primitives/Notice.module.css",
       "src/primitives/Select.module.css",
       "src/primitives/Sheet.module.css",
@@ -166,7 +170,8 @@ describe("component manifest contract", () => {
       "src/primitives/Tabs.module.css",
       "src/primitives/Text.module.css",
       "src/primitives/ThemeSelect.module.css",
-      "src/primitives/ToggleGroup.module.css"
+      "src/primitives/ToggleGroup.module.css",
+      "src/primitives/TrackKey.module.css"
     ])
   })
 
@@ -184,11 +189,13 @@ describe("component manifest contract", () => {
       "src/patterns/AgentProposal.module.css",
       "src/patterns/AgentThread.module.css",
       "src/patterns/CollaboratorGroup.module.css",
+      "src/patterns/DecisionBar.module.css",
       "src/patterns/EntityShell.module.css",
       "src/patterns/EntityTable.module.css",
       "src/patterns/EvidenceStamp.module.css",
       "src/patterns/FreshnessStamp.module.css",
       "src/patterns/GovernedActionReview.module.css",
+      "src/patterns/Hero.module.css",
       "src/patterns/PeopleStrip.module.css",
       "src/patterns/Person.module.css",
       "src/patterns/Region.module.css",
@@ -205,10 +212,12 @@ describe("component manifest contract", () => {
       "src/patterns/WorksetCard.module.css",
       "src/primitives/Avatar.module.css",
       "src/primitives/Button.module.css",
+      "src/primitives/ChartLegend.module.css",
       "src/primitives/Dialog.module.css",
       "src/primitives/Divider.module.css",
       "src/primitives/Field.module.css",
       "src/primitives/IconButton.module.css",
+      "src/primitives/LimitTrack.module.css",
       "src/primitives/Notice.module.css",
       "src/primitives/Select.module.css",
       "src/primitives/Sheet.module.css",
@@ -219,7 +228,8 @@ describe("component manifest contract", () => {
       "src/primitives/Tabs.module.css",
       "src/primitives/Text.module.css",
       "src/primitives/ThemeSelect.module.css",
-      "src/primitives/ToggleGroup.module.css"
+      "src/primitives/ToggleGroup.module.css",
+      "src/primitives/TrackKey.module.css"
     ])
   })
 
