@@ -731,39 +731,43 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
     )
     // An existing lane-operation ledger is not backfilled later, so record each
     // migrated claim's operation here; the claim's readback requires it.
-    const operations = tables.includes("work_lane_operations")
-      ? planLegacyLaneOperations(
-        migratedClaims.map(({ lane }) => lane),
-        new Map(
-          migratedClaims.flatMap(({ lane }) => {
+    // Without a ledger, schema creation below creates it and backfills every
+    // claim, so the same bound applies to an empty ledger.
+    const hasLedger = tables.includes("work_lane_operations")
+    const operations = planLegacyLaneOperations(
+      migratedClaims.map(({ lane }) => lane),
+      new Map(
+        hasLedger
+          ? migratedClaims.flatMap(({ lane }) => {
             const row = database.prepare(
               `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId, phase, revision, record
                FROM work_lane_operations WHERE operation_id = ?`
             ).get(lane.operationId)
             return row === undefined ? [] : [[lane.operationId, Schema.decodeUnknownSync(LaneOperationLedgerRow)(row)]]
           })
-        ),
-        Schema.decodeUnknownSync(LaneOperationTotalsRow)(
+          : []
+      ),
+      hasLedger
+        ? Schema.decodeUnknownSync(LaneOperationTotalsRow)(
           database.prepare(
             `SELECT COUNT(*) AS count, COALESCE(SUM(
                length(CAST(operation_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
              FROM work_lane_operations`
           ).get()
-        ),
-        { bytes: workLaneOperationMaxBytes, records: workLaneOperationMaxRecords }
-      )
-      : undefined
-    if (operations?._tag === "collision") {
+        )
+        : { bytes: 0, count: 0 },
+      { bytes: workLaneOperationMaxBytes, records: workLaneOperationMaxRecords }
+    )
+    if (operations._tag === "collision") {
       throw new WorkStoreError({ cause: operations, operation: "open.migrate.lane-operation-collision" })
     }
-    if (operations?._tag === "capacity") {
+    if (operations._tag === "capacity") {
       throw new WorkStoreError({ cause: operations, operation: "open.migrate.lane-operation-capacity" })
     }
     for (const { lane } of migratedClaims) {
       update.run(lane.goalId, lane.operationId, lane.phase, JSON.stringify(lane), lane.laneId)
     }
-    // Without a ledger, schema creation below creates it and backfills every claim.
-    if (operations !== undefined && operations.inserts.length > 0) {
+    if (hasLedger && operations.inserts.length > 0) {
       const recordOperation = database.prepare(
         `INSERT INTO work_lane_operations
            (operation_id, lane_id, goal_id, phase, revision, record) VALUES (?, ?, ?, ?, ?, ?)`

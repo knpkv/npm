@@ -2636,6 +2636,52 @@ database.close()`,
       expect(operations).toEqual([{ operationId: "goal:legacy", revision: 1 }])
     }).pipe(provideNodeServices))
 
+  it.effect("rejects a ledger-less legacy file whose claims would overflow the new ledger, leaving it unchanged", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-no-ledger-capacity-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const legacy = fixtureDatabase(path)
+      legacy.exec(
+        "CREATE TABLE work_lane_claims (lane_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record TEXT NOT NULL)"
+      )
+      const insert = legacy.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?)")
+      legacy.exec("BEGIN")
+      for (let index = 0; index <= 16_384; index += 1) {
+        const laneId = `goal:legacy-${index}`
+        insert.run(
+          laneId,
+          1,
+          JSON.stringify({
+            branch: "feat/legacy-work",
+            expectedRevision: 0,
+            head: "0123456789012345678901234567890123456789",
+            laneId,
+            owner: { id: "owner:legacy", name: "Legacy owner" },
+            parent: null,
+            phase: "implementation",
+            revision: 1,
+            worktree: `/worktrees/legacy-${index}`
+          })
+        )
+      }
+      legacy.exec("COMMIT")
+      legacy.close()
+      expect(yield* safelyOpenResult(path)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.lane-operation-capacity" },
+          operation: "open.database"
+        }
+      })
+      const reopened = fixtureDatabase(path)
+      const tables = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
+        reopened.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all()
+      ).map(({ name }) => name)
+      reopened.close()
+      expect(tables).toEqual(["work_lane_claims"])
+    }).pipe(provideNodeServices))
+
   it.effect("transactionally migrates the previous lane and handoff schema", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-authority-"))

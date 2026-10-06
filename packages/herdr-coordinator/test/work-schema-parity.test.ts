@@ -88,7 +88,7 @@ const SqlRow = Schema.Struct({ name: Schema.String, sql: Schema.NullOr(Schema.St
 const TriggerRow = Schema.Struct({ name: Schema.String, tbl_name: Schema.String, sql: Schema.String })
 const VersionRow = Schema.Struct({ user_version: Schema.Number })
 /** A stored cell; Work's tables hold no blobs or 64-bit integers. */
-const Cell = Schema.Union([Schema.String, Schema.Number, Schema.Null])
+const Cell = Schema.Union([Schema.String, Schema.Number, Schema.Null, Schema.Uint8Array])
 const TableRow = Schema.Record(Schema.String, Cell)
 
 const rows = <A, I>(schema: Schema.Codec<A, I>, database: DatabaseSync, query: string): ReadonlyArray<A> =>
@@ -164,7 +164,9 @@ const parseJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 /** A stored cell with JSON text parsed, so key order inside a record does not matter. */
 const comparable = (cell: typeof Cell.Type): Schema.Json =>
-  Predicate.isString(cell) && /^[[{]/.test(cell)
+  Predicate.isUint8Array(cell)
+    ? { blob: Buffer.from(cell).toString("hex") }
+    : Predicate.isString(cell) && /^[[{]/.test(cell)
     ? Option.getOrElse(parseJson(cell), () => cell)
     : cell
 
@@ -579,6 +581,17 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
           database.exec("UPDATE work_lane_operations SET revision = 'two' WHERE operation_id = 'goal:legacy'")
         })
         yield* expectRejectedUnchanged(root, mistyped, {
+          bridge: "sql-work.initialize.lane-operation-collision",
+          store: "open.migrate.lane-operation-collision"
+        })
+        const blob = join(root, "blob.sqlite")
+        copyFileSync(replica, blob)
+        writeFixture(blob, (database) => {
+          database.exec(
+            "UPDATE work_lane_operations SET record = CAST(record AS BLOB) WHERE operation_id = 'goal:legacy'"
+          )
+        })
+        yield* expectRejectedUnchanged(root, blob, {
           bridge: "sql-work.initialize.lane-operation-collision",
           store: "open.migrate.lane-operation-collision"
         })

@@ -44,8 +44,9 @@ export const resolveLegacyLaneClaim = (
 
 /** One `work_lane_operations` row, as both drivers read it. */
 // SQLite keeps whatever type a row was written with, so every column may be
-// text or a number; a row of the wrong shape is a collision, not a decode error.
-const LedgerValue = Schema.Union([Schema.String, Schema.Number])
+// text, a number or a blob; a row of the wrong shape is a collision, not a
+// decode error.
+const LedgerValue = Schema.Union([Schema.String, Schema.Number, Schema.Uint8Array])
 export const LaneOperationLedgerRow = Schema.Struct({
   operationId: Schema.String,
   laneId: LedgerValue,
