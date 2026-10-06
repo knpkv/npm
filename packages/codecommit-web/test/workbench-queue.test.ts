@@ -7,7 +7,8 @@ import {
   globMatches,
   poolEntryMatches,
   ruleProgress,
-  workbenchQueue
+  workbenchQueue,
+  yourReviewCount
 } from "../src/client/components/workbench-queue.js"
 
 const NOW = new Date("2026-10-05T15:30:00Z")
@@ -396,5 +397,25 @@ describe("formatSpan", () => {
     expect(formatSpan(2 * DAY + 6 * HOUR + 59 * 60_000)).toBe("2d 6h")
     expect(formatSpan(5 * HOUR)).toBe("5h")
     expect(formatSpan(40 * 60_000 + 59_000)).toBe("40m")
+  })
+})
+
+describe("yourReviewCount", () => {
+  it("counts exactly what the rail lists under Needs your review, so the header badge agrees", () => {
+    const prs = [
+      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], id: "named" }),
+      make({ approvalRules: [rule("Any one", 1, [], false)], id: "open-rule" }),
+      make({
+        approvalRules: [rule("Reviewers", 1, ["*"], false, ["arn:aws:sts::111122223333:assumed-role/Reviewers/*"])],
+        id: "role-pool"
+      }),
+      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], approvedBy: ["andrey"], id: "approved" }),
+      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], id: "merged", status: "MERGED" }),
+      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], author: "andrey", id: "own" })
+    ]
+    const queue = workbenchQueue(prs, "andrey", NOW)
+    expect(queue.summary).toMatchObject({ _tag: "Waiting", count: 2 })
+    expect(yourReviewCount(prs, "andrey")).toBe(2)
+    expect(yourReviewCount(prs, undefined)).toBe(0)
   })
 })

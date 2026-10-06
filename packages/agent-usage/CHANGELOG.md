@@ -1,5 +1,17 @@
 # @knpkv/agent-usage
 
+## 0.5.0
+
+### Minor Changes
+
+- [#484](https://github.com/knpkv/npm/pull/484) [`f06778a`](https://github.com/knpkv/npm/commit/f06778abd2e065eda14c0010a2916a3d1b71cb16) Thanks [@konopkov](https://github.com/konopkov)! - The server answers one Booking's sessions in a range at `/api/sessions`: each session's first and last request, requests, tokens and API-equivalent cost on that Booking, most cost first, capped at 200 rows with a count of the rest, over a range of at most 92 days. Same owner-session and origin checks as every read.
+
+### Patch Changes
+
+- [#489](https://github.com/knpkv/npm/pull/489) [`f76a90c`](https://github.com/knpkv/npm/commit/f76a90ccdf7f62a23301b5027f688bcb1f65bc64) Thanks [@konopkov](https://github.com/konopkov)! - Keep usage chart colors aligned with the selected theme, including scoped Storybook previews.
+- Updated dependencies [[`487f2ba`](https://github.com/knpkv/npm/commit/487f2ba4fdb585f0cd0b2ab96fd4eeedce9da10d)]:
+  - @knpkv/rly@0.8.0
+
 ## 0.4.1
 
 ### Patch Changes
