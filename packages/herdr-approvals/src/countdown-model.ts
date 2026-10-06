@@ -105,6 +105,23 @@ export const clockText = (expiresAt: number | null, now: number): string | null 
   return left <= 0 ? "expiring" : countdownText(left)
 }
 
+/**
+ * How much of a request's approval window is used, for its row's LimitTrack: `value` in percent of
+ * the window, with the near mark where five minutes remain. `null` without an expiry or a window.
+ */
+export const windowUsed = (
+  createdAt: number,
+  expiresAt: number | null,
+  now: number
+): { readonly value: number; readonly near: number } | null => {
+  if (expiresAt === null || expiresAt <= createdAt) return null
+  const window = expiresAt - createdAt
+  return {
+    near: Math.min(100, Math.max(0, 100 - (SOON_MS / window) * 100)),
+    value: Math.min(100, Math.max(0, ((now - createdAt) / window) * 100))
+  }
+}
+
 /** Tick every second while any clock shows seconds, otherwise every 15 seconds. */
 export const tickInterval = (expiries: ReadonlyArray<number | null>, now: number): number =>
   expiries.some((expiresAt) => expiresAt !== null && expiresAt - now < SOON_MS + 1000) ? 1000 : 15_000

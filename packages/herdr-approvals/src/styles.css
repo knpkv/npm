@@ -955,6 +955,7 @@
     grid-template-areas:
       "meta clock"
       "title clock"
+      "track track"
       "caption caption";
     grid-template-columns: minmax(0, 1fr) auto;
     inline-size: 100%;
@@ -1007,6 +1008,11 @@
   .countdown-row-clock[data-urgency="imminent"],
   .countdown-row-clock[data-urgency="due"] {
     color: var(--rly-color-blocked-ink);
+  }
+
+  .countdown-row-track {
+    grid-area: track;
+    margin-block: var(--rly-space-6) var(--rly-space-2);
   }
 
   .countdown-row-caption {

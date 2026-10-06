@@ -8,7 +8,8 @@ import {
   factsOf,
   pendingItems,
   tickInterval,
-  urgencyOf
+  urgencyOf,
+  windowUsed
 } from "../src/countdown-model.js"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
 
@@ -102,6 +103,16 @@ describe("countdown model", () => {
       ["late", "ALPHA"],
       ["open", "ALPHA"]
     ])
+  })
+
+  it("measures the used share of an approval window, near mark at five minutes left", () => {
+    const used = windowUsed(0, 15 * 60_000, 5 * 60_000)
+    expect(used?.near).toBeCloseTo(66.667, 2)
+    expect(used?.value).toBeCloseTo(33.333, 2)
+    expect(windowUsed(0, 15 * 60_000, 20 * 60_000)?.value).toBe(100)
+    expect(windowUsed(0, 3 * 60_000, 0)?.near).toBe(0)
+    expect(windowUsed(0, null, 0)).toBeNull()
+    expect(windowUsed(10, 10, 0)).toBeNull()
   })
 
   it("ticks every second only while a clock shows seconds", () => {

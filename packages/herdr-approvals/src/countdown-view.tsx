@@ -11,7 +11,7 @@
  * @module
  */
 import { DecisionBar, Hero, HeroWord, type RlyDecisionBarState, Region } from "@knpkv/rly/patterns"
-import { Button, Notice } from "@knpkv/rly/primitives"
+import { Button, LimitTrack, Notice } from "@knpkv/rly/primitives"
 import { Predicate } from "effect"
 import { type KeyboardEvent, type ReactElement, type ReactNode, useEffect, useRef, useState } from "react"
 import { jobTitle } from "./activity-history.js"
@@ -27,7 +27,8 @@ import {
   type PendingItem,
   pendingItems,
   tickInterval,
-  urgencyOf
+  urgencyOf,
+  windowUsed
 } from "./countdown-model.js"
 import type { DashboardSnapshot, PendingApprovalFailure } from "./dashboard-model.js"
 import { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
@@ -418,6 +419,7 @@ export const ApprovalsCountdown = ({
                 if (row === undefined) return null
                 const key = itemKey(row)
                 const clock = clockText(row.expiresAt, now)
+                const used = windowUsed(row.createdAt, row.expiresAt, now)
                 return (
                   <li key={key}>
                     <button
@@ -438,6 +440,10 @@ export const ApprovalsCountdown = ({
                         >
                           {clock}
                         </span>
+                      )}
+                      {used === null ? null : (
+                        // Decorative: the clock beside it says the same in words.
+                        <LimitTrack className="countdown-row-track" near={used.near} size="slim" value={used.value} />
                       )}
                       <small className="countdown-row-caption">
                         from {row.actor}
