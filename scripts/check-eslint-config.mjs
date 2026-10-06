@@ -3665,6 +3665,17 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    import { WorkStore } from "@knpkv/herdr-work"
+    import { Effect } from "effect"
+    const openAndClose = WorkStore.open(path).pipe(Effect.map((store) => store.close()))
+  `,
+  expected: 1,
+  filePath: "packages/herdr-coordinator/test/eslint-work-store-cleanup-unyielded-invalid.ts",
+  ruleId: "local-rules/require-immediate-work-store-cleanup"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import { Effect } from "effect"
     const service: OrchestratorService = {
       queue: (id) => appendTransition(id, "queued"),
