@@ -118,7 +118,8 @@ test("walks the rail with the arrow keys and opens a row with Enter", async ({ p
 
 test("shows the rail from an 800px window and keeps a 768px tablet on the phone layout", async ({ page }) => {
   await serve(page)
-  for (const [width, visible] of [[768, false], [799, false], [800, true]] as const) {
+  const cases: ReadonlyArray<readonly [width: number, visible: boolean]> = [[768, false], [799, false], [800, true]]
+  for (const [width, visible] of cases) {
     await page.setViewportSize({ height: 900, width })
     await page.goto(detail("12"))
     await expect(page.getByRole("heading", { level: 1, name: "Bound patch reads" })).toBeVisible()

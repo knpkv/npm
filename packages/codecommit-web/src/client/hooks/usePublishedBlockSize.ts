@@ -13,7 +13,7 @@ export function usePublishedBlockSize<T extends HTMLElement = HTMLElement>(prope
       observerRef.current?.disconnect()
       observerRef.current = null
       const root = document.documentElement
-      if (!node) {
+      if (node === null) {
         root.style.removeProperty(property)
         return
       }
