@@ -1,0 +1,108 @@
+@layer rly.components {
+  .root {
+    --rly-limit-track-ink: var(--rly-color-text-2);
+    background: var(--rly-color-surface-3);
+    border-radius: var(--rly-radius-tag);
+    display: block;
+    inline-size: 100%;
+    min-inline-size: var(--rly-space-48);
+    overflow: hidden;
+    position: relative;
+  }
+  .defaultSize {
+    block-size: var(--rly-space-12);
+  }
+  .slim {
+    block-size: var(--rly-space-6);
+  }
+  .fill {
+    background: var(--rly-limit-track-ink, var(--rly-color-text-2));
+    inset-block: 0;
+    inset-inline-start: 0;
+    position: absolute;
+  }
+  .root[data-tone="near"] {
+    --rly-limit-track-ink: var(--rly-color-held-ink);
+  }
+  .root[data-tone="full"] {
+    --rly-limit-track-ink: var(--rly-color-blocked-ink);
+  }
+  /*
+   * An old reading's empty track carries a faint 135° hatch, so even a 0% reading shows its age.
+   * It differs from no reading by angle (45°) and by the solid edge.
+   */
+  .root[data-stale="true"] {
+    background: repeating-linear-gradient(135deg, var(--rly-color-border-2) 0 1px, transparent 1px 5px)
+      var(--rly-color-surface-3);
+  }
+  /* Old readings are hatched in the same ink, so the tone survives and the age is still visible. */
+  .root[data-stale="true"] .fill {
+    background: repeating-linear-gradient(
+      135deg,
+      var(--rly-limit-track-ink, var(--rly-color-text-2)) 0 3px,
+      transparent 3px 6px
+    );
+  }
+  /*
+   * No reading is not an empty limit: a faint full-width hatch inside a dashed edge, so it never reads
+   * as 0%, and stays distinct from a stale reading, which hatches only its fill in the tone's ink.
+   */
+  .root[data-tone="unknown"] {
+    background: repeating-linear-gradient(45deg, var(--rly-color-border-2) 0 1px, transparent 1px 5px)
+      var(--rly-color-surface-3);
+    outline: 1px dashed var(--rly-color-border-2);
+    outline-offset: -1px;
+  }
+  .projection {
+    border-block: 2px dotted var(--rly-color-held-ink);
+    box-sizing: border-box;
+    inset-block: 25%;
+    position: absolute;
+  }
+  /* A dark core on a light halo, so the mark reads over the empty track and over every fill. */
+  .near {
+    background: var(--rly-color-text-1);
+    box-shadow:
+      -1px 0 0 var(--rly-color-surface-1),
+      1px 0 0 var(--rly-color-surface-1);
+    inline-size: 1px;
+    inset-block: 0;
+    position: absolute;
+  }
+  /* The Storybook toolbar's forced-colours mode maps the tokens to system colours too; draw the same edge. */
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[data-tone="unknown"] {
+    outline-style: dashed;
+  }
+  @media (forced-colors: active) {
+    /*
+     * The system palette paints the empty track as Canvas, so an inset edge keeps the 0–100% scale
+     * visible without changing the track's geometry.
+     */
+    .root {
+      outline: 1px solid CanvasText;
+      outline-offset: -1px;
+    }
+    .root[data-stale="true"] {
+      background: repeating-linear-gradient(135deg, CanvasText 0 1px, Canvas 1px 5px);
+      forced-color-adjust: none;
+    }
+    .root[data-tone="unknown"] {
+      background: repeating-linear-gradient(45deg, CanvasText 0 1px, Canvas 1px 5px);
+      forced-color-adjust: none;
+      outline-style: dashed;
+    }
+    /* Keep the halo: forced colours drop box-shadow, and the tokens already map to system colours. */
+    .near {
+      forced-color-adjust: none;
+    }
+    /* Preserve the age cue with the user's palette when the browser removes background images. */
+    .root[data-stale="true"] .fill {
+      background: repeating-linear-gradient(135deg, CanvasText 0 3px, Canvas 3px 6px);
+      forced-color-adjust: none;
+    }
+  }
+}

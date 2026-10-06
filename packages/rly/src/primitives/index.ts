@@ -5,6 +5,8 @@ export { Avatar, RLY_AVATAR_DEFAULT_VARIANTS, RLY_AVATAR_VARIANTS } from "./Avat
 export type { AvatarProps, RlyAvatarForm, RlyAvatarSize } from "./Avatar.js"
 export { Button, RLY_BUTTON_DEFAULT_VARIANTS, RLY_BUTTON_VARIANTS } from "./Button.js"
 export type { ButtonProps, RlyButtonSize, RlyButtonVariant } from "./Button.js"
+export { ChartLegend, RLY_SERIES, rlySeriesColor } from "./ChartLegend.js"
+export type { ChartLegendProps, RlyChartLegendItem, RlySeries } from "./ChartLegend.js"
 export { Dialog, RLY_DIALOG_DEFAULT_VARIANTS, RLY_DIALOG_VARIANTS } from "./Dialog.js"
 export type {
   DialogCloseProps,
@@ -19,6 +21,8 @@ export { Field, RLY_FIELD_DEFAULT_VARIANTS, RLY_FIELD_VARIANTS } from "./Field.j
 export type { FieldControlProps, FieldProps, RlyFieldSize } from "./Field.js"
 export { IconButton, RLY_ICON_BUTTON_DEFAULT_VARIANTS, RLY_ICON_BUTTON_VARIANTS } from "./IconButton.js"
 export type { IconButtonProps, RlyIconButtonSize, RlyIconButtonVariant } from "./IconButton.js"
+export { LimitTrack, limitTrackTone, RLY_LIMIT_TRACK_DEFAULT_VARIANTS, RLY_LIMIT_TRACK_VARIANTS } from "./LimitTrack.js"
+export type { LimitTrackProps, RlyLimitTrackSize, RlyLimitTrackTone } from "./LimitTrack.js"
 export { Notice, RLY_NOTICE_DEFAULT_VARIANTS, RLY_NOTICE_VARIANTS } from "./Notice.js"
 export type { NoticeProps, RlyNoticeAnnouncement, RlyNoticeTone } from "./Notice.js"
 export { RLY_SELECT_DEFAULT_VARIANTS, RLY_SELECT_VARIANTS, Select } from "./Select.js"
@@ -49,3 +53,5 @@ export { ThemeSelect } from "./ThemeSelect.js"
 export type { RlyThemeSelectLabelVisibility, ThemeSelectProps } from "./ThemeSelect.js"
 export { RLY_TOGGLE_GROUP_DEFAULT_VARIANTS, RLY_TOGGLE_GROUP_VARIANTS, ToggleGroup } from "./ToggleGroup.js"
 export type { RlyToggleGroupSize, RlyToggleItem, ToggleGroupProps } from "./ToggleGroup.js"
+export { RLY_TRACK_KEY_MARKS, TrackKey } from "./TrackKey.js"
+export type { RlyTrackKeyItem, RlyTrackKeyMark, TrackKeyProps } from "./TrackKey.js"

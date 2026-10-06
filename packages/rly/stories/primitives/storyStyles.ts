@@ -40,3 +40,11 @@ export const swatchStyle: CSSProperties = {
   minWidth: 0,
   padding: "var(--rly-space-16)"
 }
+
+/**
+ * Whether a story renders in forced colours, natively or through the catalog's forced-colours global.
+ * Play functions that compare colours use it: in forced colours every series and tone is one system colour.
+ */
+export const forcedColoursActive = (element: Element): boolean =>
+  window.matchMedia("(forced-colors: active)").matches ||
+  element.closest("[data-rly-forced-colors=\"active\"]") !== null
