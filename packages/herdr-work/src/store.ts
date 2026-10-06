@@ -74,6 +74,11 @@ import {
   planLegacyLaneOperations,
   resolveLegacyLaneClaim
 } from "./internal/legacy-lane-claim.js"
+import {
+  enforcesOneHandoffPerSession,
+  SessionIndexDefinition,
+  sessionIndexDefinitionQuery
+} from "./internal/session-index.js"
 import { terminalCandidates, terminalCheckpoint } from "./internal/terminal-reconcile.js"
 import {
   isTerminalWorkState,
@@ -270,6 +275,33 @@ const storeError = (operation: string) => (cause: unknown) => new WorkStoreError
 
 const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
   new WorkStoreError({ cause: error.cause, operation: error.operation })
+
+/**
+ * Files written before the session index was unique carry a plain index under
+ * the same name, which `CREATE UNIQUE INDEX IF NOT EXISTS` leaves in place.
+ * Replace it, failing closed when two handoffs already share a session. Runs
+ * inside `WorkStore.open`'s schema transaction, so a failure leaves the plain
+ * index in place.
+ */
+const requireUniqueSessionIndex = (database: DatabaseSync): void => {
+  const sessionIndex = Schema.decodeUnknownSync(Schema.Array(SessionIndexDefinition))(
+    database.prepare(sessionIndexDefinitionQuery).all()
+  )[0]
+  if (sessionIndex === undefined || enforcesOneHandoffPerSession(sessionIndex)) return
+  // NULL sessions never collide under a UNIQUE index, so they are not duplicates.
+  const duplicateGroups = `SELECT session_id AS sessionId, COUNT(*) AS rows, group_concat(handoff_id) AS handoffIds
+    FROM work_decision_handoffs WHERE session_id IS NOT NULL
+    GROUP BY session_id HAVING COUNT(*) > 1`
+  const duplicates = database.prepare(`${duplicateGroups} LIMIT 10`).all()
+  if (duplicates.length > 0) {
+    const total = database.prepare(`SELECT COUNT(*) AS sessions FROM (${duplicateGroups})`).get()
+    throw new WorkStoreError({ cause: { duplicates, total }, operation: "open.migrate.session-index" })
+  }
+  database.exec(`
+    DROP INDEX work_decision_handoffs_session;
+    CREATE UNIQUE INDEX work_decision_handoffs_session ON work_decision_handoffs (session_id);
+  `)
+}
 
 /**
  * Upgrades pre-session Work tables in place. Runs inside `WorkStore.open`'s
@@ -2230,7 +2262,7 @@ export class WorkStore implements WorkStoreService {
         END;
         CREATE INDEX IF NOT EXISTS work_decision_handoffs_lane_time
           ON work_decision_handoffs (lane_id, occurred_at, handoff_id);
-        CREATE INDEX IF NOT EXISTS work_decision_handoffs_session
+        CREATE UNIQUE INDEX IF NOT EXISTS work_decision_handoffs_session
           ON work_decision_handoffs (session_id);
         CREATE TABLE IF NOT EXISTS work_observed_facts (
           subject TEXT PRIMARY KEY,
@@ -2255,6 +2287,7 @@ export class WorkStore implements WorkStoreService {
         CREATE INDEX IF NOT EXISTS work_observed_failures_age
           ON work_observed_failures (last_at, subject);
       `)
+          requireUniqueSessionIndex(database)
           const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
             database.prepare("PRAGMA table_info(work_goal_events)").all()
           )
