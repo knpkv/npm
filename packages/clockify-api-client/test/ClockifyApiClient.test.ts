@@ -196,6 +196,25 @@ it.layer(suite)("ClockifyApiClient", (it) => {
       expect(entries[0]?.tagIds).toBeNull()
     }))
 
+  it.effect("decodes a time-entries list whose entries have null rates", () =>
+    Effect.gen(function*() {
+      // Clockify returns costRate/hourlyRate as explicit null when no rate applies.
+      reply(200, [{
+        id: "entry-1",
+        description: "[ENG-6169] review transaction mapper",
+        billable: true,
+        userId: "user-1",
+        workspaceId: "workspace-1",
+        costRate: null,
+        hourlyRate: null,
+        timeInterval: { start: "2026-07-20T09:00:00Z", end: "2026-07-20T11:00:00Z", duration: "PT2H" }
+      }])
+      const client = yield* ClockifyApiClient
+      const entries = yield* client.getTimeEntries("workspace-1", "user-1")
+      expect(entries[0]?.costRate).toBeNull()
+      expect(entries[0]?.hourlyRate).toBeNull()
+    }))
+
   it.effect("fails when a successful response violates the generated schema", () =>
     Effect.gen(function*() {
       reply(200, { id: "user-1" })

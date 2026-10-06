@@ -43,7 +43,7 @@ import { localDay, nextLocalMidnight } from "../utils/time.js"
  * Which evidence placed a session on an Issue Key. `none` means no signal did — the session is
  * an Unattributed Session and is reported with its hours rather than guessed at.
  */
-export type AttributionSignal = "branch" | "path" | "standing" | "agent" | "none"
+export type AttributionSignal = "branch" | "path" | "standing" | "agent" | "split" | "none"
 
 /**
  * Attribution Signals in precedence order — the first to yield an Issue Key wins. Also the
@@ -55,6 +55,7 @@ export const ATTRIBUTION_PRECEDENCE: ReadonlyArray<AttributionSignal> = [
   "path",
   "standing",
   "agent",
+  "split",
   "none"
 ]
 
@@ -72,6 +73,8 @@ export interface AttributableSession {
   readonly gitBranch: string | null
   /** Issue Keys mined from the transcript — the closed choice set for a Coding Agent. */
   readonly candidateKeys: ReadonlyArray<string>
+  /** Counts from the full in-scope transcript, before its bounded agent digest is constructed. */
+  readonly mentionCounts?: ReadonlyMap<string, number>
 }
 
 /** How one Agent Session was placed (or not placed) on an Issue Key. */
@@ -86,6 +89,8 @@ export interface SessionAttribution {
    * Such credit is reported so the hours stay visible, but is never offered for confirmation.
    */
   readonly belowConfidenceFloor: boolean
+  /** Sprint candidates sharing this session, weighted by transcript mentions. Absent for single-ticket attribution. */
+  readonly targets?: ReadonlyArray<{ readonly ticketKey: string; readonly weight: number }>
 }
 
 /**
@@ -101,6 +106,41 @@ export interface SessionAttribution {
 const TICKET_KEY = /(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,9}-\d{1,6}(?![A-Za-z0-9])/g
 
 const matchTicketKeys = (text: string): ReadonlyArray<string> => [...text.matchAll(TICKET_KEY)].map((m) => m[0])
+
+/** Count transcript mentions without deduplicating repeated ticket keys. */
+export const ticketMentionCounts = (text: string): ReadonlyMap<string, number> => {
+  const counts = new Map<string, number>()
+  for (const key of matchTicketKeys(text)) counts.set(key, (counts.get(key) ?? 0) + 1)
+  return counts
+}
+
+/** Split only unplaced or low-confidence sessions onto evidenced tickets in my known open sprint. */
+export const splitSessionAttribution = (
+  session: AttributableSession,
+  attribution: SessionAttribution,
+  sprint: ReadonlySet<string> | undefined,
+  ignored: ReadonlySet<string>
+): SessionAttribution => {
+  const counts = session.mentionCounts
+  if (
+    sprint === undefined || counts === undefined ||
+    (attribution.ticketKey !== null && !attribution.belowConfidenceFloor)
+  ) return attribution
+  const targets = [...new Set(session.candidateKeys)]
+    .filter((key) => sprint.has(key) && !ignored.has(key))
+    .flatMap((ticketKey) => {
+      const weight = counts.get(ticketKey)
+      return weight === undefined ? [] : [{ ticketKey, weight }]
+    })
+  return targets.length === 0 ? attribution : {
+    sessionId: attribution.sessionId,
+    ticketKey: null,
+    signal: "split",
+    confidence: null,
+    belowConfidenceFloor: false,
+    targets
+  }
+}
 
 /**
  * True when a string is an Issue Key and nothing else.
@@ -246,14 +286,23 @@ export interface DeterministicAttribution {
  */
 export const deterministicAttribution = (
   session: AttributableSession,
-  options: { readonly standingMap: Readonly<Record<string, string>> }
+  options: {
+    readonly standingMap: Readonly<Record<string, string>>
+    readonly ignoredTickets?: ReadonlySet<string> | undefined
+  }
 ): DeterministicAttribution | null => {
   const fromBranch = ticketKeyFromBranch(session.gitBranch)
-  if (fromBranch !== null) return { ticketKey: fromBranch, signal: "branch" }
+  if (fromBranch !== null) {
+    return options.ignoredTickets?.has(fromBranch) === true ? null : { ticketKey: fromBranch, signal: "branch" }
+  }
   const fromPath = ticketKeyFromPath(session.cwd)
-  if (fromPath !== null) return { ticketKey: fromPath, signal: "path" }
+  if (fromPath !== null) {
+    return options.ignoredTickets?.has(fromPath) === true ? null : { ticketKey: fromPath, signal: "path" }
+  }
   const standing = standingAttribution(session.cwd, options.standingMap)
-  if (standing !== null) return { ticketKey: standing, signal: "standing" }
+  if (standing !== null) {
+    return options.ignoredTickets?.has(standing) === true ? null : { ticketKey: standing, signal: "standing" }
+  }
   return null
 }
 
@@ -275,9 +324,10 @@ export const attributeSession = (
     /** Only consulted when no deterministic signal placed the session. */
     readonly agentChoice?: AgentChoice | null | undefined
     readonly confidenceFloor: number
+    readonly ignoredTickets?: ReadonlySet<string> | undefined
   }
 ): SessionAttribution => {
-  const deterministic = deterministicAttribution(session, { standingMap: options.standingMap })
+  const deterministic = deterministicAttribution(session, options)
   if (deterministic !== null) {
     return {
       sessionId: session.sessionId,
@@ -298,7 +348,10 @@ export const attributeSession = (
   }
   // The choice set is closed over the transcript's own text: a key the transcript never
   // mentioned cannot reach a worklog, however confidently it was named.
-  if (choice === null || choice === undefined || !session.candidateKeys.includes(choice.ticketKey)) {
+  if (
+    choice === null || choice === undefined || options.ignoredTickets?.has(choice.ticketKey) === true ||
+    !session.candidateKeys.includes(choice.ticketKey)
+  ) {
     return unattributed
   }
 
@@ -484,8 +537,8 @@ export const activeWindows = (
  * of active buckets changes, with the buckets active in that slice.
  */
 const overlapSlices = (
-  spansByBucket: ReadonlyMap<string, ReadonlyArray<CreditedSpan>>
-): ReadonlyArray<{ readonly startMs: number; readonly endMs: number; readonly bucketIds: ReadonlyArray<string> }> => {
+  spansByBucket: ReadonlyMap<string, ReadonlyArray<CreditedSpan & { readonly weight?: number }>>
+): ReadonlyArray<OwnedRun> => {
   const boundaries = new Set<number>()
   for (const spans of spansByBucket.values()) {
     for (const span of spans) {
@@ -494,14 +547,18 @@ const overlapSlices = (
     }
   }
   const ordered = [...boundaries].sort((a, b) => a - b)
-  const slices: Array<{ startMs: number; endMs: number; bucketIds: ReadonlyArray<string> }> = []
+  const slices: Array<OwnedRun> = []
   for (let i = 0; i < ordered.length - 1; i++) {
     const startMs = ordered[i]!
     const endMs = ordered[i + 1]!
-    const bucketIds = [...spansByBucket.entries()]
-      .filter(([, spans]) => spans.some((span) => span.startMs <= startMs && span.endMs >= endMs))
-      .map(([bucketId]) => bucketId)
-    if (bucketIds.length > 0) slices.push({ startMs, endMs, bucketIds })
+    const weights = new Map([...spansByBucket].flatMap(([id, spans]) => {
+      const active = spans.filter((span) => span.startMs <= startMs && span.endMs >= endMs)
+      // Duplicate sessions on one ticket union their presence, rather than winning extra time.
+      return active.length === 0
+        ? []
+        : [[id, Math.max(...active.map((span) => span.weight ?? 1))] satisfies [string, number]]
+    }))
+    if (weights.size > 0) slices.push({ startMs, endMs, bucketIds: [...weights.keys()], weights })
   }
   return slices
 }
@@ -520,6 +577,7 @@ export interface OwnedRun {
   readonly startMs: number
   readonly endMs: number
   readonly bucketIds: ReadonlyArray<string>
+  readonly weights?: ReadonlyMap<string, number> | undefined
 }
 
 const sameOwners = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean =>
@@ -536,6 +594,7 @@ const sameOwners = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean
 const joinable = (previous: OwnedRun, next: OwnedRun): boolean =>
   previous.endMs === next.startMs &&
   sameOwners(previous.bucketIds, next.bucketIds) &&
+  previous.bucketIds.every((id) => (previous.weights?.get(id) ?? 1) === (next.weights?.get(id) ?? 1)) &&
   localDay(new Date(previous.startMs)) === localDay(new Date(next.startMs))
 
 /** Join touching stretches with identical owners. A gap of idle time always separates two runs. */
@@ -553,39 +612,13 @@ const mergeRuns = (runs: ReadonlyArray<OwnedRun>): ReadonlyArray<OwnedRun> => {
 }
 
 /**
- * Coalesce ownership so it changes no more often than the Dwell Floor.
+ * Coalesce rapid ownership changes without removing overlapping tickets.
  *
- * **What this is for.** Three concurrent sessions on three Issue Keys interleave their prompts, and
- * read literally that says the work changed ticket every few minutes. It did not — that is an
- * artefact of reading several transcripts at once. A day of it is two dozen slivers on a calendar and
- * indefensible on a timesheet.
- *
- * **Two rules, in order.**
- *
- * 1. *A ticket present for less than the floor inside one connected source cluster, interrupting work
- *    that resumes after it, was not a ticket that was worked on.* It was a keystroke inside other work — a branch
- *    checked, a file opened, a question asked — so its time goes to the work around it. This is what
- *    actually removes the slivers: they rarely touch anything, because a transcript goes quiet
- *    between prompts, and they are as often overlapping as adjacent, because concurrent sessions
- *    overlap by definition. Adjacency and overlap were both tried as the test and both left the
- *    interleaving as they found it. The requirement for work on *both* sides is what keeps a genuine
- *    short piece of work — eight minutes on another ticket, and then the day moves on — from being
- *    swallowed by what came before it.
- * 2. *Tenancy, not adjacency.* Between tickets that were genuinely worked on, whoever takes the
- *    timeline holds it for at least the floor: a stretch beginning inside that tenure and owned by
- *    someone else is credited to the incumbent. This catches two real tickets alternating quickly.
- *
- * **What it never does.** It reassigns time and never creates or drops any — idle gaps are not swept
- * into a tenure — so the inequality that makes a proposal safe to accept survives intact. Nothing is
- * ever welded across a local midnight, because runs are bucketed by the day they start in.
- *
- * **Unplaced hours take no part.** A stretch nothing placed neither holds a tenure nor loses its time
- * to one: promoting it would bill work no transcript placed on that ticket, and demoting an
- * attributed sliver into it would quietly discard billable work. An attributed tenure simply
- * continues across it.
- *
- * **A minor ticket with nothing to belong to keeps its own time.** Four minutes alone in an otherwise
- * empty day has no surrounding work to join, and dropping it would lose work that happened.
+ * A short sole-owner interruption returns to surrounding major work only when that work resumes
+ * in the same connected source cluster. Overlapping tickets keep their ownership regardless of
+ * their presence length. Tenancy holds between disjoint attributed owners for the dwell period.
+ * Unplaced time retains its own credit and cannot acquire or lose an attributed ticket's time.
+ * Idle gaps and local midnight are barriers; no coalescing creates additional wall-clock time.
  */
 export const applyDwellFloor = (
   slices: ReadonlyArray<OwnedRun>,
@@ -647,15 +680,14 @@ export const applyDwellFloor = (
 
   const withoutMinors = runs.map((run, index) => {
     const day = localDay(new Date(run.startMs))
-    const kept = run.bucketIds.filter((id) => major(id, index))
-    if (kept.length > 0) return { ...run, bucketIds: kept }
+    if (run.bucketIds.length > 1 || run.bucketIds.some((id) => major(id, index))) return run
     // Every owner was minor, so this is only an *interruption* if the work it interrupts resumes:
     // there has to be major work on both sides of it. Eight minutes on another ticket after half an
     // hour, with nothing after it, is a short piece of work rather than a keystroke inside a longer
     // one — and swallowing it would lose the change of ticket a person actually made.
     const before = majorOwnersToward(index, day, -1)
     const after = majorOwnersToward(index, day, 1)
-    return before === undefined || after === undefined ? run : { ...run, bucketIds: before }
+    return before === undefined || after === undefined ? run : { ...run, bucketIds: before, weights: undefined }
   })
 
   // Phase two: between tickets that were genuinely worked on, ownership holds for the floor.
@@ -681,7 +713,7 @@ export const applyDwellFloor = (
     }
     const overlapsTenant = tenant !== null && run.bucketIds.some((id) => tenant!.bucketIds.includes(id))
     if (tenant !== null && sameDay && run.startMs - tenant.sinceMs < dwellMs && !overlapsTenant) {
-      held.push({ ...run, bucketIds: tenant.bucketIds })
+      held.push({ ...run, bucketIds: tenant.bucketIds, weights: undefined })
       continue
     }
     tenant = { bucketIds: run.bucketIds, sinceMs: run.startMs }
@@ -790,13 +822,16 @@ interface BucketDayCredit {
  * Issue Key that time belongs to.
  *
  * A slice's duration is divided, never duplicated, so the total across every bucket can never
- * exceed the wall clock of the day. With a positive dwell floor, overlapping attributed runs
- * are scheduled evenly among the strongest tickets that fit; zero preserves raw shares.
+ * exceed the wall clock of the day. With a positive dwell floor, each ticket receives one packed
+ * block per connected cluster, ordered by its first activity. Touching same-ticket blocks coalesce
+ * after packing; idle gaps remain separate. Sub-minute shares fold into another ranked ticket when
+ * the cluster has a writable minute; zero preserves raw shares.
  */
 const shareBetweenBuckets = (
-  spansByBucket: ReadonlyMap<string, ReadonlyArray<CreditedSpan>>,
+  spansByBucket: ReadonlyMap<string, ReadonlyArray<CreditedSpan & { readonly weight?: number }>>,
   options: {
     readonly dwellSeconds: number
+    readonly priority?: ((bucketId: string, day: string) => number) | undefined
     readonly attributed: (bucketId: string) => boolean
     readonly coveredByCertain: (bucketId: string, activeIds: ReadonlyArray<string>) => boolean
   }
@@ -819,7 +854,7 @@ const shareBetweenBuckets = (
     })),
     options
   )
-  const runs = scheduleRuns(originalRuns, options.dwellSeconds, options.attributed)
+  const runs = scheduleRuns(originalRuns, options.dwellSeconds, options.attributed, options.priority)
   for (const run of originalRuns) {
     for (const id of run.bucketIds) add(id, localDay(new Date(run.startMs)), 0, run.endMs - run.startMs)
   }
@@ -832,8 +867,10 @@ const shareBetweenBuckets = (
     const duration = run.endMs - run.startMs
     // Divided, never duplicated: this is the one place an instant becomes seconds, and it is the
     // same number that reaches the row's total and the block a person accepts.
-    const creditedMs = duration / run.bucketIds.length
-    for (const [index, bucketId] of run.bucketIds.entries()) {
+    const totalWeight = run.bucketIds.reduce((sum, id) => sum + (run.weights?.get(id) ?? 1), 0)
+    let cursorMs = run.startMs
+    for (const bucketId of run.bucketIds) {
+      const creditedMs = duration * (run.weights?.get(bucketId) ?? 1) / totalWeight
       add(bucketId, day, creditedMs, 0)
       const byDay = settlementEnds.get(bucketId) ?? new Map<string, number>()
       byDay.set(day, Math.max(byDay.get(day) ?? 0, run.settlementEndMs))
@@ -843,10 +880,11 @@ const shareBetweenBuckets = (
       sourceStarts.set(bucketId, startsByDay)
       runSpans.set(bucketId, [...(runSpans.get(bucketId) ?? []), {
         creditedMs,
-        endMs: options.dwellSeconds > 0 ? run.startMs + creditedMs * (index + 1) : run.endMs,
-        startMs: options.dwellSeconds > 0 ? run.startMs + creditedMs * index : run.startMs,
+        endMs: options.dwellSeconds > 0 ? cursorMs + creditedMs : run.endMs,
+        startMs: options.dwellSeconds > 0 ? cursorMs : run.startMs,
         sourceStartMs: run.sourceStartMs
       }])
+      cursorMs += creditedMs
     }
   }
 
@@ -956,6 +994,9 @@ type BucketKind = "attributed" | "withheld" | "unattributed"
 const bucketId = (kind: BucketKind, ticketKey: string | null): string => `${kind}\u0000${ticketKey ?? ""}`
 
 class MissingDayAttributionError extends Data.TaggedError("MissingDayAttributionError")<{ readonly message: string }> {}
+class InvalidAttributionWeightError
+  extends Data.TaggedError("InvalidAttributionWeightError")<{ readonly message: string }>
+{}
 
 /**
  * Fold per-session active windows onto Issue Keys, dividing every overlap between *distinct* keys.
@@ -976,11 +1017,15 @@ export const splitCredits = (
      * {@link DEFAULT_DWELL_SECONDS}; zero turns the rule off and reports the raw interleaving.
      */
     readonly dwellSeconds?: number | undefined
+    /** Higher values receive writable minutes first when a shared stretch is too short. */
+    readonly priority?: ((ticketKey: string, day: string) => number) | undefined
+    /** Remove these tickets' windows before sharing; overlapping tickets absorb them, never solo time. */
+    readonly ignoredTickets?: ReadonlySet<string> | undefined
   }
 ): CreditSplit => {
   const bySession = new Map(attributions.map((attribution) => [attribution.sessionId, attribution]))
 
-  const spansByBucket = new Map<string, Array<CreditedSpan>>()
+  const spansByBucket = new Map<string, Array<CreditedSpan & { readonly weight?: number }>>()
   const metaByBucket = new Map<
     string,
     {
@@ -1001,37 +1046,54 @@ export const splitCredits = (
 
   for (const session of windows) {
     const attribution = bySession.get(session.sessionId)
-    const ticketKey = attribution?.ticketKey ?? null
-    const kind: BucketKind = ticketKey === null
-      ? "unattributed"
-      : attribution?.belowConfidenceFloor === true
-      ? "withheld"
-      : "attributed"
-    const id = bucketId(kind, ticketKey)
+    const targets = attribution?.targets ?? [{ ticketKey: attribution?.ticketKey ?? null, weight: 1 }]
+    if (targets.some((target) => !Number.isFinite(target.weight) || target.weight <= 0)) {
+      throw new InvalidAttributionWeightError({ message: "Split targets require finite positive weights" })
+    }
+    const allowed = targets.filter((target) =>
+      target.ticketKey === null || options?.ignoredTickets?.has(target.ticketKey) !== true
+    )
+    const totalWeight = allowed.reduce((sum, target) => sum + target.weight, 0)
+    for (const target of allowed) {
+      const ticketKey = target.ticketKey
+      if (ticketKey !== null && options?.ignoredTickets?.has(ticketKey) === true) continue
+      const kind: BucketKind = ticketKey === null
+        ? "unattributed"
+        : attribution?.belowConfidenceFloor === true
+        ? "withheld"
+        : "attributed"
+      const id = bucketId(kind, ticketKey)
 
-    spansByBucket.set(id, [...(spansByBucket.get(id) ?? []), ...session.spans])
-    // Session windows are already day-bounded, so a span belongs to exactly one day.
-    for (const span of session.spans) {
-      const key = dayKey(id, localDay(new Date(span.startMs)))
-      sessionsByBucketDay.set(key, (sessionsByBucketDay.get(key) ?? new Set()).add(session.sessionId))
-      const previous = evidenceByBucketDay.get(key)
-      const signal = attribution?.signal ?? "none"
-      const confidence = attribution?.confidence ?? null
-      evidenceByBucketDay.set(key, {
-        signal: previous === undefined || signalRank(signal) > signalRank(previous.signal) ? signal : previous.signal,
-        confidence: previous === undefined ? confidence : weakerConfidence(previous.confidence, confidence)
+      spansByBucket.set(id, [
+        ...(spansByBucket.get(id) ?? []),
+        ...session.spans.map((span) => ({
+          ...span,
+          weight: target.weight / totalWeight
+        }))
+      ])
+      // Session windows are already day-bounded, so a span belongs to exactly one day.
+      for (const span of session.spans) {
+        const key = dayKey(id, localDay(new Date(span.startMs)))
+        sessionsByBucketDay.set(key, (sessionsByBucketDay.get(key) ?? new Set()).add(session.sessionId))
+        const previous = evidenceByBucketDay.get(key)
+        const signal = attribution?.signal ?? "none"
+        const confidence = attribution?.confidence ?? null
+        evidenceByBucketDay.set(key, {
+          signal: previous === undefined || signalRank(signal) > signalRank(previous.signal) ? signal : previous.signal,
+          confidence: previous === undefined ? confidence : weakerConfidence(previous.confidence, confidence)
+        })
+      }
+      const existing = metaByBucket.get(id)
+      metaByBucket.set(id, {
+        kind,
+        ticketKey,
+        sessions: new Set([...(existing?.sessions ?? []), session.sessionId])
       })
     }
-    const existing = metaByBucket.get(id)
-    metaByBucket.set(id, {
-      kind,
-      ticketKey,
-      sessions: new Set([...(existing?.sessions ?? []), session.sessionId])
-    })
   }
 
   const shared = shareBetweenBuckets(
-    new Map([...spansByBucket.entries()].map(([id, spans]) => [id, mergeSpansWithinDays(spans)])),
+    spansByBucket,
     {
       attributed: (id) => metaByBucket.get(id)?.kind === "attributed",
       coveredByCertain: (id, activeIds) => {
@@ -1041,7 +1103,11 @@ export const splitCredits = (
           return certain?.kind === "attributed" && certain.ticketKey === held.ticketKey
         })
       },
-      dwellSeconds: options?.dwellSeconds ?? DEFAULT_DWELL_SECONDS
+      dwellSeconds: options?.dwellSeconds ?? DEFAULT_DWELL_SECONDS,
+      priority: (id, day) => {
+        const ticketKey = metaByBucket.get(id)?.ticketKey
+        return ticketKey === null || ticketKey === undefined ? 0 : options?.priority?.(ticketKey, day) ?? 0
+      }
     }
   )
 
@@ -1128,6 +1194,8 @@ export interface RecordedBucket {
 
 /** A Proposed Worklog: the gap between what a session accounts for and what is already recorded. */
 export interface SessionProposal {
+  /** Provider-window review holds. Evidence remains readable; the named providers cannot write it. */
+  readonly writeBlocked?: Readonly<Partial<Record<SourceConsumption.Source, string>>> | undefined
   readonly ticketKey: string
   readonly day: string
   readonly signal: AttributionSignal

@@ -17,13 +17,19 @@ import * as Data from "effect/Data"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import type {
+  ConfirmBatchItemResponse,
+  DeleteSavedEntryRequest,
+  DeleteSavedEntryResponse,
   DescribeRowRequest,
   DescribeRowResponse,
   DescribeSavedEntryRequest,
   DescribeSavedEntryResponse,
+  IgnorePayload,
+  IgnoreResult,
   ManualPayload,
   OwnershipPayload,
   OwnershipResult,
+  PromoteWithheldRequest,
   ReadProgress,
   StandingPayload,
   StandingResult,
@@ -105,11 +111,15 @@ const post = async <A>(
   path: string,
   payload:
     | ConfirmRequest
+    | { readonly requests: ReadonlyArray<ConfirmRequest> }
     | typeof DescribeRowRequest.Type
     | DescribeSavedEntryRequest
     | UpdateSavedEntryRequest
     | typeof ManualPayload.Type
     | typeof OwnershipPayload.Type
+    | typeof IgnorePayload.Type
+    | DeleteSavedEntryRequest
+    | PromoteWithheldRequest
     | typeof StandingPayload.Type
     | SessionAgentSettings,
   decode: (response: Response) => Promise<A>,
@@ -131,6 +141,22 @@ const post = async <A>(
   })
 }
 
+/** Offer one low-confidence match as an ordinary suggestion in the retained week. */
+export const promoteWithheld = (payload: PromoteWithheldRequest): Promise<WeekPlanResponse> =>
+  post(
+    "/api/rows/promote",
+    payload,
+    async (response) => (await import("./decoding.js")).decodeWeekPlan(await response.json())
+  )
+
+/** Delete the retained provider entry; its evidence becomes proposable again after a refresh. */
+export const deleteSavedEntry = (payload: DeleteSavedEntryRequest): Promise<DeleteSavedEntryResponse> =>
+  post(
+    "/api/entries/delete",
+    payload,
+    async (response) => (await import("./decoding.js")).decodeSavedEntryDelete(await response.json())
+  )
+
 /** Edit the retained provider entry; the server verifies its current owner and snapshot. */
 export const updateSavedEntry = async (payload: UpdateSavedEntryRequest): Promise<UpdateSavedEntryResponse> => {
   const { decodeSavedEntryUpdate } = await import("./decoding.js")
@@ -140,7 +166,10 @@ export const updateSavedEntry = async (payload: UpdateSavedEntryRequest): Promis
     async (response) => decodeSavedEntryUpdate(await response.json())
   )
   if (
-    result.planId !== payload.planId || result.entry.source !== payload.source || result.entry.id !== payload.entryId
+    result.planId !== payload.planId || result.entry.source !== payload.source ||
+    // A ticket change replaces the provider entry, so only then may its id differ.
+    (payload.ticketKey === undefined && result.entry.id !== payload.entryId) ||
+    (payload.ticketKey !== undefined && result.entry.ticketKey !== payload.ticketKey)
   ) {
     throw new RequestFailure({
       message: "The updated entry did not match this request. Refresh totals to check it.",
@@ -291,6 +320,16 @@ export const confirmRow = (request: ConfirmRequest): Promise<WriteResultResponse
     async (response) => (await import("./decoding.js")).decodeWriteResult(await response.json())
   )
 
+/** Confirm several queued approvals under one provider re-read; one outcome per request, in order. */
+export const confirmRows = (
+  requests: ReadonlyArray<ConfirmRequest>
+): Promise<ReadonlyArray<ConfirmBatchItemResponse>> =>
+  post(
+    "/api/rows/confirm-batch",
+    { requests },
+    async (response) => (await (await import("./decoding.js")).decodeConfirmBatch(await response.json())).items
+  )
+
 /** Suggest a note from retained row evidence when its editor opens. Never reads sessions again. */
 export const describeRow = (
   request: typeof DescribeRowRequest.Type,
@@ -318,6 +357,14 @@ export const markTicketMine = (
     "/api/config/mine",
     request,
     async (response) => (await import("./decoding.js")).decodeOwnershipResult(await response.json())
+  )
+
+/** Ignore a ticket in every week, or restore it. Takes effect on the next session scan. */
+export const setTicketIgnored = (request: typeof IgnorePayload.Type): Promise<typeof IgnoreResult.Type> =>
+  post(
+    "/api/config/ignore",
+    request,
+    async (response) => (await import("./decoding.js")).decodeIgnoreResult(await response.json())
   )
 
 export const mapStandingAttribution = (

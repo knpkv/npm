@@ -167,6 +167,36 @@ describe("segmented writes", () => {
     }))
 })
 
+describe("sub-minute Jira remainder", () => {
+  // Jira cannot take less than a minute, so a remainder below it after a successful write is the
+  // provider's floor, not a failed write — reporting it as one buried every confirmation in errors.
+  it.effect("reports a write as Written when only an unloggable remainder is left", () =>
+    Effect.gen(function*() {
+      const plan: PlannedWrite = {
+        _tag: "Write",
+        ticketKey: "PROJ-1",
+        day: "2026-07-01",
+        targets: { clockify: false, jira: true },
+        clockify: { seconds: 0, startedAt: undefined, segments: [] },
+        jira: {
+          seconds: 521,
+          withheldSeconds: 39,
+          startedAt: new Date(0),
+          segments: [{ block: { startMs: 0, endMs: 560000, seconds: 560 }, seconds: 521, startedAt: new Date(0) }]
+        }
+      }
+      const result = yield* applyPlannedWrite(
+        {
+          applyToClockify: () => Effect.succeed(true),
+          applyToJira: () => Effect.succeed<JiraWorklogOutcome>({ _tag: "Posted" })
+        },
+        plan,
+        "note"
+      )
+      expect(result.jira).toMatchObject({ _tag: "Written", seconds: 521 })
+    }))
+})
+
 describe("applyProposal targets", () => {
   const proposal: SessionProposal = {
     activeSeconds: 3600,
@@ -228,6 +258,55 @@ describe("applyProposal targets", () => {
       }
     }
   }
+
+  it.effect("refuses each held provider without calling it while allowing the independent side", () =>
+    Effect.gen(function*() {
+      const fake = fakeService()
+      const hold = "Unlinked provider entries need private review"
+      const result = yield* applyProposal(
+        fake.service,
+        { ...proposal, writeBlocked: { clockify: hold } },
+        "note",
+        sourceScopes
+      )
+      expect(result.clockify).toEqual({ _tag: "Refused", message: hold })
+      expect(fake.calls.every((call) => call.startsWith("jira "))).toBe(true)
+      expect(result.jira._tag).toBe("Written")
+      const allHeld = fakeService()
+      const blocked = yield* applyProposal(
+        allHeld.service,
+        { ...proposal, writeBlocked: { clockify: hold, jira: hold } },
+        "note",
+        sourceScopes
+      )
+      expect(blocked).toEqual({
+        clockify: { _tag: "Refused", message: hold },
+        jira: { _tag: "Refused", message: hold }
+      })
+      expect(allHeld.calls).toEqual([])
+    }))
+
+  it.effect("reports a held provider that owes nothing as nothing owed", () =>
+    Effect.gen(function*() {
+      const fake = fakeService()
+      const hold = "Unlinked provider entries need private review"
+      const result = yield* applyProposal(
+        fake.service,
+        {
+          ...proposal,
+          clockifyDelta: 0,
+          clockifySeconds: 3600,
+          jiraDelta: 0,
+          jiraSeconds: 3600,
+          writeBlocked: { clockify: hold, jira: hold }
+        },
+        "note",
+        sourceScopes
+      )
+      expect(result.clockify._tag).not.toBe("Refused")
+      expect(result.jira._tag).not.toBe("Refused")
+      expect(fake.calls).toEqual([])
+    }))
 
   // CLI/watch own their deltas; execution retains sub-minute amounts and per-provider offsets.
   it.effect("preserves CLI/watch deltas and independent whole-row anchors", () =>
@@ -537,7 +616,8 @@ describe("applyProposal targets", () => {
       )
       expect(fake.calls).toEqual(["jira PROJ-1 60"])
       expect(fake.starts).toEqual([new Date(later)])
-      expect(outcome.jira).toMatchObject({ _tag: "PartiallyWritten", seconds: 60 })
+      // The withheld remainder is Jira's floor, not a failure: everything writable was written.
+      expect(outcome.jira).toMatchObject({ _tag: "Written", seconds: 60 })
     }))
 
   it.effect("withholds a sub-minute Jira tail introduced while capping against day totals", () =>
@@ -577,11 +657,7 @@ describe("applyProposal targets", () => {
         jira: true
       })
       expect(fake.calls).toEqual(["jira PROJ-1 60", "jira PROJ-1 60"])
-      expect(outcome.jira).toMatchObject({
-        _tag: "PartiallyWritten",
-        seconds: 120,
-        failure: { _tag: "Refused" }
-      })
+      expect(outcome.jira).toMatchObject({ _tag: "Written", seconds: 120 })
     }))
 
   it.effect("keeps three one-minute Jira segments fully writable", () =>

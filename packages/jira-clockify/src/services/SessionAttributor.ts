@@ -60,6 +60,26 @@ export interface SessionAttributorRequest {
   readonly candidateKeys: ReadonlyArray<string>
   /** Bounded digest of the session's prompts. */
   readonly digest: string
+  /**
+   * What Jira says about each candidate, when it could say. Shown beside the candidate as a
+   * tie-breaker; it never adds a candidate or overrides the evidence.
+   */
+  readonly candidateFacts?: ReadonlyMap<string, CandidateFact> | undefined
+}
+
+/** Ranking facts about one candidate Issue Key. */
+export interface CandidateFact {
+  /** In an open sprint and assigned to me. */
+  readonly inSprint: boolean
+  /** I already logged Jira time on it inside the period being reconciled. */
+  readonly logged: boolean
+}
+
+/** A candidate as the prompt shows it: the key, then any facts that may break a tie. */
+const describeCandidate = (key: string, fact: CandidateFact | undefined): string => {
+  if (fact === undefined) return key
+  const marks = [...(fact.inSprint ? ["open sprint"] : []), ...(fact.logged ? [] : ["not logged yet"])]
+  return marks.length === 0 ? key : `${key} [${marks.join(", ")}]`
 }
 
 /** One session's answer, paired back to the request that produced it. */
@@ -165,9 +185,16 @@ const buildPrompt = (requests: ReadonlyArray<SessionAttributorRequest>): string 
     "Set confidence between 0 and 1: how sure you are that the session's work should be logged",
     "against that issue.",
     "",
+    "Some candidates carry marks: [open sprint] means the issue is in my current sprint and assigned",
+    "to me; [not logged yet] means I have logged no time on it in this period. Use the marks only to",
+    "break a tie between candidates the digest supports equally — prefer open sprint, then not logged",
+    "yet. Never choose an issue because of its marks alone.",
+    "",
     ...requests.flatMap((request) => [
       `--- session ${request.sessionId} ---`,
-      `Candidates: ${request.candidateKeys.join(", ")}`,
+      `Candidates: ${
+        request.candidateKeys.map((key) => describeCandidate(key, request.candidateFacts?.get(key))).join(", ")
+      }`,
       "Digest:",
       request.digest,
       ""

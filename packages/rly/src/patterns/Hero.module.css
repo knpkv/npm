@@ -1,0 +1,82 @@
+@layer rly.components {
+  .root {
+    color: var(--rly-color-text-1);
+    display: grid;
+    gap: var(--rly-space-4);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .fact {
+    margin: var(--rly-space-0);
+  }
+
+  .caption {
+    color: var(--rly-color-text-2);
+    margin: var(--rly-space-0);
+    max-inline-size: 62ch;
+  }
+
+  .heading .fact {
+    font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
+      var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
+    letter-spacing: var(--rly-type-section-title-tracking);
+  }
+
+  .heading .caption {
+    font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
+      var(--rly-type-body-large-font);
+  }
+
+  .line .text {
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    margin: var(--rly-space-0);
+  }
+
+  .line .fact {
+    font-weight: var(--rly-type-card-title-weight);
+  }
+
+  .display .fact {
+    font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / var(--rly-type-page-title-line-height)
+      var(--rly-type-page-title-font);
+    letter-spacing: var(--rly-type-page-title-tracking);
+  }
+
+  .display .caption {
+    font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
+      var(--rly-type-body-large-font);
+  }
+
+  .word {
+    font-weight: inherit;
+  }
+
+  .blocked {
+    color: var(--rly-color-blocked-ink);
+  }
+
+  .held {
+    color: var(--rly-color-held-ink);
+  }
+
+  /*
+   * Forced colours drop the state ink, and the word already inherits the sentence's weight, so
+   * underline it to keep it distinct. The same rule applies under the Storybook toolbar's mode.
+   */
+  @media (forced-colors: active) {
+    .blocked,
+    .held {
+      text-decoration: underline;
+      text-decoration-thickness: var(--rly-space-2);
+      text-underline-offset: var(--rly-space-4);
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .blocked,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .held {
+    text-decoration: underline;
+    text-decoration-thickness: var(--rly-space-2);
+    text-underline-offset: var(--rly-space-4);
+  }
+}

@@ -295,6 +295,9 @@ export const applyPlannedWrite = (
     let clockifyFailure: string | null = targets.clockify && plan.clockify.segments.length > 0 &&
         sourceRowId !== undefined && expectedScopes?.clockify == null
       ? missingSourceScope
+      // A hold refuses only time this side would write; a side owing nothing stays nothing owed.
+      : plan.clockify.segments.length > 0
+      ? plan.writeBlocked?.clockify ?? null
       : null
     if (targets.clockify && clockifyFailure === null) {
       for (const segment of plan.clockify.segments) {
@@ -345,7 +348,9 @@ export const applyPlannedWrite = (
       ? jiraAvailability === "not-logged-in"
         ? { _tag: "NotLoggedIn" }
         : { _tag: "Refused", message: missingSourceScope }
-      : null
+      : plan.writeBlocked?.jira === undefined || plan.jira.seconds <= 0
+      ? null
+      : { _tag: "Refused", message: plan.writeBlocked.jira }
     const withheldJiraSeconds = plan.jira.withheldSeconds ?? 0
     if (plan.jira.seconds <= 0) {
       return {
@@ -382,9 +387,8 @@ export const applyPlannedWrite = (
         endMs: segment.startedAt.getTime() + segment.seconds * 1000
       })
     }
-    if (jiraFailure === null && withheldJiraSeconds > 0) {
-      jiraFailure = { _tag: "Refused", message: "the remaining Jira gaps are below its one-minute minimum" }
-    }
+    // A sub-minute remainder after a successful write is Jira's floor at work, not a failure: there
+    // was nothing more Jira could accept.
     const jira: SideOutcome = jiraWrittenSeconds > 0 && jiraFailure !== null
       ? { _tag: "PartiallyWritten", seconds: jiraWrittenSeconds, segments: jiraSegments, failure: jiraFailure }
       : jiraWrittenSeconds > 0
@@ -404,6 +408,7 @@ export const applyProposal = (
 ): Effect.Effect<WriteOutcome> => {
   const prepared = prepareProposal({
     evidence: {
+      writeBlocked: proposal.writeBlocked,
       blocks: proposal.blocks,
       credited: proposal.sessionSeconds,
       ticketKey: proposal.ticketKey,
@@ -428,6 +433,7 @@ export const applyProposal = (
       service,
       {
         _tag: "Write",
+        writeBlocked: proposal.writeBlocked,
         ticketKey: proposal.ticketKey,
         day: proposal.day,
         targets,
@@ -499,6 +505,7 @@ export const applyProposal = (
     service,
     {
       _tag: "Write",
+      writeBlocked: proposal.writeBlocked,
       ticketKey: proposal.ticketKey,
       day: proposal.day,
       targets,
