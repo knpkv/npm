@@ -146,9 +146,8 @@
 
   .chevron {
     block-size: var(--rly-space-8);
-    /* A drawn chevron, not an accent: two edges of a rotated square. */
-    border: solid currentcolor;
-    border-width: 0 1.5px 1.5px 0;
+    border-block-end: 1.5px solid currentcolor; /* stripe-ok: drawn chevron, two edges of a rotated square */
+    border-inline-end: 1.5px solid currentcolor; /* stripe-ok: drawn chevron, mirrors in right-to-left text */
     inline-size: var(--rly-space-8);
     justify-self: center;
     transform: rotate(45deg) translate(-1px, -1px);

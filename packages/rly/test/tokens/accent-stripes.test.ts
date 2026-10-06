@@ -34,6 +34,21 @@ describe("findAccentStripes", () => {
     expect(declarations(".a { border-inline-start-width: thick; }")).toHaveLength(1)
   })
 
+  it("flags a stripe built from border-width, and a side border whose width is left at medium", () => {
+    expect(declarations(".card { border: solid var(--rly-color-held-ink); border-width: 0 0 0 4px; }")).toEqual([
+      "border-width: 0 0 0 4px"
+    ])
+    expect(declarations(".a { border-left: solid var(--rly-color-border-1); }")).toHaveLength(1)
+    expect(declarations(".a { border-width: 1px; border-width: 0 1px 1px 0; }")).toEqual([])
+  })
+
+  it("lets a drawn shape opt out per declaration, with a reason", () => {
+    expect(
+      declarations(".chevron { border-inline-end: 1.5px solid currentcolor; /* stripe-ok: drawn chevron */ }")
+    ).toEqual([])
+    expect(declarations(".chevron { border-inline-end: 1.5px solid currentcolor; /* stripe-ok: */ }")).toHaveLength(1)
+  })
+
   it("treats an inset whose offsets cannot be read as a stripe", () => {
     expect(declarations(".a { box-shadow: inset calc(-1 * var(--rly-space-4)) 0 var(--rly-color-focus); }"))
       .toHaveLength(1)

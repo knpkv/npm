@@ -109,6 +109,12 @@ describe("registry source validation", () => {
       .toContain(
         "component Button destructures size from RLY_ICON_DEFAULT_VARIANTS.size, not its own default"
       )
+    expect(mutate(source.replace("size: \"dense\" })", "size: (`dense`) })"))).toContain(
+      "variant Button.size has a source default the registry cannot read; write it as a string"
+    )
+    expect(mutate(source.replace("  size = RLY_BUTTON_DEFAULT_VARIANTS.size,\n", "  size,\n"))).toContain(
+      "component Button never falls back to its size default when the prop is omitted"
+    )
     expect(mutate(source.replace("size = RLY_BUTTON_DEFAULT_VARIANTS.size", "size = pickSize()"))).toContain(
       "component Button destructures size = pickSize(), which the registry cannot check"
     )

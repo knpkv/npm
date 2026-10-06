@@ -203,3 +203,22 @@ test("shows the complete 500-file inventory and compact forced-color states", as
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("diff-inventory-320.png") })
 })
+
+test("draws the directory chevron on the inline-end edge, so it mirrors in right-to-left text", async ({ page }) => {
+  await page.goto(story("diff-difffiletree--file-states"))
+  const chevron = page.locator("[aria-expanded] [class*=\"chevron\"]").first()
+  await expect(chevron).toBeAttached()
+  const edges = () =>
+    chevron.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return {
+        left: Number.parseFloat(style.borderLeftWidth) > 0,
+        right: Number.parseFloat(style.borderRightWidth) > 0
+      }
+    })
+  expect(await edges()).toEqual({ left: false, right: true })
+  await page.evaluate(() => {
+    document.documentElement.dir = "rtl"
+  })
+  expect(await edges()).toEqual({ left: true, right: false })
+})

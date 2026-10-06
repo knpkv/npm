@@ -20,6 +20,8 @@
     border: var(--rly-space-0);
     color: var(--rly-color-text-2);
     cursor: pointer;
+    /* Options keep their label width; a row too wide for its container scrolls instead. */
+    flex-shrink: 0;
     font: inherit;
     padding-inline: var(--rly-space-12);
     white-space: nowrap;

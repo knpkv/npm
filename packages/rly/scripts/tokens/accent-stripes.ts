@@ -8,7 +8,11 @@
  * neutral divider colour (`border-1`, `border-2`, `transparent`); anything else counts as a stripe,
  * whatever unit or colour spelling it uses. Inset shadows are allowed as full rings
  * (`inset 0 0 0 2px …`), blurred or spread insets, and block-edge underlines; an inset whose offsets
- * cannot be read (`calc(…)`, an unknown variable) is treated as a stripe.
+ * cannot be read (`calc(…)`, an unknown variable) is treated as a stripe. A `border-width` list with
+ * exactly one edge thicker than a hairline is a stripe too, however the colour is set.
+ *
+ * A drawn shape that needs a thick edge (a chevron made of two edges of a rotated square) opts out
+ * per declaration with a reasoned comment on the same line: `/* stripe-ok: drawn chevron *\/`.
  */
 
 export interface AccentStripeViolation {
@@ -19,7 +23,8 @@ export interface AccentStripeViolation {
 }
 
 const ONE_SIDE = String.raw`border-(?:left|right|inline-start|inline-end)`
-const DECLARATION = new RegExp(String.raw`(${ONE_SIDE}(?:-width|-color)?|box-shadow)\s*:\s*([^;}]+)`, "gi")
+const DECLARATION = new RegExp(String.raw`(${ONE_SIDE}(?:-width|-color)?|border-width|box-shadow)\s*:\s*([^;}]+)`, "gi")
+const EXEMPT = /\/\*\s*stripe-ok:\s*\S[^*]*\*\//
 const ZEROED = /^\s*(?:0|none|0px|var\(--rly-space-0\))\s*$/i
 const NEUTRAL_COLOR = /^(?:var\(\s*--rly-color-border-[12]\s*\)|transparent)$/i
 const HAIRLINE = /^(?:0?\.\d+|1)px$|^(?:0|0px|var\(\s*--rly-space-0\s*\))$/i
@@ -73,18 +78,34 @@ const isOneSidedInset = (layer: string): boolean => {
   return !ZERO_LENGTH.test(x) && ZERO_LENGTH.test(y) && flat(blur) && flat(spread)
 }
 
-/** A side border's parts: width, style and colour, each optional, in any order. */
+/**
+ * A side border's parts, in any order: every token a style, a hairline width or a neutral colour,
+ * and the width stated, since an omitted width is CSS's `medium`, not a hairline.
+ */
 const isNeutralHairline = (value: string): boolean => {
   const tokens = splitTopLevel(value.trim(), /\s/)
   const width = tokens.filter((token) => !STYLE.test(token) && !NEUTRAL_COLOR.test(token))
   const colors = tokens.filter((token) => !STYLE.test(token) && !HAIRLINE.test(token))
-  // Every token must be a style, a hairline width, or a neutral colour.
-  return width.every((token) => HAIRLINE.test(token)) && colors.every((token) => NEUTRAL_COLOR.test(token))
+  return (
+    tokens.some((token) => HAIRLINE.test(token)) &&
+    width.every((token) => HAIRLINE.test(token)) &&
+    colors.every((token) => NEUTRAL_COLOR.test(token))
+  )
+}
+
+/** `border-width` with one edge thicker than a hairline and every other edge zero. */
+const isOneSidedWidth = (value: string): boolean => {
+  const [top, right = top, bottom = top, left = right] = splitTopLevel(value.trim(), /\s/)
+  const edges = [top, right, bottom, left]
+  const thick = edges.filter((edge) => edge !== undefined && !HAIRLINE.test(edge))
+  const zero = edges.filter((edge) => edge !== undefined && ZEROED.test(edge))
+  return thick.length === 1 && zero.length === 3
 }
 
 const isStripe = (property: string, value: string): boolean => {
   const name = property.toLowerCase()
   if (name === "box-shadow") return splitTopLevel(value, /,/).some(isOneSidedInset)
+  if (name === "border-width") return isOneSidedWidth(value)
   if (ZEROED.test(value)) return false
   if (name.endsWith("-color")) return !NEUTRAL_COLOR.test(value.trim())
   if (name.endsWith("-width")) return !HAIRLINE.test(value.trim())
@@ -94,12 +115,15 @@ const isStripe = (property: string, value: string): boolean => {
 /** Every one-sided accent stripe declared in a CSS source, with its 1-based position. */
 export const findAccentStripes = (path: string, source: string): ReadonlyArray<AccentStripeViolation> => {
   const comparable = stripComments(source)
+  const lines = source.split("\n")
   const violations: Array<AccentStripeViolation> = []
   for (const match of comparable.matchAll(DECLARATION)) {
     const [declaration, property, value] = match
     if (property === undefined || value === undefined || declaration === undefined) continue
     if (!isStripe(property, value)) continue
-    violations.push({ ...position(comparable, match.index), declaration: declaration.trim(), path })
+    const at = position(comparable, match.index)
+    if (EXEMPT.test(lines[at.line - 1] ?? "")) continue
+    violations.push({ ...at, declaration: declaration.trim(), path })
   }
   return violations
 }

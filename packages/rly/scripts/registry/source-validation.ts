@@ -299,6 +299,8 @@ interface SourceVariants {
   readonly defaults: ReadonlyMap<string, ReadonlyArray<string>>
   /** Names of the `*_DEFAULT_VARIANTS` constants the file declares. */
   readonly defaultConstants: ReadonlySet<string>
+  /** Axes whose default is written as something other than a string literal. */
+  readonly unreadableDefaults: ReadonlySet<string>
 }
 
 /** Literal variant axes and defaults a component source declares through `defineVariants`. */
@@ -306,6 +308,7 @@ const sourceVariants = (source: string, fileName: string): SourceVariants => {
   const axes = new Map<string, Array<ReadonlySet<string>>>()
   const defaults = new Map<string, Array<string>>()
   const defaultConstants = new Set<string>()
+  const unreadableDefaults = new Set<string>()
   const sourceFile = TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true)
   for (const statement of sourceFile.statements) {
     if (!TypeScript.isVariableStatement(statement)) continue
@@ -323,6 +326,8 @@ const sourceVariants = (source: string, fileName: string): SourceVariants => {
         if (axis === undefined || !TypeScript.isPropertyAssignment(property)) continue
         if (isDefaults && TypeScript.isStringLiteral(property.initializer)) {
           defaults.set(axis, [...(defaults.get(axis) ?? []), property.initializer.text])
+        } else if (isDefaults) {
+          unreadableDefaults.add(axis)
         } else if (!isDefaults && TypeScript.isObjectLiteralExpression(property.initializer)) {
           const values = new Set<string>()
           for (const value of property.initializer.properties) {
@@ -334,7 +339,7 @@ const sourceVariants = (source: string, fileName: string): SourceVariants => {
       }
     }
   }
-  return { axes, defaults, defaultConstants }
+  return { axes, defaultConstants, defaults, unreadableDefaults }
 }
 
 /**
@@ -384,7 +389,7 @@ const destructuredFallbacks = (source: string, fileName: string, prop: string): 
  */
 const validateVariants = (component: ComponentRecord, source: string): ReadonlyArray<string> => {
   const failures: Array<string> = []
-  const { axes, defaultConstants, defaults } = sourceVariants(source, component.source)
+  const { axes, defaultConstants, defaults, unreadableDefaults } = sourceVariants(source, component.source)
   const where = (axis: string) => `variant ${component.name}.${axis}`
   for (const variant of component.variants) {
     const declared = axes.get(variant.name) ?? []
@@ -400,9 +405,14 @@ const validateVariants = (component: ComponentRecord, source: string): ReadonlyA
         `${where(variant.name)} lists ${variant.values.join("|")} but source declares ${[...values].join("|")}`
       )
     }
+    if (unreadableDefaults.has(variant.name)) {
+      failures.push(`${where(variant.name)} has a source default the registry cannot read; write it as a string`)
+      continue
+    }
     const fallback = defaults.get(variant.name) ?? []
-    if (fallback.length === 0) continue
-    if (fallback.length > 1 || fallback[0] === undefined) {
+    // A required variant (no manifest default) has no source default to compare.
+    if (fallback.length === 0 && variant.defaultValue === undefined) continue
+    if (fallback.length !== 1 || fallback[0] === undefined) {
       failures.push(`${where(variant.name)} has ${fallback.length} source defaults, expected one`)
       continue
     }
@@ -412,7 +422,13 @@ const validateVariants = (component: ComponentRecord, source: string): ReadonlyA
         `${where(variant.name)} defaults to ${variant.defaultValue} but source defaults to ${sourceDefault}`
       )
     }
-    for (const destructured of destructuredFallbacks(source, component.source, variant.name)) {
+    const destructuredAll = destructuredFallbacks(source, component.source, variant.name)
+    if (destructuredAll.length === 0) {
+      failures.push(
+        `component ${component.name} never falls back to its ${variant.name} default when the prop is omitted`
+      )
+    }
+    for (const destructured of destructuredAll) {
       if (destructured._tag === "Literal" && destructured.value !== sourceDefault) {
         failures.push(
           `component ${component.name} destructures ${variant.name} = "${destructured.value}" but its declared default is ${sourceDefault}`

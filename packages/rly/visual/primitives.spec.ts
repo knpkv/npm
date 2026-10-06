@@ -63,14 +63,26 @@ test("sizes toggle groups to the shared control heights, border included", async
   }
 })
 
-test("keeps a toggle group on one row that scrolls inside a narrow screen", async ({ page }) => {
+test("keeps a toggle group on one row that scrolls inside a narrow container", async ({ page }) => {
   await page.setViewportSize({ height: 800, width: 320 })
   await page.goto(story("primitives-togglegroup--interaction"))
-  const tops = await page
-    .getByRole("radiogroup", { exact: true, name: "Range (default)" })
-    .getByRole("radio")
-    .evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)))
-  expect(new Set(tops).size).toBe(1)
+  const group = page.getByRole("radiogroup", { exact: true, name: "Range (default)" })
+  await expect(group.getByRole("radio")).toHaveCount(4)
+  // Narrower than its four options: the row must scroll, not wrap or squeeze its labels.
+  await group.evaluate((element) => {
+    if (element.parentElement !== null) element.parentElement.style.inlineSize = "120px"
+  })
+  const layout = await group.evaluate((element) => ({
+    scrolls: element.scrollWidth > element.clientWidth,
+    tops: [...element.querySelectorAll("[role=\"radio\"]")].map((radio) =>
+      Math.round(radio.getBoundingClientRect().top)
+    ),
+    clipped: [...element.querySelectorAll("[role=\"radio\"]")].filter((radio) => radio.scrollWidth > radio.clientWidth)
+      .length
+  }))
+  expect(layout.scrolls).toBe(true)
+  expect(new Set(layout.tops).size).toBe(1)
+  expect(layout.clipped).toBe(0)
   const overflow = await page.evaluate(() =>
     document.documentElement.scrollWidth - document.documentElement.clientWidth
   )
