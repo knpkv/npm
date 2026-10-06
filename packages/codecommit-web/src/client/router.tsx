@@ -11,16 +11,25 @@ import { StatsPage } from "./components/stats-page.js"
 import { WorkbenchLayout } from "./components/workbench-layout.js"
 import * as Predicate from "effect/Predicate"
 
+/**
+ * `fullWidth`: the page fills the viewport and scrolls inside itself (the sandbox editor).
+ * `wide`: an ordinary scrolling page with a wider cap, for the Workbench's rail + PR + findings.
+ */
 interface RouteHandle {
   readonly fullWidth?: boolean
+  readonly wide?: boolean
 }
 
 const isRouteHandle = <UnparsedInput,>(h: UnparsedInput): h is UnparsedInput & RouteHandle =>
-  h != null && Predicate.hasProperty(h, "fullWidth")
+  h != null && (Predicate.hasProperty(h, "fullWidth") || Predicate.hasProperty(h, "wide"))
 
 const hasFullWidth = (m: { handle?: unknown }): boolean => isRouteHandle(m.handle) && m.handle.fullWidth === true
 
+const hasWide = (m: { handle?: unknown }): boolean => isRouteHandle(m.handle) && m.handle.wide === true
+
 export const useFullWidthRoute = (): boolean => useMatches().some(hasFullWidth)
+
+export const useWideRoute = (): boolean => useMatches().some(hasWide)
 
 export const router = createBrowserRouter([
   {
@@ -29,6 +38,7 @@ export const router = createBrowserRouter([
       { index: true, element: <PRList /> },
       {
         element: <WorkbenchLayout />,
+        handle: { wide: true },
         children: [{ path: "accounts/:accountId/prs/:prId", element: <PRDetail /> }]
       },
       { path: "sandboxes", element: <SandboxesPage /> },

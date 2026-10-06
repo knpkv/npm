@@ -8,11 +8,12 @@
  * @module
  */
 import { useAtomValue } from "@effect/atom-react"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
-import { type KeyboardEvent, useMemo, useRef } from "react"
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router"
 import { appStateAtom } from "../atoms/app.js"
+import type { CodeCommitPullRequestRouteCoordinates } from "../codecommit-route.js"
 import { queuePullRequests } from "../utils/queuePullRequests.js"
+import { selectCodeCommitPullRequest } from "./pr-detail.js"
 import { prListHref, prListKey } from "./pr-list.js"
 import styles from "./workbench-rail.module.css"
 import {
@@ -117,35 +118,41 @@ const Summary = ({ summary }: { readonly summary: WorkbenchSummary }) =>
     )
   })
 
-const isCurrent = (pullRequest: Domain.PullRequest, current: CurrentPullRequest | undefined): boolean =>
-  current !== undefined &&
-  String(pullRequest.id) === current.pullRequestId &&
-  (pullRequest.account.profile === current.accountId || pullRequest.account.awsAccountId === current.accountId)
-
-export interface CurrentPullRequest {
-  readonly accountId: string
-  readonly pullRequestId: string
-}
-
-/** The queue rail. `current` marks the pull request open beside it, when there is one. */
-export function WorkbenchRail({ current }: { readonly current?: CurrentPullRequest | undefined }) {
+/**
+ * The queue rail. `route` is the pull-request URL open beside it; it is resolved against the whole
+ * cache exactly as the PR page resolves it, so an ambiguous route marks no row.
+ */
+export function WorkbenchRail({ route }: { readonly route?: CodeCommitPullRequestRouteCoordinates | undefined }) {
   const appState = useAtomValue(appStateAtom)
   // Ages are measured when the queue data changes, which the server pushes on every refresh.
   const queue = useMemo(() => workbenchQueue(queuePullRequests(appState), appState.currentUser, new Date()), [appState])
-  return <WorkbenchRailView current={current} currentUser={appState.currentUser} queue={queue} />
+  const open = route === undefined ? null : selectCodeCommitPullRequest(appState.pullRequests, route).pullRequest
+  return (
+    <WorkbenchRailView
+      currentKey={open === null ? undefined : prListKey(open)}
+      currentUser={appState.currentUser}
+      queue={queue}
+    />
+  )
 }
 
 /** The rail's rendering, separate from app state so it can be exercised directly. */
 export function WorkbenchRailView({
-  current,
+  currentKey,
   currentUser,
   queue
 }: {
-  readonly current?: CurrentPullRequest | undefined
+  readonly currentKey?: string | undefined
   readonly currentUser: string | undefined
   readonly queue: WorkbenchQueue
 }) {
   const list = useRef<HTMLDivElement>(null)
+  // The roving tab stop: the row arrow keys last reached, reset when the open pull request changes,
+  // and falling back to the open row, then the first, when its row leaves the queue.
+  const [activeKey, setActiveKey] = useState(currentKey)
+  useEffect(() => setActiveKey(currentKey), [currentKey])
+  const keys = queue.rows.map((row) => prListKey(row.pullRequest))
+  const tabStop = [activeKey, currentKey].find((key) => key !== undefined && keys.includes(key)) ?? keys[0]
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const links = Array.from(list.current?.querySelectorAll<HTMLAnchorElement>("a[data-row]") ?? [])
     const index = links.findIndex((link) => link === document.activeElement)
@@ -161,8 +168,7 @@ export function WorkbenchRailView({
               : undefined
     if (target === undefined) return
     event.preventDefault()
-    for (const link of links) link.tabIndex = -1
-    target.tabIndex = 0
+    setActiveKey(target.dataset["row"])
     target.focus()
   }
   // Rows arrive sorted by group, so the groups and their order follow from the rows themselves.
@@ -170,7 +176,6 @@ export function WorkbenchRailView({
     group,
     rows: queue.rows.filter((row) => row.group === group)
   }))
-  const focusable = queue.rows.find((row) => isCurrent(row.pullRequest, current)) ?? queue.rows[0]
   return (
     <section aria-labelledby="workbench-queue-title" className={styles.region}>
       <header className={styles.head}>
@@ -190,10 +195,10 @@ export function WorkbenchRailView({
                 {rows.map((row) => (
                   <li key={prListKey(row.pullRequest)}>
                     <Link
-                      aria-current={isCurrent(row.pullRequest, current) ? "page" : undefined}
+                      aria-current={prListKey(row.pullRequest) === currentKey ? "page" : undefined}
                       className={styles.row}
-                      data-row
-                      tabIndex={row === focusable ? 0 : -1}
+                      data-row={prListKey(row.pullRequest)}
+                      tabIndex={prListKey(row.pullRequest) === tabStop ? 0 : -1}
                       to={prListHref(row.pullRequest)}
                     >
                       <span className={styles.repo}>
