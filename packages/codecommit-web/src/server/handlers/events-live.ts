@@ -3,7 +3,7 @@
  *
  * Streams a serialized SsePayload (pull requests, accounts, notifications,
  * sandboxes, pending review count, permission prompts) on every state or
- * repo change. Computes `pendingReviewCount` via {@link needsMyReview}.
+ * repo change.
  *
  * **Mental model**
  *
@@ -14,7 +14,7 @@
  * @module
  */
 import { CacheService, PRService } from "@knpkv/codecommit-core"
-import { AppStatus, listedForEnabledAccounts, needsMyReview, PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { AppStatus, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { PermissionGateLiveTag } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
 import { Duration, Effect, Option, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
 import { HttpServerResponse } from "effect/http"
@@ -46,7 +46,6 @@ const SsePayload = Schema.Struct({
     items: Schema.Array(NotificationResponse),
     nextCursor: Schema.optional(Schema.Number)
   }),
-  pendingReviewCount: Schema.Number.pipe(Schema.withDecodingDefaultType(Effect.succeed(0))),
   sandboxes: Schema.Array(SandboxResponse),
   permissionPrompt: Schema.optional(Schema.Struct({
     id: Schema.String,
@@ -126,14 +125,6 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
 
         const pendingPrompt = yield* permGate.getFirstPending()
 
-        // Counts the queue, not the cache: a switched-off account must not keep
-        // the review badge lit.
-        const pendingReviewCount = prState.currentUser !== undefined && prState.currentUser.length > 0
-          ? listedForEnabledAccounts(pullRequests, Option.getOrUndefined(enabledProfiles))
-            .filter((pr) => needsMyReview(pr, prState.currentUser))
-            .length
-          : 0
-
         const payload = yield* encode({
           accounts: prState.accounts,
           ...(Option.isSome(enabledProfiles) && { enabledProfiles: [...enabledProfiles.value] }),
@@ -143,7 +134,6 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           error: prState.error,
           lastUpdated: prState.lastUpdated,
           currentUser: prState.currentUser,
-          pendingReviewCount,
           unreadNotificationCount: unreadCount,
           notifications,
           sandboxes,
