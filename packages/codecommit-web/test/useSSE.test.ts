@@ -98,3 +98,26 @@ describe("SSE account visibility", () => {
     expect(queuePullRequests(state).map((pr) => String(pr.id))).toEqual(["11", "22"])
   })
 })
+
+describe("SSE caller identities", () => {
+  it("keeps every account's caller identity, resolved or not, from the wire snapshot", () => {
+    const callerIdentities = {
+      alpha: {
+        _tag: "Resolved",
+        accountId: "111111111111",
+        arn: "arn:aws:sts::111111111111:assumed-role/Reviewers/alice@example.com",
+        username: "alice@example.com"
+      },
+      beta: { _tag: "Unresolved", reason: { _tag: "CredentialsUnavailable" } }
+    }
+    const state = decodeSseState(JSON.stringify({
+      pullRequests: [],
+      accounts: [],
+      status: "idle",
+      pendingReviewCount: 0,
+      callerIdentities
+    }))
+
+    expect(state.callerIdentities).toEqual(callerIdentities)
+  })
+})

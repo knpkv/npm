@@ -597,6 +597,54 @@ export interface PullRequestRefreshScope {
 }
 
 /**
+ * Why the caller is unknown in one account: only the failures core can tell apart. An expired
+ * SSO login reaches core as a credential failure, with no expiry marker, so it is
+ * `CredentialsUnavailable`; `ExpiredToken` from STS itself is `StsRejected`. Reasons carry no
+ * message, because provider text can include profile paths; the account's notification explains.
+ *
+ * @category Domain
+ */
+export const CallerIdentityUnresolvedReason = Schema.Union([
+  /** Credentials could not be acquired: profile missing, SSO login expired, provider timed out. */
+  Schema.TaggedStruct("CredentialsUnavailable", {}),
+  /** STS answered GetCallerIdentity with an error, e.g. ExpiredToken or AccessDenied. */
+  Schema.TaggedStruct("StsRejected", {}),
+  /** STS was still throttling after retries. */
+  Schema.TaggedStruct("Throttled", {}),
+  /** The pull-request refresh hit an authentication error after the identity had resolved. */
+  Schema.TaggedStruct("RefreshAuthFailed", {})
+])
+
+/** @category Domain */
+export type CallerIdentityUnresolvedReason = typeof CallerIdentityUnresolvedReason.Type
+
+/**
+ * Who the caller is in one configured account, from STS GetCallerIdentity on its primary region.
+ * `arn` is the raw STS Arn: for an SSO session its last segment is usually the person's email, so it
+ * is a client-visible identifier that only travels to its owner over the authenticated event stream.
+ *
+ * @category Domain
+ */
+export const CallerIdentityState = Schema.Union([
+  Schema.TaggedStruct("Resolved", { accountId: Schema.String, arn: Schema.String, username: Schema.String }),
+  Schema.TaggedStruct("Unresolved", { reason: CallerIdentityUnresolvedReason })
+])
+
+/** @category Domain */
+export type CallerIdentityState = typeof CallerIdentityState.Type
+
+/**
+ * The caller's identity per configured account, keyed by AWS profile (the same value as
+ * `PullRequest.account.profile`). A profile with no key is not enabled, or not resolved yet.
+ *
+ * @category Domain
+ */
+export const CallerIdentities = Schema.Record(Schema.String, CallerIdentityState)
+
+/** @category Domain */
+export type CallerIdentities = typeof CallerIdentities.Type
+
+/**
  * Application state.
  *
  * @category Domain
@@ -609,6 +657,8 @@ export interface AppState {
   readonly error?: string | undefined
   readonly lastUpdated?: Date
   readonly currentUser?: string
+  /** Per-account caller identity; absent until the first refresh has resolved identities. */
+  readonly callerIdentities?: CallerIdentities
   readonly pendingReviewCount?: number
   /** Monotonic sequence incremented when a list refresh starts. */
   readonly refreshGeneration?: number

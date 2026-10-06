@@ -8,13 +8,16 @@ import { type AccountParams, makeApiError, normalizeAuthor, withAwsContext } fro
 export interface CallerIdentity {
   readonly username: string
   readonly accountId: string
+  /** Raw STS Arn, e.g. `arn:aws:sts::123:assumed-role/Reviewers/alice`. */
+  readonly arn: string
 }
 
 const callGetCallerIdentity = (account: AccountParams) =>
   sts.getCallerIdentity({}).pipe(
     Effect.map((resp): CallerIdentity => ({
       username: normalizeAuthor(resp.Arn ?? ""),
-      accountId: resp.Account ?? ""
+      accountId: resp.Account ?? "",
+      arn: resp.Arn ?? ""
     })),
     Effect.mapError((cause) => makeApiError("getCallerIdentity", account.profile, account.region, cause))
   )

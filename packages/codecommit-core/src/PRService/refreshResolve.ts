@@ -3,14 +3,21 @@
  * Phases 1+2: Load cached PRs, resolve config/identity/subscriptions.
  */
 
-import { Clock, DateTime, Effect, Option, Ref, Schema, SubscriptionRef } from "effect"
-import { AwsClient } from "../AwsClient/index.js"
+import { Clock, DateTime, Effect, Match, Option, Ref, Result, Schema, SubscriptionRef } from "effect"
+import { AwsClient, type CallerIdentity } from "../AwsClient/index.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import { PullRequestRepo, type PullRequestRepoContract } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
-import { type AppStatus, AwsRegion } from "../Domain.js"
+import {
+  type AppStatus,
+  AwsRegion,
+  type CallerIdentities,
+  type CallerIdentityState,
+  type CallerIdentityUnresolvedReason
+} from "../Domain.js"
+import type { AwsClientError } from "../Errors.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
 import { enabledProfilesOf, retainEnabledAccountRows } from "./visibility.js"
 
@@ -61,6 +68,27 @@ export interface ResolvedAccounts {
   readonly currentUser: string | undefined
 }
 
+const resolved = (identity: CallerIdentity): CallerIdentityState => ({
+  _tag: "Resolved",
+  accountId: identity.accountId,
+  arn: identity.arn,
+  username: identity.username
+})
+
+const unresolved = (reason: CallerIdentityUnresolvedReason): CallerIdentityState => ({ _tag: "Unresolved", reason })
+
+/**
+ * Why an identity lookup failed, decided by the error's type alone. Every AWS client error has a
+ * reason and there is no default branch, so a new error type fails to compile until it gets one.
+ */
+export const unresolvedReasonOf = (error: AwsClientError): CallerIdentityUnresolvedReason =>
+  Match.valueTags(error, {
+    AwsCredentialError: (): CallerIdentityUnresolvedReason => ({ _tag: "CredentialsUnavailable" }),
+    AwsApiError: (): CallerIdentityUnresolvedReason => ({ _tag: "StsRejected" }),
+    AwsThrottleError: (): CallerIdentityUnresolvedReason => ({ _tag: "Throttled" })
+  })
+
+/** Look up the caller in one account: record its AWS account id, and say who they are or why not. */
 const resolveIdentity = (
   accountIdRef: Ref.Ref<Map<string, string>>,
   account: AccountConfig,
@@ -75,12 +103,12 @@ const resolveIdentity = (
     const notificationRepo = yield* NotificationRepo
     const { clearCurrentUser, updateCurrentUser } = options ?? {}
 
-    const identity = yield* awsClient.getCallerIdentity({
+    const lookup = yield* awsClient.getCallerIdentity({
       profile: account.profile,
       region
-    }).pipe(Effect.catchIf(() => true, () => Effect.void))
+    }).pipe(Effect.result)
 
-    if (identity === undefined) {
+    if (Result.isFailure(lookup)) {
       yield* notificationRepo.addSystem({
         type: "error",
         title: `${account.profile} (${region})`,
@@ -89,11 +117,13 @@ const resolveIdentity = (
         deduplicate: true
       })
       if (clearCurrentUser !== undefined) yield* clearCurrentUser
-      return
+      return unresolved(unresolvedReasonOf(lookup.failure))
     }
 
+    const identity = lookup.success
     yield* Ref.update(accountIdRef, (m) => new Map(m).set(account.profile, identity.accountId))
     if (updateCurrentUser !== undefined) yield* updateCurrentUser(identity.username)
+    return resolved(identity)
   })
 
 export const resolveAccounts = (state: PRState) =>
@@ -151,7 +181,7 @@ export const resolveAccounts = (state: PRState) =>
     if (firstAccount === undefined) return undefined
     const firstRegion = primaryRegion(firstAccount)
 
-    yield* resolveIdentity(
+    const firstIdentity = yield* resolveIdentity(
       accountIdRef,
       firstAccount,
       firstRegion,
@@ -161,14 +191,19 @@ export const resolveAccounts = (state: PRState) =>
       }
     )
 
-    yield* Effect.forEach(
+    const remainingIdentities = yield* Effect.forEach(
       remainingAccounts,
-      (account) => {
-        const region = primaryRegion(account)
-        return resolveIdentity(accountIdRef, account, region)
-      },
-      { concurrency: 3, discard: true }
+      (account) =>
+        resolveIdentity(accountIdRef, account, primaryRegion(account)).pipe(
+          Effect.map((identity): readonly [string, CallerIdentityState] => [account.profile, identity])
+        ),
+      { concurrency: 3 }
     )
+    const callerIdentities: CallerIdentities = Object.fromEntries([
+      [firstAccount.profile, firstIdentity],
+      ...remainingIdentities
+    ])
+    yield* SubscriptionRef.update(state, (s) => ({ ...s, callerIdentities }))
 
     const accountIdMap = yield* Ref.get(accountIdRef)
 

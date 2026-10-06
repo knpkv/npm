@@ -9,12 +9,61 @@ import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { AccountConfig } from "../src/ConfigService/internal.js"
-import { type AppState, PullRequest } from "../src/Domain.js"
+import { type AppState, type CallerIdentityState, PullRequest } from "../src/Domain.js"
 import { AwsApiError } from "../src/Errors.js"
 import { fetchAndUpsertPRs } from "../src/PRService/refreshFetch.js"
 import { subscriptionKey } from "../src/PRService/refreshResolve.js"
 
 describe("fetchAndUpsertPRs", () => {
+  it.effect("marks the account's caller identity unresolved when its refresh fails authentication", () =>
+    Effect.gen(function*() {
+      const resolved: CallerIdentityState = {
+        _tag: "Resolved",
+        accountId: "123456789012",
+        arn: "arn:aws:sts::123456789012:assumed-role/Reviewers/alice",
+        username: "alice"
+      }
+      const state = yield* SubscriptionRef.make<AppState>({
+        pullRequests: [],
+        accounts: [],
+        status: "loading",
+        currentUser: "alice",
+        callerIdentities: { "test-profile": resolved, "other-profile": resolved }
+      })
+      const expiredAccount = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.fail(new Error("ExpiredTokenException: the security token has expired"))
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [expiredAccount],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: "alice",
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      const { callerIdentities, currentUser } = yield* SubscriptionRef.get(state)
+      expect(currentUser).toBeUndefined()
+      expect(callerIdentities).toEqual({
+        "test-profile": { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } },
+        "other-profile": resolved
+      })
+    }))
+
   const staleOpenPR = Schema.decodeSync(CachedPullRequest)({
     id: "35",
     awsAccountId: "123456789012",

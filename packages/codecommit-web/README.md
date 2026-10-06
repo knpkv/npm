@@ -14,3 +14,15 @@ request `Host` header is not an authority source. Browser reads that Fetch
 Metadata marks as cross-site, or as same-site/`none` without the bound Origin,
 are refused; explicit clients without Fetch Metadata still need the owner
 cookie.
+
+The authenticated event stream carries `callerIdentities`, the caller's identity
+per configured account and keyed by AWS profile. Each entry is either `Resolved`
+(`accountId`, `arn`, `username`) or `Unresolved` with a typed `reason`
+(`CredentialsUnavailable`, `StsRejected`, `Throttled` or `RefreshAuthFailed`). The
+client matches wildcard approval pools (`…/Reviewers/*`) against the exact `arn`
+of the account a pull request lives in. That ARN is a client-visible identifier:
+for SSO sessions its last segment is usually the person's email. It travels only
+to the owner it describes, over the owner-cookie-authenticated stream. It is never
+logged, never served on unauthenticated routes, and the browser keeps it only in
+its in-memory snapshot. Reasons carry no provider message; the account's
+notification explains the failure.

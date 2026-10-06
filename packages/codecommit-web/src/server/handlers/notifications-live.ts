@@ -9,7 +9,7 @@
  * @module
  */
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
-import { AwsRegion } from "@knpkv/codecommit-core/Domain.js"
+import { AwsRegion, type CallerIdentities, type CallerIdentityState } from "@knpkv/codecommit-core/Domain.js"
 import { Duration, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -17,6 +17,22 @@ import { ApiError, CodeCommitApi } from "../Api.js"
 import { BackgroundScope } from "../internal/BackgroundScope.js"
 
 const SSO_TIMEOUT = Duration.minutes(3)
+
+const resolvedIdentity = (identity: AwsClient.CallerIdentity): CallerIdentityState => ({
+  _tag: "Resolved",
+  accountId: identity.accountId,
+  arn: identity.arn,
+  username: identity.username
+})
+
+const credentialsUnavailable: CallerIdentityState = {
+  _tag: "Unresolved",
+  reason: { _tag: "CredentialsUnavailable" }
+}
+
+/** Every known account after a sign-out: its credentials are gone, so its identity is unknown. */
+const signedOut = (identities: CallerIdentities): CallerIdentities =>
+  Object.fromEntries(Object.keys(identities).map((profile) => [profile, credentialsUnavailable]))
 
 const exitCode = (cmd: ChildProcess.Command) =>
   Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) => spawner.exitCode(cmd))
@@ -82,7 +98,8 @@ export const NotificationsLive = HttpApiBuilder.group(
                       if (identity) {
                         yield* SubscriptionRef.update(prService.state, (s) => ({
                           ...s,
-                          currentUser: identity.username
+                          currentUser: identity.username,
+                          callerIdentities: { ...s.callerIdentities, [payload.profile]: resolvedIdentity(identity) }
                         }))
                       }
                     })
@@ -123,7 +140,15 @@ export const NotificationsLive = HttpApiBuilder.group(
               ssoSemaphore.withPermits(1)(
                 exitCode(cmd).pipe(
                   Effect.timeout(SSO_TIMEOUT),
-                  Effect.tap(() => SubscriptionRef.update(prService.state, ({ currentUser: _, ...rest }) => rest)),
+                  // `aws sso logout` signs out every SSO session, so no account's identity holds.
+                  Effect.tap(() =>
+                    SubscriptionRef.update(prService.state, ({ currentUser: _, ...rest }) => ({
+                      ...rest,
+                      ...(rest.callerIdentities !== undefined && {
+                        callerIdentities: signedOut(rest.callerIdentities)
+                      })
+                    }))
+                  ),
                   Effect.catchIf(() => true, (e) =>
                     Effect.logWarning("SSO logout failed", e).pipe(
                       Effect.andThen(notificationRepo.addSystem({

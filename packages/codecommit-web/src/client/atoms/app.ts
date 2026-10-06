@@ -62,6 +62,11 @@ export interface AppState {
   readonly error?: string
   readonly lastUpdated?: Date
   readonly currentUser?: string
+  /**
+   * The caller per account, keyed by profile. A wildcard pool decides exactly only for a
+   * `Resolved` identity; absent, a missing key, or `Unresolved` means membership is unknown.
+   */
+  readonly callerIdentities?: Domain.CallerIdentities
   readonly pendingReviewCount?: number
   readonly unreadNotificationCount?: number
   readonly notifications?: {

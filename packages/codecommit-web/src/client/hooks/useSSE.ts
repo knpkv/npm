@@ -19,7 +19,14 @@
  *
  * @module
  */
-import { AppStatus, AwsProfileName, AwsRegion, PullRequest, PullRequestStatus } from "@knpkv/codecommit-core/Domain.js"
+import {
+  AppStatus,
+  AwsProfileName,
+  AwsRegion,
+  CallerIdentities,
+  PullRequest,
+  PullRequestStatus
+} from "@knpkv/codecommit-core/Domain.js"
 import { Effect, Schema } from "effect"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
@@ -113,6 +120,8 @@ const SsePayload = Schema.Struct({
   error: Schema.optional(Schema.String),
   lastUpdated: Schema.optional(Schema.DateFromString),
   currentUser: Schema.optional(Schema.String),
+  // Declared here too: a field missing from this client schema is silently dropped.
+  callerIdentities: Schema.optional(CallerIdentities),
   pendingReviewCount: Schema.Number.pipe(Schema.withDecodingDefaultType(Effect.succeed(0))),
   unreadNotificationCount: Schema.optional(Schema.Number),
   notifications: Schema.optional(Schema.Struct({
@@ -159,6 +168,7 @@ const toAppState = (payload: typeof SsePayload.Type): AppState => {
     ...((payload.error !== undefined) && { error: payload.error }),
     ...((payload.lastUpdated !== undefined) && { lastUpdated: payload.lastUpdated }),
     ...((payload.currentUser !== undefined) && { currentUser: payload.currentUser }),
+    ...((payload.callerIdentities !== undefined) && { callerIdentities: payload.callerIdentities }),
     ...((payload.unreadNotificationCount !== undefined) &&
       { unreadNotificationCount: payload.unreadNotificationCount }),
     ...((notifications !== undefined) && { notifications }),

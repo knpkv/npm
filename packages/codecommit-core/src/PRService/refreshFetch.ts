@@ -19,9 +19,11 @@ import {
 } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
-import type { PullRequestRefreshScope } from "../Domain.js"
+import type { CallerIdentityState, PullRequestRefreshScope } from "../Domain.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
+
+const refreshAuthFailed: CallerIdentityState = { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }
 
 /** Resolve a stale cached PR: retain contradictory OPEN evidence, update a definitive merged/closed status. */
 const resolveStaleStatus = (
@@ -123,7 +125,14 @@ export const fetchAndUpsertPRs = (params: {
                   deduplicate: true
                 }).pipe(Effect.catch(() => Effect.void))
                 if (isAuthError) {
-                  yield* SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => rest)
+                  // The auth check is a text match on the provider error (see isAuthError above).
+                  yield* SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => ({
+                    ...rest,
+                    callerIdentities: {
+                      ...rest.callerIdentities,
+                      [account.profile]: refreshAuthFailed
+                    }
+                  }))
                 }
               })
             )
