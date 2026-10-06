@@ -6,6 +6,7 @@ import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { LogInIcon, LogOutIcon, SearchIcon, UserIcon } from "lucide-react"
 import { StatePanel } from "@knpkv/rly/primitives"
+import switchStyles from "./settings-accounts.module.css"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {
   appStateAtom,
@@ -35,6 +36,13 @@ interface ConfigData {
   readonly currentUser?: string | undefined
 }
 
+interface SavePayload {
+  readonly accounts: Array<{ profile: string; regions: Array<string>; enabled: boolean }>
+  readonly autoDetect: boolean
+  readonly autoRefresh: boolean
+  readonly refreshIntervalSeconds: number
+}
+
 export function SettingsAccounts() {
   const config = useAtomValue(configQueryAtom)
   const appState = useAtomValue(appStateAtom)
@@ -45,23 +53,24 @@ export function SettingsAccounts() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
   const debounceRef = useRef<NodeJS.Timeout | null>(null)
+  // The change waiting out the debounce. Leaving the page sends it rather than dropping it: switching an
+  // account on and going straight back to the queue must still switch it on.
+  const pendingRef = useRef<SavePayload | null>(null)
 
   useEffect(
     () => () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
+      if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+      if (pendingRef.current !== null) saveConfig({ payload: pendingRef.current })
     },
-    []
+    [saveConfig]
   )
 
   const saveWithDebounce = useCallback(
-    (payload: {
-      accounts: Array<{ profile: string; regions: Array<string>; enabled: boolean }>
-      autoDetect: boolean
-      autoRefresh: boolean
-      refreshIntervalSeconds: number
-    }) => {
-      if (debounceRef.current) clearTimeout(debounceRef.current)
+    (payload: SavePayload) => {
+      if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+      pendingRef.current = payload
       debounceRef.current = setTimeout(() => {
+        pendingRef.current = null
         saveConfig({ payload })
       }, 500)
     },
@@ -245,7 +254,7 @@ function AccountsList({
   return (
     <>
       {/* Who is signed in only means something once a profile exists. */}
-      <div className="flex items-center gap-2 text-sm" hidden={accounts.length === 0}>
+      <div className="flex items-center gap-2 text-sm" hidden={enabledCount === 0}>
         <UserIcon className="size-4 text-muted-foreground" />
         {currentUser ? (
           <>
@@ -329,7 +338,7 @@ function AccountsList({
                 </span>
                 <input
                   checked={account.enabled}
-                  className="size-5 shrink-0 cursor-pointer"
+                  className={switchStyles.switch}
                   onChange={() => toggleAccount(account.profile, data)}
                   role="switch"
                   type="checkbox"

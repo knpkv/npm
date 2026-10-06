@@ -167,6 +167,9 @@ export function PRList() {
     appState.currentUser !== undefined && appState.currentUser !== "" ? (appState.notifications?.items ?? []) : []
 
   const enabledAccounts = appState.enabledProfiles?.length ?? profiles.length
+  // A zero is only true once an account's pull requests were read: not before the first snapshot, nor
+  // while the first sync runs or waits for permission.
+  const countsKnown = snapshotSeen && (prs.length > 0 || (!isLoading && appState.permissionPrompt?.category !== "read"))
 
   const listContent = (() => {
     // Before the first snapshot only the connection is known; after it, the snapshot says why it's empty.
@@ -400,11 +403,8 @@ export function PRList() {
             >
               <span className={styles.facetLabel}>{facet.label}</span>
               {/* Unknown until the first snapshot: never a 0 that the page can't vouch for. */}
-              <span
-                aria-label={snapshotSeen ? `${facet.count} pull requests` : "unknown"}
-                className={styles.facetCount}
-              >
-                {snapshotSeen ? facet.count : "—"}
+              <span aria-label={countsKnown ? `${facet.count} pull requests` : "unknown"} className={styles.facetCount}>
+                {countsKnown ? facet.count : "—"}
               </span>
             </button>
           ))}

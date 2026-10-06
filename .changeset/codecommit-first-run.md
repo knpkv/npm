@@ -15,3 +15,4 @@ A first run of the CodeCommit web app now leads somewhere at every step.
 - Settings → Accounts lists each profile as a switch named by the profile, and auto-detect is a checkbox. A settings or stats read that fails stays in its region with the reason (and Retry for stats) instead of replacing the page.
 - `codecommit web` prints the sign-in link on its own, saying it works once within 60 seconds.
 - Approval rules this page created can be removed.
+- Switching an account on and leaving Settings straight away no longer loses the change: a pending save is sent when the page closes. Counts read as unknown, not 0, while the first sync runs or waits for permission.
