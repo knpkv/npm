@@ -175,10 +175,16 @@ const secureRequestBody = (
     request.end()
   })
 
+/**
+ * Picks a free loopback port and releases it. Another process can take it
+ * before the caller binds it, so use it only when a port must be known before
+ * any listener exists; otherwise bind port 0 and read the bound address.
+ */
 const reserveLoopbackPort = (): Promise<number> =>
   new Promise((resolve, reject) => {
     const reservation = createServer()
     reservation.once("error", reject)
+    // ast-grep-ignore: no-released-ephemeral-test-port -- one test must probe a port before hostd binds it (see its use).
     reservation.listen(0, "127.0.0.1", () => {
       let port: number
       try {
@@ -191,6 +197,43 @@ const reserveLoopbackPort = (): Promise<number> =>
       reservation.close((error) => error === undefined ? resolve(port) : reject(error))
     })
   })
+
+const isAddressInUse = Schema.is(Schema.Struct({ code: Schema.Literal("EADDRINUSE") }))
+
+/**
+ * Starts hostd with an approval-hub port chosen up front. The serve listener
+ * checks the Host header against `approvalHub.url`, so that one port must be
+ * known before binding; every other listener should bind port 0 and be read
+ * back from the started server. A reserved port can be taken by another
+ * process before hostd binds it, so a start that fails with EADDRINUSE retries
+ * with a fresh reservation.
+ */
+const startWithApprovalPort = <A>(start: (approvalPort: number) => Promise<A>): Promise<A> => {
+  const attempt = async (remaining: number): Promise<A> => {
+    const approvalPort = await reserveLoopbackPort()
+    try {
+      return await start(approvalPort)
+    } catch (error) {
+      if (remaining > 1 && isAddressInUse(error)) return attempt(remaining - 1)
+      throw error
+    }
+  }
+  return attempt(5)
+}
+
+/** Binds `server` to an ephemeral port on `host` and returns the port it got. */
+const listenOn = (server: ReturnType<typeof createServer>, host: string): Promise<number> =>
+  new Promise((resolve, reject) => {
+    server.once("error", reject)
+    server.listen(0, host, () => {
+      const address = Schema.decodeUnknownResult(Schema.Struct({ port: Schema.Number }))(server.address())
+      if (Result.isFailure(address)) reject(address.failure)
+      else resolve(address.success.port)
+    })
+  })
+
+/** The port a started listener actually bound, read from its URL; a listener that did not start throws. */
+const boundPort = (url: string | null): number => Number(new URL(url ?? "").port)
 
 const workPreflightFromFleetctl = (
   operation: "admission-preflight" | "recovery-preflight" | "recovery-context",
@@ -296,26 +339,6 @@ const decodeWorkCheckpoint = (input: WorkCheckpointTestPayload) =>
       (cause) => new FleetValidationError({ detail: `invalid request: ${String(cause)}` })
     )
   )
-
-const availablePort = (): Promise<number> =>
-  new Promise((resolve, reject) => {
-    const reservation = createServer()
-    reservation.once("error", reject)
-    reservation.listen(0, "127.0.0.1", () => {
-      const address = Schema.decodeUnknownResult(
-        Schema.Struct({ port: Schema.Number })
-      )(reservation.address())
-      if (Result.isFailure(address)) {
-        reservation.close()
-        reject(address.failure)
-        return
-      }
-      reservation.close((error) => {
-        if (error === undefined) resolve(address.success.port)
-        else reject(error)
-      })
-    })
-  })
 
 const requestStatus = (url: string, host: string): Promise<number> =>
   new Promise((resolve, reject) => {
@@ -1725,16 +1748,12 @@ esac
     return Effect.scoped(
       Effect.gen(function*() {
         yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
-        const approvalPort = yield* Effect.promise(reserveLoopbackPort)
-        const localPort = yield* Effect.promise(reserveLoopbackPort)
-        const workPort = yield* Effect.promise(reserveLoopbackPort)
-        const listenerConfig = {
+        // Local and work listeners bind port 0; only the approval hub's port is chosen up front.
+        const baseListenerConfig = {
           ...hostConfig,
-          localPort,
-          port: workPort,
-          approvalPort,
-          machines: [...hostConfig.machines, { host: "ALPHA", nodeId: "node-alpha" }],
-          approvalHub: { ...hostConfig.approvalHub, url: `https://127.0.0.1:${approvalPort}/` }
+          localPort: 0,
+          port: 0,
+          machines: [...hostConfig.machines, { host: "ALPHA", nodeId: "node-alpha" }]
         }
         const workStore = yield* WorkStore.open(join(root, "approval-app.sqlite"))
         yield* Effect.addFinalizer(() => Effect.sync(() => workStore.close()))
@@ -1800,9 +1819,19 @@ esac
         const jobStore = yield* JobStore.open(join(root, "jobs.sqlite"))
         yield* Effect.addFinalizer(() => Effect.sync(() => jobStore.close()))
         const fleet = yield* makeFleetService({ approvalEnabled: true, host: "SER8", operations, store: jobStore })
-        const server = yield* Effect.acquireRelease(
-          Effect.promise(() => startHttpServer(listenerConfig, fleet, assets, { terminalConnector: unusedTerminal })),
-          (running) => Effect.promise(running.close)
+        const { approvalPort, listenerConfig, server } = yield* Effect.acquireRelease(
+          Effect.promise(() =>
+            startWithApprovalPort(async (approvalPort) => {
+              const listenerConfig = {
+                ...baseListenerConfig,
+                approvalPort,
+                approvalHub: { ...hostConfig.approvalHub, url: `https://127.0.0.1:${approvalPort}/` }
+              }
+              const server = await startHttpServer(listenerConfig, fleet, assets, { terminalConnector: unusedTerminal })
+              return { approvalPort, listenerConfig, server }
+            })
+          ),
+          (running) => Effect.promise(running.server.close)
         )
         if (server.serveUrl === null) {
           return yield* Effect.die("serve URL missing")
@@ -1867,7 +1896,12 @@ esac
           target: recoveryTarget
         })
         const cliConfigPath = join(root, "fleet.json")
-        writeFileSync(cliConfigPath, JSON.stringify(listenerConfig))
+        // fleetctl reaches the listeners hostd actually bound.
+        writeFileSync(
+          cliConfigPath,
+          // On a cross-host hub, `port` is served by the tailnet listener.
+          JSON.stringify({ ...listenerConfig, localPort: boundPort(server.url), port: boundPort(server.tailnetUrl) })
+        )
         const contextPath = `/v1/work/recovery-context?goalId=${encodeURIComponent(unlinked.goal.id)}`
         const contextResponse = yield* Effect.promise(() =>
           secureRequestBody(`${server.serveUrl}${contextPath}`, headers)
@@ -1979,9 +2013,8 @@ esac
     const root = mkdtempSync(join(tmpdir(), "herdr-http-local-preflight-"))
     return Effect.gen(function*() {
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
-      const localPort = yield* Effect.promise(reserveLoopbackPort)
-      const workPort = yield* Effect.promise(reserveLoopbackPort)
-      const hostConfig = { ...config(root), localPort, port: workPort }
+      // Both listeners bind port 0; fleetctl gets the ports hostd actually bound.
+      const hostConfig = { ...config(root), localPort: 0, port: 0 }
       const workStore = yield* WorkStore.open(join(root, "approval-app.sqlite"))
       yield* Effect.addFinalizer(() => Effect.sync(() => workStore.close()))
       const work = yield* makeWorkService(workStore)
@@ -2006,7 +2039,7 @@ esac
         Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: unusedTerminal })),
         (running) => Effect.promise(running.close)
       )
-      expect(server.url).toBe(`http://127.0.0.1:${localPort}`)
+      expect(server.url).toMatch(/^http:\/\/127\.0\.0\.1:[1-9][0-9]*$/)
       const admissionTarget = {
         repository: "knpkv/npm",
         pullRequest: 434,
@@ -2029,7 +2062,10 @@ esac
         expectedGoalUpdatedAt: unlinked.goal.updatedAt
       }
       const cliConfigPath = join(root, "fleet.json")
-      writeFileSync(cliConfigPath, JSON.stringify(hostConfig))
+      writeFileSync(
+        cliConfigPath,
+        JSON.stringify({ ...hostConfig, localPort: boundPort(server.url), port: boundPort(server.workUrl) })
+      )
       const context = yield* Effect.promise(() =>
         workPreflightFromFleetctl("recovery-context", cliConfigPath, unlinked.goal.id, "ALPHA")
       )
@@ -2417,6 +2453,7 @@ esac
     )
     const hostConfig = {
       ...config(root),
+      approvalPort: 0,
       crossHost: true,
       port: 0,
       tailscaleCommand
@@ -2745,7 +2782,6 @@ esac
       (store) =>
         Effect.scoped(
           Effect.gen(function*() {
-            const pendingPort = yield* Effect.promise(availablePort)
             const peerServer = createServer((request, response) => {
               const requestUrl = new URL(request.url ?? "/", "http://peer.local")
               const hasCursor = requestUrl.searchParams.has("cursorCreatedAt")
@@ -2770,13 +2806,7 @@ esac
                 nextCursor: hasCursor ? null : { createdAt: 1, id: "legacy-peer-job" }
               }))
             })
-            yield* Effect.promise(
-              () =>
-                new Promise<void>((resolve, reject) => {
-                  peerServer.once("error", reject)
-                  peerServer.listen(pendingPort, "127.0.0.2", resolve)
-                })
-            )
+            const pendingPort = yield* Effect.promise(() => listenOn(peerServer, "127.0.0.2"))
             yield* Effect.addFinalizer(() =>
               Effect.promise(
                 () =>
@@ -2785,8 +2815,7 @@ esac
                   })
               )
             )
-            const approvalPort = yield* Effect.promise(availablePort)
-            const hostConfig: HostConfiguration = {
+            const hostConfigFor = (approvalPort: number): HostConfiguration => ({
               ...config(root),
               approvalHub: {
                 host: "ALPHA",
@@ -2800,20 +2829,23 @@ esac
               host: "ALPHA",
               port: pendingPort,
               tailscaleCommand: tailscale
-            }
+            })
             const fleet = yield* makeFleetService({
               approvalEnabled: true,
-              host: hostConfig.host,
+              host: "ALPHA",
               operations,
               store
             })
-            const server = yield* Effect.acquireRelease(
+            const { approvalPort, server } = yield* Effect.acquireRelease(
               Effect.promise(() =>
-                startHttpServer(hostConfig, fleet, assets, {
-                  terminalConnector: unusedTerminal
-                })
+                startWithApprovalPort(async (approvalPort) => ({
+                  approvalPort,
+                  server: await startHttpServer(hostConfigFor(approvalPort), fleet, assets, {
+                    terminalConnector: unusedTerminal
+                  })
+                }))
               ),
-              (running) => Effect.promise(running.close)
+              (running) => Effect.promise(running.server.close)
             )
             if (server.serveUrl === null) {
               return yield* new FleetValidationError({
@@ -3571,7 +3603,9 @@ esac
   it.effect("finishes restart recovery before accepting jobs", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-recovery-test-"))
     return Effect.gen(function*() {
-      const localPort = yield* Effect.promise(availablePort)
+      // This test probes the local port before hostd binds it, so it needs the
+      // number up front; every other test lets hostd bind port 0.
+      const localPort = yield* Effect.promise(reserveLoopbackPort)
       const hostConfig = { ...config(root), localPort }
       const recoveryEntered = yield* Deferred.make<void>()
       const releaseRecovery = yield* Deferred.make<void>()
@@ -3635,8 +3669,7 @@ esac
   it.effect("does not run recovered work when listener startup fails", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-listen-failure-test-"))
     return Effect.gen(function*() {
-      const localPort = yield* Effect.promise(availablePort)
-      const hostConfig = { ...config(root), localPort }
+      const hostConfig = { ...config(root), localPort: 0 }
       const operationStarted = yield* Deferred.make<void>()
       let runs = 0
       const recoveryOperations: HostOperations = {
@@ -3662,14 +3695,9 @@ esac
             yield* fleet.submit({ payload: { kind: "nix.check" } }, "local")
             yield* Effect.scoped(
               Effect.gen(function*() {
+                // The blocker takes an ephemeral port first, so hostd's local listener cannot bind it.
                 const blocker = createServer()
-                yield* Effect.promise(
-                  () =>
-                    new Promise<void>((resolve, reject) => {
-                      blocker.once("error", reject)
-                      blocker.listen(localPort, "127.0.0.1", resolve)
-                    })
-                )
+                const blockedPort = yield* Effect.promise(() => listenOn(blocker, "127.0.0.1"))
                 yield* Effect.addFinalizer(() =>
                   Effect.promise(
                     () => new Promise<void>((resolve) => blocker.close(() => resolve()))
@@ -3677,7 +3705,7 @@ esac
                 )
                 const failed = yield* Effect.result(
                   Effect.tryPromise(() =>
-                    startHttpServer(hostConfig, fleet, assets, {
+                    startHttpServer({ ...hostConfig, localPort: blockedPort }, fleet, assets, {
                       terminalConnector: unusedTerminal
                     })
                   )
@@ -3696,7 +3724,7 @@ esac
               (running) => Effect.promise(running.close)
             )
             yield* Deferred.await(operationStarted)
-            expect(server.url).toContain(`:${localPort}`)
+            expect(boundPort(server.url)).toBeGreaterThan(0)
             expect(runs).toBe(1)
           }).pipe(Effect.scoped),
         (store) => Effect.sync(() => store.close())
@@ -3722,6 +3750,7 @@ esac
     )
     const hostConfig = {
       ...config(root),
+      approvalPort: 0,
       crossHost: true,
       port: 0,
       tailscaleCommand

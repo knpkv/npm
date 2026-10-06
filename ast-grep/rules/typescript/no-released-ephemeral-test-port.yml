@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-released-ephemeral-test-port
+language: tsx
+severity: error
+message: "Bind the server under test to port 0 and read its bound address; a port reserved and released here can be taken before it is used"
+rule:
+  pattern: $SERVER.listen(0, $$$)
+  has:
+    field: arguments
+    has:
+      any:
+        - kind: arrow_function
+        - kind: function_expression
+      has:
+        pattern: $SERVER.close($$$)
+        stopBy: end
+
+files:
+  - "packages/*/test/**/*.ts"
+  - "packages/*/test/**/*.tsx"
+
+note: |
+  Picking a free port by listening on port 0, closing, and handing the number
+  to another listener races with every other process on the machine: two test
+  suites running at once collided this way with EADDRINUSE. Let the listener
+  under test bind port 0 itself and read the port back from it. When a port
+  truly must be known before any listener exists (for example, a test that
+  proves nothing listens yet), suppress with
+  `// ast-grep-ignore: no-released-ephemeral-test-port` and a reason.

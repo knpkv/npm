@@ -1,0 +1,70 @@
+id: no-released-ephemeral-test-port
+snapshots:
+  ? |
+    const reserve = () =>
+      new Promise((resolve) => {
+        const probe = createServer()
+        probe.listen(0, "127.0.0.1", () => {
+          const port = probe.address().port
+          probe.close(() => resolve(port))
+        })
+      })
+  : labels:
+      - source: |-
+          probe.listen(0, "127.0.0.1", () => {
+                const port = probe.address().port
+                probe.close(() => resolve(port))
+              })
+        style: primary
+        start: 88
+        end: 210
+      - source: probe.close(() => resolve(port))
+        style: secondary
+        start: 171
+        end: 203
+      - source: |-
+          () => {
+                const port = probe.address().port
+                probe.close(() => resolve(port))
+              }
+        style: secondary
+        start: 117
+        end: 209
+      - source: |-
+          () => {
+                const port = probe.address().port
+                probe.close(() => resolve(port))
+              }
+        style: secondary
+        start: 117
+        end: 209
+  ? |
+    reservation.listen(0, "127.0.0.1", function() {
+      reservation.close()
+    })
+  : labels:
+      - source: |-
+          reservation.listen(0, "127.0.0.1", function() {
+            reservation.close()
+          })
+        style: primary
+        start: 0
+        end: 72
+      - source: reservation.close()
+        style: secondary
+        start: 50
+        end: 69
+      - source: |-
+          function() {
+            reservation.close()
+          }
+        style: secondary
+        start: 35
+        end: 71
+      - source: |-
+          function() {
+            reservation.close()
+          }
+        style: secondary
+        start: 35
+        end: 71
