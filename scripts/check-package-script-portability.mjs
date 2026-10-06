@@ -18,13 +18,18 @@ const isBuildScript = (name) => name.split(":").some((segment) => buildLifecycle
 const browserPairingBuild = /^pnpm\s+--filter\s+"?@knpkv\/browser-pairing"?\s+build\s*$/u
 const reviewGraphBuild = /^pnpm\s+--filter\s+"?@knpkv\/review\.\.\."?\s+build\s*$/u
 const storybookTestCommand = /^pnpm\s+(?:run\s+)?test:storybook\s*$/u
+// The Storybook Vitest project itself, options in any order.
+const storybookVitestRun =
+  /^vitest\s+run(?=(?:\s+\S+)*\s+--config\s+vitest\.storybook\.config\.ts(?:\s|$))(?=(?:\s+\S+)*\s+--project\s+storybook(?:\s|$))(?:\s+\S+)+\s*$/u
 const codeCommitWebRoleCheck = /^tsc\s+-p\s+tsconfig\.roles\.json\s+--noEmit$/u
 const protectedExecutableName = (matcher) =>
   matcher === browserPairingBuild || matcher === reviewGraphBuild || matcher === storybookTestCommand
     ? "pnpm"
     : matcher === codeCommitWebRoleCheck
       ? "tsc"
-      : undefined
+      : matcher === storybookVitestRun
+        ? "vitest"
+        : undefined
 const browserPairingConsumerLifecycleRequirements = [
   {
     script: "predev",
@@ -1507,9 +1512,9 @@ export const findNonPortableBuildScripts = (manifestPath, scripts) =>
 export const findStorybookLifecycleGaps = (manifestPath, scripts, hasStorybookConfig) => {
   if (!hasStorybookConfig) return []
   return [
-    ...(scripts?.["test:storybook"] === undefined
-      ? [`${manifestPath}: scripts.test:storybook must run the Storybook Vitest project`]
-      : []),
+    ...(hasReachableLifecycleCommand(scripts?.["test:storybook"] ?? "", storybookVitestRun)
+      ? []
+      : [`${manifestPath}: scripts.test:storybook must run the Storybook Vitest project`]),
     ...(hasReachableLifecycleCommand(scripts?.["test:browser"] ?? "", storybookTestCommand)
       ? []
       : [`${manifestPath}: scripts.test:browser must invoke pnpm test:storybook`])
@@ -1547,6 +1552,36 @@ assert.deepEqual(findStorybookLifecycleGaps("packages/other/package.json", {}, t
   "packages/other/package.json: scripts.test:browser must invoke pnpm test:storybook"
 ])
 assert.deepEqual(findStorybookLifecycleGaps("packages/other/package.json", {}, false), [])
+for (const command of [
+  "echo skipped",
+  "vitest run --config vitest.config.ts --project storybook",
+  "vitest run --config vitest.storybook.config.ts --project unit",
+  "vitest run --config vitest.storybook.config.ts --project storybook || true",
+  "exit 0; vitest run --config vitest.storybook.config.ts --project storybook"
+]) {
+  assert.deepEqual(
+    findStorybookLifecycleGaps(
+      "packages/agent-usage/package.json",
+      { "test:storybook": command, "test:browser": "pnpm test:storybook && playwright test" },
+      true
+    ),
+    ["packages/agent-usage/package.json: scripts.test:storybook must run the Storybook Vitest project"]
+  )
+}
+for (const command of [
+  "vitest run --config vitest.storybook.config.ts --project storybook",
+  "vitest run --project storybook --config vitest.storybook.config.ts",
+  "pnpm storybook:deps && vitest run --config vitest.storybook.config.ts --project storybook"
+]) {
+  assert.deepEqual(
+    findStorybookLifecycleGaps(
+      "packages/agent-usage/package.json",
+      { "test:storybook": command, "test:browser": "pnpm test:storybook && playwright test" },
+      true
+    ),
+    []
+  )
+}
 assert.deepEqual(findStorybookLifecycleGaps("packages/other/package.json", storybookScripts, false), [])
 
 export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependencies, devDependencies) => {
