@@ -4,15 +4,15 @@
  * The review workspace shows Relay as a third column when its grid is wide, and stacked under
  * the diff on narrow screens. Between those, a third column would squeeze the diff, so the pane
  * moves into a native modal `<dialog>` opened from a header button ("Relay" before a review,
- * "Findings (n)" after): Esc closes it, and the browser returns focus to that button. The command
- * palette shortcut closes it too, so the palette does not open behind the modal. The findings and
+ * "Findings (n)" after): Esc closes it, and the browser returns focus to that button. Any other
+ * dialog opening meanwhile (the command palette, a permission prompt) closes it first, so that
+ * dialog is never left inert behind the modal. The findings and
  * the selection live in the workspace and survive a move between placements; the pane itself
  * remounts, so DOM-only state (an expanded Evidence section, the deck's scroll) resets on a resize.
  *
  * @module
  */
 import { type ReactNode, type RefObject, useEffect, useRef } from "react"
-import { isCommandPaletteShortcut } from "./command-palette.js"
 import styles from "./findings-drawer.module.css"
 
 /**
@@ -54,6 +54,29 @@ export function FindingsDrawer({
     if (open && !element.open) element.showModal()
     if (!open && element.open) element.close()
   }, [open])
+  // A native modal sits above every portal-based dialog, which it would leave inert behind it (the
+  // command palette, a permission prompt). So the drawer steps aside for any other dialog: it closes
+  // as soon as one appears, and hands it the focus it could not take while the modal was open.
+  useEffect(() => {
+    const element = dialog.current
+    if (!open || element === null) return
+    const observer = new MutationObserver(() => {
+      const other = [...document.querySelectorAll<HTMLElement>("[role='dialog'], [role='alertdialog']")].find(
+        (candidate) => !element.contains(candidate)
+      )
+      if (other === undefined || !element.open) return
+      element.close()
+      // That dialog tried to take focus while the modal still made it inert; give it focus now.
+      if (!other.contains(document.activeElement)) {
+        const first = other.querySelector<HTMLElement>(
+          "input, textarea, select, button, [href], [tabindex]:not([tabindex='-1'])"
+        )
+        ;(first ?? other).focus()
+      }
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [open])
   return (
     <dialog
       aria-labelledby="findings-drawer-title"
@@ -67,9 +90,6 @@ export function FindingsDrawer({
           returnFocus.current?.focus()
         }
         onClose()
-      }}
-      onKeyDown={(event) => {
-        if (isCommandPaletteShortcut(event)) onClose()
       }}
       ref={dialog}
     >

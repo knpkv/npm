@@ -166,7 +166,7 @@ test("keeps the diff inside the workspace in the drawer layout of a narrow colum
 })
 
 // The palette opens in a portal under body; a native modal above it would leave it inert.
-test("closes the drawer when the command palette opens, so the palette takes input", async ({ page }) => {
+test("steps aside for the command palette, so the palette takes input", async ({ page }) => {
   await page.setViewportSize({ height: 900, width: 1280 })
   await serve(page)
   await page.goto(detail)
@@ -180,6 +180,43 @@ test("closes the drawer when the command palette opens, so the palette takes inp
   await expect(input).toBeFocused()
   await page.keyboard.type("Settings")
   await expect(input).toHaveValue("Settings")
+})
+
+// A permission prompt pushed while the drawer is open closes the drawer and can be answered.
+test("keeps a permission prompt usable while the drawer is open", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  await page.goto(detail)
+
+  await page.getByRole("button", { name: "Relay", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  await page.unroute("**/api/events/")
+  await page.route("**/api/events/", (route) =>
+    route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          accounts: [],
+          currentUser: "viewer",
+          enabledProfiles: ["production"],
+          permissionPrompt: {
+            category: "read",
+            context: "Refresh pull requests",
+            id: "prompt-1",
+            operation: "codecommit:GetPullRequest"
+          },
+          pullRequests,
+          sandboxes: [],
+          status: "idle"
+        })
+      }\n\n`,
+      contentType: "text/event-stream"
+    }))
+  await expect(page.getByRole("dialog", { name: "Relay" })).toBeHidden({ timeout: 15_000 })
+  const allow = page.getByRole("button", { name: "Allow Once" })
+  await expect(allow).toBeVisible({ timeout: 15_000 })
+  const answered = page.waitForRequest((request) => request.url().includes("/permissions/respond"))
+  await allow.click()
+  expect((await answered).postDataJSON()).toEqual({ id: "prompt-1", response: "allow_once" })
 })
 
 // A reader inside Relay who narrows the window keeps the pane: it moves into the drawer, open.
