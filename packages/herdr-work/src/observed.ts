@@ -17,10 +17,36 @@ import type {
  * lowercased: `Knpkv/npm` and `knpkv/npm` are one subject.
  */
 export const pullRequestSubject = (repository: string, pullRequest: number): string =>
-  `github:${repository.toLowerCase()}#${pullRequest}`
+  `github:${asciiLower(repository)}#${pullRequest}`
 
 /** The subject an agent's facts and failures are stored under; the host is case-insensitive. */
-export const agentSubject = (host: string, agentId: string): string => `herdr:${host.toLowerCase()}/${agentId}`
+export const agentSubject = (host: string, agentId: string): string => `herdr:${asciiLower(host)}/${agentId}`
+
+/**
+ * Lowercases ASCII letters only. Full Unicode lowercasing can lengthen a
+ * string (`İ` becomes two code units), which would push a bounded identity
+ * past its limit; hosts and GitHub names compare case-insensitively in ASCII.
+ */
+export const asciiLower = (value: string): string => value.replace(/[A-Z]/g, (letter) => letter.toLowerCase())
+
+const githubSubject = /^github:([^#]+)#([1-9][0-9]*)$/
+const herdrSubject = /^herdr:([^/]+)\/(.+)$/
+
+/**
+ * The canonical form of a subject a failed read names, so it lands on the
+ * same row as that subject's facts; null when the subject does not belong to
+ * its source (a `github` failure must name `github:<repo>#<n>`, a `herdr`
+ * failure `herdr:<host>/<agentId>`). `git` subjects are kept as given.
+ */
+export const canonicalSubject = (source: "github" | "herdr" | "git", subject: string): string | null => {
+  if (source === "git") return subject
+  if (source === "github") {
+    const match = githubSubject.exec(subject)
+    return match?.[1] === undefined || match[2] === undefined ? null : pullRequestSubject(match[1], Number(match[2]))
+  }
+  const match = herdrSubject.exec(subject)
+  return match?.[1] === undefined || match[2] === undefined ? null : agentSubject(match[1], match[2])
+}
 
 /**
  * The key one observation is stored under: one pull request, or one agent on
@@ -34,7 +60,7 @@ export const observationSubject = (observation: WorkObservation): string => {
     case "agent":
       return agentSubject(observation.host, observation.agentId)
     case "unknown":
-      return observation.subject
+      return canonicalSubject(observation.source, observation.subject) ?? observation.subject
   }
 }
 

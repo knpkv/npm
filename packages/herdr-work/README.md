@@ -38,9 +38,13 @@ has been gone for more than 24 hours on unfinished work. Entries are kept, most
 recently updated goals first, while the encoded snapshots fit the 1 MiB response
 budget; any left out are counted in `observedOmitted`. `observed` is always
 present, empty when nothing was observed; when not even that fits, the `now`
-window carries no overlay keys, which means live state is not available. A snapshot taken at an explicit
-time shows only what was known by then: facts first seen by then, with the last
-confirmation made by then, and failures whose latest failed read was by then.
+window carries no overlay keys, which means live state is not available. The overlay keeps only the latest
+facts per subject, not their history, so a snapshot taken at an explicit time
+shows a subject's current facts only if they were first seen by then (with
+their latest confirmation if it was made by then, else their first sighting),
+and a failure only if its latest failed read was by then. Facts that were
+replaced later are not shown at all. Failure subjects are spelled the same way
+as fact subjects; a failure that names another source's subject is rejected.
 Earlier windows stay as recorded. A goal's agent is its agent hierarchy, or its
 connect target on older goals; host and repository letter case never makes a
 new fact.

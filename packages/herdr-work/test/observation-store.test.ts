@@ -388,4 +388,26 @@ describe("observed facts", () => {
         since: 6_000
       })
     })))
+
+  it.effect("files a failed read under its subject's canonical spelling, and rejects one that names another source", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* work.record({ eventId: "goal-pr7.1", goal, occurredAt: 1_000, version: "herdr.work.event.v1" })
+      yield* work.observe([
+        at(100, { _tag: "unknown", reason: "gh: 502", source: "github", subject: "github:Knpkv/NPM#7" })
+      ])
+      expect((yield* work.snapshots(10_000)).now.observed?.[0]?.unknown?.reason).toBe("gh: 502")
+      expect(
+        yield* Effect.flip(work.observe([
+          at(200, { _tag: "unknown", reason: "x", source: "github", subject: "herdr:ser8/agent-owner" })
+        ]))
+      ).toMatchObject({ _tag: "WorkStoreError", operation: "observe.subject" })
+    })))
+
+  it.effect("keeps a non-ASCII host within its bound when it folds letter case", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      const report = yield* work.observe([at(100, { ...agent("idle"), host: "İ".repeat(256) })])
+      expect(report.outcomes[0]?._tag).toBe("stored")
+    })))
 })

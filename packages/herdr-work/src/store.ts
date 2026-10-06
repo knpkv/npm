@@ -123,7 +123,7 @@ import type {
   WorkRecoveryPreflight as WorkRecoveryPreflightType,
   WorkRecoveryTarget as WorkRecoveryTargetType
 } from "./model.js"
-import { observationSubject } from "./observed.js"
+import { asciiLower, canonicalSubject, observationSubject } from "./observed.js"
 
 const StoredEventRow = Schema.Struct({ record: Schema.String })
 const StoredEventRows = Schema.Array(StoredEventRow)
@@ -1928,6 +1928,7 @@ const ObservedFactRow = Schema.Struct({
 
 const StoredFactRow = Schema.Struct({ observationId: Schema.String, confirmedAt: Schema.Number })
 const FactTotalsRow = Schema.Struct({ count: Schema.Number, bytes: Schema.Number })
+const EvictionRow = Schema.Struct({ subject: Schema.String, bytes: Schema.Number })
 
 type PreparedObservation =
   | {
@@ -1949,8 +1950,8 @@ const canonicalObservation = (
   observation: WorkPullRequestObservationType | WorkAgentObservationType
 ): WorkPullRequestObservationType | WorkAgentObservationType =>
   observation._tag === "agent"
-    ? { ...observation, host: observation.host.toLowerCase() }
-    : { ...observation, repository: observation.repository.toLowerCase() }
+    ? { ...observation, host: asciiLower(observation.host) }
+    : { ...observation, repository: asciiLower(observation.repository) }
 
 /**
  * Applies each observation in one transaction, then evicts the oldest rows
@@ -2025,24 +2026,30 @@ const writeObservations = (
       endFailures.run(item.subject, item.observedAt)
       return { _tag: "stored", subject: item.subject }
     })
-    const evict = (table: string, age: string): number => {
-      const totals = database.prepare(
-        `SELECT COUNT(*) AS count, COALESCE(SUM(length(CAST(subject AS BLOB)) +
-           length(CAST(${table === "work_observed_facts" ? "record" : "reason"} AS BLOB))), 0) AS bytes
-         FROM ${table}`
+    // Totals are read once and kept current as rows go, so eviction is one
+    // indexed lookup and delete per row, not a full rescan per row.
+    const evict = (table: string, age: string, payload: string): number => {
+      const size = `length(CAST(subject AS BLOB)) + length(CAST(${payload} AS BLOB))`
+      const totals = Schema.decodeUnknownSync(FactTotalsRow)(
+        database.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${size}), 0) AS bytes FROM ${table}`).get()
       )
       const oldest = database.prepare(
-        `DELETE FROM ${table} WHERE subject = (SELECT subject FROM ${table} ORDER BY ${age} ASC, subject ASC LIMIT 1)`
+        `SELECT subject, ${size} AS bytes FROM ${table} ORDER BY ${age} ASC, subject ASC LIMIT 1`
       )
+      const remove = database.prepare(`DELETE FROM ${table} WHERE subject = ?`)
+      let { bytes, count } = totals
       let evicted = 0
-      for (;;) {
-        const { bytes, count } = Schema.decodeUnknownSync(FactTotalsRow)(totals.get())
-        if (count <= workObservedFactMaxRecords && bytes <= workObservedFactMaxBytes) return evicted
-        oldest.run()
+      while (count > workObservedFactMaxRecords || bytes > workObservedFactMaxBytes) {
+        const row = Schema.decodeUnknownSync(EvictionRow)(oldest.get())
+        remove.run(row.subject)
+        count -= 1
+        bytes -= row.bytes
         evicted += 1
       }
+      return evicted
     }
-    const evicted = evict("work_observed_facts", "observed_at") + evict("work_observed_failures", "since")
+    const evicted = evict("work_observed_facts", "observed_at", "record") +
+      evict("work_observed_failures", "since", "reason")
     database.exec("COMMIT")
     return { evicted, outcomes }
   } catch (cause) {
@@ -2199,6 +2206,8 @@ export class WorkStore implements WorkStoreService {
           since INTEGER NOT NULL,
           last_at INTEGER NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS work_observed_failures_age
+          ON work_observed_failures (since, subject);
       `)
           const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
             database.prepare("PRAGMA table_info(work_goal_events)").all()
@@ -4819,6 +4828,9 @@ export class WorkStore implements WorkStoreService {
           observationSubject(envelope.observation)
         ).pipe(Effect.mapError(storeError("observe.subject")))
         if (envelope.observation._tag === "unknown") {
+          if (canonicalSubject(envelope.observation.source, envelope.observation.subject) === null) {
+            return yield* new WorkStoreError({ cause: envelope.observation, operation: "observe.subject" })
+          }
           return {
             _tag: "unknown",
             observedAt: envelope.observedAt,
