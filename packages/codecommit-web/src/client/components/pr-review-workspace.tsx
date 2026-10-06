@@ -1909,8 +1909,10 @@ const ReadyReviewWorkspace = ({
       </Surface>
       <FindingsDrawer
         onClose={() => {
-          // An explicit close also ends "focus is in Relay", so a later resize doesn't reopen it.
-          relayHasFocus.current = false
+          // Dismissing the drawer ends "focus is in Relay", so a later resize doesn't reopen it. A
+          // close forced by leaving drawer layout is not a dismissal: focus has just moved into the
+          // inline pane, and narrowing again should bring the drawer back.
+          if (placement === "drawer") relayHasFocus.current = false
           setFindingsOpen(false)
         }}
         open={findingsOpen}

@@ -311,3 +311,25 @@ test("keeps focus in Relay when an open drawer's layout widens into a column", a
     )
   ).toBe(true)
 })
+
+// Narrowing again after a forced close brings the drawer back with focus, unlike a dismissal.
+test("reopens the drawer on narrowing after a layout-forced close", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  await page.goto(detail)
+
+  await page.getByRole("button", { name: "Relay", exact: true }).click()
+  const drawer = page.getByRole("dialog", { name: "Relay" })
+  await expect(drawer).toBeVisible()
+  await page.setViewportSize({ height: 1080, width: 1920 })
+  await expect(page.getByRole("complementary", { name: "Relay findings" })).toBeVisible()
+  await expect
+    .poll(() =>
+      page.evaluate(
+        () => document.querySelector("aside[aria-label='Relay findings']")?.contains(document.activeElement) ?? false
+      )
+    )
+    .toBe(true)
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await expect(drawer).toBeVisible()
+})
