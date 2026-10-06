@@ -1,5 +1,4 @@
 import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
-import { describeProfileSources, staticKeysShadowSso } from "@knpkv/codecommit-core/AwsProfileCredentials.js"
 import * as CodeCommit from "@knpkv/codecommit-core/ReadClient.js"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -183,27 +182,24 @@ const collectCodePipelinePipelines = Effect.fn("AwsResourceDiscovery.collectCode
   return { names: normalizeNames(names), truncated: nextToken !== null || names.size > MAXIMUM_RESOURCE_NAMES }
 })
 
-/**
- * A failed discovery, with the sign-in cause when the profile's files explain it. Reading the files
- * is best effort: if they can't be read, the failure is reported without a cause.
- */
+/** Report a failed discovery and log only safe provider diagnostics. */
 const failed = Effect.fn("AwsResourceDiscovery.failed")(function*(
   profile: string,
   service: "codecommit" | "codepipeline",
   failureClass: AwsResourceFailureClass,
-  failureTag: string
+  failure: CodeCommit.CodeCommitReadError | CodePipelineProviderFailure | AwsResourcePaginationFailure
 ) {
   yield* Effect.logWarning("AWS resource discovery failed").pipe(
-    Effect.annotateLogs({ service, profile, failureClass, failure: failureTag })
+    Effect.annotateLogs({
+      service,
+      profile,
+      failureClass,
+      failure: failure._tag,
+      ...("operation" in failure && { operation: failure.operation }),
+      ...("diagnosticCode" in failure && { diagnosticCode: failure.diagnosticCode })
+    })
   )
-  if (failureClass !== "authentication") return { _tag: "failed", failureClass } satisfies AwsServiceResourceDiscovery
-  const shadowed = yield* Effect.tryPromise(() => describeProfileSources(profile)).pipe(
-    Effect.map(staticKeysShadowSso),
-    Effect.orElseSucceed(() => false)
-  )
-  return (shadowed
-    ? { _tag: "failed", failureClass, cause: "static-keys-shadow-sso" }
-    : { _tag: "failed", failureClass }) satisfies AwsServiceResourceDiscovery
+  return { _tag: "failed", failureClass } satisfies AwsServiceResourceDiscovery
 })
 
 const available = (collection: ResourceCollection): AwsServiceResourceDiscovery => ({
@@ -230,15 +226,13 @@ export const makeAwsResourceDiscovery = Effect.fn("AwsResourceDiscovery.make")(f
       {
         codeCommit: collectCodeCommitRepositories(codeCommit, account).pipe(
           Effect.matchEffect({
-            onFailure: (failure) =>
-              failed(request.profile, "codecommit", codeCommitFailureClass(failure), failure._tag),
+            onFailure: (failure) => failed(request.profile, "codecommit", codeCommitFailureClass(failure), failure),
             onSuccess: (collection) => Effect.succeed(available(collection))
           })
         ),
         codePipeline: collectCodePipelinePipelines(codePipeline, pipelineAccount).pipe(
           Effect.matchEffect({
-            onFailure: (failure) =>
-              failed(request.profile, "codepipeline", codePipelineFailureClass(failure), failure._tag),
+            onFailure: (failure) => failed(request.profile, "codepipeline", codePipelineFailureClass(failure), failure),
             onSuccess: (collection) => Effect.succeed(available(collection))
           })
         )

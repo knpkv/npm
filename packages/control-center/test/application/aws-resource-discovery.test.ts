@@ -1,15 +1,14 @@
-import * as NodeServices from "@effect/platform-node/NodeServices"
-import { assert, describe, it, layer } from "@effect/vitest"
+import { assert, describe, it } from "@effect/vitest"
 import { AwsApiError, AwsCredentialError } from "@knpkv/codecommit-core/Errors.js"
 import * as CodeCommit from "@knpkv/codecommit-core/ReadClient.js"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Path from "effect/Path"
+import * as Logger from "effect/Logger"
 import * as Ref from "effect/Ref"
+import * as References from "effect/References"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { afterEach, vi } from "vitest"
 
 import { AwsResourceDiscoveryRequest } from "../../src/api/plugins.js"
 import { ApplicationInvalidRequest, ApplicationRateLimited } from "../../src/server/api/ApplicationServices.js"
@@ -19,7 +18,11 @@ import {
   CodePipelineReadClient,
   type CodePipelineReadClientService
 } from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
-import { PluginAuthenticationFailure, PluginAuthorizationFailure } from "../../src/server/plugins/failures.js"
+import {
+  PluginAuthenticationFailure,
+  PluginAuthorizationFailure,
+  PluginMalformedResponseFailure
+} from "../../src/server/plugins/failures.js"
 
 const request = Schema.decodeUnknownSync(AwsResourceDiscoveryRequest)({
   profile: "production",
@@ -312,54 +315,23 @@ describe("AWS resource discovery", () => {
       })
     ))
 
-  layer(NodeServices.layer)("sign-in failures", (it) => {
-    /** Point the AWS SDK's shared-file loader at one fixture directory for this test. */
-    const useProfileFiles = (directory: string) =>
-      Effect.gen(function*() {
-        const path = yield* Path.Path
-        const root = yield* path.fromFileUrl(new URL(`../fixtures/aws-profiles/${directory}/`, import.meta.url))
-        vi.stubEnv("AWS_CONFIG_FILE", path.join(root, "config"))
-        vi.stubEnv("AWS_SHARED_CREDENTIALS_FILE", path.join(root, "credentials"))
-      })
-    afterEach(() => {
-      vi.unstubAllEnvs()
-    })
-
-    const rejected = codePipelineClient({
-      listPipelinesPage: () =>
-        Effect.fail(new PluginAuthenticationFailure({ operation: "codepipeline-list-pipelines" }))
-    })
-
-    it.effect("reports a rejected CodePipeline session as authentication, not unavailable", () => {
-      return useProfileFiles("sso-only").pipe(Effect.andThen(runDiscovery(
+  describe("sign-in failures", () => {
+    it.effect("reports a rejected CodePipeline session as authentication, not unavailable", () =>
+      runDiscovery(
         codeCommitClient(),
-        rejected,
+        codePipelineClient({
+          listPipelinesPage: () =>
+            Effect.fail(new PluginAuthenticationFailure({ operation: "codepipeline-list-pipelines" }))
+        }),
         Effect.gen(function*() {
           const discovery = yield* AwsResourceDiscovery
           const result = yield* discovery.discover(request)
           assert.deepStrictEqual(result.codePipeline, { _tag: "failed", failureClass: "authentication" })
         })
-      )))
-    })
+      ))
 
-    it.effect("names static keys that shadow the profile's SSO login", () => {
-      return useProfileFiles("shadowed").pipe(Effect.andThen(runDiscovery(
-        codeCommitClient(),
-        rejected,
-        Effect.gen(function*() {
-          const discovery = yield* AwsResourceDiscovery
-          const result = yield* discovery.discover(request)
-          assert.deepStrictEqual(result.codePipeline, {
-            _tag: "failed",
-            failureClass: "authentication",
-            cause: "static-keys-shadow-sso"
-          })
-        })
-      )))
-    })
-
-    it.effect("reports a CodeCommit credential failure as authentication", () => {
-      return useProfileFiles("sso-only").pipe(Effect.andThen(runDiscovery(
+    it.effect("reports a CodeCommit credential failure as authentication", () =>
+      runDiscovery(
         codeCommitClient({
           listRepositoriesPage: ({ account }) =>
             Effect.fail(new AwsCredentialError({ profile: account.profile, region: account.region, cause: "expired" }))
@@ -370,7 +342,85 @@ describe("AWS resource discovery", () => {
           const result = yield* discovery.discover(request)
           assert.deepStrictEqual(result.codeCommit, { _tag: "failed", failureClass: "authentication" })
         })
-      )))
-    })
+      ))
   })
+
+  it.effect("logs safe operation and diagnostic fields for both malformed provider responses", () =>
+    Effect.gen(function*() {
+      const annotations: Array<(typeof References.CurrentLogAnnotations)["Service"]> = []
+      const logger = Logger.make<unknown, void>(({ fiber }) => {
+        annotations.push({ ...fiber.getRef(References.CurrentLogAnnotations) })
+      })
+      yield* runDiscovery(
+        codeCommitClient({
+          listRepositoriesPage: () =>
+            Effect.fail(
+              new CodeCommit.CodeCommitMalformedResponseError({
+                operation: "listRepositoriesPage",
+                diagnosticCode: "codecommit-discovery-sentinel"
+              })
+            )
+        }),
+        codePipelineClient({
+          listPipelinesPage: () =>
+            Effect.fail(
+              new PluginMalformedResponseFailure({
+                operation: "codepipeline-list-pipelines",
+                diagnosticCode: "codepipeline-discovery-sentinel"
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          yield* discovery.discover(request)
+        })
+      ).pipe(Effect.withLogger(logger))
+      assert.strictEqual(annotations.length, 2)
+      assert.deepStrictEqual(annotations.find(({ service }) => service === "codecommit"), {
+        service: "codecommit",
+        profile: "production",
+        failureClass: "malformed-response",
+        failure: "CodeCommitMalformedResponseError",
+        operation: "listRepositoriesPage",
+        diagnosticCode: "codecommit-discovery-sentinel"
+      })
+      assert.deepStrictEqual(annotations.find(({ service }) => service === "codepipeline"), {
+        service: "codepipeline",
+        profile: "production",
+        failureClass: "malformed-response",
+        failure: "PluginMalformedResponseFailure",
+        operation: "codepipeline-list-pipelines",
+        diagnosticCode: "codepipeline-discovery-sentinel"
+      })
+    }))
+
+  it.effect("logs authentication failures without inventing a diagnostic code", () =>
+    Effect.gen(function*() {
+      const annotations: Array<(typeof References.CurrentLogAnnotations)["Service"]> = []
+      const logger = Logger.make<unknown, void>(({ fiber }) => {
+        annotations.push({ ...fiber.getRef(References.CurrentLogAnnotations) })
+      })
+      yield* runDiscovery(
+        codeCommitClient(),
+        codePipelineClient({
+          listPipelinesPage: () =>
+            Effect.fail(
+              new PluginAuthenticationFailure({
+                operation: "codepipeline-list-pipelines"
+              })
+            )
+        }),
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          yield* discovery.discover(request)
+        })
+      ).pipe(Effect.withLogger(logger))
+      assert.deepStrictEqual(annotations, [{
+        service: "codepipeline",
+        profile: "production",
+        failureClass: "authentication",
+        failure: "PluginAuthenticationFailure",
+        operation: "codepipeline-list-pipelines"
+      }])
+    }))
 })

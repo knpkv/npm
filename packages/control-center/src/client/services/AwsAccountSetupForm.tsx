@@ -112,9 +112,7 @@ export const discoveryFailureMessage = (
 ): string => {
   switch (failure.failureClass) {
     case "authentication":
-      return failure.cause === "static-keys-shadow-sso"
-        ? `Can't sign in to ${service} with ${profile}: old keys in ~/.aws/credentials override its SSO login. Remove the [${profile}] section from that file, then refresh.`
-        : `Can't sign in to ${service} with ${profile}. Run aws sso login --profile ${profile}, then refresh.`
+      return `Can't sign in to ${service} with ${profile}. Check this profile's credentials or sign-in session, then refresh.`
     case "authorization":
       return `${profile} isn't allowed to list ${service} resources. Enter names manually or update the profile's permissions.`
     case "rate-limit":

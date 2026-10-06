@@ -3,19 +3,21 @@ import { assert, describe, it } from "@effect/vitest"
 import { discoveryFailureMessage } from "../../src/client/services/AwsAccountSetupForm.js"
 
 describe("AWS discovery failure copy", () => {
-  it("names the shadowing credentials section and how to remove it", () => {
+  it("does not prescribe SSO or deleting static keys without credential-source evidence", () => {
     const message = discoveryFailureMessage("CodePipeline", "dev-administratoraccess", {
       _tag: "failed",
-      failureClass: "authentication",
-      cause: "static-keys-shadow-sso"
+      failureClass: "authentication"
     })
-    assert.include(message, "~/.aws/credentials")
-    assert.include(message, "[dev-administratoraccess]")
+    assert.include(message, "dev-administratoraccess")
+    assert.include(message, "credentials or sign-in session")
+    assert.notInclude(message, "Remove")
+    assert.notInclude(message, "aws sso login")
   })
 
-  it("points an expired sign-in at aws sso login for the same profile", () => {
+  it("keeps static-only profile authentication guidance source-neutral", () => {
     const message = discoveryFailureMessage("CodeCommit", "dev", { _tag: "failed", failureClass: "authentication" })
-    assert.include(message, "aws sso login --profile dev")
+    assert.include(message, "credentials or sign-in session")
+    assert.notInclude(message, "aws sso login")
   })
 
   it("never prints the raw failure class", () => {

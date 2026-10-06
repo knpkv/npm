@@ -326,9 +326,7 @@ export const AwsServiceResourceDiscovery = Schema.Union([
       "rate-limit",
       "timeout",
       "unavailable"
-    ]),
-    /** Why sign-in failed, when the server can tell from the profile's files. Names no values. */
-    cause: Schema.optionalKey(Schema.Literals(["static-keys-shadow-sso"]))
+    ])
   })
 ]).pipe(Schema.toTaggedUnion("_tag"), Schema.annotate({ identifier: "AwsServiceResourceDiscovery" }))
 
