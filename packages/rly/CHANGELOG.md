@@ -1,5 +1,25 @@
 # @knpkv/rly
 
+## 0.9.0
+
+### Minor Changes
+
+- [#510](https://github.com/knpkv/npm/pull/510) [`934843b`](https://github.com/knpkv/npm/commit/934843bbcea57cbf3266fce950c020733046cac1) Thanks [@konopkov](https://github.com/konopkov)! - Add chart foundations: eight series colour tokens plus a neutral remainder (`--rly-color-series-*`), `LimitTrack` (a 0–100% limit with a near mark, a projected extension, and a stale hatch), `TrackKey` for the marks, and `ChartLegend` with `rlySeriesColor`.
+
+- [#505](https://github.com/knpkv/npm/pull/505) [`148daa6`](https://github.com/knpkv/npm/commit/148daa6be147dca74bc642bd552b603deb760eae) Thanks [@konopkov](https://github.com/konopkov)! - Add `DecisionBar`: approve or reject one named target. The target and its clock stay visible, and both actions carry the target in their accessible names. An `off` state keeps them focusable with the reason linked, and `sending` waits for the server's answer instead of assuming success. `placement="sticky"` pins the bar at thumb reach on phones.
+
+- [#504](https://github.com/knpkv/npm/pull/504) [`4e8f346`](https://github.com/knpkv/npm/commit/4e8f346b926b859ea2b3be07ec7dc6cb77ca8e76) Thanks [@konopkov](https://github.com/konopkov)! - Add `Hero` and `HeroWord`: the one fact a screen leads with, as a sentence in text ink with its figure inside, plus an optional caption. The `line` size folds it to one line beside a detail, and `display` is for boards read from across a room. `HeroWord` gives only the state word blocked or held ink.
+
+- [#500](https://github.com/knpkv/npm/pull/500) [`7df3dbb`](https://github.com/knpkv/npm/commit/7df3dbb9875ab31f369351df2de898b36d40e613) Thanks [@konopkov](https://github.com/konopkov)! - Add `Region`: one main page region as a bordered surface with a single header row (title, plain count, actions) above a rule. The section is named by its heading, the heading can take programmatic focus through `headingId`, and `tone="tray"` steps the surface down for regions that hold actionable cards.
+
+- [#498](https://github.com/knpkv/npm/pull/498) [`8924289`](https://github.com/knpkv/npm/commit/89242895271072b83185d6cc02376b2c56830f6a) Thanks [@konopkov](https://github.com/konopkov)! - Add a `words` size to `StageRail` for rows and facts. Stages read as one line ("Build succeeded, Staging failed: integration tests, Prod waiting") with no markers, chips or owners. Only critical and caution states take ink, and the heading remains for assistive technology.
+
+- [#502](https://github.com/knpkv/npm/pull/502) [`f8d2612`](https://github.com/knpkv/npm/commit/f8d2612e09b20974dd8eccc8ff197bb072c40cbf) Thanks [@konopkov](https://github.com/konopkov)! - Add optional `provenance` to `TimelineRow` events. The marker takes a shape (○ applied automatically, ● approved, ◆ waiting for approval, a hatched square for couldn't read, ▲ flag only) and the label says it in words. A new `TimelineProvenanceKey` keys the shapes. The shapes stay distinct in forced colours.
+
+### Patch Changes
+
+- [#515](https://github.com/knpkv/npm/pull/515) [`e57bb6d`](https://github.com/knpkv/npm/commit/e57bb6db1b393dbff8e116573cf2db23992c1cf4) Thanks [@konopkov](https://github.com/konopkov)! - Region stays inside its container when its title or body holds a token with no break point, such as a long branch name or id. The token breaks only where it cannot fit; words still wrap at spaces.
+
 ## 0.8.0
 
 ### Minor Changes

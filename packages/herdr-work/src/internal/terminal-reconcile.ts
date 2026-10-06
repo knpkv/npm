@@ -47,7 +47,8 @@ export const terminalCandidates = (
   })
 }
 
-const goalActivityLimit = 128
+/** The most activities a goal holds; a terminal transition never drops one to fit its own note. */
+export const goalActivityLimit = 128
 
 /**
  * The terminal checkpoint for one candidate. It is stamped with the pull
@@ -81,10 +82,9 @@ export const terminalCheckpoint = (
   const existing = head.goal.activity ?? []
   const activity = existing.length >= goalActivityLimit ? existing : [...existing, observed]
   const goal: WorkGoal = {
-    ...head.goal,
+    ...withoutBlockers(head.goal),
     state: merged ? "completed" : "abandoned",
     delivery: merged ? "merged" : head.goal.delivery,
-    blocker: null,
     activity,
     updatedAt: occurredAt
   }
@@ -92,6 +92,13 @@ export const terminalCheckpoint = (
     version: "herdr.work.event.v1",
     eventId,
     occurredAt,
-    goal: head.goal.blockers === undefined ? goal : { ...goal, blockers: [] }
+    goal
   })
 }
+
+/**
+ * A goal with no blocker in either representation, as every finished goal
+ * must be: `blocker` null and, when the goal has a `blockers` list, an empty one.
+ */
+export const withoutBlockers = (goal: WorkGoal): WorkGoal =>
+  goal.blockers === undefined ? { ...goal, blocker: null } : { ...goal, blocker: null, blockers: [] }
