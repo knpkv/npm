@@ -729,6 +729,24 @@ export const WorkDispatchHandoff = Schema.Struct({
 )
 export interface WorkDispatchHandoff extends Schema.Schema.Type<typeof WorkDispatchHandoff> {}
 
+/**
+ * The key one subject's facts and failures are stored under, such as
+ * `github:<owner>/<repo>#<n>` or `herdr:<host>/<agentId>`. Composite, so it is
+ * bounded on its own rather than by `Identifier`.
+ */
+export const WorkObservationSubject = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(1_024),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
+)
+
+/** Why a source could not be read: one bounded line, so failures stay small in every snapshot. */
+const FailureReason = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
+)
+
 /** CI status of a pull request's head, rolled up from its check runs and statuses. */
 export const WorkObservedChecks = Schema.Literals(["none", "pending", "passing", "failing"])
 export type WorkObservedChecks = typeof WorkObservedChecks.Type
@@ -761,8 +779,8 @@ export interface WorkAgentObservation extends Schema.Schema.Type<typeof WorkAgen
 /** A source that could not be read. It is reported, never turned into a fact about a goal. */
 export const WorkUnknownObservation = Schema.TaggedStruct("unknown", {
   source: Schema.Literals(["github", "herdr", "git"]),
-  subject: Identifier,
-  reason: Text
+  subject: WorkObservationSubject,
+  reason: FailureReason
 })
 export interface WorkUnknownObservation extends Schema.Schema.Type<typeof WorkUnknownObservation> {}
 
@@ -786,7 +804,7 @@ export interface WorkObservationEnvelope extends Schema.Schema.Type<typeof WorkO
  * `confirmedAt` is the last time a read returned them again.
  */
 export const WorkObservedFact = Schema.Struct({
-  subject: Identifier,
+  subject: WorkObservationSubject,
   observationId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
   observedAt: Timestamp,
   confirmedAt: Timestamp,
@@ -802,9 +820,9 @@ export interface WorkObservedFact extends Schema.Schema.Type<typeof WorkObserved
  * failure of the run; a later failure keeps it, a good read ends the run.
  */
 export const WorkObservedFailure = Schema.Struct({
-  subject: Identifier,
+  subject: WorkObservationSubject,
   source: WorkUnknownObservation.fields.source,
-  reason: Text,
+  reason: FailureReason,
   since: Timestamp
 })
 export interface WorkObservedFailure extends Schema.Schema.Type<typeof WorkObservedFailure> {}
@@ -819,10 +837,10 @@ export const workObservedFactMaxBytes = 2 * 1024 * 1024
  * a source it could not read.
  */
 export const WorkObserveOutcome = Schema.TaggedUnion({
-  stored: { subject: Identifier },
-  unchanged: { subject: Identifier },
-  stale: { subject: Identifier },
-  unknown: { subject: Identifier, reason: Text }
+  stored: { subject: WorkObservationSubject },
+  unchanged: { subject: WorkObservationSubject },
+  stale: { subject: WorkObservationSubject },
+  unknown: { subject: WorkObservationSubject, reason: FailureReason }
 })
 export type WorkObserveOutcome = typeof WorkObserveOutcome.Type
 
@@ -850,7 +868,7 @@ export const WorkGoalObserved = Schema.Struct({
    */
   unknown: Schema.NullOr(Schema.Struct({
     source: WorkUnknownObservation.fields.source,
-    reason: Text,
+    reason: FailureReason,
     since: Timestamp,
     lastGoodAt: Schema.NullOr(Timestamp)
   })),
@@ -871,10 +889,18 @@ export const WorkSnapshot = Schema.Struct({
   asOf: Timestamp,
   goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals)),
   families: Schema.optionalKey(Schema.Array(WorkGoalFamilyGroup).check(Schema.isMaxLength(workSnapshotMaxGoals))),
-  /** Observed facts per goal, merged at read time; only the `now` window carries them. */
+  /**
+   * Observed facts per goal, merged at read time; only the `now` window
+   * carries them, and only for goals something was observed about.
+   */
   observed: Schema.optionalKey(
     Schema.Array(WorkGoalObservedEntry).check(Schema.isMaxLength(workSnapshotMaxGoals))
-  )
+  ),
+  /**
+   * How many goals' observed entries were left out to keep the snapshot within
+   * the response budget; the most recently updated goals keep theirs.
+   */
+  observedOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)))
 }).check(
   Schema.makeFilter(
     (snapshot) => {

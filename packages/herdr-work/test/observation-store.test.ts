@@ -1,18 +1,20 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Schema } from "effect"
 import { TestClock } from "effect/testing"
-import { mkdtempSync, rmSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from "node:fs"
+import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import {
   makeWorkService,
+  withObservedFacts,
   type WorkAdmissionTarget,
   type WorkAgentObservation,
   type WorkGoal,
   type WorkObservationEnvelope,
   workObservedFactMaxRecords,
   type WorkPullRequestObservation,
+  WorkSnapshots,
   WorkStore
 } from "../src/index.js"
 
@@ -189,5 +191,115 @@ describe("observed facts", () => {
       const report = yield* work.observe([at(100_000, agent("idle", "agent-newest"))])
       expect(report.evicted).toBe(1)
       expect((yield* work.observe([at(1, agent("idle", "agent-0"))])).outcomes[0]?._tag).toBe("stored")
+    })))
+
+  it.effect("keeps the latest failure's reason and the earliest failure's start, whatever order they arrive in", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      const failed = (observedAt: number, reason: string) =>
+        at(observedAt, { _tag: "unknown", reason, source: "github", subject: "github:knpkv/npm#7" })
+      yield* work.record({ eventId: "goal-pr7.1", goal, occurredAt: 1_000, version: "herdr.work.event.v1" })
+      yield* work.observe([failed(300, "gh: 502")])
+      yield* work.observe([failed(100, "gh: rate limited")])
+      expect((yield* work.snapshots(10_000)).now.observed?.[0]?.unknown).toEqual({
+        lastGoodAt: null,
+        reason: "gh: 502",
+        since: 100,
+        source: "github"
+      })
+    })))
+
+  it.effect("stores the longest valid agent subject and rejects a subject past its bound without writing", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      const longest = { ...agent("idle", "a".repeat(256)), host: "h".repeat(256) }
+      expect((yield* work.observe([at(100, longest)])).outcomes[0]?._tag).toBe("stored")
+      yield* work.snapshots(10_000)
+      const tooLong = at(200, {
+        _tag: "pull_request",
+        branch: "feat/x",
+        checks: "none",
+        closedAt: null,
+        head: "a".repeat(40),
+        pullRequest: 7,
+        repository: `${"o".repeat(600)}/${"r".repeat(600)}`,
+        review: "requested",
+        state: "open"
+      })
+      expect(yield* Effect.flip(work.observe([at(150, agent("working")), tooLong]))).toMatchObject({
+        _tag: "WorkStoreError",
+        operation: "observe.subject"
+      })
+      expect((yield* work.observe([at(160, agent("working"))])).outcomes[0]?._tag).toBe("stored")
+    })))
+
+  it.effect("matches a pull request whatever the letter case of its repository", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* work.record({
+        eventId: "goal-pr7.1",
+        goal: { ...goal, review: { ...goal.review!, url: "https://github.com/Knpkv/NPM/pull/7" } },
+        occurredAt: 1_000,
+        version: "herdr.work.event.v1"
+      })
+      yield* work.observe([at(5_000, pullRequest({ closedAt: 4_900, state: "merged" }))])
+      expect((yield* work.snapshots(10_000)).now.observed?.[0]?.displayState).toBe("completed")
+    })))
+
+  it.effect("keeps the database's WAL siblings private after an observation", () =>
+    Effect.scoped(Effect.gen(function*() {
+      if (platform() === "win32") return
+      const { path, work } = yield* fixture
+      yield* work.observe([at(100, agent("idle"))])
+      expect(existsSync(`${path}-wal`)).toBe(true)
+      for (const sibling of [`${path}-wal`, `${path}-shm`].filter((file) => existsSync(file))) {
+        chmodSync(sibling, 0o644)
+      }
+      yield* work.observe([at(200, agent("working"))])
+      for (const file of [path, `${path}-wal`, `${path}-shm`].filter((candidate) => existsSync(candidate))) {
+        expect(statSync(file).mode & 0o777, file).toBe(0o600)
+      }
+    })))
+
+  it.effect("keeps observed entries within the response budget, most recently updated goals first, and counts the rest", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* fixture
+      for (const number of [7, 8, 9]) {
+        yield* work.record({
+          eventId: `goal-pr${number}.1`,
+          goal: {
+            ...goal,
+            id: `goal-pr${number}`,
+            review: { ...goal.review!, updatedAt: 1_000 + number, url: `https://github.com/knpkv/npm/pull/${number}` },
+            updatedAt: 1_000 + number,
+            createdAt: 1_000 + number
+          },
+          occurredAt: 1_000 + number,
+          version: "herdr.work.event.v1"
+        })
+        yield* work.observe([at(5_000, pullRequest({ pullRequest: number }))])
+      }
+      // Goals that nothing was observed about get no entry at all.
+      yield* work.record({
+        eventId: "goal-quiet.1",
+        goal: { ...goal, createdAt: 1_001, id: "goal-quiet", review: null, updatedAt: 1_001 },
+        occurredAt: 1_001,
+        version: "herdr.work.event.v1"
+      })
+      const full = yield* work.snapshots(10_000)
+      expect(full.now.observed?.map(({ goalId }) => goalId)).toEqual(["goal-pr9", "goal-pr8", "goal-pr7"])
+      const { facts, failures } = yield* store.snapshotInput()
+      const { observed: _observed, ...now } = full.now
+      const base: WorkSnapshots = { ...full, now }
+      const size = (snapshots: WorkSnapshots) =>
+        new TextEncoder().encode(JSON.stringify(Schema.encodeSync(WorkSnapshots)(snapshots))).byteLength
+      const budget = size(base) + 64 + 2 * (size(withObservedFacts(base, facts, failures, 10_000_000)) - size(base)) / 3
+      const trimmed = withObservedFacts(base, facts, failures, budget)
+      expect(trimmed.now.observed?.map(({ goalId }) => goalId)).toEqual(["goal-pr9", "goal-pr8"])
+      expect(trimmed.now.observedOmitted).toBe(1)
+      expect(size(trimmed)).toBeLessThanOrEqual(budget)
+      const none = withObservedFacts(base, facts, failures, size(base))
+      expect(none.now.observed).toBeUndefined()
+      expect(none.now.observedOmitted).toBe(3)
     })))
 })

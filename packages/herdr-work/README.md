@@ -24,14 +24,18 @@ failed subject the same way as its facts (`pullRequestSubject`, `agentSubject`).
 history: they never write a checkpoint, never count against the history bound,
 and are not part of any approval token, so observing cannot invalidate a pending
 approval. Facts and failures each have their own bounds (4,096 rows, 2 MiB) and evict
-the oldest rows beyond them. `snapshots` merges the facts into the `now` window as
+the oldest rows beyond them. Pull request subjects lowercase the repository, since GitHub names are
+case-insensitive. `snapshots` merges the facts into the `now` window, for each
+goal something was observed about, as
 `observed` entries: the matching facts, the oldest current failure among the
 goal's own subjects as `unknown` (with `lastGoodAt`, the last confirmation of
 that subject's facts), and a derived `displayState` (a recorded
 terminal state, then a merged or closed pull request, then the owner's blocker,
 then the agent's working or blocked status, then an open pull request as
 `review`, then the goal's own state) and a `stale` flag for an owner whose agent
-has been gone for more than 24 hours on unfinished work. Earlier windows stay as
+has been gone for more than 24 hours on unfinished work. Entries are kept, most
+recently updated goals first, while the encoded snapshots fit the 1 MiB response
+budget; any left out are counted in `observedOmitted`. Earlier windows stay as
 recorded.
 
 `WorkStore.appendMany` validates a whole checkpoint batch before one SQLite

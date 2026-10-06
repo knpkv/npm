@@ -1,3 +1,4 @@
+import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
 import { Clock, Effect, Equal, Option, Schema } from "effect"
 import { WorkPullRequestLinkError, WorkRecoveryContextError } from "./errors.js"
 import type {
@@ -292,7 +293,12 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       yield* Clock.currentTimeMillis,
       source.logicalObservedAt ?? 0
     )
-    return withObservedFacts(yield* projectWorkSnapshots(source.events, timestamp), source.facts, source.failures)
+    return withObservedFacts(
+      yield* projectWorkSnapshots(source.events, timestamp),
+      source.facts,
+      source.failures,
+      fleetResponseBodyMaxBytes
+    )
   })
   const observe = Effect.fn("HerdrWork.observe")((envelopes: ReadonlyArray<WorkObservationEnvelope>) =>
     store.observe(envelopes)

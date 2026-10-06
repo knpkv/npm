@@ -1,19 +1,23 @@
+import { Schema } from "effect"
+import { WorkGoalObservedEntry, WorkSnapshots } from "./model.js"
 import type {
   WorkAgentObservation,
   WorkDisplayState,
   WorkGoal,
   WorkGoalObserved,
-  WorkGoalObservedEntry,
   WorkObservation,
   WorkObservedFact,
   WorkObservedFailure,
-  WorkPullRequestObservation,
-  WorkSnapshots
+  WorkPullRequestObservation
 } from "./model.js"
 
-/** The subject a pull request's facts and failures are stored under. */
+/**
+ * The subject a pull request's facts and failures are stored under. GitHub
+ * owner and repository names are case-insensitive (and ASCII), so they are
+ * lowercased: `Knpkv/npm` and `knpkv/npm` are one subject.
+ */
 export const pullRequestSubject = (repository: string, pullRequest: number): string =>
-  `github:${repository}#${pullRequest}`
+  `github:${repository.toLowerCase()}#${pullRequest}`
 
 /** The subject an agent's facts and failures are stored under; the host is case-insensitive. */
 export const agentSubject = (host: string, agentId: string): string => `herdr:${host.toLowerCase()}/${agentId}`
@@ -120,18 +124,45 @@ export const observeGoal = (
   now: number
 ): WorkGoalObserved => observeWith(goal, bySubject(facts), bySubject(failures), now)
 
-/** Adds observed facts to the `now` window. Earlier windows are history and stay as recorded. */
+const utf8 = new TextEncoder()
+const encodedBytes = (value: Schema.Json): number => utf8.encode(JSON.stringify(value)).byteLength
+
+const observedSomething = ({ agent, pullRequest, unknown }: WorkGoalObserved): boolean =>
+  agent !== null || pullRequest !== null || unknown !== null
+
+/**
+ * Adds observed facts to the `now` window, for each goal something was
+ * observed about. Earlier windows are history and stay as recorded. Entries
+ * are kept in the window's goal order (most recently updated first) while the
+ * encoded snapshots stay within `maxBytes`; the rest are counted in
+ * `observedOmitted`, never silently dropped.
+ */
 export const withObservedFacts = (
   snapshots: WorkSnapshots,
   facts: ReadonlyArray<WorkObservedFact>,
-  failures: ReadonlyArray<WorkObservedFailure>
+  failures: ReadonlyArray<WorkObservedFailure>,
+  maxBytes: number
 ): WorkSnapshots => {
   if (facts.length === 0 && failures.length === 0) return snapshots
   const factMap = bySubject(facts)
   const failureMap = bySubject(failures)
-  const observed: ReadonlyArray<WorkGoalObservedEntry> = snapshots.now.goals.map((goal) => ({
-    goalId: goal.id,
-    ...observeWith(goal, factMap, failureMap, snapshots.observedAt)
-  }))
-  return { ...snapshots, now: { ...snapshots.now, observed } }
+  const candidates: ReadonlyArray<WorkGoalObservedEntry> = snapshots.now.goals.flatMap((goal) => {
+    const observed = observeWith(goal, factMap, failureMap, snapshots.observedAt)
+    return observedSomething(observed) ? [{ goalId: goal.id, ...observed }] : []
+  })
+  if (candidates.length === 0) return snapshots
+  const encode = Schema.encodeSync(WorkSnapshots)
+  // Room for `"observed":[…],"observedOmitted":N` on top of the bare snapshots.
+  let used = encodedBytes(encode(snapshots)) + 64
+  const kept: Array<WorkGoalObservedEntry> = []
+  for (const entry of candidates) {
+    const bytes = encodedBytes(Schema.encodeSync(WorkGoalObservedEntry)(entry)) + 1
+    if (used + bytes > maxBytes) break
+    kept.push(entry)
+    used += bytes
+  }
+  const omitted = candidates.length - kept.length
+  if (omitted === 0) return { ...snapshots, now: { ...snapshots.now, observed: kept } }
+  if (kept.length === 0) return { ...snapshots, now: { ...snapshots.now, observedOmitted: omitted } }
+  return { ...snapshots, now: { ...snapshots.now, observed: kept, observedOmitted: omitted } }
 }

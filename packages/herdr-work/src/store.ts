@@ -91,6 +91,7 @@ import {
   WorkLaneClaim,
   WorkLaneClaimed,
   WorkObservationEnvelope,
+  WorkObservationSubject,
   WorkObservedFact,
   workObservedFactMaxBytes,
   workObservedFactMaxRecords,
@@ -1972,9 +1973,15 @@ const writeObservations = (
       "UPDATE work_observed_facts SET confirmed_at = max(confirmed_at, ?) WHERE subject = ?"
     )
     const endFailures = database.prepare("DELETE FROM work_observed_failures WHERE subject = ? AND since <= ?")
+    // `since` is the earliest failure of the run; source and reason come from
+    // the latest one, whatever order the failures arrive in.
     const recordFailure = database.prepare(
-      `INSERT INTO work_observed_failures (subject, source, reason, since) VALUES (?, ?, ?, ?)
-       ON CONFLICT (subject) DO UPDATE SET source = excluded.source, reason = excluded.reason`
+      `INSERT INTO work_observed_failures (subject, source, reason, since, last_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (subject) DO UPDATE SET
+         since = min(since, excluded.since),
+         source = CASE WHEN excluded.last_at >= last_at THEN excluded.source ELSE source END,
+         reason = CASE WHEN excluded.last_at >= last_at THEN excluded.reason ELSE reason END,
+         last_at = max(last_at, excluded.last_at)`
     )
     const outcomes = prepared.map((item): WorkObserveOutcome => {
       const row = readFact.get(item.subject)
@@ -1983,7 +1990,7 @@ const writeObservations = (
         if (stored !== undefined && stored.confirmedAt >= item.observedAt) {
           return { _tag: "stale", subject: item.subject }
         }
-        recordFailure.run(item.subject, item.source, item.reason, item.observedAt)
+        recordFailure.run(item.subject, item.source, item.reason, item.observedAt, item.observedAt)
         return { _tag: "unknown", reason: item.reason, subject: item.subject }
       }
       if (stored?.observationId === item.observationId) {
@@ -2167,7 +2174,8 @@ export class WorkStore implements WorkStoreService {
           subject TEXT PRIMARY KEY,
           source TEXT NOT NULL,
           reason TEXT NOT NULL,
-          since INTEGER NOT NULL
+          since INTEGER NOT NULL,
+          last_at INTEGER NOT NULL
         );
       `)
           const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
@@ -4779,34 +4787,45 @@ export class WorkStore implements WorkStoreService {
     const decoded = yield* Schema.decodeUnknownEffect(
       Schema.Array(WorkObservationEnvelope).check(Schema.isMaxLength(workObservedFactMaxRecords))
     )(envelopes).pipe(Effect.mapError(storeError("observe.decode")))
-    const prepared = yield* Effect.forEach(decoded, (envelope) => {
-      const subject = observationSubject(envelope.observation)
-      if (envelope.observation._tag === "unknown") {
-        return Effect.succeed<PreparedObservation>({
-          _tag: "unknown",
-          observedAt: envelope.observedAt,
-          reason: envelope.observation.reason,
-          source: envelope.observation.source,
-          subject
-        })
-      }
-      // Encoding emits keys in schema field order, so equal facts give equal text and one id.
-      const record = JSON.stringify(Schema.encodeSync(WorkObservationEnvelope)(envelope).observation)
-      return this.#cryptoService.digest("SHA-256", utf8.encode(record)).pipe(
-        Effect.mapError(storeError("observe.digest")),
-        Effect.map((digest): PreparedObservation => ({
+    const cryptoService = this.#cryptoService
+    const prepared = yield* Effect.forEach(
+      decoded,
+      Effect.fnUntraced(function*(envelope) {
+        // Composite subjects are bounded on their own; check before anything is written.
+        const subject = yield* Schema.decodeUnknownEffect(WorkObservationSubject)(
+          observationSubject(envelope.observation)
+        ).pipe(Effect.mapError(storeError("observe.subject")))
+        if (envelope.observation._tag === "unknown") {
+          return {
+            _tag: "unknown",
+            observedAt: envelope.observedAt,
+            reason: envelope.observation.reason,
+            source: envelope.observation.source,
+            subject
+          } satisfies PreparedObservation
+        }
+        // Encoding emits keys in schema field order, so equal facts give equal text and one id.
+        const record = JSON.stringify(Schema.encodeSync(WorkObservationEnvelope)(envelope).observation)
+        const digest = yield* cryptoService.digest("SHA-256", utf8.encode(record)).pipe(
+          Effect.mapError(storeError("observe.digest"))
+        )
+        return {
           _tag: "fact",
           observationId: Hex.encode(digest),
           observedAt: envelope.observedAt,
           record,
           subject
-        }))
-      )
-    })
-    return yield* Effect.try({
+        } satisfies PreparedObservation
+      })
+    )
+    yield* this.secureFiles()
+    const report = yield* Effect.try({
       try: () => writeObservations(this.#database, prepared),
       catch: storeError("observe.write")
     })
+    // The write may have created the WAL siblings; they get the same private mode.
+    yield* this.secureFiles()
+    return report
   })
 
   private secureFiles() {
