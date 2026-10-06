@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { AwsClient, ConfigService } from "@knpkv/codecommit-core"
+import { AwsClient, ConfigService, Errors } from "@knpkv/codecommit-core"
 import { Data, Effect, Layer, Option, Schema, Stream } from "effect"
 import { Command } from "effect/cli"
 import { TestConsole } from "effect/testing"
@@ -106,7 +106,7 @@ const runListCommand = (
 ) =>
   Effect.gen(function*() {
     const exit = yield* Command.runWith(prListCommand, { version: "0.0.0-test" })(args).pipe(Effect.exit)
-    return { exit, stdout: yield* TestConsole.logLines }
+    return { exit, stdout: yield* TestConsole.logLines, stderr: yield* TestConsole.errorLines }
   }).pipe(
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(Layer.mergeAll(aws, config, NodeServices.layer))
@@ -168,15 +168,66 @@ describe("pr list --json", () => {
       expect(result.exit._tag).toBe("Success")
       expect(JSON.parse(result.stdout.join("\n"))).toEqual([])
     }))
+})
 
-  it.effect("emits parseable empty JSON when no accounts are enabled", () =>
+describe("pr list first run", () => {
+  // QA-J63: no enabled account is a setup gap, not an empty result. One line says where to fix it.
+  for (const args of [["--filter", "stale"], ["--filter", "stale", "--json"]]) {
+    it.effect(`fails with one line when no accounts are enabled (${args.join(" ")})`, () =>
+      Effect.gen(function*() {
+        const result = yield* runListCommand(
+          args,
+          emptyAwsLayer(),
+          configLayer([{ profile: "dev", regions: ["eu-west-1"], enabled: false }])
+        )
+        expect(result.exit._tag).toBe("Failure")
+        expect(result.stdout).toEqual([])
+        expect(result.stderr).toEqual([
+          "No CodeCommit accounts are enabled. Enable one in `codecommit web` (Settings, Accounts) or `codecommit tui`, then run this again."
+        ])
+      }))
+  }
+
+  // QA-J61: missing credentials name the profile and the two fixes, instead of a logged stack trace.
+  it.effect("names the profile and the fixes when AWS has no credentials", () =>
     Effect.gen(function*() {
-      const result = yield* runListCommand(
-        ["--filter", "stale", "--json"],
-        emptyAwsLayer(),
-        configLayer([{ profile: "dev", regions: ["eu-west-1"], enabled: false }])
+      const noCredentials = Layer.succeed(
+        AwsClient.AwsClient,
+        AwsClient.AwsClient.of({
+          getPullRequests: (account) =>
+            Stream.fail(
+              new Errors.AwsCredentialError({ profile: account.profile, region: account.region, cause: "none" })
+            ),
+          getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
+          getCallerIdentity: () => unused("getCallerIdentity"),
+          createPullRequest: () => unused("createPullRequest"),
+          listBranches: () => unused("listBranches"),
+          getCommentsForPullRequest: () => unused("getCommentsForPullRequest"),
+          updatePullRequestTitle: () => unused("updatePullRequestTitle"),
+          updatePullRequestDescription: () => unused("updatePullRequestDescription"),
+          getPullRequest: () => unused("getPullRequest"),
+          getDifferences: () => unused("getDifferences"),
+          createApprovalRule: () => unused("createApprovalRule"),
+          updateApprovalRule: () => unused("updateApprovalRule"),
+          deleteApprovalRule: () => unused("deleteApprovalRule")
+        })
       )
+      const result = yield* runListCommand(
+        ["--profile", "dev", "--region", "eu-west-1"],
+        noCredentials,
+        configLayer([])
+      )
+      expect(result.exit._tag).toBe("Failure")
+      expect(result.stderr).toEqual([
+        "No AWS credentials for profile \"dev\" in eu-west-1. Sign in with `aws sso login --profile dev`, or pass --profile with one of the profiles `aws configure list-profiles` shows."
+      ])
+    }))
+
+  // QA-J64: "No all PRs found." read as a typo.
+  it.effect("says no pull requests were found with --all", () =>
+    Effect.gen(function*() {
+      const result = yield* runListCommand(["--all"], emptyAwsLayer(), configLayer([]))
       expect(result.exit._tag).toBe("Success")
-      expect(JSON.parse(result.stdout.join("\n"))).toEqual([])
+      expect(result.stdout).toEqual(["Fetching pull requests...", "No pull requests found."])
     }))
 })
