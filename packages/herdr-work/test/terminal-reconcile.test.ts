@@ -173,6 +173,37 @@ describe("terminal reconcile", () => {
       expect(withActivityProvenance(base, [], reconcilerEvents, activityOrigins, size(base))).toEqual(base)
     })))
 
+  it.effect("with confirmedSince, acts only on a fact read again at or after it", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 6_000 }])
+      // Stored at 6 000; a caller whose read began at 7 000 did not confirm it.
+      expect(yield* work.reconcile({ confirmedSince: 7_000 })).toEqual([])
+      expect((yield* currentGoal(work))?.state).toBe("review")
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 7_500 }])
+      expect((yield* work.reconcile({ confirmedSince: 7_000 }))[0]?._tag).toBe("applied")
+      expect((yield* currentGoal(work))?.state).toBe("abandoned")
+    })))
+
+  it.effect("never acts on a fact a newer failed read has put in doubt", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 6_000 }])
+      yield* work.observe([{
+        observation: {
+          _tag: "unknown",
+          reason: "GitHub returned 502",
+          source: "github",
+          subject: "github:knpkv/npm#7"
+        },
+        observedAt: 7_000
+      }])
+      expect(yield* work.reconcile()).toEqual([])
+      expect((yield* currentGoal(work))?.state).toBe("review")
+    })))
+
   it.effect("records a pull request closed without merging as abandoned", () =>
     Effect.scoped(Effect.gen(function*() {
       const { work } = yield* fixture

@@ -44,6 +44,7 @@ import type {
   WorkObservedAdmission,
   WorkObserveReport,
   WorkProspectiveAdmission,
+  WorkReconcileOptions,
   WorkReconcileOutcome,
   WorkRecoveryContext,
   WorkRecoveryPreflight,
@@ -144,7 +145,7 @@ export interface WorkService {
    * Records goals whose pull request is observed merged or closed as completed
    * or abandoned. Run it after `observe`; it never writes anything else.
    */
-  readonly reconcile: () => Effect.Effect<
+  readonly reconcile: (options?: WorkReconcileOptions) => Effect.Effect<
     ReadonlyArray<WorkReconcileOutcome>,
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
@@ -354,7 +355,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
   const observe = Effect.fn("HerdrWork.observe")((envelopes: ReadonlyArray<WorkObservationEnvelope>) =>
     store.observe(envelopes)
   )
-  const reconcile = Effect.fn("HerdrWork.reconcile")(() => store.reconcile())
+  const reconcile = Effect.fn("HerdrWork.reconcile")((options?: WorkReconcileOptions) => store.reconcile(options))
   const recordMany = Effect.fn("HerdrWork.recordMany")((
     transactionId: string,
     events: ReadonlyArray<WorkGoalCheckpoint>

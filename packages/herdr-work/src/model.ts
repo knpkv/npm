@@ -964,6 +964,16 @@ export const workReconcilerHeadroom = 256
  * or found a newer owner checkpoint than the one it planned from (it tries
  * again on the next run).
  */
+/**
+ * Options for `reconcile`. `confirmedSince` limits it to pull request facts
+ * read again, successfully, at or after that time: a caller that has just
+ * re-read every pull request passes the start of its read, so a fact stored
+ * earlier (the pull request may since have reopened) is never acted on.
+ */
+export interface WorkReconcileOptions {
+  readonly confirmedSince?: number
+}
+
 export const WorkReconcileOutcome = Schema.TaggedUnion({
   applied: { goalId: WorkGoalId, eventId: Identifier, state: Schema.Literals(["completed", "abandoned"]) },
   recorded: { goalId: WorkGoalId, eventId: Identifier },

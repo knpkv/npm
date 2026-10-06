@@ -61,7 +61,12 @@ goal's latest checkpoint and the pull request's fact are still the ones it was
 planned from (otherwise that goal is reported as a conflict), and 256
 checkpoints of history stay free. A goal is stamped at most once, by the
 reconciler's own record of what it wrote, so a goal its owner reopens stays
-reopened. The checkpoint adds a `reconciler.` activity unless the goal's
+reopened. A pull request fact is never acted on after a failed read newer than
+its last confirmation. `reconcile({ confirmedSince })` also skips any fact not
+read again at or after `confirmedSince`: a caller that has just re-read its pull
+requests passes the start of that read, so a fact stored earlier (the pull
+request may since have reopened, or the read was refused as stale) never closes
+a goal, including one the snapshot hides as superseded. The checkpoint adds a `reconciler.` activity unless the goal's
 activity list is full; owner activity is never dropped to make room.
 `abandon` applies an approved `work.abandon` job. The goal, owned by exactly the
 approved owner and still at the approved head, becomes `abandoned`: its blocker

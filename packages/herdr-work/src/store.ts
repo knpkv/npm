@@ -150,6 +150,7 @@ import type {
   WorkProspectiveAdmission as WorkProspectiveAdmissionType,
   WorkPullRequestLink as WorkPullRequestLinkType,
   WorkPullRequestObservation as WorkPullRequestObservationType,
+  WorkReconcileOptions,
   WorkReconcileOutcome,
   WorkRecoveryPreflight as WorkRecoveryPreflightType,
   WorkRecoveryTarget as WorkRecoveryTargetType
@@ -2003,7 +2004,7 @@ export interface WorkStoreService {
    * completed or abandoned, stamped with the close time. Only these terminal
    * facts are ever written to goal history; everything else stays an overlay.
    */
-  readonly reconcile: () => Effect.Effect<
+  readonly reconcile: (options?: WorkReconcileOptions) => Effect.Effect<
     ReadonlyArray<WorkReconcileOutcome>,
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
@@ -5344,7 +5345,7 @@ export class WorkStore implements WorkStoreService {
     }
   })
 
-  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore) {
+  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore, options?: WorkReconcileOptions) {
     const source = yield* this.snapshotInput()
     if (workHistoryMaxEvents - source.events.length < workReconcilerHeadroom) {
       return yield* new WorkProjectionError({
@@ -5360,7 +5361,7 @@ export class WorkStore implements WorkStoreService {
     const now = yield* Clock.currentTimeMillis
     const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) => this.appendAt(checkpoint, guard)
     return yield* Effect.forEach(
-      terminalCandidates(source.events, source.facts),
+      terminalCandidates(source.events, source.facts, source.failures, options?.confirmedSince),
       Effect.fnUntraced(function*(candidate): Effect.fn.Return<
         WorkReconcileOutcome,
         WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
