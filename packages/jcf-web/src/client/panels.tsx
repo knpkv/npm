@@ -298,8 +298,8 @@ export const ConfirmPanel = (props: {
       )}
       {heldTargets.length > 0 ? (
         <p className="jcf-note" data-tone="warning" role="status">
-          {heldTargets.map((provider) => (provider === "jira" ? "Jira" : "Clockify")).join(" and ")} writes are held: earlier
-          entries need manual review before new session time can be logged.
+          {heldTargets.map((provider) => (provider === "jira" ? "Jira" : "Clockify")).join(" and ")} writes are held:
+          earlier entries need manual review before new session time can be logged.
         </p>
       ) : null}
       {preview?._tag === "Write" && preview.clockify.refusal === "unlinked-overlap" ? (

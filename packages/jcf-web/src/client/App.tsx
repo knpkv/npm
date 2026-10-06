@@ -339,8 +339,8 @@ export const App = () => {
         {heldProviders.length > 0 ? (
           <p className="jcf-note" data-tone="warning" role="status">
             {heldProviders.join(" and ")} writes are held for this week: earlier entries need manual review before new
-            session time can be logged. Suggestions for {heldProviders.length === 1 ? "that system" : "those systems"} stay
-            readable here but cannot be logged.
+            session time can be logged. Suggestions for {heldProviders.length === 1 ? "that system" : "those systems"}{" "}
+            stay readable here but cannot be logged.
           </p>
         ) : null}
         {plan !== null && !plan.attributorAvailable ? (
