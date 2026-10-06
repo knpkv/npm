@@ -1468,8 +1468,9 @@ export const componentManifest = {
       source: "src/patterns/StageRail.tsx",
       status: "stable",
       styles: ["src/patterns/StageRail.module.css"],
-      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default", "words"] }],
       visual: {
+        coverageStoryIds: ["patterns-stagerail--words"],
         story: "stories/patterns/StageRail.stories.tsx",
         storyId: "patterns-stagerail--states",
         tests: ["test/patterns/StageRail.test.tsx"]

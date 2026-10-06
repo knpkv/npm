@@ -777,7 +777,8 @@
       },
       "storyId": "patterns-stagerail--states",
       "storyIds": [
-        "patterns-stagerail--states"
+        "patterns-stagerail--states",
+        "patterns-stagerail--words"
       ]
     },
     {

@@ -45,3 +45,22 @@ test("keeps named collaborator roles and controlled overflow clear at 320 pixels
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("people-320.png") })
 })
+
+test(
+  "keeps stage words on wrapping lines inside 320 pixels with ink only on the blocking state",
+  async ({ page }, testInfo) => {
+    await page.setViewportSize({ height: 900, width: 320 })
+    await page.goto(story("patterns-stagerail--words"))
+
+    const rail = page.getByRole("region", { name: "Relay 2.4 stages" })
+    await expect(rail).toBeVisible()
+    await expect(rail.locator("[data-rly-stage-marker]")).toHaveCount(0)
+    const [blocked, quiet] = await Promise.all([
+      rail.locator("[data-rly-stage-word='blocked']").evaluate((element) => getComputedStyle(element).color),
+      rail.locator("[data-rly-stage-word='quiet']").first().evaluate((element) => getComputedStyle(element).color)
+    ])
+    expect(blocked).not.toBe(quiet)
+    await expectNoHorizontalOverflow(page)
+    await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("stage-words-320.png") })
+  }
+)

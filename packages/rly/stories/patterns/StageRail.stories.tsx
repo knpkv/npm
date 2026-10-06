@@ -118,3 +118,37 @@ export const CompactForcedColors: Story = {
   },
   render: () => <CompactCanary />
 }
+
+const releaseStages = [
+  { id: "build", name: "Build", state: "succeeded", tone: "positive" },
+  { id: "staging", name: "Staging", reason: "integration tests", state: "failed", tone: "critical" },
+  { id: "prod", name: "Prod", state: "waiting", tone: "neutral" }
+] satisfies ReadonlyArray<RlyStage>
+const heldStages = [
+  { id: "build", name: "Build", state: "succeeded", tone: "positive" },
+  { id: "approval", name: "Approval", reason: "waiting for a deployment approver", state: "held", tone: "caution" },
+  { id: "prod", name: "Prod", state: "not started", tone: "neutral" }
+] satisfies ReadonlyArray<RlyStage>
+
+/** Stages as words inside list rows: only the blocking and held states take ink. */
+export const Words: Story = {
+  args: { heading: "Relay 2.4 stages", size: "words", stages: releaseStages },
+  play: async ({ canvas, canvasElement }) => {
+    await expect(canvas.getByRole("region", { name: "Relay 2.4 stages" })).toBeVisible()
+    await expect(canvasElement.querySelectorAll("[data-rly-stage-marker]")).toHaveLength(0)
+    await expect(canvasElement.querySelectorAll("[data-rly-stage-word='blocked']")).toHaveLength(1)
+    await expect(canvasElement.querySelectorAll("[data-rly-stage-word='held']")).toHaveLength(1)
+    await expect(canvas.getByText(": integration tests")).toBeVisible()
+  },
+  render: () => (
+    <main style={pageStyle}>
+      <Text as="h1" variant="section-title">
+        Releases
+      </Text>
+      <div style={stackStyle}>
+        <StageRail heading="Relay 2.4 stages" size="words" stages={releaseStages} />
+        <StageRail heading="Agent usage 1.3 stages" size="words" stages={heldStages} />
+      </div>
+    </main>
+  )
+}

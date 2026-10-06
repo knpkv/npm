@@ -163,4 +163,59 @@
       padding-inline-start: var(--rly-space-12);
     }
   }
+
+  /* Words: one line of "Name state" pairs, commas between them, no chips or markers. */
+  .words .heading {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+  }
+
+  .wordList {
+    display: flex;
+    flex-wrap: wrap;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-2) var(--rly-space-4);
+    list-style: none;
+    margin: var(--rly-space-0);
+    min-inline-size: var(--rly-space-0);
+    padding: var(--rly-space-0);
+  }
+
+  .word {
+    color: var(--rly-color-text-1);
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .word:not(:last-child)::after {
+    color: var(--rly-color-text-2);
+    content: ",";
+  }
+
+  .wordName {
+    color: var(--rly-color-text-1);
+  }
+
+  .wordState {
+    color: var(--rly-color-text-2);
+  }
+
+  .wordState[data-rly-stage-word="blocked"] {
+    color: var(--rly-color-blocked-ink);
+    font-weight: 600;
+  }
+
+  .wordState[data-rly-stage-word="held"] {
+    color: var(--rly-color-held-ink);
+    font-weight: 600;
+  }
+
+  .wordReason {
+    color: var(--rly-color-text-2);
+  }
 }

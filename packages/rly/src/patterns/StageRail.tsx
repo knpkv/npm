@@ -18,6 +18,12 @@ export const RLY_STAGE_RAIL_VARIANTS = defineVariants({
       className: style("defaultSize"),
       purpose: "Standard stage progression with supporting context",
       tokens: ["space-24", "space-12", "type-card-title", "type-body"]
+    },
+    words: {
+      className: style("words"),
+      purpose:
+        "Stages as one line of words inside a row or fact (no markers, chips or owners); only blocking and held states take ink",
+      tokens: ["type-meta", "color-text-1", "color-text-2", "color-blocked-ink", "color-held-ink"]
     }
   }
 })
@@ -59,7 +65,14 @@ const validateStages = (stages: ReadonlyArray<RlyStage>): ReadonlyArray<RlyStage
   return stages
 }
 
-/** Render every supplied stage as an ordered, color-independent progression. */
+const wordTone = (tone: RlyStateTone): "blocked" | "held" | "quiet" =>
+  tone === "critical" ? "blocked" : tone === "caution" ? "held" : "quiet"
+
+/**
+ * Render every supplied stage as an ordered, color-independent progression. The `words` size
+ * reads as a sentence ("Build succeeded, Staging failed: integration tests, Prod waiting") for
+ * rows and facts; its heading stays for assistive technology only.
+ */
 export const StageRail = ({
   className,
   emptyLabel = "No stages recorded.",
@@ -90,6 +103,18 @@ export const StageRail = ({
       </h2>
       {stages.length === 0 ? (
         <p className={style("empty")}>{visibleEmptyLabel}</p>
+      ) : size === "words" ? (
+        <ol className={style("wordList")}>
+          {stages.map((stage) => (
+            <li className={style("word")} data-rly-stage-id={stage.id} key={stage.id}>
+              <span className={style("wordName")}>{stage.name}</span>{" "}
+              <span className={style("wordState")} data-rly-stage-word={wordTone(stage.tone)}>
+                {stage.state}
+              </span>
+              {stage.reason === undefined ? null : <span className={style("wordReason")}>: {stage.reason}</span>}
+            </li>
+          ))}
+        </ol>
       ) : (
         <ol className={style("list")}>
           {stages.map((stage, index) => (
@@ -102,7 +127,7 @@ export const StageRail = ({
               )}
               <div className={style("content")}>
                 <h3 className={style("name")}>{stage.name}</h3>
-                <StateLabel label={stage.state} size={size === "compact" ? "compact" : "default"} tone={stage.tone} />
+                <StateLabel label={stage.state} size={size === "default" ? "default" : "compact"} tone={stage.tone} />
                 {stage.reason === undefined ? null : <p className={style("reason")}>{stage.reason}</p>}
                 {stage.owner === undefined ? null : <Person person={stage.owner} size={size} />}
               </div>

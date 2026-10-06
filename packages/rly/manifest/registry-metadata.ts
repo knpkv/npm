@@ -240,7 +240,8 @@ export const COMPONENT_REGISTRY_METADATA = {
     "blocked",
     "building",
     "compact",
-    "complete"
+    "complete",
+    "words"
   ], ["delivery", "progress"]),
   StateLabel: registryMetadata("Name a compact state using text and color-independent tone", [
     "caution",

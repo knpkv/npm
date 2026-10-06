@@ -4026,7 +4026,8 @@
         "building",
         "compact",
         "complete",
-        "default"
+        "default",
+        "words"
       ],
       "status": "stable",
       "variants": [
@@ -4042,6 +4043,10 @@
             {
               "description": "Use default for the size presentation.",
               "name": "default"
+            },
+            {
+              "description": "Use words for the size presentation.",
+              "name": "words"
             }
           ]
         }

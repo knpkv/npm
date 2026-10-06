@@ -1076,7 +1076,8 @@
         "building",
         "compact",
         "complete",
-        "default"
+        "default",
+        "words"
       ],
       "terms": [
         "blocked",
@@ -1088,7 +1089,8 @@
         "pattern",
         "progress",
         "size",
-        "stagerail"
+        "stagerail",
+        "words"
       ]
     },
     {
