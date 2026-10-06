@@ -239,756 +239,609 @@ const storeError = (operation: string) => (cause: unknown) => new WorkStoreError
 const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
   new WorkStoreError({ cause: error.cause, operation: error.operation })
 
+/**
+ * Upgrades pre-session Work tables in place. Runs inside `WorkStore.open`'s
+ * schema transaction, so a failure here or in a later schema step leaves the
+ * file as it was.
+ */
 const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
-  let transaction = false
-  try {
-    database.exec("BEGIN IMMEDIATE")
-    transaction = true
-    const columns = (table: string) =>
-      Schema.decodeUnknownSync(
-        Schema.Array(Schema.Struct({ name: Schema.String }))
-      )(database.prepare(`PRAGMA table_info(${table})`).all()).map(({ name }) => name)
-    const laneColumns = columns("work_lane_claims")
-    const decisionColumns = columns("work_decision_handoffs")
-    const tables = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
-      database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
-    ).map(({ name }) => name)
-    const coordinatorDispatchColumns = tables.includes("orchestrator_dispatches")
-      ? columns("orchestrator_dispatches")
+  const columns = (table: string) =>
+    Schema.decodeUnknownSync(
+      Schema.Array(Schema.Struct({ name: Schema.String }))
+    )(database.prepare(`PRAGMA table_info(${table})`).all()).map(({ name }) => name)
+  const laneColumns = columns("work_lane_claims")
+  const decisionColumns = columns("work_decision_handoffs")
+  const tables = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
+    database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
+  ).map(({ name }) => name)
+  const coordinatorDispatchColumns = tables.includes("orchestrator_dispatches")
+    ? columns("orchestrator_dispatches")
+    : []
+  const requireBindingCompanions = (
+    binding: WorkAgentBindingType,
+    operation: string
+  ): void => {
+    const laneInput = tables.includes("work_lane_operations")
+      ? database.prepare(
+        `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId,
+           phase, revision, record
+         FROM work_lane_operations WHERE operation_id = ?`
+      ).get(binding.lane.operationId)
+      : undefined
+    const checkpointInput = tables.includes("work_goal_events")
+      ? database.prepare(
+        `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
+         FROM work_goal_events WHERE event_id = ?`
+      ).get(binding.checkpoint.eventId)
+      : undefined
+    const error = agentBindingReadbackError(
+      binding,
+      laneInput === undefined ? undefined : Schema.decodeUnknownSync(AgentBindingLaneOperationRow)(laneInput),
+      checkpointInput === undefined
+        ? undefined
+        : Schema.decodeUnknownSync(AgentBindingGoalEventRow)(checkpointInput),
+      operation
+    )
+    if (error !== undefined) throw error
+  }
+  const coordinatorTablesPresent = {
+    dispatch: tables.includes("orchestrator_dispatches"),
+    event: tables.includes("orchestrator_events"),
+    metadata: tables.includes("orchestrator_dispatch_metadata")
+  }
+  const requireCoordinatorSchema = (operation: string): boolean => {
+    const present = Object.values(coordinatorTablesPresent).filter(Boolean).length
+    if (present !== 0 && present !== 3) {
+      throw new WorkStoreError({ cause: coordinatorTablesPresent, operation: `${operation}.schema` })
+    }
+    return present === 3
+  }
+  requireCoordinatorSchema("open.migrate")
+  const readCoordinatorLifecycle = (dispatchRequestId: string) => ({
+    dispatchRows: Schema.decodeUnknownSync(Schema.Array(CoordinatorLifecycleDispatchRow))(
+      database.prepare(
+        `SELECT dispatch_request_id AS dispatchRequestId,
+         activity_idempotency_key AS activityIdempotencyKey, command,
+         accepted_at AS acceptedAt, status
+       FROM orchestrator_dispatches WHERE dispatch_request_id = ? LIMIT 2`
+      ).all(dispatchRequestId)
+    ),
+    eventRows: Schema.decodeUnknownSync(Schema.Array(CoordinatorLifecycleEventRow))(
+      database.prepare(
+        `SELECT dispatch_request_id AS dispatchRequestId, sequence, type,
+         activity_idempotency_key AS activityIdempotencyKey,
+         occurred_at AS occurredAt, detail, result
+       FROM orchestrator_events WHERE dispatch_request_id = ?
+       ORDER BY sequence ASC LIMIT 5`
+      ).all(dispatchRequestId)
+    )
+  })
+  const routeStorageAuthority = (
+    dispatchRequestId: string,
+    operation: string
+  ): CoordinatorRouteStorageAuthority => {
+    if (!coordinatorDispatchColumns.includes("is_routed")) {
+      return { _tag: "legacy_without_routed_discriminator" }
+    }
+    const rows = Schema.decodeUnknownSync(Schema.Array(CoordinatorRouteDiscriminatorRow))(
+      database.prepare(
+        `SELECT is_routed AS isRouted FROM orchestrator_dispatches
+         WHERE dispatch_request_id = ? LIMIT 2`
+      ).all(dispatchRequestId)
+    )
+    const row = rows[0]
+    if (rows.length !== 1 || row === undefined) {
+      throw new WorkStoreError({ cause: { dispatchRequestId, rows }, operation })
+    }
+    return { _tag: "routed_discriminator", isRouted: row.isRouted }
+  }
+  const requireLinkedParentAuthority = (
+    linkedRequestId: string | null,
+    operation: string
+  ): void => {
+    if (linkedRequestId === null) return
+    const metadataRows = Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
+      database.prepare(
+        `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
+         FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ? LIMIT 2`
+      ).all(linkedRequestId)
+    )
+    const metadata = metadataRows[0]
+    if (metadataRows.length !== 1 || metadata === undefined || metadata.workLink !== null) {
+      throw new WorkStoreError({ cause: { linkedRequestId, metadataRows }, operation })
+    }
+    const lifecycle = readCoordinatorLifecycle(linkedRequestId)
+    requireCoordinatorFailedLunaAuthority(
+      lifecycle.dispatchRows,
+      lifecycle.eventRows,
+      metadata.route,
+      routeStorageAuthority(linkedRequestId, operation),
+      operation
+    )
+  }
+  const requireMetadataAuthority = (
+    dispatchRequestId: string,
+    routeText: string,
+    lineage: ReadonlyArray<string>,
+    operation: string
+  ): void => {
+    const commandRows = Schema.decodeUnknownSync(Schema.Array(CoordinatorCommandRow))(
+      database.prepare(
+        `SELECT activity_idempotency_key AS activityIdempotencyKey, command FROM orchestrator_dispatches
+         WHERE dispatch_request_id = ? LIMIT 2`
+      ).all(dispatchRequestId)
+    )
+    const commandRow = commandRows[0]
+    if (commandRows.length !== 1 || commandRow === undefined) {
+      throw new WorkStoreError({ cause: { commandRows, dispatchRequestId }, operation })
+    }
+    const route = requireCoordinatorRouteAuthority(
+      commandRow.command,
+      commandRow.activityIdempotencyKey,
+      routeText,
+      lineage,
+      routeStorageAuthority(dispatchRequestId, operation),
+      operation
+    )
+    requireLinkedParentAuthority(route.linkedRequestId, `${operation}.parent`)
+  }
+  const requireLifecycleAuthority = (
+    dispatchRequestId: string,
+    expectedRunningAt: number,
+    operation: string
+  ): void => {
+    if (!requireCoordinatorSchema(operation)) return
+    const lifecycle = readCoordinatorLifecycle(dispatchRequestId)
+    requireCoordinatorLifecycleAuthority(
+      lifecycle.dispatchRows,
+      lifecycle.eventRows,
+      expectedRunningAt,
+      operation
+    )
+  }
+  const requireCurrentAgentBindingAuthority = (
+    dispatchRequestId: string,
+    handoff: WorkDecisionHandoffType,
+    operation: string
+  ): void => {
+    const lifecycle = readCoordinatorLifecycle(dispatchRequestId)
+    const runningAt = coordinatorLifecycleRunningAt(
+      lifecycle.dispatchRows,
+      lifecycle.eventRows,
+      `${operation}.lifecycle`
+    )
+    const bindingRows = tables.includes("work_agent_bindings")
+      ? Schema.decodeUnknownSync(Schema.Array(AgentBindingRow))(
+        database.prepare(
+          `SELECT dispatch_request_id AS dispatchRequestId, lane_id AS laneId,
+             expected_revision AS expectedRevision, revision, agent_id AS agentId, host, record
+           FROM work_agent_bindings WHERE dispatch_request_id = ? LIMIT 2`
+        ).all(dispatchRequestId)
+      )
       : []
-    const requireBindingCompanions = (
-      binding: WorkAgentBindingType,
-      operation: string
-    ): void => {
-      const laneInput = tables.includes("work_lane_operations")
-        ? database.prepare(
+    if (runningAt === null && bindingRows.length === 0) return
+    const bindingRow = bindingRows[0]
+    if (runningAt === null || bindingRows.length !== 1 || bindingRow === undefined) {
+      throw new WorkStoreError({ cause: { bindingRows, lifecycle }, operation })
+    }
+    const decoded = decodeAgentBindingRow(
+      bindingRow,
+      { dispatchRequestId, laneId: handoff.laneId },
+      operation
+    )
+    if (decoded._tag === "invalid") throw decoded.error
+    if (
+      decoded.binding.request.expectedRevision !== handoff.expectedRevision ||
+      decoded.binding.lane.goalId !== handoff.goalId ||
+      decoded.binding.checkpoint.occurredAt !== runningAt
+    ) {
+      throw new WorkStoreError({ cause: { binding: decoded.binding, handoff, runningAt }, operation })
+    }
+    requireBindingCompanions(decoded.binding, operation)
+    const currentLaneRows = Schema.decodeUnknownSync(Schema.Array(LaneRow))(
+      database.prepare(
+        `SELECT lane_id AS laneId, goal_id AS goalId, operation_id AS operationId,
+           phase, revision, record
+         FROM work_lane_claims WHERE lane_id = ? LIMIT 2`
+      ).all(decoded.binding.lane.laneId)
+    )
+    const currentLaneRow = currentLaneRows[0]
+    if (currentLaneRows.length !== 1 || currentLaneRow === undefined) {
+      throw new WorkStoreError({
+        cause: { binding: decoded.binding, currentLaneRows },
+        operation: `${operation}.lane-revision`
+      })
+    }
+    let currentLane: typeof WorkLaneClaimed.Type
+    try {
+      currentLane = Schema.decodeUnknownSync(WorkLaneClaimed)(JSON.parse(currentLaneRow.record))
+    } catch (cause) {
+      throw new WorkStoreError({ cause, operation: `${operation}.lane-revision` })
+    }
+    const currentLaneSchema = laneColumns.includes("goal_id")
+    const currentOperationRows = currentLaneSchema
+      ? Schema.decodeUnknownSync(Schema.Array(AgentBindingLaneOperationRow))(
+        database.prepare(
           `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId,
              phase, revision, record
-           FROM work_lane_operations WHERE operation_id = ?`
-        ).get(binding.lane.operationId)
-        : undefined
-      const checkpointInput = tables.includes("work_goal_events")
-        ? database.prepare(
-          `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
-           FROM work_goal_events WHERE event_id = ?`
-        ).get(binding.checkpoint.eventId)
-        : undefined
-      const error = agentBindingReadbackError(
-        binding,
-        laneInput === undefined ? undefined : Schema.decodeUnknownSync(AgentBindingLaneOperationRow)(laneInput),
-        checkpointInput === undefined
-          ? undefined
-          : Schema.decodeUnknownSync(AgentBindingGoalEventRow)(checkpointInput),
-        operation
+           FROM work_lane_operations WHERE operation_id = ? LIMIT 2`
+        ).all(currentLane.operationId)
       )
-      if (error !== undefined) throw error
+      : []
+    const currentOperationError = currentLaneSchema
+      ? laneOperationReadbackError(
+        currentLane,
+        currentOperationRows.length === 1 ? currentOperationRows[0] : undefined,
+        `${operation}.lane-revision`
+      )
+      : undefined
+    if (
+      currentLane.laneId !== currentLaneRow.laneId ||
+      currentLane.goalId !== currentLaneRow.goalId ||
+      currentLane.operationId !== currentLaneRow.operationId ||
+      currentLane.phase !== currentLaneRow.phase ||
+      currentLane.revision !== currentLaneRow.revision ||
+      currentLane.laneId !== decoded.binding.lane.laneId ||
+      currentLane.goalId !== decoded.binding.lane.goalId ||
+      currentLane.revision < decoded.binding.lane.revision ||
+      (currentLaneSchema && currentLane.revision === decoded.binding.lane.revision &&
+        !Equal.equals(currentLane, decoded.binding.lane)) ||
+      currentOperationError !== undefined
+    ) {
+      throw new WorkStoreError({
+        cause: { binding: decoded.binding, currentLane, currentLaneRow, currentOperationError },
+        operation: `${operation}.lane-revision`
+      })
     }
-    const coordinatorTablesPresent = {
-      dispatch: tables.includes("orchestrator_dispatches"),
-      event: tables.includes("orchestrator_events"),
-      metadata: tables.includes("orchestrator_dispatch_metadata")
+  }
+  const dispatches = tables.includes("work_dispatch_handoffs")
+    ? Schema.decodeUnknownSync(Schema.Array(LegacyDispatchStoredRow))(
+      database.prepare(
+        `SELECT dispatch_request_id AS dispatchRequestId, handoff_id AS handoffId,
+           lane_id AS laneId, occurred_at AS occurredAt, lineage, record
+         FROM work_dispatch_handoffs`
+      ).all()
+    )
+    : []
+  const decisionIdentities = decisionColumns.length > 0
+    ? Schema.decodeUnknownSync(Schema.Array(DecisionIdentityRow))(
+      database.prepare("SELECT handoff_id AS handoffId FROM work_decision_handoffs").all()
+    )
+    : []
+  const orphanDispatch = dispatches.find(({ handoffId }) =>
+    !decisionIdentities.some((decision) => decision.handoffId === handoffId)
+  )
+  if (orphanDispatch !== undefined) {
+    throw new WorkStoreError({
+      cause: { decisionIdentities, dispatch: orphanDispatch },
+      operation: "open.migrate.dispatch-decision"
+    })
+  }
+  if (tables.includes("orchestrator_dispatch_metadata")) {
+    const linkedMetadata = Schema.decodeUnknownSync(Schema.Array(MetadataHandoffIdentityRow))(
+      database.prepare(
+        `SELECT dispatch_request_id AS dispatchRequestId,
+           CASE WHEN work_link IS NULL THEN 0 ELSE 1 END AS hasWorkLink,
+           CASE WHEN json_valid(work_link) AND json_type(work_link, '$.handoff.id') = 'text'
+             THEN json_extract(work_link, '$.handoff.id') END AS handoffId,
+           route
+         FROM orchestrator_dispatch_metadata AS metadata
+         WHERE work_link IS NOT NULL OR EXISTS (
+           SELECT 1 FROM orchestrator_dispatch_metadata AS linked
+           WHERE linked.dispatch_request_id = metadata.dispatch_request_id
+             AND linked.work_link IS NOT NULL
+         ) OR (json_valid(route) AND json_extract(route, '$.model') = 'gpt-5.6-sol')
+         LIMIT ${workDecisionMaxRecords + 1}`
+      ).all()
+    )
+    if (linkedMetadata.length > workDecisionMaxRecords) {
+      throw new WorkStoreError({ cause: linkedMetadata.length, operation: "open.migrate.metadata-capacity" })
     }
-    const requireCoordinatorSchema = (operation: string): boolean => {
-      const present = Object.values(coordinatorTablesPresent).filter(Boolean).length
-      if (present !== 0 && present !== 3) {
-        throw new WorkStoreError({ cause: coordinatorTablesPresent, operation: `${operation}.schema` })
-      }
-      return present === 3
+    const metadataCounts = new Map<string, number>()
+    const dispatchCounts = new Map<string, number>()
+    const decisionCounts = new Map<string, number>()
+    for (const metadata of linkedMetadata) {
+      metadataCounts.set(
+        metadata.dispatchRequestId,
+        (metadataCounts.get(metadata.dispatchRequestId) ?? 0) + 1
+      )
     }
-    requireCoordinatorSchema("open.migrate")
-    const readCoordinatorLifecycle = (dispatchRequestId: string) => ({
-      dispatchRows: Schema.decodeUnknownSync(Schema.Array(CoordinatorLifecycleDispatchRow))(
-        database.prepare(
-          `SELECT dispatch_request_id AS dispatchRequestId,
-           activity_idempotency_key AS activityIdempotencyKey, command,
-           accepted_at AS acceptedAt, status
-         FROM orchestrator_dispatches WHERE dispatch_request_id = ? LIMIT 2`
-        ).all(dispatchRequestId)
-      ),
-      eventRows: Schema.decodeUnknownSync(Schema.Array(CoordinatorLifecycleEventRow))(
-        database.prepare(
-          `SELECT dispatch_request_id AS dispatchRequestId, sequence, type,
-           activity_idempotency_key AS activityIdempotencyKey,
-           occurred_at AS occurredAt, detail, result
-         FROM orchestrator_events WHERE dispatch_request_id = ?
-         ORDER BY sequence ASC LIMIT 5`
-        ).all(dispatchRequestId)
+    for (const dispatch of dispatches) {
+      const identity = JSON.stringify([dispatch.dispatchRequestId, dispatch.handoffId])
+      dispatchCounts.set(identity, (dispatchCounts.get(identity) ?? 0) + 1)
+    }
+    for (const decision of decisionIdentities) {
+      decisionCounts.set(decision.handoffId, (decisionCounts.get(decision.handoffId) ?? 0) + 1)
+    }
+    const invalidMetadata = linkedMetadata.find((metadata) => {
+      if (metadata.route === null) return true
+      const requiresWorkLink = coordinatorRouteRequiresWorkLink(
+        metadata.route,
+        routeStorageAuthority(metadata.dispatchRequestId, "open.migrate.metadata-decision"),
+        "open.migrate.metadata-decision"
+      )
+      if (!requiresWorkLink) return metadata.hasWorkLink === 1
+      const dispatchIdentity = JSON.stringify([metadata.dispatchRequestId, metadata.handoffId])
+      return (
+        metadata.handoffId === null || metadataCounts.get(metadata.dispatchRequestId) !== 1 ||
+        dispatchCounts.get(dispatchIdentity) !== 1 || decisionCounts.get(metadata.handoffId) !== 1
       )
     })
-    const routeStorageAuthority = (
-      dispatchRequestId: string,
-      operation: string
-    ): CoordinatorRouteStorageAuthority => {
-      if (!coordinatorDispatchColumns.includes("is_routed")) {
-        return { _tag: "legacy_without_routed_discriminator" }
-      }
-      const rows = Schema.decodeUnknownSync(Schema.Array(CoordinatorRouteDiscriminatorRow))(
-        database.prepare(
-          `SELECT is_routed AS isRouted FROM orchestrator_dispatches
-           WHERE dispatch_request_id = ? LIMIT 2`
-        ).all(dispatchRequestId)
-      )
-      const row = rows[0]
-      if (rows.length !== 1 || row === undefined) {
-        throw new WorkStoreError({ cause: { dispatchRequestId, rows }, operation })
-      }
-      return { _tag: "routed_discriminator", isRouted: row.isRouted }
+    if (invalidMetadata !== undefined) {
+      throw new WorkStoreError({
+        cause: { decisionIdentities, dispatches, linkedMetadata, metadata: invalidMetadata },
+        operation: "open.migrate.metadata-decision"
+      })
     }
-    const requireLinkedParentAuthority = (
-      linkedRequestId: string | null,
-      operation: string
-    ): void => {
-      if (linkedRequestId === null) return
-      const metadataRows = Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
-        database.prepare(
-          `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
+  }
+  const lanes = laneColumns.length > 0 && !laneColumns.includes("goal_id")
+    ? Schema.decodeUnknownSync(Schema.Array(LegacyLaneStoredRow))(
+      database.prepare("SELECT lane_id AS laneId, revision, record FROM work_lane_claims").all()
+    ).map((row) => {
+      const legacy = Schema.decodeUnknownSync(LegacyLaneRecord)(JSON.parse(row.record))
+      if (legacy.laneId !== row.laneId || legacy.revision !== row.revision) {
+        throw new WorkStoreError({ cause: { legacy, row }, operation: "open.migrate.lane-identity" })
+      }
+      return Schema.decodeUnknownSync(WorkLaneClaimed)({
+        ...legacy,
+        goalId: legacy.laneId,
+        operationId: legacy.laneId
+      })
+    })
+    : []
+  const decisions = decisionColumns.length > 0 && !decisionColumns.includes("session_id")
+    ? Schema.decodeUnknownSync(Schema.Array(LegacyDecisionStoredRow))(
+      database.prepare("SELECT handoff_id AS handoffId, record FROM work_decision_handoffs").all()
+    ).map((row) => {
+      const legacy = Schema.decodeUnknownSync(LegacyDecisionRecord)(JSON.parse(row.record))
+      if (legacy.id !== row.handoffId) {
+        throw new WorkStoreError({ cause: { legacy, row }, operation: "open.migrate.handoff-identity" })
+      }
+      const matchingDispatches = dispatches.filter(({ handoffId }) => handoffId === legacy.id)
+      const dispatch = matchingDispatches[0]
+      const lane = lanes.find(({ laneId }) => laneId === legacy.laneId)
+      if (lane === undefined) {
+        throw new WorkStoreError({ cause: legacy, operation: "open.migrate.handoff-lane" })
+      }
+      const dispatchIds = dispatch === undefined
+        ? []
+        : Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
+      if (matchingDispatches.length !== 1 || dispatch === undefined) {
+        throw new WorkStoreError({
+          cause: { legacy, matchingDispatches },
+          operation: "open.migrate.legacy-dispatch-cardinality"
+        })
+      }
+      const dispatchHandoff = Schema.decodeUnknownSync(LegacyDecisionRecord)(JSON.parse(dispatch.record))
+      if (
+        dispatch.laneId !== legacy.laneId || dispatch.occurredAt !== legacy.occurredAt ||
+        !legacyDecisionEquivalent(dispatchHandoff, legacy)
+      ) {
+        throw new WorkStoreError({
+          cause: { dispatch, dispatchHandoff, legacy },
+          operation: "open.migrate.legacy-dispatch-authority"
+        })
+      }
+      if (tables.includes("orchestrator_dispatch_metadata")) {
+        const metadataRows = Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
+          database.prepare(
+            `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
            FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ? LIMIT 2`
-        ).all(linkedRequestId)
-      )
-      const metadata = metadataRows[0]
-      if (metadataRows.length !== 1 || metadata === undefined || metadata.workLink !== null) {
-        throw new WorkStoreError({ cause: { linkedRequestId, metadataRows }, operation })
+          ).all(dispatch.dispatchRequestId)
+        )
+        const metadata = metadataRows[0]
+        if (metadataRows.length !== 1 || metadata === undefined) {
+          throw new WorkStoreError({
+            cause: { dispatch, metadataRows },
+            operation: "open.migrate.legacy-metadata-authority"
+          })
+        }
+        if (metadata.workLink === null) {
+          throw new WorkStoreError({
+            cause: { dispatch, metadata },
+            operation: "open.migrate.legacy-metadata-authority"
+          })
+        }
+        const workLink = Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(metadata.workLink))
+        requireMetadataAuthority(
+          dispatch.dispatchRequestId,
+          metadata.route,
+          workLink.lineage,
+          "open.migrate.legacy-metadata-authority"
+        )
+        if (
+          !legacyDecisionEquivalent(workLink.handoff, legacy) ||
+          !workDispatchLineageEquivalent(workLink.lineage, dispatchIds)
+        ) {
+          throw new WorkStoreError({
+            cause: { legacy, workLink },
+            operation: "open.migrate.legacy-metadata-authority"
+          })
+        }
       }
-      const lifecycle = readCoordinatorLifecycle(linkedRequestId)
-      requireCoordinatorFailedLunaAuthority(
-        lifecycle.dispatchRows,
-        lifecycle.eventRows,
-        metadata.route,
-        routeStorageAuthority(linkedRequestId, operation),
-        operation
-      )
-    }
-    const requireMetadataAuthority = (
-      dispatchRequestId: string,
-      routeText: string,
-      lineage: ReadonlyArray<string>,
-      operation: string
-    ): void => {
-      const commandRows = Schema.decodeUnknownSync(Schema.Array(CoordinatorCommandRow))(
-        database.prepare(
-          `SELECT activity_idempotency_key AS activityIdempotencyKey, command FROM orchestrator_dispatches
-           WHERE dispatch_request_id = ? LIMIT 2`
-        ).all(dispatchRequestId)
-      )
-      const commandRow = commandRows[0]
-      if (commandRows.length !== 1 || commandRow === undefined) {
-        throw new WorkStoreError({ cause: { commandRows, dispatchRequestId }, operation })
-      }
-      const route = requireCoordinatorRouteAuthority(
-        commandRow.command,
-        commandRow.activityIdempotencyKey,
-        routeText,
-        lineage,
-        routeStorageAuthority(dispatchRequestId, operation),
-        operation
-      )
-      requireLinkedParentAuthority(route.linkedRequestId, `${operation}.parent`)
-    }
-    const requireLifecycleAuthority = (
-      dispatchRequestId: string,
-      expectedRunningAt: number,
-      operation: string
-    ): void => {
-      if (!requireCoordinatorSchema(operation)) return
-      const lifecycle = readCoordinatorLifecycle(dispatchRequestId)
-      requireCoordinatorLifecycleAuthority(
-        lifecycle.dispatchRows,
-        lifecycle.eventRows,
-        expectedRunningAt,
-        operation
-      )
-    }
-    const requireCurrentAgentBindingAuthority = (
-      dispatchRequestId: string,
-      handoff: WorkDecisionHandoffType,
-      operation: string
-    ): void => {
-      const lifecycle = readCoordinatorLifecycle(dispatchRequestId)
-      const runningAt = coordinatorLifecycleRunningAt(
-        lifecycle.dispatchRows,
-        lifecycle.eventRows,
-        `${operation}.lifecycle`
-      )
       const bindingRows = tables.includes("work_agent_bindings")
         ? Schema.decodeUnknownSync(Schema.Array(AgentBindingRow))(
           database.prepare(
             `SELECT dispatch_request_id AS dispatchRequestId, lane_id AS laneId,
                expected_revision AS expectedRevision, revision, agent_id AS agentId, host, record
-             FROM work_agent_bindings WHERE dispatch_request_id = ? LIMIT 2`
-          ).all(dispatchRequestId)
+             FROM work_agent_bindings
+             WHERE dispatch_request_id = ?`
+          ).all(dispatch.dispatchRequestId)
         )
         : []
-      if (runningAt === null && bindingRows.length === 0) return
       const bindingRow = bindingRows[0]
-      if (runningAt === null || bindingRows.length !== 1 || bindingRow === undefined) {
-        throw new WorkStoreError({ cause: { bindingRows, lifecycle }, operation })
+      if (bindingRows.length !== 1 || bindingRow === undefined) {
+        throw new WorkStoreError({
+          cause: { bindingRows, dispatch, legacy },
+          operation: "open.migrate.legacy-handoff-revision"
+        })
       }
-      const decoded = decodeAgentBindingRow(
+      const bindingDecision = decodeAgentBindingRow(
         bindingRow,
-        { dispatchRequestId, laneId: handoff.laneId },
-        operation
+        { dispatchRequestId: dispatch.dispatchRequestId, laneId: legacy.laneId },
+        "open.migrate.legacy-agent-binding"
       )
-      if (decoded._tag === "invalid") throw decoded.error
-      if (
-        decoded.binding.request.expectedRevision !== handoff.expectedRevision ||
-        decoded.binding.lane.goalId !== handoff.goalId ||
-        decoded.binding.checkpoint.occurredAt !== runningAt
-      ) {
-        throw new WorkStoreError({ cause: { binding: decoded.binding, handoff, runningAt }, operation })
-      }
-      requireBindingCompanions(decoded.binding, operation)
-      const currentLaneRows = Schema.decodeUnknownSync(Schema.Array(LaneRow))(
-        database.prepare(
-          `SELECT lane_id AS laneId, goal_id AS goalId, operation_id AS operationId,
-             phase, revision, record
-           FROM work_lane_claims WHERE lane_id = ? LIMIT 2`
-        ).all(decoded.binding.lane.laneId)
-      )
-      const currentLaneRow = currentLaneRows[0]
-      if (currentLaneRows.length !== 1 || currentLaneRow === undefined) {
+      if (bindingDecision._tag === "invalid") throw bindingDecision.error
+      if (bindingDecision.binding.lane.goalId !== legacy.goalId) {
         throw new WorkStoreError({
-          cause: { binding: decoded.binding, currentLaneRows },
-          operation: `${operation}.lane-revision`
+          cause: { binding: bindingDecision.binding, legacy },
+          operation: "open.migrate.legacy-agent-binding.goal"
         })
       }
-      let currentLane: typeof WorkLaneClaimed.Type
-      try {
-        currentLane = Schema.decodeUnknownSync(WorkLaneClaimed)(JSON.parse(currentLaneRow.record))
-      } catch (cause) {
-        throw new WorkStoreError({ cause, operation: `${operation}.lane-revision` })
-      }
-      const currentLaneSchema = laneColumns.includes("goal_id")
-      const currentOperationRows = currentLaneSchema
-        ? Schema.decodeUnknownSync(Schema.Array(AgentBindingLaneOperationRow))(
-          database.prepare(
-            `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId,
-               phase, revision, record
-             FROM work_lane_operations WHERE operation_id = ? LIMIT 2`
-          ).all(currentLane.operationId)
-        )
-        : []
-      const currentOperationError = currentLaneSchema
-        ? laneOperationReadbackError(
-          currentLane,
-          currentOperationRows.length === 1 ? currentOperationRows[0] : undefined,
-          `${operation}.lane-revision`
-        )
-        : undefined
-      if (
-        currentLane.laneId !== currentLaneRow.laneId ||
-        currentLane.goalId !== currentLaneRow.goalId ||
-        currentLane.operationId !== currentLaneRow.operationId ||
-        currentLane.phase !== currentLaneRow.phase ||
-        currentLane.revision !== currentLaneRow.revision ||
-        currentLane.laneId !== decoded.binding.lane.laneId ||
-        currentLane.goalId !== decoded.binding.lane.goalId ||
-        currentLane.revision < decoded.binding.lane.revision ||
-        (currentLaneSchema && currentLane.revision === decoded.binding.lane.revision &&
-          !Equal.equals(currentLane, decoded.binding.lane)) ||
-        currentOperationError !== undefined
-      ) {
+      if (lane.revision < bindingDecision.binding.lane.revision) {
         throw new WorkStoreError({
-          cause: { binding: decoded.binding, currentLane, currentLaneRow, currentOperationError },
-          operation: `${operation}.lane-revision`
+          cause: { binding: bindingDecision.binding, lane, legacy },
+          operation: "open.migrate.legacy-handoff-lane-revision"
         })
       }
-    }
-    const dispatches = tables.includes("work_dispatch_handoffs")
-      ? Schema.decodeUnknownSync(Schema.Array(LegacyDispatchStoredRow))(
-        database.prepare(
-          `SELECT dispatch_request_id AS dispatchRequestId, handoff_id AS handoffId,
-             lane_id AS laneId, occurred_at AS occurredAt, lineage, record
-           FROM work_dispatch_handoffs`
-        ).all()
+      requireBindingCompanions(bindingDecision.binding, "open.migrate.legacy-agent-binding")
+      requireLifecycleAuthority(
+        bindingDecision.binding.request.dispatchRequestId,
+        bindingDecision.binding.checkpoint.occurredAt,
+        "open.migrate.legacy-agent-binding.lifecycle"
       )
-      : []
-    const decisionIdentities = decisionColumns.length > 0
-      ? Schema.decodeUnknownSync(Schema.Array(DecisionIdentityRow))(
-        database.prepare("SELECT handoff_id AS handoffId FROM work_decision_handoffs").all()
-      )
-      : []
-    const orphanDispatch = dispatches.find(({ handoffId }) =>
-      !decisionIdentities.some((decision) => decision.handoffId === handoffId)
+      return Schema.decodeUnknownSync(WorkDecisionHandoff)({
+        ...legacy,
+        contextDelta: legacy.summary,
+        expectedRevision: bindingDecision.binding.request.expectedRevision,
+        sessionId: legacy.id,
+        dispatchIds,
+        blockers: [],
+        evidenceRefs: [],
+        version: "herdr.work.decision.v2"
+      })
+    })
+    : []
+  if (laneColumns.length > 0 && !laneColumns.includes("goal_id")) {
+    database.exec("ALTER TABLE work_lane_claims ADD COLUMN goal_id TEXT")
+    database.exec("ALTER TABLE work_lane_claims ADD COLUMN operation_id TEXT")
+    database.exec("ALTER TABLE work_lane_claims ADD COLUMN phase TEXT")
+    const update = database.prepare(
+      "UPDATE work_lane_claims SET goal_id = ?, operation_id = ?, phase = ?, record = ? WHERE lane_id = ?"
     )
-    if (orphanDispatch !== undefined) {
-      throw new WorkStoreError({
-        cause: { decisionIdentities, dispatch: orphanDispatch },
-        operation: "open.migrate.dispatch-decision"
-      })
-    }
-    if (tables.includes("orchestrator_dispatch_metadata")) {
-      const linkedMetadata = Schema.decodeUnknownSync(Schema.Array(MetadataHandoffIdentityRow))(
-        database.prepare(
-          `SELECT dispatch_request_id AS dispatchRequestId,
-             CASE WHEN work_link IS NULL THEN 0 ELSE 1 END AS hasWorkLink,
-             CASE WHEN json_valid(work_link) AND json_type(work_link, '$.handoff.id') = 'text'
-               THEN json_extract(work_link, '$.handoff.id') END AS handoffId,
-             route
-           FROM orchestrator_dispatch_metadata AS metadata
-           WHERE work_link IS NOT NULL OR EXISTS (
-             SELECT 1 FROM orchestrator_dispatch_metadata AS linked
-             WHERE linked.dispatch_request_id = metadata.dispatch_request_id
-               AND linked.work_link IS NOT NULL
-           ) OR (json_valid(route) AND json_extract(route, '$.model') = 'gpt-5.6-sol')
-           LIMIT ${workDecisionMaxRecords + 1}`
-        ).all()
+    for (const lane of lanes) update.run(lane.goalId, lane.operationId, lane.phase, JSON.stringify(lane), lane.laneId)
+  }
+  if (decisionColumns.length > 0 && !decisionColumns.includes("session_id")) {
+    database.exec("ALTER TABLE work_decision_handoffs ADD COLUMN session_id TEXT")
+    const update = database.prepare(
+      "UPDATE work_decision_handoffs SET session_id = ?, record = ? WHERE handoff_id = ?"
+    )
+    for (const decision of decisions) update.run(decision.sessionId, JSON.stringify(decision), decision.id)
+    if (dispatches.length > 0) {
+      const updateDispatch = database.prepare(
+        "UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?"
       )
-      if (linkedMetadata.length > workDecisionMaxRecords) {
-        throw new WorkStoreError({ cause: linkedMetadata.length, operation: "open.migrate.metadata-capacity" })
-      }
-      const metadataCounts = new Map<string, number>()
-      const dispatchCounts = new Map<string, number>()
-      const decisionCounts = new Map<string, number>()
-      for (const metadata of linkedMetadata) {
-        metadataCounts.set(
-          metadata.dispatchRequestId,
-          (metadataCounts.get(metadata.dispatchRequestId) ?? 0) + 1
-        )
-      }
-      for (const dispatch of dispatches) {
-        const identity = JSON.stringify([dispatch.dispatchRequestId, dispatch.handoffId])
-        dispatchCounts.set(identity, (dispatchCounts.get(identity) ?? 0) + 1)
-      }
-      for (const decision of decisionIdentities) {
-        decisionCounts.set(decision.handoffId, (decisionCounts.get(decision.handoffId) ?? 0) + 1)
-      }
-      const invalidMetadata = linkedMetadata.find((metadata) => {
-        if (metadata.route === null) return true
-        const requiresWorkLink = coordinatorRouteRequiresWorkLink(
-          metadata.route,
-          routeStorageAuthority(metadata.dispatchRequestId, "open.migrate.metadata-decision"),
-          "open.migrate.metadata-decision"
-        )
-        if (!requiresWorkLink) return metadata.hasWorkLink === 1
-        const dispatchIdentity = JSON.stringify([metadata.dispatchRequestId, metadata.handoffId])
-        return (
-          metadata.handoffId === null || metadataCounts.get(metadata.dispatchRequestId) !== 1 ||
-          dispatchCounts.get(dispatchIdentity) !== 1 || decisionCounts.get(metadata.handoffId) !== 1
-        )
-      })
-      if (invalidMetadata !== undefined) {
-        throw new WorkStoreError({
-          cause: { decisionIdentities, dispatches, linkedMetadata, metadata: invalidMetadata },
-          operation: "open.migrate.metadata-decision"
-        })
-      }
-    }
-    const lanes = laneColumns.length > 0 && !laneColumns.includes("goal_id")
-      ? Schema.decodeUnknownSync(Schema.Array(LegacyLaneStoredRow))(
-        database.prepare("SELECT lane_id AS laneId, revision, record FROM work_lane_claims").all()
-      ).map((row) => {
-        const legacy = Schema.decodeUnknownSync(LegacyLaneRecord)(JSON.parse(row.record))
-        if (legacy.laneId !== row.laneId || legacy.revision !== row.revision) {
-          throw new WorkStoreError({ cause: { legacy, row }, operation: "open.migrate.lane-identity" })
-        }
-        return Schema.decodeUnknownSync(WorkLaneClaimed)({
-          ...legacy,
-          goalId: legacy.laneId,
-          operationId: legacy.laneId
-        })
-      })
-      : []
-    const decisions = decisionColumns.length > 0 && !decisionColumns.includes("session_id")
-      ? Schema.decodeUnknownSync(Schema.Array(LegacyDecisionStoredRow))(
-        database.prepare("SELECT handoff_id AS handoffId, record FROM work_decision_handoffs").all()
-      ).map((row) => {
-        const legacy = Schema.decodeUnknownSync(LegacyDecisionRecord)(JSON.parse(row.record))
-        if (legacy.id !== row.handoffId) {
-          throw new WorkStoreError({ cause: { legacy, row }, operation: "open.migrate.handoff-identity" })
-        }
-        const matchingDispatches = dispatches.filter(({ handoffId }) => handoffId === legacy.id)
-        const dispatch = matchingDispatches[0]
-        const lane = lanes.find(({ laneId }) => laneId === legacy.laneId)
-        if (lane === undefined) {
-          throw new WorkStoreError({ cause: legacy, operation: "open.migrate.handoff-lane" })
-        }
-        const dispatchIds = dispatch === undefined
-          ? []
-          : Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
-        if (matchingDispatches.length !== 1 || dispatch === undefined) {
-          throw new WorkStoreError({
-            cause: { legacy, matchingDispatches },
-            operation: "open.migrate.legacy-dispatch-cardinality"
-          })
-        }
-        const dispatchHandoff = Schema.decodeUnknownSync(LegacyDecisionRecord)(JSON.parse(dispatch.record))
-        if (
-          dispatch.laneId !== legacy.laneId || dispatch.occurredAt !== legacy.occurredAt ||
-          !legacyDecisionEquivalent(dispatchHandoff, legacy)
-        ) {
-          throw new WorkStoreError({
-            cause: { dispatch, dispatchHandoff, legacy },
-            operation: "open.migrate.legacy-dispatch-authority"
-          })
-        }
-        if (tables.includes("orchestrator_dispatch_metadata")) {
-          const metadataRows = Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
-            database.prepare(
-              `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
-             FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ? LIMIT 2`
-            ).all(dispatch.dispatchRequestId)
-          )
-          const metadata = metadataRows[0]
-          if (metadataRows.length !== 1 || metadata === undefined) {
-            throw new WorkStoreError({
-              cause: { dispatch, metadataRows },
-              operation: "open.migrate.legacy-metadata-authority"
-            })
-          }
-          if (metadata.workLink === null) {
-            throw new WorkStoreError({
-              cause: { dispatch, metadata },
-              operation: "open.migrate.legacy-metadata-authority"
-            })
-          }
-          const workLink = Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(metadata.workLink))
-          requireMetadataAuthority(
-            dispatch.dispatchRequestId,
-            metadata.route,
-            workLink.lineage,
-            "open.migrate.legacy-metadata-authority"
-          )
-          if (
-            !legacyDecisionEquivalent(workLink.handoff, legacy) ||
-            !workDispatchLineageEquivalent(workLink.lineage, dispatchIds)
-          ) {
-            throw new WorkStoreError({
-              cause: { legacy, workLink },
-              operation: "open.migrate.legacy-metadata-authority"
-            })
-          }
-        }
-        const bindingRows = tables.includes("work_agent_bindings")
-          ? Schema.decodeUnknownSync(Schema.Array(AgentBindingRow))(
-            database.prepare(
-              `SELECT dispatch_request_id AS dispatchRequestId, lane_id AS laneId,
-                 expected_revision AS expectedRevision, revision, agent_id AS agentId, host, record
-               FROM work_agent_bindings
-               WHERE dispatch_request_id = ?`
-            ).all(dispatch.dispatchRequestId)
-          )
-          : []
-        const bindingRow = bindingRows[0]
-        if (bindingRows.length !== 1 || bindingRow === undefined) {
-          throw new WorkStoreError({
-            cause: { bindingRows, dispatch, legacy },
-            operation: "open.migrate.legacy-handoff-revision"
-          })
-        }
-        const bindingDecision = decodeAgentBindingRow(
-          bindingRow,
-          { dispatchRequestId: dispatch.dispatchRequestId, laneId: legacy.laneId },
-          "open.migrate.legacy-agent-binding"
-        )
-        if (bindingDecision._tag === "invalid") throw bindingDecision.error
-        if (bindingDecision.binding.lane.goalId !== legacy.goalId) {
-          throw new WorkStoreError({
-            cause: { binding: bindingDecision.binding, legacy },
-            operation: "open.migrate.legacy-agent-binding.goal"
-          })
-        }
-        if (lane.revision < bindingDecision.binding.lane.revision) {
-          throw new WorkStoreError({
-            cause: { binding: bindingDecision.binding, lane, legacy },
-            operation: "open.migrate.legacy-handoff-lane-revision"
-          })
-        }
-        requireBindingCompanions(bindingDecision.binding, "open.migrate.legacy-agent-binding")
-        requireLifecycleAuthority(
-          bindingDecision.binding.request.dispatchRequestId,
-          bindingDecision.binding.checkpoint.occurredAt,
-          "open.migrate.legacy-agent-binding.lifecycle"
-        )
-        return Schema.decodeUnknownSync(WorkDecisionHandoff)({
-          ...legacy,
-          contextDelta: legacy.summary,
-          expectedRevision: bindingDecision.binding.request.expectedRevision,
-          sessionId: legacy.id,
-          dispatchIds,
-          blockers: [],
-          evidenceRefs: [],
-          version: "herdr.work.decision.v2"
-        })
-      })
-      : []
-    if (laneColumns.length > 0 && !laneColumns.includes("goal_id")) {
-      database.exec("ALTER TABLE work_lane_claims ADD COLUMN goal_id TEXT")
-      database.exec("ALTER TABLE work_lane_claims ADD COLUMN operation_id TEXT")
-      database.exec("ALTER TABLE work_lane_claims ADD COLUMN phase TEXT")
-      const update = database.prepare(
-        "UPDATE work_lane_claims SET goal_id = ?, operation_id = ?, phase = ?, record = ? WHERE lane_id = ?"
-      )
-      for (const lane of lanes) update.run(lane.goalId, lane.operationId, lane.phase, JSON.stringify(lane), lane.laneId)
-    }
-    if (decisionColumns.length > 0 && !decisionColumns.includes("session_id")) {
-      database.exec("ALTER TABLE work_decision_handoffs ADD COLUMN session_id TEXT")
-      const update = database.prepare(
-        "UPDATE work_decision_handoffs SET session_id = ?, record = ? WHERE handoff_id = ?"
-      )
-      for (const decision of decisions) update.run(decision.sessionId, JSON.stringify(decision), decision.id)
-      if (dispatches.length > 0) {
-        const updateDispatch = database.prepare(
-          "UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?"
-        )
-        const updateMetadata = tables.includes("orchestrator_dispatch_metadata")
-          ? database.prepare(
-            "UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?"
-          )
-          : null
-        for (const dispatch of dispatches) {
-          const decision = decisions.find(({ id }) => id === dispatch.handoffId)
-          if (decision === undefined) continue
-          updateDispatch.run(JSON.stringify(decision), dispatch.dispatchRequestId)
-          updateMetadata?.run(
-            JSON.stringify({ handoff: decision, lineage: decision.dispatchIds }),
-            dispatch.dispatchRequestId
-          )
-        }
-      }
-    }
-    if (decisionColumns.length > 0) {
-      const storedDecisions = Schema.decodeUnknownSync(Schema.Array(DecisionRow))(
-        database.prepare(
-          `SELECT handoff_id AS handoffId, session_id AS sessionId, lane_id AS laneId,
-             occurred_at AS occurredAt, record
-           FROM work_decision_handoffs`
-        ).all()
-      )
-      const updateDecision = database.prepare(
-        "UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?"
-      )
-      const updateDispatch = tables.includes("work_dispatch_handoffs")
-        ? database.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE handoff_id = ?")
-        : null
       const updateMetadata = tables.includes("orchestrator_dispatch_metadata")
         ? database.prepare(
-          `UPDATE orchestrator_dispatch_metadata SET work_link = ?
-           WHERE dispatch_request_id = ?`
+          "UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?"
         )
         : null
-      const previousDecisions = storedDecisions.flatMap((row) => {
-        const input = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(row.record)
-        const previous = decodePreviousDecisionHandoff(input)
-        const handoffDispatches = tables.includes("work_dispatch_handoffs")
-          ? Schema.decodeUnknownSync(Schema.Array(LegacyDispatchStoredRow))(
-            database.prepare(
-              `SELECT dispatch_request_id AS dispatchRequestId, handoff_id AS handoffId,
-                 lane_id AS laneId, occurred_at AS occurredAt, lineage, record
-               FROM work_dispatch_handoffs WHERE handoff_id = ?`
-            ).all(row.handoffId)
-          )
-          : []
-        switch (previous._tag) {
-          case "current": {
-            if (
-              previous.value.id !== row.handoffId || previous.value.sessionId !== row.sessionId ||
-              previous.value.laneId !== row.laneId || previous.value.occurredAt !== row.occurredAt
-            ) {
-              throw new WorkStoreError({
-                cause: { handoff: previous.value, row },
-                operation: "open.migrate.handoff-identity"
-              })
-            }
-            if (handoffDispatches.length > 1) {
-              throw new WorkStoreError({
-                cause: { handoffDispatches, row },
-                operation: "open.migrate.dispatch-cardinality"
-              })
-            }
-            const linkedMetadata = tables.includes("orchestrator_dispatch_metadata")
-              ? Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
-                database.prepare(
-                  `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
-                   FROM orchestrator_dispatch_metadata
-                   WHERE work_link IS NOT NULL
-                     AND CASE WHEN json_valid(work_link)
-                       THEN json_extract(work_link, '$.handoff.id') END = ?`
-                ).all(row.handoffId)
-              )
-              : []
-            if (
-              tables.includes("orchestrator_dispatch_metadata") &&
-              (linkedMetadata.length !== handoffDispatches.length ||
-                linkedMetadata.some((metadata) =>
-                  !handoffDispatches.some(({ dispatchRequestId }) => dispatchRequestId === metadata.dispatchRequestId)
-                ))
-            ) {
-              throw new WorkStoreError({
-                cause: { handoffDispatches, linkedMetadata, row },
-                operation: "open.migrate.metadata-authority"
-              })
-            }
-            for (const dispatch of handoffDispatches) {
-              const dispatchAuthority = (() => {
-                try {
-                  return {
-                    handoff: Schema.decodeUnknownSync(WorkDecisionHandoff)(JSON.parse(dispatch.record)),
-                    lineage: Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
-                  }
-                } catch (cause) {
-                  throw new WorkStoreError({ cause, operation: "open.migrate.decode-dispatch-authority" })
-                }
-              })()
-              if (
-                dispatch.laneId !== previous.value.laneId ||
-                dispatch.occurredAt !== previous.value.occurredAt ||
-                !currentDecisionHandoffEquivalent(dispatchAuthority.handoff, previous.value) ||
-                !workDispatchLineageContainedBy(dispatchAuthority.lineage, previous.value.dispatchIds)
-              ) {
-                throw new WorkStoreError({
-                  cause: { dispatch, dispatchAuthority, handoff: previous.value },
-                  operation: "open.migrate.dispatch-authority"
-                })
-              }
-              if (!tables.includes("orchestrator_dispatch_metadata")) continue
-              const metadata = linkedMetadata.find(({ dispatchRequestId }) =>
-                dispatchRequestId === dispatch.dispatchRequestId
-              )
-              if (metadata?.workLink === null || metadata?.workLink === undefined) {
-                throw new WorkStoreError({
-                  cause: { dispatch, metadata },
-                  operation: "open.migrate.metadata-authority"
-                })
-              }
-              const workLink = (() => {
-                try {
-                  return Schema.decodeUnknownSync(CurrentMetadataWorkLink)(JSON.parse(metadata.workLink))
-                } catch (cause) {
-                  throw new WorkStoreError({ cause, operation: "open.migrate.decode-metadata-authority" })
-                }
-              })()
-              requireMetadataAuthority(
-                dispatch.dispatchRequestId,
-                metadata.route,
-                workLink.lineage,
-                "open.migrate.metadata-authority"
-              )
-              if (
-                !currentDecisionHandoffEquivalent(workLink.handoff, previous.value) ||
-                !workDispatchLineageEquivalent(workLink.lineage, dispatchAuthority.lineage)
-              ) {
-                throw new WorkStoreError({
-                  cause: { handoff: previous.value, workLink },
-                  operation: "open.migrate.metadata-authority"
-                })
-              }
-              requireCurrentAgentBindingAuthority(
-                dispatch.dispatchRequestId,
-                previous.value,
-                "open.migrate.current-agent-binding"
-              )
-            }
-            return []
-          }
-          case "invalid":
-            throw new WorkStoreError({
-              cause: previous.cause,
-              operation: "open.migrate.invalid-handoff"
-            })
-          case "previous":
-            return [{ previous: previous.value, row }]
-        }
-      })
-      for (const { previous, row } of previousDecisions) {
-        const laneRevision = Schema.decodeUnknownSync(LaneRevisionRow)(
-          database.prepare("SELECT revision FROM work_lane_claims WHERE lane_id = ?").get(row.laneId)
+      for (const dispatch of dispatches) {
+        const decision = decisions.find(({ id }) => id === dispatch.handoffId)
+        if (decision === undefined) continue
+        updateDispatch.run(JSON.stringify(decision), dispatch.dispatchRequestId)
+        updateMetadata?.run(
+          JSON.stringify({ handoff: decision, lineage: decision.dispatchIds }),
+          dispatch.dispatchRequestId
         )
-        const handoffDispatches = tables.includes("work_dispatch_handoffs")
-          ? Schema.decodeUnknownSync(Schema.Array(LegacyDispatchStoredRow))(
-            database.prepare(
-              `SELECT dispatch_request_id AS dispatchRequestId, handoff_id AS handoffId,
-                 lane_id AS laneId, occurred_at AS occurredAt, lineage, record
-               FROM work_dispatch_handoffs WHERE handoff_id = ?`
-            ).all(row.handoffId)
-          )
-          : []
-        if (handoffDispatches.length > 1) {
-          throw new WorkStoreError({
-            cause: { handoffDispatches, row },
-            operation: "open.migrate.dispatch-cardinality"
-          })
-        }
-        const linkedMetadata = tables.includes("orchestrator_dispatch_metadata")
-          ? Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
-            database.prepare(
-              `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
-               FROM orchestrator_dispatch_metadata
-               WHERE work_link IS NOT NULL
-                 AND CASE WHEN json_valid(work_link)
-                   THEN json_extract(work_link, '$.handoff.id') END = ?`
-            ).all(row.handoffId)
-          )
-          : []
-        if (
-          tables.includes("orchestrator_dispatch_metadata") &&
-          (linkedMetadata.length !== handoffDispatches.length ||
-            linkedMetadata.some((metadata) =>
-              !handoffDispatches.some(({ dispatchRequestId }) => dispatchRequestId === metadata.dispatchRequestId)
-            ))
-        ) {
-          throw new WorkStoreError({
-            cause: { handoffDispatches, linkedMetadata, row },
-            operation: "open.migrate.metadata-authority"
-          })
-        }
-        const bindingRows = tables.includes("work_agent_bindings") && tables.includes("work_dispatch_handoffs")
-          ? Schema.decodeUnknownSync(Schema.Array(AgentBindingRow))(
-            database.prepare(
-              `SELECT binding.dispatch_request_id AS dispatchRequestId, binding.lane_id AS laneId,
-                 binding.expected_revision AS expectedRevision, binding.revision,
-                 binding.agent_id AS agentId, binding.host, binding.record
-               FROM work_agent_bindings binding
-               JOIN work_dispatch_handoffs dispatch
-                 ON dispatch.dispatch_request_id = binding.dispatch_request_id
-               WHERE dispatch.handoff_id = ?`
-            ).all(row.handoffId)
-          )
-          : []
-        const bindingRow = bindingRows[0]
-        const handoffDispatch = bindingRow === undefined
-          ? undefined
-          : handoffDispatches.find(({ dispatchRequestId }) => dispatchRequestId === bindingRow.dispatchRequestId)
-        if (bindingRows.length !== 1 || bindingRow === undefined || handoffDispatch === undefined) {
-          throw new WorkStoreError({ cause: { bindingRows, row }, operation: "open.migrate.handoff-revision" })
-        }
-        const bindingDecision = decodeAgentBindingRow(
-          bindingRow,
-          { dispatchRequestId: handoffDispatch.dispatchRequestId, laneId: previous.laneId },
-          "open.migrate.agent-binding"
+      }
+    }
+  }
+  if (decisionColumns.length > 0) {
+    const storedDecisions = Schema.decodeUnknownSync(Schema.Array(DecisionRow))(
+      database.prepare(
+        `SELECT handoff_id AS handoffId, session_id AS sessionId, lane_id AS laneId,
+           occurred_at AS occurredAt, record
+         FROM work_decision_handoffs`
+      ).all()
+    )
+    const updateDecision = database.prepare(
+      "UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?"
+    )
+    const updateDispatch = tables.includes("work_dispatch_handoffs")
+      ? database.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE handoff_id = ?")
+      : null
+    const updateMetadata = tables.includes("orchestrator_dispatch_metadata")
+      ? database.prepare(
+        `UPDATE orchestrator_dispatch_metadata SET work_link = ?
+         WHERE dispatch_request_id = ?`
+      )
+      : null
+    const previousDecisions = storedDecisions.flatMap((row) => {
+      const input = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(row.record)
+      const previous = decodePreviousDecisionHandoff(input)
+      const handoffDispatches = tables.includes("work_dispatch_handoffs")
+        ? Schema.decodeUnknownSync(Schema.Array(LegacyDispatchStoredRow))(
+          database.prepare(
+            `SELECT dispatch_request_id AS dispatchRequestId, handoff_id AS handoffId,
+               lane_id AS laneId, occurred_at AS occurredAt, lineage, record
+             FROM work_dispatch_handoffs WHERE handoff_id = ?`
+          ).all(row.handoffId)
         )
-        if (bindingDecision._tag === "invalid") throw bindingDecision.error
-        if (laneRevision.revision < bindingDecision.binding.lane.revision) {
-          throw new WorkStoreError({
-            cause: { binding: bindingDecision.binding, laneRevision, previous },
-            operation: "open.migrate.handoff-lane-revision"
-          })
-        }
-        if (bindingDecision.binding.lane.goalId !== previous.goalId) {
-          throw new WorkStoreError({
-            cause: { binding: bindingDecision.binding, previous },
-            operation: "open.migrate.agent-binding.goal"
-          })
-        }
-        requireBindingCompanions(bindingDecision.binding, "open.migrate.agent-binding")
-        requireLifecycleAuthority(
-          bindingDecision.binding.request.dispatchRequestId,
-          bindingDecision.binding.checkpoint.occurredAt,
-          "open.migrate.agent-binding.lifecycle"
-        )
-        const verifiedDispatches = handoffDispatches.map((dispatch) => {
-          const dispatchHandoff = Schema.decodeUnknownSync(PreviousWorkDecisionHandoff)(JSON.parse(dispatch.record))
-          const lineage = Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
+        : []
+      switch (previous._tag) {
+        case "current": {
           if (
-            dispatch.laneId !== previous.laneId || dispatch.occurredAt !== previous.occurredAt ||
-            !previousDecisionHandoffEquivalent(dispatchHandoff, previous) ||
-            !workDispatchLineageContainedBy(lineage, previous.dispatchIds)
+            previous.value.id !== row.handoffId || previous.value.sessionId !== row.sessionId ||
+            previous.value.laneId !== row.laneId || previous.value.occurredAt !== row.occurredAt
           ) {
             throw new WorkStoreError({
-              cause: { dispatch, dispatchHandoff, previous },
-              operation: "open.migrate.dispatch-authority"
+              cause: { handoff: previous.value, row },
+              operation: "open.migrate.handoff-identity"
             })
           }
-          if (tables.includes("orchestrator_dispatch_metadata")) {
+          if (handoffDispatches.length > 1) {
+            throw new WorkStoreError({
+              cause: { handoffDispatches, row },
+              operation: "open.migrate.dispatch-cardinality"
+            })
+          }
+          const linkedMetadata = tables.includes("orchestrator_dispatch_metadata")
+            ? Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
+              database.prepare(
+                `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
+                 FROM orchestrator_dispatch_metadata
+                 WHERE work_link IS NOT NULL
+                   AND CASE WHEN json_valid(work_link)
+                     THEN json_extract(work_link, '$.handoff.id') END = ?`
+              ).all(row.handoffId)
+            )
+            : []
+          if (
+            tables.includes("orchestrator_dispatch_metadata") &&
+            (linkedMetadata.length !== handoffDispatches.length ||
+              linkedMetadata.some((metadata) =>
+                !handoffDispatches.some(({ dispatchRequestId }) => dispatchRequestId === metadata.dispatchRequestId)
+              ))
+          ) {
+            throw new WorkStoreError({
+              cause: { handoffDispatches, linkedMetadata, row },
+              operation: "open.migrate.metadata-authority"
+            })
+          }
+          for (const dispatch of handoffDispatches) {
+            const dispatchAuthority = (() => {
+              try {
+                return {
+                  handoff: Schema.decodeUnknownSync(WorkDecisionHandoff)(JSON.parse(dispatch.record)),
+                  lineage: Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
+                }
+              } catch (cause) {
+                throw new WorkStoreError({ cause, operation: "open.migrate.decode-dispatch-authority" })
+              }
+            })()
+            if (
+              dispatch.laneId !== previous.value.laneId ||
+              dispatch.occurredAt !== previous.value.occurredAt ||
+              !currentDecisionHandoffEquivalent(dispatchAuthority.handoff, previous.value) ||
+              !workDispatchLineageContainedBy(dispatchAuthority.lineage, previous.value.dispatchIds)
+            ) {
+              throw new WorkStoreError({
+                cause: { dispatch, dispatchAuthority, handoff: previous.value },
+                operation: "open.migrate.dispatch-authority"
+              })
+            }
+            if (!tables.includes("orchestrator_dispatch_metadata")) continue
             const metadata = linkedMetadata.find(({ dispatchRequestId }) =>
               dispatchRequestId === dispatch.dispatchRequestId
             )
@@ -998,7 +851,13 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
                 operation: "open.migrate.metadata-authority"
               })
             }
-            const workLink = Schema.decodeUnknownSync(PreviousMetadataWorkLink)(JSON.parse(metadata.workLink))
+            const workLink = (() => {
+              try {
+                return Schema.decodeUnknownSync(CurrentMetadataWorkLink)(JSON.parse(metadata.workLink))
+              } catch (cause) {
+                throw new WorkStoreError({ cause, operation: "open.migrate.decode-metadata-authority" })
+              }
+            })()
             requireMetadataAuthority(
               dispatch.dispatchRequestId,
               metadata.route,
@@ -1006,138 +865,274 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
               "open.migrate.metadata-authority"
             )
             if (
-              !previousDecisionHandoffEquivalent(workLink.handoff, previous) ||
-              !workDispatchLineageEquivalent(workLink.lineage, lineage)
+              !currentDecisionHandoffEquivalent(workLink.handoff, previous.value) ||
+              !workDispatchLineageEquivalent(workLink.lineage, dispatchAuthority.lineage)
             ) {
               throw new WorkStoreError({
-                cause: { previous, workLink },
+                cause: { handoff: previous.value, workLink },
                 operation: "open.migrate.metadata-authority"
               })
             }
+            requireCurrentAgentBindingAuthority(
+              dispatch.dispatchRequestId,
+              previous.value,
+              "open.migrate.current-agent-binding"
+            )
           }
-          return { dispatch, lineage }
-        })
-        const migrated = upgradePreviousDecisionHandoff(
-          previous,
-          bindingDecision.binding.request.expectedRevision
-        )
-        if (
-          migrated.id !== row.handoffId || migrated.sessionId !== row.sessionId ||
-          migrated.laneId !== row.laneId || migrated.occurredAt !== row.occurredAt
-        ) {
-          throw new WorkStoreError({ cause: { migrated, row }, operation: "open.migrate.handoff-identity" })
+          return []
         }
-        const encoded = JSON.stringify(migrated)
-        updateDecision.run(encoded, row.handoffId)
-        updateDispatch?.run(encoded, row.handoffId)
-        for (const { dispatch, lineage } of verifiedDispatches) {
-          updateMetadata?.run(
-            JSON.stringify({ handoff: migrated, lineage }),
-            dispatch.dispatchRequestId
-          )
-        }
-      }
-      if (decisions.length > 0 || previousDecisions.length > 0) {
-        const migratedLedger = Schema.decodeUnknownSync(LedgerBytesRow)(
-          database.prepare(
-            `SELECT COALESCE(SUM(
-               length(CAST(handoff_id AS BLOB)) + length(CAST(record AS BLOB))
-             ), 0) AS bytes
-             FROM work_decision_handoffs`
-          ).get()
-        )
-        if (migratedLedger.bytes > workDecisionMaxBytes) {
+        case "invalid":
           throw new WorkStoreError({
-            cause: migratedLedger,
-            operation: "open.migrate.handoff-capacity"
+            cause: previous.cause,
+            operation: "open.migrate.invalid-handoff"
+          })
+        case "previous":
+          return [{ previous: previous.value, row }]
+      }
+    })
+    for (const { previous, row } of previousDecisions) {
+      const laneRevision = Schema.decodeUnknownSync(LaneRevisionRow)(
+        database.prepare("SELECT revision FROM work_lane_claims WHERE lane_id = ?").get(row.laneId)
+      )
+      const handoffDispatches = tables.includes("work_dispatch_handoffs")
+        ? Schema.decodeUnknownSync(Schema.Array(LegacyDispatchStoredRow))(
+          database.prepare(
+            `SELECT dispatch_request_id AS dispatchRequestId, handoff_id AS handoffId,
+               lane_id AS laneId, occurred_at AS occurredAt, lineage, record
+             FROM work_dispatch_handoffs WHERE handoff_id = ?`
+          ).all(row.handoffId)
+        )
+        : []
+      if (handoffDispatches.length > 1) {
+        throw new WorkStoreError({
+          cause: { handoffDispatches, row },
+          operation: "open.migrate.dispatch-cardinality"
+        })
+      }
+      const linkedMetadata = tables.includes("orchestrator_dispatch_metadata")
+        ? Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
+          database.prepare(
+            `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
+             FROM orchestrator_dispatch_metadata
+             WHERE work_link IS NOT NULL
+               AND CASE WHEN json_valid(work_link)
+                 THEN json_extract(work_link, '$.handoff.id') END = ?`
+          ).all(row.handoffId)
+        )
+        : []
+      if (
+        tables.includes("orchestrator_dispatch_metadata") &&
+        (linkedMetadata.length !== handoffDispatches.length ||
+          linkedMetadata.some((metadata) =>
+            !handoffDispatches.some(({ dispatchRequestId }) => dispatchRequestId === metadata.dispatchRequestId)
+          ))
+      ) {
+        throw new WorkStoreError({
+          cause: { handoffDispatches, linkedMetadata, row },
+          operation: "open.migrate.metadata-authority"
+        })
+      }
+      const bindingRows = tables.includes("work_agent_bindings") && tables.includes("work_dispatch_handoffs")
+        ? Schema.decodeUnknownSync(Schema.Array(AgentBindingRow))(
+          database.prepare(
+            `SELECT binding.dispatch_request_id AS dispatchRequestId, binding.lane_id AS laneId,
+               binding.expected_revision AS expectedRevision, binding.revision,
+               binding.agent_id AS agentId, binding.host, binding.record
+             FROM work_agent_bindings binding
+             JOIN work_dispatch_handoffs dispatch
+               ON dispatch.dispatch_request_id = binding.dispatch_request_id
+             WHERE dispatch.handoff_id = ?`
+          ).all(row.handoffId)
+        )
+        : []
+      const bindingRow = bindingRows[0]
+      const handoffDispatch = bindingRow === undefined
+        ? undefined
+        : handoffDispatches.find(({ dispatchRequestId }) => dispatchRequestId === bindingRow.dispatchRequestId)
+      if (bindingRows.length !== 1 || bindingRow === undefined || handoffDispatch === undefined) {
+        throw new WorkStoreError({ cause: { bindingRows, row }, operation: "open.migrate.handoff-revision" })
+      }
+      const bindingDecision = decodeAgentBindingRow(
+        bindingRow,
+        { dispatchRequestId: handoffDispatch.dispatchRequestId, laneId: previous.laneId },
+        "open.migrate.agent-binding"
+      )
+      if (bindingDecision._tag === "invalid") throw bindingDecision.error
+      if (laneRevision.revision < bindingDecision.binding.lane.revision) {
+        throw new WorkStoreError({
+          cause: { binding: bindingDecision.binding, laneRevision, previous },
+          operation: "open.migrate.handoff-lane-revision"
+        })
+      }
+      if (bindingDecision.binding.lane.goalId !== previous.goalId) {
+        throw new WorkStoreError({
+          cause: { binding: bindingDecision.binding, previous },
+          operation: "open.migrate.agent-binding.goal"
+        })
+      }
+      requireBindingCompanions(bindingDecision.binding, "open.migrate.agent-binding")
+      requireLifecycleAuthority(
+        bindingDecision.binding.request.dispatchRequestId,
+        bindingDecision.binding.checkpoint.occurredAt,
+        "open.migrate.agent-binding.lifecycle"
+      )
+      const verifiedDispatches = handoffDispatches.map((dispatch) => {
+        const dispatchHandoff = Schema.decodeUnknownSync(PreviousWorkDecisionHandoff)(JSON.parse(dispatch.record))
+        const lineage = Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
+        if (
+          dispatch.laneId !== previous.laneId || dispatch.occurredAt !== previous.occurredAt ||
+          !previousDecisionHandoffEquivalent(dispatchHandoff, previous) ||
+          !workDispatchLineageContainedBy(lineage, previous.dispatchIds)
+        ) {
+          throw new WorkStoreError({
+            cause: { dispatch, dispatchHandoff, previous },
+            operation: "open.migrate.dispatch-authority"
           })
         }
-      }
-    }
-    if (tables.includes("orchestrator_dispatch_metadata") && coordinatorDispatchColumns.includes("is_routed")) {
-      const pageSize = 512
-      let cursor: string | null = null
-      while (true) {
-        const input = cursor === null
-          ? database.prepare(
-            `SELECT CAST(metadata.rowid AS TEXT) AS rowId,
-                 metadata.dispatch_request_id AS dispatchRequestId,
-                 dispatch.activity_idempotency_key AS activityIdempotencyKey,
-                 dispatch.command, dispatch.is_routed AS isRouted,
-                 CASE WHEN metadata.work_link IS NULL THEN 0 ELSE 1 END AS hasWorkLink,
-                 metadata.route
-               FROM orchestrator_dispatch_metadata AS metadata
-               LEFT JOIN orchestrator_dispatches AS dispatch
-                 ON dispatch.dispatch_request_id = metadata.dispatch_request_id
-               ORDER BY metadata.rowid ASC LIMIT ?`
-          ).all(pageSize)
-          : database.prepare(
-            `SELECT CAST(metadata.rowid AS TEXT) AS rowId,
-                 metadata.dispatch_request_id AS dispatchRequestId,
-                 dispatch.activity_idempotency_key AS activityIdempotencyKey,
-                 dispatch.command, dispatch.is_routed AS isRouted,
-                 CASE WHEN metadata.work_link IS NULL THEN 0 ELSE 1 END AS hasWorkLink,
-                 metadata.route
-               FROM orchestrator_dispatch_metadata AS metadata
-               LEFT JOIN orchestrator_dispatches AS dispatch
-                 ON dispatch.dispatch_request_id = metadata.dispatch_request_id
-               WHERE metadata.rowid > CAST(? AS INTEGER)
-               ORDER BY metadata.rowid ASC LIMIT ?`
-          ).all(cursor, pageSize)
-        const rows = Schema.decodeUnknownSync(Schema.Array(CoordinatorMetadataRouteRow))(input)
-        for (const row of rows) {
-          try {
-            const isLegacyUnroutedOrphan = row.activityIdempotencyKey === null && row.command === null &&
-              row.isRouted === null && row.route === null && row.hasWorkLink === 0
-            if (isLegacyUnroutedOrphan) continue
-            if (
-              row.activityIdempotencyKey === null || row.command === null ||
-              row.route === null || row.isRouted === null
-            ) {
-              throw new WorkStoreError({ cause: row, operation: "open.migrate.metadata-route" })
-            }
-            requireCoordinatorRouteBinding(
-              row.command,
-              row.activityIdempotencyKey,
-              row.route,
-              row.hasWorkLink === 1,
-              { _tag: "routed_discriminator", isRouted: row.isRouted },
-              "open.migrate.metadata-route"
-            )
-          } catch (cause) {
-            if (Schema.is(WorkStoreError)(cause)) throw cause
-            throw new WorkStoreError({ cause, operation: "open.migrate.metadata-route" })
+        if (tables.includes("orchestrator_dispatch_metadata")) {
+          const metadata = linkedMetadata.find(({ dispatchRequestId }) =>
+            dispatchRequestId === dispatch.dispatchRequestId
+          )
+          if (metadata?.workLink === null || metadata?.workLink === undefined) {
+            throw new WorkStoreError({
+              cause: { dispatch, metadata },
+              operation: "open.migrate.metadata-authority"
+            })
+          }
+          const workLink = Schema.decodeUnknownSync(PreviousMetadataWorkLink)(JSON.parse(metadata.workLink))
+          requireMetadataAuthority(
+            dispatch.dispatchRequestId,
+            metadata.route,
+            workLink.lineage,
+            "open.migrate.metadata-authority"
+          )
+          if (
+            !previousDecisionHandoffEquivalent(workLink.handoff, previous) ||
+            !workDispatchLineageEquivalent(workLink.lineage, lineage)
+          ) {
+            throw new WorkStoreError({
+              cause: { previous, workLink },
+              operation: "open.migrate.metadata-authority"
+            })
           }
         }
-        const last = rows.at(-1)
-        if (rows.length < pageSize || last === undefined) break
-        cursor = last.rowId
+        return { dispatch, lineage }
+      })
+      const migrated = upgradePreviousDecisionHandoff(
+        previous,
+        bindingDecision.binding.request.expectedRevision
+      )
+      if (
+        migrated.id !== row.handoffId || migrated.sessionId !== row.sessionId ||
+        migrated.laneId !== row.laneId || migrated.occurredAt !== row.occurredAt
+      ) {
+        throw new WorkStoreError({ cause: { migrated, row }, operation: "open.migrate.handoff-identity" })
       }
-      const invalidRoutedMetadata = Schema.decodeUnknownSync(Schema.Array(RoutedMetadataCardinalityRow))(
+      const encoded = JSON.stringify(migrated)
+      updateDecision.run(encoded, row.handoffId)
+      updateDispatch?.run(encoded, row.handoffId)
+      for (const { dispatch, lineage } of verifiedDispatches) {
+        updateMetadata?.run(
+          JSON.stringify({ handoff: migrated, lineage }),
+          dispatch.dispatchRequestId
+        )
+      }
+    }
+    if (decisions.length > 0 || previousDecisions.length > 0) {
+      const migratedLedger = Schema.decodeUnknownSync(LedgerBytesRow)(
         database.prepare(
-          `SELECT dispatch.dispatch_request_id AS dispatchRequestId,
-               COUNT(metadata.dispatch_request_id) AS metadataCount
-             FROM orchestrator_dispatches AS dispatch
-             LEFT JOIN orchestrator_dispatch_metadata AS metadata
-               ON metadata.dispatch_request_id = dispatch.dispatch_request_id
-             WHERE dispatch.is_routed = 1
-             GROUP BY dispatch.dispatch_request_id
-             HAVING COUNT(metadata.dispatch_request_id) <> 1
-             LIMIT 1`
-        ).all()
-      )[0]
-      if (invalidRoutedMetadata !== undefined) {
+          `SELECT COALESCE(SUM(
+             length(CAST(handoff_id AS BLOB)) + length(CAST(record AS BLOB))
+           ), 0) AS bytes
+           FROM work_decision_handoffs`
+        ).get()
+      )
+      if (migratedLedger.bytes > workDecisionMaxBytes) {
         throw new WorkStoreError({
-          cause: invalidRoutedMetadata,
-          operation: "open.migrate.routed-metadata"
+          cause: migratedLedger,
+          operation: "open.migrate.handoff-capacity"
         })
       }
     }
-    database.exec("COMMIT")
-    transaction = false
-  } catch (error) {
-    if (transaction) database.exec("ROLLBACK")
-    throw error
+  }
+  if (tables.includes("orchestrator_dispatch_metadata") && coordinatorDispatchColumns.includes("is_routed")) {
+    const pageSize = 512
+    let cursor: string | null = null
+    while (true) {
+      const input = cursor === null
+        ? database.prepare(
+          `SELECT CAST(metadata.rowid AS TEXT) AS rowId,
+               metadata.dispatch_request_id AS dispatchRequestId,
+               dispatch.activity_idempotency_key AS activityIdempotencyKey,
+               dispatch.command, dispatch.is_routed AS isRouted,
+               CASE WHEN metadata.work_link IS NULL THEN 0 ELSE 1 END AS hasWorkLink,
+               metadata.route
+             FROM orchestrator_dispatch_metadata AS metadata
+             LEFT JOIN orchestrator_dispatches AS dispatch
+               ON dispatch.dispatch_request_id = metadata.dispatch_request_id
+             ORDER BY metadata.rowid ASC LIMIT ?`
+        ).all(pageSize)
+        : database.prepare(
+          `SELECT CAST(metadata.rowid AS TEXT) AS rowId,
+               metadata.dispatch_request_id AS dispatchRequestId,
+               dispatch.activity_idempotency_key AS activityIdempotencyKey,
+               dispatch.command, dispatch.is_routed AS isRouted,
+               CASE WHEN metadata.work_link IS NULL THEN 0 ELSE 1 END AS hasWorkLink,
+               metadata.route
+             FROM orchestrator_dispatch_metadata AS metadata
+             LEFT JOIN orchestrator_dispatches AS dispatch
+               ON dispatch.dispatch_request_id = metadata.dispatch_request_id
+             WHERE metadata.rowid > CAST(? AS INTEGER)
+             ORDER BY metadata.rowid ASC LIMIT ?`
+        ).all(cursor, pageSize)
+      const rows = Schema.decodeUnknownSync(Schema.Array(CoordinatorMetadataRouteRow))(input)
+      for (const row of rows) {
+        try {
+          const isLegacyUnroutedOrphan = row.activityIdempotencyKey === null && row.command === null &&
+            row.isRouted === null && row.route === null && row.hasWorkLink === 0
+          if (isLegacyUnroutedOrphan) continue
+          if (
+            row.activityIdempotencyKey === null || row.command === null ||
+            row.route === null || row.isRouted === null
+          ) {
+            throw new WorkStoreError({ cause: row, operation: "open.migrate.metadata-route" })
+          }
+          requireCoordinatorRouteBinding(
+            row.command,
+            row.activityIdempotencyKey,
+            row.route,
+            row.hasWorkLink === 1,
+            { _tag: "routed_discriminator", isRouted: row.isRouted },
+            "open.migrate.metadata-route"
+          )
+        } catch (cause) {
+          if (Schema.is(WorkStoreError)(cause)) throw cause
+          throw new WorkStoreError({ cause, operation: "open.migrate.metadata-route" })
+        }
+      }
+      const last = rows.at(-1)
+      if (rows.length < pageSize || last === undefined) break
+      cursor = last.rowId
+    }
+    const invalidRoutedMetadata = Schema.decodeUnknownSync(Schema.Array(RoutedMetadataCardinalityRow))(
+      database.prepare(
+        `SELECT dispatch.dispatch_request_id AS dispatchRequestId,
+             COUNT(metadata.dispatch_request_id) AS metadataCount
+           FROM orchestrator_dispatches AS dispatch
+           LEFT JOIN orchestrator_dispatch_metadata AS metadata
+             ON metadata.dispatch_request_id = dispatch.dispatch_request_id
+           WHERE dispatch.is_routed = 1
+           GROUP BY dispatch.dispatch_request_id
+           HAVING COUNT(metadata.dispatch_request_id) <> 1
+           LIMIT 1`
+      ).all()
+    )[0]
+    if (invalidRoutedMetadata !== undefined) {
+      throw new WorkStoreError({
+        cause: invalidRoutedMetadata,
+        operation: "open.migrate.routed-metadata"
+      })
+    }
   }
 }
 
@@ -1848,11 +1843,16 @@ export class WorkStore implements WorkStoreService {
     const opened = yield* openPrivateSqlite(path, {
       busyTimeoutMillis: workStoreBusyTimeoutMillis,
       initialize: (database) => {
-        migrateLegacyAuthorityTables(database)
-        const hadLaneOperationLedger = database.prepare(
-          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_lane_operations'"
-        ).get() !== undefined
-        database.exec(`
+        // One transaction: legacy migration and schema creation succeed or fail
+        // together, and their statements share one commit instead of syncing
+        // the file once each.
+        database.exec("BEGIN IMMEDIATE")
+        try {
+          migrateLegacyAuthorityTables(database)
+          const hadLaneOperationLedger = database.prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_lane_operations'"
+          ).get() !== undefined
+          database.exec(`
         CREATE TABLE IF NOT EXISTS work_goal_events (
           event_id TEXT PRIMARY KEY,
           goal_id TEXT NOT NULL,
@@ -1958,21 +1958,21 @@ export class WorkStore implements WorkStoreService {
         CREATE INDEX IF NOT EXISTS work_decision_handoffs_session
           ON work_decision_handoffs (session_id);
       `)
-        const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
-          database.prepare("PRAGMA table_info(work_goal_events)").all()
-        )
-        if (!columns.some(({ name }) => name === "transaction_id")) {
-          database.exec("ALTER TABLE work_goal_events ADD COLUMN transaction_id TEXT")
-        }
-        if (!hadLaneOperationLedger) {
-          database.exec(`
+          const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
+            database.prepare("PRAGMA table_info(work_goal_events)").all()
+          )
+          if (!columns.some(({ name }) => name === "transaction_id")) {
+            database.exec("ALTER TABLE work_goal_events ADD COLUMN transaction_id TEXT")
+          }
+          if (!hadLaneOperationLedger) {
+            database.exec(`
           INSERT OR IGNORE INTO work_lane_operations
             (operation_id, lane_id, goal_id, phase, revision, record)
           SELECT operation_id, lane_id, goal_id, phase, revision, record
           FROM work_lane_claims
         `)
-        }
-        database.exec(`
+          }
+          database.exec(`
         INSERT OR IGNORE INTO work_lane_operation_totals
           (singleton, operation_count, operation_bytes)
         SELECT 1, COUNT(*), COALESCE(SUM(
@@ -1980,7 +1980,7 @@ export class WorkStore implements WorkStoreService {
         ), 0)
         FROM work_lane_operations
       `)
-        database.exec(`
+          database.exec(`
         INSERT OR IGNORE INTO work_goal_transaction_totals
           (singleton, transaction_count, transaction_bytes)
         SELECT 1, COUNT(*), COALESCE(SUM(
@@ -1988,7 +1988,7 @@ export class WorkStore implements WorkStoreService {
         ), 0)
         FROM work_goal_transactions
       `)
-        database.exec(`
+          database.exec(`
         INSERT OR REPLACE INTO work_decision_totals
           (singleton, decision_count, decision_bytes)
         SELECT 1, COUNT(*), COALESCE(SUM(
@@ -1996,6 +1996,13 @@ export class WorkStore implements WorkStoreService {
         ), 0)
         FROM work_decision_handoffs
       `)
+          database.exec("COMMIT")
+        } catch (error) {
+          // SQLite may already have rolled back (SQLITE_FULL, IOERR); a second
+          // ROLLBACK would throw and replace the real error.
+          if (database.isTransaction) database.exec("ROLLBACK")
+          throw error
+        }
       }
     }).pipe(Effect.mapError(fromPrivateDatabaseError))
     return new WorkStore(path, opened, cryptoService)
