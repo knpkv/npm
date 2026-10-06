@@ -345,8 +345,13 @@ export const workbenchQueue = (
           openMs: Math.max(0, now.getTime() - pullRequest.creationDate.getTime()),
           pullRequest,
           quietMs,
-          rule: ruleProgress(pullRequest),
-          stuck: group === "yours" ? stuckReason(pullRequest, quietMs) : undefined
+          // While approval is unknown, rule progress is only last known, so the row says unknown instead.
+          rule: approvalOf(pullRequest)._tag === "Unknown" ? undefined : ruleProgress(pullRequest),
+          stuck: group === "yours"
+            ? stuckReason(pullRequest, quietMs)
+            : approvalOf(pullRequest)._tag === "Unknown"
+            ? "unverified"
+            : undefined
         }
       ]
     })

@@ -871,14 +871,16 @@ const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresent
         verdict: "Closed."
       }
     case "OPEN": {
+      const approval = approvalOf(pr)
       if (!pr.isMergeable) {
+        const conflict = `Resolve the conflict between ${pr.sourceBranch} and ${pr.destinationBranch} before merging.`
         return {
-          reason: `Resolve the conflict between ${pr.sourceBranch} and ${pr.destinationBranch} before merging.`,
+          // The conflict decides the verdict; an unknown approval still says why.
+          reason: approval._tag === "Unknown" ? `${conflict} ${approvalUnknownReasonText(approval.reason)}` : conflict,
           tone: "critical",
           verdict: "Resolve conflicts."
         }
       }
-      const approval = approvalOf(pr)
       if (approval._tag === "Unknown") {
         return {
           reason: approvalUnknownReasonText(approval.reason),

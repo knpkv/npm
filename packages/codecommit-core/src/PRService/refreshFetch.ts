@@ -293,28 +293,38 @@ export const fetchAndUpsertPRs = (params: {
                 pullRequestId: pr.id
               })
               .pipe(
-                Effect.flatMap((detail) =>
-                  detail.repositoryName === pr.repositoryName
-                    ? resolveStaleStatus(
-                      prRepo,
-                      detail,
-                      pr.awsAccountId,
-                      pr.id,
-                      pr.repositoryName,
-                      pr.accountRegion
-                    ).pipe(Effect.andThen(recordStaleEvaluation(pr, detail)))
-                    : Effect.void
-                ),
-                Effect.catch(() =>
-                  withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(
-                    Effect.andThen(
-                      prRepo.deleteOne(pr.awsAccountId, pr.id, {
-                        repositoryName: pr.repositoryName,
-                        accountRegion: pr.accountRegion
-                      }).pipe(Effect.catch(() => Effect.void))
-                    )
-                  )
-                )
+                Effect.matchEffect({
+                  // Only a failed provider read can mean the pull request is gone.
+                  onFailure: () =>
+                    withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(
+                      Effect.andThen(
+                        prRepo.deleteOne(pr.awsAccountId, pr.id, {
+                          repositoryName: pr.repositoryName,
+                          accountRegion: pr.accountRegion
+                        }).pipe(Effect.catch(() => Effect.void))
+                      )
+                    ),
+                  // The provider proved it exists, so a failed cache write keeps the row and only withholds
+                  // the scope's success.
+                  onSuccess: (detail) =>
+                    detail.repositoryName === pr.repositoryName
+                      ? resolveStaleStatus(
+                        prRepo,
+                        detail,
+                        pr.awsAccountId,
+                        pr.id,
+                        pr.repositoryName,
+                        pr.accountRegion
+                      ).pipe(
+                        Effect.andThen(recordStaleEvaluation(pr, detail)),
+                        Effect.catch((error) =>
+                          Effect.logWarning("stale pull request write failed", error).pipe(
+                            Effect.andThen(withholdScopeSuccess(pr.accountProfile, pr.accountRegion))
+                          )
+                        )
+                      )
+                      : Effect.void
+                })
               ),
           { concurrency: 5, discard: true }
         )

@@ -139,7 +139,11 @@ describe("workbenchQueue", () => {
       approvalUnknown: { _tag: "NotPermitted" },
       id: "s"
     })
-    expect(workbenchQueue([pullRequest], byName("andrey"), NOW).rows.map((row) => row.group)).toEqual(["pool"])
+    const [row] = workbenchQueue([pullRequest], byName("andrey"), NOW).rows
+    expect(row?.group).toBe("pool")
+    // The last known "1/1 Approvals" must not show: the row says approval is unknown instead.
+    expect(row?.rule).toBeUndefined()
+    expect(row?.stuck).toBe("unverified")
   })
 
   it("calls an own PR with unknown approval unverified, never ready, even with last known satisfied rules", () => {

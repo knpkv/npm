@@ -443,6 +443,43 @@ describe("fetchAndUpsertPRs", () => {
       ])
     }))
 
+  it.effect("keeps a stale row the provider confirmed when writing its evaluation to the cache fails", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const deletes = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () => Effect.succeed(providerOpenDetail)
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          recordApprovalEvaluation: () =>
+            Effect.fail(new CacheError({ operation: "recordApprovalEvaluation", cause: new Error("disk full") })),
+          deleteOne: () => Ref.update(deletes, (n) => n + 1),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+      // A failed cache write is no evidence the pull request is gone.
+      expect(yield* Ref.get(deletes)).toBe(0)
+      expect(successfulScopes).toEqual([])
+    }))
+
   it.effect("writes a successful stale re-evaluation back, clearing an earlier unknown approval", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
