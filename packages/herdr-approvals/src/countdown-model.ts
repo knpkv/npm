@@ -122,9 +122,17 @@ export const windowUsed = (
   }
 }
 
-/** Tick every second while any clock shows seconds, otherwise every 15 seconds. */
+/**
+ * Tick every second while any clock shows seconds, otherwise every 15 seconds. A clock past zero
+ * reads "expiring" and changes no more, so it does not keep the second cadence.
+ */
 export const tickInterval = (expiries: ReadonlyArray<number | null>, now: number): number =>
-  expiries.some((expiresAt) => expiresAt !== null && expiresAt - now < SOON_MS + 1000) ? 1000 : 15_000
+  expiries.some((expiresAt) => expiresAt !== null && expiresAt > now && expiresAt - now < SOON_MS + 1000)
+    ? 1000
+    : 15_000
+
+/** How long to wait before asking the hub again about a request still listed past its deadline. */
+export const REVALIDATE_RETRY_MS = 15_000
 
 /**
  * Requests whose clock crossed into the last minute between two readings, for one polite

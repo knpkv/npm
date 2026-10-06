@@ -48,6 +48,11 @@
     inline-size: var(--rly-space-40);
     justify-content: center;
   }
+  /* A force-mounted tab (Approvals) stays mounted but is hidden while another tab shows. */
+  .fleet-shell-main [role="tabpanel"][data-state="inactive"] {
+    display: none;
+  }
+
   .fleet-shell-main {
     margin-inline: auto;
     max-inline-size: 100rem;
@@ -902,7 +907,8 @@
     margin: 0;
   }
 
-  .countdown-announcer {
+  .countdown-announcer,
+  .countdown-visually-hidden {
     block-size: 1px;
     clip-path: inset(50%);
     inline-size: 1px;

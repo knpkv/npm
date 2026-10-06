@@ -120,6 +120,7 @@ describe("countdown model", () => {
   it("ticks every second only while a clock shows seconds", () => {
     expect(tickInterval([10 * 60_000, null], 0)).toBe(15_000)
     expect(tickInterval([10 * 60_000, 4 * 60_000], 0)).toBe(1_000)
+    expect(tickInterval([-5_000], 0)).toBe(15_000)
   })
 
   it("announces a request once, as it enters its last minute", () => {

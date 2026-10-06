@@ -26,6 +26,7 @@ import {
   type PendingFacts,
   type PendingItem,
   pendingItems,
+  REVALIDATE_RETRY_MS,
   tickInterval,
   urgencyOf,
   windowUsed
@@ -118,7 +119,9 @@ const ApprovalHero = ({
         fact={
           unchecked > 0
             ? `Nothing to approve on reachable hosts; ${plural(unchecked, "host", "hosts")} unchecked`
-            : "Nothing to approve"
+            : snapshot.pendingApprovals.nextCursors.length > 0
+              ? "Nothing on the first page; more requests aren't loaded yet"
+              : "Nothing to approve"
         }
         label="Approval summary"
       />
@@ -204,6 +207,9 @@ const decisionState = ({
  * nothing: a local request still pending, or one on a page not loaded yet, and a remote request
  * on a host that could not be checked. Only local history is consulted, and only for local requests.
  */
+/** What a request the hub expired says, wherever it is shown. */
+const EXPIRED_TEXT = "Expired just now. Nothing was applied."
+
 const departureOf = (snapshot: DashboardSnapshot, item: PendingItem): string | null => {
   if (item._tag === "Remote") {
     const sameHost = (host: string) => host.toLowerCase() === item.host.toLowerCase()
@@ -217,7 +223,7 @@ const departureOf = (snapshot: DashboardSnapshot, item: PendingItem): string | n
   const decided = record === undefined ? null : decidedOf(record)
   if (decided !== null) {
     return decided.outcome === "Expired"
-      ? "Expired just now. Nothing was applied."
+      ? EXPIRED_TEXT
       : `${decided.outcome}${decided.by === null ? "" : ` by ${decided.by}`}.`
   }
   return snapshot.pendingApprovals.nextCursors.length > 0 ? null : "This request left the queue."
@@ -387,14 +393,20 @@ export const ApprovalsCountdown = ({
 
   // When a request's deadline passes on the clock, ask the hub once; its record, not the clock,
   // turns the request into "expired". Also runs when a hidden page becomes visible again.
-  const revalidated = useRef(new Set<string>())
+  // A read can fail; while the request is still listed past its deadline, ask again every 15s.
+  const revalidatedAt = useRef(new Map<string, number>())
   useEffect(() => {
     if (onRevalidate === undefined) return
-    const due = facts.filter(
-      (entry) => entry.expiresAt !== null && entry.expiresAt <= now && !revalidated.current.has(itemKey(entry))
-    )
+    const due = facts.filter((entry) => {
+      const askedAt = revalidatedAt.current.get(itemKey(entry))
+      return (
+        entry.expiresAt !== null &&
+        entry.expiresAt <= now &&
+        (askedAt === undefined || now - askedAt >= REVALIDATE_RETRY_MS)
+      )
+    })
     if (due.length === 0) return
-    for (const entry of due) revalidated.current.add(itemKey(entry))
+    for (const entry of due) revalidatedAt.current.set(itemKey(entry), now)
     onRevalidate()
   }, [facts, now, onRevalidate])
 
@@ -404,7 +416,9 @@ export const ApprovalsCountdown = ({
     selected === undefined || selectedId === null
       ? undefined
       : selected._tag === "Local" && decisionStatus?.jobId === selectedId
-        ? !decisionStatus.settles && departure !== null
+        ? // A later read that proves the outcome beats an uncertain answer, and a confirmed expiry
+          // beats an earlier refusal (a decision that reached the hub after its deadline).
+          departure !== null && (!decisionStatus.settles || departure === EXPIRED_TEXT)
           ? departure
           : decisionStatus.text
         : (departure ?? undefined)
@@ -502,7 +516,9 @@ export const ApprovalsCountdown = ({
             <p className="countdown-empty">
               {unchecked.length > 0
                 ? "Nothing is waiting on the hosts that answered."
-                : "Nothing is waiting for your decision."}
+                : snapshot.pendingApprovals.nextCursors.length > 0
+                  ? "Nothing on the first page. Load more to see the rest."
+                  : "Nothing is waiting for your decision."}
             </p>
           ) : (
             <ul className="countdown-rows" onKeyDown={moveRowFocus} role="list">
@@ -535,6 +551,11 @@ export const ApprovalsCountdown = ({
                           data-urgency={row.expiresAt === null ? "calm" : urgencyOf(row.expiresAt - now)}
                         >
                           {clock}
+                        </span>
+                      )}
+                      {used === null ? null : (
+                        <span className="countdown-visually-hidden">
+                          , {String(Math.round(used.value))}% of its approval window used
                         </span>
                       )}
                       {used === null ? null : (

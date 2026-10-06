@@ -9,6 +9,9 @@ import type { DashboardSnapshot } from "../src/dashboard-model.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 
+/** One fixed snapshot time, so "the same read" and "a newer read" never depend on the clock ticking. */
+const OBSERVED_AT = 1_800_000_000_000
+
 type JobRecord = DashboardSnapshot["records"][number]
 
 const record = (id: string, overrides: Partial<JobRecord> = {}): JobRecord => ({
@@ -39,7 +42,7 @@ const snapshot = (overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot
   directory: null,
   historyNextCursor: null,
   host: "ALPHA",
-  observedAt: Date.now(),
+  observedAt: OBSERVED_AT,
   pendingApprovals: { failures: [], local: [record("job-1")], nextCursors: [], remote: [] },
   records: [],
   status: {
@@ -190,7 +193,7 @@ describe("ApprovalsCountdown", () => {
     view.render({
       decisionStatus: {
         jobId: "job-1",
-        observedAt: Date.now(),
+        observedAt: OBSERVED_AT,
         settles: true,
         text: "The hub refused: this request already changed."
       },
@@ -256,7 +259,7 @@ describe("ApprovalsCountdown", () => {
     view.render({
       decisionStatus: {
         jobId: "job-1",
-        observedAt: Date.now(),
+        observedAt: OBSERVED_AT,
         settles: true,
         text: "The hub recorded your approval; the job is queued."
       },
@@ -367,7 +370,7 @@ describe("ApprovalsCountdown", () => {
     const view = mount({
       decisionStatus: {
         jobId: "job-1",
-        observedAt: Date.now(),
+        observedAt: OBSERVED_AT,
         settles: true,
         text: "The hub refused: this request already changed."
       },
@@ -500,7 +503,7 @@ describe("ApprovalsCountdown", () => {
     view.render({
       decisionStatus: {
         jobId: "job-1",
-        observedAt: Date.now(),
+        observedAt: OBSERVED_AT,
         settles: true,
         text: "The hub recorded your approval."
       },
@@ -541,7 +544,7 @@ describe("ApprovalsCountdown", () => {
     const view = mount({ snapshot: snapshot() })
     const status = {
       jobId: "job-1",
-      observedAt: Date.now(),
+      observedAt: OBSERVED_AT,
       settles: false,
       text: "The hub didn't confirm the decision."
     }
@@ -567,6 +570,46 @@ describe("ApprovalsCountdown", () => {
     const lists = [...view.container.querySelectorAll(".countdown-rows")]
     expect(lists.length).toBe(2)
     expect(lists.every((list) => list.getAttribute("role") === "list")).toBe(true)
+    view.unmount()
+  })
+
+  it("keeps the summary provisional when the first page is empty but more remain", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [],
+          nextCursors: [{ cursor: { createdAt: 1, id: "job-1" }, host: "ALPHA" }],
+          remote: []
+        }
+      })
+    })
+    expect(view.container.querySelector("[aria-label='Approval summary'] p")?.textContent).toBe(
+      "Nothing on the first page; more requests aren't loaded yet"
+    )
+    view.unmount()
+  })
+
+  it("shows a confirmed expiry over an earlier refusal", () => {
+    const status = { jobId: "job-1", observedAt: OBSERVED_AT, settles: true, text: "The hub refused." }
+    const view = mount({ decisionStatus: status, snapshot: snapshot() })
+    view.render({
+      decisionStatus: status,
+      snapshot: snapshot({
+        observedAt: OBSERVED_AT + 5_000,
+        pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] },
+        records: [record("job-1", { expiredAt: Date.now(), status: "expired" })]
+      })
+    })
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("Expired just now. Nothing was applied.")
+    view.unmount()
+  })
+
+  it("says each row's used share of its approval window in words", () => {
+    const view = mount({ snapshot: snapshot() })
+    expect(view.container.querySelector("[data-countdown-row] .countdown-visually-hidden")?.textContent).toMatch(
+      /^, \d+% of its approval window used$/
+    )
     view.unmount()
   })
 })
