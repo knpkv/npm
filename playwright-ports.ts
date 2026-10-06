@@ -50,6 +50,12 @@ const freePort = (): Promise<number> =>
  * The port recorded in `variable`, or a fresh free one recorded there for this
  * run's workers. A recorded value that isn't a TCP port rejects with
  * `PlaywrightPortVariableError`.
+ *
+ * A free port is found by binding port 0 and closing that probe; the web
+ * server binds the number moments later. Another process can take it in that
+ * millisecond window. `--strictPort` then fails the run loudly instead of
+ * serving on another port. Closing the window needs the server to bind port 0
+ * and report its own origin to Playwright: backlog item P2 (arch lane).
  */
 export const playwrightPort = async (variable: string): Promise<number> => {
   const recorded = env[variable]
