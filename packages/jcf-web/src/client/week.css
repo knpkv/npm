@@ -31,9 +31,25 @@
   white-space: nowrap;
 }
 
-.jcf-bar-actions {
-  flex-wrap: wrap;
+/* The one primary action ends the row. */
+.jcf-bar-primary {
   margin-inline-start: auto;
+}
+
+/* Session and agent controls belong to the week they read, in its region header. */
+.jcf-region-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+}
+
+.jcf-region-actions button {
+  white-space: nowrap;
+}
+
+.jcf-region-actions button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.58;
 }
 
 .jcf-bar button[aria-disabled="true"] {
@@ -44,7 +60,6 @@
 /* Lanes, never a sum: each system's saved and suggested time in its own column, in words. */
 .jcf-totals {
   background: var(--rly-color-surface-2);
-  border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-control);
   display: flex;
   flex-wrap: wrap;
@@ -60,6 +75,14 @@
 
 .jcf-totals span {
   color: var(--rly-color-text-2);
+}
+
+.jcf-totals-age {
+  flex-basis: 100%;
+}
+
+.jcf-totals-age strong {
+  color: var(--rly-color-held-ink);
 }
 
 .jcf-note {
@@ -345,9 +368,12 @@
   white-space: nowrap;
 }
 
+/* A time range never wraps; a lane too narrow for the whole range shows its start. */
 .jcf-block-clock {
   font-variant-numeric: tabular-nums;
   opacity: 0.85;
+  overflow: hidden;
+  white-space: nowrap;
 }
 
 /* The note tells two blocks of one ticket apart, so it wraps rather than ellipsising. */
@@ -540,6 +566,11 @@ body,
   margin: 0 auto 0 0;
 }
 
+.jcf-read-at[data-failed="true"] {
+  color: var(--rly-color-blocked-ink);
+  font-weight: 600;
+}
+
 .jcf-read-at {
   color: var(--rly-color-text-2);
   font-size: var(--rly-type-label-size);
@@ -604,23 +635,52 @@ body,
 
 .jcf-block-source {
   margin-left: auto;
-  font-size: 0.8em;
+  font-size: var(--rly-type-meta-size);
   color: var(--rly-color-text-2);
 }
 
 /* The ticket key takes priority when a collision lane cannot fit both labels. */
-@container jcf-card (max-width: 9rem) {
-  .jcf-block-source {
+/* In a narrow lane a suggestion keeps its key and drops its label, while a saved block wraps its
+   provider (or Pending) onto the next line: it is the only visible sign of which record it is. */
+/* Under 6rem a block cannot hold "09:00–10:00" or a bracketed key on one line: it keeps the key and
+   start time, and the full range and note stay in its title and editor. */
+@container jcf-card (max-width: 6rem) {
+  .jcf-block-clock-end,
+  .jcf-block .jcf-block-note {
     display: none;
   }
 }
 
+@container jcf-card (max-width: 9rem) {
+  .jcf-block-gap .jcf-block-source {
+    display: none;
+  }
+
+  .jcf-block-logged .jcf-block-label {
+    flex-wrap: wrap;
+  }
+
+  .jcf-block-logged .jcf-block-source {
+    margin-left: 0;
+  }
+}
+
+/* The hour gutter is part of the grid: same surface, one rule on its right. */
 .jcf-gutter,
 .jcf-gutter-head {
   position: sticky;
   left: 0;
   z-index: 2;
-  background: var(--rly-color-surface-2);
+  background: var(--rly-color-surface-1);
+}
+
+.jcf-gutter {
+  border-right: 1px solid var(--rly-color-border-1);
+}
+
+/* The first label sits on the grid's top edge; lifting it would tuck it under the day header. */
+.jcf-hour-label:first-child {
+  transform: none;
 }
 
 /* Saved time: a flat filled block with an even border; the provider is named in words inside it. */
@@ -925,7 +985,7 @@ body,
 
 .jcf-agenda-time {
   grid-column: 1 / -1;
-  font-size: var(--rly-type-meta-size);
+  font-size: var(--rly-type-label-size);
   color: var(--rly-color-text-2);
   font-variant-numeric: tabular-nums;
 }
@@ -958,6 +1018,17 @@ body,
   }
 }
 
+/* Five day columns need about 900px; below that the week reads as an agenda unless asked otherwise. */
+@media (max-width: 900px) {
+  .jcf-week-view[data-view="auto"] .jcf-calendar {
+    display: none;
+  }
+
+  .jcf-week-view[data-view="auto"] .jcf-agenda {
+    display: grid;
+  }
+}
+
 @media (max-width: 640px) {
   .jcf-shell {
     padding: var(--rly-space-12);
@@ -970,14 +1041,6 @@ body,
 
   .jcf-bar-group button {
     flex: 1 0 auto;
-  }
-
-  .jcf-week-view[data-view="auto"] .jcf-calendar {
-    display: none;
-  }
-
-  .jcf-week-view[data-view="auto"] .jcf-agenda {
-    display: grid;
   }
 
   .jcf-fields {
@@ -1039,10 +1102,11 @@ body,
 /* Request and response share both edges: a transcript, not chat bubbles. */
 .jcf-agent-message {
   min-width: 0;
-  padding: var(--rly-space-12);
-  border: 1px solid var(--rly-color-border-1);
-  border-radius: var(--rly-radius-control);
-  background: var(--rly-color-surface-1);
+}
+
+.jcf-agent-message + .jcf-agent-message {
+  border-top: 1px solid var(--rly-color-border-1);
+  padding-top: var(--rly-space-16);
 }
 .jcf-agent-message header {
   display: flex;
@@ -1127,7 +1191,6 @@ body,
   white-space: nowrap;
 }
 
-.jcf-layers button[data-source="overlapping"][aria-pressed="false"],
 .jcf-block-gap[data-overlap="true"] {
   border-color: var(--rly-color-held-ink);
 }
@@ -1148,6 +1211,15 @@ body,
 
 .jcf-approval-mode > span {
   color: var(--rly-color-text-2);
+}
+
+.jcf-approval-mode > .jcf-approval-label {
+  color: var(--rly-color-text-1);
+  font-weight: 600;
+}
+
+.jcf-delete {
+  margin-inline-start: auto;
 }
 
 .jcf-approval-queue {

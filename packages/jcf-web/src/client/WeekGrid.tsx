@@ -163,7 +163,10 @@ const Block = (props: {
             {block.pending === true ? "Pending" : block.source === "jira" ? "Jira" : "Clockify"}
           </span>
         </span>
-        <span className="jcf-block-clock">{clock}</span>
+        <span className="jcf-block-clock">
+          <span>{formatClock(new Date(block.startMs))}</span>
+          <span className="jcf-block-clock-end">–{formatClock(new Date(block.endMs))}</span>
+        </span>
         {block.description === null ? null : <span className="jcf-block-note">{block.description}</span>}
       </button>
     )
@@ -198,7 +201,10 @@ const Block = (props: {
             {props.quickApproval ? "Approve" : block.overlap ? "Overlap" : "Suggestion"}
           </span>
         </span>
-        <span className="jcf-block-clock">{clock}</span>
+        <span className="jcf-block-clock">
+          <span>{formatClock(new Date(block.startMs))}</span>
+          <span className="jcf-block-clock-end">–{formatClock(new Date(block.endMs))}</span>
+        </span>
         {/* Last, so a block too short for three lines loses the title rather than the times. */}
         {block.ticketTitle === null ? null : <span className="jcf-block-note">{block.ticketTitle}</span>}
       </button>
@@ -226,9 +232,9 @@ export const WeekGrid = (props: {
 }) => {
   const { layers } = props
   const [view, setView] = useState<"auto" | "calendar" | "agenda">("auto")
-  const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 640px)").matches)
+  const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 900px)").matches)
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 640px)")
+    const query = window.matchMedia("(max-width: 900px)")
     const change = () => setNarrow(query.matches)
     query.addEventListener("change", change)
     return () => query.removeEventListener("change", change)
@@ -238,12 +244,12 @@ export const WeekGrid = (props: {
   const { calendarPlacements, counts, days, hours, placements, visibleHours } = useMemo(() => {
     return projectCalendar(props.plan, props.optimisticEntries, layers)
   }, [props.plan, props.optimisticEntries, layers])
-  // Dense collision lanes still need a 24px review target beside the 24px quick action. A stretch row
-  // also spends its border, padding and row gap, so its lanes need 64px.
+  // A collision lane holds a 24px review target, a 2px gap and the 32px quick action, plus 2px for
+  // percentage rounding. A stretch row also spends its border, padding and row gap: 72px.
   const minimumColumnPixels = [...calendarPlacements.values()].reduce(
     (maximum, day) =>
       day.reduce(
-        (maximum, placed) => Math.max(maximum, placed.columns * (placed.block.kind === "stretch" ? 64 : 48)),
+        (maximum, placed) => Math.max(maximum, placed.columns * (placed.block.kind === "stretch" ? 72 : 60)),
         maximum
       ),
     0
@@ -263,6 +269,7 @@ export const WeekGrid = (props: {
           {(
             [
               {
+                id: "saved",
                 label: "Saved entries",
                 choices: [
                   { key: "jira", label: "Jira entries", detail: "Jira worklogs" },
@@ -270,6 +277,7 @@ export const WeekGrid = (props: {
                 ]
               },
               {
+                id: "suggestions",
                 label: "Suggestions",
                 choices: [
                   { key: "available", label: "No overlap", detail: "outside the saved time you show" },
@@ -278,6 +286,7 @@ export const WeekGrid = (props: {
                 ]
               }
             ] satisfies ReadonlyArray<{
+              readonly id: string
               readonly label: string
               readonly choices: ReadonlyArray<{
                 readonly key: keyof typeof layers | "all"
@@ -287,10 +296,10 @@ export const WeekGrid = (props: {
             }>
           ).map((group) => (
             <div className="jcf-layer-group" key={group.label}>
-              <span className="jcf-layer-title" id={`jcf-layer-${group.label}`}>
+              <span className="jcf-layer-title" id={`jcf-layer-${group.id}`}>
                 {group.label}
               </span>
-              <div className="jcf-layer-choices" role="group" aria-labelledby={`jcf-layer-${group.label}`}>
+              <div className="jcf-layer-choices" role="group" aria-labelledby={`jcf-layer-${group.id}`}>
                 {group.choices
                   .filter(
                     ({ key }) =>
@@ -317,7 +326,7 @@ export const WeekGrid = (props: {
                         disabled={props.writing && (key === "jira" || key === "clockify")}
                         onClick={() => props.onToggleLayer(key)}
                       >
-                        {`${label} (${key === "all" ? counts.available + counts.overlapping : counts[key]})`}
+                        {`${label} ${key === "all" ? counts.available + counts.overlapping : counts[key]}`}
                       </Button>
                     )
                   })}

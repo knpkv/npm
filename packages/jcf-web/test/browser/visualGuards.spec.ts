@@ -36,7 +36,7 @@ for (const width of [1280, 390]) {
   test(`no element draws a one-sided stripe at ${width}px`, async ({ page }) => {
     await open(page, width)
     expect(await oneSidedStripes(page)).toEqual([])
-    await page.getByRole("button", { name: width < 640 ? "Calendar" : "Agenda", exact: true }).click()
+    await page.getByRole("button", { name: width <= 900 ? "Calendar" : "Agenda", exact: true }).click()
     expect(await oneSidedStripes(page)).toEqual([])
   })
 }
@@ -120,4 +120,70 @@ test("visible copy separates facts without middots", async ({ page }) => {
   await page.getByRole("button", { name: /^PROJ-123, 11:00–12:00/u }).click()
   await expect(page.getByRole("complementary", { name: "Time entry editor" })).toBeVisible()
   expect(await page.locator("main").innerText()).not.toContain("·")
+})
+
+// Without stripes, a saved block's provider word is the only visible sign of which record it is,
+// so it stays shown in narrow collision lanes too.
+test("saved blocks name their provider in the calendar", async ({ page }) => {
+  await open(page, 1280)
+  const labels = await page.locator(".jcf-block-logged").evaluateAll((blocks) =>
+    blocks.map((block) => {
+      const source = block.querySelector(".jcf-block-source")
+      return source !== null && getComputedStyle(source).display !== "none" ? (source.textContent ?? "") : ""
+    })
+  )
+  expect(labels.length).toBeGreaterThan(0)
+  expect([...labels].sort()).toEqual(["Clockify", "Jira"])
+})
+
+// B1 (#526 review): at 768 five day columns did not fit and the calendar was cut at its right edge.
+test("below 900px the week opens as an agenda", async ({ page }) => {
+  await open(page, 768)
+  await expect(page.locator(".jcf-calendar")).toBeHidden()
+  await expect(page.locator(".jcf-agenda")).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+})
+
+for (const width of [1024, 1280, 1920]) {
+  // B2 (#526 review): ticket keys and time ranges wrapped inside event blocks ("09:00–|10:00").
+  test(`event block keys and times stay on one line at ${width}px`, async ({ page }) => {
+    await open(page, width)
+    const lines = await page.locator(".jcf-block .jcf-block-key, .jcf-block .jcf-block-clock").evaluateAll((spans) =>
+      spans.filter((span) => span.getClientRects().length > 0).map((span) =>
+        Math.round(span.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(span).lineHeight))
+      )
+    )
+    expect(lines.length).toBeGreaterThan(0)
+    expect(lines.every((count) => count === 1)).toBe(true)
+  })
+}
+
+for (const width of [768, 1024, 1280]) {
+  // B3 (#526 review): eleven toolbar controls wrapped into ragged rows with Log time alone on one.
+  test(`the toolbar fits one row and Log time never sits alone at ${width}px`, async ({ page }) => {
+    await open(page, width)
+    const tops = await page.locator(".jcf-bar button").evaluateAll((buttons) =>
+      buttons.map((button) => Math.round(button.getBoundingClientRect().top))
+    )
+    const logTime = await page.getByRole("button", { name: "Log time", exact: true }).first().boundingBox()
+    expect(logTime).not.toBeNull()
+    const rowOfLogTime = tops.filter((top) => Math.abs(top - Math.round(logTime?.y ?? 0)) <= 2)
+    expect(new Set(tops).size).toBe(1)
+    expect(rowOfLogTime.length).toBeGreaterThan(1)
+  })
+}
+
+// B4 (#526 review): a failed read named no consequence and left earlier totals looking current.
+test("a failed read says what is shown and marks the totals as old", async ({ page }) => {
+  await open(page, 1280)
+  await page.route(
+    "**/api/week/stream?*",
+    (route) => route.fulfill({ status: 503, json: { message: "Jira is temporarily unavailable" } })
+  )
+  await page.getByRole("button", { name: "Rescan sessions", exact: true }).click()
+  const alert = page.getByRole("alert").filter({ hasText: "Could not load the week" })
+  await expect(alert).toContainText("Jira is temporarily unavailable. The week below is from the read at")
+  await expect(alert.getByRole("button", { name: "Try again", exact: true })).toBeVisible()
+  await expect(page.getByRole("group", { name: "Week totals" })).toContainText("Last read failed: totals are from")
+  await expect(page.locator(".jcf-read-at")).toHaveText("Last read failed")
 })

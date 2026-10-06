@@ -215,9 +215,10 @@ export const SavedEntryPanel = (props: {
             type="button"
             variant="quiet"
             disabled={props.unavailable || props.busy || !props.targetVisible}
+            className="jcf-delete"
             onClick={() => setConfirmingDelete(true)}
           >
-            Delete entry
+            {`Delete ${entry.ticketKey ?? "this"} entry`}
           </Button>
         )}
       </div>

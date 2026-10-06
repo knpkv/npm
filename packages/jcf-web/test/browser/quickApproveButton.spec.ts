@@ -204,6 +204,7 @@ test("fifteen-minute + controls stay inside non-overlapping calendar cards", asy
         top: rect.top,
         bottom: rect.bottom,
         keyWidth: card.querySelector(".jcf-block-key")?.getBoundingClientRect().width,
+        reviewWidth: card.querySelector(".jcf-block-gap")?.getBoundingClientRect().width,
         sourceHidden: source !== null && getComputedStyle(source).display === "none",
         plus: action === undefined
           ? null
@@ -221,6 +222,8 @@ test("fifteen-minute + controls stay inside non-overlapping calendar cards", asy
   )
   for (const [index, card] of bounds.entries()) {
     expect(card.keyWidth).toBeGreaterThan(0)
+    // The review target keeps 24px beside the 32px quick action in the densest lane.
+    expect(card.reviewWidth).toBeGreaterThanOrEqual(24)
     expect(card.sourceHidden).toBe(true)
     expect(card.plus?.width).toBeGreaterThanOrEqual(24)
     expect(card.plus?.height).toBeGreaterThanOrEqual(24)

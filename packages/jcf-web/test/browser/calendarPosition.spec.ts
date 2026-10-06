@@ -19,7 +19,7 @@ const position = (page: Page) =>
   }))
 
 // Hold both network phases: a final-state assertion alone misses the jump during totals refresh.
-for (const viewport of [{ width: 1440, height: 1000 }, { width: 1440, height: 1600 }, { width: 800, height: 1000 }]) {
+for (const viewport of [{ width: 1440, height: 1000 }, { width: 1440, height: 1600 }, { width: 960, height: 1000 }]) {
   // The tall viewport keeps the page at zero, where browser scroll anchoring cannot hide inserted status height.
   test(`Log selected time preserves the visible hour at ${viewport.width}×${viewport.height}`, async ({ page }) => {
     await page.setViewportSize(viewport)

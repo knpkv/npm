@@ -25,6 +25,10 @@ test("layer controls keep one line each with both scopes and every width", async
         )
       )
       expect(groups).toHaveLength(2)
+      // Both toggle rows are named groups: their label ids carry no whitespace.
+      for (const name of ["Saved entries", "Suggestions"]) {
+        await expect(page.getByRole("group", { name, exact: true })).toHaveCount(1)
+      }
       for (const controls of groups) {
         expect(controls.length).toBeGreaterThan(0)
         expect(new Set(controls.map((control) => control.height)).size).toBe(1)

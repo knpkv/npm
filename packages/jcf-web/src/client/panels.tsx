@@ -18,7 +18,7 @@ import { useAtomValue } from "@effect/atom-react"
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { UnattributedDayResponse, WeekRowResponse, WriteTargetsRequest } from "../server/Api.js"
 import { consumedFromWeekBlocks, prepareProposal } from "../shared/writePlanning.js"
-import { duration, formatDuration, parseDuration, signalMeaning, spanRange } from "./format.js"
+import { dayLabel, duration, formatDuration, parseDuration, signalMeaning, spanRange } from "./format.js"
 import type { RowDescriptionDraft } from "./rowDescriptions.js"
 
 /** Rly owns field labels, focus, input sizing and announced validation. */
@@ -200,7 +200,7 @@ export const ConfirmPanel = (props: {
   return (
     <section aria-label={`Confirm ${props.row.ticketKey} on ${props.row.day}`} className="jcf-panel">
       <h2>
-        {props.row.ticketKey} on {props.row.day}, {spanRange(block)}
+        {props.row.ticketKey}, {dayLabel(props.row.day)}, {spanRange(block)}
       </h2>
       {props.row.ticketTitle === null ? null : <p className="jcf-muted">{props.row.ticketTitle}</p>}
       <dl>

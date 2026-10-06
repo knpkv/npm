@@ -52,6 +52,33 @@ const totalLine = (savedSeconds: number, suggestedSeconds: number): string =>
     suggestedSeconds > 0 ? formatDuration(suggestedSeconds) : "nothing"
   } suggested`
 
+/** Why Log time is off right now, in the order a person can act on it. */
+const logTimeReason = (state: {
+  readonly loading: boolean
+  readonly busy: boolean
+  readonly plan: unknown
+  readonly writeTargets: { readonly jira: boolean; readonly clockify: boolean }
+  readonly queueActive: boolean
+}): string =>
+  state.loading
+    ? "Waiting for the week to load."
+    : state.plan === null
+      ? "Load a week first."
+      : state.busy || state.queueActive
+        ? "Waiting for the current save to finish."
+        : !state.writeTargets.jira && !state.writeTargets.clockify
+          ? "Show the Jira or Clockify layer to log time to it."
+          : "Refresh totals to read current time before logging."
+
+/**
+ * The cause as the server named it, what the page still shows, and what to do. A failed read never
+ * leaves earlier totals looking current.
+ */
+const readFailureDescription = (cause: string, shownFrom: string | null): string =>
+  `${cause.replace(/\.$/u, "")}. ${
+    shownFrom === null ? "Nothing was read yet." : `The week below is from the read at ${shownFrom}.`
+  } Check that Jira and Clockify are reachable and signed in, then try again.`
+
 /** A successful segment does not make a partially failed approval complete. */
 const incompleteWrite = (result: WriteResultResponse | null): boolean =>
   result !== null &&
@@ -143,11 +170,11 @@ export const App = () => {
         <StatePanel
           announce="assertive"
           title={readMode === "recorded" ? "Could not update logged time" : "Could not load the week"}
-          description={readFailure}
+          description={readFailureDescription(readFailure, plan === null ? null : readAt)}
           tone="critical"
           action={
             <Button disabled={agentSettingsSaving} onClick={retry} size="compact">
-              {readMode === "full" ? "Rescan sessions" : "Retry read"}
+              Try again
             </Button>
           }
         />
@@ -194,7 +221,7 @@ export const App = () => {
             <Text as="h1" variant="section-title">
               Jira and Clockify week
             </Text>
-            <p className="jcf-read-at">
+            <p className="jcf-read-at" data-failed={readFailure !== null}>
               {loading
                 ? "Reading the week…"
                 : readFailure !== null
@@ -244,46 +271,15 @@ export const App = () => {
                 </Button>
               ))}
             </div>
-            <div className="jcf-bar-group jcf-bar-actions" role="group" aria-label="Sessions and logging">
-              <Button
-                size="compact"
-                disabled={busy || loading || agentSettingsSaving}
-                aria-expanded={agentSettingsOpen}
-                onClick={() => setAgentSettingsOpen((open) => !open)}
-              >
-                Agent settings
-              </Button>
-              <Button
-                aria-expanded={open?.kind === "agent"}
-                aria-disabled={agentLogUnavailable ? "true" : undefined}
-                aria-describedby={agentLogUnavailable ? "jcf-agent-log-reason" : undefined}
-                onClick={() => {
-                  if (agentLogUnavailable) return
-                  setOpen(open?.kind === "agent" ? null : { kind: "agent" })
-                }}
-                size="compact"
-              >
-                Agent requests and responses
-              </Button>
-              <span hidden id="jcf-agent-log-reason">
-                {cancelled ? "The read was cancelled." : "No agent has run yet. Rescan sessions to start one."}
+            <div className="jcf-bar-group jcf-bar-primary">
+              <span hidden id="jcf-log-time-reason">
+                {logTimeReason(state)}
               </span>
-              <Button disabled={busy || loading} onClick={refreshRecorded} size="compact">
-                Refresh totals
-              </Button>
               <Button
-                disabled={busy || loading || agentSettingsSaving}
+                aria-disabled={unavailable ? "true" : undefined}
+                aria-describedby={unavailable ? "jcf-log-time-reason" : undefined}
                 onClick={() => {
-                  void rescan()
-                }}
-                size="compact"
-              >
-                {missingPlan ? "Scan sessions" : "Rescan sessions"}
-              </Button>
-              <Button
-                disabled={unavailable}
-                onClick={() => {
-                  if (plan !== null) setOpen({ kind: "manual", day: plan.monday, clock: "09:00" })
+                  if (!unavailable && plan !== null) setOpen({ kind: "manual", day: plan.monday, clock: "09:00" })
                 }}
                 size="compact"
                 variant="primary"
@@ -292,23 +288,11 @@ export const App = () => {
               </Button>
             </div>
           </div>
-          {agentSettingsOpen ? (
-            <Suspense fallback={<p>Loading agent settings…</p>}>
-              <AgentSettingsPanel
-                disabled={busy || loading}
-                onSaved={actions.markConfigurationChanged}
-                onSaving={(saving) => {
-                  setAgentSettingsSaving(saving)
-                  descriptions.invalidate()
-                }}
-              />
-            </Suspense>
-          ) : null}
           {configurationChanged ? (
             <p className="jcf-note">Setting saved. Choose Rescan sessions to update the suggestions.</p>
           ) : null}
-          {plan !== null && open !== null ? null : (
-            <div className="jcf-feedback" data-floating={plan !== null && (readMode === "recorded" || !loading)}>
+          {plan === null || open !== null ? null : (
+            <div className="jcf-feedback" data-floating={readMode === "recorded" || !loading}>
               {feedback}
             </div>
           )}
@@ -368,81 +352,147 @@ export const App = () => {
             </section>
           )}
           <div className="jcf-workspace" data-editing={open !== null}>
-            {plan === null ? null : (
-              <Region className="jcf-week-region" title={weekLabel(plan.days)}>
-                <div className="jcf-totals" role="group" aria-label="Week totals">
-                  {plan.scope === "clockify" ? null : (
-                    <p aria-label="Jira totals" role="group">
-                      <strong>Jira</strong> <span>{totalLine(totals.jira, totals.jiraSuggested)}</span>
-                    </p>
-                  )}
-                  {plan.scope === "jira" ? null : (
-                    <p aria-label="Clockify totals" role="group">
-                      <strong>Clockify</strong> <span>{totalLine(totals.clockify, totals.clockifySuggested)}</span>
-                    </p>
-                  )}
-                </div>
-                <div className="jcf-approval-mode" role="group" aria-label="Suggestion approval mode">
+            <Region
+              className="jcf-week-region"
+              title={plan === null ? "Your week" : weekLabel(plan.days)}
+              actions={
+                <div className="jcf-region-actions" role="group" aria-label="Sessions">
                   <Button
                     size="compact"
-                    aria-pressed={!quickApproval}
-                    variant={quickApproval ? "secondary" : "primary"}
-                    onClick={() => setQuickApproval(false)}
+                    disabled={busy || loading || agentSettingsSaving}
+                    aria-expanded={agentSettingsOpen}
+                    onClick={() => setAgentSettingsOpen((open) => !open)}
                   >
-                    Review first
+                    Agent settings
                   </Button>
                   <Button
-                    size="compact"
-                    aria-pressed={quickApproval}
-                    variant={quickApproval ? "primary" : "secondary"}
+                    aria-expanded={open?.kind === "agent"}
+                    aria-disabled={agentLogUnavailable ? "true" : undefined}
+                    aria-describedby={agentLogUnavailable ? "jcf-agent-log-reason" : undefined}
                     onClick={() => {
-                      setOpen(null)
-                      setQuickApproval(true)
+                      if (agentLogUnavailable) return
+                      setOpen(open?.kind === "agent" ? null : { kind: "agent" })
                     }}
+                    size="compact"
                   >
-                    Quick approve
+                    Agent log
                   </Button>
-                  <span>
-                    {quickApproval
-                      ? "Click suggestions to queue them. Each one can be undone for 5 seconds before it saves."
-                      : "Open a suggestion to adjust its time or note."}
+                  <span hidden id="jcf-agent-log-reason">
+                    {cancelled ? "The read was cancelled." : "No agent has run yet. Rescan sessions to start one."}
                   </span>
+                  <Button disabled={busy || loading} onClick={refreshRecorded} size="compact">
+                    Refresh totals
+                  </Button>
+                  <Button
+                    disabled={busy || loading || agentSettingsSaving}
+                    onClick={() => {
+                      void rescan()
+                    }}
+                    size="compact"
+                  >
+                    {missingPlan ? "Scan sessions" : "Rescan sessions"}
+                  </Button>
                 </div>
-                <WeekGrid
-                  onOpenSaved={(entry) => {
-                    actions.clearWritten()
-                    setOpen({ kind: "saved", entry })
-                  }}
-                  queueUnavailable={state.queueUnavailable}
-                  onQuickApprove={(rowId, blockIndex) => {
-                    actions.clearWritten()
-                    actions.queueConfirm({ rowId, blocks: [blockIndex] })
-                  }}
-                  layers={state.layers}
-                  onToggleLayer={actions.toggleLayer}
-                  writing={writing}
-                  optimisticEntries={optimisticEntries}
-                  disabled={state.queueUnavailable}
-                  manualDisabled={unavailable}
-                  quickApproval={quickApproval}
-                  selectedBlockIndex={open?.kind === "confirm" ? open.blockIndex : undefined}
-                  onOpenRow={(rowId, blockIndex) => {
-                    actions.clearWritten()
-                    if (quickApproval) {
+              }
+            >
+              {agentSettingsOpen ? (
+                <Suspense fallback={<p>Loading agent settings…</p>}>
+                  <AgentSettingsPanel
+                    disabled={busy || loading}
+                    onSaved={actions.markConfigurationChanged}
+                    onSaving={(saving) => {
+                      setAgentSettingsSaving(saving)
+                      descriptions.invalidate()
+                    }}
+                  />
+                </Suspense>
+              ) : null}
+              {plan === null ? (
+                <div className="jcf-feedback">{feedback}</div>
+              ) : (
+                <>
+                  <div className="jcf-totals" role="group" aria-label="Week totals">
+                    {readFailure === null || readAt === null ? null : (
+                      <p className="jcf-totals-age">
+                        <strong>Last read failed:</strong> totals are from {readAt}.
+                      </p>
+                    )}
+                    {plan.scope === "clockify" ? null : (
+                      <p aria-label="Jira totals" role="group">
+                        <strong>Jira</strong> <span>{totalLine(totals.jira, totals.jiraSuggested)}</span>
+                      </p>
+                    )}
+                    {plan.scope === "jira" ? null : (
+                      <p aria-label="Clockify totals" role="group">
+                        <strong>Clockify</strong> <span>{totalLine(totals.clockify, totals.clockifySuggested)}</span>
+                      </p>
+                    )}
+                  </div>
+                  <div className="jcf-approval-mode" role="group" aria-labelledby="jcf-approval-label">
+                    <span className="jcf-approval-label" id="jcf-approval-label">
+                      Suggestions open as
+                    </span>
+                    <Button
+                      size="compact"
+                      aria-pressed={!quickApproval}
+                      variant={quickApproval ? "secondary" : "primary"}
+                      onClick={() => setQuickApproval(false)}
+                    >
+                      Review first
+                    </Button>
+                    <Button
+                      size="compact"
+                      aria-pressed={quickApproval}
+                      variant={quickApproval ? "primary" : "secondary"}
+                      onClick={() => {
+                        setOpen(null)
+                        setQuickApproval(true)
+                      }}
+                    >
+                      Quick approve
+                    </Button>
+                    <span>
+                      {quickApproval
+                        ? "Click suggestions to queue them. Each one can be undone for 5 seconds before it saves."
+                        : "Open a suggestion to adjust its time or note."}
+                    </span>
+                  </div>
+                  <WeekGrid
+                    onOpenSaved={(entry) => {
+                      actions.clearWritten()
+                      setOpen({ kind: "saved", entry })
+                    }}
+                    queueUnavailable={state.queueUnavailable}
+                    onQuickApprove={(rowId, blockIndex) => {
+                      actions.clearWritten()
                       actions.queueConfirm({ rowId, blocks: [blockIndex] })
-                      return
-                    }
-                    setOpen({ blockIndex, kind: "confirm", rowId })
-                  }}
-                  onOpenSlot={(day, clock) => {
-                    actions.clearWritten()
-                    setOpen({ clock, day, kind: "manual" })
-                  }}
-                  plan={plan}
-                  selectedRowId={open?.kind === "confirm" ? open.rowId : undefined}
-                />
-              </Region>
-            )}
+                    }}
+                    layers={state.layers}
+                    onToggleLayer={actions.toggleLayer}
+                    writing={writing}
+                    optimisticEntries={optimisticEntries}
+                    disabled={state.queueUnavailable}
+                    manualDisabled={unavailable}
+                    quickApproval={quickApproval}
+                    selectedBlockIndex={open?.kind === "confirm" ? open.blockIndex : undefined}
+                    onOpenRow={(rowId, blockIndex) => {
+                      actions.clearWritten()
+                      if (quickApproval) {
+                        actions.queueConfirm({ rowId, blocks: [blockIndex] })
+                        return
+                      }
+                      setOpen({ blockIndex, kind: "confirm", rowId })
+                    }}
+                    onOpenSlot={(day, clock) => {
+                      actions.clearWritten()
+                      setOpen({ clock, day, kind: "manual" })
+                    }}
+                    plan={plan}
+                    selectedRowId={open?.kind === "confirm" ? open.rowId : undefined}
+                  />
+                </>
+              )}
+            </Region>
 
             {open === null &&
             plan !== null &&
