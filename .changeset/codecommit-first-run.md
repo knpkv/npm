@@ -9,3 +9,4 @@ The CLI's first run says what to do next:
 - `pr list --all` with nothing to show says "No pull requests found."
 - Bare `codecommit` without an interactive terminal exits 1 with one line instead of drawing the terminal UI into a pipe.
 - `tui`, `web` and the web flags have help descriptions, and the terminal UI's header names the product "CodeCommit".
+- `pr list` without `--region` reads the profile's region from `~/.aws/config` instead of us-east-1, and says which profile and region it read; warnings logged while listing go to stderr, so stdout and `--json` stay clean.
