@@ -86,12 +86,27 @@ const decodeRawStatus = (rawStatus: string | undefined, isMerged: boolean): Pull
 }
 
 /**
+ * CodeCommit could not say whether a revision's approval rules are satisfied — for example
+ * `codecommit:EvaluatePullRequestApprovalRules` is denied. Approval is unknown, not "pending".
+ */
+export class ApprovalEvaluationError extends Data.TaggedError("ApprovalEvaluationError")<{
+  readonly pullRequestId: string
+  readonly revisionId: string
+  readonly cause: unknown
+}> {}
+
+/**
  * Evaluate which approval rules are satisfied/not, returning just the boolean + satisfied rule names.
+ * A failed evaluation fails: callers surface it rather than list the pull request as unapproved.
  */
 export const fetchApprovalEvaluation = (
   pullRequestId: string,
   revisionId: string
-): Effect.Effect<{ readonly isApproved: boolean; readonly satisfiedNames: Set<string> }, never, AwsMethodEnv> =>
+): Effect.Effect<
+  { readonly isApproved: boolean; readonly satisfiedNames: Set<string> },
+  ApprovalEvaluationError,
+  AwsMethodEnv
+> =>
   throttleRetry(
     codecommit.evaluatePullRequestApprovalRules({ pullRequestId, revisionId })
   ).pipe(
@@ -99,8 +114,7 @@ export const fetchApprovalEvaluation = (
       isApproved: r.evaluation?.approved ?? false,
       satisfiedNames: new Set(r.evaluation?.approvalRulesSatisfied ?? [])
     })),
-    Effect.tapError((e) => Effect.logWarning("fetchApprovalEvaluation failed", e)),
-    Effect.catch(() => Effect.succeed({ isApproved: false, satisfiedNames: new Set<string>() }))
+    Effect.mapError((cause) => new ApprovalEvaluationError({ pullRequestId, revisionId, cause }))
   )
 
 /** Plain data shape matching ApprovalRule — avoids Schema.Class branding. */
