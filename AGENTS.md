@@ -107,6 +107,10 @@ Make every **Prevention** note implementation-ready:
 - name one invalid fixture that must fail and one nearby valid fixture that must continue to pass;
 - call out likely false positives, generated/vendor exclusions, and any cases that still require judgment.
 
+### Escape Ledger
+
+Every lint, type and Effect-diagnostics escape (`@effect-diagnostics*`, `@ts-expect-error`/`@ts-ignore`/`@ts-nocheck`, `eslint-disable*`, `oxlint-disable*`, `ast-grep-ignore`) in tracked source and tests is counted in the generated `docs/debt.md`, against `docs/debt.baseline.json`. `pnpm debt:check` (part of `pnpm lint`) fails when any package's count for a kind rises, when it falls without the baseline being tightened, or when a new directive has no reason. A reason is ` -- <reason>` on the directive, free text after `@ts-expect-error`, or a comment line directly above it. Directives that already lacked a reason when the ledger was introduced are grandfathered by exact file and text. Debt only shrinks: fix the cause rather than adding an escape. A deliberate raise is a separate, reviewed `pnpm debt:update` named in the PR body; never fold it into an unrelated change.
+
 Manual acceptance checklists must contain one explicit item for every manually named SC flow; a grouped
 row may cover several flows only when each is named, and a checklist cannot pass while any item is
 `PENDING`, failed, or unresolved. Capability-boundary decisions must stay synchronized across the
@@ -204,6 +208,7 @@ For `packages/control-center/README.md`, `packages/control-center/src/api/**`, a
 - **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.
 - **Feature Classification**: In `.changeset/*.md`, exported or user-visible functionality added under publishable `packages/*/src` or `packages/*/package.json` requires a `minor` bump. This includes additive fields in exported interfaces and schemas, even when their producer or decoder is implemented privately. A new public option or application workspace is not a patch; dependency-only stabilization may remain a patch. Private, generated, and vendor packages are excluded, while internal-only features still require judgment.
 - **Breaking Classification**: An incompatible exported type or schema change requires at least a `minor` bump, with `major` retained for packages whose stability contract requires it. A `Stream<Uint8Array>` to `Uint8Array` change in an exported service result paired with `patch` is invalid; the same change in an unexported internal result may remain a patch. Private, generated, and vendor packages are excluded, while structurally exposed types still require judgment.
+- **Dependency Pins**: Toolchain and Effect dependencies are exact pins. Published packages may use caret ranges for their runtime dependencies so consumers can dedupe.
 - **Automated Releases**: The CI/CD pipeline automates the release process. When a version PR is merged, the packages are automatically published to `npm`.
 
 Generated source exposed through a publishable package's `exports` remains a
