@@ -15,7 +15,6 @@ import {
   type AppState,
   type AppStatus,
   AwsRegion,
-  type CallerIdentities,
   type CallerIdentityState,
   type CallerIdentityUnresolvedReason
 } from "../Domain.js"
@@ -196,30 +195,39 @@ export const resolveAccounts = (state: PRState) =>
     // A logout during resolution bumps the generation; then nothing this resolution found is published.
     const generationAtStart = (yield* SubscriptionRef.get(state)).identityGeneration ?? 0
     const unchangedSinceStart = (s: AppState) => (s.identityGeneration ?? 0) === generationAtStart
-    const firstIdentity = yield* resolveIdentity(
+    // Each account's outcome is published as soon as its own lookup completes, so a failed account is
+    // never shown with its old identity while slower accounts are still resolving.
+    const publish = (profile: string) => (identity: CallerIdentityState) =>
+      SubscriptionRef.update(state, (s) =>
+        unchangedSinceStart(s) ? { ...s, callerIdentities: { ...s.callerIdentities, [profile]: identity } } : s)
+    yield* resolveIdentity(
       accountIdRef,
       firstAccount,
       firstRegion,
       {
-        clearCurrentUser: SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => rest),
+        clearCurrentUser: SubscriptionRef.update(state, ({ currentUser: _, ...rest }) =>
+          rest),
         updateCurrentUser: (username) =>
           SubscriptionRef.update(state, (s) => unchangedSinceStart(s) ? { ...s, currentUser: username } : s)
       }
-    )
-
-    const remainingIdentities = yield* Effect.forEach(
+    ).pipe(Effect.flatMap(publish(firstAccount.profile)))
+    yield* Effect.forEach(
       remainingAccounts,
       (account) =>
-        resolveIdentity(accountIdRef, account, primaryRegion(account)).pipe(
-          Effect.map((identity): readonly [string, CallerIdentityState] => [account.profile, identity])
-        ),
-      { concurrency: 3 }
+        resolveIdentity(accountIdRef, account, primaryRegion(account)).pipe(Effect.flatMap(publish(account.profile))),
+      { concurrency: 3, discard: true }
     )
-    const callerIdentities: CallerIdentities = Object.fromEntries([
-      [firstAccount.profile, firstIdentity],
-      ...remainingIdentities
-    ])
-    yield* SubscriptionRef.update(state, (s) => unchangedSinceStart(s) ? { ...s, callerIdentities } : s)
+    // A profile with no key is not enabled: drop identities of accounts switched off since the last refresh.
+    const enabledProfiles = new Set<string>(enabledAccounts.map((account) => account.profile))
+    yield* SubscriptionRef.update(state, (s) =>
+      unchangedSinceStart(s) && s.callerIdentities !== undefined
+        ? {
+          ...s,
+          callerIdentities: Object.fromEntries(
+            Object.entries(s.callerIdentities).filter(([profile]) => enabledProfiles.has(profile))
+          )
+        }
+        : s)
 
     const accountIdMap = yield* Ref.get(accountIdRef)
 

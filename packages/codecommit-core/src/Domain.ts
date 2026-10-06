@@ -604,16 +604,16 @@ export interface PullRequestRefreshScope {
  *
  * @category Domain
  */
-export const CallerIdentityUnresolvedReason = Schema.Union([
+export const CallerIdentityUnresolvedReason = Schema.TaggedUnion({
   /** Credentials could not be acquired: profile missing, SSO login expired, provider timed out. */
-  Schema.TaggedStruct("CredentialsUnavailable", {}),
+  CredentialsUnavailable: {},
   /** STS answered GetCallerIdentity with an error, e.g. ExpiredToken or AccessDenied. */
-  Schema.TaggedStruct("StsRejected", {}),
+  StsRejected: {},
   /** STS was still throttling after retries. */
-  Schema.TaggedStruct("Throttled", {}),
+  Throttled: {},
   /** The pull-request refresh hit an authentication error after the identity had resolved. */
-  Schema.TaggedStruct("RefreshAuthFailed", {})
-])
+  RefreshAuthFailed: {}
+})
 
 /** @category Domain */
 export type CallerIdentityUnresolvedReason = typeof CallerIdentityUnresolvedReason.Type
@@ -625,10 +625,10 @@ export type CallerIdentityUnresolvedReason = typeof CallerIdentityUnresolvedReas
  *
  * @category Domain
  */
-export const CallerIdentityState = Schema.Union([
-  Schema.TaggedStruct("Resolved", { accountId: Schema.String, arn: Schema.String, username: Schema.String }),
-  Schema.TaggedStruct("Unresolved", { reason: CallerIdentityUnresolvedReason })
-])
+export const CallerIdentityState = Schema.TaggedUnion({
+  Resolved: { accountId: Schema.String, arn: Schema.String, username: Schema.String },
+  Unresolved: { reason: CallerIdentityUnresolvedReason }
+})
 
 /** @category Domain */
 export type CallerIdentityState = typeof CallerIdentityState.Type
@@ -680,6 +680,24 @@ export const signOutState = ({ currentUser: _, ...state }: AppState): AppState =
       Object.keys(state.callerIdentities).map((profile) => [profile, signedOutIdentity])
     )
   })
+})
+
+/**
+ * The state after a successful SSO login to one account: that account's identity and the current
+ * user, under a new identity generation, so a refresh that started before the login cannot overwrite
+ * them with its older failure.
+ *
+ * @category Domain
+ */
+export const signInState = (
+  state: AppState,
+  profile: string,
+  identity: { readonly accountId: string; readonly arn: string; readonly username: string }
+): AppState => ({
+  ...state,
+  currentUser: identity.username,
+  identityGeneration: (state.identityGeneration ?? 0) + 1,
+  callerIdentities: { ...state.callerIdentities, [profile]: { _tag: "Resolved", ...identity } }
 })
 
 /**

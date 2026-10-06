@@ -7,7 +7,6 @@
  * @internal
  */
 
-import * as Category from "@distilled.cloud/aws/Category"
 import { Array as Arr, Cause, Effect, Option, Predicate, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
@@ -27,10 +26,11 @@ import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
 
 /**
- * Wire tags of authentication failures, for errors the provider client only knows as `UnknownAwsError`
- * (it keeps the wire tag in `errorTag`).
+ * Provider tags that mean the credentials themselves no longer work. Deliberately narrower than the
+ * provider's own auth category, which also covers missing grants (AccessDenied, NotAuthorized) and
+ * service opt-in (OptInRequired): there the credentials work and the identity still holds.
  */
-const unknownAuthErrorTags = new Set([
+const credentialInvalidTags = new Set([
   "ExpiredTokenException",
   "ExpiredToken",
   "UnrecognizedClientException",
@@ -42,21 +42,19 @@ const unknownAuthErrorTags = new Set([
   "AuthFailure"
 ])
 
-/** Denied permissions mean the credentials work and lack a grant; the identity still holds. */
-const authorizationOnly = new Set(["AccessDeniedException", "AccessDenied"])
-
 const tagOf = (value: unknown, key: "_tag" | "errorTag"): string =>
   Predicate.hasProperty(value, key) && Predicate.isString(value[key]) ? value[key] : ""
 
 /**
  * Whether a refresh failure means the account's credentials no longer work, decided from its type: a
- * credential failure, or a provider error the provider client itself classifies as authentication.
+ * credential failure, or a provider error whose tag (or, for an error the provider client doesn't
+ * know, whose wire tag) says the credentials are invalid.
  */
 const isAuthFailure = (error: AwsClientError): boolean =>
   error._tag === "AwsCredentialError" ||
   (error._tag === "AwsApiError" && (
-    (Category.isAuthError(error.cause) && !authorizationOnly.has(tagOf(error.cause, "_tag"))) ||
-    (tagOf(error.cause, "_tag") === "UnknownAwsError" && unknownAuthErrorTags.has(tagOf(error.cause, "errorTag")))
+    credentialInvalidTags.has(tagOf(error.cause, "_tag")) ||
+    (tagOf(error.cause, "_tag") === "UnknownAwsError" && credentialInvalidTags.has(tagOf(error.cause, "errorTag")))
   ))
 
 const refreshAuthFailed: CallerIdentityState = { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }
@@ -114,6 +112,8 @@ export const fetchAndUpsertPRs = (params: {
     const subscriptionRepo = yield* SubscriptionRepo
 
     const { accountIdMap, currentUser, enabledAccounts, staleThreshold, state, subscribedRef } = params
+    // A login or logout during this refresh bumps the generation; its auth failures are then stale.
+    const generationAtStart = (yield* SubscriptionRef.get(state)).identityGeneration ?? 0
 
     // Stale rows are safe to reconcile only when their owning list operation
     // completed successfully. A failed account stream says nothing about which
@@ -181,13 +181,20 @@ export const fetchAndUpsertPRs = (params: {
                 }).pipe(Effect.catch(() => Effect.void))
                 if (isAuthError) {
                   // Typed first (credential failure, or a provider auth error), with the older text match as fallback.
-                  yield* SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => ({
-                    ...rest,
-                    // Only a resolved identity becomes RefreshAuthFailed; an earlier lookup failure keeps its reason.
-                    ...(rest.callerIdentities?.[account.profile]?._tag === "Resolved" && {
-                      callerIdentities: { ...rest.callerIdentities, [account.profile]: refreshAuthFailed }
-                    })
-                  }))
+                  yield* SubscriptionRef.update(state, (current) => {
+                    if ((current.identityGeneration ?? 0) !== generationAtStart) return current
+                    // currentUser comes from the first enabled account; another account's failure leaves it.
+                    const ownsCurrentUser = account.profile === enabledAccounts[0]?.profile
+                    const { currentUser, ...rest } = current
+                    return {
+                      ...(!ownsCurrentUser && currentUser !== undefined && { currentUser }),
+                      ...rest,
+                      // Only a resolved identity becomes RefreshAuthFailed; an earlier lookup failure keeps its reason.
+                      ...(rest.callerIdentities?.[account.profile]?._tag === "Resolved" && {
+                        callerIdentities: { ...rest.callerIdentities, [account.profile]: refreshAuthFailed }
+                      })
+                    }
+                  })
                 }
               })
             )

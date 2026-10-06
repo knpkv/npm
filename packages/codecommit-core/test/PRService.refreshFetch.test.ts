@@ -11,7 +11,7 @@ import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { AccountConfig } from "../src/ConfigService/internal.js"
-import { type AppState, type CallerIdentityState, PullRequest } from "../src/Domain.js"
+import { type AppState, type CallerIdentityState, PullRequest, signInState } from "../src/Domain.js"
 import { AwsApiError, AwsCredentialError } from "../src/Errors.js"
 import { fetchAndUpsertPRs } from "../src/PRService/refreshFetch.js"
 import { subscriptionKey } from "../src/PRService/refreshResolve.js"
@@ -59,12 +59,113 @@ describe("fetchAndUpsertPRs", () => {
       expect((yield* SubscriptionRef.get(state)).callerIdentities?.["test-profile"]).toEqual(lookupFailed)
     }))
 
+  it.effect("does not let an older refresh's auth failure undo a login that landed meanwhile", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const freshLogin = {
+        accountId: "123456789012",
+        arn: "arn:aws:sts::123456789012:assumed-role/R/alice",
+        username: "alice"
+      }
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          // The login lands while this refresh is in flight, then the refresh's old session fails.
+          getPullRequestRefresh: () =>
+            Stream.fromEffect(SubscriptionRef.update(state, (s) => signInState(s, "test-profile", freshLogin))).pipe(
+              Stream.flatMap(() =>
+                Stream.fail(
+                  new AwsCredentialError({ profile: account.profile, region: account.regions[0]!, cause: "expired" })
+                )
+              )
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+      const after = yield* SubscriptionRef.get(state)
+      expect(after.currentUser).toBe("alice")
+      expect(after.callerIdentities?.["test-profile"]).toEqual({ _tag: "Resolved", ...freshLogin })
+    }))
+
+  it.effect.each([
+    ["another account's", "beta", "alice"],
+    ["the current-user account's own", "alpha", undefined]
+  ])(
+    "clears currentUser on %s auth failure only when that account owns it",
+    ([, failing, expectedUser]) =>
+      Effect.gen(function*() {
+        const identity = (accountId: string, name: string): CallerIdentityState => ({
+          _tag: "Resolved",
+          accountId,
+          arn: `arn:aws:sts::${accountId}:assumed-role/R/${name}`,
+          username: name
+        })
+        const state = yield* SubscriptionRef.make<AppState>({
+          pullRequests: [],
+          accounts: [],
+          status: "loading",
+          currentUser: "alice",
+          callerIdentities: { alpha: identity("111111111111", "alice"), beta: identity("222222222222", "bob") }
+        })
+        const accounts = ["alpha", "beta"].map((profile) =>
+          Schema.decodeSync(AccountConfig)({ profile, regions: ["us-east-1"], enabled: true })
+        )
+        const dependencies = Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getPullRequestRefresh: (account) =>
+              account.profile === failing
+                ? Stream.fail(
+                  new AwsCredentialError({ profile: account.profile, region: account.region, cause: "expired" })
+                )
+                : Stream.empty
+          }),
+          Layer.mock(PullRequestRepo, {
+            findStaleOpen: () => Effect.succeed([]),
+            propagateRepoAccountId: () => Effect.void,
+            upsertMany: () => Effect.void
+          }),
+          Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+          Layer.mock(SubscriptionRepo, {})
+        )
+        yield* fetchAndUpsertPRs({
+          state,
+          enabledAccounts: accounts,
+          accountIdMap: new Map([["alpha", "111111111111"], ["beta", "222222222222"]]),
+          subscribedRef: yield* Ref.make(new Set<string>()),
+          currentUser: "alice",
+          staleThreshold: "2026-08-03T00:00:00Z"
+        }).pipe(Effect.provide(dependencies))
+        const after = yield* SubscriptionRef.get(state)
+        expect(after.currentUser).toBe(expectedUser)
+        expect(after.callerIdentities?.[failing]).toEqual({ _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } })
+      })
+  )
+
   // Production refresh failures are typed: an expired credential, or a provider auth error wrapped in AwsApiError.
   it.effect.each([
     ["an AwsCredentialError", "credential"],
     ["an AwsApiError carrying ExpiredTokenException", "expired"],
     ["an AwsApiError carrying an unknown wire ExpiredTokenException", "unknown-expired"],
     ["an AwsApiError carrying AccessDeniedException (authorization, not authentication)", "denied"],
+    ["an AwsApiError carrying OptInRequired (service opt-in, credentials fine)", "opt-in"],
+    ["an AwsApiError carrying NotAuthorized (a missing grant, credentials fine)", "not-authorized"],
     ["an AwsApiError carrying an unrelated provider error", "unrelated"]
   ])("handles a refresh that fails with %s", ([, kind]) =>
     Effect.gen(function*() {
@@ -106,6 +207,10 @@ describe("fetchAndUpsertPRs", () => {
               errorData: undefined,
               message: "The security token is expired"
             })
+            : kind === "opt-in"
+            ? new AwsErrors.OptInRequired({ message: "subscription required" })
+            : kind === "not-authorized"
+            ? new AwsErrors.NotAuthorized({ message: "not authorized" })
             : { _tag: "InternalFailure", message: "provider error" }
         })
       const dependencies = Layer.mergeAll(
@@ -130,7 +235,7 @@ describe("fetchAndUpsertPRs", () => {
       const { callerIdentities } = yield* SubscriptionRef.get(state)
       expect(callerIdentities?.["other-profile"]).toEqual(resolved)
       expect(callerIdentities?.["test-profile"]).toEqual(
-        kind === "unrelated" || kind === "denied"
+        ["unrelated", "denied", "opt-in", "not-authorized"].includes(kind ?? "")
           ? resolved
           : { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }
       )

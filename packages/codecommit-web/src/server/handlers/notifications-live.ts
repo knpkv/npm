@@ -9,7 +9,7 @@
  * @module
  */
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
-import { type AppState, AwsRegion, type CallerIdentityState, signOutState } from "@knpkv/codecommit-core/Domain.js"
+import { type AppState, AwsRegion, signInState, signOutState } from "@knpkv/codecommit-core/Domain.js"
 import { Data, Duration, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -17,13 +17,6 @@ import { ApiError, CodeCommitApi } from "../Api.js"
 import { BackgroundScope } from "../internal/BackgroundScope.js"
 
 const SSO_TIMEOUT = Duration.minutes(3)
-
-const resolvedIdentity = (identity: AwsClient.CallerIdentity): CallerIdentityState => ({
-  _tag: "Resolved",
-  accountId: identity.accountId,
-  arn: identity.arn,
-  username: identity.username
-})
 
 const exitCode = (cmd: ChildProcess.Command) =>
   Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) => spawner.exitCode(cmd))
@@ -106,11 +99,7 @@ export const NotificationsLive = HttpApiBuilder.group(
                         region
                       }).pipe(Effect.catchIf(() => true, () => Effect.succeed(undefined)))
                       if (identity) {
-                        yield* SubscriptionRef.update(prService.state, (s) => ({
-                          ...s,
-                          currentUser: identity.username,
-                          callerIdentities: { ...s.callerIdentities, [payload.profile]: resolvedIdentity(identity) }
-                        }))
+                        yield* SubscriptionRef.update(prService.state, (s) => signInState(s, payload.profile, identity))
                       }
                     })
                   ),
