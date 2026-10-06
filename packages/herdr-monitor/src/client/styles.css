@@ -163,6 +163,11 @@ button {
   overflow-wrap: break-word;
   padding: var(--rly-space-16);
 }
+/* Grid items keep their longest word as a minimum width; let them shrink so a long task or branch
+   name wraps inside its tile. */
+.agent > * {
+  min-width: 0;
+}
 .state {
   font-weight: 600;
 }

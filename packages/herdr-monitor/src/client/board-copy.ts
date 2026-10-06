@@ -37,11 +37,19 @@ export const headline = (agents: ReadonlyArray<Agent>): string => {
     return `${first.name} is blocked${reason}${others === 0 ? "" : `, and ${others} more`}`
   }
   const working = agents.filter((agent) => agent.state === "working").length
+  // An agent that published no state is neither idle nor clear of blockers; say so instead.
+  const unknown = agents.filter((agent) => agent.state === "unknown").length
+  const unknownPart = `${unknown} ${unknown === 1 ? "agent has" : "agents have"} no published state`
   if (agents.length === 0) return "No agents published"
   if (working === 0) {
-    return `Nothing running; ${agents.length} ${agents.length === 1 ? "agent is" : "agents are"} idle or done`
+    const settled = agents.length - unknown
+    if (unknown === 0) {
+      return `Nothing running; ${agents.length} ${agents.length === 1 ? "agent is" : "agents are"} idle or done`
+    }
+    return settled === 0 ? unknownPart : `${unknownPart}; ${settled} idle or done`
   }
-  return `${working} of ${agents.length} ${agents.length === 1 ? "agent" : "agents"} working, none blocked`
+  const of = `${working} of ${agents.length} ${agents.length === 1 ? "agent" : "agents"} working`
+  return unknown === 0 ? `${of}, none blocked` : `${of}; ${unknownPart}`
 }
 
 /** `5 agents, 1 working, 1 blocked`. */

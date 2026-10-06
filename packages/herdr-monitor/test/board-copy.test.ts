@@ -30,6 +30,14 @@ describe("board copy", () => {
     expect(headline([agent({ state: "working" }), agent({ id: "b" })])).toBe("1 of 2 agents working, none blocked")
     expect(headline([agent({})])).toBe("Nothing running; 1 agent is idle or done")
     expect(headline([])).toBe("No agents published")
+    // Review finding: an agent with no published state was counted as idle or done.
+    expect(headline([agent({ state: "unknown" })])).toBe("1 agent has no published state")
+    expect(headline([agent({ state: "unknown" }), agent({ id: "b" })])).toBe(
+      "1 agent has no published state; 1 idle or done"
+    )
+    expect(headline([agent({ state: "working" }), agent({ id: "b", state: "unknown" })])).toBe(
+      "1 of 2 agents working; 1 agent has no published state"
+    )
   })
 
   it("counts with commas, not middots", () => {
