@@ -131,6 +131,8 @@ const schemaSnapshot = (path: string) => {
     return {
       tables: userTables(database).map((table) => ({
         checks: checkConstraints(sqlByName.get(table.name) ?? ""),
+        // The CREATE text carries clauses no PRAGMA reports (ON CONFLICT, AUTOINCREMENT, collations, FK deferral).
+        create: normalize(sqlByName.get(table.name) ?? ""),
         columns: rows(ColumnRow, database, `PRAGMA table_xinfo(${quoted(table.name)})`),
         foreignKeys: rows(ForeignKeyRow, database, `PRAGMA foreign_key_list(${quoted(table.name)})`),
         indexes: rows(IndexRow, database, `PRAGMA index_list(${quoted(table.name)})`)
@@ -252,7 +254,8 @@ const objects = (snapshot: Snapshot): ReadonlyMap<string, unknown> =>
         .filter((index) => !isAutoindex(index))
         .map((index): SchemaObject => [`index ${index.name}`, { ...index, table: name }])
     ]),
-    ...snapshot.triggers.map((trigger): SchemaObject => [`trigger ${trigger.name}`, trigger])
+    ...snapshot.triggers.map((trigger): SchemaObject => [`trigger ${trigger.name}`, trigger]),
+    ["pragma user_version", snapshot.userVersion]
   ])
 
 const onlyIn = (left: ReadonlyMap<string, unknown>, right: ReadonlyMap<string, unknown>) =>
