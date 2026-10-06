@@ -280,9 +280,12 @@ const expectRejectedUnchanged = (
 /** Tables, indexes and triggers only one driver creates; both are required in production. */
 const storeOnly = [
   "index work_decision_handoffs_lane_time",
+  "index work_observed_facts_age",
   "table work_goal_reassignments",
   "table work_goal_transaction_totals",
   "table work_goal_transactions",
+  "table work_observed_facts",
+  "table work_observed_failures",
   "trigger work_goal_transactions_after_insert"
 ]
 const bridgeOnly = ["index work_dispatch_handoffs_lane", "table work_dispatch_handoffs"]

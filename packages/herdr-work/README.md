@@ -12,6 +12,28 @@ The store preserves safe caller-owned state-directory modes, but rejects
 group- or world-writable POSIX directories and substituted database paths before
 opening the authority database.
 
+`observe` stores observed facts for the Work tab: a pull request's state, head,
+review and checks as GitHub reported them, or an agent's Herdr status. One
+latest fact is kept per subject (`github:<repo>#<n>`, `herdr:<host>/<agentId>`).
+The same facts again keep their first-seen time (`observedAt`) and move their
+last confirmation (`confirmedAt`); facts older than the last confirmation are
+skipped. An `unknown` observation (a source that could not be read) never
+replaces a fact: it starts or continues the subject's run of failures, whose
+`since` stays at the first failure until a good read ends it. Hostd names the
+failed subject the same way as its facts (`pullRequestSubject`, `agentSubject`). Facts are not goal
+history: they never write a checkpoint, never count against the history bound,
+and are not part of any approval token, so observing cannot invalidate a pending
+approval. Facts and failures each have their own bounds (4,096 rows, 2 MiB) and evict
+the oldest rows beyond them. `snapshots` merges the facts into the `now` window as
+`observed` entries: the matching facts, the oldest current failure among the
+goal's own subjects as `unknown` (with `lastGoodAt`, the last confirmation of
+that subject's facts), and a derived `displayState` (a recorded
+terminal state, then a merged or closed pull request, then the owner's blocker,
+then the agent's working or blocked status, then an open pull request as
+`review`, then the goal's own state) and a `stale` flag for an owner whose agent
+has been gone for more than 24 hours on unfinished work. Earlier windows stay as
+recorded.
+
 `WorkStore.appendMany` validates a whole checkpoint batch before one SQLite
 transaction. Reusing its transaction ID with the same batch replays it. A
 changed event with an existing event ID or goal/timestamp returns
