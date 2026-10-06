@@ -26,7 +26,8 @@ export interface AccentStripeViolation {
 
 const ONE_SIDE = String.raw`border-(?:left|right|inline-start|inline-end)`
 const DECLARATION = new RegExp(
-  String.raw`(${ONE_SIDE}(?:-width|-color)?|border-inline-width|border-width|box-shadow)\s*:\s*([^;}]+)`,
+  // Only a real declaration name: not the tail of a custom property such as `--card-border-left`.
+  String.raw`(?<![\w-])(${ONE_SIDE}(?:-width|-color)?|border-inline-width|border-width|box-shadow)\s*:\s*([^;}]+)`,
   "gi"
 )
 const RULE_COLOR =
@@ -170,7 +171,8 @@ const isStripe = (property: string, value: string, rule: string): boolean => {
   if (name === "border-width" || name === "border-inline-width") return isOneSidedWidth(name, value, rule)
   if (ZEROED.test(value)) return false
   if (name.endsWith("-color")) return !NEUTRAL_COLOR.test(value.trim())
-  if (name.endsWith("-width")) return !HAIRLINE.test(value.trim())
+  // A side width alone draws in the rule's colour, so a hairline passes only with a neutral one stated.
+  if (name.endsWith("-width")) return !HAIRLINE.test(value.trim()) || !statesNeutralColor(rule)
   return !isNeutralHairline(value)
 }
 

@@ -241,4 +241,10 @@ test("turns the directory chevron toward the inline end, mirrored in right-to-le
     { angle: 45, expanded: "false", leftEdge: true },
     { angle: -45, expanded: "true", leftEdge: true }
   ])
+  // An LTR tree inside an RTL page follows its own, nearer direction.
+  await button.evaluate((element) => element.closest("nav")?.setAttribute("dir", "ltr"))
+  expect(await states()).toEqual([
+    { angle: -45, expanded: "false", leftEdge: false },
+    { angle: 45, expanded: "true", leftEdge: false }
+  ])
 })

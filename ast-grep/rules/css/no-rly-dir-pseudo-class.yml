@@ -18,5 +18,6 @@ files:
 note: |
   Vite's default CSS target predates :dir() support, so lightningcss rewrites
   `.x:dir(rtl)` as `.x:is(:lang(ar), :lang(he), …)`. An English page with
-  dir="rtl" then never matches. Mirror with logical properties, or select the
-  direction attribute: `:where([dir="rtl"]) .x`.
+  dir="rtl" then never matches. Mirror with logical properties, or set a custom
+  property on `[dir="rtl"]` and `[dir="ltr"]` and read it, so the nearest
+  direction boundary wins (see DiffFileTree's `--rly-diff-tree-turn`).

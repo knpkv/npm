@@ -22,6 +22,28 @@ const registryFiles = (): ReadonlyMap<string, string> => {
   return files
 }
 
+interface FocusedRegistry {
+  readonly manifest: ComponentManifest
+  readonly files: ReadonlyMap<string, string>
+}
+
+/** One component's manifest and files, so a mutation check scans one component, not the registry. */
+const focused = (name: string): FocusedRegistry => {
+  const component = componentManifest.components.find((candidate) => candidate.name === name)
+  if (component === undefined) throw new Error(`${name} is not in the manifest`)
+  const all = registryFiles()
+  const paths = [component.source, ...component.styles, component.visual.story, ...component.visual.tests]
+  return {
+    files: new Map(
+      paths.flatMap((path): ReadonlyArray<readonly [string, string]> => {
+        const source = all.get(path)
+        return source === undefined ? [] : [[path, source]]
+      })
+    ),
+    manifest: { ...componentManifest, components: [component] }
+  }
+}
+
 const withDiffCodeCoverageStory = (storyId: string): ComponentManifest => ({
   ...componentManifest,
   components: componentManifest.components.map((component) =>
@@ -86,11 +108,11 @@ describe("registry source validation", () => {
   })
 
   it("fails closed on duplicated, unlisted or unreadable variant declarations", () => {
-    const files = new Map(registryFiles())
+    const { files, manifest } = focused("Button")
     const path = "src/primitives/Button.tsx"
     const source = files.get(path)
     if (source === undefined) throw new Error("Button source fixture is missing")
-    const mutate = (next: string) => findRegistrySourceFailures(componentManifest, new Map([...files, [path, next]]))
+    const mutate = (next: string) => findRegistrySourceFailures(manifest, new Map([...files, [path, next]]))
     expect(
       mutate(
         `${source}\nexport const RLY_EXTRA_VARIANTS = defineVariants({ size: { dense: { className: "x", purpose: "x", tokens: [] } } })\n`
@@ -160,11 +182,11 @@ describe("registry source validation", () => {
   })
 
   it("reads fallbacks only from the component's own implementation", () => {
-    const files = new Map(registryFiles())
+    const { files, manifest } = focused("Button")
     const path = "src/primitives/Button.tsx"
     const source = files.get(path)
     if (source === undefined) throw new Error("Button source fixture is missing")
-    const mutate = (next: string) => findRegistrySourceFailures(componentManifest, new Map([...files, [path, next]]))
+    const mutate = (next: string) => findRegistrySourceFailures(manifest, new Map([...files, [path, next]]))
     const helper = (fallback: string) =>
       `\nconst sizeOf = ({ size = ${fallback} }: { readonly size?: string }) => size\n`
     // A same-named helper neither stands in for a missing fallback nor rejects a correct one.
@@ -175,8 +197,8 @@ describe("registry source validation", () => {
       )
     ).toContain("component Button never falls back to its size default when the prop is omitted")
     expect(mutate(source + helper("\"principal\""))).toEqual([])
-    // A wrapped implementation is followed; one the registry cannot locate fails closed.
-    expect(findRegistrySourceFailures(componentManifest, files)).toEqual([])
+    // The focused fixture is clean, and an implementation the registry cannot locate fails closed.
+    expect(findRegistrySourceFailures(manifest, files)).toEqual([])
     expect(mutate(source.replace("export const Button = (", "export const Button = makeButton(), unused = (")))
       .toContain(
         "component Button has no implementation the registry can find in src/primitives/Button.tsx"

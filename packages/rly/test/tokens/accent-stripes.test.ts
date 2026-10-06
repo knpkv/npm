@@ -34,6 +34,17 @@ describe("findAccentStripes", () => {
     expect(declarations(".a { border-inline-start-width: thick; }")).toHaveLength(1)
   })
 
+  it("checks a split side width against its rule's colour and ignores custom-property names", () => {
+    expect(declarations(".card { border: 0 solid var(--rly-color-held-ink); border-left-width: 1px; }")).toEqual([
+      "border-left-width: 1px"
+    ])
+    expect(declarations(".card { border: 0 solid var(--rly-color-border-1); border-left-width: 1px; }")).toEqual([])
+    expect(declarations(".theme { --card-border-left: 4px solid red; --panel-box-shadow: inset 3px 0 red; }")).toEqual(
+      []
+    )
+    expect(declarations(".card { border-left: 4px solid red; }")).toEqual(["border-left: 4px solid red"])
+  })
+
   it("flags a coloured hairline on one inline edge and passes block underlines and neutral hairlines", () => {
     expect(declarations(".card { border: solid var(--rly-color-held-ink); border-width: 0 0 0 1px; }")).toEqual([
       "border-width: 0 0 0 1px"

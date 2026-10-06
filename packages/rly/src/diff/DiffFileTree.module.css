@@ -150,24 +150,27 @@
     border-inline-end: 1.5px solid currentcolor; /* stripe-ok: drawn chevron, mirrors in right-to-left text */
     inline-size: var(--rly-space-8);
     justify-self: center;
-    transform: rotate(45deg) translate(-1px, -1px);
+    /* --rly-diff-tree-turn is 1 in left-to-right text and -1 in right-to-left; see below. */
+    transform: rotate(calc(45deg * var(--rly-diff-tree-turn, 1)))
+      translate(calc(-1px * var(--rly-diff-tree-turn, 1)), -1px);
     transition: transform var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 
   .directoryButton[aria-expanded="false"] .chevron {
-    transform: rotate(-45deg);
+    transform: rotate(calc(-45deg * var(--rly-diff-tree-turn, 1)));
   }
 
   /*
-   * In right-to-left text the edges sit on the left, so the turns mirror: down when open, left when shut.
-   * Selects the dir attribute: the build lowers :dir() to a :lang() list.
+   * In right-to-left text the edges sit on the left, so the turns mirror: down when open, left when
+   * shut. Each dir attribute sets the sign and the nearest one is inherited, so an LTR tree inside an
+   * RTL page turns the LTR way. (The build lowers :dir() to a :lang() list, so it cannot be used.)
    */
-  :where([dir="rtl"]) .chevron {
-    transform: rotate(-45deg) translate(1px, -1px);
+  [dir="rtl"] {
+    --rly-diff-tree-turn: -1;
   }
 
-  :where([dir="rtl"]) .directoryButton[aria-expanded="false"] .chevron {
-    transform: rotate(45deg);
+  [dir="ltr"] {
+    --rly-diff-tree-turn: 1;
   }
 
   .directoryName {
