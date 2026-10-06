@@ -5,8 +5,8 @@
  * @module
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { loopbackOrigin } from "@knpkv/browser-pairing/owner-session"
-import { Deferred, Effect, Fiber, Layer, Option } from "effect"
+import { loopbackOrigin, serveWithBootstrapUrl } from "@knpkv/browser-pairing/owner-session"
+import { Effect, Option } from "effect"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { makeOwnerSession } from "./server/OwnerSession.js"
@@ -25,18 +25,12 @@ const run = Effect.gen(function*() {
     Option.getOrUndefined(configuredOrigin)
   ).pipe(Effect.orDie)
 
-  const ready = yield* Deferred.make<string>()
-  const server = yield* Layer.launch(makeServer({ port, ready, security })).pipe(
-    Effect.forkChild({ startImmediately: true })
+  return yield* serveWithBootstrapUrl(
+    (ready) => makeServer({ port, ready, security }),
+    // On stdout and nowhere else: this line is the credential. It is not logged, so it cannot end up
+    // in a log file that outlives the process that minted it.
+    (url) => Stream.make(`jcf week view: ${url}\n`).pipe(Stream.run(stdio.stdout()))
   )
-  // The server only ends this race by failing; until it is listening there is no link to print.
-  const url = yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(server).pipe(Effect.andThen(Effect.never)))
-  // On stdout and nowhere else: this line is the credential. It is not logged, so it cannot end up
-  // in a log file that outlives the process that minted it.
-  yield* Stream.make(`jcf week view: ${url}\n`).pipe(
-    Stream.run(stdio.stdout())
-  )
-  return yield* Fiber.join(server)
 })
 
 // Executable entry point: the host platform is provided once for this process.

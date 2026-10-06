@@ -80,7 +80,11 @@ import { useComments } from "../hooks/useComments.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
 import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
-import { matchesCodeCommitPullRequestRoute, type CodeCommitPullRequestRouteCoordinates } from "../codecommit-route.js"
+import {
+  matchesCodeCommitPullRequestRoute,
+  pullRequestRouteCoordinates,
+  type CodeCommitPullRequestRouteCoordinates
+} from "../codecommit-route.js"
 import { encodePullRequestCoordinates } from "../../pull-request-coordinates.js"
 import {
   type ReviewCommentNavigation,
@@ -203,6 +207,15 @@ export const refreshFailureDescription = (cause: unknown): string => {
 const isTextInputTarget = (target: EventTarget | null): boolean => {
   const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
   return tagName === "INPUT" || tagName === "TEXTAREA"
+}
+
+/**
+ * True when Enter on the focused element already does something (follow a link, press a button),
+ * so the page-wide Enter shortcut must not also fire. Used by the PR page's keydown handler.
+ */
+export const ownsEnterKey = (target: EventTarget | null): boolean => {
+  const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
+  return tagName === "A" || tagName === "BUTTON" || tagName === "SELECT" || tagName === "SUMMARY"
 }
 
 const formatRelativeDate = (dateStr: string): string => {
@@ -882,14 +895,10 @@ export function PRDetail() {
   const updateRule = useAtomSet(updateApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
   const routeSelection = useMemo(() => {
-    if (prId === undefined || prId.length === 0) return { pullRequest: null, ambiguous: false }
-    let route: CodeCommitPullRequestRouteCoordinates = { pullRequestId: prId }
-    if (accountId !== undefined) route = { ...route, accountId }
-    if (searchParams.has("region")) route = { ...route, region: searchParams.get("region") ?? "" }
-    if (searchParams.has("repository")) {
-      route = { ...route, repositoryName: searchParams.get("repository") ?? "" }
-    }
-    return selectCodeCommitPullRequest(state.pullRequests, route)
+    const route = pullRequestRouteCoordinates(accountId, prId, searchParams)
+    return route === undefined
+      ? { pullRequest: null, ambiguous: false }
+      : selectCodeCommitPullRequest(state.pullRequests, route)
   }, [accountId, prId, searchParams, state.pullRequests])
   const pr = routeSelection.pullRequest
   const routeHasPartialCoordinates = searchParams.has("repository") !== searchParams.has("region")
@@ -1277,7 +1286,7 @@ export function PRDetail() {
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")
-      } else if ((e.key === "Enter" || e.key === "o") && consoleUrl.length > 0) {
+      } else if ((e.key === "o" || (e.key === "Enter" && !ownsEnterKey(e.target))) && consoleUrl.length > 0) {
         handleOpen()
       } else if (e.key === "." && pr !== null) {
         e.preventDefault()

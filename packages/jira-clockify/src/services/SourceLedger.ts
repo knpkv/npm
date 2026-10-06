@@ -80,18 +80,64 @@ const V3LedgerFile = Schema.Struct({
   observedUnbound: Schema.Array(ObservedUnbound)
 })
 
-const LedgerFile = Schema.Struct({
+const V4LedgerFile = Schema.Struct({
   version: Schema.Literal(4),
   reviewedWindows: Schema.Array(ReviewedWindow),
   pending: Schema.Array(Identity),
   bindings: Schema.Array(Binding),
   observedUnbound: Schema.Array(ObservedUnbound)
+})
+
+const EntryIdentity = Schema.Struct({
+  provider: Identity.fields.provider,
+  scope: Schema.NonEmptyString,
+  entryId: Schema.NonEmptyString
+})
+interface EntryIdentity extends Schema.Schema.Type<typeof EntryIdentity> {}
+
+/** Server-private replacement intent; provider/account coordinates never cross the web boundary. */
+const ReplacementRequest = EntryIdentity.pipe(Schema.fieldsAssign({
+  originalTicketKey: Schema.NullOr(Schema.String),
+  ticketKey: Schema.NonEmptyString,
+  startMs: Schema.Finite,
+  endMs: Schema.Finite,
+  description: Schema.String
+})).check(Schema.makeFilter((value) => value.endMs > value.startMs, { expected: "positive replacement duration" }))
+export interface ReplacementRequest extends Schema.Schema.Type<typeof ReplacementRequest> {}
+
+const ReplacementEntry = Schema.Struct({
+  entryId: Schema.NonEmptyString,
+  ticketKey: Schema.NonEmptyString,
+  startMs: Schema.Finite,
+  endMs: Schema.Finite,
+  jiraCreatedAtMs: Schema.optionalKey(jiraCreatedAtMs)
+}).check(Schema.makeFilter((value) => value.endMs > value.startMs, { expected: "positive replacement duration" }))
+interface ReplacementEntry extends Schema.Schema.Type<typeof ReplacementEntry> {}
+
+const ReplacementIntent = Schema.TaggedUnion({
+  Pending: { ...ReplacementRequest.fields, replacementId: Schema.optionalKey(Schema.NonEmptyString) },
+  Verified: { ...ReplacementRequest.fields, replacement: ReplacementEntry }
+})
+
+const LedgerFile = Schema.Struct({
+  ...V4LedgerFile.fields,
+  version: Schema.Literal(5),
+  replacementIntents: Schema.Array(ReplacementIntent)
 }).check(Schema.makeFilter((value) => {
   const keys = value.bindings.map((binding) => JSON.stringify([binding.provider, binding.scope, binding.entryId]))
   const observedKeys = value.observedUnbound.map((entry) =>
     JSON.stringify([entry.provider, entry.scope, entry.entryId])
   )
-  return new Set(keys).size === keys.length &&
+  const replacementScopes = value.replacementIntents.map((entry) => JSON.stringify([entry.provider, entry.scope]))
+  return new Set(replacementScopes).size === replacementScopes.length &&
+    value.replacementIntents.every((entry) =>
+      entry.endMs > entry.startMs &&
+      (entry._tag === "Pending"
+        ? entry.replacementId !== entry.entryId
+        : entry.replacement.entryId !== entry.entryId && entry.replacement.ticketKey === entry.ticketKey &&
+          (entry.replacement.jiraCreatedAtMs === undefined || entry.provider === "jira"))
+    ) &&
+    new Set(keys).size === keys.length &&
     new Set(observedKeys).size === observedKeys.length &&
     observedKeys.every((key) => !keys.includes(key)) &&
     value.observedUnbound.every((entry) =>
@@ -108,20 +154,28 @@ const LedgerFile = Schema.Struct({
 
 export type LedgerFile = typeof LedgerFile.Type
 
-const empty: LedgerFile = { version: 4, reviewedWindows: [], pending: [], bindings: [], observedUnbound: [] }
+const empty: LedgerFile = {
+  version: 5,
+  reviewedWindows: [],
+  pending: [],
+  bindings: [],
+  observedUnbound: [],
+  replacementIntents: []
+}
 const decodeStored = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Union([LegacyLedgerFile, V2LedgerFile, V3LedgerFile, LedgerFile])),
+  Schema.fromJsonString(Schema.Union([LegacyLedgerFile, V2LedgerFile, V3LedgerFile, V4LedgerFile, LedgerFile])),
   { onExcessProperty: "error" }
 )
 const decode = (content: string) =>
   decodeStored(content).pipe(
     Effect.flatMap((stored) =>
-      stored.version === 4
+      stored.version === 5
         ? Effect.succeed(stored)
         : Schema.decodeEffect(LedgerFile)({
           ...stored,
-          version: 4,
-          observedUnbound: stored.version === 1 ? [] : stored.observedUnbound
+          version: 5,
+          observedUnbound: stored.version === 1 ? [] : stored.observedUnbound,
+          replacementIntents: []
         })
     )
   )
@@ -139,6 +193,8 @@ const lockOwner = (pid: number, namespace: number): typeof LockOwner.Type => ({ 
 
 export class SourceLedgerError extends Schema.TaggedError<SourceLedgerError>()("SourceLedgerError", {
   message: Schema.String,
+  /** A known review hold can be reported by a scan; storage and identity failures still fail it. */
+  reason: Schema.optionalKey(Schema.Literal("review-required")),
   cause: Schema.optionalKey(Schema.Defect())
 }) {}
 
@@ -152,6 +208,24 @@ export interface SourceLedgerContract {
     jiraCreatedAtMs?: number
   ) => Effect.Effect<void, SourceLedgerError>
   readonly release: (identity: SourceIdentity) => Effect.Effect<void, SourceLedgerError>
+  /** Reserve before POST; an interrupted or failed POST is never permission to repeat it. */
+  readonly reserveReplacement: (request: ReplacementRequest) => Effect.Effect<void, SourceLedgerError>
+  /** Retain an acknowledged remote ID before attempting its full provider verification. */
+  readonly identifyReplacement: (entry: EntryIdentity, replacementId: string) => Effect.Effect<void, SourceLedgerError>
+  /** Copy source claims or remember an ordinary replacement before the original can be deleted. */
+  readonly verifyReplacement: (
+    entry: EntryIdentity,
+    replacement: ReplacementEntry
+  ) => Effect.Effect<void, SourceLedgerError>
+  /** Remove only the deleted entry's scoped bindings; other providers and accounts retain their claims. */
+  readonly removeEntry: (
+    entry: { readonly provider: "clockify" | "jira"; readonly scope: string; readonly entryId: string }
+  ) => Effect.Effect<void, SourceLedgerError>
+  /** Retain original source identity on a replacement entry before the original is deleted. */
+  readonly copyEntry: (
+    entry: { readonly provider: "clockify" | "jira"; readonly scope: string; readonly entryId: string },
+    replacement: { readonly entryId: string; readonly ticketKey: string; readonly jiraCreatedAtMs?: number }
+  ) => Effect.Effect<void, SourceLedgerError>
   readonly ensureWindow: (
     window: SourceWindow,
     observed: ReadonlyArray<{ readonly entryId: string; readonly startMs: number }>,
@@ -171,11 +245,20 @@ const hasLegacyClockify = (current: LedgerFile, legacyScope: string): boolean =>
   current.reviewedWindows.some((value) => value.provider === "clockify" && value.scope === legacyScope) ||
   current.observedUnbound.some((value) => value.provider === "clockify" && value.scope === legacyScope) ||
   current.pending.some((value) => value.provider === "clockify" && value.scope === legacyScope) ||
-  current.bindings.some((value) => value.provider === "clockify" && value.scope === legacyScope)
+  current.bindings.some((value) => value.provider === "clockify" && value.scope === legacyScope) ||
+  current.replacementIntents.some((value) => value.provider === "clockify" && value.scope === legacyScope)
+
+const sameEntry = (left: EntryIdentity, right: EntryIdentity): boolean =>
+  left.provider === right.provider && left.scope === right.scope && left.entryId === right.entryId
 
 const rejectLegacyClockify = (current: LedgerFile, legacyScope: string) =>
   hasLegacyClockify(current, legacyScope)
-    ? Effect.fail(new SourceLedgerError({ message: "Earlier Clockify scope needs private manual consumption review" }))
+    ? Effect.fail(
+      new SourceLedgerError({
+        message: "Earlier Clockify scope needs private manual consumption review",
+        reason: "review-required"
+      })
+    )
     : Effect.void
 
 /** A pending remote create never becomes permission to repeat it after a crash. */
@@ -335,6 +418,15 @@ export const layer = Layer.effect(
             return yield* new SourceLedgerError({ message: "Earlier provider entries need manual consumption review" })
           }
           if (
+            current.replacementIntents.some((entry) =>
+              entry.provider === identity.provider && entry.scope === identity.scope
+            )
+          ) {
+            return yield* new SourceLedgerError({
+              message: "An unresolved saved-entry replacement needs manual review"
+            })
+          }
+          if (
             current.pending.some((pending) =>
               pending.provider === identity.provider &&
               pending.scope === identity.scope && pending.rowId === identity.rowId
@@ -388,6 +480,151 @@ export const layer = Layer.effect(
         })
       )
 
+    const reserveReplacement: SourceLedgerContract["reserveReplacement"] = (request) =>
+      update((current) =>
+        Effect.gen(function*() {
+          yield* Schema.decodeEffect(ReplacementRequest)(request).pipe(
+            Effect.mapError((cause) => new SourceLedgerError({ message: "Invalid replacement request", cause }))
+          )
+          if (
+            [...current.pending, ...current.replacementIntents].some((entry) =>
+              entry.provider === request.provider && entry.scope === request.scope
+            )
+          ) {
+            return yield* new SourceLedgerError({
+              message: "This provider has an unresolved write; review it before retrying"
+            })
+          }
+          return { ...current, replacementIntents: [...current.replacementIntents, { _tag: "Pending", ...request }] }
+        })
+      )
+
+    const identifyReplacement: SourceLedgerContract["identifyReplacement"] = (entry, replacementId) =>
+      update((current) =>
+        Effect.gen(function*() {
+          const intent = current.replacementIntents.find((value) => sameEntry(value, entry))
+          if (
+            intent === undefined || intent._tag !== "Pending" || intent.replacementId !== undefined ||
+            replacementId.trim() === "" || replacementId === entry.entryId
+          ) {
+            return yield* new SourceLedgerError({
+              message: "Replacement identity requires an unresolved create intent"
+            })
+          }
+          return {
+            ...current,
+            replacementIntents: current.replacementIntents.map((value) =>
+              sameEntry(value, entry) ? { ...intent, replacementId } : value
+            )
+          }
+        })
+      )
+
+    const copiedBindings = (current: LedgerFile, entry: EntryIdentity, replacement: ReplacementEntry) => {
+      const original = current.bindings.find((binding) => sameEntry(binding, entry))
+      if (original === undefined) return current.bindings
+      const { jiraCreatedAtMs: _oldCreatedAt, ...identity } = original
+      return [...current.bindings, {
+        ...identity,
+        entryId: replacement.entryId,
+        ticketKey: replacement.ticketKey,
+        ...(replacement.jiraCreatedAtMs !== undefined && { jiraCreatedAtMs: replacement.jiraCreatedAtMs })
+      }]
+    }
+
+    const verifyReplacement: SourceLedgerContract["verifyReplacement"] = (entry, replacement) =>
+      update((current) =>
+        Effect.gen(function*() {
+          const intent = current.replacementIntents.find((value) => sameEntry(value, entry))
+          if (
+            intent === undefined || intent._tag !== "Pending" || intent.replacementId !== replacement.entryId ||
+            intent.ticketKey !== replacement.ticketKey ||
+            current.bindings.some((binding) =>
+              binding.provider === entry.provider && binding.scope === entry.scope &&
+              binding.entryId === replacement.entryId
+            ) ||
+            current.observedUnbound.some((known) =>
+              known.provider === entry.provider && known.scope === entry.scope && known.entryId === replacement.entryId
+            )
+          ) return yield* new SourceLedgerError({ message: "Verified replacement does not match its pending intent" })
+          const claimed = current.bindings.some((binding) => sameEntry(binding, entry))
+          const covered = current.reviewedWindows.some((window) =>
+            window.provider === entry.provider && window.scope === entry.scope &&
+            window.fromMs <= replacement.startMs && replacement.startMs < window.toMs
+          )
+          const { _tag: _pendingTag, replacementId: _acknowledgedId, ...request } = intent
+          return {
+            ...current,
+            replacementIntents: current.replacementIntents.map((value) =>
+              sameEntry(value, entry) ? { ...request, _tag: "Verified", replacement } : value
+            ),
+            bindings: copiedBindings(current, entry, replacement),
+            // A verified explicit move is known ordinary time, even outside older reviewed bounds.
+            // Trust only its exact interval; other earlier IDs still require manual review.
+            reviewedWindows: claimed || covered ? current.reviewedWindows : [...current.reviewedWindows, {
+              provider: entry.provider,
+              scope: entry.scope,
+              fromMs: replacement.startMs,
+              toMs: replacement.endMs
+            }],
+            observedUnbound: claimed ? current.observedUnbound : [...current.observedUnbound, {
+              provider: entry.provider,
+              scope: entry.scope,
+              entryId: replacement.entryId,
+              startMs: replacement.startMs
+            }]
+          }
+        })
+      )
+
+    const removeEntry: SourceLedgerContract["removeEntry"] = (entry) =>
+      update((current) =>
+        Effect.gen(function*() {
+          if (current.replacementIntents.some((intent) => sameEntry(intent, entry) && intent._tag === "Pending")) {
+            return yield* new SourceLedgerError({ message: "An unverified replacement needs private manual review" })
+          }
+          return {
+            ...current,
+            replacementIntents: current.replacementIntents.filter((intent) =>
+              intent._tag !== "Verified" ||
+              !(sameEntry(intent, entry) || sameEntry({ ...intent, entryId: intent.replacement.entryId }, entry))
+            ),
+            bindings: current.bindings.filter((binding) =>
+              binding.provider !== entry.provider || binding.scope !== entry.scope || binding.entryId !== entry.entryId
+            ),
+            observedUnbound: current.observedUnbound.filter((observed) =>
+              observed.provider !== entry.provider || observed.scope !== entry.scope ||
+              observed.entryId !== entry.entryId
+            )
+          }
+        })
+      )
+
+    const copyEntry: SourceLedgerContract["copyEntry"] = (entry, replacement) =>
+      update((current) =>
+        Effect.gen(function*() {
+          if (
+            replacement.entryId.trim() === "" || replacement.ticketKey.trim() === "" ||
+            current.bindings.some((binding) =>
+              binding.provider === entry.provider && binding.scope === entry.scope &&
+              binding.entryId === replacement.entryId
+            )
+          ) return yield* new SourceLedgerError({ message: "Replacement entry requires a unique provider identity" })
+          const original = current.bindings.find((binding) =>
+            binding.provider === entry.provider && binding.scope === entry.scope && binding.entryId === entry.entryId
+          )
+          if (original === undefined) return current
+          return {
+            ...current,
+            bindings: copiedBindings(current, entry, {
+              ...replacement,
+              startMs: original.startMs,
+              endMs: original.endMs
+            })
+          }
+        })
+      )
+
     const ensureWindow = (
       window: SourceWindow,
       observed: ReadonlyArray<{ readonly entryId: string; readonly startMs: number }>,
@@ -429,7 +666,8 @@ export const layer = Layer.effect(
             )
           ) {
             return yield* new SourceLedgerError({
-              message: "Unlinked earlier provider entries need private manual review before session writes"
+              message: "Unlinked earlier provider entries need private manual review before session writes",
+              reason: "review-required"
             })
           }
           const newlyOrdinary = observed.filter((entry) =>
@@ -443,7 +681,8 @@ export const layer = Layer.effect(
             )
           ) {
             return yield* new SourceLedgerError({
-              message: "Unlinked earlier provider entries need private manual review before session writes"
+              message: "Unlinked earlier provider entries need private manual review before session writes",
+              reason: "review-required"
             })
           }
           const covered = priorWindows.some((known) => known.fromMs <= window.fromMs && known.toMs >= window.toMs)
@@ -467,6 +706,18 @@ export const layer = Layer.effect(
         })
       )
 
-    return SourceLedger.of({ read, assertNoLegacyClockify, reserve, bind, release, ensureWindow })
+    return SourceLedger.of({
+      read,
+      assertNoLegacyClockify,
+      reserve,
+      bind,
+      release,
+      reserveReplacement,
+      identifyReplacement,
+      verifyReplacement,
+      removeEntry,
+      copyEntry,
+      ensureWindow
+    })
   })
 )

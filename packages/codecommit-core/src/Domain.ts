@@ -659,6 +659,10 @@ export interface AppState {
   readonly currentUser?: string
   /** Per-account caller identity; absent until the first refresh has resolved identities. */
   readonly callerIdentities?: CallerIdentities
+  /**
+   * Unused. codecommit-web no longer sets or reads it; its review count is the client-side
+   * `yourReviewCount` (workbench-queue.ts). Kept for L2-7, which retires or replaces it.
+   */
   readonly pendingReviewCount?: number
   /** Monotonic sequence incremented when a list refresh starts. */
   readonly refreshGeneration?: number

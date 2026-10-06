@@ -1,5 +1,17 @@
 # @knpkv/control-center
 
+## 0.9.4
+
+### Patch Changes
+
+- Updated dependencies [[`1ef1847`](https://github.com/knpkv/npm/commit/1ef1847c867f83de237dec1c454b6bb5e40183ef), [`3048770`](https://github.com/knpkv/npm/commit/30487706842612a798a17ce7d0d8e71973442fa2), [`487f2ba`](https://github.com/knpkv/npm/commit/487f2ba4fdb585f0cd0b2ab96fd4eeedce9da10d), [`139ec4f`](https://github.com/knpkv/npm/commit/139ec4f66f1b790cb1364d1171a49f48496a60b8)]:
+  - @knpkv/atlassian-common@1.9.0
+  - @knpkv/confluence-to-markdown@2.5.0
+  - @knpkv/rly@0.8.0
+  - @knpkv/codecommit-core@0.17.1
+  - @knpkv/relay-product@0.2.2
+  - @knpkv/review@0.3.2
+
 ## 0.9.3
 
 ### Patch Changes

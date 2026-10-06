@@ -44,7 +44,6 @@ test("filters queues and facets without losing disabled-account detail routes", 
         JSON.stringify({
           accounts: [],
           currentUser: "viewer",
-          pendingReviewCount: 0,
           pullRequests,
           sandboxes: [],
           status: "idle",

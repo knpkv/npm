@@ -10,8 +10,8 @@
  * @module
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { loopbackOrigin } from "@knpkv/browser-pairing/owner-session"
-import { ConfigProvider, Console, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect"
+import { loopbackOrigin, serveWithBootstrapUrl } from "@knpkv/browser-pairing/owner-session"
+import { ConfigProvider, Console, Effect, Option, Schema } from "effect"
 import { Command, Flag } from "effect/cli"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
@@ -51,17 +51,11 @@ const serve = Command.make(
       loopbackOrigin("127.0.0.1", port),
       Option.getOrUndefined(configuredOrigin)
     )
-    const ready = yield* Deferred.make<string>()
-    const server = yield* Layer.launch(makeServer({ config: settings, port, ready, security })).pipe(
-      Effect.forkChild({ startImmediately: true })
+    return yield* serveWithBootstrapUrl(
+      (ready) => makeServer({ config: settings, port, ready, security }),
+      // On stdout and nowhere else: this line is the credential, so it is never logged.
+      (url) => Stream.make(`agent usage: ${url}\n`).pipe(Stream.run(stdio.stdout()))
     )
-    // The server only ends this race by failing; until it is listening there is no link to print.
-    const url = yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(server).pipe(Effect.andThen(Effect.never)))
-    // On stdout and nowhere else: this line is the credential, so it is never logged.
-    yield* Stream.make(`agent usage: ${url}\n`).pipe(
-      Stream.run(stdio.stdout())
-    )
-    return yield* Fiber.join(server)
   })
 ).pipe(Command.withDescription("Record usage continuously and serve the browser view"))
 

@@ -8,7 +8,6 @@
  * @module
  */
 import type { PullRequest } from "@knpkv/codecommit-core/Domain.js"
-import { needsMyReview } from "@knpkv/codecommit-core/Domain.js"
 import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
 import { ServiceMark } from "@knpkv/rly/patterns"
 import { StateLabel, Text, type RlyStateTone } from "@knpkv/rly/primitives"
@@ -18,6 +17,7 @@ import { useMemo } from "react"
 import { Link } from "react-router"
 import { pullRequestRowDecision, pullRequestRowTimeLabel, pullRequestRowTimestamp } from "./pr-row-presentation.js"
 import styles from "./review-queue.module.css"
+import { needsYourReview } from "./workbench-queue.js"
 
 interface PRRowProps {
   readonly pr: PullRequest
@@ -51,7 +51,7 @@ const scoreClassName = (tier: ReturnType<typeof getScoreTier>): string => {
 }
 
 export function PRRow({ currentUser, pr, showUpdated, to }: PRRowProps) {
-  const reviewRequested = needsMyReview(pr, currentUser)
+  const reviewRequested = needsYourReview(pr, currentUser)
   const score: HealthScore | undefined = useMemo(
     () => Option.getOrUndefined(calculateHealthScore(pr, new Date())),
     [pr]

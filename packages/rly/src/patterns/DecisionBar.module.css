@@ -1,0 +1,78 @@
+@layer rly.components {
+  .root {
+    box-sizing: border-box;
+    color: var(--rly-color-text-1);
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: var(--rly-space-0);
+  }
+
+  .inline {
+    position: static;
+  }
+
+  .sticky {
+    background: var(--rly-color-canvas);
+    border-block-start: 1px solid var(--rly-color-border-1);
+    inset-block-end: var(--rly-space-0);
+    padding: var(--rly-space-12) var(--rly-space-16);
+    position: sticky;
+    z-index: 1;
+  }
+
+  .target {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    margin: var(--rly-space-0);
+  }
+
+  .clock {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+  }
+
+  .sticky .actions > * {
+    flex: 1 1 0;
+  }
+
+  /* An off action stays focusable (aria-disabled) and reads as inert without losing contrast. */
+  .actions > [aria-disabled="true"] {
+    color: var(--rly-color-text-2);
+    cursor: not-allowed;
+  }
+
+  /* Kept in the accessibility tree while empty, so its first message is announced. */
+  .status:empty {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+  }
+
+  .reason,
+  .status,
+  .note {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    margin: var(--rly-space-0);
+  }
+
+  /* Forced colours flatten the muted ink of an off action, so mark it with a dashed border too. */
+  @media (forced-colors: active) {
+    .actions > [aria-disabled="true"] {
+      border-style: dashed;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .actions > [aria-disabled="true"] {
+    border-style: dashed;
+  }
+}

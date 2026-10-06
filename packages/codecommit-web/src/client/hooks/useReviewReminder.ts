@@ -5,7 +5,7 @@
  *
  * - Reads enabled + interval from localStorage
  * - Fires grouped toast + desktop notification at interval
- * - Only when pendingReviewCount > 0
+ * - Only when reviewCount (`yourReviewCount`) > 0
  * - One reminder per interval regardless of PR count
  *
  * @module
@@ -35,9 +35,9 @@ function readNumber(key: string, fallback: number): number {
   }
 }
 
-export function useReviewReminder(pendingReviewCount: number) {
-  const countRef = useRef(pendingReviewCount)
-  countRef.current = pendingReviewCount
+export function useReviewReminder(reviewCount: number) {
+  const countRef = useRef(reviewCount)
+  countRef.current = reviewCount
 
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null

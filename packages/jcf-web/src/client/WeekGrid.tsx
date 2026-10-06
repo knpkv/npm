@@ -21,11 +21,13 @@ import type { SavedEntry } from "../shared/contracts.js"
 import type { WeekPlanResponse } from "../server/Api.js"
 import type { OptimisticEntry } from "./weekAtoms.js"
 import {
+  type CalendarBlock,
   type CalendarLayers,
   type GridBlock,
   minimumBlockPixels,
   minutePixels,
-  projectCalendar
+  projectCalendar,
+  type ProposableBlock
 } from "./calendarProjection.js"
 import { duration, formatClock } from "./format.js"
 import { clockAtOffset, type HourWindow, type Placed } from "./layout.js"
@@ -68,7 +70,7 @@ const QuickApproveButton = (props: {
 )
 
 const Block = (props: {
-  readonly placed: Placed<GridBlock>
+  readonly placed: Placed<CalendarBlock>
   readonly window: HourWindow
   readonly onOpen: (rowId: string, blockIndex: number) => void
   readonly selectedRowId: string | undefined
@@ -89,6 +91,54 @@ const Block = (props: {
     width: `${(1 / columns) * 100}%`
   }
   const clock = `${formatClock(new Date(block.startMs))}–${formatClock(new Date(block.endMs))}`
+
+  if (block.kind === "stretch") {
+    const selected = (member: ProposableBlock) =>
+      props.selectedRowId === member.rowId && props.selectedBlockIndex === member.blockIndex
+    // The height is a floor, not a cap: hovering or focusing a stretch lets its rows show in full.
+    const stretchStyle: CSSProperties & Record<"--jcf-stretch-height", string> = {
+      left: style.left,
+      top: style.top,
+      width: style.width,
+      "--jcf-stretch-height": `${height}px`
+    }
+    return (
+      <div
+        className="jcf-stretch"
+        style={stretchStyle}
+        role="group"
+        aria-label={`${clock}, ${String(block.members.length)} tickets packed in this stretch`}
+      >
+        <span className="jcf-stretch-head">
+          {clock} · {block.members.length} tickets
+        </span>
+        <ul>
+          {block.members.map((member) => (
+            <li key={member.id} className="jcf-stretch-row">
+              <button
+                id={`jcf-calendar-suggestion-${encodeURIComponent(member.rowId)}-${member.blockIndex}`}
+                type="button"
+                className="jcf-stretch-entry"
+                data-overlap={member.overlap}
+                data-selected={selected(member)}
+                aria-pressed={selected(member)}
+                disabled={props.disabled}
+                title={`${member.ticketKey}${member.ticketTitle === null ? "" : ` — ${member.ticketTitle}`}\n${formatClock(new Date(member.startMs))}–${formatClock(new Date(member.endMs))} · ${duration(member.seconds)}`}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  props.onOpen(member.rowId, member.blockIndex)
+                }}
+              >
+                <span className="jcf-block-key">{member.ticketKey}</span>
+                <span className="jcf-stretch-duration">{duration(member.seconds)}</span>
+              </button>
+              <QuickApproveButton block={member} disabled={props.queueUnavailable} onApprove={props.onQuickApprove} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+  }
 
   if (block.kind === "logged") {
     return (
@@ -185,12 +235,17 @@ export const WeekGrid = (props: {
   }, [])
   const presentation = view === "auto" ? (narrow ? "agenda" : "calendar") : view
 
-  const { counts, days, hours, placements, visibleHours } = useMemo(() => {
+  const { calendarPlacements, counts, days, hours, placements, visibleHours } = useMemo(() => {
     return projectCalendar(props.plan, props.optimisticEntries, layers)
   }, [props.plan, props.optimisticEntries, layers])
-  // Dense collision lanes still need a 24px review target beside the 24px quick action.
-  const minimumColumnPixels = [...placements.values()].reduce(
-    (maximum, day) => day.reduce((maximum, placed) => Math.max(maximum, placed.columns * 48), maximum),
+  // Dense collision lanes still need a 24px review target beside the 24px quick action. A stretch row
+  // also spends its border, padding and row gap, so its lanes need 64px.
+  const minimumColumnPixels = [...calendarPlacements.values()].reduce(
+    (maximum, day) =>
+      day.reduce(
+        (maximum, placed) => Math.max(maximum, placed.columns * (placed.block.kind === "stretch" ? 64 : 48)),
+        maximum
+      ),
     0
   )
   const calendarStyle: CSSProperties & Record<"--jcf-columns" | "--jcf-hour" | "--jcf-column-min", string> = {
@@ -348,7 +403,7 @@ export const WeekGrid = (props: {
                   }}
                 />
               ) : null}
-              {(placements.get(day) ?? []).map((placed) => (
+              {(calendarPlacements.get(day) ?? []).map((placed) => (
                 <Block
                   key={placed.block.id}
                   onOpen={props.onOpenRow}

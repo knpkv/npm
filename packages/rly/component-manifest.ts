@@ -164,6 +164,81 @@ export const componentManifest = {
     }
   ],
   components: [
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RLY_REGION_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_REGION_VARIANTS" },
+        { kind: "value", name: "Region" },
+        { kind: "type", name: "RegionProps" },
+        { kind: "type", name: "RlyRegionHeadingLevel" },
+        { kind: "type", name: "RlyRegionTone" }
+      ],
+      name: "Region",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/Region.tsx",
+      status: "experimental",
+      styles: ["src/patterns/Region.module.css"],
+      variants: [{ defaultValue: "default", name: "tone", values: ["default", "tray"] }],
+      visual: {
+        story: "stories/patterns/Region.stories.tsx",
+        storyId: "patterns-region--states",
+        tests: ["test/patterns/Region.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "Hero" },
+        { kind: "value", name: "HeroWord" },
+        { kind: "value", name: "RLY_HERO_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_HERO_VARIANTS" },
+        { kind: "value", name: "RLY_HERO_WORD_VARIANTS" },
+        { kind: "type", name: "HeroProps" },
+        { kind: "type", name: "HeroWordProps" },
+        { kind: "type", name: "RlyHeroSize" },
+        { kind: "type", name: "RlyHeroWordTone" }
+      ],
+      name: "Hero",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/Hero.tsx",
+      status: "experimental",
+      styles: ["src/patterns/Hero.module.css"],
+      variants: [
+        { defaultValue: "heading", name: "size", values: ["heading", "line", "display"] },
+        { name: "tone", values: ["blocked", "held"] }
+      ],
+      visual: {
+        story: "stories/patterns/Hero.stories.tsx",
+        storyId: "patterns-hero--states",
+        tests: ["test/patterns/Hero.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "DecisionBar" },
+        { kind: "value", name: "RLY_DECISION_BAR_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_DECISION_BAR_VARIANTS" },
+        { kind: "type", name: "DecisionBarProps" },
+        { kind: "type", name: "RlyDecisionBarPlacement" },
+        { kind: "type", name: "RlyDecisionBarState" }
+      ],
+      name: "DecisionBar",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/DecisionBar.tsx",
+      status: "experimental",
+      styles: ["src/patterns/DecisionBar.module.css"],
+      variants: [{ defaultValue: "inline", name: "placement", values: ["inline", "sticky"] }],
+      visual: {
+        story: "stories/patterns/DecisionBar.stories.tsx",
+        storyId: "patterns-decisionbar--states",
+        tests: ["test/patterns/DecisionBar.test.tsx"]
+      }
+    },
     // scaffold:components:insert
     {
       category: "diff",
@@ -1468,8 +1543,9 @@ export const componentManifest = {
       source: "src/patterns/StageRail.tsx",
       status: "stable",
       styles: ["src/patterns/StageRail.module.css"],
-      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default", "words"] }],
       visual: {
+        coverageStoryIds: ["patterns-stagerail--words"],
         story: "stories/patterns/StageRail.stories.tsx",
         storyId: "patterns-stagerail--states",
         tests: ["test/patterns/StageRail.test.tsx"]

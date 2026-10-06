@@ -14,10 +14,12 @@ import {
   mineTicketKeys,
   type SessionAttribution,
   splitCredits,
+  splitSessionAttribution,
   standingAttribution,
   type TicketDayCredit,
   ticketKeyFromBranch,
-  ticketKeyFromPath
+  ticketKeyFromPath,
+  ticketMentionCounts
 } from "../src/agent/sessions.js"
 import { marker } from "../src/agent/sourceConsumption.js"
 
@@ -177,6 +179,31 @@ describe("attributeSession", () => {
     gitBranch: null,
     candidateKeys: ["PROJ-7", "PROJ-8"]
   }
+
+  it.each([
+    { gitBranch: "feat/PROJ-1", cwd: "/dev/PROJ-2", standingMap: { "/dev": "PROJ-3" }, ignored: "PROJ-1" },
+    { gitBranch: null, cwd: "/dev/PROJ-2", standingMap: { "/dev": "PROJ-3" }, ignored: "PROJ-2" },
+    { gitBranch: null, cwd: "/dev/docs", standingMap: { "/dev": "PROJ-3" }, ignored: "PROJ-3" }
+  ])("lets an ignored $ignored deterministic hit fall through to an allowed agent choice", (signal) => {
+    const options = {
+      standingMap: signal.standingMap,
+      ignoredTickets: new Set([signal.ignored]),
+      agentChoice: { ticketKey: "PROJ-7", confidence: 0.9 },
+      confidenceFloor: 0.7
+    }
+    const source = { ...session, gitBranch: signal.gitBranch, cwd: signal.cwd }
+    expect(deterministicAttribution(source, options)).toBeNull()
+    expect(attributeSession(source, options)).toMatchObject({ ticketKey: "PROJ-7", signal: "agent" })
+  })
+
+  it("rejects an ignored agent choice even when the original candidates contain it", () => {
+    expect(attributeSession(session, {
+      standingMap: {},
+      ignoredTickets: new Set(["PROJ-7"]),
+      agentChoice: { ticketKey: "PROJ-7", confidence: 1 },
+      confidenceFloor: 0.7
+    })).toMatchObject({ ticketKey: null, signal: "none" })
+  })
 
   it("prefers a branch over every weaker signal", () => {
     const result = attributeSession(
@@ -503,6 +530,76 @@ describe("activeWindows and sharing", () => {
 })
 
 describe("splitCredits", () => {
+  for (const dwellSeconds of [0, 900]) {
+    it(`shares an orchestrator hour 3:1 only among known sprint tickets, with dwell ${dwellSeconds}`, () => {
+      const session = {
+        sessionId: "orchestrator",
+        cwd: "/work",
+        gitBranch: null,
+        candidateKeys: ["PROJ-1", "PROJ-2", "PROJ-3", "PROJ-4"],
+        mentionCounts: ticketMentionCounts("PROJ-1 PROJ-1 PROJ-1 PROJ-2 PROJ-3 PROJ-4")
+      }
+      const primary = attributeSession(session, { standingMap: {}, confidenceFloor: 0.7 })
+      const attribution = splitSessionAttribution(
+        session,
+        primary,
+        new Set(["PROJ-1", "PROJ-2", "PROJ-4"]),
+        new Set(["PROJ-4"])
+      )
+      const startMs = at(2026, 7, 1, 10, 0)
+      const windows = [{
+        sessionId: session.sessionId,
+        day: "2026-07-01",
+        seconds: 3600,
+        spans: [{ startMs, endMs: startMs + 3600_000 }]
+      }]
+      const result = splitCredits(windows, [attribution], { dwellSeconds })
+      expect(result.attributed.map((row) => [row.ticketKey, row.seconds, row.signal])).toEqual([
+        ["PROJ-1", 2700, "split"],
+        ["PROJ-2", 900, "split"]
+      ])
+      expect(result.unattributed).toEqual([])
+      expect(splitSessionAttribution(session, primary, undefined, new Set())).toBe(primary)
+      const held = attributeSession(session, {
+        standingMap: {},
+        confidenceFloor: 0.7,
+        agentChoice: { ticketKey: "PROJ-3", confidence: 0.2 }
+      })
+      expect(splitSessionAttribution(session, held, undefined, new Set())).toBe(held)
+      expect(splitSessionAttribution(session, held, new Set(["PROJ-1", "PROJ-2"]), new Set()).signal).toBe("split")
+    })
+  }
+
+  it("conserves weighted split presence alongside a full ticket and duplicate sessions", () => {
+    const startMs = at(2026, 7, 1, 10, 0)
+    const windows = ["orchestrator", "duplicate", "worker"].map((sessionId) => ({
+      sessionId,
+      day: "2026-07-01",
+      seconds: 3600,
+      spans: [{ startMs, endMs: startMs + 3600_000 }]
+    }))
+    const split: SessionAttribution = {
+      sessionId: "orchestrator",
+      ticketKey: null,
+      signal: "split",
+      confidence: null,
+      belowConfidenceFloor: false,
+      targets: [{ ticketKey: "PROJ-1", weight: 3 }, { ticketKey: "PROJ-2", weight: 1 }]
+    }
+    const result = splitCredits(windows, [split, { ...split, sessionId: "duplicate" }, {
+      sessionId: "worker",
+      ticketKey: "PROJ-3",
+      signal: "branch",
+      confidence: null,
+      belowConfidenceFloor: false
+    }])
+    expect(result.attributed.map((row) => [row.ticketKey, row.seconds])).toEqual([
+      ["PROJ-1", 1350],
+      ["PROJ-2", 450],
+      ["PROJ-3", 1800]
+    ])
+    expect(result.attributed.reduce((sum, row) => sum + row.seconds, 0)).toBe(3600)
+  })
   /** A credited bucket from `[fromH, fromM, toH, toM]` spans on `day`, seconds derived from them. */
   const credited = (
     sessionId: string,
@@ -530,7 +627,24 @@ describe("splitCredits", () => {
     ...overrides
   })
 
-  it("keeps distinct allocations in one cluster stable when source sessions are reordered", () => {
+  it("removes ignored windows before sharing so parallel tickets absorb them and solo time stays unoffered", () => {
+    const split = splitCredits([
+      credited("ignored", "2026-07-01", [[10, 0, 11, 0], [14, 0, 15, 0]]),
+      credited("worked", "2026-07-01", [[10, 0, 11, 0]])
+    ], [
+      attribution({ sessionId: "ignored", ticketKey: "PROJ-1", signal: "branch" }),
+      attribution({ sessionId: "worked", ticketKey: "PROJ-2", signal: "branch" })
+    ], { ignoredTickets: new Set(["PROJ-1"]) })
+    expect(split.attributed).toMatchObject([{ ticketKey: "PROJ-2", seconds: 3600 }])
+    expect(split.attributed).toHaveLength(1)
+    expect(split.attributed[0]?.blocks).toMatchObject([{
+      startMs: at(2026, 7, 1, 10, 0),
+      endMs: at(2026, 7, 1, 11, 0)
+    }])
+    expect(split.unattributed).toEqual([])
+  })
+
+  it("keeps one packed allocation per ticket stable when source sessions are reordered", () => {
     const windows = [
       credited("early", "2026-07-01", [[10, 0, 10, 40]]),
       credited("late", "2026-07-01", [[11, 20, 12, 0]]),
@@ -544,9 +658,9 @@ describe("splitCredits", () => {
     const forward = splitCredits(windows, attributions, { dwellSeconds: 900 })
     const reversed = splitCredits([...windows].reverse(), [...attributions].reverse(), { dwellSeconds: 900 })
     const blocks = (result: typeof forward) => result.attributed.find((row) => row.ticketKey === "PROJ-1")?.blocks
-    expect(blocks(forward)?.map((block) => block.seconds)).toEqual([1200, 2400])
+    expect(blocks(forward)?.map((block) => block.seconds)).toEqual([3600])
     expect(blocks(reversed)).toEqual(blocks(forward))
-    expect(blocks(forward)?.map((block) => block.allocationIndex)).toEqual([0, 1])
+    expect(blocks(forward)?.map((block) => block.allocationIndex)).toEqual([0])
   })
 
   it("folds several sessions onto one Issue Key and keeps the weakest signal", () => {
@@ -782,8 +896,12 @@ describe("applyDwellFloor", () => {
       minutes(15, 60, "attributed\u0000PROJ-1"),
       minutes(120, 150, "attributed\u0000PROJ-2")
     ])
-    expect(owners(beforeLaterEvidence)).toEqual([["attributed\u0000PROJ-1", 60]])
-    expect(owners(afterLaterEvidence).slice(0, 1)).toEqual(owners(beforeLaterEvidence))
+    expect(owners(beforeLaterEvidence)).toEqual([
+      ["attributed\u0000PROJ-1", 10],
+      ["attributed\u0000PROJ-1+attributed\u0000PROJ-2", 5],
+      ["attributed\u0000PROJ-1", 45]
+    ])
+    expect(owners(afterLaterEvidence).slice(0, 3)).toEqual(owners(beforeLaterEvidence))
     expect(heldMinutes(afterLaterEvidence)).toBe(90)
   })
 
@@ -826,13 +944,17 @@ describe("applyDwellFloor", () => {
     ])
   })
 
-  it("absorbs a shared sliver too — the rule is about how often ownership changes", () => {
+  it("keeps a shared short ticket alongside the surrounding owner", () => {
     const slices = [
       minutes(0, 30, "attributed\u0000PROJ-1"),
       minutes(30, 32, "attributed\u0000PROJ-1", "attributed\u0000PROJ-2"),
       minutes(32, 60, "attributed\u0000PROJ-1")
     ]
-    expect(owners(floor(slices))).toEqual([["attributed\u0000PROJ-1", 60]])
+    expect(owners(floor(slices))).toEqual([
+      ["attributed\u0000PROJ-1", 30],
+      ["attributed\u0000PROJ-1+attributed\u0000PROJ-2", 2],
+      ["attributed\u0000PROJ-1", 28]
+    ])
   })
 
   it("never welds two stretches across a local midnight", () => {
@@ -862,7 +984,7 @@ describe("applyDwellFloor", () => {
 })
 
 describe("splitCredits under the Dwell Floor", () => {
-  it("credits an interrupting minute to the stretch around it", () => {
+  it("keeps an overlapping short session credited under the dwell floor", () => {
     const events = [
       ...Array.from({ length: 21 }, (_, index) => ({ atMs: at(2026, 7, 1, 9, 0) + index * 60_000, sessionId: "s1" })),
       { atMs: at(2026, 7, 1, 9, 10), sessionId: "s2" }
@@ -875,14 +997,12 @@ describe("splitCredits under the Dwell Floor", () => {
     const withFloor = splitCredits(windows, attributions, { dwellSeconds: 900 })
     const withoutFloor = splitCredits(windows, attributions, { dwellSeconds: 0 })
 
-    // Read literally, the transcripts say the work changed ticket twice in a minute. It did not.
-    expect(withFloor.attributed.map((row) => row.ticketKey)).toEqual(["PROJ-1"])
+    expect(withFloor.attributed.map((row) => row.ticketKey)).toEqual(["PROJ-1", "PROJ-2"])
     expect(withoutFloor.attributed.map((row) => row.ticketKey)).toEqual(["PROJ-1", "PROJ-2"])
-    // Time moved rather than vanished: the day still holds what it held.
+    // Scheduling preserves the wall-clock budget and every evidenced ticket.
     const total = (rows: ReadonlyArray<{ seconds: number }>) => rows.reduce((sum, row) => sum + row.seconds, 0)
     expect(total(withFloor.attributed)).toBe(total(withoutFloor.attributed))
-    // And one block instead of two, which is the difference on a calendar.
-    expect(withFloor.attributed[0]!.blocks).toHaveLength(1)
+    expect(withFloor.attributed[1]?.seconds).toBeGreaterThan(0)
   })
 })
 

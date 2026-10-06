@@ -67,7 +67,6 @@ export interface AppState {
    * `Resolved` identity; absent, a missing key, or `Unresolved` means membership is unknown.
    */
   readonly callerIdentities?: Domain.CallerIdentities
-  readonly pendingReviewCount?: number
   readonly unreadNotificationCount?: number
   readonly notifications?: {
     readonly items: ReadonlyArray<NotificationItem>

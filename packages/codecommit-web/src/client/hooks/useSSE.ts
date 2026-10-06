@@ -122,7 +122,6 @@ const SsePayload = Schema.Struct({
   currentUser: Schema.optional(Schema.String),
   // Declared here too: a field missing from this client schema is silently dropped.
   callerIdentities: Schema.optional(CallerIdentities),
-  pendingReviewCount: Schema.Number.pipe(Schema.withDecodingDefaultType(Effect.succeed(0))),
   unreadNotificationCount: Schema.optional(Schema.Number),
   notifications: Schema.optional(Schema.Struct({
     items: Schema.Array(NotificationWire),
@@ -162,7 +161,6 @@ const toAppState = (payload: typeof SsePayload.Type): AppState => {
       enabled: account.enabled
     })),
     status: payload.status,
-    pendingReviewCount: payload.pendingReviewCount,
     ...((payload.enabledProfiles !== undefined) && { enabledProfiles: payload.enabledProfiles }),
     ...((payload.statusDetail !== undefined) && { statusDetail: payload.statusDetail }),
     ...((payload.error !== undefined) && { error: payload.error }),

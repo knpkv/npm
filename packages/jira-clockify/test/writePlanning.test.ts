@@ -100,6 +100,25 @@ describe("confirmation planning", () => {
     })
   })
 
+  // A recorded worklog ending mid-second leaves a fractional gap; the plan must not report or
+  // consume time a provider, which stores whole seconds, will not hold.
+  it("plans whole seconds when recorded time ends mid-second", () => {
+    const single = { ...evidence, credited: morning.seconds, blocks: [morning] }
+    const prepared = prepareProposal({ evidence: single, targets, request: {} })
+    expect(prepared._tag).toBe("Prepared")
+    if (prepared._tag !== "Prepared") return
+    const result = prepared.plan([{
+      ticketKey: evidence.ticketKey,
+      day: evidence.day,
+      clockifySeconds: 0,
+      jiraSeconds: 3078.165,
+      intervals: [{ startMs: morning.startMs, endMs: morning.startMs + 3078165, source: "jira" }]
+    }])
+    if (result._tag !== "Write") return expect.unreachable()
+    expect(result.jira.segments.every((segment) => Number.isInteger(segment.seconds))).toBe(true)
+    expect(Number.isInteger(result.jira.seconds)).toBe(true)
+  })
+
   it("withholds Jira gaps that are individually below its one-minute floor", () => {
     const short = { startMs: 0, endMs: 180000, seconds: 180 }
     const prepared = prepareProposal({
