@@ -196,6 +196,7 @@ const tableRows = (path: string): ReadonlyMap<string, ReadonlyArray<Schema.Json>
 
 const LaneClaimRow = Schema.Struct({
   record: Schema.fromJsonString(Schema.Struct({
+    goalId: Schema.String,
     operationId: Schema.String,
     revision: Schema.Number
   }))
@@ -490,6 +491,28 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
           yield* open(path)
           yield* open(path)
           expect(laneClaim(path), name).toMatchObject({ operationId: "goal:legacy", revision: 2 })
+        }
+      })
+    ))
+
+  it.effect("keeps the lane's own goal when a claim that moved past its binding names a different goal", () =>
+    withRoot((root) =>
+      Effect.gen(function*() {
+        const legacy = join(root, "legacy.sqlite")
+        writeFixture(legacy, (database) => {
+          writePreV2WorkFile(database, "goal:legacy-feature")
+          advanceLegacyClaim(database)
+        })
+        for (const [name, open] of Object.entries(drivers)) {
+          const path = join(root, `${name}.sqlite`)
+          copyFileSync(legacy, path)
+          yield* open(path)
+          yield* open(path)
+          expect(laneClaim(path), name).toMatchObject({
+            goalId: "goal:legacy-feature",
+            operationId: "goal:legacy",
+            revision: 2
+          })
         }
       })
     ))

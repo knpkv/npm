@@ -8,7 +8,9 @@ import { WorkLaneClaimed } from "../model.js"
  * open checks a current binding's lane against the claim exactly. The binding
  * writer set the claim to exactly its lane, so a well-formed pair differs only
  * in the ids the legacy record lacked; any other difference, or a second bound lane (lane CAS
- * allows one binding per revision), means an inconsistent file.
+ * allows one binding per revision), means an inconsistent file. A claim that moved past
+ * every binding keeps its own fields and the lane-id operation, with the one goal its
+ * lane's bindings recorded; bindings that disagree on that goal mean an inconsistent file.
  */
 export type LegacyLaneClaim =
   | { readonly _tag: "claim"; readonly lane: WorkLaneClaimed }
@@ -30,7 +32,17 @@ export const resolveLegacyLaneClaim = (
       []
     )
   const [only, ...rest] = bound
-  if (only === undefined) return { _tag: "claim", lane: legacy }
+  if (only === undefined) {
+    // The claim moved past its bindings: it keeps its own fields and the
+    // lane-id operation, but the lane's goal never changes, so it takes the
+    // goal every earlier binding of this lane recorded.
+    const earlier = bindingLanes.filter(({ laneId }) => laneId === legacy.laneId)
+    const goals = [...new Set(earlier.map(({ goalId }) => goalId))]
+    const [goalId, ...otherGoals] = goals
+    if (goalId === undefined) return { _tag: "claim", lane: legacy }
+    if (otherGoals.length > 0) return { _tag: "ambiguous", bound: earlier, lane: legacy }
+    return { _tag: "claim", lane: Schema.decodeUnknownSync(WorkLaneClaimed)({ ...legacy, goalId }) }
+  }
   if (rest.length > 0) return { _tag: "ambiguous", bound, lane: legacy }
   // The legacy record had neither id, so only the fields it did record must agree.
   // Decode, not spread, so Equal compares two WorkLaneClaimed values.

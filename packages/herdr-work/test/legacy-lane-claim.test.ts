@@ -26,11 +26,27 @@ const bound = lane({ goalId: "goal:bound", operationId: "dispatch:sol" })
 describe("resolveLegacyLaneClaim", () => {
   it("keeps the lane id when no running binding recorded the lane at the claim's revision", () => {
     expect(resolveLegacyLaneClaim(legacy, [])).toEqual({ _tag: "claim", lane: legacy })
-    // The lane moved on after the binding: the binding is one revision behind.
-    const advanced = lane({ expectedRevision: 1, revision: 2 })
-    expect(resolveLegacyLaneClaim(advanced, [bound])).toEqual({ _tag: "claim", lane: advanced })
     expect(resolveLegacyLaneClaim(legacy, [lane({ laneId: "goal:other", operationId: "dispatch:other" })]))
       .toEqual({ _tag: "claim", lane: legacy })
+  })
+
+  it("keeps the lane-id operation but takes the lane's goal when the claim moved past its bindings", () => {
+    // The lane moved on after the binding: the binding is one revision behind.
+    const advanced = lane({ expectedRevision: 1, revision: 2 })
+    expect(resolveLegacyLaneClaim(advanced, [bound])).toEqual({
+      _tag: "claim",
+      lane: lane({ expectedRevision: 1, goalId: "goal:bound", revision: 2 })
+    })
+  })
+
+  it("rejects a moved-past claim whose earlier bindings disagree on the lane's goal", () => {
+    const advanced = lane({ expectedRevision: 1, revision: 2 })
+    const otherGoal = lane({ goalId: "goal:other", operationId: "dispatch:luna" })
+    expect(resolveLegacyLaneClaim(advanced, [bound, otherGoal])).toEqual({
+      _tag: "ambiguous",
+      bound: [bound, otherGoal],
+      lane: advanced
+    })
   })
 
   it("adopts the bound lane, ids included, when it agrees with every recorded field", () => {
