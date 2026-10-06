@@ -12,6 +12,7 @@
  */
 import { DecisionBar, Hero, HeroWord, type RlyDecisionBarState, Region } from "@knpkv/rly/patterns"
 import { Button, Notice } from "@knpkv/rly/primitives"
+import { Predicate } from "effect"
 import { type KeyboardEvent, type ReactElement, type ReactNode, useEffect, useRef, useState } from "react"
 import { jobTitle } from "./activity-history.js"
 import { ApprovalRequestDisclosure } from "./approval-request-view.js"
@@ -38,14 +39,15 @@ export interface DecisionStatus {
 }
 
 /**
- * Wall-clock milliseconds, re-read after `delayFor(now)` and whenever the page becomes visible
- * again. The clock is a framework boundary, so it reads the browser's time directly.
+ * Wall-clock milliseconds, re-read after `delayFor(now)` while the page is visible and again
+ * when it becomes visible. The clock is a framework boundary, so it reads the browser's time directly.
  */
 const useNow = (delayFor: (now: number) => number): number => {
   const [now, setNow] = useState(() => Date.now())
   const delay = delayFor(now)
   useEffect(() => {
-    const timer = window.setTimeout(() => setNow(Date.now()), delay)
+    // No ticks while the page is hidden; becoming visible again re-reads the clock and resumes.
+    const timer = document.visibilityState === "hidden" ? undefined : window.setTimeout(() => setNow(Date.now()), delay)
     const onVisible = () => {
       if (document.visibilityState === "visible") setNow(Date.now())
     }
@@ -132,7 +134,7 @@ const ApprovalHero = ({
               <>{soonest.title} is expiring</>
             ) : (
               <>
-                {clock} until {soonest.title} expires
+                {clock} left on {soonest.title}
               </>
             )}
             {urgency === "soon" ? (
@@ -153,6 +155,13 @@ const ApprovalHero = ({
 }
 
 const factsLabel = (kind: string, host: string): string => `${kind} on ${host}`
+
+/** The request key a row carries in `data-countdown-row`, for keyboard shortcuts on that row. */
+const rowKeyOf = (target: { readonly dataset: unknown }): string | undefined => {
+  const dataset = target.dataset
+  if (!Predicate.hasProperty(dataset, "countdownRow")) return undefined
+  return Predicate.isString(dataset.countdownRow) ? dataset.countdownRow : undefined
+}
 
 /**
  * What the bar can do for the selected request. Shared by the bar and the keyboard shortcuts, so
@@ -202,7 +211,7 @@ const RequestDetail = ({
   readonly gone: boolean
   readonly item: PendingItem
   readonly now: number
-  readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
+  readonly onDecision: ((item: PendingItem, decision: ApprovalDecision["decision"]) => void) | undefined
   readonly sending: ApprovalDecision | null
   readonly snapshot: DashboardSnapshot
 }) => {
@@ -211,9 +220,7 @@ const RequestDetail = ({
   const state = onDecision === undefined ? unavailable : decisionState({ approvalsEnabled, gone, item, sending })
   const clock = gone ? null : clockText(facts.expiresAt, now)
   const decide = (decision: "approve" | "reject") => () => {
-    if (state._tag === "ready" && onDecision !== undefined && item._tag === "Local") {
-      onDecision({ decision, jobId: item.record.id })
-    }
+    if (state._tag === "ready" && onDecision !== undefined) onDecision(item, decision)
   }
   const payload = item._tag === "Local" ? item.record.payload : item.approval.payload
   return (
@@ -290,7 +297,8 @@ export const ApprovalsCountdown = ({
   const selectedKey = selected === undefined ? null : itemKey(factsOf(selected, snapshot.host))
   const gone = picked !== null && pickedIndex < 0
 
-  // One polite line for threshold crossings; the ticking text itself is never announced.
+  // One polite line for threshold crossings; the ticking text itself is never announced. Runs
+  // whenever the clock or the queue changes; the previous reading makes each crossing count once.
   const [announcement, setAnnouncement] = useState("")
   const previousNow = useRef(now)
   useEffect(() => {
@@ -299,28 +307,51 @@ export const ApprovalsCountdown = ({
     if (crossed.length > 0) {
       setAnnouncement(crossed.map(({ host, title }) => `One minute left to decide ${title} on ${host}.`).join(" "))
     }
-  }, [now])
+  }, [facts, now])
 
+  // Your own decision keeps the hub's answer, also after the request leaves the queue; any other
+  // departure says why from the hub's record.
+  const selectedId = selected === undefined ? null : factsOf(selected, snapshot.host).id
   const answer =
-    selected === undefined
+    selected === undefined || selectedId === null
       ? undefined
-      : gone
-        ? goneStatus(snapshot, factsOf(selected, snapshot.host).id)
-        : selected._tag === "Local" && decisionStatus?.jobId === selected.record.id
-          ? decisionStatus.text
+      : selected._tag === "Local" && decisionStatus?.jobId === selectedId
+        ? decisionStatus.text
+        : gone
+          ? goneStatus(snapshot, selectedId)
           : undefined
 
+  // Deciding pins the decided request, so the bar and its status stay on it when it leaves the
+  // queue instead of moving to the next request, which a second shortcut would then decide.
+  const decideItem = (item: PendingItem, decision: ApprovalDecision["decision"]): void => {
+    if (onDecision === undefined || item._tag !== "Local") return
+    setPicked({ item, key: itemKey(factsOf(item, snapshot.host)) })
+    onDecision({ decision, jobId: item.record.id })
+  }
+
+  // A shortcut on a row decides that row's request (and selects it); anywhere else in the page it
+  // decides the selected request. Either way it obeys the same state as the bar.
   const onShortcut = (event: KeyboardEvent<HTMLElement>): void => {
-    if (selected === undefined || onDecision === undefined || selected._tag !== "Local") return
     const decision = approvalShortcutFor({
       key: event.key,
       modified: event.ctrlKey || event.metaKey,
       shift: event.shiftKey
     })
-    if (decision === null) return
-    const state = decisionState({ approvalsEnabled: snapshot.approvalsEnabled, gone, item: selected, sending })
+    if (decision === null || onDecision === undefined) return
+    const rowKey = Predicate.hasProperty(event.target, "dataset") ? rowKeyOf(event.target) : undefined
+    const rowIndex = rowKey === undefined ? -1 : facts.findIndex((candidate) => itemKey(candidate) === rowKey)
+    const target = rowIndex >= 0 ? items[rowIndex] : selected
+    if (target === undefined) return
     event.preventDefault()
-    if (state._tag === "ready") onDecision({ decision, jobId: selected.record.id })
+    const targetGone = target === selected && gone
+    const state = decisionState({
+      approvalsEnabled: snapshot.approvalsEnabled,
+      gone: targetGone,
+      item: target,
+      sending
+    })
+    if (state._tag === "ready") decideItem(target, decision)
+    else if (rowIndex >= 0) setPicked({ item: target, key: itemKey(factsOf(target, snapshot.host)) })
   }
 
   const moveRowFocus = (event: KeyboardEvent<HTMLUListElement>): void => {
@@ -392,7 +423,7 @@ export const ApprovalsCountdown = ({
                     <button
                       aria-current={key === selectedKey ? "true" : undefined}
                       className="countdown-row"
-                      data-countdown-row=""
+                      data-countdown-row={key}
                       onClick={() => setPicked({ item, key })}
                       type="button"
                     >
@@ -427,14 +458,14 @@ export const ApprovalsCountdown = ({
           )}
         </Region>
         {selected === undefined ? null : (
-          <Region className="countdown-selected" title="Request">
+          <Region className="countdown-selected" title="Selected request">
             <RequestDetail
               answer={answer}
               approvalsEnabled={snapshot.approvalsEnabled}
               gone={gone}
               item={selected}
               now={now}
-              onDecision={onDecision}
+              onDecision={onDecision === undefined ? undefined : decideItem}
               sending={sending}
               snapshot={snapshot}
             />

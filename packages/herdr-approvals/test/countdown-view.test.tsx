@@ -112,7 +112,7 @@ describe("ApprovalsCountdown", () => {
       })
     })
     expect(view.container.querySelector("[aria-label='Approval summary'] p")?.textContent).toMatch(
-      /^\dm \d\ds until Apply Nix configuration expires, expires soon$/
+      /^\dm \d\ds left on Apply Nix configuration, expires soon$/
     )
     expect(view.container.querySelectorAll("[data-rly-decision-bar]")).toHaveLength(1)
     expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("sooner")
@@ -203,6 +203,65 @@ describe("ApprovalsCountdown", () => {
     })
     expect(view.bar()?.dataset["state"]).toBe("off")
     expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("Expired just now. Nothing was applied.")
+    view.unmount()
+  })
+
+  it("decides the focused row's request by shortcut, not the first one", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [
+            record("first", { approvalExpiresAt: Date.now() + 2 * 60_000 }),
+            record("second", { approvalExpiresAt: Date.now() + 8 * 60_000 })
+          ],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    const second = view.container.querySelectorAll<HTMLButtonElement>("[data-countdown-row]")[1]
+    act(() => {
+      second?.focus()
+      second?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "Enter" }))
+    })
+    expect(view.decisions).toEqual([{ decision: "approve", jobId: "second" }])
+    expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("second")
+    view.unmount()
+  })
+
+  it("keeps the decided request and the hub's answer after it leaves the queue", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1"), record("job-2", { approvalExpiresAt: Date.now() + 9 * 60_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    act(() => view.bar()?.querySelector<HTMLButtonElement>("button")?.click())
+    expect(view.decisions).toEqual([{ decision: "approve", jobId: "job-1" }])
+    view.render({
+      decisionStatus: { jobId: "job-1", text: "The hub recorded your approval; the job is queued." },
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-2", { approvalExpiresAt: Date.now() + 9 * 60_000 })],
+          nextCursors: [],
+          remote: []
+        },
+        records: [record("job-1", { approvedAt: Date.now(), approvedBy: "owner@example.com", status: "queued" })]
+      })
+    })
+    expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("job-1")
+    expect(view.bar()?.dataset["state"]).toBe("off")
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe(
+      "The hub recorded your approval; the job is queued."
+    )
+    view.press("Enter")
+    expect(view.decisions).toHaveLength(1)
     view.unmount()
   })
 })
