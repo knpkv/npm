@@ -1,6 +1,7 @@
-import type { ComponentPropsWithRef, KeyboardEvent, ReactElement, RefObject } from "react"
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import type { ComponentPropsWithRef, KeyboardEvent, ReactElement, Ref, RefCallback } from "react"
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { classNames, cssClass, requireText } from "../internal/component.js"
+import * as Predicate from "../internal/predicates.js"
 import {
   binColumns,
   chartTicks,
@@ -60,19 +61,40 @@ export type StackedBarsProps = StackedBarsBaseProps & {
 const LABEL_WIDTH = 72
 const ANNOUNCE_AFTER = 500
 
-const useInlineSize = (fallback: number): readonly [number, RefObject<HTMLDivElement | null>] => {
-  const ref = useRef<HTMLDivElement>(null)
+/** Hand an element (or null on detach) to a caller's object or callback ref, as Dialog does. */
+const assignRef = (ref: Ref<HTMLDivElement> | undefined, element: HTMLDivElement | null): void => {
+  if (Predicate.isFunction(ref)) ref(element)
+  else if (ref !== null && ref !== undefined) ref.current = element
+}
+
+/** Measures the root's inline size while still handing the root to the caller's ref. */
+const useInlineSize = (
+  fallback: number,
+  callerRef: Ref<HTMLDivElement> | undefined
+): readonly [number, RefCallback<HTMLDivElement>] => {
   const [size, setSize] = useState(fallback)
-  useEffect(() => {
-    const element = ref.current
-    if (element === null) return
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry !== undefined) setSize(entry.contentRect.width)
-    })
-    observer.observe(element)
-    return () => observer.disconnect()
-  }, [])
+  const ref = useCallback(
+    (element: HTMLDivElement | null) => {
+      assignRef(callerRef, element)
+      if (element === null) return
+      const observer = new ResizeObserver(([entry]) => {
+        if (entry !== undefined) setSize(entry.contentRect.width)
+      })
+      observer.observe(element)
+      return () => {
+        observer.disconnect()
+        assignRef(callerRef, null)
+      }
+    },
+    [callerRef]
+  )
   return [size, ref]
+}
+
+/** A stretch of the plot on the shared 0–1000 time scale. */
+interface AxisSpan {
+  readonly x: number
+  readonly width: number
 }
 
 /** Where an instant falls on the time axis, from 0 to 1, clamped to the drawn range. */
@@ -133,9 +155,12 @@ const Band = ({
 }
 
 /**
- * Stacked values per period on a time axis, with optional limit bands above. Narrow containers bin
- * periods so every bar stays at least 6px wide. One tab stop: ←/→ move and select, Shift extends,
- * Home/End jump, Escape clears. Click selects; Shift+click, or a second tap elsewhere, extends.
+ * Stacked values per period on a time axis, with optional limit bands above. Bars, bands, the window
+ * and the selection share one time scale, so a short final bin is drawn narrower. Narrow containers
+ * bin periods so every bar stays at least 6px wide; the selection keeps its columns across rebinning.
+ * One tab stop: ←/→ move and select, Shift extends, Home/End jump, Escape clears. Click selects;
+ * Shift+click, or a second touch tap elsewhere, extends. The SVG is hidden from assistive technology,
+ * so callers render a table of the same columns (and band readings) beside it.
  */
 export const StackedBars = ({
   bands = [],
@@ -148,11 +173,12 @@ export const StackedBars = ({
   instructions,
   label,
   onSelectionChange,
+  ref: callerRef,
   selection,
   window,
   ...props
 }: StackedBarsProps): ReactElement => {
-  const [width, ref] = useInlineSize(720)
+  const [width, ref] = useInlineSize(720, callerRef)
   const instructionsId = useId()
   const binSize = chooseBinSize(width, columns.length)
   const bins = useMemo(() => binColumns(columns, binSize), [columns, binSize])
@@ -160,6 +186,8 @@ export const StackedBars = ({
   const ticks = chartTicks(bins.length, width, LABEL_WIDTH)
   const [focus, setFocus] = useState<number | null>(null)
   const [pendingTap, setPendingTap] = useState<number | null>(null)
+  // Only a touch tap may extend by tapping again; a mouse extends with Shift.
+  const pointerType = useRef("mouse")
   const [announcement, setAnnouncement] = useState("")
   const binOf = (column: number): number => Math.floor(column / binSize)
 
@@ -176,6 +204,8 @@ export const StackedBars = ({
       onSelectionChange(null)
       return
     }
+    // An empty chart has nothing to move to, so the browser keeps Home, End and the arrows.
+    if (bins.length === 0) return
     const current = focus ?? (selection === null ? bins.length - 1 : binOf(selection.to))
     const next = moveFocus(event.key, current, bins.length - 1)
     if (next === null) return
@@ -186,24 +216,19 @@ export const StackedBars = ({
 
   const from = columns[0]?.start ?? 0
   const to = columns[columns.length - 1]?.end ?? from
-  const percent = (index: number): string => `${(index / Math.max(1, bins.length)) * 100}%`
-  const slots = Math.max(1, bins.length)
-  const shaded =
-    window === undefined
-      ? null
-      : {
-          x: axisFraction(window.from, from, to) * slots,
-          width: (axisFraction(window.to, from, to) - axisFraction(window.from, from, to)) * slots
-        }
-  // The selection is drawn once over whole bins, behind the bars, so its edges stay visible where
-  // the bars cover its fill.
-  const selectedBins =
-    selection === null
-      ? null
-      : bins.reduce<{ readonly first: number; readonly last: number } | null>((span, bin, index) => {
-          if (bin.first < selection.from || bin.last > selection.to) return span
-          return span === null ? { first: index, last: index } : { first: span.first, last: index }
-        }, null)
+  // One time scale for everything drawn: the bands' 0–1000 viewBox, from the first column's start.
+  const x = (at: number): number => axisFraction(at, from, to) * 1000
+  const span = (start: number, end: number): AxisSpan => ({
+    width: Math.max(0, x(end) - x(start)),
+    x: x(start)
+  })
+  const shaded = window === undefined ? null : span(window.from, window.to)
+  // The selection is drawn once from its own columns, behind the bars, so its edges stay visible
+  // where the bars cover its fill and it survives a resize that rebins the columns.
+  const selectionStart = selection === null ? undefined : columns[Math.max(0, selection.from)]
+  const selectionEnd = selection === null ? undefined : columns[Math.min(columns.length - 1, selection.to)]
+  const selected =
+    selectionStart === undefined || selectionEnd === undefined ? null : span(selectionStart.start, selectionEnd.end)
 
   return (
     <div {...props} className={classNames(style("root"), className)} ref={ref}>
@@ -222,38 +247,38 @@ export const StackedBars = ({
         tabIndex={0}
       >
         <span className={style("scale")}>{formatScale(max, binSize)}</span>
-        <svg
-          aria-hidden="true"
-          className={style("bars")}
-          preserveAspectRatio="none"
-          viewBox={`0 0 ${Math.max(1, bins.length)} 100`}
-        >
+        <svg aria-hidden="true" className={style("bars")} preserveAspectRatio="none" viewBox="0 0 1000 100">
           {shaded === null || shaded.width <= 0 ? null : (
             <rect className={style("window")} data-part="window" height={100} width={shaded.width} x={shaded.x} />
           )}
-          {selectedBins === null ? null : (
+          {selected === null || selected.width <= 0 ? null : (
             <rect
               className={style("selection")}
               data-part="selection"
               height={100}
-              width={selectedBins.last - selectedBins.first + 1}
-              x={selectedBins.first}
+              width={selected.width}
+              x={selected.x}
             />
           )}
           {bins.map((bin, index) => {
-            const selected = selection !== null && bin.first >= selection.from && bin.last <= selection.to
+            const slot = span(bin.start, bin.end)
+            const inSelection = selection !== null && bin.last >= selection.from && bin.first <= selection.to
             return (
               <g
                 data-focused={focus === index ? "true" : undefined}
-                data-selected={selected ? "true" : undefined}
+                data-selected={inSelection ? "true" : undefined}
                 key={bin.first}
                 onClick={(event) => {
-                  const extend = event.shiftKey || (pendingTap !== null && pendingTap !== index)
+                  const touch = pointerType.current === "touch"
+                  const extend = event.shiftKey || (touch && pendingTap !== null && pendingTap !== index)
                   onSelectionChange(selectBin(selection, bins, index, extend))
-                  setPendingTap(extend ? null : index)
+                  setPendingTap(touch && !extend ? index : null)
+                }}
+                onPointerDown={(event) => {
+                  pointerType.current = event.pointerType
                 }}
               >
-                <rect className={style("hit")} height={100} width={1} x={index} />
+                <rect className={style("hit")} height={100} width={slot.width} x={slot.x} />
                 {bin.segments.map((segment) => {
                   const top = max === 0 ? 0 : ((segment.offset + segment.value) / max) * 88
                   const size = max === 0 ? 0 : (segment.value / max) * 88
@@ -264,16 +289,26 @@ export const StackedBars = ({
                       fill={rlySeriesColor(segment.series)}
                       height={size}
                       key={segment.id}
-                      width={1}
-                      x={index}
+                      width={slot.width}
+                      x={slot.x}
                       y={100 - top}
                     />
                   )
                 })}
-                <rect className={style("focusRing")} height={100} width={1} x={index} />
+                <rect className={style("focusRing")} height={100} width={slot.width} x={slot.x} />
               </g>
             )
           })}
+          {/* The window's edges again over the bars, so a narrow window stays visible where bars cover its fill. */}
+          {shaded === null || shaded.width <= 0 ? null : (
+            <rect
+              className={style("windowEdge")}
+              data-part="window-edge"
+              height={100}
+              width={shaded.width}
+              x={shaded.x}
+            />
+          )}
         </svg>
       </div>
       <div aria-hidden="true" className={style("axis")}>
@@ -285,7 +320,7 @@ export const StackedBars = ({
               className={style("tick")}
               data-anchor={tick.anchor}
               key={tick.index}
-              style={tick.anchor === "end" ? { insetInlineEnd: 0 } : { insetInlineStart: percent(tick.index) }}
+              style={tick.anchor === "end" ? { insetInlineEnd: 0 } : { insetInlineStart: `${x(bin.start) / 10}%` }}
             >
               {formatTick(bin, binSize)}
             </span>

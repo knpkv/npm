@@ -20,8 +20,11 @@ describe("chart model", () => {
     expect(chooseBinSize(720, 24)).toBe(1)
     expect(chooseBinSize(720, 168)).toBe(2)
     expect(chooseBinSize(320, 168)).toBe(6)
-    expect(chooseBinSize(40, 168)).toBe(24)
+    expect(chooseBinSize(40, 168)).toBe(48)
     expect(chooseBinSize(0, 0)).toBe(1)
+    // Past a day per bar, bins grow in whole days until every bar is 6px wide again.
+    expect(chooseBinSize(320, 2000)).toBe(48)
+    expect(320 / Math.ceil(2000 / chooseBinSize(320, 2000))).toBeGreaterThanOrEqual(6)
   })
 
   it("merges a bin's segments by id in the order the series first appear, offsetting each on the last", () => {

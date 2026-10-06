@@ -38,10 +38,19 @@ export interface RlyChartTick {
 /** Bin sizes that divide a day evenly, so bins line up with clock hours. */
 const BIN_SIZES: ReadonlyArray<number> = [1, 2, 3, 6, 12, 24]
 
-/** The smallest bin size that keeps each bar at least `minBar` pixels wide. */
+const DAY = 24
+
+/**
+ * The smallest bin size that keeps each bar at least `minBar` pixels wide. Past a day per bar it
+ * grows in whole days, so bins still line up with midnight.
+ */
 export const chooseBinSize = (width: number, count: number, minBar = 6): number => {
   if (count === 0) return 1
-  return BIN_SIZES.find((size) => width / Math.ceil(count / size) >= minBar) ?? BIN_SIZES[BIN_SIZES.length - 1] ?? 1
+  const fits = (size: number): boolean => width / Math.ceil(count / size) >= minBar
+  const preferred = BIN_SIZES.find(fits)
+  if (preferred !== undefined) return preferred
+  const bars = Math.max(1, Math.floor(width / minBar))
+  return Math.max(1, Math.ceil(count / bars / DAY)) * DAY
 }
 
 /** Group columns into bins of `size`, merging segments by id in first-appearance order. */

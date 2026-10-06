@@ -1,7 +1,14 @@
 // @vitest-environment happy-dom
 
-import { describe, expect, it } from "vitest"
-import { type RlyChartColumn, StackedBars, type StackedBarsProps } from "../../src/primitives/StackedBars.js"
+import { act, createRef, type ReactElement, useState } from "react"
+import { createRoot, type Root } from "react-dom/client"
+import { afterEach, describe, expect, it, vi } from "vitest"
+import {
+  type RlyChartColumn,
+  type RlyChartSelection,
+  StackedBars,
+  type StackedBarsProps
+} from "../../src/primitives/StackedBars.js"
 import { render as renderRoot } from "./render.js"
 
 const hour = 3_600_000
@@ -31,6 +38,60 @@ const render = (overrides: Partial<StackedBarsProps> = {}): HTMLElement => {
   return root
 }
 
+// A ResizeObserver whose width the test sets, so rebinning runs on the natural measurement path.
+const observers: Array<{ readonly callback: ResizeObserverCallback; readonly target: Element }> = []
+class TestResizeObserver {
+  readonly callback: ResizeObserverCallback
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback
+  }
+  observe(target: Element): void {
+    observers.push({ callback: this.callback, target })
+  }
+  unobserve(): void {}
+  disconnect(): void {
+    const index = observers.findIndex((observer) => observer.callback === this.callback)
+    if (index >= 0) observers.splice(index, 1)
+  }
+}
+const resizeTo = async (width: number): Promise<void> => {
+  await act(async () => {
+    for (const { callback, target } of observers) {
+      const entry: ResizeObserverEntry = {
+        borderBoxSize: [],
+        contentBoxSize: [],
+        contentRect: new DOMRectReadOnly(0, 0, width, 100),
+        devicePixelContentBoxSize: [],
+        target
+      }
+      callback([entry], new TestResizeObserver(callback))
+    }
+  })
+}
+
+const roots: Array<Root> = []
+const mount = async (element: ReactElement): Promise<HTMLElement> => {
+  const container = document.createElement("div")
+  document.body.append(container)
+  const root = createRoot(container)
+  roots.push(root)
+  await act(async () => root.render(element))
+  return container
+}
+afterEach(async () => {
+  for (const root of roots.splice(0)) await act(async () => root.unmount())
+  document.body.replaceChildren()
+  vi.unstubAllGlobals()
+})
+
+const hours = (count: number): ReadonlyArray<RlyChartColumn> =>
+  Array.from({ length: count }, (_, index) => ({
+    end: (index + 1) * hour,
+    segments: [{ id: "a", series: 1, value: 1 }],
+    start: index * hour
+  }))
+const numeric = (element: Element | null | undefined, name: string): number => Number(element?.getAttribute(name))
+
 describe("StackedBars", () => {
   it("is one labelled, described tab stop with a polite live region", () => {
     const root = render()
@@ -56,11 +117,12 @@ describe("StackedBars", () => {
     expect(root.querySelectorAll('[data-selected="true"]')).toHaveLength(2)
   })
 
-  it("draws the selection once over whole bins, behind the bars", () => {
+  it("draws the selection once over its columns, behind the bars", () => {
     const root = render({ selection: { from: 2, to: 3 } })
     const selection = root.querySelector('[data-part="selection"]')
-    expect(selection?.getAttribute("x")).toBe("2")
-    expect(selection?.getAttribute("width")).toBe("2")
+    // Columns 2–3 of six hours, on the 0–1000 time scale.
+    expect(numeric(selection, "x")).toBeCloseTo(1000 / 3)
+    expect(numeric(selection, "width")).toBeCloseTo(1000 / 3)
     const bars = root.querySelector("svg:not([class*='band'])")
     expect(bars?.firstElementChild).toBe(selection)
     expect(render().querySelector('[data-part="selection"]')).toBeNull()
@@ -74,8 +136,13 @@ describe("StackedBars", () => {
     const [band, bars] = root.querySelectorAll('[data-part="window"]')
     expect(band?.getAttribute("x")).toBe("500")
     expect(band?.getAttribute("width")).toBe("500")
-    expect(bars?.getAttribute("x")).toBe("3")
-    expect(bars?.getAttribute("width")).toBe("3")
+    // The bars share the band's time scale, so the shading lines up exactly.
+    expect(bars?.getAttribute("x")).toBe("500")
+    expect(bars?.getAttribute("width")).toBe("500")
+    // Its edges are drawn again over the bars, where a narrow window would otherwise hide.
+    const edge = root.querySelector('[data-part="window-edge"]')
+    expect(edge?.parentElement?.lastElementChild).toBe(edge)
+    expect(edge?.getAttribute("x")).toBe("500")
     expect(root.textContent).toContain("Current 5-hour window, resets 06:00")
     expect(() => render({ window: { from: 0, label: " ", to: hour } })).toThrow("visible text")
   })
@@ -110,5 +177,99 @@ describe("StackedBars", () => {
     const ticks = [...render().querySelectorAll("[data-anchor]")]
     expect(ticks.at(-1)?.getAttribute("data-anchor")).toBe("end")
     expect(ticks.at(-1)?.textContent).toBe("5h")
+  })
+
+  it("draws a short final bin on the same time scale as the window over it", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    // 25 hourly columns at 100px bin in pairs: the last bin holds one hour.
+    const root = await mount(
+      <StackedBars {...props} columns={hours(25)} window={{ from: 24 * hour, label: "Last hour", to: 25 * hour }} />
+    )
+    await resizeTo(100)
+    const bars = root.querySelector("svg:not([class*='band'])")
+    const last = bars?.querySelectorAll("[class*='hit']")
+    const final = last?.[last.length - 1]
+    const window = bars?.querySelector('[data-part="window"]')
+    expect(last).toHaveLength(13)
+    expect(numeric(final, "x")).toBeCloseTo(numeric(window, "x"))
+    expect(numeric(final, "width")).toBeCloseTo(numeric(window, "width"))
+    expect(numeric(final, "width")).toBeCloseTo(numeric(last?.[0], "width") / 2)
+  })
+
+  it("keeps a controlled selection visible when a resize rebins it", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const selection: RlyChartSelection = { from: 2, to: 3 }
+    const root = await mount(<StackedBars {...props} columns={hours(30)} selection={selection} />)
+    await resizeTo(720)
+    const wide = root.querySelector('[data-part="selection"]')
+    const before = { width: numeric(wide, "width"), x: numeric(wide, "x") }
+    // At 80px the 30 columns bin in threes, so no bin lies wholly inside columns 2–3.
+    await resizeTo(80)
+    const narrow = root.querySelector('[data-part="selection"]')
+    expect({ width: numeric(narrow, "width"), x: numeric(narrow, "x") }).toEqual(before)
+    expect(root.querySelectorAll('[data-selected="true"]').length).toBeGreaterThan(0)
+  })
+
+  it("hands the root to the caller's object and callback refs, and releases them on unmount", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const object = createRef<HTMLDivElement>()
+    const seen: Array<HTMLDivElement | null> = []
+    await mount(<StackedBars {...props} ref={object} />)
+    await mount(<StackedBars {...props} ref={(element) => void seen.push(element)} />)
+    expect(object.current?.querySelector('[role="group"]')).not.toBeNull()
+    expect(seen[0]?.querySelector('[role="group"]')).not.toBeNull()
+    for (const root of roots.splice(0)) await act(async () => root.unmount())
+    expect(object.current).toBeNull()
+    expect(seen.at(-1)).toBeNull()
+  })
+
+  it("leaves Home, End and the arrows to the browser when there is nothing to move to", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const onSelectionChange = vi.fn()
+    const empty = await mount(<StackedBars {...props} columns={[]} onSelectionChange={onSelectionChange} />)
+    const filled = await mount(<StackedBars {...props} onSelectionChange={onSelectionChange} />)
+    const press = (container: HTMLElement, key: string): boolean => {
+      const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key })
+      act(() => void container.querySelector('[role="group"]')?.dispatchEvent(event))
+      return event.defaultPrevented
+    }
+    for (const key of ["Home", "End", "ArrowLeft", "ArrowRight"]) expect(press(empty, key)).toBe(false)
+    expect(onSelectionChange).not.toHaveBeenCalled()
+    expect(press(filled, "Home")).toBe(true)
+    expect(onSelectionChange).toHaveBeenCalledWith({ from: 0, to: 0 })
+  })
+
+  it("replaces the selection on each mouse click and extends only on Shift or a second touch tap", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const onSelectionChange = vi.fn()
+    // Owns the selection like a real caller, so an extension grows what the last click chose.
+    const Owner = (): ReactElement => {
+      const [selection, setSelection] = useState<RlyChartSelection | null>(null)
+      return (
+        <StackedBars
+          {...props}
+          onSelectionChange={(next) => {
+            onSelectionChange(next)
+            setSelection(next)
+          }}
+          selection={selection}
+        />
+      )
+    }
+    const root = await mount(<Owner />)
+    const bar = (index: number): Element | undefined => root.querySelectorAll("svg:not([class*='band']) g")[index]
+    const tap = (index: number, pointerType: string, shiftKey = false): void =>
+      act(() => {
+        bar(index)?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType }))
+        bar(index)?.dispatchEvent(new MouseEvent("click", { bubbles: true, shiftKey }))
+      })
+    tap(0, "mouse")
+    tap(2, "mouse")
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 2, to: 2 })
+    tap(4, "mouse", true)
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 2, to: 4 })
+    tap(1, "touch")
+    tap(3, "touch")
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 1, to: 3 })
   })
 })

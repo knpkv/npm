@@ -1,6 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { useCallback, useState } from "react"
-import { expect, userEvent } from "storybook/test"
+import { type CSSProperties, useCallback, useState } from "react"
+import { expect, userEvent, within } from "storybook/test"
 import { ChartLegend, type RlySeries } from "../../src/primitives/ChartLegend.js"
 import {
   type RlyChartColumn,
@@ -57,6 +57,91 @@ const bands: ReadonlyArray<RlyStepBand> = [
   }
 ]
 
+// The chart's SVG is hidden from assistive technology, so the same data ships as a table: one row
+// per day, each booking's spend, and the highest reading of each band that day.
+const dayName = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short", day: "numeric", month: "short" })
+const dollars = (value: number): string => `$${value.toFixed(2)}`
+const peakOf = (band: RlyStepBand, from: number, to: number): string => {
+  const levels = band.segments
+    .filter((segment) => segment.from < to && segment.to > from)
+    .map((segment) => segment.level)
+  const known = levels.filter((level): level is number => level !== null)
+  if (known.length === 0) return "No reading"
+  const peak = `${Math.max(...known)}%`
+  return known.length < levels.length ? `${peak}, partly no reading` : peak
+}
+const cellStyle: CSSProperties = {
+  padding: "var(--rly-space-4) var(--rly-space-8)",
+  textAlign: "end",
+  whiteSpace: "nowrap"
+}
+const headStyle: CSSProperties = { ...cellStyle, textAlign: "start" }
+
+const DataTable = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> }) => {
+  const days = Array.from({ length: Math.ceil(columns.length / 24) }, (_, index) =>
+    columns.slice(index * 24, index * 24 + 24)
+  )
+  return (
+    // The table scrolls inside its own box at phone widths instead of widening the page.
+    <div
+      aria-label="Daily spend table"
+      role="region"
+      style={{ overflowX: "auto" }}
+      // Keyboard users can scroll the table when it is wider than the page.
+      tabIndex={0}
+    >
+      <table style={{ borderCollapse: "collapse", fontVariantNumeric: "tabular-nums" }}>
+        <caption style={{ textAlign: "start" }}>Spend by booking and limit peaks per day</caption>
+        <thead>
+          <tr>
+            <th scope="col" style={headStyle}>
+              Day
+            </th>
+            {bookings.map((booking) => (
+              <th key={booking.id} scope="col" style={cellStyle}>
+                {booking.label}
+              </th>
+            ))}
+            {bands.map((band) => (
+              <th key={band.id} scope="col" style={cellStyle}>
+                {`${band.label} peak`}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {days.map((hours) => {
+            const from = hours[0]?.start ?? 0
+            const to = hours[hours.length - 1]?.end ?? from
+            return (
+              <tr key={from}>
+                <th scope="row" style={headStyle}>
+                  {dayName.format(from)}
+                </th>
+                {bookings.map((booking) => (
+                  <td key={booking.id} style={cellStyle}>
+                    {dollars(
+                      hours
+                        .flatMap((column) => column.segments)
+                        .filter((segment) => segment.id === booking.id)
+                        .reduce((sum, segment) => sum + segment.value, 0)
+                    )}
+                  </td>
+                ))}
+                {bands.map((band) => (
+                  <td key={band.id} style={cellStyle}>
+                    {peakOf(band, from, to)}
+                  </td>
+                ))}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 const day = new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short", hour: "2-digit", minute: "2-digit" })
 
 const Chart = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> }) => {
@@ -94,6 +179,7 @@ const Chart = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> })
           selection={selection}
         />
         <ChartLegend items={bookings} label="Bookings by colour" />
+        {columns.length === 0 ? null : <DataTable columns={columns} />}
       </div>
     </main>
   )
@@ -138,6 +224,13 @@ export const Week: Story = {
     await expect(canvas.getByText("Current 5-hour window")).toBeVisible()
     await expect(canvasElement.querySelectorAll('[data-part="window"]')).toHaveLength(3)
     await expect(canvasElement.scrollWidth).toBeLessThanOrEqual(canvasElement.clientWidth + 1)
+    // The table carries what the hidden SVG draws: every day, each booking's spend, each band's peak.
+    const table = canvas.getByRole("table", { name: "Spend by booking and limit peaks per day" })
+    await expect(within(table).getAllByRole("row")).toHaveLength(8)
+    await expect(within(table).getByRole("columnheader", { name: "RLY-142 ledger export" })).toBeVisible()
+    await expect(within(table).getByRole("columnheader", { name: "5-hour window peak" })).toBeVisible()
+    await expect(within(table).getByRole("rowheader", { name: "Tue 29 Sept" })).toBeVisible()
+    await expect(within(table).getAllByText("96%, partly no reading")).toHaveLength(1)
   },
   render: () => <Chart columns={week} />
 }
@@ -145,9 +238,12 @@ export const Week: Story = {
 /** No columns yet: the plot stays one labelled stop and draws nothing. */
 export const Empty: Story = {
   args: { ...fixedArgs, columns: [] },
-  play: async ({ canvas, canvasElement }) => {
+  play: async ({ canvas }) => {
     await expect(canvas.getByRole("group", { name: "Spend by booking, API-equivalent dollars" })).toBeVisible()
-    await expect(canvasElement.querySelectorAll("[data-series]")).toHaveLength(0)
+    // The legend keeps its swatches; the plot itself draws no series.
+    const plot = canvas.getByRole("group", { name: "Spend by booking, API-equivalent dollars" })
+    await expect(plot.querySelectorAll("[data-series]")).toHaveLength(0)
+    await expect(canvas.queryByRole("table")).toBeNull()
   },
   render: () => <Chart columns={[]} />
 }
