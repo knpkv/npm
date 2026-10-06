@@ -7,6 +7,7 @@ import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
+import { afterEach, vi } from "vitest"
 
 import { AwsResourceDiscoveryRequest } from "../../src/api/plugins.js"
 import { ApplicationInvalidRequest, ApplicationRateLimited } from "../../src/server/api/ApplicationServices.js"
@@ -16,7 +17,7 @@ import {
   CodePipelineReadClient,
   type CodePipelineReadClientService
 } from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
-import { PluginAuthorizationFailure } from "../../src/server/plugins/failures.js"
+import { PluginAuthenticationFailure, PluginAuthorizationFailure } from "../../src/server/plugins/failures.js"
 
 const request = Schema.decodeUnknownSync(AwsResourceDiscoveryRequest)({
   profile: "production",
@@ -308,4 +309,66 @@ describe("AWS resource discovery", () => {
         assert.deepStrictEqual(result.codePipeline, { _tag: "failed", failureClass: "authorization" })
       })
     ))
+
+  describe("sign-in failures", () => {
+    const fixtures = new URL("../fixtures/aws-profiles/", import.meta.url).pathname
+    const useProfileFiles = (directory: string) => {
+      vi.stubEnv("AWS_CONFIG_FILE", `${fixtures}${directory}/config`)
+      vi.stubEnv("AWS_SHARED_CREDENTIALS_FILE", `${fixtures}${directory}/credentials`)
+    }
+    afterEach(() => {
+      vi.unstubAllEnvs()
+    })
+
+    const rejected = codePipelineClient({
+      listPipelinesPage: () =>
+        Effect.fail(new PluginAuthenticationFailure({ operation: "codepipeline-list-pipelines" }))
+    })
+
+    it.effect("reports a rejected CodePipeline session as authentication, not unavailable", () => {
+      useProfileFiles("sso-only")
+      return runDiscovery(
+        codeCommitClient(),
+        rejected,
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          const result = yield* discovery.discover(request)
+          assert.deepStrictEqual(result.codePipeline, { _tag: "failed", failureClass: "authentication" })
+        })
+      )
+    })
+
+    it.effect("names static keys that shadow the profile's SSO login", () => {
+      useProfileFiles("shadowed")
+      return runDiscovery(
+        codeCommitClient(),
+        rejected,
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          const result = yield* discovery.discover(request)
+          assert.deepStrictEqual(result.codePipeline, {
+            _tag: "failed",
+            failureClass: "authentication",
+            cause: "static-keys-shadow-sso"
+          })
+        })
+      )
+    })
+
+    it.effect("reports a CodeCommit credential failure as authentication", () => {
+      useProfileFiles("sso-only")
+      return runDiscovery(
+        codeCommitClient({
+          listRepositoriesPage: ({ account }) =>
+            Effect.fail(new AwsCredentialError({ profile: account.profile, region: account.region, cause: "expired" }))
+        }),
+        codePipelineClient(),
+        Effect.gen(function*() {
+          const discovery = yield* AwsResourceDiscovery
+          const result = yield* discovery.discover(request)
+          assert.deepStrictEqual(result.codeCommit, { _tag: "failed", failureClass: "authentication" })
+        })
+      )
+    })
+  })
 })

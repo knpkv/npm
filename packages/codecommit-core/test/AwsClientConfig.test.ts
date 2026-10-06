@@ -1,6 +1,6 @@
 import { assert, describe, expect, it } from "@effect/vitest"
 
-import { makeProfileCredentialProvider } from "../src/AwsClientConfig/internal/ProfileCredentialProvider.js"
+import { makeProfileCredentialProvider, profileSourcesOf, staticKeysShadowSso } from "../src/AwsProfileCredentials.js"
 
 const credentials = (accessKeyId: string) => ({
   accessKeyId,
@@ -71,5 +71,38 @@ describe("AWS profile credential resolution", () => {
 
     await expect(provider("expired-sso")).rejects.toBe(expired)
     assert.strictEqual(fallbackCalls, 0)
+  })
+})
+
+describe("AWS profile sources", () => {
+  const ssoConfig = { "profile-sso": { sso_session: "corp", region: "eu-west-1" } }
+
+  it("flags static keys that shadow an SSO-configured profile", () => {
+    const sources = profileSourcesOf("profile-sso", {
+      configFile: ssoConfig,
+      credentialsFile: { "profile-sso": { aws_access_key_id: "ASIAFIXTURE" } }
+    })
+    assert.deepStrictEqual(sources, { profile: "profile-sso", ssoConfigured: true, staticKeys: true })
+    assert.isTrue(staticKeysShadowSso(sources))
+  })
+
+  it("does not flag a static-only profile", () => {
+    const sources = profileSourcesOf("static", {
+      configFile: { static: { region: "eu-west-1" } },
+      credentialsFile: { static: { aws_access_key_id: "AKIAFIXTURE" } }
+    })
+    assert.isFalse(staticKeysShadowSso(sources))
+  })
+
+  it("does not flag an SSO profile without a credentials section", () => {
+    assert.isFalse(staticKeysShadowSso(profileSourcesOf("profile-sso", { configFile: ssoConfig, credentialsFile: {} })))
+  })
+
+  it("recognises the legacy sso_start_url form", () => {
+    const sources = profileSourcesOf("legacy", {
+      configFile: { legacy: { sso_start_url: "https://example.awsapps.com/start" } },
+      credentialsFile: { legacy: { aws_access_key_id: "ASIAFIXTURE" } }
+    })
+    assert.isTrue(staticKeysShadowSso(sources))
   })
 })
