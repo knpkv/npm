@@ -1,5 +1,5 @@
 ---
-"@knpkv/clockify-api-client": minor
+"@knpkv/clockify-api-client": major
 "@knpkv/jira-clockify": minor
 ---
 
@@ -11,5 +11,5 @@
   - `workspaceSettings` is no longer modelled, because the upstream schema disagrees with live responses on many nullable and enum fields.
   - `MembershipDtoV1.costRate` and `hourlyRate`, and `WorkspaceSubdomainDtoV1.name`, accept `null`.
   - `FeaturePlan` and `WorkspaceSettingsDtoV1` stay exported.
-  - These are type changes to exported generated schemas. The previous types could not decode a real response, so code relying on them could not have run.
+  - These are incompatible type changes to exported generated schemas, so this is a major release. The previous types could not decode a real response, so code relying on them could not have run.
 - **`@knpkv/jira-clockify`**: setup now fails with a typed `ClockifyRequestError` that names the failed request, instead of reporting no workspaces. "Invalid API key" is reported only when Clockify rejects the key with 401 or 403; before, any failure looked up the user as an invalid key. The account lookup is exported as `loadClockifyAccount`, so it can be tested against real-shaped responses.

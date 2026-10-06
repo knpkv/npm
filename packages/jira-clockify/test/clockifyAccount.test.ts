@@ -9,7 +9,7 @@ import workspaces from "./fixtures/clockify-workspaces.json" with { type: "json"
 const user = { id: "64f0c0ffee0000000000bb01", name: "Example User", email: "user@example.invalid" }
 
 /** Clockify answered at the HTTP boundary: `/v1/user`, and `/v1/workspaces` with the given body and status. */
-const clockify = (workspacesBody: Schema.Json, userStatus = 200) =>
+const clockify = (workspacesBody: Schema.Json, userStatus = 200, workspacesStatus = 200) =>
   makeClockifyApi(
     HttpClient.make((request) => {
       const respond = (body: Schema.Json, status: number) =>
@@ -19,7 +19,7 @@ const clockify = (workspacesBody: Schema.Json, userStatus = 200) =>
         ))
       return request.url.endsWith("/v1/user")
         ? respond(userStatus === 200 ? user : { message: "Api key does not exist", code: 4003 }, userStatus)
-        : respond(workspacesBody, 200)
+        : respond(workspacesBody, workspacesStatus)
     }),
     { apiKey: Redacted.make("test-key"), baseUrl: "https://api.clockify.me/api" }
   )
@@ -41,6 +41,12 @@ describe("loadClockifyAccount", () => {
   it.effect("reports an invalid key only when Clockify rejects it", () =>
     Effect.gen(function*() {
       const result = yield* Effect.result(loadClockifyAccount(clockify(workspaces, 401)))
+      expect(Result.isFailure(result) && result.failure._tag).toBe("InvalidClockifyApiKeyError")
+    }))
+
+  it.effect("reports an invalid key when Clockify rejects it at the workspaces request too", () =>
+    Effect.gen(function*() {
+      const result = yield* Effect.result(loadClockifyAccount(clockify({ message: "Unauthorized" }, 200, 403)))
       expect(Result.isFailure(result) && result.failure._tag).toBe("InvalidClockifyApiKeyError")
     }))
 })

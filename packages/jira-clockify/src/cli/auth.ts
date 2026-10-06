@@ -69,7 +69,11 @@ export const loadClockifyAccount = (client: ReturnType<typeof makeClockifyApi>) 
     )
     const workspaces = yield* client.getWorkspacesOfUser(undefined).pipe(
       Effect.flatMap(decodeClockifyWorkspaces),
-      Effect.mapError((cause) => new ClockifyRequestError({ operation: "getWorkspacesOfUser", cause }))
+      Effect.mapError((cause) =>
+        isRejectedKey(cause)
+          ? new InvalidClockifyApiKeyError()
+          : new ClockifyRequestError({ operation: "getWorkspacesOfUser", cause })
+      )
     )
     return { user, workspaces }
   })
