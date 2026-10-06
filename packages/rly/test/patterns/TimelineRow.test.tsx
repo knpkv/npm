@@ -138,13 +138,19 @@ describe("TimelineRow", () => {
   })
 
   it("keys every shape with its words, or only the kinds asked for", () => {
-    const all = renderToStaticMarkup(<TimelineProvenanceKey />)
+    const all = renderToStaticMarkup(<TimelineProvenanceKey label="Observation key" />)
+    expect(all).toMatch(/<ul[^>]*aria-label="Observation key"[^>]*role="list"/)
+    expect(all.match(/<li/g)).toHaveLength(5)
     expect(all.match(/data-rly-timeline-provenance=/g)).toHaveLength(5)
     expect(all).toContain("couldn&#x27;t read")
     const two = renderToStaticMarkup(
-      <TimelineProvenanceKey kinds={["auto", "pending"]} labels={{ pending: "waiting for you" }} />
+      <TimelineProvenanceKey kinds={["auto", "pending"]} label="Key" labels={{ pending: "waiting for you" }} />
     )
     expect(two.match(/data-rly-timeline-provenance=/g)).toHaveLength(2)
     expect(two).toContain("waiting for you")
+  })
+
+  it("refuses a key without a name", () => {
+    expect(() => renderToStaticMarkup(<TimelineProvenanceKey label=" " />)).toThrow("TimelineProvenanceKey label")
   })
 })

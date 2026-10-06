@@ -158,10 +158,12 @@ export const Provenance: Story = {
   args: { continued: false, event: eventAt(0) },
   play: async ({ canvas, canvasElement }) => {
     for (const kind of ["auto", "approved", "pending", "unknown", "flag"]) {
-      await expect(canvasElement.querySelectorAll(`li [data-rly-timeline-provenance='${kind}']`)).toHaveLength(1)
+      await expect(canvasElement.querySelectorAll(`ol li [data-rly-timeline-provenance='${kind}']`)).toHaveLength(1)
     }
     await expect(canvas.getByText("Waiting for your approval")).toBeVisible()
-    await expect(canvas.getByText("couldn't read")).toBeVisible()
+    const key = canvas.getByRole("list", { name: "Observation key" })
+    await expect(key).toBeVisible()
+    await expect(key.querySelectorAll("li")).toHaveLength(5)
   },
   render: () => (
     <main style={pageStyle}>
@@ -182,7 +184,7 @@ export const Provenance: Story = {
           />
         ))}
       </ol>
-      <TimelineProvenanceKey />
+      <TimelineProvenanceKey label="Observation key" />
     </main>
   )
 }

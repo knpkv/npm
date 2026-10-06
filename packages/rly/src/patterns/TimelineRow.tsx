@@ -144,26 +144,34 @@ const keyLabels = {
 } satisfies Readonly<Record<RlyTimelineProvenanceKind, string>>
 
 /** Props for the legend of provenance shapes shown beside a timeline. */
-export type TimelineProvenanceKeyProps = Omit<ComponentPropsWithRef<"p">, "children"> & {
+export type TimelineProvenanceKeyProps = Omit<ComponentPropsWithRef<"ul">, "children"> & {
   /** Kinds to explain, in order. Defaults to every kind. */
   readonly kinds?: ReadonlyArray<RlyTimelineProvenanceKind>
+  /** Required accessible name of the legend, such as "Observation key". */
+  readonly label: string
   /** Words per kind, when the application's wording differs from the defaults. */
   readonly labels?: Partial<Readonly<Record<RlyTimelineProvenanceKind, string>>>
 }
 
-/** The key for provenance shapes: each shape beside its words, kept together when the line wraps. */
+/** The key for provenance shapes: a named list, each shape beside its words, kept together when it wraps. */
 export const TimelineProvenanceKey = ({
   className,
   kinds = ["auto", "approved", "pending", "unknown", "flag"],
+  label,
   labels = {},
   ...props
 }: TimelineProvenanceKeyProps): ReactElement => (
-  <p {...props} className={classNames(style("key"), className)}>
+  <ul
+    {...props}
+    aria-label={requireText(label, "TimelineProvenanceKey label")}
+    className={classNames(style("key"), className)}
+    role="list"
+  >
     {kinds.map((kind) => (
-      <span className={style("keyItem")} key={kind}>
+      <li className={style("keyItem")} key={kind}>
         <span aria-hidden="true" className={style(provenanceMarkClass[kind])} data-rly-timeline-provenance={kind} />{" "}
         {labels[kind] ?? keyLabels[kind]}
-      </span>
+      </li>
     ))}
-  </p>
+  </ul>
 )

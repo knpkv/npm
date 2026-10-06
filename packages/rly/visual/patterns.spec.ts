@@ -53,12 +53,24 @@ test(
       await page.setViewportSize({ height: 1_400, width: 320 })
       await page.goto(story("patterns-timelinerow--provenance", forcedColors))
 
-      for (const kind of ["auto", "approved", "pending", "unknown", "flag"]) {
-        const mark = page.locator(`li [data-rly-timeline-provenance='${kind}']`)
-        await expect(mark).toBeVisible()
-        const box = await mark.boundingBox()
-        expect(box?.width ?? 0).toBeGreaterThan(0)
-      }
+      const look = (kind: string) =>
+        page.locator(`ol [data-rly-timeline-provenance='${kind}']`).evaluate((element) => {
+          const css = getComputedStyle(element)
+          return {
+            clipped: css.clipPath !== "none",
+            filled: css.backgroundColor !== "rgba(0, 0, 0, 0)" || css.backgroundImage !== "none",
+            hatched: css.backgroundImage !== "none",
+            rotated: css.rotate === "45deg",
+            round: css.borderTopLeftRadius !== "0px"
+          }
+        })
+      // Each shape stays distinct in both modes: that is what carries provenance without colour.
+      expect(await look("auto")).toMatchObject({ clipped: false, filled: false, rotated: false, round: true })
+      expect(await look("approved")).toMatchObject({ filled: true, hatched: false, rotated: false, round: true })
+      expect(await look("pending")).toMatchObject({ filled: true, rotated: true })
+      expect(await look("flag")).toMatchObject({ clipped: true, filled: true })
+      expect(await look("unknown")).toMatchObject({ hatched: true, round: false })
+      await expect(page.getByRole("list", { name: "Observation key" })).toBeVisible()
       await expect(page.getByText("Not applied: GitHub rate limit, retrying at 05:12")).toBeVisible()
       await expectNoHorizontalOverflow(page)
       await page.screenshot({

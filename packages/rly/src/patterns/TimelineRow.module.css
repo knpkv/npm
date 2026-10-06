@@ -146,7 +146,7 @@
   }
 
   .markAuto {
-    border: 2px solid var(--rly-color-text-2);
+    border: var(--rly-space-2) solid var(--rly-color-text-2);
     border-radius: var(--rly-radius-round);
   }
 
@@ -166,7 +166,11 @@
   }
 
   .markUnknown {
-    background: repeating-linear-gradient(135deg, var(--rly-color-text-2) 0 2px, transparent 2px 4px);
+    background: repeating-linear-gradient(
+      135deg,
+      var(--rly-color-text-2) 0 var(--rly-space-2),
+      transparent var(--rly-space-2) var(--rly-space-4)
+    );
     border: 1px solid var(--rly-color-text-2);
   }
 
@@ -184,6 +188,8 @@
   .key {
     color: var(--rly-color-text-2);
     display: flex;
+    list-style: none;
+    padding: var(--rly-space-0);
     flex-wrap: wrap;
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
@@ -198,7 +204,11 @@
     white-space: nowrap;
   }
 
-  /* Forced colours drop background fills; draw the filled shapes in the text colour instead. */
+  /*
+   * Forced colours drop background fills and may flatten the unknown hatch, which would leave it
+   * looking like auto's ring. Draw fills and the hatch in system colours instead. The same rules
+   * apply under the Storybook toolbar's forced-colours attribute.
+   */
   @media (forced-colors: active) {
     .markApproved,
     .markPending,
@@ -207,9 +217,31 @@
       forced-color-adjust: none;
     }
 
-    .markAuto,
     .markUnknown {
+      background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 4px);
+      border-color: CanvasText;
+      forced-color-adjust: none;
+    }
+
+    .markAuto {
       border-color: CanvasText;
     }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .markApproved,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .markPending,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .markFlag {
+    background: CanvasText;
+    forced-color-adjust: none;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .markUnknown {
+    background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 4px);
+    border-color: CanvasText;
+    forced-color-adjust: none;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .markAuto {
+    border-color: CanvasText;
   }
 }
