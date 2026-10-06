@@ -548,7 +548,10 @@ export const DashboardView = ({
         ) : snapshot.approvalApp.canonical ? null : (
           <Surface padding="default" tone="secondary" className="hub-link">
             <Text tone="secondary">Notifications and coordinator chat live on the canonical hub.</Text>
-            <a href={snapshot.approvalApp.canonicalUrl}>Open {new URL(snapshot.approvalApp.canonicalUrl).host}</a>
+            <a href={snapshot.approvalApp.canonicalUrl}>
+              {/* Non-breaking hyphens keep a host like "monster-banana" whole; the href is unchanged. */}
+              Open {new URL(snapshot.approvalApp.canonicalUrl).host.replaceAll("-", "\u2011")}
+            </a>
           </Surface>
         )}
         {approvalOnly ? null : <AgentActivity snapshot={snapshot} />}

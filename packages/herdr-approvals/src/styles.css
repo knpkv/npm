@@ -355,7 +355,7 @@
   .agenda-heading p {
     display: -webkit-box;
     overflow: hidden;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
   }
@@ -433,7 +433,7 @@
     font-family: var(--rly-font-mono);
     font-size: var(--rly-type-meta-size);
     margin: 0;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .approval-request-detail dd[data-redacted="true"] {
@@ -759,6 +759,7 @@
   .remote-approval-link {
     color: var(--rly-color-agent);
     font-weight: 650;
+    overflow-wrap: break-word;
   }
 
   .chat-panel {
@@ -833,7 +834,7 @@
 
   .chat-turn p {
     margin: 0;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     white-space: pre-wrap;
   }
 
@@ -900,8 +901,10 @@
    * Approvals countdown: the hero, then "Waiting for you" beside the selected request on wide
    * screens. On phones the request comes first, so the decision sits right under the hero.
    */
+  /* Equal-width figures: the 1s tick changes digits, never the width of a line. */
   .countdown {
     display: grid;
+    font-variant-numeric: tabular-nums;
     gap: var(--rly-space-16);
   }
 
@@ -1198,7 +1201,7 @@
 
   .app-error pre {
     color: var(--rly-color-blocked-ink);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     white-space: pre-wrap;
   }
 
