@@ -108,6 +108,7 @@ const awsStub = (cfg: StubConfig): Layer.Layer<AwsClient.AwsClient> =>
         }
         return Stream.fromIterable(cfg.prsByTarget?.[k] ?? [])
       },
+      getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
       getCallerIdentity: (account) => {
         const username = cfg.callerByProfile?.[account.profile]
         if (username == null) {

@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/browser-pairing",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Typed browser pairing credentials and transport primitives",
   "license": "MIT",
   "repository": {

@@ -393,6 +393,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
       case "work.admit":
       case "work.recover":
       case "work.reassign":
+      case "work.abandon":
         return Effect.fail(
           new FleetOperationError({
             cause: payload.kind,

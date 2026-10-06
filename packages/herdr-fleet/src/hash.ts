@@ -144,6 +144,15 @@ export const canonicalJobPayload = (payload: JobPayload): string => {
         expectedGoalEventId: payload.expectedGoalEventId,
         expectedGoalUpdatedAt: payload.expectedGoalUpdatedAt
       })
+    case "work.abandon":
+      return JSON.stringify({
+        kind: payload.kind,
+        goalId: payload.goalId,
+        owner: { id: payload.owner.id, name: payload.owner.name },
+        reason: payload.reason,
+        expectedGoalEventId: payload.expectedGoalEventId,
+        expectedGoalUpdatedAt: payload.expectedGoalUpdatedAt
+      })
   }
 }
 

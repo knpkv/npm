@@ -2566,6 +2566,87 @@ database.close()`,
       }
     }).pipe(provideNodeServices))
 
+  it.effect("keeps one coordinator handoff per session with a unique session index", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-session-index-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const sessionIndex = (path: string) => {
+        const database = fixtureDatabase(path)
+        try {
+          return Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String, unique: Schema.Number })))(
+            database.prepare("PRAGMA index_list(work_decision_handoffs)").all()
+          ).find(({ name }) => name === "work_decision_handoffs_session")
+        } finally {
+          database.close()
+        }
+      }
+      // A file migrated from v1 handoffs gains session_id through ALTER TABLE, which
+      // cannot add a column UNIQUE constraint, and carried a plain session index.
+      const withPlainSessionIndex = (path: string, rows: ReadonlyArray<readonly [string, string]>) => {
+        const database = fixtureDatabase(path)
+        database.exec(`
+          DROP TRIGGER work_decision_handoffs_after_insert;
+          ALTER TABLE work_decision_handoffs RENAME TO work_decision_handoffs_current;
+          CREATE TABLE work_decision_handoffs (
+            handoff_id TEXT PRIMARY KEY, lane_id TEXT NOT NULL, occurred_at INTEGER NOT NULL, record TEXT NOT NULL
+          );
+          ALTER TABLE work_decision_handoffs ADD COLUMN session_id TEXT;
+          DROP TABLE work_decision_handoffs_current;
+          CREATE INDEX work_decision_handoffs_lane_time ON work_decision_handoffs (lane_id, occurred_at, handoff_id);
+          CREATE INDEX work_decision_handoffs_session ON work_decision_handoffs (session_id);
+        `)
+        const insert = database.prepare(
+          "INSERT INTO work_decision_handoffs (handoff_id, session_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?, ?)"
+        )
+        database.exec("BEGIN")
+        for (const [handoffId, sessionId] of rows) {
+          const handoff: WorkDecisionHandoff = {
+            blockers: [],
+            contextDelta: "Session index fixture",
+            decision: "handoff",
+            dispatchIds: [],
+            evidenceRefs: [],
+            expectedRevision: 1,
+            goalId: "goal-session-index",
+            id: handoffId,
+            laneId: "lane-session-index",
+            occurredAt: 1,
+            owner: { id: "owner-packages", name: "Package owner" },
+            sessionId,
+            summary: "Session index fixture",
+            version: "herdr.work.decision.v2"
+          }
+          insert.run(handoffId, sessionId, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
+        }
+        database.exec("COMMIT")
+        database.close()
+      }
+
+      const fresh = join(directory, "fresh.sqlite")
+      yield* safelyOpenResult(fresh)
+      expect(sessionIndex(fresh)).toEqual({ name: "work_decision_handoffs_session", unique: 1 })
+
+      const upgraded = join(directory, "upgraded.sqlite")
+      yield* safelyOpenResult(upgraded)
+      withPlainSessionIndex(upgraded, [["handoff:a", "session:a"], ["handoff:b", "session:b"]])
+      expect(sessionIndex(upgraded)).toEqual({ name: "work_decision_handoffs_session", unique: 0 })
+      expect(yield* safelyOpenResult(upgraded)).toMatchObject({ _tag: "Success" })
+      expect(sessionIndex(upgraded)).toEqual({ name: "work_decision_handoffs_session", unique: 1 })
+
+      const duplicated = join(directory, "duplicated.sqlite")
+      yield* safelyOpenResult(duplicated)
+      withPlainSessionIndex(duplicated, [["handoff:a", "session:shared"], ["handoff:b", "session:shared"]])
+      expect(yield* safelyOpenResult(duplicated)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.session-index" },
+          operation: "open.database"
+        }
+      })
+      // Fails closed: the plain index and both rows stay as they were.
+      expect(sessionIndex(duplicated)).toEqual({ name: "work_decision_handoffs_session", unique: 0 })
+    }).pipe(provideNodeServices))
+
   it.effect("creates the Work schema atomically and leaves nothing behind when a step fails", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-atomic-schema-"))

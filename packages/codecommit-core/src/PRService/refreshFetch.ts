@@ -7,9 +7,10 @@
  * @internal
  */
 
-import { Cause, Effect, Option, Predicate, Ref, Stream, SubscriptionRef } from "effect"
+import { Array as Arr, Cause, Effect, Option, Predicate, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
+import type { CacheError } from "../CacheService/CacheError.js"
 import { diffApprovalPools, diffPR } from "../CacheService/diff.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import {
@@ -19,9 +20,21 @@ import {
 } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
-import type { PullRequestRefreshScope } from "../Domain.js"
+import type { PullRequestRefreshScope, UnevaluatedPullRequest } from "../Domain.js"
+import type { AwsClientError } from "../Errors.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
+
+/** A pull-request read that failed only because its approval rules could not be evaluated. */
+const failedOnlyOnApprovalEvaluation = (error: AwsClientError | CacheError): boolean =>
+  error._tag === "AwsApiError" && Predicate.isTagged(error.cause, "ApprovalEvaluationError")
+
+/** The evaluation failure's own message, which names the operation and the provider's reason. */
+const approvalFailureMessage = (error: AwsClientError | CacheError): string =>
+  Predicate.hasProperty(error, "cause") && Predicate.hasProperty(error.cause, "message") &&
+    Predicate.isString(error.cause.message)
+    ? error.cause.message
+    : "EvaluatePullRequestApprovalRules failed"
 
 /** Resolve a stale cached PR: retain contradictory OPEN evidence, update a definitive merged/closed status. */
 const resolveStaleStatus = (
@@ -78,6 +91,13 @@ export const fetchAndUpsertPRs = (params: {
         )
       )
     )
+    // A scope whose listing completed but where some pull requests could not be re-evaluated: its stale
+    // rows still reconcile (the listing is complete), but the refresh does not count as successful.
+    const partialScopes = yield* Ref.make(new Set<string>())
+    // Pull requests the listing returned whose evaluation failed: known to be open, so not stale.
+    const evaluationFailedPullRequests = yield* Ref.make(new Set<string>())
+    const pullRequestKey = (profile: string, region: string, id: string, repositoryName: string) =>
+      `${accountRegionKey(profile, region)}\0${id}\0${repositoryName}`
     const withholdScopeSuccess = (profile: string, region: string) =>
       Ref.update(successfullyFetchedScopes, (scopes) => {
         const next = new Set(scopes)
@@ -95,8 +115,8 @@ export const fetchAndUpsertPRs = (params: {
       (account.regions ?? []).map((region) => {
         const label = `${account.profile} (${region})`
         const awsAccountId = accountIdMap.get(account.profile) ?? ""
-        return awsClient.getPullRequests({ profile: account.profile, region }).pipe(
-          Stream.map((pr) => ({ awsAccountId, label, pr })),
+        return awsClient.getPullRequestRefresh({ profile: account.profile, region }).pipe(
+          Stream.map((item) => ({ awsAccountId, item, label, profile: account.profile, region })),
           Stream.catch((error) => {
             const causeStr = (Predicate.isError(error)
               ? error.name !== "Error" ? error.name : error.message
@@ -132,9 +152,56 @@ export const fetchAndUpsertPRs = (params: {
       })
     )
 
+    const unevaluated = yield* Ref.make<ReadonlyArray<UnevaluatedPullRequest>>([])
+    // A stale row is reconciled only for an enabled account's scope, which supplies its profile and region.
+    const recordStaleUnevaluated = (
+      pr: {
+        readonly accountProfile: string
+        readonly accountRegion: string
+        readonly id: string
+        readonly repositoryName: string
+      },
+      message: string
+    ) =>
+      Effect.forEach(
+        enabledAccounts.filter((account) => account.profile === pr.accountProfile),
+        (account) =>
+          Effect.forEach(
+            (account.regions ?? []).filter((region) => region === pr.accountRegion),
+            (region) =>
+              Ref.update(unevaluated, (all) => [...all, {
+                profile: account.profile,
+                region,
+                pullRequestId: pr.id,
+                repositoryName: pr.repositoryName,
+                message
+              }]),
+            { discard: true }
+          ),
+        { discard: true }
+      )
+
     yield* Stream.mergeAll(streams, { concurrency: 2 }).pipe(
-      Stream.runForEach(({ awsAccountId, label, pr }) =>
+      Stream.runForEach(({ awsAccountId, item, label, profile, region }) =>
         Effect.gen(function*() {
+          if (item._tag === "EvaluationFailed") {
+            // Only this pull request is unknown: its cached row stays as it was, the account's other
+            // pull requests carry on, and the account's refresh counts as partial rather than successful.
+            yield* Ref.update(unevaluated, (all) => [...all, {
+              profile,
+              region,
+              pullRequestId: item.pullRequestId,
+              repositoryName: item.repositoryName,
+              message: item.error.message
+            }])
+            yield* Ref.update(partialScopes, (scopes) => new Set(scopes).add(accountRegionKey(profile, region)))
+            yield* Ref.update(
+              evaluationFailedPullRequests,
+              (keys) => new Set(keys).add(pullRequestKey(profile, region, item.pullRequestId, item.repositoryName))
+            )
+            return
+          }
+          const pr = item.pullRequest
           // Diff subscribed PRs against cache
           const subscribed = yield* Ref.get(subscribedRef)
           if (
@@ -210,13 +277,15 @@ export const fetchAndUpsertPRs = (params: {
 
     // Transition stale OPEN PRs: re-fetch to discover if they were merged/closed
     const successfulScopes = yield* Ref.get(successfullyFetchedScopes)
+    const listedButUnevaluated = yield* Ref.get(evaluationFailedPullRequests)
     yield* prRepo.findStaleOpen(staleThreshold).pipe(
       Effect.flatMap((stalePRs) =>
         Effect.forEach(
           stalePRs.filter(
             (pr) =>
               accountIdMap.get(pr.accountProfile) === pr.awsAccountId &&
-              successfulScopes.has(accountRegionKey(pr.accountProfile, pr.accountRegion))
+              successfulScopes.has(accountRegionKey(pr.accountProfile, pr.accountRegion)) &&
+              !listedButUnevaluated.has(pullRequestKey(pr.accountProfile, pr.accountRegion, pr.id, pr.repositoryName))
           ),
           (pr) =>
             awsClient
@@ -237,13 +306,17 @@ export const fetchAndUpsertPRs = (params: {
                     )
                     : Effect.void
                 ),
-                Effect.catch(() =>
+                Effect.catch((error) =>
                   withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(
                     Effect.andThen(
-                      prRepo.deleteOne(pr.awsAccountId, pr.id, {
-                        repositoryName: pr.repositoryName,
-                        accountRegion: pr.accountRegion
-                      }).pipe(Effect.catch(() => Effect.void))
+                      // The pull request was read; only its approval enrichment failed. That is not
+                      // evidence it is gone, so the row stays for the next refresh to settle.
+                      failedOnlyOnApprovalEvaluation(error)
+                        ? recordStaleUnevaluated(pr, approvalFailureMessage(error))
+                        : prRepo.deleteOne(pr.awsAccountId, pr.id, {
+                          repositoryName: pr.repositoryName,
+                          accountRegion: pr.accountRegion
+                        }).pipe(Effect.catch(() => Effect.void))
                     )
                   )
                 )
@@ -254,10 +327,35 @@ export const fetchAndUpsertPRs = (params: {
       Effect.catch(() => Ref.set(successfullyFetchedScopes, new Set()))
     )
 
+    // Every refresh replaces the list, so a pull request that evaluates again drops off it. One
+    // notification per profile, because system notifications deduplicate by profile.
+    const unevaluatedPullRequests = yield* Ref.get(unevaluated)
+    yield* SubscriptionRef.update(state, (s) => ({ ...s, unevaluatedPullRequests }))
+    yield* Effect.forEach(
+      Object.values(Arr.groupBy(unevaluatedPullRequests, ({ profile }) => profile)),
+      (failures) => {
+        const first = Arr.headNonEmpty(failures)
+        const regions = [...new Set(failures.map(({ region }) => region))].join(", ")
+        return notificationRepo.addSystem({
+          type: "error",
+          title: `${first.profile}: approval evaluation`,
+          message: `${failures.length} pull request${
+            failures.length === 1 ? "" : "s"
+          } in ${regions} couldn't be re-evaluated and kept their cached approval state: ${first.message}`,
+          profile: first.profile,
+          replaceUnread: true
+        }).pipe(Effect.catch(() => Effect.void))
+      },
+      { discard: true }
+    )
+
     // Propagate repoAccountId from any PR that has it to all PRs that don't
     yield* prRepo.propagateRepoAccountId().pipe(Effect.catch(() => Effect.void))
 
-    const reconciledScopes = yield* Ref.get(successfullyFetchedScopes)
+    const partial = yield* Ref.get(partialScopes)
+    const reconciledScopes = new Set(
+      [...(yield* Ref.get(successfullyFetchedScopes))].filter((key) => !partial.has(key))
+    )
     return enabledAccounts.flatMap((account) =>
       (account.regions ?? []).flatMap((region) => {
         const awsAccountId = accountIdMap.get(account.profile)
