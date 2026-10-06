@@ -36,6 +36,8 @@ import { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.
 /** The hub's answer to the last decision sent from this page, for the job it decided. */
 export interface DecisionStatus {
   readonly jobId: string
+  /** The hub accepted or refused it: the bar stays off for this request until the queue shows its state. */
+  readonly settles: boolean
   readonly text: string
 }
 
@@ -172,56 +174,68 @@ const decisionState = ({
   approvalsEnabled,
   gone,
   item,
-  sending
+  sending,
+  settled
 }: {
   readonly approvalsEnabled: boolean
   readonly gone: boolean
   readonly item: PendingItem
   readonly sending: ApprovalDecision | null
+  readonly settled: boolean
 }): RlyDecisionBarState => {
-  if (gone) return { _tag: "off", reason: "This request has left the queue. Nothing was applied from here." }
+  if (gone) return { _tag: "off", reason: "This request has left the queue." }
   if (item._tag === "Remote") return { _tag: "off", reason: `Decided on ${item.host}.` }
   if (sending !== null && sending.jobId === item.record.id) return { _tag: "sending", action: sending.decision }
+  if (settled) return { _tag: "off", reason: "The hub has answered this decision; the list shows its current state." }
   if (sending !== null) return { _tag: "off", reason: "Another decision is waiting for the hub." }
   if (!approvalsEnabled) return { _tag: "off", reason: "Approvals are turned off on this host." }
   if (!item.record.approvalAvailable) return { _tag: "off", reason: "This request can't be decided from here." }
   return { _tag: "ready" }
 }
 
-/** Why a selected request left the queue, from the hub's own record when it has one. */
-const goneStatus = (snapshot: DashboardSnapshot, id: string): string => {
-  const record = snapshot.records.find((candidate) => candidate.id === id)
+/**
+ * Why a request the reader was looking at is no longer listed, or `null` when its absence proves
+ * nothing: a local request still pending, or one on a page not loaded yet, and a remote request
+ * on a host that could not be checked. Only local history is consulted, and only for local requests.
+ */
+const departureOf = (snapshot: DashboardSnapshot, item: PendingItem): string | null => {
+  if (item._tag === "Remote") {
+    return snapshot.pendingApprovals.failures.some(({ host }) => host === item.host)
+      ? null
+      : `This request left ${item.host}'s queue.`
+  }
+  const record = snapshot.records.find((candidate) => candidate.id === item.record.id)
+  if (record !== undefined && record.status === "pending_approval") return null
   const decided = record === undefined ? null : decidedOf(record)
-  if (decided === null) return "This request left the queue."
-  if (decided.outcome === "Expired") return "Expired just now. Nothing was applied."
-  return `${decided.outcome}${decided.by === null ? "" : ` by ${decided.by}`}.`
+  if (decided !== null) {
+    return decided.outcome === "Expired"
+      ? "Expired just now. Nothing was applied."
+      : `${decided.outcome}${decided.by === null ? "" : ` by ${decided.by}`}.`
+  }
+  return snapshot.pendingApprovals.nextCursors.length > 0 ? null : "This request left the queue."
 }
 
 const RequestDetail = ({
   answer,
-  approvalsEnabled,
   gone,
   item,
   now,
   onDecision,
-  sending,
-  snapshot
+  snapshot,
+  state
 }: {
   readonly answer: string | undefined
-  readonly approvalsEnabled: boolean
   readonly gone: boolean
   readonly item: PendingItem
   readonly now: number
-  readonly onDecision: ((item: PendingItem, decision: ApprovalDecision["decision"]) => void) | undefined
-  readonly sending: ApprovalDecision | null
+  readonly onDecision: (item: PendingItem, decision: ApprovalDecision["decision"]) => void
   readonly snapshot: DashboardSnapshot
+  readonly state: RlyDecisionBarState
 }) => {
   const facts = factsOf(item, snapshot.host)
-  const unavailable: RlyDecisionBarState = { _tag: "off", reason: "Decisions are unavailable here." }
-  const state = onDecision === undefined ? unavailable : decisionState({ approvalsEnabled, gone, item, sending })
   const clock = gone ? null : clockText(facts.expiresAt, now)
   const decide = (decision: "approve" | "reject") => () => {
-    if (state._tag === "ready" && onDecision !== undefined) onDecision(item, decision)
+    if (state._tag === "ready") onDecision(item, decision)
   }
   const payload = item._tag === "Local" ? item.record.payload : item.approval.payload
   return (
@@ -290,16 +304,38 @@ export const ApprovalsCountdown = ({
     )
   )
 
-  // The selected request, remembered with its item so its detail and bar stay after it leaves
-  // the queue; the soonest request is selected until the reader picks one.
+  // The selected request, remembered with its item. The soonest is pinned on first sight, so the
+  // decision target changes only when the reader selects (or focuses) another row, never because the
+  // queue moved under a focused button.
   const [picked, setPicked] = useState<{ readonly key: string; readonly item: PendingItem } | null>(null)
-  const pickedIndex = picked === null ? -1 : facts.findIndex((candidate) => itemKey(candidate) === picked.key)
-  const selected = pickedIndex >= 0 ? items[pickedIndex] : picked !== null ? picked.item : items[0]
-  const selectedKey = selected === undefined ? null : itemKey(factsOf(selected, snapshot.host))
-  const gone = picked !== null && pickedIndex < 0
+  const pick = (item: PendingItem): void => setPicked({ item, key: itemKey(factsOf(item, snapshot.host)) })
+  const first = items[0]
+  useEffect(() => {
+    if (picked === null && first !== undefined) setPicked({ item: first, key: itemKey(factsOf(first, snapshot.host)) })
+  }, [first, picked, snapshot.host])
+  const shown = picked ?? (first === undefined ? null : { item: first, key: itemKey(factsOf(first, snapshot.host)) })
+  const shownIndex = shown === null ? -1 : facts.findIndex((candidate) => itemKey(candidate) === shown.key)
+  const selected = shown === null ? undefined : shownIndex >= 0 ? items[shownIndex] : shown.item
+  const selectedKey = shown?.key ?? null
+  // Absent from the list is "gone" only when the hub's own record or a complete read proves it.
+  const departure = selected === undefined || shownIndex >= 0 ? null : departureOf(snapshot, selected)
+  const gone = departure !== null
 
-  // One polite line for threshold crossings; the ticking text itself is never announced. Runs
-  // whenever the clock or the queue changes; the previous reading makes each crossing count once.
+  const stateOf = (item: PendingItem, itemGone: boolean): RlyDecisionBarState => {
+    if (onDecision === undefined) return { _tag: "off", reason: "Decisions are unavailable here." }
+    const id = factsOf(item, snapshot.host).id
+    return decisionState({
+      approvalsEnabled: snapshot.approvalsEnabled,
+      gone: itemGone,
+      item,
+      sending,
+      settled: item._tag === "Local" && decisionStatus?.jobId === id && decisionStatus.settles
+    })
+  }
+
+  // One polite line for what the reader is not looking at: a request entering its last minute,
+  // one the hub reports expired, and the hub's answer for a request no longer selected. The
+  // selected request's own answer and expiry are announced by its DecisionBar.
   const [announcement, setAnnouncement] = useState("")
   const previousNow = useRef(now)
   useEffect(() => {
@@ -309,24 +345,37 @@ export const ApprovalsCountdown = ({
       setAnnouncement(crossed.map(({ host, title }) => `One minute left to decide ${title} on ${host}.`).join(" "))
     }
   }, [facts, now])
+  const previousFacts = useRef(new Map<string, PendingFacts>())
+  useEffect(() => {
+    const listed = new Set(facts.map(itemKey))
+    const expired = [...previousFacts.current.entries()].flatMap(([key, entry]) => {
+      if (listed.has(key) || key === selectedKey || entry.host !== snapshot.host) return []
+      const record = snapshot.records.find((candidate) => candidate.id === entry.id)
+      return record?.status === "expired" ? [entry] : []
+    })
+    previousFacts.current = new Map(facts.map((entry) => [itemKey(entry), entry]))
+    if (expired.length > 0) {
+      setAnnouncement(expired.map(({ host, title }) => `${title} on ${host} expired. Nothing was applied.`).join(" "))
+    }
+  }, [snapshot])
+  const selectedId = selected === undefined ? null : factsOf(selected, snapshot.host).id
+  useEffect(() => {
+    if (decisionStatus !== null && decisionStatus.jobId !== selectedId) setAnnouncement(decisionStatus.text)
+  }, [decisionStatus])
 
   // Your own decision keeps the hub's answer, also after the request leaves the queue; any other
-  // departure says why from the hub's record.
-  const selectedId = selected === undefined ? null : factsOf(selected, snapshot.host).id
+  // departure says why.
   const answer =
     selected === undefined || selectedId === null
       ? undefined
       : selected._tag === "Local" && decisionStatus?.jobId === selectedId
         ? decisionStatus.text
-        : gone
-          ? goneStatus(snapshot, selectedId)
-          : undefined
+        : (departure ?? undefined)
 
-  // Deciding pins the decided request, so the bar and its status stay on it when it leaves the
-  // queue instead of moving to the next request, which a second shortcut would then decide.
+  // Deciding pins the decided request, so the bar and its status stay on it when it leaves the queue.
   const decideItem = (item: PendingItem, decision: ApprovalDecision["decision"]): void => {
     if (onDecision === undefined || item._tag !== "Local") return
-    setPicked({ item, key: itemKey(factsOf(item, snapshot.host)) })
+    pick(item)
     onDecision({ decision, jobId: item.record.id })
   }
 
@@ -344,15 +393,9 @@ export const ApprovalsCountdown = ({
     const target = rowIndex >= 0 ? items[rowIndex] : selected
     if (target === undefined) return
     event.preventDefault()
-    const targetGone = target === selected && gone
-    const state = decisionState({
-      approvalsEnabled: snapshot.approvalsEnabled,
-      gone: targetGone,
-      item: target,
-      sending
-    })
+    const state = stateOf(target, rowIndex < 0 && gone)
     if (state._tag === "ready") decideItem(target, decision)
-    else if (rowIndex >= 0) setPicked({ item: target, key: itemKey(factsOf(target, snapshot.host)) })
+    else if (rowIndex >= 0) pick(target)
   }
 
   const moveRowFocus = (event: KeyboardEvent<HTMLUListElement>): void => {
@@ -426,7 +469,11 @@ export const ApprovalsCountdown = ({
                       aria-current={key === selectedKey ? "true" : undefined}
                       className="countdown-row"
                       data-countdown-row={key}
-                      onClick={() => setPicked({ item, key })}
+                      data-agenda-item=""
+                      data-approval-host={row.host}
+                      data-approval-job={row.id}
+                      onClick={() => pick(item)}
+                      onFocus={() => pick(item)}
                       type="button"
                     >
                       <span className="countdown-row-meta">
@@ -475,13 +522,12 @@ export const ApprovalsCountdown = ({
           <Region className="countdown-selected" title="Selected request">
             <RequestDetail
               answer={answer}
-              approvalsEnabled={snapshot.approvalsEnabled}
               gone={gone}
               item={selected}
               now={now}
-              onDecision={onDecision === undefined ? undefined : decideItem}
-              sending={sending}
+              onDecision={decideItem}
               snapshot={snapshot}
+              state={stateOf(selected, gone)}
             />
           </Region>
         )}

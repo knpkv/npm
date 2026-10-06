@@ -3,6 +3,7 @@
 ---
 
 The Approvals tab is a countdown:
+
 - It leads with the request that expires first ("4m 12s until Apply Nix configuration expires").
 - Every pending request, from this host and others, is listed soonest first, with its time left.
 - One decision bar sits on the selected request and names what it decides.

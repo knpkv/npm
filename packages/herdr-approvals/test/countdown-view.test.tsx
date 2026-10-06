@@ -184,7 +184,7 @@ describe("ApprovalsCountdown", () => {
     view.press("Enter")
     expect(view.decisions).toEqual([])
     view.render({
-      decisionStatus: { jobId: "job-1", text: "The hub refused: this request already changed." },
+      decisionStatus: { jobId: "job-1", settles: true, text: "The hub refused: this request already changed." },
       snapshot: snapshot()
     })
     expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe(
@@ -245,7 +245,7 @@ describe("ApprovalsCountdown", () => {
     act(() => view.bar()?.querySelector<HTMLButtonElement>("button")?.click())
     expect(view.decisions).toEqual([{ decision: "approve", jobId: "job-1" }])
     view.render({
-      decisionStatus: { jobId: "job-1", text: "The hub recorded your approval; the job is queued." },
+      decisionStatus: { jobId: "job-1", settles: true, text: "The hub recorded your approval; the job is queued." },
       snapshot: snapshot({
         pendingApprovals: {
           failures: [],
@@ -263,6 +263,143 @@ describe("ApprovalsCountdown", () => {
     )
     view.press("Enter")
     expect(view.decisions).toHaveLength(1)
+    view.unmount()
+  })
+
+  it("keeps the first request pinned when the queue moves under it", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1"), record("job-2", { approvalExpiresAt: Date.now() + 9 * 60_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    view.render({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-2", { approvalExpiresAt: Date.now() + 9 * 60_000 })],
+          nextCursors: [],
+          remote: []
+        },
+        records: [record("job-1", { expiredAt: Date.now(), status: "expired" })]
+      })
+    })
+    expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("job-1")
+    expect(view.bar()?.dataset["state"]).toBe("off")
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("Expired just now. Nothing was applied.")
+    view.press("Enter")
+    expect(view.decisions).toEqual([])
+    view.unmount()
+  })
+
+  it("does not call a request gone when it may just be on an unloaded page", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1"), record("job-2", { approvalExpiresAt: Date.now() + 9 * 60_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    act(() => view.container.querySelectorAll<HTMLButtonElement>("[data-countdown-row]")[1]?.click())
+    view.render({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1")],
+          nextCursors: [{ cursor: { createdAt: 1, id: "job-1" }, host: "ALPHA" }],
+          remote: []
+        }
+      })
+    })
+    expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("job-2")
+    expect(view.bar()?.dataset["state"]).toBe("ready")
+    view.unmount()
+  })
+
+  it("says a remote request left its own host's queue, never a local job's outcome", () => {
+    const remote: DashboardSnapshot["pendingApprovals"]["remote"][number] = {
+      approval: {
+        actor: "ops@example.com",
+        approvalExpiresAt: Date.now() + 3 * 60_000,
+        createdAt: Date.now(),
+        id: "job-1",
+        payload: { kind: "nix.check", ref: "main" },
+        status: "pending_approval"
+      },
+      approvalUrl: "https://beta.example.test/approve/job-1",
+      host: "BETA"
+    }
+    const view = mount({
+      snapshot: snapshot({ pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [remote] } })
+    })
+    view.render({
+      snapshot: snapshot({
+        pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] },
+        records: [record("job-1", { approvedAt: Date.now(), approvedBy: "owner@example.com", status: "queued" })]
+      })
+    })
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("This request left BETA's queue.")
+    view.unmount()
+  })
+
+  it("keeps a request off once the hub refused it", () => {
+    const view = mount({
+      decisionStatus: { jobId: "job-1", settles: true, text: "The hub refused: this request already changed." },
+      snapshot: snapshot()
+    })
+    expect(view.bar()?.dataset["state"]).toBe("off")
+    view.press("Enter")
+    expect(view.decisions).toEqual([])
+    view.unmount()
+  })
+
+  it("carries the deep-link target on rows and selects a row on focus", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1"), record("job-2", { approvalExpiresAt: Date.now() + 9 * 60_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    const second = view.container.querySelector<HTMLButtonElement>(
+      "[data-approval-host='ALPHA'][data-approval-job='job-2']"
+    )
+    expect(second?.hasAttribute("data-agenda-item")).toBe(true)
+    act(() => second?.focus())
+    expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("job-2")
+    view.unmount()
+  })
+
+  it("announces a request the hub expired while another was selected", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1"), record("job-2", { approvalExpiresAt: Date.now() + 9 * 60_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    view.render({
+      snapshot: snapshot({
+        pendingApprovals: { failures: [], local: [record("job-1")], nextCursors: [], remote: [] },
+        records: [record("job-2", { expiredAt: Date.now(), status: "expired" })]
+      })
+    })
+    expect(view.container.querySelector(".countdown-announcer")?.textContent).toBe(
+      "Apply Nix configuration on ALPHA expired. Nothing was applied."
+    )
     view.unmount()
   })
 })

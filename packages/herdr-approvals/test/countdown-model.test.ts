@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
+  answerForStatus,
+  answerSettles,
   answerText,
   clockText,
   countdownText,
@@ -129,9 +131,15 @@ describe("countdown model", () => {
     expect(crossedIntoLastMinute(facts, 30_000, 39_000)).toEqual([])
   })
 
-  it("words the hub's answer, never assuming success", () => {
+  it("words the hub's answer by what it proves, never that nothing ran", () => {
     expect(answerText(DecisionAnswer.Refused({ status: 409 }))).toContain("already changed")
-    expect(answerText(DecisionAnswer.Unreachable())).toContain("may not have arrived")
+    expect(answerText(DecisionAnswer.Refused({ status: 409 }))).not.toContain("Nothing")
+    expect(answerForStatus(409)._tag).toBe("Refused")
+    expect(answerForStatus(503)._tag).toBe("Uncertain")
+    expect(answerText(answerForStatus(503))).toContain("may have been recorded")
+    expect(answerText(DecisionAnswer.Uncertain({ status: null }))).toContain("may not have arrived")
+    expect(answerSettles(answerForStatus(503))).toBe(false)
+    expect(answerSettles(answerForStatus(409))).toBe(true)
     expect(answerText(DecisionAnswer.Accepted({ decision: "approve", record: record("x", { status: "queued" }) })))
       .toBe("The hub recorded your approval; the job is queued.")
     expect(answerText(DecisionAnswer.Accepted({ decision: "reject", record: record("x", { status: "rejected" }) })))

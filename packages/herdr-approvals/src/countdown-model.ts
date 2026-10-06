@@ -169,16 +169,31 @@ export const decidedOf = (record: SanitizedJobRecord): DecidedItem | null => {
   return null
 }
 
-/** How the hub answered one decision, as the DecisionBar's announced status. */
+/**
+ * How the hub answered one decision. `Refused` carries a status the hub returns before it changes
+ * anything (4xx); a 5xx or a lost connection is `Uncertain`, because the approve route records the
+ * decision before it queues the job, so a failure after that point does not mean nothing happened.
+ */
 export type DecisionAnswer = Data.TaggedEnum<{
   Accepted: { readonly decision: "approve" | "reject"; readonly record: SanitizedJobRecord }
   Refused: { readonly status: number }
-  Unreachable: {}
+  Uncertain: { readonly status: number | null }
 }>
 
 /** Constructors and exhaustive `$match` for {@link DecisionAnswer}. */
 export const DecisionAnswer = Data.taggedEnum<DecisionAnswer>()
 
+/** The answer for an HTTP status: 4xx is the hub's refusal, anything else leaves the outcome open. */
+export const answerForStatus = (status: number): DecisionAnswer =>
+  status >= 400 && status < 500 ? DecisionAnswer.Refused({ status }) : DecisionAnswer.Uncertain({ status })
+
+/**
+ * Whether the answer settles the request from this page: accepted, or refused by the hub. The bar
+ * stays off for it until the queue shows its current state; an uncertain answer leaves it usable.
+ */
+export const answerSettles = (answer: DecisionAnswer): boolean => answer._tag !== "Uncertain"
+
+/** The hub's answer in words. It says only what the response proves, never that nothing ran. */
 export const answerText = (answer: DecisionAnswer): string =>
   DecisionAnswer.$match(answer, {
     Accepted: ({ decision, record }) =>
@@ -189,11 +204,16 @@ export const answerText = (answer: DecisionAnswer): string =>
         : "The hub recorded your approval.",
     Refused: ({ status }) =>
       status === 409
-        ? "The hub refused: this request already changed (it expired or someone decided it). Nothing was applied."
+        ? "The hub refused: this request already changed. It may have expired or been decided by someone else."
         : status === 403
         ? "The hub refused: you can't decide this request."
         : status === 404
-        ? "The hub no longer has this request. Nothing was applied."
-        : `The hub refused the decision (HTTP ${String(status)}). Nothing was applied.`,
-    Unreachable: () => "Couldn't reach the hub, so the decision may not have arrived. Refresh before trying again."
+        ? "The hub no longer has this request."
+        : `The hub refused the decision (HTTP ${String(status)}).`,
+    Uncertain: ({ status }) =>
+      status === null
+        ? "Couldn't reach the hub, so the decision may not have arrived. The list refreshes with its current state."
+        : `The hub didn't confirm the decision (HTTP ${
+          String(status)
+        }). It may have been recorded; the list refreshes with its current state.`
   })

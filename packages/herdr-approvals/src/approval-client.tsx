@@ -43,7 +43,7 @@ import {
 import { FleetShell, FleetWorkPanel, fleetWorkRequestStateFromResult, fleetWorkStateFromRequest } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 import { SanitizedJobRecord } from "./approval-request.js"
-import { answerText, DecisionAnswer } from "./countdown-model.js"
+import { answerForStatus, answerSettles, answerText, DecisionAnswer } from "./countdown-model.js"
 import type { DecisionStatus } from "./countdown-view.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 
@@ -141,7 +141,10 @@ const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecisi
   })
 })
 
-/** The hub's answer to one decision: the record it returned, its refusal status, or no answer. */
+/**
+ * The hub's answer to one decision: the record it returned, a status, or no answer. A lost
+ * connection or an unreadable success body leaves the outcome open.
+ */
 const decisionAnswerOf = (
   decision: ApprovalDecision,
   exit: Exit.Exit<SanitizedJobRecord, BrowserNetworkError | BrowserStatusError | BrowserJsonError>
@@ -149,8 +152,8 @@ const decisionAnswerOf = (
   if (Exit.isSuccess(exit)) return DecisionAnswer.Accepted({ decision: decision.decision, record: exit.value })
   const failure = Cause.findErrorOption(exit.cause)
   return Option.isSome(failure) && failure.value._tag === "BrowserStatusError"
-    ? DecisionAnswer.Refused({ status: failure.value.status })
-    : DecisionAnswer.Unreachable()
+    ? answerForStatus(failure.value.status)
+    : DecisionAnswer.Uncertain({ status: null })
 }
 
 const loadChat = fetchJson(ChatHistory, "/v1/chat")
@@ -469,7 +472,10 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     const exit = await runDecision(decision)
     setBusyJobId(null)
     setSendingDecision(null)
-    setDecisionStatus({ jobId: decision.jobId, text: answerText(decisionAnswerOf(decision, exit)) })
+    const answer = decisionAnswerOf(decision, exit)
+    setDecisionStatus({ jobId: decision.jobId, settles: answerSettles(answer), text: answerText(answer) })
+    // Whatever the answer, the queue is re-read so the page shows the hub's own state next.
+    if (!Exit.isSuccess(exit)) refreshDashboard()
     if (Exit.isSuccess(exit)) {
       setDeepLinkTarget(null)
       refreshDashboard()
