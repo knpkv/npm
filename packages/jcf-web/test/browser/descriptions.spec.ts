@@ -121,6 +121,33 @@ test("a suggestion that lands in a focused field is replaced by the first keystr
   await expect(page.getByRole("status", { name: "Description suggestion" })).toContainText("Your description")
 })
 
+// Text the person already typed is theirs: a late suggestion neither replaces nor selects over it.
+test("a suggestion that lands after typing leaves the typed text and caret alone", async ({ page }) => {
+  await open(page)
+  let release: (() => void) | undefined
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route("**/api/rows/describe", async (route) => {
+    await held
+    await route.continue()
+  })
+  const requested = page.waitForRequest("**/api/rows/describe")
+  await page.getByRole("button", { name: /PROJ-123, 11:00/ }).click()
+  await requested
+  await noteField(page).focus()
+  await page.keyboard.type("Own")
+  const replied = page.waitForResponse("**/api/rows/describe")
+  release?.()
+  await replied
+  await expect(page.getByRole("status", { name: "Description suggestion" })).toContainText("Your description")
+  await expect(noteField(page)).toHaveValue("Own")
+  expect(await noteField(page).evaluate((field: HTMLTextAreaElement) => [field.selectionStart, field.selectionEnd]))
+    .toEqual([3, 3])
+  await page.keyboard.type(" words")
+  await expect(noteField(page)).toHaveValue("Own words")
+})
+
 // A failed optional request leaves approval usable and exposes an explicit retry.
 test("shows a description failure and retries without rescanning sessions", async ({ page }) => {
   await open(page)
