@@ -38,7 +38,9 @@ export const resolveConnectWorkGoal = (
   agent: Pick<ConnectAgent, "host" | "id">,
   snapshots: WorkSnapshots
 ): Exclude<ConnectWorkGoalResolution, { readonly _tag: "unavailable" }> => {
-  const goals = snapshots.now.goals.filter((goal) => goal.state !== "completed" && sameAgent(agent, goal))
+  const goals = snapshots.now.goals.filter((goal) =>
+    goal.state !== "completed" && goal.state !== "abandoned" && sameAgent(agent, goal)
+  )
   if (goals.length === 0) return { _tag: "missing" }
   if (goals.length > 1) return { _tag: "ambiguous", goalIds: goals.map(({ id }) => id) }
   const goal = goals[0]

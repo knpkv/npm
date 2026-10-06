@@ -55,7 +55,8 @@ const terminalState = {
   blocked: false,
   review: false,
   deployed: true,
-  completed: true
+  completed: true,
+  abandoned: true
 } satisfies Readonly<Record<WorkState, boolean>>
 
 const terminal = (goal: WorkGoal): boolean => terminalState[goal.state]
