@@ -34,6 +34,24 @@ describe("findAccentStripes", () => {
     expect(declarations(".a { border-inline-start-width: thick; }")).toHaveLength(1)
   })
 
+  it("reads only the rule's own declarations and ignores !important", () => {
+    expect(
+      declarations(
+        ".card { border-style: solid; border-width: 0; border-left-width: 1px; .child { border-color: var(--rly-color-border-1); } }"
+      )
+    ).toEqual(["border-left-width: 1px"])
+    expect(
+      declarations(
+        ".row { border: 0 solid var(--rly-color-border-1); border-left-width: 1px; .child { border-color: var(--rly-color-held-ink); } }"
+      )
+    ).toEqual([])
+    expect(declarations(".col { border-left: 1px solid var(--rly-color-border-1) !important; }")).toEqual([])
+    expect(declarations(".col { border-left: none ! IMPORTANT; }")).toEqual([])
+    expect(declarations(".col { border-left: 4px solid red !important; }")).toEqual([
+      "border-left: 4px solid red !important"
+    ])
+  })
+
   it("checks a split side width against its rule's colour and ignores custom-property names", () => {
     expect(declarations(".card { border: 0 solid var(--rly-color-held-ink); border-left-width: 1px; }")).toEqual([
       "border-left-width: 1px"

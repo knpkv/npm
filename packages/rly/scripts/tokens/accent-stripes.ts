@@ -122,7 +122,10 @@ const widthEdges = (
     ]
 }
 
-/** The rule body around a declaration: from its block's `{` to the matching `}`. */
+/**
+ * The declarations of the rule that holds a declaration: from its block's `{` to the matching `}`,
+ * leaving out nested blocks, so a nested child's colour never stands in for its parent's.
+ */
 const ruleAround = (source: string, offset: number): string => {
   let depth = 0
   let start = 0
@@ -136,19 +139,33 @@ const ruleAround = (source: string, offset: number): string => {
       depth -= 1
     }
   }
-  const end = source.indexOf("}", offset)
-  return source.slice(start, end < 0 ? source.length : end)
+  let own = ""
+  depth = 0
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index]
+    if (character === "{") depth += 1
+    if (character === "}") {
+      if (depth === 0) break
+      depth -= 1
+      continue
+    }
+    if (depth === 0 && character !== "{") own += character
+  }
+  return own
 }
+
+/** A value without its `!important` priority, which says nothing about what the border draws. */
+const withoutPriority = (value: string): string => value.replace(/\s*!\s*important\s*$/i, "")
 
 /** Whether a rule states its border colour, and every colour it states is a neutral divider. */
 const statesNeutralColor = (rule: string): boolean => {
-  const colors = [...rule.matchAll(RULE_COLOR)].flatMap(([, property, value]) =>
-    property === undefined || value === undefined
-      ? []
-      : property.toLowerCase() === "border"
-      ? splitTopLevel(value.trim(), /\s/).filter((token) => !STYLE.test(token) && !LENGTH.test(token))
-      : splitTopLevel(value.trim(), /\s/)
-  )
+  const colors = [...rule.matchAll(RULE_COLOR)].flatMap(([, property, raw]) => {
+    if (property === undefined || raw === undefined) return []
+    const value = withoutPriority(raw.trim())
+    return property.toLowerCase() === "border"
+      ? splitTopLevel(value, /\s/).filter((token) => !STYLE.test(token) && !LENGTH.test(token))
+      : splitTopLevel(value, /\s/)
+  })
   return colors.length > 0 && colors.every((color) => NEUTRAL_COLOR.test(color))
 }
 
@@ -184,7 +201,7 @@ export const findAccentStripes = (path: string, source: string): ReadonlyArray<A
   for (const match of comparable.matchAll(DECLARATION)) {
     const [declaration, property, value] = match
     if (property === undefined || value === undefined || declaration === undefined) continue
-    if (!isStripe(property, value, ruleAround(comparable, match.index))) continue
+    if (!isStripe(property, withoutPriority(value.trim()), ruleAround(comparable, match.index))) continue
     const at = position(comparable, match.index)
     if (EXEMPT.test(lines[at.line - 1] ?? "")) continue
     violations.push({ ...at, declaration: declaration.trim(), path })

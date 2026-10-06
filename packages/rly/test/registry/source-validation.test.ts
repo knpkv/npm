@@ -197,6 +197,24 @@ describe("registry source validation", () => {
       )
     ).toContain("component Button never falls back to its size default when the prop is omitted")
     expect(mutate(source + helper("\"principal\""))).toEqual([])
+    // A nested helper inside the component counts no more than one outside it.
+    const nested = (fallback: string) =>
+      `\n  const pick = ({ size = ${fallback} }: { readonly size?: string }) => size\n  void pick\n`
+    const head = "}: ButtonProps): ReactElement => {"
+    expect(source).toContain(head)
+    const withNested = (base: string, fallback: string) => base.replace(head, head + nested(fallback))
+    expect(
+      mutate(
+        withNested(
+          source.replace("  size = RLY_BUTTON_DEFAULT_VARIANTS.size,\n", "  size,\n"),
+          "RLY_BUTTON_DEFAULT_VARIANTS.size"
+        )
+      )
+    ).toContain("component Button never falls back to its size default when the prop is omitted")
+    expect(mutate(withNested(source, "\"principal\""))).toEqual([])
+    // An aliased props binding still counts.
+    expect(mutate(source.replace("size = RLY_BUTTON_DEFAULT_VARIANTS.size", "size: chosen = \"principal\"")))
+      .toContain("component Button destructures size = \"principal\" but its declared default is dense")
     // The focused fixture is clean, and an implementation the registry cannot locate fails closed.
     expect(findRegistrySourceFailures(manifest, files)).toEqual([])
     expect(mutate(source.replace("export const Button = (", "export const Button = makeButton(), unused = (")))

@@ -433,9 +433,9 @@ const componentImplementation = (sourceFile: TypeScript.SourceFile, name: string
 }
 
 /**
- * The fallbacks for `prop` inside the component's implementation (its parameters, or props it
- * destructures in its body); bindings elsewhere in the file, such as a helper with the same prop
- * name, never count. Undefined when no implementation is found.
+ * The fallbacks for `prop` that the component's implementation gives its own props: in the props
+ * parameter's destructuring, or in a body destructure of that parameter, aliases included. Nested
+ * helpers and other objects never count. Undefined when no implementation is found.
  */
 const destructuredFallbacks = (
   source: string,
@@ -447,26 +447,45 @@ const destructuredFallbacks = (
   const sourceFile = TypeScript.createSourceFile(fileName, source, TypeScript.ScriptTarget.Latest, true)
   const implementation = componentImplementation(sourceFile, component)
   if (implementation.length === 0) return undefined
-  const visit = (node: TypeScript.Node): void => {
-    if (
-      TypeScript.isBindingElement(node)
-      && TypeScript.isIdentifier(node.name)
-      && node.name.text === prop
-      && node.propertyName === undefined
-      && node.initializer !== undefined
-    ) {
-      const initializer = node.initializer
-      fallbacks.push(
-        TypeScript.isStringLiteral(initializer)
-          ? { _tag: "Literal", value: initializer.text }
-          : TypeScript.isPropertyAccessExpression(initializer) && TypeScript.isIdentifier(initializer.expression)
-          ? { _tag: "Defaults", constant: initializer.expression.text, axis: initializer.name.text }
-          : { _tag: "Unsupported", text: initializer.getText(sourceFile) }
-      )
+  const fallbackOf = (initializer: TypeScript.Expression): Fallback =>
+    TypeScript.isStringLiteral(initializer)
+      ? { _tag: "Literal", value: initializer.text }
+      : TypeScript.isPropertyAccessExpression(initializer) && TypeScript.isIdentifier(initializer.expression)
+      ? { _tag: "Defaults", constant: initializer.expression.text, axis: initializer.name.text }
+      : { _tag: "Unsupported", text: initializer.getText(sourceFile) }
+  /** The binding for `prop` in a props pattern, aliased (`size: chosen = …`) or not. */
+  const collect = (pattern: TypeScript.BindingName): void => {
+    if (!TypeScript.isObjectBindingPattern(pattern)) return
+    for (const element of pattern.elements) {
+      const key = element.propertyName ?? element.name
+      if (!TypeScript.isIdentifier(key) || key.text !== prop) continue
+      if (element.initializer !== undefined) fallbacks.push(fallbackOf(element.initializer))
     }
-    TypeScript.forEachChild(node, visit)
   }
-  for (const node of implementation) visit(node)
+  const isFunctionScope = (node: TypeScript.Node): boolean =>
+    TypeScript.isFunctionLike(node) || TypeScript.isClassLike(node)
+  for (const implementationNode of implementation) {
+    const [propsParameter] = implementationNode.parameters
+    if (propsParameter === undefined) continue
+    // The props parameter destructured in place...
+    collect(propsParameter.name)
+    // ...or destructured from the props parameter in the body, never inside nested functions.
+    const propsName = TypeScript.isIdentifier(propsParameter.name) ? propsParameter.name.text : undefined
+    const visit = (node: TypeScript.Node): void => {
+      if (isFunctionScope(node)) return
+      if (
+        propsName !== undefined
+        && TypeScript.isVariableDeclaration(node)
+        && node.initializer !== undefined
+        && TypeScript.isIdentifier(unwrap(node.initializer))
+        && unwrap(node.initializer).getText(sourceFile) === propsName
+      ) {
+        collect(node.name)
+      }
+      TypeScript.forEachChild(node, visit)
+    }
+    if (implementationNode.body !== undefined) TypeScript.forEachChild(implementationNode.body, visit)
+  }
   return fallbacks
 }
 
