@@ -76,3 +76,16 @@
   flex: 1;
   min-block-size: 0;
 }
+
+/* A short viewport (or zoom) can't fit the pane: the drawer body scrolls and the pane takes its height. */
+@media (max-height: 40rem) {
+  .body {
+    overflow-y: auto;
+  }
+
+  .body > aside {
+    block-size: auto;
+    flex: none;
+    overflow: visible;
+  }
+}

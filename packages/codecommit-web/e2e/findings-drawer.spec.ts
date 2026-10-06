@@ -333,3 +333,31 @@ test("reopens the drawer on narrowing after a layout-forced close", async ({ pag
   await page.setViewportSize({ height: 900, width: 1280 })
   await expect(drawer).toBeVisible()
 })
+
+// Closing the palette that took over from the drawer returns focus to the drawer's trigger.
+test("returns focus to the trigger when the palette that replaced the drawer closes", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  await page.goto(detail)
+
+  const trigger = page.getByRole("button", { name: "Relay", exact: true })
+  await trigger.click()
+  await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  await page.keyboard.press("Control+p")
+  await expect(page.getByPlaceholder("Type a command...")).toBeFocused()
+  await page.keyboard.press("Escape")
+  await expect(trigger).toBeFocused()
+  await expect(page).toHaveURL(/\/accounts\/production\/prs\/12\?/)
+})
+
+// On a short viewport the drawer scrolls, so every Relay control stays reachable.
+test("keeps Relay controls reachable in the drawer on a short viewport", async ({ page }) => {
+  await page.setViewportSize({ height: 400, width: 1280 })
+  await serve(page)
+  await page.goto(detail)
+
+  await page.getByRole("button", { name: "Relay", exact: true }).click()
+  const run = page.getByRole("dialog", { name: "Relay" }).getByRole("button", { name: "Run Relay" })
+  await run.scrollIntoViewIfNeeded()
+  await expect(run).toBeInViewport()
+})

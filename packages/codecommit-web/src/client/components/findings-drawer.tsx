@@ -76,6 +76,17 @@ export function FindingsDrawer({
         )
         ;(first ?? other).focus()
       }
+      // Its own focus restore points into the closed drawer; when it goes and focus falls to the
+      // page body, hand focus to the drawer's return target instead.
+      const handoff = new MutationObserver(() => {
+        if (other.isConnected) return
+        handoff.disconnect()
+        // After that dialog's own focus restore has run.
+        window.requestAnimationFrame(() => {
+          if (document.activeElement === null || document.activeElement === document.body) returnFocus()?.focus()
+        })
+      })
+      handoff.observe(document.body, { childList: true, subtree: true })
     })
     observer.observe(document.body, { childList: true, subtree: true })
     return () => observer.disconnect()
