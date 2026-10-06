@@ -72,3 +72,41 @@ test(
     }
   }
 )
+
+test(
+  "keeps stage words inside 320 pixels, with ink on the blocking state and its weight kept in forced colors",
+  async ({
+    page
+  }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 900, width: 320 })
+      await page.goto(story("patterns-stagerail--words", forcedColors))
+
+      const rail = page.getByRole("list", { name: "Relay 2.4 stages" })
+      await expect(rail).toBeVisible()
+      await expect(page.getByRole("region")).toHaveCount(0)
+      await expect(rail.locator("[data-rly-stage-marker]")).toHaveCount(0)
+      const style = (selector: string) =>
+        rail
+          .locator(selector)
+          .first()
+          .evaluate((element) => ({
+            color: getComputedStyle(element).color,
+            weight: Number(getComputedStyle(element).fontWeight)
+          }))
+      const [blocked, quiet] = await Promise.all([
+        style("[data-rly-stage-word='blocked']"),
+        style("[data-rly-stage-word='quiet']")
+      ])
+      expect(blocked.weight).toBeGreaterThanOrEqual(600)
+      expect(quiet.weight).toBeLessThan(600)
+      if (forcedColors === "auto") expect(blocked.color).not.toBe(quiet.color)
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`stage-words-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
