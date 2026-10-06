@@ -18,6 +18,7 @@
 import { Effect, Schema } from "effect"
 import type * as SqlClient from "effect/sql/SqlClient"
 import * as SqlSchema from "effect/sql/SqlSchema"
+import type { ApprovalUnknownTag } from "../../../Domain.js"
 import { type CommentThreadJson, decodeCommentLocationJson } from "../commentLocations.js"
 import { cacheError, joinApprovedBy, UpsertInput } from "./internal.js"
 import { PullRequestAmbiguityError } from "./queries.js"
@@ -154,6 +155,22 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("updateDiffStats")
+      ),
+
+    /** Record that a re-read could not evaluate approval: the row's approval is only its last known value. */
+    markApprovalUnknown: (
+      awsAccountId: string,
+      id: string,
+      reason: ApprovalUnknownTag,
+      coordinates?: PullRequestCoordinates
+    ) =>
+      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+        Effect.andThen(
+          sql`UPDATE pull_requests SET approval_unknown_reason = ${reason}
+          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
+        ),
+        Effect.tap(() => publish),
+        cacheError("markApprovalUnknown")
       ),
 
     updateStatusAndClosedAt: (

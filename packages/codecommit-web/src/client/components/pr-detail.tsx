@@ -26,7 +26,13 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
-import { AwsRegion, PullRequestId } from "@knpkv/codecommit-core/Domain.js"
+import {
+  approvalOf,
+  approvalUnknownLabel,
+  approvalUnknownReasonText,
+  AwsRegion,
+  PullRequestId
+} from "@knpkv/codecommit-core/Domain.js"
 import {
   calculateHealthScore,
   type CategoryStatus,
@@ -521,7 +527,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     const firstComment = allComments.find((c) => c.author !== pr.author)
     const commentMs = firstComment !== undefined ? firstComment.date.getTime() - pr.creationDate.getTime() : null
     // Approval as review fallback: use lastModifiedDate as proxy for approval time
-    const hasNonAuthorApproval = pr.isApproved && pr.approvedBy.some((a) => a !== pr.author)
+    const hasNonAuthorApproval = approvalOf(pr)._tag === "Approved" && pr.approvedBy.some((a) => a !== pr.author)
     const approvalMs = hasNonAuthorApproval ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
     const ttfr = commentMs != null && approvalMs != null ? Math.min(commentMs, approvalMs) : (commentMs ?? approvalMs)
 
@@ -535,7 +541,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     const ttaf = feedbackDeltas.length > 0 ? feedbackDeltas.reduce((a, b) => a + b, 0) / feedbackDeltas.length : null
 
     return { timeToFirstReview: ttfr, timeToAddressFeedback: ttaf }
-  }, [commentsResult, pr.author, pr.creationDate, pr.lastModifiedDate, pr.isApproved, pr.approvedBy])
+  }, [commentsResult, pr])
 
   const hasAny = timeToMerge != null || timeToFirstReview != null || timeToAddressFeedback != null
   if (!hasAny) return null
@@ -620,6 +626,8 @@ interface ApproversCardProps {
     readonly fromTemplate?: string | undefined
   }>
   readonly approvedBy: ReadonlyArray<string>
+  /** The last evaluation failed, so each rule's `satisfied` is only its last known value. */
+  readonly approvalUnknown: boolean
   readonly knownUserArns: ReadonlyMap<string, string>
   readonly currentUser: string | undefined
   readonly repoAccountId: string
@@ -630,6 +638,7 @@ interface ApproversCardProps {
 
 function ApproversCard({
   approvalRules,
+  approvalUnknown,
   approvedBy,
   currentUser,
   knownUserArns,
@@ -704,7 +713,9 @@ function ApproversCard({
           </Text>
           {required &&
             approvalRules.length > 0 &&
-            (isSatisfied ? (
+            (approvalUnknown ? (
+              <StateLabel label={approvalUnknownLabel} size="compact" tone="neutral" />
+            ) : isSatisfied ? (
               <StateLabel label="Satisfied" size="compact" tone="positive" />
             ) : (
               <StateLabel label="Pending" size="compact" tone="caution" />
@@ -859,7 +870,7 @@ const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresent
         tone: "neutral",
         verdict: "Closed."
       }
-    case "OPEN":
+    case "OPEN": {
       if (!pr.isMergeable) {
         return {
           reason: `Resolve the conflict between ${pr.sourceBranch} and ${pr.destinationBranch} before merging.`,
@@ -867,7 +878,15 @@ const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresent
           verdict: "Resolve conflicts."
         }
       }
-      if (!pr.isApproved) {
+      const approval = approvalOf(pr)
+      if (approval._tag === "Unknown") {
+        return {
+          reason: approvalUnknownReasonText(approval.reason),
+          tone: "caution",
+          verdict: `${approvalUnknownLabel}.`
+        }
+      }
+      if (approval._tag === "Pending") {
         return {
           reason: "The branch is mergeable, but its provider approval is still pending.",
           tone: "caution",
@@ -879,6 +898,7 @@ const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresent
         tone: "positive",
         verdict: "Ready to merge."
       }
+    }
   }
 }
 
@@ -1487,13 +1507,20 @@ export function PRDetail() {
               </Link>
             ) : (
               <>
-                <Link className={styles.stateLink} to={`/?f=status:${pr.isApproved ? "approved" : "pending"}`}>
-                  <StateLabel
-                    label={pr.isApproved ? "Approved" : "Pending approval"}
-                    size="compact"
-                    tone={pr.isApproved ? "positive" : "caution"}
-                  />
-                </Link>
+                {approvalOf(pr)._tag === "Unknown" ? (
+                  <StateLabel label={approvalUnknownLabel} size="compact" tone="neutral" />
+                ) : (
+                  <Link
+                    className={styles.stateLink}
+                    to={`/?f=status:${approvalOf(pr)._tag === "Approved" ? "approved" : "pending"}`}
+                  >
+                    <StateLabel
+                      label={approvalOf(pr)._tag === "Approved" ? "Approved" : "Pending approval"}
+                      size="compact"
+                      tone={approvalOf(pr)._tag === "Approved" ? "positive" : "caution"}
+                    />
+                  </Link>
+                )}
                 <Link className={styles.stateLink} to={`/?f=status:${pr.isMergeable ? "mergeable" : "conflicts"}`}>
                   <StateLabel
                     label={pr.isMergeable ? "Mergeable" : "Conflict"}
@@ -1598,6 +1625,7 @@ export function PRDetail() {
             ].map((card) => (
               <ApproversCard
                 approvalRules={pr.approvalRules}
+                approvalUnknown={approvalOf(pr)._tag === "Unknown"}
                 approvedBy={pr.approvedBy}
                 currentUser={state.currentUser}
                 key={card.ruleName}

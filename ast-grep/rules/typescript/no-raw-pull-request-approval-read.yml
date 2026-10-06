@@ -23,8 +23,6 @@ ignores:
   - "packages/codecommit-core/src/CacheService/**"
   # Row <-> domain mappers copy the field unchanged.
   - "packages/codecommit-core/src/PRService/internal.ts"
-  # Follow-up: ui2 migrates the web client to approvalOf, then this line is removed.
-  - "packages/codecommit-web/src/client/**"
 
 note: |
   A pull request whose approval rules failed to evaluate keeps its last known `isApproved` and sets

@@ -17,11 +17,11 @@ import { subscriptionKey } from "../src/PRService/refreshResolve.js"
 /** A provider pull request as the refresh stream delivers it. */
 
 describe("fetchAndUpsertPRs", () => {
-  it.effect("keeps a stale cached PR whose re-read finds it open with approval unknown", () =>
+  it.effect("keeps a stale cached PR whose re-read finds it open with approval unknown, and records it", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
       const deleteCalls = yield* Ref.make(0)
-      const statusUpdates = yield* Ref.make(0)
+      const marked = yield* Ref.make<ReadonlyArray<readonly [string, string]>>([])
       const account = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
@@ -37,14 +37,14 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           findStaleOpen: () => Effect.succeed([staleOpenPR]),
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
-          updateStatusAndClosedAt: () => Ref.update(statusUpdates, (count) => count + 1),
+          markApprovalUnknown: (_, id, reason) => Ref.update(marked, (all) => [...all, [id, reason]]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
         Layer.mock(SubscriptionRepo, {})
       )
 
-      yield* fetchAndUpsertPRs({
+      const successfulScopes = yield* fetchAndUpsertPRs({
         state,
         enabledAccounts: [account],
         accountIdMap: new Map([["test-profile", "123456789012"]]),
@@ -53,9 +53,13 @@ describe("fetchAndUpsertPRs", () => {
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
-      // An unknown approval is not evidence the pull request is gone: it is still open, so its row stays.
+      // An unknown approval is not evidence the pull request is gone: it is still open, so its row stays,
+      // marked unknown, listed as unevaluated, and its scope is partial.
       expect(yield* Ref.get(deleteCalls)).toBe(0)
-      expect(yield* Ref.get(statusUpdates)).toBe(0)
+      expect(yield* Ref.get(marked)).toEqual([[staleOpenPR.id, "NotPermitted"]])
+      expect(successfulScopes).toEqual([])
+      expect((yield* SubscriptionRef.get(state)).unevaluatedPullRequests?.map((u) => u.pullRequestId))
+        .toEqual([staleOpenPR.id])
     }))
 
   const staleOpenPR = Schema.decodeSync(CachedPullRequest)({
@@ -432,6 +436,63 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([
         { profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }
       ])
+    }))
+
+  it.effect("sends no pool notification while approval stays unknown across refreshes", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const notified = yield* Ref.make<ReadonlyArray<string>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const pool = (members: ReadonlyArray<string>) => [{
+        ruleName: "reviewers",
+        requiredApprovals: 1,
+        poolMembers: members,
+        poolMemberArns: [],
+        satisfied: false
+      }]
+      // The cache keeps its last known rules (alice not in the pool); the fresh rules add alice.
+      const cachedRow = Schema.decodeSync(CachedPullRequest)({
+        ...Schema.encodeSync(CachedPullRequest)(staleOpenPR),
+        id: "36",
+        approvalRules: JSON.stringify(pool([]))
+      })
+      const fresh = Schema.decodeSync(PullRequest)({
+        ...Schema.encodeSync(PullRequest)(unknownPR("36")),
+        approvalRules: pool(["alice"])
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, { getPullRequests: () => Stream.make(fresh) }),
+        Layer.mock(PullRequestRepo, {
+          findByCoordinates: () => Effect.succeed(Option.some(cachedRow)),
+          upsert: () => Effect.void,
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {
+          add: (n) => Ref.update(notified, (all) => [...all, n.type]),
+          addSystem: () => Effect.void
+        }),
+        Layer.mock(SubscriptionRepo, { subscribe: () => Effect.void })
+      )
+      const refresh = Effect.gen(function*() {
+        return yield* fetchAndUpsertPRs({
+          state,
+          enabledAccounts: [account],
+          accountIdMap: new Map([["test-profile", "123456789012"]]),
+          subscribedRef: yield* Ref.make(
+            new Set([subscriptionKey("123456789012", "36", "example-repository", "us-east-1")])
+          ),
+          currentUser: "alice",
+          staleThreshold: "2026-08-03T00:00:00Z"
+        }).pipe(Effect.provide(dependencies))
+      })
+      yield* refresh
+      yield* refresh
+      expect((yield* Ref.get(notified)).filter((type) => type === "approval_requested")).toEqual([])
     }))
 
   it.effect("still reconciles an unrelated closed row when another pull request's approval is unknown", () =>

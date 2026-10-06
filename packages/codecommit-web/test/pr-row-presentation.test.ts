@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 
 import {
   pullRequestRowDecision,
+  pullRequestRowStatus,
   pullRequestRowTimeLabel,
   pullRequestRowTimestamp
 } from "../src/client/components/pr-row-presentation.js"
@@ -36,5 +37,13 @@ describe("pull request row presentation", () => {
     expect(pullRequestRowTimeLabel(pr, false, new Date("2026-08-11T18:30:00.000Z"))).toBe(
       "Opened 01.08.2026"
     )
+  })
+
+  it("labels an unknown approval as unknown, whatever its last known value", () => {
+    const open: { readonly isMergeable: boolean; readonly status: "OPEN" } = { isMergeable: true, status: "OPEN" }
+    expect(pullRequestRowStatus({ ...open, isApproved: true, approvalUnknown: { _tag: "NotPermitted" } }))
+      .toEqual({ label: "Approval unknown", tone: "neutral" })
+    expect(pullRequestRowStatus({ ...open, isApproved: true })).toEqual({ label: "Approved", tone: "positive" })
+    expect(pullRequestRowStatus({ ...open, isApproved: false })).toEqual({ label: "Pending", tone: "caution" })
   })
 })

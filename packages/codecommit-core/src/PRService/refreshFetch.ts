@@ -19,7 +19,12 @@ import {
 } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
-import { approvalUnknownReasonText, type PullRequestRefreshScope, type UnevaluatedPullRequest } from "../Domain.js"
+import {
+  type ApprovalUnknownReason,
+  approvalUnknownReasonText,
+  type PullRequestRefreshScope,
+  type UnevaluatedPullRequest
+} from "../Domain.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
 
@@ -136,6 +141,41 @@ export const fetchAndUpsertPRs = (params: {
     )
 
     const unevaluated = yield* Ref.make<ReadonlyArray<UnevaluatedPullRequest>>([])
+    // A stale row re-read with approval unknown keeps only its last known approval: mark the row, list it
+    // as unevaluated, and count its scope as partial, as for a listed pull request.
+    const recordStaleApprovalUnknown = (
+      pr: {
+        readonly awsAccountId: string
+        readonly accountProfile: string
+        readonly accountRegion: string
+        readonly id: string
+        readonly repositoryName: string
+      },
+      reason: ApprovalUnknownReason | undefined
+    ) =>
+      reason === undefined ? Effect.void : Effect.gen(function*() {
+        yield* prRepo.markApprovalUnknown(pr.awsAccountId, pr.id, reason._tag, {
+          repositoryName: pr.repositoryName,
+          accountRegion: pr.accountRegion
+        })
+        yield* Ref.update(
+          partialScopes,
+          (scopes) => new Set(scopes).add(accountRegionKey(pr.accountProfile, pr.accountRegion))
+        )
+        // A stale row is reconciled only for an enabled account's scope, which supplies its typed profile and region.
+        for (const account of enabledAccounts.filter((a) => a.profile === pr.accountProfile)) {
+          for (const region of (account.regions ?? []).filter((r) => r === pr.accountRegion)) {
+            yield* Ref.update(unevaluated, (all) => [...all, {
+              profile: account.profile,
+              region,
+              pullRequestId: pr.id,
+              repositoryName: pr.repositoryName,
+              message: approvalUnknownReasonText(reason)
+            }])
+          }
+        }
+      })
+
     yield* Stream.mergeAll(streams, { concurrency: 2 }).pipe(
       Stream.runForEach(({ awsAccountId, label, pr, profile, region }) =>
         Effect.gen(function*() {
@@ -175,7 +215,10 @@ export const fetchAndUpsertPRs = (params: {
             )
             if (Option.isSome(cached)) {
               const notifications = diffPR(cached.value, prToUpsertInput(pr, awsAccountId), awsAccountId)
-              const poolNotifications = diffApprovalPools(
+              // While approval is unknown the cache keeps its last known rules, so comparing them with
+              // the fresh ones would repeat the same notification every refresh; membership is compared
+              // once evaluation recovers.
+              const poolNotifications = pr.approvalUnknown !== undefined ? [] : diffApprovalPools(
                 cached.value.approvalRules ?? [],
                 pr.approvalRules,
                 currentUser,
@@ -251,7 +294,7 @@ export const fetchAndUpsertPRs = (params: {
                       pr.id,
                       pr.repositoryName,
                       pr.accountRegion
-                    )
+                    ).pipe(Effect.andThen(recordStaleApprovalUnknown(pr, detail.approvalUnknown)))
                     : Effect.void
                 ),
                 Effect.catch(() =>

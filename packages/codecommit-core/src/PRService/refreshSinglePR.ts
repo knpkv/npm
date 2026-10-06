@@ -284,7 +284,8 @@ export const makeRefreshSinglePR = (
 
     if (isSubscribed && Option.isSome(cachedPR)) {
       const prNotifications = diffPR(cachedPR.value, freshUpsert, durableAccountId)
-      const poolNotifications = diffApprovalPools(
+      // The cache keeps its last known rules while approval is unknown; compare once it recovers.
+      const poolNotifications = detail.approvalUnknown !== undefined ? [] : diffApprovalPools(
         cachedPR.value.approvalRules ?? [],
         freshUpsert.approvalRules,
         currentState.currentUser,

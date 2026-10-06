@@ -121,6 +121,21 @@ describe("workbenchQueue", () => {
     expect(queue.summary._tag === "Waiting" ? formatSpan(queue.summary.oldest.openMs) : "").toBe("3d")
   })
 
+  it("calls an own PR with unknown approval unverified, never ready, even with last known satisfied rules", () => {
+    const row = workbenchQueue(
+      [make({
+        author: "andrey",
+        approvalRules: [rule("Approvals", 1, ["ana"], true)],
+        approvalUnknown: { _tag: "Throttled" },
+        id: "u",
+        isApproved: true
+      })],
+      byName("andrey"),
+      NOW
+    ).rows[0]
+    expect(row?.stuck).toBe("unverified")
+  })
+
   it("names the worst reason an own PR is stuck: conflicts before quiet before approvals", () => {
     const stuck = (overrides: Parameters<typeof make>[0]) =>
       workbenchQueue([make({ author: "andrey", ...overrides })], byName("andrey"), NOW).rows[0]?.stuck

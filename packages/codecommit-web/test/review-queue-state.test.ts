@@ -127,3 +127,15 @@ describe("shared queue filter contract", () => {
     expect(matchesQueueFilter(pullRequest, { key: "account", value: "unknown" })).toBe(false)
   })
 })
+
+describe("approval filters with an unknown approval", () => {
+  it("lists an unknown approval as neither approved nor pending", () => {
+    const unknown = Schema.decodeSync(PullRequest)({
+      ...Schema.encodeSync(PullRequest)(pullRequest),
+      isApproved: true,
+      approvalUnknown: { _tag: "NotPermitted" }
+    })
+    expect(matchesQueueFilter(unknown, { key: "status", value: "approved" })).toBe(false)
+    expect(matchesQueueFilter(unknown, { key: "status", value: "pending" })).toBe(false)
+  })
+})

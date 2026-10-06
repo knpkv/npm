@@ -8,7 +8,7 @@
  * to the client yet), *quiet* runs from the last modification. An unknown caller identity is
  * reported as `Unknown`, never as an empty queue.
  */
-import { identityMatches } from "@knpkv/codecommit-core/Domain.js"
+import { approvalOf, identityMatches } from "@knpkv/codecommit-core/Domain.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { Data } from "effect"
 
@@ -248,9 +248,12 @@ export const ruleProgress = (pullRequest: Domain.PullRequest): RuleProgress | un
 const stuckReason = (pullRequest: Domain.PullRequest, quietMs: number): StuckReason => {
   if (!pullRequest.isMergeable) return "conflicts"
   if (quietMs > QUIET_AFTER_MS) return "quiet"
+  const approval = approvalOf(pullRequest)
+  // An unknown approval has only last known rules, so it can be neither ready nor waiting on approvals.
+  if (approval._tag === "Unknown") return "unverified"
   if (pullRequest.approvalRules.length === 0) return "ready"
   if (!pullRequest.approvalRules.every((rule) => rule.satisfied)) return "approvals"
-  return pullRequest.isApproved ? "ready" : "unverified"
+  return approval._tag === "Approved" ? "ready" : "unverified"
 }
 
 /**

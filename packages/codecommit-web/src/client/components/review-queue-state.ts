@@ -1,4 +1,4 @@
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import * as Predicate from "effect/Predicate"
 import type { FilterEntry, FilterKey } from "../atoms/ui.js"
 import { extractScope } from "../utils/extractScope.js"
@@ -83,10 +83,11 @@ export const matchesQueueFilter = (pr: Domain.PullRequest, entry: FilterEntry): 
     }
     case "status":
       switch (entry.value) {
+        // An unknown approval is neither approved nor pending.
         case "approved":
-          return pr.status === "OPEN" && pr.isApproved
+          return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "Approved"
         case "pending":
-          return pr.status === "OPEN" && !pr.isApproved
+          return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "Pending"
         case "mergeable":
           return pr.status === "OPEN" && pr.isMergeable
         case "conflicts":
