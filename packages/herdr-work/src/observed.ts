@@ -133,7 +133,7 @@ const observedSomething = ({ agent, pullRequest, unknown }: WorkGoalObserved): b
 
 /**
  * Adds observed facts to the `now` window, for each goal something was
- * observed about. Earlier windows are history and stay as recorded. Entries
+ * observed about (`observed` is present, possibly empty, whenever it fits). Earlier windows are history and stay as recorded. Entries
  * are kept in the window's goal order (most recently updated first) while the
  * encoded snapshots stay within `maxBytes`; the rest are counted in
  * `observedOmitted`, never silently dropped.
@@ -154,21 +154,20 @@ export const withObservedFacts = (
     }))
   )
   const failureMap = bySubject(failures.filter(({ since }) => since <= asOf))
-  if (factMap.size === 0 && failureMap.size === 0) return snapshots
   const candidates: ReadonlyArray<WorkGoalObservedEntry> = snapshots.now.goals.flatMap((goal) => {
     const observed = observeWith(goal, factMap, failureMap, snapshots.observedAt)
     return observedSomething(observed) ? [{ goalId: goal.id, ...observed }] : []
   })
-  if (candidates.length === 0) return snapshots
   const encode = Schema.encodeSync(WorkSnapshots)
   const withEntries = (kept: ReadonlyArray<WorkGoalObservedEntry>): WorkSnapshots => {
     const omitted = candidates.length - kept.length
-    if (omitted === 0) return { ...snapshots, now: { ...snapshots.now, observed: kept } }
-    if (kept.length === 0) return { ...snapshots, now: { ...snapshots.now, observedOmitted: omitted } }
-    return { ...snapshots, now: { ...snapshots.now, observed: kept, observedOmitted: omitted } }
+    const now = { ...snapshots.now, observed: kept }
+    return { ...snapshots, now: omitted === 0 ? now : { ...now, observedOmitted: omitted } }
   }
   // Estimate greedily, then check the real encoding and drop entries until it
-  // fits; if not even the omission count fits, return the bare snapshots.
+  // fits. `observed` is always present, empty when nothing was observed; if
+  // not even that fits, the snapshots carry no overlay keys at all, which a
+  // reader treats as "live state not available".
   let used = encodedBytes(encode(snapshots)) + 64
   const kept: Array<WorkGoalObservedEntry> = []
   for (const entry of candidates) {

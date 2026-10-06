@@ -298,10 +298,10 @@ describe("observed facts", () => {
       expect(trimmed.now.observed?.map(({ goalId }) => goalId)).toEqual(["goal-pr9", "goal-pr8"])
       expect(trimmed.now.observedOmitted).toBe(1)
       expect(size(trimmed)).toBeLessThanOrEqual(budget)
-      const countOnly = withObservedFacts(base, facts, failures, size(base) + 24)
-      expect(countOnly.now.observed).toBeUndefined()
+      const countOnly = withObservedFacts(base, facts, failures, size(base) + 48)
+      expect(countOnly.now.observed).toEqual([])
       expect(countOnly.now.observedOmitted).toBe(3)
-      expect(size(countOnly)).toBeLessThanOrEqual(size(base) + 24)
+      expect(size(countOnly)).toBeLessThanOrEqual(size(base) + 48)
       // Not even the count fits: the snapshots come back unchanged, never over budget.
       expect(withObservedFacts(base, facts, failures, size(base))).toEqual(base)
     })))
@@ -331,7 +331,7 @@ describe("observed facts", () => {
       yield* work.observe([
         at(6_000, { _tag: "unknown", reason: "gh: 502", source: "github", subject: "github:knpkv/npm#7" })
       ])
-      expect((yield* work.snapshots(2_000)).now.observed).toBeUndefined()
+      expect((yield* work.snapshots(2_000)).now.observed).toEqual([])
       const atMerge = (yield* work.snapshots(5_500)).now.observed?.[0]
       expect(atMerge?.displayState).toBe("completed")
       expect(atMerge?.unknown).toBeNull()
@@ -346,5 +346,14 @@ describe("observed facts", () => {
       yield* work.observe([at(300, pullRequest())])
       expect((yield* work.observe([at(400, pullRequest({ repository: "KNPKV/npm" }))])).outcomes[0]?._tag)
         .toBe("unchanged")
+    })))
+
+  it.effect("always says whether live state is available: an empty overlay when nothing was observed", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* work.record({ eventId: "goal-pr7.1", goal, occurredAt: 1_000, version: "herdr.work.event.v1" })
+      const now = (yield* work.snapshots(10_000)).now
+      expect(now.observed).toEqual([])
+      expect(now.observedOmitted).toBeUndefined()
     })))
 })
