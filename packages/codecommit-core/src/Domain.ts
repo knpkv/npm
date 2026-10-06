@@ -609,6 +609,10 @@ export interface AppState {
   readonly error?: string | undefined
   readonly lastUpdated?: Date
   readonly currentUser?: string
+  /**
+   * Unused. codecommit-web no longer sets or reads it; its review count is the client-side
+   * `yourReviewCount` (workbench-queue.ts). Kept for L2-7, which retires or replaces it.
+   */
   readonly pendingReviewCount?: number
   /** Monotonic sequence incremented when a list refresh starts. */
   readonly refreshGeneration?: number

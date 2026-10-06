@@ -1,0 +1,136 @@
+/* Workbench queue rail: a flat region; rows separated by hairlines; only blocking facts carry ink. */
+
+.region {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  /* Fits the viewport beside a long pull request; the list scrolls inside a closed box. */
+  max-block-size: calc(100dvh - var(--app-header-block-size, 4.5rem) - var(--rly-space-32));
+  min-inline-size: 0;
+}
+
+.head {
+  align-items: center;
+  border-block-end: 1px solid var(--rly-color-border-1);
+  display: flex;
+  min-block-size: 48px;
+  padding-inline: var(--rly-space-16);
+}
+
+.title {
+  font-size: 1.0625rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.count {
+  color: var(--rly-color-text-2);
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+
+.body {
+  align-content: start;
+  display: grid;
+  gap: var(--rly-space-16);
+  overflow-y: auto;
+  padding: var(--rly-space-16) var(--rly-space-8);
+}
+
+.summary {
+  margin: 0;
+  padding-inline: var(--rly-space-8);
+}
+
+.summary strong {
+  font-weight: 600;
+}
+
+.number {
+  font-variant-numeric: tabular-nums;
+}
+
+.groups {
+  display: grid;
+  gap: var(--rly-space-24);
+}
+
+.group {
+  display: grid;
+  gap: var(--rly-space-4);
+}
+
+.groupTitle {
+  font-size: 0.875rem;
+  font-weight: 600;
+  margin: 0;
+  padding-inline: var(--rly-space-8);
+}
+
+.rows {
+  display: grid;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.row {
+  border-block-end: 1px solid var(--rly-color-border-1);
+  color: inherit;
+  display: grid;
+  gap: var(--rly-space-2) var(--rly-space-12);
+  grid-template-areas: "repo age" "title title" "caption caption";
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: var(--rly-space-8);
+  text-decoration: none;
+}
+
+.row:hover {
+  background: var(--rly-color-surface-2);
+}
+
+.row[aria-current="page"] {
+  background: var(--rly-color-surface-2);
+  outline: 1px solid var(--rly-color-border-2);
+  outline-offset: -1px;
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: -2px;
+}
+
+.repo {
+  color: var(--rly-color-text-2);
+  font-size: 0.8125rem;
+  grid-area: repo;
+}
+
+.age {
+  font-variant-numeric: tabular-nums;
+  grid-area: age;
+}
+
+.rowTitle {
+  font-weight: 500;
+  grid-area: title;
+  overflow-wrap: anywhere;
+}
+
+.caption {
+  color: var(--rly-color-text-2);
+  font-size: 0.8125rem;
+  grid-area: caption;
+}
+
+.blocking {
+  color: var(--rly-color-blocked-ink);
+}
+
+.empty {
+  color: var(--rly-color-text-2);
+  margin: 0;
+  padding-inline: var(--rly-space-8);
+}

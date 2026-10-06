@@ -6,6 +6,7 @@ import {
   hasFallbackSandboxCollision,
   isReusableSandbox,
   isStoppingSandbox,
+  ownsEnterKey,
   reviewApiAccountId,
   sandboxAccountIdForPullRequest,
   sandboxMatchesPullRequest,
@@ -203,5 +204,18 @@ describe("PR detail coordinates", () => {
       region: "us-east-1"
     })
     expect(exact).toEqual({ pullRequest: other, ambiguous: false })
+  })
+})
+
+describe("PR page Enter shortcut", () => {
+  it("leaves Enter to a focused link or button, and keeps it on the page body", () => {
+    expect(["A", "BUTTON", "SELECT", "SUMMARY"].map((tagName) => ownsEnterKey({ tagName }))).toEqual([
+      true,
+      true,
+      true,
+      true
+    ])
+    expect(ownsEnterKey({ tagName: "BODY" })).toBe(false)
+    expect(ownsEnterKey(null)).toBe(false)
   })
 })

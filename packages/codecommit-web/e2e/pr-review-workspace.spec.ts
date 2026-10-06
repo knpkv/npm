@@ -161,7 +161,6 @@ const routeReviewWorkspace = async (
       accounts: [{ ...activePullRequest.account, enabled: true }],
       currentUser: "reviewer",
       lastUpdated: "2026-08-12T09:30:00.000Z",
-      pendingReviewCount: 1,
       pullRequests: [{
         ...activePullRequest,
         commentCount: options?.commentCount?.() ?? activePullRequest.commentCount
@@ -1136,7 +1135,6 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
         accounts: [{ ...pullRequest.account, enabled: true }],
         currentUser: "reviewer",
         lastUpdated: "2026-08-12T09:31:00.000Z",
-        pendingReviewCount: 1,
         pullRequests: [{ ...pullRequest, commentCount }],
         sandboxes: [],
         status: "idle"
@@ -1654,7 +1652,6 @@ test("reloads after a completed manual refresh without refetching for ordinary S
           accounts: [{ ...pullRequest.account, enabled: true }],
           currentUser: "reviewer",
           lastUpdated: fetchedAt,
-          pendingReviewCount: 1,
           pullRequests: [{ ...pullRequest, fetchedAt }],
           sandboxes: [],
           status: "idle"
@@ -1869,7 +1866,6 @@ test("invalidates approver refreshes once per observed head without polling chur
           accounts: [{ ...pullRequest.account, enabled: true }],
           currentUser: "reviewer",
           lastUpdated: pullRequest.fetchedAt,
-          pendingReviewCount: 1,
           pullRequests: [pullRequest],
           sandboxes: [],
           status: "idle"
@@ -1963,7 +1959,6 @@ test("scopes file selection to the exact pull request while preserving same-revi
           accounts: [{ ...pullRequest.account, enabled: true }],
           currentUser: "reviewer",
           lastUpdated: pullRequest.fetchedAt,
-          pendingReviewCount: 2,
           pullRequests: [pullRequest, secondPullRequest],
           sandboxes: [],
           status: "idle"
@@ -2092,7 +2087,6 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
           accounts: [{ ...pullRequest.account, enabled: true }],
           currentUser: "reviewer",
           lastUpdated: pullRequest.fetchedAt,
-          pendingReviewCount: 2,
           pullRequests: [pullRequest, secondPullRequest],
           sandboxes: [],
           status: "idle"
@@ -2182,7 +2176,6 @@ test("shows a mode-only change even when file text is unchanged", async ({ page 
           accounts: [{ ...pullRequest.account, enabled: true }],
           currentUser: "reviewer",
           lastUpdated: pullRequest.fetchedAt,
-          pendingReviewCount: 1,
           pullRequests: [pullRequest],
           sandboxes: [],
           status: "idle"
@@ -2239,7 +2232,6 @@ test("reflects loaded exceptional content states in the file tree", async ({ pag
           accounts: [{ ...pullRequest.account, enabled: true }],
           currentUser: "reviewer",
           lastUpdated: pullRequest.fetchedAt,
-          pendingReviewCount: 1,
           pullRequests: [pullRequest],
           sandboxes: [],
           status: "idle"
@@ -2317,7 +2309,6 @@ test("uses a bounded fallback for newline- and byte-dense files", async ({ page 
           accounts: [{ ...pullRequest.account, enabled: true }],
           currentUser: "reviewer",
           lastUpdated: pullRequest.fetchedAt,
-          pendingReviewCount: 1,
           pullRequests: [pullRequest],
           sandboxes: [],
           status: "idle"
@@ -2394,7 +2385,6 @@ test("renders small disjoint and large append-only changes within the complexity
           accounts: [{ ...pullRequest.account, enabled: true }],
           currentUser: "reviewer",
           lastUpdated: pullRequest.fetchedAt,
-          pendingReviewCount: 1,
           pullRequests: [pullRequest],
           sandboxes: [],
           status: "idle"
@@ -2458,7 +2448,6 @@ test("evicts inactive file content while retaining same-file rerenders", async (
           accounts: [{ ...pullRequest.account, enabled: true }],
           currentUser: "reviewer",
           lastUpdated: pullRequest.fetchedAt,
-          pendingReviewCount: 1,
           pullRequests: [pullRequest],
           sandboxes: [],
           status: "idle"
