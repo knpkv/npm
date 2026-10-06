@@ -38,3 +38,21 @@ invalid:
     for (let index = 0; index < 500; index++) {
       insert.run(index)
     }
+  - |
+    database.exec("BEGIN")
+    database.exec("COMMIT")
+    for (let index = 0; index < 260; index++) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index)
+    }
+  - |
+    other.exec("BEGIN")
+    for (let index = 0; index < 260; index++) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index)
+    }
+    other.exec("COMMIT")
+  - |
+    other.exec("BEGIN")
+    const insert = database.prepare("INSERT INTO rows VALUES (?)")
+    for (let index = 0; index < 500; index++) {
+      insert.run(index)
+    }

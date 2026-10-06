@@ -22,13 +22,19 @@ rule:
   inside:
     kind: for_statement
     stopBy: end
+    # Exempt only while a transaction is open on the same connection: the
+    # nearest earlier BEGIN on $DB, with no COMMIT or ROLLBACK on $DB after it.
     not:
       follows:
         kind: expression_statement
         has:
-          kind: call_expression
+          pattern: $DB.exec($$$)
           regex: "\\.exec\\(\\s*.BEGIN"
-        stopBy: end
+        stopBy:
+          kind: expression_statement
+          has:
+            pattern: $DB.exec($$$)
+            regex: "\\.exec\\(\\s*.(COMMIT|ROLLBACK|END)"
   not:
     inside:
       kind: call_expression

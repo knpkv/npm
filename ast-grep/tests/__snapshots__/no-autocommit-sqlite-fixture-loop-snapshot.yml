@@ -47,3 +47,70 @@ snapshots:
         style: secondary
         start: 62
         end: 223
+  ? |
+    database.exec("BEGIN")
+    database.exec("COMMIT")
+    for (let index = 0; index < 260; index++) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index)
+    }
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(index)
+        style: primary
+        start: 93
+        end: 151
+      - source: |-
+          for (let index = 0; index < 260; index++) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(index)
+          }
+        style: secondary
+        start: 47
+        end: 153
+  ? |
+    other.exec("BEGIN")
+    const insert = database.prepare("INSERT INTO rows VALUES (?)")
+    for (let index = 0; index < 500; index++) {
+      insert.run(index)
+    }
+  : labels:
+      - source: insert.run(index)
+        style: primary
+        start: 129
+        end: 146
+      - source: const insert = database.prepare("INSERT INTO rows VALUES (?)")
+        style: secondary
+        start: 20
+        end: 82
+      - source: |
+          other.exec("BEGIN")
+          const insert = database.prepare("INSERT INTO rows VALUES (?)")
+          for (let index = 0; index < 500; index++) {
+            insert.run(index)
+          }
+        style: secondary
+        start: 0
+        end: 149
+      - source: |-
+          for (let index = 0; index < 500; index++) {
+            insert.run(index)
+          }
+        style: secondary
+        start: 83
+        end: 148
+  ? |
+    other.exec("BEGIN")
+    for (let index = 0; index < 260; index++) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index)
+    }
+    other.exec("COMMIT")
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(index)
+        style: primary
+        start: 66
+        end: 124
+      - source: |-
+          for (let index = 0; index < 260; index++) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(index)
+          }
+        style: secondary
+        start: 20
+        end: 126
