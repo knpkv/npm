@@ -720,6 +720,16 @@ body,
   opacity: 0.65;
 }
 
+.jcf-scrim {
+  display: none;
+}
+
+@media (max-width: 1100px) {
+  .jcf-scrim {
+    display: block;
+  }
+}
+
 .jcf-editor {
   grid-column: 2;
   min-width: 0;
@@ -1007,7 +1017,18 @@ body,
     position: static;
   }
 
+  /* A sheet, not a floating panel: the page behind it dims and stops taking input. */
+  .jcf-scrim {
+    /* The same scrim as rly's Sheet overlay. */
+    background: var(--rly-color-text-1);
+    opacity: 0.3;
+    inset: 0;
+    position: fixed;
+    z-index: 4;
+  }
+
   .jcf-editor {
+    border: 1px solid var(--rly-color-border-2);
     grid-column: 1;
     position: fixed;
     inset: var(--rly-space-16);

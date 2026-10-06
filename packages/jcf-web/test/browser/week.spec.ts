@@ -645,6 +645,8 @@ test("Jira, Clockify and suggestions are separate layers with provider totals", 
   await layers.getByRole("button", { name: "Overlap", exact: true }).click()
   await expect(page.locator(".jcf-block-gap")).toHaveCount(0)
   await layers.getByRole("button", { name: "Jira entries", exact: true }).click()
+  // On a phone the agent panel is a sheet over an inert page: close it before using the layers.
+  await page.getByRole("complementary", { name: "Agent conversation" }).getByRole("button", { name: "Close" }).click()
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.locator(".jcf-agenda-entry[data-source=\"jira\"]")).toBeVisible()
   await layers.getByRole("button", { name: "Clockify entries", exact: true }).click()

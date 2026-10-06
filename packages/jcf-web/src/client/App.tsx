@@ -118,7 +118,17 @@ export const App = () => {
   const [agentSettingsOpen, setAgentSettingsOpen] = useState(false)
   const [agentSettingsSaving, setAgentSettingsSaving] = useState(false)
   const [quickApproval, setQuickApproval] = useState(false)
+  // Below 1100px the editor is a bottom sheet over the week: a scrim covers the page, which is
+  // inert behind it, so focus and clicks stay in the sheet until it closes.
+  const [narrowSheet, setNarrowSheet] = useState(() => window.matchMedia("(max-width: 1100px)").matches)
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 1100px)")
+    const change = () => setNarrowSheet(query.matches)
+    query.addEventListener("change", change)
+    return () => query.removeEventListener("change", change)
+  }, [])
   const [open, setOpen] = useState<OpenPanel | null>(null)
+  const sheetOpen = narrowSheet && open !== null
   const [theme, setTheme] = useState<RlyTheme>("system")
   const [readAt, setReadAt] = useState<string | null>(null)
   useEffect(() => {
@@ -217,7 +227,7 @@ export const App = () => {
     <ThemeProvider className="jcf-shell" theme={theme}>
       <PortalProvider>
         <main className="jcf-app">
-          <header className="jcf-masthead">
+          <header className="jcf-masthead" inert={sheetOpen}>
             <Text as="h1" variant="section-title">
               Jira and Clockify week
             </Text>
@@ -232,7 +242,7 @@ export const App = () => {
             </p>
             <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} value={theme} />
           </header>
-          <div className="jcf-bar" role="toolbar" aria-label="Week controls">
+          <div className="jcf-bar" role="toolbar" aria-label="Week controls" inert={sheetOpen}>
             <div className="jcf-bar-group" role="group" aria-label="Week">
               <Button
                 aria-label="Previous week"
@@ -353,6 +363,7 @@ export const App = () => {
           )}
           <div className="jcf-workspace" data-editing={open !== null}>
             <Region
+              inert={sheetOpen}
               className="jcf-week-region"
               title={plan === null ? "Your week" : weekLabel(plan.days)}
               actions={
@@ -537,6 +548,15 @@ export const App = () => {
               </aside>
             ) : null}
 
+            {sheetOpen ? (
+              <div
+                aria-hidden="true"
+                className="jcf-scrim"
+                onClick={() => {
+                  if (open?.kind === "agent" || !writing) setOpen(null)
+                }}
+              />
+            ) : null}
             {open === null ? null : (
               <EditorFrame
                 notice={plan === null ? undefined : feedback}
@@ -633,7 +653,7 @@ export const App = () => {
           </div>
 
           {plan === null ? null : (
-            <div className="jcf-lanes">
+            <div className="jcf-lanes" inert={sheetOpen}>
               {plan.withheld.length === 0 ? null : (
                 <Region className="jcf-lane" count={plan.withheld.length} title="Low-confidence matches">
                   <p className="jcf-muted">

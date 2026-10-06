@@ -187,3 +187,18 @@ test("a failed read says what is shown and marks the totals as old", async ({ pa
   await expect(page.getByRole("group", { name: "Week totals" })).toContainText("Last read failed: totals are from")
   await expect(page.locator(".jcf-read-at")).toHaveText("Last read failed")
 })
+
+// #526 review: at 768 the editor floated over the agenda with nothing behind it. Below 1100px it is
+// a sheet: a scrim covers the week, the page is inert behind it, and the scrim closes it.
+test("below 1100px the editor opens as a sheet over an inert page", async ({ page }) => {
+  await open(page, 768)
+  await page.locator(".jcf-agenda-entry[data-kind=\"proposable\"]").first().click()
+  const editor = page.getByRole("complementary", { name: "Time entry editor" })
+  await expect(editor).toBeVisible()
+  await expect(page.locator(".jcf-scrim")).toBeVisible()
+  expect(await page.locator(".jcf-week-region").evaluate((region) => region.closest("[inert]") !== null)).toBe(true)
+  await page.keyboard.press("Tab")
+  expect(await page.evaluate(() => document.activeElement?.closest(".jcf-editor") !== null)).toBe(true)
+  await page.locator(".jcf-scrim").click({ position: { x: 10, y: 10 } })
+  await expect(editor).toHaveCount(0)
+})
