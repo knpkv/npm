@@ -15,7 +15,9 @@
   inline-size: min(calc(100% - 2.5rem), 80rem);
   flex: 1 1 auto;
   margin-inline: auto;
-  padding-block: clamp(3rem, 7vw, 5.5rem);
+  /* Shared with sticky children (the workbench rail) that must fit above it at the bottom of the page. */
+  --app-main-padding-block-end: clamp(3rem, 7vw, 5.5rem);
+  padding-block: clamp(3rem, 7vw, 5.5rem) var(--app-main-padding-block-end);
 }
 
 /* Workbench routes: rail, pull request and Relay findings need more room than the 80rem reading width. */
@@ -35,6 +37,7 @@
 @media (max-width: 40rem) {
   .main {
     inline-size: min(calc(100% - 1.5rem), 80rem);
-    padding-block: 2.25rem 3.5rem;
+    --app-main-padding-block-end: 3.5rem;
+    padding-block: 2.25rem var(--app-main-padding-block-end);
   }
 }
