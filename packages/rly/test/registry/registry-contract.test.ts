@@ -24,6 +24,15 @@ describe("agent registry contract", () => {
       headingSize: "section"
     })
   })
+  it("shows the component itself in its import example, even when a helper constant is exported first", () => {
+    const registry = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
+      components: Schema.Array(Schema.Struct({ example: Schema.String, name: Schema.String }))
+    })))(renderComponentsRegistry(componentManifest))
+    const example = (name: string) => registry.components.find((component) => component.name === name)?.example
+    expect(example("TrackKey")).toBe("import { TrackKey } from \"@knpkv/rly/primitives\"")
+    // A record whose component name is no value export keeps the first value export.
+    for (const component of registry.components) expect(component.example).toMatch(/^import (type )?\{ \w+ \} from /)
+  })
   it("renders every opted-in component deterministically with explicit tooling metadata", () => {
     const reordered: ComponentManifest = {
       ...componentManifest,

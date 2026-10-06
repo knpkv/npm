@@ -119,6 +119,20 @@ test("keeps the track scale in forced colours and draws no reading unlike an emp
   }
 })
 
+test("shows a stale 0% reading's age, distinct from a fresh empty track and from no reading", async ({ page }) => {
+  await page.goto(story("primitives-limittrack--gallery"))
+  const track = (name: string) => page.locator(`[data-limit="${name}"] [data-tone]`)
+  const image = (name: string) => track(name).evaluate((element) => getComputedStyle(element).backgroundImage)
+  const modes: ReadonlyArray<"none" | "active"> = ["none", "active"]
+  for (const forcedColors of modes) {
+    await page.emulateMedia({ forcedColors })
+    const staleZero = await image("Codex daily")
+    expect(staleZero).not.toBe("none")
+    expect(staleZero).not.toBe(await image("Codex 5-hour"))
+    expect(await image("5-hour window")).toBe("none")
+  }
+})
+
 test("draws the track edge when the Storybook toolbar turns forced colours on", async ({ page }) => {
   await page.goto(story("primitives-limittrack--gallery").replace("forcedColors:auto", "forcedColors:active"))
   const partial = page.locator("[data-limit=\"5-hour window\"] [data-tone]")

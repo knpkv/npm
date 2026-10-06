@@ -22,6 +22,7 @@ const limits = [
   { name: "Weekly", state: "near", value: 84, projected: 103, text: "84%, about 103% at reset" },
   { name: "Weekly, large model", state: "full", value: 100, text: "100%, at the limit" },
   { name: "Codex weekly", state: "stale", value: 61, stale: true, text: "61%, old reading" },
+  { name: "Codex daily", state: "stale", value: 0, stale: true, text: "0%, old reading" },
   { name: "Codex 5-hour", state: "unknown", value: null, text: "No reading" }
 ] satisfies ReadonlyArray<{
   readonly name: string

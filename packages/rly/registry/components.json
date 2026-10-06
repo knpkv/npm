@@ -1447,7 +1447,7 @@
         "storyId": "diff-diffcodeview--worker-states",
         "storyPath": "?path=/story/diff-diffcodeview--worker-states"
       },
-      "example": "import { createDiffWorkerFactory } from \"@knpkv/rly/diff\"",
+      "example": "import { DiffWorkerProvider } from \"@knpkv/rly/diff\"",
       "exports": [
         {
           "kind": "value",
@@ -3052,7 +3052,7 @@
         "storyId": "patterns-relationshipchain--cardinalities",
         "storyPath": "?path=/story/patterns-relationshipchain--cardinalities"
       },
-      "example": "import { RLY_RELATIONSHIP_DIRECTION_PRESENTATION } from \"@knpkv/rly/patterns\"",
+      "example": "import { RelationshipChain } from \"@knpkv/rly/patterns\"",
       "exports": [
         {
           "kind": "value",
@@ -3613,7 +3613,7 @@
         "storyId": "primitives-select--states",
         "storyPath": "?path=/story/primitives-select--states"
       },
-      "example": "import { RLY_SELECT_DEFAULT_VARIANTS } from \"@knpkv/rly/primitives\"",
+      "example": "import { Select } from \"@knpkv/rly/primitives\"",
       "exports": [
         {
           "kind": "value",
@@ -3804,7 +3804,7 @@
         "storyId": "patterns-servicemark--gallery",
         "storyPath": "?path=/story/patterns-servicemark--gallery"
       },
-      "example": "import { RLY_SERVICE_MARK_DEFAULT_VARIANTS } from \"@knpkv/rly/patterns\"",
+      "example": "import { ServiceMark } from \"@knpkv/rly/patterns\"",
       "exports": [
         {
           "kind": "value",
@@ -3933,7 +3933,7 @@
         "storyId": "primitives-sheet--interaction",
         "storyPath": "?path=/story/primitives-sheet--interaction"
       },
-      "example": "import { RLY_SHEET_DEFAULT_VARIANTS } from \"@knpkv/rly/primitives\"",
+      "example": "import { Sheet } from \"@knpkv/rly/primitives\"",
       "exports": [
         {
           "kind": "value",
@@ -4160,7 +4160,7 @@
         "storyId": "patterns-stagerail--states",
         "storyPath": "?path=/story/patterns-stagerail--states"
       },
-      "example": "import { RLY_STAGE_RAIL_DEFAULT_VARIANTS } from \"@knpkv/rly/patterns\"",
+      "example": "import { StageRail } from \"@knpkv/rly/patterns\"",
       "exports": [
         {
           "kind": "value",
@@ -4661,7 +4661,7 @@
         "storyId": "primitives-tabs--interaction",
         "storyPath": "?path=/story/primitives-tabs--interaction"
       },
-      "example": "import { RLY_TABS_DEFAULT_VARIANTS } from \"@knpkv/rly/primitives\"",
+      "example": "import { Tabs } from \"@knpkv/rly/primitives\"",
       "exports": [
         {
           "kind": "value",
@@ -4929,7 +4929,7 @@
         "storyId": "foundations-themeprovider--controlled",
         "storyPath": "?path=/story/foundations-themeprovider--controlled"
       },
-      "example": "import { RLY_THEME_NAMES } from \"@knpkv/rly/foundations\"",
+      "example": "import { ThemeProvider } from \"@knpkv/rly/foundations\"",
       "exports": [
         {
           "kind": "value",
@@ -5197,7 +5197,7 @@
         "storyId": "primitives-togglegroup--interaction",
         "storyPath": "?path=/story/primitives-togglegroup--interaction"
       },
-      "example": "import { RLY_TOGGLE_GROUP_DEFAULT_VARIANTS } from \"@knpkv/rly/primitives\"",
+      "example": "import { ToggleGroup } from \"@knpkv/rly/primitives\"",
       "exports": [
         {
           "kind": "value",
@@ -5296,7 +5296,7 @@
         "storyId": "primitives-trackkey--all-marks",
         "storyPath": "?path=/story/primitives-trackkey--all-marks"
       },
-      "example": "import { RLY_TRACK_KEY_MARKS } from \"@knpkv/rly/primitives\"",
+      "example": "import { TrackKey } from \"@knpkv/rly/primitives\"",
       "exports": [
         {
           "kind": "value",
@@ -5375,7 +5375,7 @@
         "storyId": "patterns-verdict--states",
         "storyPath": "?path=/story/patterns-verdict--states"
       },
-      "example": "import { RLY_VERDICT_VARIANTS } from \"@knpkv/rly/patterns\"",
+      "example": "import { Verdict } from \"@knpkv/rly/patterns\"",
       "exports": [
         {
           "kind": "value",

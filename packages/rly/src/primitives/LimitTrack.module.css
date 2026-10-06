@@ -27,6 +27,14 @@
   .root[data-tone="full"] {
     --rly-limit-track-ink: var(--rly-color-blocked-ink);
   }
+  /*
+   * An old reading's empty track carries a faint 135° hatch, so even a 0% reading shows its age.
+   * It differs from no reading by angle (45°) and by the solid edge.
+   */
+  .root[data-stale="true"] {
+    background: repeating-linear-gradient(135deg, var(--rly-color-border-2) 0 1px, transparent 1px 5px)
+      var(--rly-color-surface-3);
+  }
   /* Old readings are hatched in the same ink, so the tone survives and the age is still visible. */
   .root[data-stale="true"] .fill {
     background: repeating-linear-gradient(
@@ -77,6 +85,10 @@
     .root {
       outline: 1px solid CanvasText;
       outline-offset: -1px;
+    }
+    .root[data-stale="true"] {
+      background: repeating-linear-gradient(135deg, CanvasText 0 1px, Canvas 1px 5px);
+      forced-color-adjust: none;
     }
     .root[data-tone="unknown"] {
       background: repeating-linear-gradient(45deg, CanvasText 0 1px, Canvas 1px 5px);

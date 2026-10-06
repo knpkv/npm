@@ -22,8 +22,10 @@ const variantDescription = (component: ComponentRecord, name: string): string =>
 const variantValueDescription = (variantName: string, value: string): string =>
   `Use ${value} for the ${variantName} presentation.`
 
+/** The import a consumer writes first: the component itself when it is a value export, else the first value. */
 const componentExample = (component: ComponentRecord): string => {
-  const valueExport = component.exports.find(({ kind }) => kind === "value")
+  const valueExport = component.exports.find(({ kind, name }) => kind === "value" && name === component.name)
+    ?? component.exports.find(({ kind }) => kind === "value")
   if (valueExport === undefined) {
     return `import type { ${component.exports[0]?.name ?? component.name} } from "${publicImportPath(component)}"`
   }
