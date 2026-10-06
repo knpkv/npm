@@ -181,6 +181,28 @@
     },
     {
       "capabilities": [
+        "explain",
+        "present"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "ChartLegend",
+      "states": [
+        "default",
+        "other",
+        "series"
+      ],
+      "terms": [
+        "chartlegend",
+        "explain",
+        "other",
+        "present",
+        "primitive",
+        "series"
+      ]
+    },
+    {
+      "capabilities": [
         "group",
         "people"
       ],
@@ -717,6 +739,37 @@
         "secondary",
         "size",
         "variant"
+      ]
+    },
+    {
+      "capabilities": [
+        "measure",
+        "present"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "LimitTrack",
+      "states": [
+        "default",
+        "full",
+        "near",
+        "projected",
+        "stale",
+        "unknown"
+      ],
+      "terms": [
+        "default",
+        "full",
+        "limittrack",
+        "measure",
+        "near",
+        "present",
+        "primitive",
+        "projected",
+        "size",
+        "slim",
+        "stale",
+        "unknown"
       ]
     },
     {
@@ -1394,6 +1447,7 @@
         "agent",
         "default",
         "human",
+        "provenance",
         "service",
         "system"
       ],
@@ -1402,6 +1456,7 @@
         "audit",
         "human",
         "pattern",
+        "provenance",
         "service",
         "system",
         "timeline",
@@ -1428,6 +1483,32 @@
         "select",
         "size",
         "togglegroup"
+      ]
+    },
+    {
+      "capabilities": [
+        "explain",
+        "present"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "TrackKey",
+      "states": [
+        "default",
+        "near",
+        "projected",
+        "stale",
+        "unknown"
+      ],
+      "terms": [
+        "explain",
+        "near",
+        "present",
+        "primitive",
+        "projected",
+        "stale",
+        "trackkey",
+        "unknown"
       ]
     },
     {

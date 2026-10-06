@@ -126,6 +126,8 @@ test("another + queues during a held write in Review first and totals refresh on
   const editor = page.getByRole("complementary", { name: "Time entry editor" })
   await expect(editor).toBeVisible()
   const note = editor.getByRole("textbox", { name: "What was done (optional)", exact: true })
+  // Edit after the row's suggestion has loaded; landing mid-edit is covered in descriptions.spec.
+  await expect(note).toHaveValue("Improved weekly time review and tested approval behavior")
   await note.fill("Review remains editable while the earlier block saves")
   await expect(note).toHaveValue("Review remains editable while the earlier block saves")
   await page.keyboard.press("Escape")

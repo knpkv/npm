@@ -165,3 +165,62 @@ test(
     }
   }
 )
+
+test(
+  "keeps every provenance shape distinct and labelled at 320 pixels, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_400, width: 320 })
+      await page.goto(story("patterns-timelinerow--provenance", forcedColors))
+
+      const look = (kind: string) =>
+        page.locator(`ol [data-rly-timeline-provenance='${kind}']`).evaluate((element) => {
+          const css = getComputedStyle(element)
+          return {
+            clipped: css.clipPath !== "none",
+            filled: css.backgroundColor !== "rgba(0, 0, 0, 0)" || css.backgroundImage !== "none",
+            hatched: css.backgroundImage !== "none",
+            rotated: css.rotate === "45deg",
+            round: css.borderTopLeftRadius !== "0px"
+          }
+        })
+      // Each shape stays distinct in both modes: that is what carries provenance without colour.
+      expect(await look("auto")).toMatchObject({ clipped: false, filled: false, rotated: false, round: true })
+      expect(await look("approved")).toMatchObject({ filled: true, hatched: false, rotated: false, round: true })
+      expect(await look("pending")).toMatchObject({ filled: true, rotated: true })
+      expect(await look("flag")).toMatchObject({ clipped: true, filled: true })
+      expect(await look("unknown")).toMatchObject({ hatched: true, round: false })
+      await expect(page.getByRole("list", { name: "Observation key" })).toBeVisible()
+      await expect(page.getByText("Not applied: GitHub rate limit, retrying at 05:12")).toBeVisible()
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`timeline-provenance-320-${forcedColors}.png`)
+      })
+    }
+  }
+)
+
+test("keeps a region with an unbreakable title and body token inside 320 pixels", async ({ page }, testInfo) => {
+  await page.setViewportSize({ height: 1_000, width: 320 })
+  await page.goto(story("patterns-region--states"))
+  const region = page.locator("[data-rly-region]").first()
+  await expect(region).toBeVisible()
+  // Application text can hold a token with no break point: a branch, an id, a path.
+  await region.evaluate((element) => {
+    const token = "feat/implementWorkCheckpointRecoveryAndReconciliationForTheFleetCoordinator"
+    const title = element.querySelector("h2, h3")
+    if (title !== null) title.textContent = token
+    const body = element.lastElementChild
+    if (body !== null) body.append(Object.assign(document.createElement("code"), { textContent: token }))
+  })
+  await expectNoHorizontalOverflow(page)
+  const box = await region.boundingBox()
+  expect(box?.width ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(320)
+  await page.screenshot({
+    animations: "disabled",
+    fullPage: true,
+    path: testInfo.outputPath("region-unbreakable-320.png")
+  })
+})

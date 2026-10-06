@@ -120,6 +120,8 @@ describe("fetchAndUpsertPRs", () => {
       // An enrichment failure is not evidence the pull request is gone.
       expect(yield* Ref.get(deleteCalls)).toBe(0)
       expect(successfulScopes).toEqual([])
+      const { unevaluatedPullRequests } = yield* SubscriptionRef.get(state)
+      expect(unevaluatedPullRequests?.map(({ pullRequestId }) => pullRequestId)).toEqual([staleOpenPR.id])
       // Kept, but not silently: the account says why its queue is stale.
       expect(yield* Ref.get(notifications)).toEqual([
         { type: "error", message: expect.stringContaining("EvaluatePullRequestApprovalRules") }
@@ -494,6 +496,63 @@ describe("fetchAndUpsertPRs", () => {
       ])
     }))
 
+  it.effect("still reconciles an unrelated closed row when another pull request fails evaluation", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const statusUpdates = yield* Ref.make(0)
+      const detailReads = yield* Ref.make<ReadonlyArray<string>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      // PR 36 is listed open but fails evaluation, and its cached row is stale too.
+      const failedRow = Schema.decodeSync(CachedPullRequest)({
+        ...Schema.encodeSync(CachedPullRequest)(staleOpenPR),
+        id: "36"
+      })
+      const failed: PullRequestRefreshItem = {
+        _tag: "EvaluationFailed",
+        pullRequestId: "36",
+        repositoryName: failedRow.repositoryName,
+        error: new ApprovalEvaluationError({
+          pullRequestId: "36",
+          revisionId: "revision-36",
+          cause: new Error("denied")
+        })
+      }
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequestRefresh: () => Stream.make(failed),
+          getPullRequest: ({ pullRequestId }) =>
+            Ref.update(detailReads, (ids) => [...ids, pullRequestId]).pipe(Effect.as(providerClosedDetail))
+        }),
+        Layer.mock(PullRequestRepo, {
+          // PR 35 closed at the provider; PR 36 is the one that failed evaluation.
+          findStaleOpen: () => Effect.succeed([staleOpenPR, failedRow]),
+          updateStatusAndClosedAt: () => Ref.update(statusUpdates, (count) => count + 1),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      // The listing completed, so the unrelated closed row reconciles; the listed-open PR 36 is not re-read.
+      expect(yield* Ref.get(detailReads)).toEqual([staleOpenPR.id])
+      expect(yield* Ref.get(statusUpdates)).toBe(1)
+      // Still partial: one pull request could not be re-evaluated.
+      expect(successfulScopes).toEqual([])
+    }))
+
   it.effect("publishes scope success after a stale row is authoritatively observed CLOSED", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
@@ -705,7 +764,60 @@ describe("fetchAndUpsertPRs", () => {
         repositoryName: "example-repository",
         message: expect.stringContaining("EvaluatePullRequestApprovalRules")
       }])
-      expect(yield* Ref.get(notifications)).toEqual([expect.stringMatching(/^1 pull request couldn't be re-evaluated/)])
+      expect(yield* Ref.get(notifications)).toEqual([
+        expect.stringMatching(/^1 pull request in us-east-1 couldn't be re-evaluated/)
+      ])
+    }))
+
+  it.effect("sends one notification per profile, naming every region with unevaluated pull requests", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const notifications = yield* Ref.make<ReadonlyArray<{ readonly title: string; readonly message: string }>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1", "eu-west-1"],
+        enabled: true
+      })
+      const failedIn = (id: string): PullRequestRefreshItem => ({
+        _tag: "EvaluationFailed",
+        pullRequestId: id,
+        repositoryName: "example-repository",
+        error: new ApprovalEvaluationError({
+          pullRequestId: id,
+          revisionId: `revision-${id}`,
+          cause: new Error("denied")
+        })
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequestRefresh: ({ region }) => Stream.make(failedIn(region === "us-east-1" ? "40" : "41"))
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {
+          addSystem: (notification) =>
+            Ref.update(notifications, (all) => [...all, { title: notification.title, message: notification.message }])
+        }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      const sent = yield* Ref.get(notifications)
+      expect(sent).toHaveLength(1)
+      expect(sent[0]?.title).toBe("test-profile: approval evaluation")
+      expect(sent[0]?.message).toMatch(
+        /^2 pull requests in (us-east-1, eu-west-1|eu-west-1, us-east-1) couldn't be re-evaluated/
+      )
     }))
 
   it.effect("publishes scope success after listed PR upsert and stale reconciliation succeed", () =>

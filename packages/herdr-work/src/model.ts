@@ -6,7 +6,7 @@ import {
   workReassignIsRecordable,
   WorkRecover
 } from "@knpkv/herdr-fleet/model"
-import { Equal, Schema } from "effect"
+import { Equal, Schema, Struct } from "effect"
 
 const Identifier = Schema.String.check(
   Schema.isNonEmpty(),
@@ -58,8 +58,20 @@ export type WorkLaneOperationId = typeof WorkLaneOperationId.Type
 export const WorkCoordinatorSessionId = Identifier
 export type WorkCoordinatorSessionId = typeof WorkCoordinatorSessionId.Type
 
-export const WorkState = Schema.Literals(["planned", "working", "blocked", "review", "deployed", "completed"])
+export const WorkState = Schema.Literals([
+  "planned",
+  "working",
+  "blocked",
+  "review",
+  "deployed",
+  "completed",
+  "abandoned"
+])
 export type WorkState = typeof WorkState.Type
+
+/** A goal in one of these states is finished: nothing may bind to it, link it, or move it back. */
+export const isTerminalWorkState = (state: WorkState): boolean =>
+  state === "completed" || state === "deployed" || state === "abandoned"
 
 export const DeliveryStage = Schema.Literals(["local", "review", "pull_request", "merged", "deployed"])
 export type DeliveryStage = typeof DeliveryStage.Type
@@ -417,6 +429,19 @@ export const WorkAgentBindingRequest = Schema.Struct({
     approvalJobId: Identifier,
     approvalActor: Identifier
   })),
+  /**
+   * Set when the reconciler admitted an observed worker without an approval:
+   * the same evidence as a prospective admission, credited to the observation
+   * that showed it.
+   */
+  observedAdmission: Schema.optionalKey(Schema.Struct({
+    sessionId: CodexSessionId,
+    workAssignment: Text,
+    baseHead: ExactHead,
+    expectedAbsenceToken: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+    actor: Schema.Literal("reconciler"),
+    observationId: Identifier
+  })),
   existingGoalRecovery: Schema.optionalKey(
     Schema.Struct({
       sessionId: CodexSessionId,
@@ -445,13 +470,24 @@ export const WorkAgentBindingRequest = Schema.Struct({
   )
 }).check(
   Schema.makeFilter(
-    ({ existingGoalRecovery, ownerReassignment, prospectiveAdmission }) =>
-      [existingGoalRecovery, ownerReassignment, prospectiveAdmission].filter((kind) => kind !== undefined).length <=
-        1,
+    ({ existingGoalRecovery, observedAdmission, ownerReassignment, prospectiveAdmission }) =>
+      [existingGoalRecovery, observedAdmission, ownerReassignment, prospectiveAdmission].filter((kind) =>
+        kind !== undefined
+      ).length <= 1,
     { expected: "one truthful owner-linkage provenance kind" }
   )
 )
 export interface WorkAgentBindingRequest extends Schema.Schema.Type<typeof WorkAgentBindingRequest> {}
+
+/**
+ * The admission evidence a binding was created with, whether an approved job
+ * (`prospectiveAdmission`) or the reconciler (`observedAdmission`) admitted it.
+ * Session, assignment and base-head checks read it so both kinds behave alike.
+ */
+export const admissionEvidence = (
+  request: WorkAgentBindingRequest
+): WorkAgentBindingRequest["prospectiveAdmission"] | WorkAgentBindingRequest["observedAdmission"] =>
+  request.prospectiveAdmission ?? request.observedAdmission
 
 /** Durable result of atomically binding a started worker to its Work goal. */
 export const WorkAgentBinding = Schema.Struct({
@@ -562,6 +598,23 @@ export const WorkProspectiveAdmission = Schema.Struct({
   { expected: "an exact canonical PR URL" }
 ))
 export type WorkProspectiveAdmission = typeof WorkProspectiveAdmission.Type
+
+/**
+ * An admission the reconciler makes without an approval, for a worker it
+ * observed: the same fields as an approved admission, with the observation in
+ * place of the job. The caller (hostd) has already checked what the store can't
+ * see: the pane is on this host with lineage, and its worktree is the canonical
+ * toplevel on the PR branch at the PR head with an origin equal to the PR's
+ * repository. The store re-checks the absence evidence in its transaction.
+ */
+export const WorkObservedAdmission = Schema.Struct({
+  ...Struct.omit(WorkAdmit.fields, ["kind"]),
+  observationId: Identifier
+}).check(Schema.makeFilter(
+  ({ pullRequest, repository, reviewUrl }) => reviewUrl === `https://github.com/${repository}/pull/${pullRequest}`,
+  { expected: "an exact canonical PR URL" }
+))
+export type WorkObservedAdmission = typeof WorkObservedAdmission.Type
 
 /** Read-only evidence for a genuine, existing unlinked canonical goal. */
 export const WorkRecoveryTarget = Schema.Struct({
@@ -729,6 +782,206 @@ export const WorkDispatchHandoff = Schema.Struct({
 )
 export interface WorkDispatchHandoff extends Schema.Schema.Type<typeof WorkDispatchHandoff> {}
 
+/**
+ * The key one subject's facts and failures are stored under, such as
+ * `github:<owner>/<repo>#<n>` or `herdr:<host>/<agentId>`. Composite, so it is
+ * bounded on its own rather than by `Identifier`.
+ */
+export const WorkObservationSubject = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(1_024),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
+)
+
+/**
+ * A branch name as a provider reported it. Looser than the lane `Branch`
+ * authority type: any one-line name a provider accepts (`renovate/@types-x`).
+ */
+const ObservedBranch = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
+)
+
+/** Why a source could not be read: one bounded line, so failures stay small in every snapshot. */
+const FailureReason = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
+)
+
+/** CI status of a pull request's head, rolled up from its check runs and statuses. */
+export const WorkObservedChecks = Schema.Literals(["none", "pending", "passing", "failing"])
+export type WorkObservedChecks = typeof WorkObservedChecks.Type
+
+/** A pull request as GitHub reported it. Facts only; never approval to act on it. */
+export const WorkPullRequestObservation = Schema.TaggedStruct("pull_request", {
+  repository: RepositoryName,
+  pullRequest: PullRequestNumber,
+  state: Schema.Literals(["open", "merged", "closed"]),
+  branch: ObservedBranch,
+  head: ExactHead,
+  review: WorkReviewState,
+  checks: WorkObservedChecks,
+  /** GitHub's mergedAt or closedAt; null while open. A terminal checkpoint is stamped with it, never the wall clock. */
+  closedAt: Schema.NullOr(Timestamp)
+}).check(Schema.makeFilter(
+  ({ closedAt, state }) => (state === "open") === (closedAt === null),
+  { expected: "a close time exactly when the pull request is merged or closed" }
+))
+export interface WorkPullRequestObservation extends Schema.Schema.Type<typeof WorkPullRequestObservation> {}
+
+/** An agent pane as Herdr reported it; `gone` means the pane is no longer in the host's snapshot. */
+export const WorkAgentObservation = Schema.TaggedStruct("agent", {
+  host: ApprovalHostName,
+  agentId: Identifier,
+  status: Schema.Literals(["idle", "working", "blocked", "done", "gone"])
+})
+export interface WorkAgentObservation extends Schema.Schema.Type<typeof WorkAgentObservation> {}
+
+/** A source that could not be read. It is reported, never turned into a fact about a goal. */
+export const WorkUnknownObservation = Schema.TaggedStruct("unknown", {
+  source: Schema.Literals(["github", "herdr", "git"]),
+  subject: WorkObservationSubject,
+  reason: FailureReason
+})
+export interface WorkUnknownObservation extends Schema.Schema.Type<typeof WorkUnknownObservation> {}
+
+export const WorkObservation = Schema.Union([
+  WorkPullRequestObservation,
+  WorkAgentObservation,
+  WorkUnknownObservation
+])
+export type WorkObservation = typeof WorkObservation.Type
+
+/** One observation and when it was made. Observing the same facts again is a no-op. */
+export const WorkObservationEnvelope = Schema.Struct({
+  observation: WorkObservation,
+  observedAt: Timestamp
+})
+export interface WorkObservationEnvelope extends Schema.Schema.Type<typeof WorkObservationEnvelope> {}
+
+/**
+ * The latest stored fact for one subject. `observedAt` is when these exact
+ * facts were first seen, so for a `gone` agent it is the time it went away;
+ * `confirmedAt` is the last time a read returned them again.
+ */
+export const WorkObservedFact = Schema.Struct({
+  subject: WorkObservationSubject,
+  observationId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  observedAt: Timestamp,
+  confirmedAt: Timestamp,
+  observation: Schema.Union([WorkPullRequestObservation, WorkAgentObservation])
+}).check(Schema.makeFilter(
+  ({ confirmedAt, observedAt }) => confirmedAt >= observedAt,
+  { expected: "a confirmation no earlier than the first observation" }
+))
+export interface WorkObservedFact extends Schema.Schema.Type<typeof WorkObservedFact> {}
+
+/**
+ * The current run of failed reads for one subject. `since` is the first
+ * failure of the run; a later failure keeps it, a good read newer than every
+ * failure ends the run, and a good read inside it restarts the run at its
+ * latest failure.
+ */
+export const WorkObservedFailure = Schema.Struct({
+  subject: WorkObservationSubject,
+  source: WorkUnknownObservation.fields.source,
+  reason: FailureReason,
+  since: Timestamp,
+  /** The latest failed read of the run; `source` and `reason` are from it. */
+  lastAt: Timestamp
+}).check(Schema.makeFilter(
+  ({ lastAt, since }) => lastAt >= since,
+  { expected: "a latest failed read no earlier than the run's first" }
+))
+export interface WorkObservedFailure extends Schema.Schema.Type<typeof WorkObservedFailure> {}
+
+/** The overlay keeps one latest fact per subject, within its own bounds; over them, the oldest facts go first. */
+/** How far ahead of the store's clock an observation may be stamped before it is skipped as stale. */
+export const workObservationMaxSkewMillis = 5 * 60 * 1_000
+
+export const workObservedFactMaxRecords = 4_096
+export const workObservedFactMaxBytes = 2 * 1024 * 1024
+
+/**
+ * What `observe` did with one envelope: stored a new fact, found the same
+ * facts already stored, skipped it as older than the stored fact, or reported
+ * a source it could not read.
+ */
+export const WorkObserveOutcome = Schema.TaggedUnion({
+  stored: { subject: WorkObservationSubject },
+  unchanged: { subject: WorkObservationSubject },
+  stale: { subject: WorkObservationSubject },
+  unknown: { subject: WorkObservationSubject, reason: FailureReason }
+})
+export type WorkObserveOutcome = typeof WorkObserveOutcome.Type
+
+export const WorkObserveReport = Schema.Struct({
+  outcomes: Schema.Array(WorkObserveOutcome),
+  evicted: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+})
+export interface WorkObserveReport extends Schema.Schema.Type<typeof WorkObserveReport> {}
+
+/** History the reconciler always leaves free for owners and approvals. */
+export const workReconcilerHeadroom = 256
+
+/**
+ * What `reconcile` did for one goal whose pull request is observed merged or
+ * closed: recorded it as finished, found it already recorded once by the
+ * reconciler (it never stamps a goal twice, even after an owner reopens it),
+ * or found a newer owner checkpoint than the one it planned from (it tries
+ * again on the next run).
+ */
+export const WorkReconcileOutcome = Schema.TaggedUnion({
+  applied: { goalId: WorkGoalId, eventId: Identifier, state: Schema.Literals(["completed", "abandoned"]) },
+  recorded: { goalId: WorkGoalId, eventId: Identifier },
+  conflict: { goalId: WorkGoalId }
+})
+export type WorkReconcileOutcome = typeof WorkReconcileOutcome.Type
+
+/** What the Work tab shows for a goal: its recorded state, or a newer observed one. */
+export const WorkDisplayState = WorkState
+export type WorkDisplayState = typeof WorkDisplayState.Type
+
+/** Observed facts overlaid on one goal at read time. Nothing here is goal history. */
+export const WorkGoalObserved = Schema.Struct({
+  pullRequest: Schema.NullOr(
+    Schema.Struct({ fact: WorkPullRequestObservation, observedAt: Timestamp, confirmedAt: Timestamp })
+  ),
+  agent: Schema.NullOr(Schema.Struct({ fact: WorkAgentObservation, observedAt: Timestamp, confirmedAt: Timestamp })),
+  /**
+   * A source that can't currently be read for this goal; the oldest failing
+   * run when both its pull request and its agent fail. `lastGoodAt` is when
+   * that subject last read successfully, null if it never has. A goal with no
+   * pull request URL or no agent has no subject there, so no failure either.
+   */
+  unknown: Schema.NullOr(Schema.Struct({
+    source: WorkUnknownObservation.fields.source,
+    reason: FailureReason,
+    since: Timestamp,
+    lastGoodAt: Schema.NullOr(Timestamp)
+  })),
+  displayState: WorkDisplayState,
+  stale: Schema.Boolean
+})
+export interface WorkGoalObserved extends Schema.Schema.Type<typeof WorkGoalObserved> {}
+
+export const WorkGoalObservedEntry = Schema.Struct({ goalId: WorkGoalId, ...WorkGoalObserved.fields })
+export interface WorkGoalObservedEntry extends Schema.Schema.Type<typeof WorkGoalObservedEntry> {}
+
+/**
+ * Who wrote one goal activity, when it was not the goal's owner: the
+ * reconciler (from an observed fact) or an approved Fleet job.
+ */
+export const WorkActivityProvenance = Schema.Struct({
+  goalId: WorkGoalId,
+  activityId: Identifier,
+  provenance: Schema.Literals(["reconciler", "approval"]),
+  approvalJobId: Schema.NullOr(Identifier)
+})
+export interface WorkActivityProvenance extends Schema.Schema.Type<typeof WorkActivityProvenance> {}
+
 export const WorkSnapshotWindow = Schema.Literals(["now", "day", "week", "month"])
 export type WorkSnapshotWindow = typeof WorkSnapshotWindow.Type
 
@@ -737,7 +990,30 @@ export const WorkSnapshot = Schema.Struct({
   observedAt: Timestamp,
   asOf: Timestamp,
   goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals)),
-  families: Schema.optionalKey(Schema.Array(WorkGoalFamilyGroup).check(Schema.isMaxLength(workSnapshotMaxGoals)))
+  families: Schema.optionalKey(Schema.Array(WorkGoalFamilyGroup).check(Schema.isMaxLength(workSnapshotMaxGoals))),
+  /**
+   * Observed facts per goal, merged at read time; only the `now` window
+   * carries them, and only for goals something was observed about.
+   */
+  observed: Schema.optionalKey(
+    Schema.Array(WorkGoalObservedEntry).check(Schema.isMaxLength(workSnapshotMaxGoals))
+  ),
+  /**
+   * How many goals' observed entries were left out to keep the snapshot within
+   * the response budget; the most recently updated goals keep theirs.
+   */
+  observedOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+  /** Activities written by the reconciler or an approved job; only on `now`. */
+  activityProvenance: Schema.optionalKey(Schema.Array(WorkActivityProvenance)),
+  /**
+   * Goals whose non-owner activities are all in `activityProvenance`. In a
+   * covered goal an activity missing from it is the owner's; a goal that isn't
+   * covered has unknown provenance. Trimming to the response budget drops
+   * whole goals, never single activities.
+   */
+  activityProvenanceGoals: Schema.optionalKey(Schema.Array(WorkGoalId).check(Schema.isMaxLength(workSnapshotMaxGoals))),
+  /** How many goals were left uncovered to keep the snapshot within the response budget. */
+  activityProvenanceOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)))
 }).check(
   Schema.makeFilter(
     (snapshot) => {
@@ -782,5 +1058,24 @@ export const WorkSnapshots = Schema.Struct({
   day: WorkSnapshot,
   week: WorkSnapshot,
   month: WorkSnapshot
-})
+}).check(Schema.makeFilter(
+  ({ day, month, now, week }) =>
+    [day, week, month].every((window) =>
+      window.observed === undefined && window.observedOmitted === undefined &&
+      window.activityProvenance === undefined && window.activityProvenanceGoals === undefined &&
+      window.activityProvenanceOmitted === undefined
+    ) &&
+    (now.activityProvenanceGoals === undefined ||
+      now.activityProvenanceGoals.every((goalId) => now.goals.some(({ id }) => id === goalId))) &&
+    (now.activityProvenance === undefined ||
+      now.activityProvenance.every(({ goalId }) => now.activityProvenanceGoals?.includes(goalId) === true)) &&
+    (now.observed === undefined || (
+      new Set(now.observed.map(({ goalId }) => goalId)).size === now.observed.length &&
+      now.observed.every(({ goalId }) => now.goals.some(({ id }) => id === goalId))
+    )),
+  {
+    expected:
+      "observed facts and activity provenance only on the now window, for goals in that window and covered goals only"
+  }
+))
 export interface WorkSnapshots extends Schema.Schema.Type<typeof WorkSnapshots> {}
