@@ -49,18 +49,7 @@ import {
 import { Exit, Option } from "effect"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
-import {
-  ArrowRightIcon,
-  BellIcon,
-  BellOffIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  CodeIcon,
-  LoaderIcon,
-  PlusIcon,
-  RefreshCwIcon,
-  TrashIcon
-} from "lucide-react"
+import { ArrowRightIcon, CheckIcon, ChevronDownIcon, CodeIcon, LoaderIcon, PlusIcon, TrashIcon } from "lucide-react"
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router"
@@ -702,7 +691,7 @@ function ApproversCard({
     <Surface as="section" className={styles.approverCard} padding="default" form="grouped" tone="secondary">
       <header className={styles.approverHeading}>
         <div className={styles.approverTitle}>
-          <Text as="h3" variant="card-title">
+          <Text as="h3" variant="label">
             {title}
           </Text>
           {required &&
@@ -1372,31 +1361,27 @@ export function PRDetail() {
             <StateLabel label={statusLabel} size="compact" tone={pullRequestStatusTone(pr.status)} />
           </div>
           <div className={styles.actionGroup}>
-            <Button
-              className={styles.actionButton}
-              disabled={isRefreshing}
-              onClick={handleRefresh}
-              size="sm"
-              variant="outline"
-            >
-              <RefreshCwIcon className={`size-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button className={styles.actionButton} onClick={handleSubscriptionToggle} size="sm" variant="outline">
-              {isSubscribed ? <BellOffIcon className="size-3.5" /> : <BellIcon className="size-3.5" />}
-              {isSubscribed ? "Unsubscribe" : "Subscribe"}
-            </Button>
-            <Button className={styles.actionButton} onClick={handleSandbox} size="sm" variant="outline">
-              <CodeIcon className="size-3.5" />
-              {stoppingSandbox !== undefined ? "Stopping…" : existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
-            </Button>
             <RlyButton
               className={styles.actionButton}
-              leadingIcon={copied ? "check" : "link"}
-              onClick={handleCopy}
+              loading={isRefreshing}
+              onClick={handleRefresh}
               size="compact"
               variant="secondary"
             >
+              Refresh
+            </RlyButton>
+            <RlyButton
+              className={styles.actionButton}
+              onClick={handleSubscriptionToggle}
+              size="compact"
+              variant="secondary"
+            >
+              {isSubscribed ? "Unsubscribe" : "Subscribe"}
+            </RlyButton>
+            <RlyButton className={styles.actionButton} onClick={handleSandbox} size="compact" variant="secondary">
+              {stoppingSandbox !== undefined ? "Stopping…" : existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
+            </RlyButton>
+            <RlyButton className={styles.actionButton} onClick={handleCopy} size="compact" variant="secondary">
               {copied ? "Copied" : "Copy Link"}
             </RlyButton>
             <RlyButton

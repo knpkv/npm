@@ -67,7 +67,7 @@
 }
 
 .title {
-  max-inline-size: 22ch;
+  max-inline-size: 40ch;
   overflow-wrap: break-word;
   text-wrap: balance;
 }
@@ -133,7 +133,7 @@
 
 .actionGroup {
   gap: var(--rly-space-8);
-  grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
 }
 
 .actionButton {
@@ -141,6 +141,7 @@
   inline-size: 100%;
   justify-content: flex-start;
   min-inline-size: var(--rly-space-0);
+  white-space: nowrap;
 }
 
 .actionGroup > :last-child {
