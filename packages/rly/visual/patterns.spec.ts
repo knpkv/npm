@@ -45,3 +45,30 @@ test("keeps named collaborator roles and controlled overflow clear at 320 pixels
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("people-320.png") })
 })
+
+test(
+  "keeps every hero size inside 320 pixels and the state word in its ink, in forced colors too",
+  async ({ page }, testInfo) => {
+    for (const forcedColors of ["auto", "active"]) {
+      await page.setViewportSize({ height: 1_400, width: 320 })
+      await page.goto(story("patterns-hero--states", forcedColors))
+
+      await expect(page.getByRole("region", { name: "Work summary" })).toHaveText(/3 goals need you, 2 blocked/)
+      const word = page.getByText("blocked", { exact: true }).first()
+      await expect(word).toBeVisible()
+      if (forcedColors === "auto") {
+        const [wordInk, sentenceInk] = await word.evaluate((element) => [
+          getComputedStyle(element).color,
+          getComputedStyle(element.parentElement ?? element).color
+        ])
+        expect(wordInk).not.toBe(sentenceInk)
+      }
+      await expectNoHorizontalOverflow(page)
+      await page.screenshot({
+        animations: "disabled",
+        fullPage: true,
+        path: testInfo.outputPath(`hero-320-${forcedColors}.png`)
+      })
+    }
+  }
+)

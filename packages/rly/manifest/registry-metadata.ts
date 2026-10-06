@@ -13,6 +13,11 @@ const registryMetadata = (
 
 /** Curated, fail-closed guidance keyed one-to-one with registry component names. */
 export const COMPONENT_REGISTRY_METADATA = {
+  Hero: registryMetadata("State the one fact a screen leads with as a sentence, with an optional caption", [
+    "heading",
+    "line",
+    "display"
+  ], ["present", "status"]),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"
