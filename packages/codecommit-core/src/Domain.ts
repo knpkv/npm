@@ -185,7 +185,7 @@ export const ApprovalUnknownReason = Schema.TaggedUnion({
   NotPermitted: {},
   /** AWS was still throttling the evaluation after retries. */
   Throttled: {},
-  /** Any other failure the provider returned. */
+  /** Any other failure the provider returned; the provider's error is logged, not stored. */
   ProviderFailed: {}
 })
 
@@ -285,7 +285,7 @@ export const approvalUnknownLabel = "Approval unknown"
 export const approvalUnknownReasonText: (reason: ApprovalUnknownReason) => string = Match.valueTags({
   NotPermitted: () => "Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules).",
   Throttled: () => "AWS throttled the approval check; it is retried on the next refresh.",
-  ProviderFailed: () => "AWS could not evaluate the approval rules; see the account's notification."
+  ProviderFailed: () => "AWS could not evaluate the approval rules; refresh to retry. The provider error is in the log."
 })
 
 /**
@@ -328,10 +328,16 @@ export const identityMatches = (callerUsername: string, prAuthor: string): boole
  * forms still match when they refer to the same user.
  */
 export const needsMyReview = (
-  pr: { readonly approvalRules: ReadonlyArray<ApprovalRule>; readonly approvedBy: ReadonlyArray<string> },
+  pr: {
+    readonly approvalRules: ReadonlyArray<ApprovalRule>
+    readonly approvedBy: ReadonlyArray<string>
+    readonly approvalUnknown?: ApprovalUnknownReason | undefined
+  },
   currentUser: string | undefined
 ): boolean => {
   if (currentUser === undefined || currentUser.length === 0) return false
+  // While approval is unknown, which rules are satisfied is only last known, so review is not certain.
+  if (pr.approvalUnknown !== undefined) return false
   if (pr.approvedBy.some((approver) => identityMatches(currentUser, approver))) return false
   return pr.approvalRules.some(
     (rule) => !rule.satisfied && rule.poolMembers.some((member) => identityMatches(currentUser, member))

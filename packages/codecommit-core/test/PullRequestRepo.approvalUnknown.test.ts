@@ -103,4 +103,23 @@ describe("PullRequestRepo approval unknown", () => {
       expect(health.total).toBe(2)
       expect(health.approved).toBe(1)
     })))
+
+  it.effect("records a re-read's evaluation: unknown keeps the last known approval, evaluated replaces it", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
+      yield* repo.upsert(upsertInput("46", { isApproved: 1, satisfied: true, unknown: null }))
+      yield* repo.recordApprovalEvaluation("123456789012", "46", { _tag: "Unknown", reason: "Throttled" }, coordinates)
+      const unknown = yield* read("46")
+      expect([unknown.isApproved, unknown.approvalUnknownReason]).toEqual([true, "Throttled"])
+
+      yield* repo.recordApprovalEvaluation("123456789012", "46", {
+        _tag: "Evaluated",
+        isApproved: false,
+        approvalRules: [rule(false)]
+      }, coordinates)
+      const evaluated = yield* read("46")
+      expect([evaluated.isApproved, evaluated.approvalUnknownReason]).toEqual([false, null])
+      expect(evaluated.approvalRules.map((r) => r.satisfied)).toEqual([false])
+    })))
 })

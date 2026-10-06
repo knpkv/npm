@@ -37,7 +37,11 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           findStaleOpen: () => Effect.succeed([staleOpenPR]),
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
-          markApprovalUnknown: (_, id, reason) => Ref.update(marked, (all) => [...all, [id, reason]]),
+          recordApprovalEvaluation: (_, id, evaluation) =>
+            Ref.update(
+              marked,
+              (all) => [...all, [id, evaluation._tag === "Unknown" ? evaluation.reason : "Evaluated"]]
+            ),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -415,6 +419,7 @@ describe("fetchAndUpsertPRs", () => {
           getPullRequest: () => Effect.succeed(providerOpenDetail)
         }),
         Layer.mock(PullRequestRepo, {
+          recordApprovalEvaluation: () => Effect.void,
           findStaleOpen: () => Effect.succeed([staleOpenPR]),
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
           propagateRepoAccountId: () => Effect.void
@@ -436,6 +441,49 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([
         { profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }
       ])
+    }))
+
+  it.effect("writes a successful stale re-evaluation back, clearing an earlier unknown approval", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const recorded = yield* Ref.make<ReadonlyArray<unknown>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const unknownRow = Schema.decodeSync(CachedPullRequest)({
+        ...Schema.encodeSync(CachedPullRequest)(staleOpenPR),
+        approvalUnknownReason: "NotPermitted"
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () => Effect.succeed(new PullRequestDetail({ ...providerOpenDetail, isApproved: true }))
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([unknownRow]),
+          recordApprovalEvaluation: (_, id, evaluation) => Ref.update(recorded, (all) => [...all, [id, evaluation]]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+      expect(yield* Ref.get(recorded)).toEqual([[staleOpenPR.id, {
+        _tag: "Evaluated",
+        isApproved: true,
+        approvalRules: []
+      }]])
+      // Evaluated, so nothing is unknown and the scope is not partial.
+      expect(successfulScopes).toEqual([{ profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }])
     }))
 
   it.effect("sends no pool notification while approval stays unknown across refreshes", () =>
@@ -512,6 +560,7 @@ describe("fetchAndUpsertPRs", () => {
             Ref.update(detailReads, (ids) => [...ids, pullRequestId]).pipe(Effect.as(providerClosedDetail))
         }),
         Layer.mock(PullRequestRepo, {
+          recordApprovalEvaluation: () => Effect.void,
           upsert: () => Effect.void,
           // PR 35 closed at the provider; PR 36 was just listed, so it is not stale.
           findStaleOpen: () => Effect.succeed([staleOpenPR]),
@@ -554,6 +603,7 @@ describe("fetchAndUpsertPRs", () => {
           getPullRequest: () => Effect.succeed(providerClosedDetail)
         }),
         Layer.mock(PullRequestRepo, {
+          recordApprovalEvaluation: () => Effect.void,
           findStaleOpen: () => Effect.succeed([staleOpenPR]),
           updateStatusAndClosedAt: () => Ref.update(statusUpdates, (count) => count + 1),
           propagateRepoAccountId: () => Effect.void

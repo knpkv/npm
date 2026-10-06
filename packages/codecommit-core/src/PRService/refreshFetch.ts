@@ -19,12 +19,7 @@ import {
 } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
-import {
-  type ApprovalUnknownReason,
-  approvalUnknownReasonText,
-  type PullRequestRefreshScope,
-  type UnevaluatedPullRequest
-} from "../Domain.js"
+import { approvalUnknownReasonText, type PullRequestRefreshScope, type UnevaluatedPullRequest } from "../Domain.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
 
@@ -141,9 +136,10 @@ export const fetchAndUpsertPRs = (params: {
     )
 
     const unevaluated = yield* Ref.make<ReadonlyArray<UnevaluatedPullRequest>>([])
-    // A stale row re-read with approval unknown keeps only its last known approval: mark the row, list it
-    // as unevaluated, and count its scope as partial, as for a listed pull request.
-    const recordStaleApprovalUnknown = (
+    // A stale row's re-read writes its evaluation back to the row: a successful one replaces the last
+    // known approval and clears any unknown reason; an unknown one marks the row, lists it as
+    // unevaluated, and counts its scope as partial, as for a listed pull request.
+    const recordStaleEvaluation = (
       pr: {
         readonly awsAccountId: string
         readonly accountProfile: string
@@ -151,13 +147,25 @@ export const fetchAndUpsertPRs = (params: {
         readonly id: string
         readonly repositoryName: string
       },
-      reason: ApprovalUnknownReason | undefined
+      detail: PullRequestDetail
     ) =>
-      reason === undefined ? Effect.void : Effect.gen(function*() {
-        yield* prRepo.markApprovalUnknown(pr.awsAccountId, pr.id, reason._tag, {
-          repositoryName: pr.repositoryName,
-          accountRegion: pr.accountRegion
-        })
+      Effect.gen(function*() {
+        const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
+        const reason = detail.approvalUnknown
+        if (reason === undefined) {
+          return yield* prRepo.recordApprovalEvaluation(pr.awsAccountId, pr.id, {
+            _tag: "Evaluated",
+            // ast-grep-ignore: no-raw-pull-request-approval-read -- writes the evaluated value to the cache.
+            isApproved: detail.isApproved,
+            approvalRules: detail.approvalRules
+          }, coordinates)
+        }
+        yield* prRepo.recordApprovalEvaluation(
+          pr.awsAccountId,
+          pr.id,
+          { _tag: "Unknown", reason: reason._tag },
+          coordinates
+        )
         yield* Ref.update(
           partialScopes,
           (scopes) => new Set(scopes).add(accountRegionKey(pr.accountProfile, pr.accountRegion))
@@ -294,7 +302,7 @@ export const fetchAndUpsertPRs = (params: {
                       pr.id,
                       pr.repositoryName,
                       pr.accountRegion
-                    ).pipe(Effect.andThen(recordStaleApprovalUnknown(pr, detail.approvalUnknown)))
+                    ).pipe(Effect.andThen(recordStaleEvaluation(pr, detail)))
                     : Effect.void
                 ),
                 Effect.catch(() =>

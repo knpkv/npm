@@ -277,9 +277,17 @@ const approvedToward = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRu
 /**
  * Yours first; then, for the unsatisfied rules the caller hasn't approved toward, `review` when one
  * certainly counts their approval (named member, or no pool at all) and `pool` when one only might.
+ * While approval is unknown, which rules are satisfied is only last known: any rule the caller could
+ * count toward makes it `pool`, never the certain `review`.
  */
 const groupOf = (pullRequest: Domain.PullRequest, viewer: Viewer): WorkbenchGroup | undefined => {
   if (identityMatches(viewer.name, pullRequest.author)) return "yours"
+  if (approvalOf(pullRequest)._tag === "Unknown") {
+    const couldCount = pullRequest.approvalRules
+      .filter((rule) => !approvedToward(pullRequest, rule, viewer))
+      .some((rule) => poolStanding(rule, viewer) !== "out")
+    if (couldCount) return "pool"
+  }
   const standings = pullRequest.approvalRules
     .filter((rule) => !rule.satisfied && !approvedToward(pullRequest, rule, viewer))
     .map((rule) => poolStanding(rule, viewer))

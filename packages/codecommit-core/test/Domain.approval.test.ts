@@ -1,5 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
-import { approvalOf, ApprovalUnknownReason, approvalUnknownReasonText, ApprovalUnknownTag } from "../src/Domain.js"
+import { Schema } from "effect"
+import {
+  approvalOf,
+  ApprovalRule,
+  ApprovalUnknownReason,
+  approvalUnknownReasonText,
+  ApprovalUnknownTag,
+  needsMyReview
+} from "../src/Domain.js"
 
 describe("approval", () => {
   it("reads Unknown whenever the last evaluation failed, whatever the last known approval says", () => {
@@ -17,5 +25,14 @@ describe("approval", () => {
 
   it("names exactly the reasons' tags in the flat tag schema", () => {
     expect([...ApprovalUnknownTag.literals].toSorted()).toEqual(Object.keys(ApprovalUnknownReason.cases).toSorted())
+  })
+
+  it("does not claim a review is needed while approval is unknown", () => {
+    const rules = [
+      Schema.decodeSync(ApprovalRule)({ ruleName: "r", requiredApprovals: 1, poolMembers: ["alice"], satisfied: false })
+    ]
+    expect(needsMyReview({ approvalRules: rules, approvedBy: [] }, "alice")).toBe(true)
+    expect(needsMyReview({ approvalRules: rules, approvedBy: [], approvalUnknown: { _tag: "NotPermitted" } }, "alice"))
+      .toBe(false)
   })
 })

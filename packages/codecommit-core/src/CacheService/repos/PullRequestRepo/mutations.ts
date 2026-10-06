@@ -157,20 +157,35 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         cacheError("updateDiffStats")
       ),
 
-    /** Record that a re-read could not evaluate approval: the row's approval is only its last known value. */
-    markApprovalUnknown: (
+    /**
+     * Record a re-read's approval evaluation on its row. While unknown, the last known approval and
+     * rules are kept and only the reason is set; an evaluation replaces both and clears the reason.
+     */
+    recordApprovalEvaluation: (
       awsAccountId: string,
       id: string,
-      reason: ApprovalUnknownTag,
+      evaluation:
+        | { readonly _tag: "Unknown"; readonly reason: ApprovalUnknownTag }
+        | {
+          readonly _tag: "Evaluated"
+          readonly isApproved: boolean
+          readonly approvalRules: ReadonlyArray<{ readonly ruleName: string }>
+        },
       coordinates?: PullRequestCoordinates
     ) =>
       ensureUnambiguous(awsAccountId, id, coordinates).pipe(
         Effect.andThen(
-          sql`UPDATE pull_requests SET approval_unknown_reason = ${reason}
-          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
+          evaluation._tag === "Unknown"
+            ? sql`UPDATE pull_requests SET approval_unknown_reason = ${evaluation.reason}
+              WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
+            : sql`UPDATE pull_requests SET is_approved = ${evaluation.isApproved ? 1 : 0},
+              approval_unknown_reason = NULL,
+              approval_rules = ${evaluation.approvalRules.length > 0 ? JSON.stringify(evaluation.approvalRules) : "[]"}
+              WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
         ),
+        Effect.asVoid,
         Effect.tap(() => publish),
-        cacheError("markApprovalUnknown")
+        cacheError("recordApprovalEvaluation")
       ),
 
     updateStatusAndClosedAt: (
