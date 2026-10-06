@@ -132,7 +132,7 @@ const serviceGlyphs = {
   clockify: ClockifyGlyph
 } satisfies Readonly<Record<RlyService, ServiceGlyph>>
 
-/** Props for a fully named, code-owned service identity mark. */
+/** Props for a code-owned service identity mark. */
 export type ServiceMarkProps = Omit<ComponentPropsWithRef<"span">, "aria-label" | "children" | "role"> & {
   readonly service: RlyService
   /** `hidden` drops the printed name where a title beside the mark already says it. Default `visible`. */
@@ -140,7 +140,7 @@ export type ServiceMarkProps = Omit<ComponentPropsWithRef<"span">, "aria-label" 
   readonly size?: RlyServiceMarkSize
 }
 
-/** Render recognizable service provenance with a full visible and accessible provider name. */
+/** Render service provenance: a recognisable glyph and an accessible provider name, printed unless `name="hidden"`. */
 export const ServiceMark = ({
   className,
   name: nameVariant = "visible",
