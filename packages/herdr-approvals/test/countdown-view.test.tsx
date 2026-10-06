@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it, vi } from "@effect/vitest"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import type { ApprovalDecision } from "../src/approval-decision.js"
@@ -42,7 +42,8 @@ const snapshot = (overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot
   directory: null,
   historyNextCursor: null,
   host: "ALPHA",
-  observedAt: OBSERVED_AT,
+  // A hub whose clock agrees with the browser's; skew is tested on its own.
+  observedAt: Date.now(),
   pendingApprovals: { failures: [], local: [record("job-1")], nextCursors: [], remote: [] },
   records: [],
   status: {
@@ -614,5 +615,135 @@ describe("ApprovalsCountdown", () => {
       /^, \d+% of its approval window used$/
     )
     view.unmount()
+  })
+
+  it("reads expiries on the hub's clock, not a browser clock that runs ahead", () => {
+    const hubNow = Date.now() - 10 * 60_000
+    const view = mount({
+      snapshot: snapshot({
+        observedAt: hubNow,
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1", { approvalExpiresAt: hubNow + 2 * 60_000 + 30_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    expect(view.container.querySelector("[aria-label='Approval summary'] p")?.textContent).toMatch(/^2m \d\ds left on /)
+    expect(view.revalidations.count).toBe(0)
+    view.unmount()
+  })
+
+  it("says expiring once at the deadline, without 'about to expire'", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1", { approvalExpiresAt: Date.now() - 1_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    expect(view.container.querySelector("[aria-label='Approval summary'] p")?.textContent).toBe(
+      "Apply Nix configuration is expiring"
+    )
+    view.unmount()
+  })
+
+  it("does not keep a local request decidable because another host has more pages", () => {
+    const view = mount({ snapshot: snapshot() })
+    view.render({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [],
+          nextCursors: [{ cursor: { createdAt: 1, id: "remote-9" }, host: "BETA" }],
+          remote: []
+        }
+      })
+    })
+    expect(view.bar()?.dataset["state"]).toBe("off")
+    view.press("Enter")
+    expect(view.decisions).toEqual([])
+    view.unmount()
+  })
+
+  it("keeps a local request usable while this host's own queue has more pages", () => {
+    const view = mount({ snapshot: snapshot() })
+    view.render({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [],
+          nextCursors: [{ cursor: { createdAt: 1, id: "job-9" }, host: "alpha" }],
+          remote: []
+        }
+      })
+    })
+    expect(view.bar()?.dataset["state"]).toBe("ready")
+    view.unmount()
+  })
+
+  it("still asks the hub at the deadline of a pinned request that left the loaded pages", () => {
+    vi.useFakeTimers()
+    try {
+      const listed = snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1", { approvalExpiresAt: Date.now() + 2_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+      const view = mount({ snapshot: listed })
+      // Gone from the loaded page, but this host has more pages: not proven gone.
+      view.render({
+        snapshot: {
+          ...listed,
+          pendingApprovals: {
+            failures: [],
+            local: [],
+            nextCursors: [{ cursor: { createdAt: 1, id: "job-9" }, host: "ALPHA" }],
+            remote: []
+          }
+        }
+      })
+      expect(view.revalidations.count).toBe(0)
+      // One second per act: React schedules each next tick only after it renders the last.
+      for (let second = 0; second < 3; second += 1) act(() => vi.advanceTimersByTime(1_000))
+      expect(view.revalidations.count).toBe(1)
+      view.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("does not ask the hub about a pinned request whose expiry it already recorded", () => {
+    vi.useFakeTimers()
+    try {
+      const listed = snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1", { approvalExpiresAt: Date.now() + 2_000 })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+      const view = mount({ snapshot: listed })
+      view.render({
+        snapshot: {
+          ...listed,
+          pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] },
+          records: [record("job-1", { expiredAt: Date.now(), status: "expired" })]
+        }
+      })
+      for (let second = 0; second < 20; second += 1) act(() => vi.advanceTimersByTime(1_000))
+      expect(view.revalidations.count).toBe(0)
+      view.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

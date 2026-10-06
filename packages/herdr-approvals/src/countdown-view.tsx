@@ -155,7 +155,7 @@ const ApprovalHero = ({
               <>
                 , <HeroWord tone="held">expires soon</HeroWord>
               </>
-            ) : urgency === "imminent" || urgency === "due" ? (
+            ) : urgency === "imminent" ? (
               <>
                 , <HeroWord tone="blocked">about to expire</HeroWord>
               </>
@@ -240,7 +240,8 @@ const departureOf = (snapshot: DashboardSnapshot, item: PendingItem): Departure 
       ? { text: EXPIRED_TEXT, word: "Expired." }
       : { text: `${decided.outcome}${decided.by === null ? "" : ` by ${decided.by}`}.`, word: `${decided.outcome}.` }
   }
-  return snapshot.pendingApprovals.nextCursors.length > 0
+  // Only another page of this host's queue can still hold it; a remote host's pages cannot.
+  return snapshot.pendingApprovals.nextCursors.some(({ host }) => host.toLowerCase() === snapshot.host.toLowerCase())
     ? null
     : { text: "This request left the queue.", word: "Left the queue." }
 }
@@ -353,12 +354,6 @@ export const ApprovalsCountdown = ({
 }): ReactElement => {
   const items = pendingItems(snapshot)
   const facts = items.map((item) => factsOf(item, snapshot.host))
-  const now = useNow((at) =>
-    tickInterval(
-      facts.map(({ expiresAt }) => expiresAt),
-      at
-    )
-  )
 
   // The selected request, remembered with its item. The soonest is pinned on first sight, so the
   // decision target changes only when the reader selects (or focuses) another row, never because the
@@ -375,6 +370,30 @@ export const ApprovalsCountdown = ({
   const selectedKey = shown?.key ?? null
   // Absent from the list is "gone" only when the hub's own record or a complete read proves it.
   const departure = selected === undefined || shownIndex >= 0 ? null : departureOf(snapshot, selected)
+
+  // A pinned request that left the loaded pages without proof it is gone keeps its clock and its
+  // deadline read, like a listed one.
+  const tracked =
+    selected !== undefined && shownIndex < 0 && departure === null
+      ? [...facts, factsOf(selected, snapshot.host)]
+      : facts
+
+  // Expiries are hub times, so the clock is the hub's: the snapshot's `observedAt` plus the time
+  // elapsed here since it arrived. A browser clock ahead of or behind the hub does not matter.
+  const [origin, setOrigin] = useState(() => ({
+    observedAt: snapshot.observedAt,
+    offset: snapshot.observedAt - Date.now()
+  }))
+  if (origin.observedAt !== snapshot.observedAt) {
+    setOrigin({ observedAt: snapshot.observedAt, offset: snapshot.observedAt - Date.now() })
+  }
+  const now =
+    useNow((at) =>
+      tickInterval(
+        tracked.map(({ expiresAt }) => expiresAt),
+        at + origin.offset
+      )
+    ) + origin.offset
 
   const stateOf = (item: PendingItem, itemGone: Departure | null): RlyDecisionBarState => {
     if (onDecision === undefined) return { _tag: "off", reason: "Decisions are unavailable here." }
@@ -435,7 +454,7 @@ export const ApprovalsCountdown = ({
   const revalidatedAt = useRef(new Map<string, number>())
   useEffect(() => {
     if (onRevalidate === undefined) return
-    const due = facts.filter((entry) => {
+    const due = tracked.filter((entry) => {
       const askedAt = revalidatedAt.current.get(itemKey(entry))
       return (
         entry.expiresAt !== null &&
@@ -446,7 +465,7 @@ export const ApprovalsCountdown = ({
     if (due.length === 0) return
     for (const entry of due) revalidatedAt.current.set(itemKey(entry), now)
     onRevalidate()
-  }, [facts, now, onRevalidate])
+  }, [tracked, now, onRevalidate])
 
   // Your own decision keeps the hub's answer, also after the request leaves the queue, unless the
   // answer was uncertain and a later read proves what happened; any other departure says why.
