@@ -6,6 +6,8 @@ Build a production `@knpkv/control-center` application, the independent **rly** 
 
 The committed prototype at `packages/codecommit-web/src/client/prototypes/control-center/` is the visual and interaction reference. Production implementation may simplify internal code and data flow, but must preserve the approved information hierarchy, entity relationships, human collaboration model, agent workflows, light/dark themes, and responsive behavior.
 
+> **Amendment (2026-10-05):** the prototype fixture was deleted by owner decision once the production Control Center routes replaced it. The visual and interaction reference is now the production `@knpkv/control-center` routes and the rly Storybook catalog. The prototype import boundary (Vite build-graph guard and the `no-production-prototype-import` ast-grep rule) stays in force.
+
 ## User Story
 
 As an engineering release owner, reviewer, or approver, I want one Control Center that connects work definition, code changes, documentation, pipeline executions, releases, time evidence, collaborators, and governed agents so that I can understand what can ship, trace why, act on blockers, and review evidence without switching between service-specific tools.
@@ -98,7 +100,7 @@ As an agent, I need a typed, scoped release context and governed plugin actions 
 - Use Effect Platform services for server I/O, time, HTTP, configuration, filesystem, and process access.
 - Decode untrusted HTTP, plugin, configuration, and persisted data at boundaries before assigning domain types.
 - Existing packages may be extended when a reusable capability belongs with their product client, but vendor-specific behavior must not leak into Control Center core models.
-- The prototype remains a design fixture until equivalent production routes are verified; its mock state is not a production data source.
+- The prototype remains a design fixture until equivalent production routes are verified; its mock state is not a production data source. _(Amended 2026-10-05: retired and deleted; see the Overview amendment.)_
 
 ## Acceptance Criteria
 

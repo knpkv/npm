@@ -54,6 +54,28 @@ describe("Select", () => {
     expect(RLY_SELECT_DEFAULT_VARIANTS).toEqual({ size: "default" })
   })
 
+  it("shows the selected option label without an open portal, including server rendering", () => {
+    const markup = renderToStaticMarkup(
+      <Select aria-label="Environment" onValueChange={() => undefined} options={options} value="staging" />
+    )
+    expect(markup).toContain(">Staging<")
+    expect(markup).not.toContain("Select an option")
+  })
+
+  it("keeps an uncontrolled selection live after the user picks another option", async () => {
+    Reflect.set(HTMLElement.prototype, "scrollIntoView", vi.fn())
+    const { host, portal } = await mount(
+      <Select aria-label="Environment" defaultValue="development" options={options} />
+    )
+    const trigger = host.querySelector<HTMLButtonElement>('[role="combobox"]')
+    trigger?.focus()
+    await act(async () => trigger?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowDown" })))
+    const staging = portal.querySelector<HTMLElement>('[role="option"]:nth-of-type(2)')
+    await act(async () => staging?.focus())
+    await act(async () => staging?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Enter" })))
+    expect(trigger?.textContent).toContain("Staging")
+  })
+
   it("opens from the keyboard and reports controlled selection", async () => {
     Reflect.set(HTMLElement.prototype, "scrollIntoView", vi.fn())
     const changes: Array<string> = []

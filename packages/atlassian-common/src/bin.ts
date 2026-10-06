@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stdio from "effect/Stdio"
 import pkg from "../package.json" with { type: "json" }
+import { Verbose, withCliErrorHandling } from "./cli/index.js"
 import {
   HomeDirectoryLive,
   inspectAllToolProfiles,
@@ -90,6 +91,7 @@ const auth = Command.make("auth").pipe(
 
 const atlassian = Command.make("atlassian", {}, () => Console.log("Usage: atlassian profiles|auth")).pipe(
   Command.withDescription("Unified Atlassian profile manager"),
+  Command.withGlobalFlags([Verbose]),
   Command.withSubcommands([profiles, auth])
 )
 
@@ -99,15 +101,13 @@ const program = Effect.gen(function*() {
   const args = yield* stdio.args
   return yield* cli(args)
 }).pipe(
+  withCliErrorHandling,
   Effect.provide(
     Layer.mergeAll(
       NodeServices.layer,
       NodeHttpClient.layerFetch,
       HomeDirectoryLive
     )
-  ),
-  Effect.catch(<UnparsedInput>(error: UnparsedInput) =>
-    Console.error(String(error)).pipe(Effect.andThen(Effect.fail(error)))
   )
 )
 

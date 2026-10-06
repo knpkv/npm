@@ -44,3 +44,10 @@
     display: none;
   }
 }
+
+@layer rly.base {
+  /* useDocumentTheme themes <html>; paint its canvas so overscroll matches the rly surface. */
+  :root[data-theme] {
+    background: var(--rly-color-canvas);
+  }
+}

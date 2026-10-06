@@ -99,6 +99,41 @@ export const UsageReport = Schema.Struct({
 })
 export type UsageReport = typeof UsageReport.Type
 
+export const SessionsQuery = Schema.Struct({
+  ...RangeQuery.fields,
+  /** A Booking id as `UsageReport.bookings[].id` gives it, for example `ticket:RLY-142`. */
+  booking: Schema.NonEmptyString,
+  agent: AgentFilter
+})
+export type SessionsQuery = typeof SessionsQuery.Type
+
+/** One agent session's usage on one Booking within a range. Never a share of a limit (ADR-0003). */
+export const SessionSummary = Schema.Struct({
+  agent: Agent,
+  sessionId: Schema.String,
+  /** First and last request inside the range. */
+  firstAt: Millis,
+  lastAt: Millis,
+  requests: Count,
+  tokens: Tokens,
+  /** API-Equivalent Cost of the priced tokens only. */
+  costUsd: Schema.Finite,
+  unpricedTokens: Count,
+  models: Schema.Array(Schema.String),
+  unpricedModels: Schema.Array(Schema.String),
+  branches: Schema.Array(Schema.String)
+})
+export type SessionSummary = typeof SessionSummary.Type
+
+export const SessionsReport = Schema.Struct({
+  booking: Schema.String,
+  /** Most API-Equivalent Cost first, then the most recent. */
+  sessions: Schema.Array(SessionSummary),
+  /** Sessions past the list's cap, left out. */
+  omitted: Count
+})
+export type SessionsReport = typeof SessionsReport.Type
+
 export const LimitPoint = Schema.Struct({ at: Millis, reading: LimitReading })
 
 export const LimitSeries = Schema.Struct({

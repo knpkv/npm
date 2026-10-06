@@ -6,6 +6,8 @@ import {
   LimitsReport,
   RangeQuery,
   ServerStatus,
+  SessionsQuery,
+  SessionsReport,
   UnauthorizedApiError,
   UsageQuery,
   UsageReport
@@ -26,6 +28,7 @@ export class OwnerSessionAuth extends HttpApiMiddleware.Service<OwnerSessionAuth
 export class UsageApiGroup extends HttpApiGroup.make("usage")
   .add(HttpApiEndpoint.get("usage", "/usage", { query: UsageQuery, success: UsageReport, error: ApiError }))
   .add(HttpApiEndpoint.get("limits", "/limits", { query: RangeQuery, success: LimitsReport, error: ApiError }))
+  .add(HttpApiEndpoint.get("sessions", "/sessions", { query: SessionsQuery, success: SessionsReport, error: ApiError }))
   .add(HttpApiEndpoint.get("status", "/status", { success: ServerStatus }))
   .prefix("/api")
 {}

@@ -128,9 +128,13 @@ const SelectImplementation = (componentProps: SelectProps): ReactElement => {
   requireText(accessibleName, ariaLabel === undefined ? "Select aria-labelledby" : "Select aria-label")
   const visiblePlaceholder = requireText(placeholder, "Select placeholder")
   const selectedValue = value ?? defaultValue
-  if (selectedValue !== undefined && !options.some((option) => option.value === selectedValue)) {
+  const selectedOption =
+    selectedValue === undefined ? undefined : options.find((option) => option.value === selectedValue)
+  if (selectedValue !== undefined && selectedOption === undefined) {
     throw new Error(`Select value does not match an option: ${selectedValue}`)
   }
+  // Only a controlled value is known on every render; an uncontrolled one is left to Radix to mirror.
+  const selectedLabel = valueControlled ? selectedOption?.label : undefined
 
   return (
     <RadixSelect.Root
@@ -161,7 +165,8 @@ const SelectImplementation = (componentProps: SelectProps): ReactElement => {
         ref={ref}
         tabIndex={tabIndex}
       >
-        <RadixSelect.Value placeholder={visiblePlaceholder} />
+        {/* Render the label directly so a controlled value shows before the list mounts, including on the server. */}
+        <RadixSelect.Value placeholder={visiblePlaceholder}>{selectedLabel}</RadixSelect.Value>
         <RadixSelect.Icon asChild>
           <span aria-hidden="true" className={style("triggerIcon")}>
             <Icon decorative name="chevron-down" size="small" />

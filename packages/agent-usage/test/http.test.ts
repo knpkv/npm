@@ -131,6 +131,25 @@ describe("HTTP boundary", () => {
         }
       }))
 
+    it.effect("guards the sessions read like every other: no cookie, a foreign site, or an empty range", () =>
+      Effect.gen(function*() {
+        const client = yield* HttpClient.HttpClient
+        const security = yield* OwnerSession.OwnerSession
+        const path = "/api/sessions?from=1000&to=2000&booking=ticket%3ARLY-142&agent=all"
+        expect((yield* client.get(path)).status).toBe(401)
+        const foreign = yield* client.get(path, {
+          headers: { cookie: cookieOf(security), "sec-fetch-site": "cross-site" }
+        })
+        expect(foreign.status).toBe(403)
+        const empty = yield* client.get("/api/sessions?from=2000&to=2000&booking=ticket%3ARLY-142&agent=all", {
+          headers: { cookie: cookieOf(security) }
+        })
+        expect(empty.status).toBe(400)
+        const served = yield* client.get(path, { headers: { cookie: cookieOf(security) } })
+        expect(served.status).toBe(200)
+        expect(yield* served.json).toEqual({ booking: "ticket:RLY-142", sessions: [], omitted: 0 })
+      }))
+
     it.effect("refuses a browser read started by another site", () =>
       Effect.gen(function*() {
         const client = yield* HttpClient.HttpClient
