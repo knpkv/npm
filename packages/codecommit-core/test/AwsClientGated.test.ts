@@ -17,6 +17,7 @@ describe("AwsClientGated", () => {
         calls.push({ account, options })
         return Stream.empty
       },
+      getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
       getCallerIdentity: () => unused("getCallerIdentity"),
       createPullRequest: () => unused("createPullRequest"),
       listBranches: () => unused("listBranches"),
