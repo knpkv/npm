@@ -205,6 +205,34 @@
     },
     {
       "capabilities": [
+        "decide",
+        "present"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "DecisionBar",
+      "states": [
+        "default",
+        "off",
+        "ready",
+        "sending",
+        "sticky"
+      ],
+      "terms": [
+        "decide",
+        "decisionbar",
+        "inline",
+        "off",
+        "pattern",
+        "placement",
+        "present",
+        "ready",
+        "sending",
+        "sticky"
+      ]
+    },
+    {
+      "capabilities": [
         "confirm",
         "overlay"
       ],
