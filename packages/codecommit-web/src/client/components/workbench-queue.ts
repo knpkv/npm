@@ -63,10 +63,54 @@ export interface WorkbenchQueue {
   readonly rows: ReadonlyArray<WorkbenchRow>
 }
 
-/** Whole-string match where each `*` stands for any run of characters, anywhere in the pattern. */
-const globMatches = (pattern: string, value: string): boolean =>
-  new RegExp(`^${pattern.split("*").map((part) => part.replace(/[.+?^${}()|[\]\\]/g, "\\$&")).join(".*")}$`)
-    .test(value)
+/**
+ * Whole-string match where each `*` stands for any run of characters, anywhere in the pattern.
+ * Greedy with one remembered star, so it stays O(pattern × value) for any number of stars; pool
+ * entries are repository data and must not be able to stall the page with a backtracking regex.
+ */
+export const globMatches = (pattern: string, value: string): boolean => {
+  let p = 0
+  let v = 0
+  let star = -1
+  let resume = 0
+  while (v < value.length) {
+    if (p < pattern.length && pattern[p] !== "*" && pattern[p] === value[v]) {
+      p++
+      v++
+    } else if (p < pattern.length && pattern[p] === "*") {
+      star = p++
+      resume = v
+    } else if (star >= 0) {
+      p = star + 1
+      v = ++resume
+    } else {
+      return false
+    }
+  }
+  while (pattern[p] === "*") p++
+  return p === pattern.length
+}
+
+/**
+ * Whether a pool entry could match a principal whose user or session name is `name`, whatever
+ * its role and account. The name is the entry's last path segment (`user/alice`,
+ * `assumed-role/Reviewers/alice`, shorthand `Reviewers/alice`) and must glob-match it. A `*` in
+ * that segment can also cover `/` (a role before the session, IAM user paths: `user/team/al*`
+ * matches `user/team/alex/bob`), so then only the literal text after the last `*` has to fit the
+ * end of `/name`. Role-session and federated-user ARNs are the exception: their final segment is
+ * the session name itself, so `assumed-role/Reviewers/b*` cannot be alice.
+ */
+const nameCompatible = (entry: string, name: string): boolean => {
+  const resource = entry.slice(entry.lastIndexOf(":") + 1).toLowerCase()
+  const segments = resource.split("/")
+  const named = entry.startsWith("arn:") ? segments.slice(1) : segments
+  const last = named.at(-1) ?? ""
+  const wanted = name.trim().toLowerCase().split(/[/:]/).at(-1) ?? ""
+  const sessionIsLast = entry.startsWith("arn:") &&
+    ((segments[0] === "assumed-role" && named.length >= 2) || segments[0] === "federated-user")
+  if (last.includes("*") && !sessionIsLast) return `/${wanted}`.endsWith(last.slice(last.lastIndexOf("*") + 1))
+  return globMatches(last, wanted)
+}
 
 const approverArn = /^arn:aws[\w-]*:(?:iam|sts)::(\d+):(?:user|federated-user|assumed-role)\/(.+)$/
 
@@ -83,6 +127,10 @@ export const poolEntryMatches = (entry: string, arn: string): boolean => {
   return approver !== null && approver[1] === shorthand[1] && globMatches(shorthand[2] ?? "", approver[2] ?? "")
 }
 
+/** Raw pool entries when the provider sent them; the normalized names only for legacy rules. */
+const poolEntries = (rule: Domain.ApprovalRule): ReadonlyArray<string> =>
+  rule.poolMemberArns.length > 0 ? rule.poolMemberArns : rule.poolMembers
+
 /**
  * Approvals that count toward one rule. A satisfied rule is complete by definition; a rule with
  * no pool accepts any approver. Otherwise ARNs decide whenever both sides carry them (wildcards
@@ -96,22 +144,26 @@ const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule)
     return pullRequest.approvedByArns.filter((arn) => rule.poolMemberArns.some((entry) => poolEntryMatches(entry, arn)))
       .length
   }
-  const exactMembers = rule.poolMembers.filter((member) => !member.includes("*"))
+  // Name fallback: wildcard entries never count by name. Raw entries carry the wildcards that
+  // normalization strips (`Review*/alice` becomes `alice`), so they decide when present.
+  const exactMembers = poolEntries(rule).filter((entry) => !entry.includes("*"))
   return pullRequest.approvedBy.filter((approver) => exactMembers.some((member) => identityMatches(approver, member)))
     .length
 }
 
 /**
  * Whether the caller, known only by user name, is in one rule's approval pool. `open` means the
- * rule has no pool, so any approver counts. A wildcard entry (a role pattern ending in a name, or
- * a whole role) leaves it `maybe`, because the caller's role and account are unknown. Raw pool
- * entries decide when the provider sent them; the normalized names only stand in when it did not.
+ * rule has no pool, so any approval counts. `member` means an entry without a wildcard names the
+ * caller: by user name, as core's `needsMyReview` and the pending-review count decide; the role
+ * and account in that entry are not checked, because the client has no caller ARN. `maybe` means
+ * only a wildcard entry could match, and its fixed name part does not rule the caller out.
  */
 const poolStanding = (rule: Domain.ApprovalRule, currentUser: string): "member" | "maybe" | "open" | "out" => {
-  const entries = rule.poolMemberArns.length > 0 ? rule.poolMemberArns : rule.poolMembers
+  const entries = poolEntries(rule)
   if (entries.length === 0) return "open"
-  if (entries.some((entry) => !entry.includes("*") && identityMatches(currentUser, entry))) return "member"
-  return entries.some((entry) => entry.includes("*")) ? "maybe" : "out"
+  const possible = entries.filter((entry) => nameCompatible(entry, currentUser))
+  if (possible.some((entry) => !entry.includes("*"))) return "member"
+  return possible.length > 0 ? "maybe" : "out"
 }
 
 /**

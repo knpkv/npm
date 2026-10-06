@@ -2,7 +2,13 @@ import { describe, expect, it } from "@effect/vitest"
 import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 
-import { formatSpan, poolEntryMatches, ruleProgress, workbenchQueue } from "../src/client/components/workbench-queue.js"
+import {
+  formatSpan,
+  globMatches,
+  poolEntryMatches,
+  ruleProgress,
+  workbenchQueue
+} from "../src/client/components/workbench-queue.js"
 
 const NOW = new Date("2026-10-05T15:30:00Z")
 const HOUR = 3_600_000
@@ -235,6 +241,25 @@ describe("poolEntryMatches", () => {
     expect(poolEntryMatches("arn:aws:sts::111122223333:assumed-role/Reviewers.alice", session)).toBe(false)
   })
 
+  it("matches many-wildcard patterns in linear time instead of backtracking", () => {
+    const started = performance.now()
+    expect(globMatches("*a*a*a*a*a*a*a*a*a*a*b", "a".repeat(200))).toBe(false)
+    expect(performance.now() - started).toBeLessThan(250)
+    expect(globMatches("a*b*c", "aXbYc")).toBe(true)
+    expect(globMatches("a*b*c", "aXbY")).toBe(false)
+  })
+
+  it("never counts a name-only approval against a raw wildcard entry, but still does for legacy names", () => {
+    const wildcard = make({
+      approvalRules: [rule("Reviewers", 2, ["alice"], false, ["arn:aws:sts::111122223333:assumed-role/Review*/alice"])],
+      approvedBy: ["alice"],
+      id: "1"
+    })
+    expect(ruleProgress(wildcard)).toEqual({ approved: 0, name: "Reviewers", required: 2 })
+    const legacy = make({ approvalRules: [rule("Reviewers", 2, ["alice"], false)], approvedBy: ["alice"], id: "2" })
+    expect(ruleProgress(legacy)).toEqual({ approved: 1, name: "Reviewers", required: 2 })
+  })
+
   it("counts a shorthand pool approval in rule progress", () => {
     const pullRequest = make({
       approvalRules: [
@@ -284,6 +309,21 @@ describe("workbenchQueue with role pools", () => {
     const named = rule("Maintainers", 1, ["andrey"], false, ["CodeCommitApprovers:111122223333:andrey"])
     const both = workbenchQueue([make({ approvalRules: [roleWildcard, named], id: "2" })], "andrey", NOW)
     expect(both.rows.map((row) => row.group)).toEqual(["review"])
+  })
+
+  it("leaves out wildcard entries whose fixed name part cannot be the user", () => {
+    const groupFor = (entry: string) =>
+      workbenchQueue([make({ approvalRules: [rule("Pool", 1, ["x"], false, [entry])], id: "1" })], "alice", NOW).rows
+        .map((row) => row.group)
+    expect(groupFor("arn:aws:sts::111122223333:assumed-role/Review*/bob")).toEqual([])
+    expect(groupFor("arn:aws:sts::111122223333:assumed-role/Reviewers/b*")).toEqual([])
+    expect(groupFor("arn:aws:sts::111122223333:assumed-role/Reviewers/a*")).toEqual(["pool"])
+    expect(groupFor("arn:aws:sts::111122223333:assumed-role/Rev*")).toEqual(["pool"])
+    expect(groupFor("CodeCommitApprovers:111122223333:*alice")).toEqual(["pool"])
+    expect(groupFor("CodeCommitApprovers:111122223333:Reviewers/*")).toEqual(["pool"])
+    expect(groupFor("arn:aws:iam::111122223333:user/team/ali*")).toEqual(["pool"])
+    expect(groupFor("arn:aws:iam::111122223333:user/team/bo*")).toEqual(["pool"])
+    expect(groupFor("arn:aws:sts::111122223333:federated-user/b*")).toEqual([])
   })
 
   it("puts an unsatisfied rule without a pool in Needs your review, since any approval counts", () => {
