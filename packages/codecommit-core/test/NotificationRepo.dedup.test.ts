@@ -9,8 +9,8 @@ import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 
 const unreadSystemNotifications = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
-  return yield* sql<{ title: string; message: string }>`
-    SELECT title, message FROM notifications WHERE pull_request_id = '' AND read = 0 ORDER BY id
+  return yield* sql<{ id: number; title: string; message: string }>`
+    SELECT id, title, message FROM notifications WHERE pull_request_id = '' AND read = 0 ORDER BY id
   `
 })
 
@@ -50,7 +50,7 @@ describe("NotificationRepo.addSystem", () => {
       yield* repo.addSystem({ type: "error", profile: "alpha", title: "alpha (us-east-1)", message: "session expired" })
       yield* repo.addSystem({ ...summary, message: "1 pull request in us-east-1" })
       yield* repo.addSystem({ ...summary, message: "3 pull requests in us-east-1, eu-west-1" })
-      expect(yield* unreadSystemNotifications).toEqual([
+      expect((yield* unreadSystemNotifications).map(({ message, title }) => ({ title, message }))).toEqual([
         { title: "alpha (us-east-1)", message: "session expired" },
         { title: "alpha: approval evaluation", message: "3 pull requests in us-east-1, eu-west-1" }
       ])
@@ -63,13 +63,32 @@ describe("NotificationRepo.addSystem", () => {
       const summary = { type: "error", profile: "alpha", title: "alpha: approval evaluation", replaceUnread: true }
       yield* repo.addSystem({ ...summary, message: "1 pull request in us-east-1" })
       yield* sql`
-        CREATE TRIGGER reject_replacement BEFORE INSERT ON notifications
+        CREATE TRIGGER reject_replacement BEFORE UPDATE ON notifications
         WHEN NEW.message = 'rejected' BEGIN SELECT RAISE(ABORT, 'rejected'); END
       `
       const exit = yield* Effect.exit(repo.addSystem({ ...summary, message: "rejected" }))
       expect(exit._tag).toBe("Failure")
-      expect(yield* unreadSystemNotifications).toEqual([
+      expect((yield* unreadSystemNotifications).map(({ message, title }) => ({ title, message }))).toEqual([
         { title: "alpha: approval evaluation", message: "1 pull request in us-east-1" }
       ])
+    })))
+
+  it.effect("keeps one id for an unread summary: unchanged is untouched, a new count updates it in place", () =>
+    withRepo(Effect.gen(function*() {
+      const repo = yield* NotificationRepo
+      const summary = { type: "error", profile: "alpha", title: "alpha: approval evaluation", replaceUnread: true }
+      yield* repo.addSystem({ ...summary, message: "1 pull request in us-east-1" })
+      const [first] = yield* unreadSystemNotifications
+      yield* repo.addSystem({ ...summary, message: "1 pull request in us-east-1" })
+      yield* repo.addSystem({ ...summary, message: "2 pull requests in us-east-1" })
+      expect(yield* unreadSystemNotifications).toEqual([
+        { id: first?.id, title: "alpha: approval evaluation", message: "2 pull requests in us-east-1" }
+      ])
+
+      // Once read, a later failure is news again.
+      yield* repo.markRead(first?.id ?? -1)
+      yield* repo.addSystem({ ...summary, message: "2 pull requests in us-east-1" })
+      const [next] = yield* unreadSystemNotifications
+      expect(next?.id).toBeGreaterThan(first?.id ?? 0)
     })))
 })

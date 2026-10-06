@@ -172,14 +172,28 @@ const makeNotificationRepo = Effect.gen(function*() {
       const insert = insertRow.pipe(Effect.tap(() => publish))
 
       if (n.replaceUnread === true) {
-        // One transaction: a failed insert keeps the summary it would have replaced.
-        return sql.withTransaction(
-          sql`
-            DELETE FROM notifications
+        // One transaction, and the unread summary keeps its id: clients alert on ids they have not seen,
+        // so an unchanged summary must not look new. Nothing is written, or announced, when it is unchanged.
+        const replaced = sql.withTransaction(
+          sql<{ id: number; message: string }>`
+            SELECT id, message FROM notifications
             WHERE profile = ${n.profile ?? ""} AND type = ${n.type} AND title = ${n.title}
               AND pull_request_id = '' AND read = 0
-          `.pipe(Effect.andThen(insertRow))
-        ).pipe(Effect.andThen(publish), cacheError("addSystem"))
+            ORDER BY id LIMIT 1
+          `.pipe(
+            Effect.flatMap(([current]) =>
+              current === undefined
+                ? insertRow.pipe(Effect.as(true))
+                : current.message === n.message
+                ? Effect.succeed(false)
+                : sql`UPDATE notifications SET message = ${n.message} WHERE id = ${current.id}`.pipe(Effect.as(true))
+            )
+          )
+        )
+        return replaced.pipe(
+          Effect.flatMap((changed) => changed ? publish : Effect.void),
+          cacheError("addSystem")
+        )
       }
 
       if (n.deduplicate !== true) {
