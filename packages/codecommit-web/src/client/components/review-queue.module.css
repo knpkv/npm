@@ -199,8 +199,9 @@
   cursor: pointer;
 }
 
+/* text-2: text-3 measured 4.31:1 on the chip's surface-2 in light, below AA. */
 .filterChip span:first-child {
-  color: var(--rly-color-text-3);
+  color: var(--rly-color-text-2);
 }
 
 .filterChip:hover {
