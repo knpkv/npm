@@ -145,11 +145,9 @@
   white-space: nowrap;
 }
 
+/* One sentence, not a dotted list: "Pull request 12, created …, port 8080". */
 .sandboxMeta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--rly-space-8);
+  display: block;
   color: var(--rly-color-text-3);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
@@ -159,10 +157,6 @@
   min-inline-size: 0;
   max-inline-size: 100%;
   overflow-wrap: break-word;
-}
-
-.metaSeparator {
-  color: var(--rly-color-border-2);
 }
 
 .rowActions,

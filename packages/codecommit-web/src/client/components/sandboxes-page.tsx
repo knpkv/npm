@@ -141,25 +141,15 @@ export function SandboxesPageView({
                         />
                       </span>
                       <span className={styles.sandboxMeta}>
-                        <span>PR #{sandbox.pullRequestId}</span>
-                        <span aria-hidden="true" className={styles.metaSeparator}>
-                          ·
-                        </span>
-                        <span>{formatTime(sandbox.createdAt)}</span>
+                        Pull request {sandbox.pullRequestId}, created {formatTime(sandbox.createdAt)}
                         {sandbox.port !== null && sandbox.status === "running" ? (
                           <>
-                            <span aria-hidden="true" className={styles.metaSeparator}>
-                              ·
-                            </span>
-                            <span className={styles.port}>port {sandbox.port}</span>
+                            , <span className={styles.port}>port {sandbox.port}</span>
                           </>
                         ) : null}
                         {sandbox.statusDetail !== null && isProvisioning(sandbox.status) ? (
                           <>
-                            <span aria-hidden="true" className={styles.metaSeparator}>
-                              ·
-                            </span>
-                            <span className={styles.statusDetailInline}>{sandbox.statusDetail}</span>
+                            . <span className={styles.statusDetailInline}>{sandbox.statusDetail}</span>
                           </>
                         ) : null}
                       </span>

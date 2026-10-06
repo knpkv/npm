@@ -531,7 +531,7 @@ test("keeps a replacement Relay stream visibly active after aborting its predece
   expect(runCount).toBe(2)
 
   replacementRun.resolve()
-  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   await expect(run).toBeEnabled()
 })
 
@@ -600,7 +600,7 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
   await page.goto("/accounts/111111111111/prs/42")
 
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   expect(runs[0]).toMatchObject({
     profile: {
       id: "quick",
@@ -615,7 +615,7 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
   await page.reload()
   await expect(page.getByLabel("Profile")).toHaveValue("quick")
   await expect(page.getByLabel("Profile").locator("option:checked")).toHaveText("Test review")
-  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByPlaceholder("Ask Relay about this finding…").fill("Continue this security review.")
   await page.getByRole("button", { exact: true, name: "Send" }).click()
@@ -994,7 +994,7 @@ test("recovers an interrupted finding publication after reload", async ({ page }
   await routeReviewWorkspace(page)
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   await expect.poll(() => page.evaluate(() => window.localStorage.length)).toBeGreaterThan(0)
   await page.evaluate(() => {
     const key = Object.keys(window.localStorage).find((candidate) =>
@@ -1170,7 +1170,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   reviewGate.resolve()
   await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect(page.getByText("Relay is reviewing the exact patch")).toBeVisible()
-  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   await expect(page.getByText("2 actionable findings")).toBeVisible()
   await expect(page.getByText("The changed constant expands retries without an idempotency guard.")).toBeHidden()
   await page.getByText("Evidence & recommendation").first().click()

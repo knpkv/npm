@@ -369,9 +369,10 @@ function CommentThread({
     >
       <div className={styles.commentBody}>
         <div className={styles.commentMeta}>
-          <strong>{thread.root.author}</strong>
-          <span aria-hidden="true">·</span>
-          <time dateTime={thread.root.creationDate}>{formatRelativeDate(thread.root.creationDate)}</time>
+          <span>
+            <strong>{thread.root.author}</strong>,{" "}
+            <time dateTime={thread.root.creationDate}>{formatRelativeDate(thread.root.creationDate)}</time>
+          </span>
           {target === null ? null : (
             <button className={styles.commentJump} onClick={() => onNavigateToDiff(target)} type="button">
               <CodeIcon aria-hidden="true" /> View in diff
@@ -1347,7 +1348,9 @@ export function PRDetail() {
               {pr.author}
             </Link>
             , opened <time dateTime={pr.creationDate.toISOString()}>{DateUtils.formatDate(pr.creationDate)}</time>.
-            {pr.fetchedAt !== undefined ? <> {DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}.</> : null}
+            {pr.fetchedAt !== undefined ? (
+              <> {DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}.</>
+            ) : null}
           </span>
         </div>
       </header>

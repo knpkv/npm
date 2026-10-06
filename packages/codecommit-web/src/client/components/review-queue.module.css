@@ -423,10 +423,6 @@
   gap: 0.45rem;
 }
 
-.metaSeparator {
-  color: var(--rly-color-text-3);
-}
-
 .commentCount {
   display: inline-flex;
   align-items: center;

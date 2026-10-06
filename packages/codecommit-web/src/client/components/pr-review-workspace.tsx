@@ -168,7 +168,7 @@ const locationLabel = (finding: RelayReviewFinding): string => {
     case "file":
       return finding.location.filePath
     case "line":
-      return `${finding.location.filePath}:${finding.location.line} · ${finding.location.side}`
+      return `${finding.location.filePath}:${finding.location.line}, ${finding.location.side === "after" ? "new" : "old"} side`
   }
 }
 
@@ -265,7 +265,7 @@ const annotationsFor = (
         render: () => (
           <aside className={styles.lineFinding}>
             <strong>
-              {finding.priority} · {finding.title}
+              {finding.priority}: {finding.title}
             </strong>
             <span>{finding.summary}</span>
           </aside>

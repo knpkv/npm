@@ -81,11 +81,8 @@ export function PRRow({ currentUser, pr, showUpdated, to }: PRRowProps) {
         ) : null}
         <div className={styles.prByline}>
           <Text tone="secondary" variant="meta">
-            {pr.author}
+            {pr.author},
           </Text>
-          <span aria-hidden="true" className={styles.metaSeparator}>
-            ·
-          </span>
           <Text
             as="time"
             dateTime={pullRequestRowTimestamp(pr, showUpdated === true).toISOString()}
