@@ -68,7 +68,7 @@
 
 .title {
   max-inline-size: 22ch;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   text-wrap: balance;
 }
 
@@ -170,7 +170,7 @@
 }
 
 .revisionHeading h2 {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .branchPair {
@@ -238,7 +238,7 @@
   color: var(--rly-color-text-1);
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .factStates {
@@ -280,7 +280,7 @@
 .markdown {
   color: var(--rly-color-text-1);
   max-inline-size: 68ch;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .description {
@@ -458,7 +458,7 @@
 
 .approverMember {
   max-inline-size: 100%;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .removeApprover {
@@ -584,7 +584,7 @@
 
 .commentPath {
   color: var(--rly-color-service-codecommit);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .comment,

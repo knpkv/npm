@@ -158,7 +158,7 @@
 .statusDetailInline {
   min-inline-size: 0;
   max-inline-size: 100%;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .metaSeparator {
@@ -180,7 +180,7 @@
 }
 
 .errorMessage {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   color: var(--rly-color-blocked-ink);
 }
 
@@ -361,7 +361,7 @@
 
 .logMessage {
   min-inline-size: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   color: var(--rly-color-text-2);
 }
 
