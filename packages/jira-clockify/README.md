@@ -18,19 +18,38 @@ cd packages/jira-clockify && pnpm link --global
 
 ## Setup
 
-### 1. Jira OAuth
+Run `jcf` with nothing set up and it asks about each system in turn; either can be skipped and
+added later. `jcf auth status` shows what is connected and what to run next. Every step below can
+also be run on its own.
+
+### 1. Jira
 
 ```bash
-jcf auth jira create      # Opens Atlassian console — create OAuth 2.0 app
+jcf auth jira token        # Site, email and an API token from https://id.atlassian.com/manage-profile/security/api-tokens
+```
+
+The token is checked against Jira before it is saved to `~/.jcf/jira.json` (owner-only, `0600`) and is
+never printed. A failed check says whether the site, the token or the network was the problem.
+
+Advanced: connect through your own Atlassian OAuth app instead.
+
+```bash
+jcf auth jira create       # Opens Atlassian console — create OAuth 2.0 app
 jcf auth jira configure    # Set client ID and secret
 jcf auth jira login        # Authenticate via browser
 ```
+
+When both exist, the API token is used. `jcf auth jira logout` removes both.
 
 ### 2. Clockify API Key
 
 ```bash
 jcf auth clockify setup    # Enter API key from https://app.clockify.me/manage-api-keys
+jcf auth clockify setup --api-key <key>   # For scripts; the key is visible to other processes
 ```
+
+Commands that need a system that is not connected fail with one line naming the command that
+connects it, and exit non-zero.
 
 ### 3. Configure Defaults
 
@@ -319,12 +338,14 @@ Stored in `~/.jcf/`:
 ~/.jcf/
 ├── config.json      # JQL, project, billable defaults, session roots
 ├── clockify.json    # Clockify API key, workspace, user
+├── jira.json        # Jira site, cloud id, email, API token, account (0600)
 ├── poll.lock       # Kernel lock held by the active managed poll
 ├── poll.stamp      # Last managed poll attempt, including failures
 └── state.json       # Current timer state and polling authority
 ```
 
-Jira OAuth credentials stored via `@knpkv/atlassian-common` in `~/.config/atlassian/`.
+Jira OAuth credentials (the advanced path) are stored via `@knpkv/atlassian-common` in
+`~/.config/atlassian/`. That store holds OAuth logins only, so the API token lives in `~/.jcf/jira.json`.
 
 ## License
 

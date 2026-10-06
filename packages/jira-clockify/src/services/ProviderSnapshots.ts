@@ -5,10 +5,10 @@ import {
   make as makeClockifyApi
 } from "@knpkv/clockify-api-client"
 import { make as makeJiraApi } from "@knpkv/jira-api-client"
-import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Effect, Redacted, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import { ClockifyAuth } from "./ClockifyAuth.js"
+import { JiraAccess } from "./JiraAccess.js"
 
 export class ProviderSnapshotError extends Schema.TaggedError<ProviderSnapshotError>()("ProviderSnapshotError", {
   message: Schema.String,
@@ -38,7 +38,7 @@ export type JiraWriteState =
 /** Bind all reads and mutations in an operation to one verified credential and selected provider endpoint. */
 export const make = Effect.gen(function*() {
   const clockifyAuth = yield* ClockifyAuth
-  const jiraAuth = yield* JiraAuth
+  const jiraAccess = yield* JiraAccess
   const httpClient = yield* HttpClient.HttpClient
   /** One decoded credential and endpoint back every Clockify read and write in this operation. */
   const clockifyWriteSnapshot: Effect.Effect<ClockifyWriteSnapshot, ProviderSnapshotError> = Effect.gen(function*() {
@@ -70,26 +70,14 @@ export const make = Effect.gen(function*() {
     }
   })
 
-  /** Bind verification and worklog POST to one OAuth credential and selected site. */
+  /** Bind verification and worklog POST to one credential and its site, whether API token or OAuth. */
   const jiraWriteState: Effect.Effect<JiraWriteState> = Effect.gen(function*() {
-    const login = yield* Effect.result(jiraAuth.isLoggedIn())
-    if (login._tag === "Failure") return { availability: "unverified", snapshot: null }
-    if (!login.success) return { availability: "not-logged-in", snapshot: null }
-    const tokenResult = yield* Effect.result(jiraAuth.getAccessToken())
-    const profileResult = yield* Effect.result(jiraAuth.getActiveProfile())
-    if (tokenResult._tag === "Failure" || profileResult._tag === "Failure") {
-      return { availability: "unverified", snapshot: null }
-    }
-    const token = tokenResult.success
-    const profile = profileResult.success
-    if (
-      profile === null || profile.token.cloud_id === "" || profile.token.site_url === "" ||
-      profile.token.access_token !== Redacted.value(token)
-    ) return { availability: "unverified", snapshot: null }
-    const client = makeJiraApi(httpClient, {
-      baseUrl: "",
-      auth: { type: "oauth2", accessToken: token, cloudId: profile.token.cloud_id }
-    })
+    const read = yield* Effect.result(jiraAccess.connection)
+    if (read._tag === "Failure") return { availability: "unverified", snapshot: null }
+    if (Option.isNone(read.success)) return { availability: "not-logged-in", snapshot: null }
+    const connection = read.success.value
+    if (connection.cloudId === "" || connection.siteUrl === "") return { availability: "unverified", snapshot: null }
+    const client = makeJiraApi(httpClient, { baseUrl: "", auth: connection.credential })
     const live = yield* client.getCurrentUser({}).pipe(Effect.orElseSucceed(() => null))
     if (live?.accountId === undefined || live.accountId === "") {
       return { availability: "unverified", snapshot: null }
@@ -98,11 +86,11 @@ export const make = Effect.gen(function*() {
       availability: "verified",
       snapshot: {
         client,
-        ledgerScope: JSON.stringify([profile.token.cloud_id, live.accountId]),
-        heldScope: JSON.stringify([profile.token.cloud_id, profile.token.site_url, live.accountId]),
+        ledgerScope: JSON.stringify([connection.cloudId, live.accountId]),
+        heldScope: JSON.stringify([connection.cloudId, connection.siteUrl, live.accountId]),
         accountId: live.accountId,
-        cloudId: profile.token.cloud_id,
-        siteUrl: profile.token.site_url
+        cloudId: connection.cloudId,
+        siteUrl: connection.siteUrl
       }
     }
   })

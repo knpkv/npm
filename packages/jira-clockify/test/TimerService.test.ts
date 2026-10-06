@@ -15,6 +15,8 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
 import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
 import { ConfigService, defaultJcfConfig } from "../src/services/ConfigService.js"
+import { HomeDirectory } from "../src/services/HomeDirectory.js"
+import { layer as jiraAccessLayer } from "../src/services/JiraAccess.js"
 import { StateWriter } from "../src/services/StateWriter.js"
 import type { JiraTicket } from "../src/services/TicketService.js"
 import { layer as timerLayer, TimerError, TimerService } from "../src/services/TimerService.js"
@@ -252,12 +254,21 @@ const makeFlakyHttpClientLayer = (failures: number) => {
   )
 }
 
+/** Jira reached through the OAuth login: the home holds no API-token file. */
+const oauthAccess = (jiraAuthLayer: Layer.Layer<JiraAuth>, httpLayer: Layer.Layer<HttpClient.HttpClient>) =>
+  jiraAccessLayer.pipe(
+    Layer.provide(jiraAuthLayer),
+    Layer.provide(Layer.succeed(HomeDirectory, { path: "/nonexistent/jcf-test-home" })),
+    Layer.provide(httpLayer),
+    Layer.provide(NodeServices.layer)
+  )
+
 const TestLayer = timerLayer.pipe(
   Layer.provide(MockClockifyLayer),
   Layer.provide(MockClockifyAuthLayer),
   Layer.provide(MockConfigLayer),
   Layer.provide(MockStateWriterLayer),
-  Layer.provide(MockJiraAuthLayer),
+  Layer.provide(oauthAccess(MockJiraAuthLayer, MockHttpClientLayer)),
   Layer.provide(MockHttpClientLayer),
   Layer.provide(NodeServices.layer)
 )
@@ -273,7 +284,7 @@ const makeTestLayer = (
     Layer.provide(MockClockifyAuthLayer),
     Layer.provide(MockConfigLayer),
     Layer.provide(MockStateWriterLayer),
-    Layer.provide(jiraAuthLayer),
+    Layer.provide(oauthAccess(jiraAuthLayer, httpLayer)),
     Layer.provide(httpLayer),
     Layer.provide(NodeServices.layer)
   )

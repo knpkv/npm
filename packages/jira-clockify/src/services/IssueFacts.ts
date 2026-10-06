@@ -20,7 +20,6 @@
  * @module
  */
 import { JiraApiClient } from "@knpkv/jira-api-client"
-import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -32,6 +31,7 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import { isTicketKey } from "../agent/sessions.js"
 import { HomeDirectory } from "./HomeDirectory.js"
+import { JiraAccess } from "./JiraAccess.js"
 
 /** What Jira says about one Issue Key. */
 export interface IssueFact {
@@ -281,7 +281,7 @@ export const layer = Layer.effect(
     const path = yield* Path.Path
     const home = (yield* HomeDirectory).path
     const jira = yield* JiraApiClient
-    const auth = yield* JiraAuth
+    const access = yield* JiraAccess
     const dir = path.join(home, CACHE_DIR)
     const filePath = path.join(dir, CACHE_FILE)
 
@@ -342,11 +342,11 @@ export const layer = Layer.effect(
           // A logged-out Jira resolves an empty cloudId into a URL Atlassian answers with a 404,
           // which would otherwise look exactly like "none of these issues exist" — and mark every
           // ticket as somebody else's.
-          const loggedIn = yield* auth.isLoggedIn().pipe(Effect.orElseSucceed(() => false))
-          if (!loggedIn) return { checked: false, facts: new Map<string, IssueFact>() }
+          const connection = yield* access.connection.pipe(Effect.orElseSucceed(() => Option.none()))
+          if (Option.isNone(connection)) return { checked: false, facts: new Map<string, IssueFact>() }
 
           const mine = yield* accountId.pipe(Effect.orElseSucceed(() => null))
-          const cloudId = yield* auth.getCloudId().pipe(Effect.orElseSucceed(() => ""))
+          const cloudId = connection.value.cloudId
           if (mine === null || cloudId === "") return { checked: false, facts: new Map<string, IssueFact>() }
 
           const cache = yield* readCache

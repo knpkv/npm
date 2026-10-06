@@ -1627,7 +1627,7 @@ it.effect("reports logout when retained Jira consumption already covers the repe
     if (repeated._tag === "Written") {
       expect(repeated.result.clockify).toEqual({ _tag: "Skipped" })
       expect(repeated.result.jira).toEqual({ _tag: "NotLoggedIn" })
-      expect(repeated.result.lines.join(" ")).toContain("jcf auth jira login")
+      expect(repeated.result.lines.join(" ")).toContain("jcf auth jira token")
     }
     expect([...plan.consumption.entries()]).toEqual(beforeConsumption)
     expect(fake.world.writtenFiles[ledgerPath]).toBe(beforeLedger)
@@ -1658,7 +1658,7 @@ it.effect("reports verification failure when retained Jira consumption covers a 
         message: "the provider account for this session was not verified; refresh before writing"
       })
       expect(repeated.result.lines.join(" ")).toContain("refresh before writing")
-      expect(repeated.result.lines.join(" ")).not.toContain("jcf auth jira login")
+      expect(repeated.result.lines.join(" ")).not.toContain("jcf auth jira token")
     }
     expect([...plan.consumption.entries()]).toEqual(beforeConsumption)
     expect(fake.world.writtenFiles[ledgerPath]).toBe(beforeLedger)

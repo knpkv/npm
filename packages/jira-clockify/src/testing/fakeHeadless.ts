@@ -69,6 +69,7 @@ import { ClockifyAuth } from "../services/ClockifyAuth.js"
 import { ConfigService, type JcfConfig } from "../services/ConfigService.js"
 import { HomeDirectory } from "../services/HomeDirectory.js"
 import { layer as issueFactsLayer } from "../services/IssueFacts.js"
+import { layer as jiraAccessLayer } from "../services/JiraAccess.js"
 import { layer as reconcileServiceLayer } from "../services/ReconcileService.js"
 import { layer as savedEntriesLayer } from "../services/SavedEntries.js"
 import { type AttributionChoice, SessionAttributor, SessionAttributorError } from "../services/SessionAttributor.js"
@@ -1607,10 +1608,16 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     options.pidNamespaceInode
   )
 
+  // The real access layer over the fake OAuth login and file system: no token file means OAuth.
+  const JiraAccessLayer = jiraAccessLayer.pipe(
+    Layer.provide(Layer.mergeAll(JiraAuthLayer, HomeLayer, FileSystemLayer, NodePath.layer, httpClientLayer))
+  )
+
   const Externals = Layer.mergeAll(
     ClockifyLayer,
     ClockifyAuthLayer,
     JiraAuthLayer,
+    JiraAccessLayer,
     ConfigLayer,
     StateWriterLayer,
     HomeLayer,
