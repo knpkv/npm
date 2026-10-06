@@ -6,7 +6,7 @@ import { PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../src/ConfigService/index.js"
 import { TuiConfig } from "../src/ConfigService/internal.js"
-import { type AppState, AwsProfileName, AwsRegion } from "../src/Domain.js"
+import { type AppState, AwsProfileName, AwsRegion, signOutState } from "../src/Domain.js"
 import { AwsApiError, AwsCredentialError, AwsThrottleError } from "../src/Errors.js"
 import { resolveAccounts } from "../src/PRService/refreshResolve.js"
 
@@ -116,14 +116,12 @@ describe("resolveAccounts caller identities", () => {
       expect((yield* SubscriptionRef.get(state)).callerIdentities).toEqual({})
     }))
 
-  it.effect("keeps a logout that happens while identities are still resolving", () =>
+  it.effect("publishes nothing a lookup found when an SSO logout lands during the first refresh", () =>
     Effect.gen(function*() {
       const betaMayAnswer = yield* Deferred.make<void>()
       const alphaResolved = yield* Deferred.make<void>()
+      // The first refresh: no identities and no current user are known yet.
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "idle" })
-      const signedOut: AppState["callerIdentities"] = {
-        alpha: { _tag: "Unresolved", reason: { _tag: "CredentialsUnavailable" } }
-      }
       const racing = Layer.mergeAll(
         Layer.mock(AwsClient, {
           getCallerIdentity: (account) =>
@@ -162,12 +160,13 @@ describe("resolveAccounts caller identities", () => {
         Effect.forkChild({ startImmediately: true })
       )
       yield* Deferred.await(alphaResolved)
-      // An SSO logout lands while beta is still resolving.
-      yield* SubscriptionRef.update(state, (s) => ({ ...s, callerIdentities: signedOut }))
+      // The production logout transition, while beta is still resolving.
+      yield* SubscriptionRef.update(state, signOutState)
       yield* Deferred.succeed(betaMayAnswer, undefined)
       yield* Fiber.join(resolving)
-      const { callerIdentities } = yield* SubscriptionRef.get(state)
-      expect(callerIdentities?.["alpha"]).toEqual(signedOut?.["alpha"])
-      expect(callerIdentities?.["beta"]?._tag).toBe("Resolved")
+      const after = yield* SubscriptionRef.get(state)
+      expect(after.currentUser).toBeUndefined()
+      expect(after.callerIdentities).toBeUndefined()
+      expect(after.identityGeneration).toBe(1)
     }))
 })

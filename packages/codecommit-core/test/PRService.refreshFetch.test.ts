@@ -1,5 +1,6 @@
 /** @effect-diagnostics strictEffectProvide:skip-file */
 
+import * as AwsErrors from "@distilled.cloud/aws/Errors"
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Layer, Option, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { ApprovalEvaluationError } from "../src/AwsClient/getPullRequests.js"
@@ -19,10 +20,51 @@ import { subscriptionKey } from "../src/PRService/refreshResolve.js"
 const fetched = (pullRequest: PullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest })
 
 describe("fetchAndUpsertPRs", () => {
+  it.effect("keeps an identity's earlier lookup failure when its refresh then fails authentication", () =>
+    Effect.gen(function*() {
+      const lookupFailed: CallerIdentityState = { _tag: "Unresolved", reason: { _tag: "CredentialsUnavailable" } }
+      const state = yield* SubscriptionRef.make<AppState>({
+        pullRequests: [],
+        accounts: [],
+        status: "loading",
+        callerIdentities: { "test-profile": lookupFailed }
+      })
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequestRefresh: () =>
+            Stream.fail(
+              new AwsCredentialError({ profile: account.profile, region: account.regions[0]!, cause: "expired" })
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+      expect((yield* SubscriptionRef.get(state)).callerIdentities?.["test-profile"]).toEqual(lookupFailed)
+    }))
+
   // Production refresh failures are typed: an expired credential, or a provider auth error wrapped in AwsApiError.
   it.effect.each([
     ["an AwsCredentialError", "credential"],
     ["an AwsApiError carrying ExpiredTokenException", "expired"],
+    ["an AwsApiError carrying an unknown wire ExpiredTokenException", "unknown-expired"],
+    ["an AwsApiError carrying AccessDeniedException (authorization, not authentication)", "denied"],
     ["an AwsApiError carrying an unrelated provider error", "unrelated"]
   ])("handles a refresh that fails with %s", ([, kind]) =>
     Effect.gen(function*() {
@@ -54,7 +96,17 @@ describe("fetchAndUpsertPRs", () => {
           operation: "getPullRequests",
           profile: account.profile,
           region: account.regions[0]!,
-          cause: { _tag: kind === "expired" ? "ExpiredTokenException" : "InternalFailure", message: "provider error" }
+          cause: kind === "expired"
+            ? new AwsErrors.ExpiredTokenException({ message: "The security token included in the request is expired" })
+            : kind === "denied"
+            ? new AwsErrors.AccessDeniedException({ message: "not authorized to perform codecommit:ListPullRequests" })
+            : kind === "unknown-expired"
+            ? new AwsErrors.UnknownAwsError({
+              errorTag: "ExpiredTokenException",
+              errorData: undefined,
+              message: "The security token is expired"
+            })
+            : { _tag: "InternalFailure", message: "provider error" }
         })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, { getPullRequestRefresh: () => Stream.fail(failure) }),
@@ -78,7 +130,9 @@ describe("fetchAndUpsertPRs", () => {
       const { callerIdentities } = yield* SubscriptionRef.get(state)
       expect(callerIdentities?.["other-profile"]).toEqual(resolved)
       expect(callerIdentities?.["test-profile"]).toEqual(
-        kind === "unrelated" ? resolved : { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }
+        kind === "unrelated" || kind === "denied"
+          ? resolved
+          : { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }
       )
     }))
 

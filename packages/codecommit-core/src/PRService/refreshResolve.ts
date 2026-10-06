@@ -12,6 +12,7 @@ import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import {
+  type AppState,
   type AppStatus,
   AwsRegion,
   type CallerIdentities,
@@ -192,16 +193,17 @@ export const resolveAccounts = (state: PRState) =>
     if (firstAccount === undefined) return undefined
     const firstRegion = primaryRegion(firstAccount)
 
-    // What each identity was when resolution began: an entry that changes meanwhile (an SSO logout)
-    // is newer than what this resolution saw, and must not be overwritten by it.
-    const identitiesAtStart = (yield* SubscriptionRef.get(state)).callerIdentities ?? {}
+    // A logout during resolution bumps the generation; then nothing this resolution found is published.
+    const generationAtStart = (yield* SubscriptionRef.get(state)).identityGeneration ?? 0
+    const unchangedSinceStart = (s: AppState) => (s.identityGeneration ?? 0) === generationAtStart
     const firstIdentity = yield* resolveIdentity(
       accountIdRef,
       firstAccount,
       firstRegion,
       {
         clearCurrentUser: SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => rest),
-        updateCurrentUser: (username) => SubscriptionRef.update(state, (s) => ({ ...s, currentUser: username }))
+        updateCurrentUser: (username) =>
+          SubscriptionRef.update(state, (s) => unchangedSinceStart(s) ? { ...s, currentUser: username } : s)
       }
     )
 
@@ -217,18 +219,7 @@ export const resolveAccounts = (state: PRState) =>
       [firstAccount.profile, firstIdentity],
       ...remainingIdentities
     ])
-    yield* SubscriptionRef.update(state, (s) => {
-      const current = s.callerIdentities ?? {}
-      const merged: CallerIdentities = Object.fromEntries(
-        Object.entries(callerIdentities).map(([profile, resolvedNow]) => [
-          profile,
-          current[profile] !== identitiesAtStart[profile] && current[profile] !== undefined
-            ? current[profile]
-            : resolvedNow
-        ])
-      )
-      return { ...s, callerIdentities: merged }
-    })
+    yield* SubscriptionRef.update(state, (s) => unchangedSinceStart(s) ? { ...s, callerIdentities } : s)
 
     const accountIdMap = yield* Ref.get(accountIdRef)
 

@@ -7,6 +7,7 @@
  * @internal
  */
 
+import * as Category from "@distilled.cloud/aws/Category"
 import { Array as Arr, Cause, Effect, Option, Predicate, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
@@ -25,22 +26,38 @@ import type { AwsClientError } from "../Errors.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
 
-/** Provider error tags that mean the account's credentials no longer work. */
-const providerAuthErrors = new Set([
+/**
+ * Wire tags of authentication failures, for errors the provider client only knows as `UnknownAwsError`
+ * (it keeps the wire tag in `errorTag`).
+ */
+const unknownAuthErrorTags = new Set([
   "ExpiredTokenException",
   "ExpiredToken",
   "UnrecognizedClientException",
   "InvalidClientTokenId",
   "InvalidSignatureException",
-  "UnauthorizedException",
+  "IncompleteSignature",
+  "MissingAuthenticationToken",
+  "SignatureDoesNotMatch",
   "AuthFailure"
 ])
 
-/** Whether a refresh failure means the account's credentials no longer work, decided from its type. */
+/** Denied permissions mean the credentials work and lack a grant; the identity still holds. */
+const authorizationOnly = new Set(["AccessDeniedException", "AccessDenied"])
+
+const tagOf = (value: unknown, key: "_tag" | "errorTag"): string =>
+  Predicate.hasProperty(value, key) && Predicate.isString(value[key]) ? value[key] : ""
+
+/**
+ * Whether a refresh failure means the account's credentials no longer work, decided from its type: a
+ * credential failure, or a provider error the provider client itself classifies as authentication.
+ */
 const isAuthFailure = (error: AwsClientError): boolean =>
   error._tag === "AwsCredentialError" ||
-  (error._tag === "AwsApiError" && Predicate.hasProperty(error.cause, "_tag") &&
-    Predicate.isString(error.cause._tag) && providerAuthErrors.has(error.cause._tag))
+  (error._tag === "AwsApiError" && (
+    (Category.isAuthError(error.cause) && !authorizationOnly.has(tagOf(error.cause, "_tag"))) ||
+    (tagOf(error.cause, "_tag") === "UnknownAwsError" && unknownAuthErrorTags.has(tagOf(error.cause, "errorTag")))
+  ))
 
 const refreshAuthFailed: CallerIdentityState = { _tag: "Unresolved", reason: { _tag: "RefreshAuthFailed" } }
 
@@ -166,10 +183,10 @@ export const fetchAndUpsertPRs = (params: {
                   // Typed first (credential failure, or a provider auth error), with the older text match as fallback.
                   yield* SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => ({
                     ...rest,
-                    callerIdentities: {
-                      ...rest.callerIdentities,
-                      [account.profile]: refreshAuthFailed
-                    }
+                    // Only a resolved identity becomes RefreshAuthFailed; an earlier lookup failure keeps its reason.
+                    ...(rest.callerIdentities?.[account.profile]?._tag === "Resolved" && {
+                      callerIdentities: { ...rest.callerIdentities, [account.profile]: refreshAuthFailed }
+                    })
                   }))
                 }
               })

@@ -9,12 +9,7 @@
  * @module
  */
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
-import {
-  type AppState,
-  AwsRegion,
-  type CallerIdentities,
-  type CallerIdentityState
-} from "@knpkv/codecommit-core/Domain.js"
+import { type AppState, AwsRegion, type CallerIdentityState, signOutState } from "@knpkv/codecommit-core/Domain.js"
 import { Data, Duration, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
@@ -29,15 +24,6 @@ const resolvedIdentity = (identity: AwsClient.CallerIdentity): CallerIdentitySta
   arn: identity.arn,
   username: identity.username
 })
-
-const credentialsUnavailable: CallerIdentityState = {
-  _tag: "Unresolved",
-  reason: { _tag: "CredentialsUnavailable" }
-}
-
-/** Every known account after a sign-out: its credentials are gone, so its identity is unknown. */
-const signedOut = (identities: CallerIdentities): CallerIdentities =>
-  Object.fromEntries(Object.keys(identities).map((profile) => [profile, credentialsUnavailable]))
 
 const exitCode = (cmd: ChildProcess.Command) =>
   Effect.flatMap(ChildProcessSpawner.ChildProcessSpawner, (spawner) => spawner.exitCode(cmd))
@@ -56,10 +42,7 @@ export const signOutAfter = <E, R>(
   logout.pipe(
     Effect.flatMap((code) =>
       code === 0
-        ? SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => ({
-          ...rest,
-          ...(rest.callerIdentities !== undefined && { callerIdentities: signedOut(rest.callerIdentities) })
-        }))
+        ? SubscriptionRef.update(state, signOutState)
         : Effect.fail(new SsoLogoutFailedError({ exitCode: code }))
     )
   )

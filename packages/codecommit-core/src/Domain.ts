@@ -662,6 +662,26 @@ export const UnevaluatedPullRequest = Schema.Struct({
 /** @category Domain */
 export type UnevaluatedPullRequest = typeof UnevaluatedPullRequest.Type
 
+/** One account's identity after an SSO logout: its credentials are gone. */
+const signedOutIdentity: CallerIdentityState = { _tag: "Unresolved", reason: { _tag: "CredentialsUnavailable" } }
+
+/**
+ * The state after a successful SSO logout, which ends every SSO session: no current user, every known
+ * account's identity unavailable, and a new identity generation so lookups already in flight publish
+ * nothing.
+ *
+ * @category Domain
+ */
+export const signOutState = ({ currentUser: _, ...state }: AppState): AppState => ({
+  ...state,
+  identityGeneration: (state.identityGeneration ?? 0) + 1,
+  ...(state.callerIdentities !== undefined && {
+    callerIdentities: Object.fromEntries(
+      Object.keys(state.callerIdentities).map((profile) => [profile, signedOutIdentity])
+    )
+  })
+})
+
 /**
  * Application state.
  *
@@ -677,6 +697,11 @@ export interface AppState {
   readonly currentUser?: string
   /** Per-account caller identity; absent until the first refresh has resolved identities. */
   readonly callerIdentities?: CallerIdentities
+  /**
+   * Bumped by every SSO logout. An identity lookup that started under an older generation publishes
+   * nothing, so a lookup in flight cannot sign a logged-out user back in.
+   */
+  readonly identityGeneration?: number
   /** Pull requests the last refresh kept from cache because their approval rules failed to evaluate. */
   readonly unevaluatedPullRequests?: ReadonlyArray<UnevaluatedPullRequest>
   /**
