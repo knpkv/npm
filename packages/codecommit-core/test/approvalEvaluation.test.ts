@@ -99,6 +99,9 @@ describe("approval evaluation", () => {
       Effect.gen(function*() {
         const exit = yield* Effect.exit(getPullRequest({ account, pullRequestId: "7" }))
         expect(isApprovalEvaluationError(wrappedFailure(exit))).toBe(true)
+        // The web detail view shows the wrapped error's message, so it must say what failed.
+        expect(Option.map(wrappedFailure(exit), (cause) => Predicate.hasProperty(cause, "message") && cause.message))
+          .toEqual(Option.some(expect.stringContaining("EvaluatePullRequestApprovalRules")))
       }))
   })
 })

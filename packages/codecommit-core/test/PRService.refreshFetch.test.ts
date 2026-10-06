@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Layer, Option, Ref, Schema, Stream, SubscriptionRef } from "effect"
+import { ApprovalEvaluationError } from "../src/AwsClient/getPullRequests.js"
 import { AwsClient } from "../src/AwsClient/index.js"
 import { PullRequestDetail } from "../src/AwsClient/internal.js"
 import { CacheError } from "../src/CacheService/CacheError.js"
@@ -15,6 +16,56 @@ import { fetchAndUpsertPRs } from "../src/PRService/refreshFetch.js"
 import { subscriptionKey } from "../src/PRService/refreshResolve.js"
 
 describe("fetchAndUpsertPRs", () => {
+  it.effect("keeps a stale cached PR when its re-read fails only on approval evaluation", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const deleteCalls = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          // No open pull requests, so the scope succeeds and stale reconciliation runs.
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () =>
+            Effect.fail(
+              new AwsApiError({
+                operation: "getPullRequest",
+                profile: account.profile,
+                region: account.regions[0]!,
+                cause: new ApprovalEvaluationError({
+                  pullRequestId: staleOpenPR.id,
+                  revisionId: "rev-1",
+                  cause: new Error("not authorized to perform codecommit:EvaluatePullRequestApprovalRules")
+                })
+              })
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      // An enrichment failure is not evidence the pull request is gone.
+      expect(yield* Ref.get(deleteCalls)).toBe(0)
+      expect(successfulScopes).toEqual([])
+    }))
+
   const staleOpenPR = Schema.decodeSync(CachedPullRequest)({
     id: "35",
     awsAccountId: "123456789012",

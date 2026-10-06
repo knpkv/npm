@@ -10,6 +10,7 @@
 import { Cause, Effect, Option, Predicate, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
+import type { CacheError } from "../CacheService/CacheError.js"
 import { diffApprovalPools, diffPR } from "../CacheService/diff.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import {
@@ -20,8 +21,13 @@ import {
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import type { PullRequestRefreshScope } from "../Domain.js"
+import type { AwsClientError } from "../Errors.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
+
+/** A pull-request read that failed only because its approval rules could not be evaluated. */
+const failedOnlyOnApprovalEvaluation = (error: AwsClientError | CacheError): boolean =>
+  error._tag === "AwsApiError" && Predicate.isTagged(error.cause, "ApprovalEvaluationError")
 
 /** Resolve a stale cached PR: retain contradictory OPEN evidence, update a definitive merged/closed status. */
 const resolveStaleStatus = (
@@ -237,13 +243,17 @@ export const fetchAndUpsertPRs = (params: {
                     )
                     : Effect.void
                 ),
-                Effect.catch(() =>
+                Effect.catch((error) =>
                   withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(
                     Effect.andThen(
-                      prRepo.deleteOne(pr.awsAccountId, pr.id, {
-                        repositoryName: pr.repositoryName,
-                        accountRegion: pr.accountRegion
-                      }).pipe(Effect.catch(() => Effect.void))
+                      // The pull request was read; only its approval enrichment failed. That is not
+                      // evidence it is gone, so the row stays for the next refresh to settle.
+                      failedOnlyOnApprovalEvaluation(error)
+                        ? Effect.void
+                        : prRepo.deleteOne(pr.awsAccountId, pr.id, {
+                          repositoryName: pr.repositoryName,
+                          accountRegion: pr.accountRegion
+                        }).pipe(Effect.catch(() => Effect.void))
                     )
                   )
                 )

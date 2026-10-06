@@ -39,7 +39,7 @@ import type {
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import * as DistilledRegion from "@distilled.cloud/aws/Region"
-import { Data, Effect, Schema, SchemaGetter, Stream } from "effect"
+import { Data, Effect, Predicate, Schema, SchemaGetter, Stream } from "effect"
 import { HttpClient } from "effect/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
 import {
@@ -89,11 +89,22 @@ const decodeRawStatus = (rawStatus: string | undefined, isMerged: boolean): Pull
  * CodeCommit could not say whether a revision's approval rules are satisfied — for example
  * `codecommit:EvaluatePullRequestApprovalRules` is denied. Approval is unknown, not "pending".
  */
-export class ApprovalEvaluationError extends Data.TaggedError("ApprovalEvaluationError")<{
-  readonly pullRequestId: string
-  readonly revisionId: string
-  readonly cause: unknown
-}> {}
+export class ApprovalEvaluationError extends Schema.TaggedError<ApprovalEvaluationError>()(
+  "ApprovalEvaluationError",
+  {
+    pullRequestId: Schema.String,
+    revisionId: Schema.String,
+    cause: Schema.Defect()
+  }
+) {
+  /** Shown to the user as-is (e.g. the web detail view), so it names the operation and the provider's reason. */
+  override get message(): string {
+    const reason = Predicate.hasProperty(this.cause, "message") && Predicate.isString(this.cause.message)
+      ? this.cause.message
+      : "no provider message"
+    return `EvaluatePullRequestApprovalRules failed for pull request ${this.pullRequestId}: ${reason}`
+  }
+}
 
 /**
  * Evaluate which approval rules are satisfied/not, returning just the boolean + satisfied rule names.
