@@ -26,7 +26,8 @@ const goalStates: ReadonlyArray<WorkGoal["state"]> = [
   "blocked",
   "review",
   "deployed",
-  "completed"
+  "completed",
+  "abandoned"
 ]
 const statusFilters: ReadonlyArray<"all" | WorkGoal["state"]> = ["all", ...goalStates]
 
@@ -43,7 +44,8 @@ const statePresentation = {
   blocked: { label: "Blocked", tone: "critical" },
   review: { label: "In review", tone: "caution" },
   deployed: { label: "Deployed", tone: "positive" },
-  completed: { label: "Completed", tone: "positive" }
+  completed: { label: "Completed", tone: "positive" },
+  abandoned: { label: "Abandoned", tone: "neutral" }
 } satisfies Readonly<Record<WorkGoal["state"], { readonly label: string; readonly tone: RlyStateTone }>>
 
 const deliveryLabel = {

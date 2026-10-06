@@ -38,13 +38,14 @@ import type {
   WorkObservationEnvelope,
   WorkObserveReport,
   WorkProspectiveAdmission,
+  WorkReconcileOutcome,
   WorkRecoveryContext,
   WorkRecoveryPreflight,
   WorkRecoveryTarget,
   WorkSnapshots
 } from "./model.js"
-import { WorkGoalId, WorkPullRequestLink, WorkPullRequestLinkRequest } from "./model.js"
-import { withObservedFacts, workSnapshotBudgetBytes } from "./observed.js"
+import { isTerminalWorkState, WorkGoalId, WorkPullRequestLink, WorkPullRequestLinkRequest } from "./model.js"
+import { withActivityProvenance, withObservedFacts, workSnapshotBudgetBytes } from "./observed.js"
 import { projectWorkSnapshots } from "./projection.js"
 import type { WorkStoreService } from "./store.js"
 
@@ -105,6 +106,14 @@ export interface WorkService {
     event: WorkGoalCheckpoint
   ) => Effect.Effect<
     WorkGoalCheckpoint,
+    WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+  >
+  /**
+   * Records goals whose pull request is observed merged or closed as completed
+   * or abandoned. Run it after `observe`; it never writes anything else.
+   */
+  readonly reconcile: () => Effect.Effect<
+    ReadonlyArray<WorkReconcileOutcome>,
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
   /**
@@ -216,7 +225,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
     ) {
       return yield* linkError(decoded, "missing_provenance")
     }
-    if (goal.state === "completed" || goal.state === "deployed") {
+    if (isTerminalWorkState(goal.state)) {
       return yield* linkError(decoded, "terminal_goal")
     }
     const goalEvent = source.events.filter(({ goal: candidate }) => candidate.id === goal.id).at(-1)
@@ -292,8 +301,13 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       yield* Clock.currentTimeMillis,
       source.logicalObservedAt ?? 0
     )
+    // Provenance first: an unknown author is worse than a missing observation.
     return withObservedFacts(
-      yield* projectWorkSnapshots(source.events, timestamp),
+      withActivityProvenance(
+        yield* projectWorkSnapshots(source.events, timestamp),
+        source.approvals,
+        workSnapshotBudgetBytes
+      ),
       source.facts,
       source.failures,
       workSnapshotBudgetBytes
@@ -302,6 +316,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
   const observe = Effect.fn("HerdrWork.observe")((envelopes: ReadonlyArray<WorkObservationEnvelope>) =>
     store.observe(envelopes)
   )
+  const reconcile = Effect.fn("HerdrWork.reconcile")(() => store.reconcile())
   const recordMany = Effect.fn("HerdrWork.recordMany")((
     transactionId: string,
     events: ReadonlyArray<WorkGoalCheckpoint>
@@ -333,6 +348,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       decisions,
       handoff,
       observe,
+      reconcile,
       record,
       recordMany,
       snapshots

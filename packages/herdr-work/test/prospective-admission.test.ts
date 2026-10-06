@@ -70,6 +70,14 @@ describe("prospective existing-owner admission", () => {
       const link = yield* work.admitExistingOwner(request)
       expect(link.goal.review?.url).toBe(target.reviewUrl)
       expect(link.lane.head).toBe(target.head)
+      const now = (yield* work.snapshots()).now
+      expect(now.activityProvenance).toEqual([{
+        activityId: `${request.operationId}.admission`,
+        approvalJobId: request.approvalJobId,
+        goalId: target.goalId,
+        provenance: "approval"
+      }])
+      expect(now.activityProvenanceGoals).toEqual([target.goalId])
       expect(link.binding.request.prospectiveAdmission).toEqual({
         sessionId: target.sessionId,
         workAssignment: target.expectedWork,

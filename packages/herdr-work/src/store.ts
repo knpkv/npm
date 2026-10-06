@@ -68,6 +68,7 @@ import {
   workDispatchLineageEquivalent
 } from "./internal/decision-handoff-migration.js"
 import { workHistoryError } from "./internal/history-validation.js"
+import { terminalCandidates, terminalCheckpoint } from "./internal/terminal-reconcile.js"
 import {
   LaneOperationLedgerRow,
   LaneOperationTotalsRow,
@@ -75,6 +76,7 @@ import {
   resolveLegacyLaneClaim
 } from "./internal/legacy-lane-claim.js"
 import {
+  isTerminalWorkState,
   WorkAdmissionTarget,
   WorkAgentBinding,
   WorkAgentBindingRequest,
@@ -99,6 +101,7 @@ import {
   WorkObservedFailure,
   WorkProspectiveAdmission,
   WorkPullRequestLink,
+  workReconcilerHeadroom,
   WorkRecoveryTarget,
   workSnapshotMaxGoals
 } from "./model.js"
@@ -121,10 +124,17 @@ import type {
   WorkProspectiveAdmission as WorkProspectiveAdmissionType,
   WorkPullRequestLink as WorkPullRequestLinkType,
   WorkPullRequestObservation as WorkPullRequestObservationType,
+  WorkReconcileOutcome,
   WorkRecoveryPreflight as WorkRecoveryPreflightType,
   WorkRecoveryTarget as WorkRecoveryTargetType
 } from "./model.js"
-import { asciiLower, canonicalSubject, observationSubject } from "./observed.js"
+import {
+  asciiLower,
+  canonicalSubject,
+  observationSubject,
+  reconcilerEventPrefix,
+  type WorkApprovedActivity
+} from "./observed.js"
 
 const StoredEventRow = Schema.Struct({ record: Schema.String })
 const StoredEventRows = Schema.Array(StoredEventRow)
@@ -1241,7 +1251,7 @@ const readLaneOperationLedgerTotals = (database: DatabaseSync) =>
        FROM work_lane_operation_totals WHERE singleton = 1`
     ).get()
   )
-type AppendRejection = WorkCheckpointConflictError | WorkProjectionError
+type AppendRejection = WorkCheckpointConflictError | WorkGoalRevisionConflictError | WorkProjectionError
 type AppendDecision =
   | { readonly _tag: "inserted"; readonly changes: bigint | number }
   | { readonly _tag: "replayed"; readonly event: WorkGoalCheckpointType }
@@ -1525,8 +1535,8 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
       (request.existingGoalRecovery?.sessionId === target.sessionId && request.laneId !== target.laneId)
     ) || authority.ambiguousLanes.has(target.laneId)
   const exact = goal !== undefined && lane !== undefined && binding !== undefined &&
-    goal.goal.id === target.goalId && goal.goal.state !== "completed" &&
-    goal.goal.state !== "deployed" && goal.goal.goalFamily?.role === "canonical" &&
+    goal.goal.id === target.goalId && !isTerminalWorkState(goal.goal.state) &&
+    goal.goal.goalFamily?.role === "canonical" &&
     goal.goal.goalFamily.canonicalGoalId === target.goalId &&
     Equal.equals(goal.goal.owner, target.owner) &&
     lane.goalId === target.goalId && lane.head === target.head &&
@@ -1733,8 +1743,7 @@ const recoveryState = (database: DatabaseSync, target: WorkRecoveryTargetType): 
         goal.connectTarget !== null ||
         (goal.agentHierarchy !== undefined && goal.agentHierarchy !== null) ||
         (goal.review?.url !== null && goal.review?.url !== undefined && goal.review.url !== target.reviewUrl) ||
-        goal.state === "completed" ||
-        goal.state === "deployed"
+        isTerminalWorkState(goal.state)
     )
   ) {
     return conflict("canonical goal history is linked, terminal, or belongs to another owner")
@@ -1910,14 +1919,27 @@ export interface WorkStoreService {
   readonly observe: (
     envelopes: ReadonlyArray<WorkObservationEnvelopeType>
   ) => Effect.Effect<WorkObserveReport, WorkStoreError>
+  /**
+   * Records each goal whose pull request is observed merged or closed as
+   * completed or abandoned, stamped with the close time. Only these terminal
+   * facts are ever written to goal history; everything else stays an overlay.
+   */
+  readonly reconcile: () => Effect.Effect<
+    ReadonlyArray<WorkReconcileOutcome>,
+    WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+  >
   /** Atomically reads projection history, observed facts, and the coordinator-owned logical-time boundary. */
   readonly snapshotInput: () => Effect.Effect<{
     readonly events: ReadonlyArray<WorkGoalCheckpointType>
     readonly facts: ReadonlyArray<WorkObservedFactType>
     readonly failures: ReadonlyArray<WorkObservedFailureType>
+    /** Each activity an approved Fleet job wrote, with that job's id. */
+    readonly approvals: ReadonlyArray<WorkApprovedActivity>
     readonly logicalObservedAt: number | null
   }, WorkStoreError>
 }
+
+const ReassignmentApprovalRow = Schema.Struct({ approvalJobId: Schema.String, goalId: Schema.String })
 
 const ObservedFactRow = Schema.Struct({
   subject: Schema.String,
@@ -3291,7 +3313,7 @@ export class WorkStore implements WorkStoreService {
           )
           if (currentDecision._tag === "invalid") return reject(currentDecision.error)
           const current = currentDecision.checkpoint
-          if (current.goal.state === "completed") {
+          if (current.goal.state === "completed" || current.goal.state === "abandoned") {
             return reject(
               new WorkAgentBindingAuthorityError({
                 actualRevision: lane.revision,
@@ -3507,9 +3529,22 @@ export class WorkStore implements WorkStoreService {
     return entries.map(({ dispatchRequestId }) => dispatchRequestId)
   })
 
-  readonly append = Effect.fn("WorkStore.append")(function*(
+  readonly append = (event: WorkGoalCheckpointType) =>
+    this.appendAt(event, null).pipe(
+      // Only an expected head can raise it; a plain append never checks one.
+      Effect.catchTag("WorkGoalRevisionConflictError", Effect.die)
+    )
+
+  /**
+   * Appends one checkpoint. With `expectedHead`, the goal's latest checkpoint
+   * must still be that one when the write commits (an exact replay always
+   * succeeds), so a writer that planned from the head cannot bury a newer
+   * owner checkpoint.
+   */
+  private readonly appendAt = Effect.fn("WorkStore.append")(function*(
     this: WorkStore,
-    event: WorkGoalCheckpointType
+    event: WorkGoalCheckpointType,
+    expectedHead: WorkGoalCheckpointType | null
   ) {
     const decoded = yield* Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
       Effect.mapError(storeError("append.decode"))
@@ -3547,6 +3582,26 @@ export class WorkStore implements WorkStoreService {
                 occurredAt: decoded.occurredAt
               })
             )
+          }
+          if (expectedHead !== null) {
+            const headRow = this.#database.prepare(
+              `SELECT record FROM work_goal_events WHERE goal_id = ?
+               ORDER BY occurred_at DESC, event_id DESC LIMIT 1`
+            ).get(decoded.goal.id)
+            const head = headRow === undefined ? null : Schema.decodeUnknownSync(WorkGoalCheckpoint)(
+              JSON.parse(Schema.decodeUnknownSync(StoredEventRow)(headRow).record)
+            )
+            if (head?.eventId !== expectedHead.eventId) {
+              return reject(
+                new WorkGoalRevisionConflictError({
+                  actualEventId: head?.eventId ?? null,
+                  actualUpdatedAt: head?.goal.updatedAt ?? null,
+                  expectedEventId: expectedHead.eventId,
+                  expectedUpdatedAt: expectedHead.goal.updatedAt,
+                  goalId: decoded.goal.id
+                })
+              )
+            }
           }
           const eventCount = Schema.decodeUnknownSync(CountRow)(
             this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_events").get()
@@ -4206,7 +4261,7 @@ export class WorkStore implements WorkStoreService {
               goal.goalFamily?.role !== "canonical" ||
               goal.goalFamily.canonicalGoalId !== goal.id
             ) return rejectLink("missing_provenance")
-            if (goal.state === "completed" || goal.state === "deployed") return rejectLink("terminal_goal")
+            if (isTerminalWorkState(goal.state)) return rejectLink("terminal_goal")
             if (!Equal.equals(goal.owner, reconciliation.expectedOwner)) return rejectLink("owner_mismatch")
             const bindingRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingRow))(
               this.#database.prepare(
@@ -4733,9 +4788,12 @@ export class WorkStore implements WorkStoreService {
             `SELECT subject, source, reason, since, last_at AS lastAt
              FROM work_observed_failures ORDER BY subject ASC LIMIT ?`
           ).all(workObservedFactMaxRecords + 1)
+          const reassignments = this.#database.prepare(
+            "SELECT approval_job_id AS approvalJobId, goal_id AS goalId FROM work_goal_reassignments"
+          ).all()
           this.#database.exec("COMMIT")
           inTransaction = false
-          return { bindings, events, facts, failures, laneOperations }
+          return { bindings, events, facts, failures, laneOperations, reassignments }
         } catch (cause) {
           if (inTransaction) this.#database.exec("ROLLBACK")
           throw cause
@@ -4766,6 +4824,11 @@ export class WorkStore implements WorkStoreService {
     const eventById = new Map(eventRows.map((row) => [row.eventId, row]))
     const laneByOperation = new Map(laneRows.map((row) => [row.operationId, row]))
     let logicalObservedAt: number | null = null
+    // An approved job's activity id is its operation (recovery), the operation
+    // plus `.admission` (prospective admission), or the job id (reassignment).
+    const approvals: Array<WorkApprovedActivity> = Schema.decodeUnknownSync(Schema.Array(ReassignmentApprovalRow))(
+      source.reassignments
+    ).map(({ approvalJobId, goalId }) => ({ activityId: approvalJobId, approvalJobId, goalId }))
     for (const row of bindingRows) {
       const binding = yield* Effect.try({
         try: () => Schema.decodeUnknownSync(WorkAgentBinding)(JSON.parse(row.record)),
@@ -4792,6 +4855,25 @@ export class WorkStore implements WorkStoreService {
       )
       if (readbackError !== undefined) return yield* readbackError
       logicalObservedAt = Math.max(logicalObservedAt ?? 0, binding.checkpoint.occurredAt)
+      const goalId = binding.checkpoint.goal.id
+      const { dispatchRequestId, existingGoalRecovery, ownerReassignment, prospectiveAdmission } = binding.request
+      if (prospectiveAdmission !== undefined) {
+        approvals.push({
+          activityId: `${dispatchRequestId}.admission`,
+          approvalJobId: prospectiveAdmission.approvalJobId,
+          goalId
+        })
+      }
+      if (existingGoalRecovery !== undefined) {
+        approvals.push({ activityId: dispatchRequestId, approvalJobId: existingGoalRecovery.approvalJobId, goalId })
+      }
+      if (ownerReassignment !== undefined) {
+        approvals.push({
+          activityId: ownerReassignment.approvalJobId,
+          approvalJobId: ownerReassignment.approvalJobId,
+          goalId
+        })
+      }
     }
     const factRows = yield* Schema.decodeUnknownEffect(Schema.Array(ObservedFactRow))(source.facts).pipe(
       Effect.mapError(storeError("snapshot-input.decode-fact-rows"))
@@ -4819,7 +4901,50 @@ export class WorkStore implements WorkStoreService {
     if (misfiled !== undefined) {
       return yield* new WorkStoreError({ cause: misfiled.subject, operation: "snapshot-input.fact-subject" })
     }
-    return { events, facts, failures, logicalObservedAt }
+    return { approvals, events, facts, failures, logicalObservedAt }
+  })
+
+  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore) {
+    const source = yield* this.snapshotInput()
+    if (workHistoryMaxEvents - source.events.length < workReconcilerHeadroom) {
+      return yield* new WorkProjectionError({
+        cause: source.events.length,
+        detail: `the reconciler leaves ${workReconcilerHeadroom} of ${workHistoryMaxEvents} checkpoints free`,
+        reason: "capacity_exceeded"
+      })
+    }
+    const recorded = new Set(source.events.map(({ eventId }) => eventId))
+    const cryptoService = this.#cryptoService
+    const appendAt = (checkpoint: WorkGoalCheckpointType, head: WorkGoalCheckpointType) =>
+      this.appendAt(checkpoint, head)
+    return yield* Effect.forEach(
+      terminalCandidates(source.events, source.facts),
+      Effect.fnUntraced(function*(candidate): Effect.fn.Return<
+        WorkReconcileOutcome,
+        WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+      > {
+        const goalId = candidate.head.goal.id
+        const digest = yield* cryptoService.digest(
+          "SHA-256",
+          utf8.encode(`${candidate.fact.observationId}\u0000${goalId}`)
+        ).pipe(Effect.mapError(storeError("reconcile.digest")))
+        const eventId = `${reconcilerEventPrefix}${Hex.encode(digest)}`
+        if (recorded.has(eventId)) return { _tag: "recorded", eventId, goalId }
+        const checkpoint = terminalCheckpoint(candidate, eventId)
+        return yield* appendAt(checkpoint, candidate.head).pipe(
+          Effect.as<WorkReconcileOutcome>({
+            _tag: "applied",
+            eventId,
+            goalId,
+            state: candidate.pullRequest.state === "merged" ? "completed" : "abandoned"
+          }),
+          Effect.catchTag(
+            "WorkGoalRevisionConflictError",
+            () => Effect.succeed<WorkReconcileOutcome>({ _tag: "conflict", goalId })
+          )
+        )
+      })
+    )
   })
 
   readonly observe = Effect.fn("WorkStore.observe")(function*(

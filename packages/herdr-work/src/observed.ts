@@ -1,6 +1,6 @@
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
 import { Schema } from "effect"
-import { WorkGoalObservedEntry, WorkSnapshots } from "./model.js"
+import { WorkActivityProvenance, WorkGoalObservedEntry, WorkSnapshots } from "./model.js"
 import type {
   WorkAgentObservation,
   WorkDisplayState,
@@ -84,6 +84,9 @@ const goalSubjects = (goal: WorkGoal) => {
       : pullRequestSubject(match[1], Number(match[2]))
   }
 }
+
+/** The subject of the pull request a goal's `review.url` names, or null when it names none. */
+export const goalPullRequestSubject = (goal: WorkGoal): string | null => goalSubjects(goal).pullRequest
 
 const terminalPullRequestState = (pullRequest: WorkPullRequestObservation): WorkDisplayState | null =>
   pullRequest.state === "merged" ? "completed" : pullRequest.state === "closed" ? "abandoned" : null
@@ -219,5 +222,67 @@ export const withObservedFacts = (
     if (encodedBytes(encode(result)) <= maxBytes) return result
     if (kept.length === 0) return bare
     kept.pop()
+  }
+}
+
+/** One activity an approved Fleet job wrote on a goal. */
+export interface WorkApprovedActivity {
+  readonly goalId: string
+  readonly activityId: string
+  readonly approvalJobId: string
+}
+
+/** The reconciler's checkpoints, and their activities, use this id prefix. */
+export const reconcilerEventPrefix = "reconciler."
+
+/**
+ * Adds who wrote each non-owner activity to the `now` window: the reconciler
+ * or an approved job. Goals are covered whole, in the window's goal order,
+ * while the encoded snapshots stay within `maxBytes`; `activityProvenanceGoals`
+ * names the covered ones, so a missing activity of a covered goal is the
+ * owner's and an uncovered goal is unknown, never guessed.
+ */
+export const withActivityProvenance = (
+  snapshots: WorkSnapshots,
+  approvals: ReadonlyArray<WorkApprovedActivity>,
+  maxBytes: number
+): WorkSnapshots => {
+  const approvalJob = new Map(
+    approvals.map(({ activityId, approvalJobId, goalId }) => [`${goalId}\u0000${activityId}`, approvalJobId])
+  )
+  const encode = Schema.encodeSync(WorkSnapshots)
+  // Room for the three keys on top of the bare snapshots.
+  let used = encodedBytes(encode(snapshots)) + 128
+  const provenance: Array<WorkActivityProvenance> = []
+  const covered: Array<string> = []
+  for (const goal of snapshots.now.goals) {
+    const entries = (goal.activity ?? []).flatMap(({ id }): ReadonlyArray<WorkActivityProvenance> => {
+      if (id.startsWith(reconcilerEventPrefix)) {
+        return [{ activityId: id, approvalJobId: null, goalId: goal.id, provenance: "reconciler" }]
+      }
+      const job = approvalJob.get(`${goal.id}\u0000${id}`)
+      return job === undefined ? [] : [{ activityId: id, approvalJobId: job, goalId: goal.id, provenance: "approval" }]
+    })
+    const bytes = encodedBytes(goal.id) + 3 +
+      entries.reduce((sum, entry) => sum + encodedBytes(Schema.encodeSync(WorkActivityProvenance)(entry)) + 1, 0)
+    // Goals are covered in order; once one doesn't fit, the rest stay uncovered.
+    if (used + bytes > maxBytes) break
+    for (const entry of entries) provenance.push(entry)
+    covered.push(goal.id)
+    used += bytes
+  }
+  // Check the real encoding and uncover whole goals from the end until it
+  // fits; if not even empty lists fit, carry no provenance (all unknown).
+  for (;;) {
+    const uncovered = snapshots.now.goals.length - covered.length
+    const now = {
+      ...snapshots.now,
+      activityProvenance: provenance.filter(({ goalId }) => covered.includes(goalId)),
+      activityProvenanceGoals: covered
+    }
+    const result = { ...snapshots, now: uncovered === 0 ? now : { ...now, activityProvenanceOmitted: uncovered } }
+    if (encodedBytes(encode(result)) <= maxBytes) return result
+    if (covered.length === 0) return snapshots
+    covered.pop()
   }
 }

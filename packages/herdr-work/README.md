@@ -51,6 +51,24 @@ Earlier windows stay as recorded. A goal's agent is its agent hierarchy, or its
 connect target on older goals; host and repository letter case never makes a
 new fact.
 
+`reconcile` turns the one kind of observed fact that is final into goal
+history: a goal whose pull request is observed merged becomes `completed`
+(delivery `merged`), and one closed without merging becomes `abandoned`. The
+checkpoint is stamped with the pull request's close time, or one millisecond
+after the goal's latest checkpoint when an owner wrote later, so the same fact
+always yields the same checkpoint. It is written only if that latest checkpoint
+is still the one it was planned from, a goal is never stamped twice (even after
+its owner reopens it), and 256 checkpoints of history are always left free.
+Its event and activity ids start with `reconciler.`. `isTerminalWorkState`
+names the finished states: `completed`, `deployed` and `abandoned`.
+
+The `now` window also says who wrote each activity that is not the owner's:
+`activityProvenance` lists reconciler and approved-job activities (with the
+job id), and `activityProvenanceGoals` lists the goals whose such activities
+are all present. In a covered goal an unlisted activity is the owner's; a goal
+left out to stay within the response budget is counted in
+`activityProvenanceOmitted` and its provenance is unknown.
+
 `WorkStore.appendMany` validates a whole checkpoint batch before one SQLite
 transaction. Reusing its transaction ID with the same batch replays it. A
 changed event with an existing event ID or goal/timestamp returns
