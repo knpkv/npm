@@ -1477,6 +1477,7 @@ class PackageScriptPortabilityError extends Data.TaggedError("PackageScriptPorta
 
 const PackageManifest = Schema.fromJsonString(
   Schema.Struct({
+    name: Schema.optional(Schema.String),
     scripts: Schema.optional(Schema.Record(Schema.String, Schema.String)),
     dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
     devDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String))
@@ -1613,6 +1614,69 @@ export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependenci
     .map(({ script, description }) => `${manifestPath}: scripts.${script} must include ${description}`)
   return result
 }
+
+// A package built from another package's lifecycle hook (`pnpm --filter <name> build`) is rebuilt
+// by every such hook, and under a recursive run those hooks overlap with packages compiling against
+// its output. A forced build rewrites that output each time, so a reader can see a half-written
+// `dist`; an incremental build writes nothing when it is up to date. Its buildinfo must live under
+// the output it describes, so deleting `dist` still forces a real rebuild.
+const lifecycleBuildTarget = /\bpnpm\s+--filter\s+"?(@[\w.-]+\/[\w.-]+)"?\s+build\b/gu
+const lifecycleBuildTargets = (scripts) =>
+  Object.values(scripts ?? {}).flatMap((command) =>
+    [...command.matchAll(lifecycleBuildTarget)].map((match) => match[1])
+  )
+export const findForcedLifecycleBuildTargets = (manifests) => {
+  const targets = new Set(manifests.flatMap(({ scripts }) => lifecycleBuildTargets(scripts)))
+  return manifests
+    .filter(
+      ({ name, scripts }) =>
+        name !== undefined && targets.has(name) && /(?:^|\s)--force(?:\s|$)/u.test(scripts?.build ?? "")
+    )
+    .map(
+      ({ location, name }) =>
+        `${location}: scripts.build must not use --force: ${name} is rebuilt from other packages' lifecycle hooks, and a forced build rewrites its output while they compile against it`
+    )
+}
+
+assert.deepEqual(
+  findForcedLifecycleBuildTargets([
+    {
+      location: "packages/shared/package.json",
+      name: "@knpkv/shared",
+      scripts: { build: "tsc -b tsconfig.build.json --force" }
+    },
+    {
+      location: "packages/app/package.json",
+      name: "@knpkv/app",
+      scripts: { precheck: "pnpm --filter @knpkv/shared build" }
+    }
+  ]),
+  [
+    "packages/shared/package.json: scripts.build must not use --force: @knpkv/shared is rebuilt from other packages' lifecycle hooks, and a forced build rewrites its output while they compile against it"
+  ]
+)
+assert.deepEqual(
+  findForcedLifecycleBuildTargets([
+    {
+      location: "packages/shared/package.json",
+      name: "@knpkv/shared",
+      scripts: { build: "tsc -b tsconfig.build.json" }
+    },
+    {
+      location: "packages/app/package.json",
+      name: "@knpkv/app",
+      scripts: { precheck: 'pnpm --filter "@knpkv/shared" build' }
+    }
+  ]),
+  []
+)
+// Only packages other hooks build are constrained: a standalone `rimraf dist && tsc -b --force` stays valid.
+assert.deepEqual(
+  findForcedLifecycleBuildTargets([
+    { location: "packages/leaf/package.json", name: "@knpkv/leaf", scripts: { build: "rimraf dist && tsc -b --force" } }
+  ]),
+  []
+)
 
 // Artifact-importing tests need deterministic setup from every test and coverage entry point.
 for (const manifest of ["package.json", "packages/review/package.json"]) {
@@ -3029,6 +3093,7 @@ const program = Effect.gen(function* () {
   const manifestPaths = yield* workspaceManifestPaths(fileSystem, path, repositoryRoot, workspace.packages)
 
   const diagnostics = []
+  const lifecycleManifests = []
   let checked = 0
   for (const manifestPath of manifestPaths) {
     if (!(yield* fileSystem.exists(manifestPath))) continue
@@ -3040,6 +3105,7 @@ const program = Effect.gen(function* () {
         (cause) => new PackageScriptPortabilityError({ cause, reason: `${location}: invalid package manifest` })
       )
     )
+    lifecycleManifests.push({ location, name: manifest.name, scripts: manifest.scripts })
     diagnostics.push(
       ...findNonPortableBuildScripts(location, manifest.scripts),
       ...findCodeCommitWebLifecycleGaps(location, manifest.scripts, manifest.dependencies, manifest.devDependencies)
@@ -3053,6 +3119,7 @@ const program = Effect.gen(function* () {
     checked += 1
   }
 
+  diagnostics.push(...findForcedLifecycleBuildTargets(lifecycleManifests))
   if (diagnostics.length > 0) {
     return yield* Effect.fail(new PackageScriptPortabilityError({ reason: diagnostics.join("\n") }))
   }
