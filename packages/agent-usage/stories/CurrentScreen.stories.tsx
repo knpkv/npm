@@ -1,16 +1,15 @@
 import { PortalProvider } from "@knpkv/rly/foundations"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { ReactNode } from "react"
-import { expect } from "storybook/test"
+import { expect, waitFor } from "storybook/test"
 import { BookingTable } from "../src/client/BookingTable.js"
 import { assignSlots, bookingLabel, OTHER, stackUsage } from "../src/client/chartModel.js"
 import { LimitChart } from "../src/client/LimitChart.js"
 import { LimitsSummary } from "../src/client/LimitsSummary.js"
-import type { ViewRange } from "../src/client/range.js"
 import { StatusStrip } from "../src/client/StatusStrip.js"
 import { UsageChart } from "../src/client/UsageChart.js"
 import type { ServerStatus } from "../src/shared/contracts.js"
-import { buildWeek, type Scenario } from "./fixtures/week.js"
+import { buildWeek, type Scenario, TIME_ZONE } from "./fixtures/week.js"
 
 /**
  * The agent-usage page as it ships today, piece by piece, over the fixture week. These stories are
@@ -45,7 +44,7 @@ const viewOf = (scenario: Scenario) => {
     named: new Set(named),
     slots,
     labelOf: (id: string) => (id === OTHER ? "Other" : (labels.get(id) ?? id)),
-    range: { ...week.range, bucket: "hour" } satisfies ViewRange
+    range: week.range
   }
 }
 
@@ -72,8 +71,18 @@ export const LimitsNow: Story = {
 }
 
 export const UsageByBooking: Story = {
-  play: async ({ canvasElement }) => {
-    await expect(canvasElement.querySelector("svg")).not.toBeNull()
+  play: async ({ canvasElement, globals }) => {
+    await expect(TIME_ZONE).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+    const dark =
+      globals.theme === "dark" || (globals.theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
+    await waitFor(() => {
+      expect(canvasElement.querySelectorAll(".usage-column-target")).toHaveLength(7)
+      const segment = canvasElement.querySelector('.usage-segment[fill="var(--usage-series-1)"]')
+      expect(segment).not.toBeNull()
+      expect(segment === null ? null : getComputedStyle(segment).fill).toBe(
+        dark ? "rgb(57, 135, 229)" : "rgb(42, 120, 214)"
+      )
+    })
   },
   render: () => {
     const view = viewOf("binding")
@@ -91,6 +100,10 @@ export const UsageByBooking: Story = {
     )
   }
 }
+
+export const UsageByBookingLight: Story = { ...UsageByBooking, globals: { theme: "light" } }
+export const UsageByBookingDark: Story = { ...UsageByBooking, globals: { theme: "dark" } }
+export const UsageByBookingSystem: Story = { ...UsageByBooking, globals: { theme: "system" } }
 
 export const LimitsOverTime: Story = {
   play: async ({ canvasElement }) => {

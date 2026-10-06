@@ -17,9 +17,10 @@ const safeWorkspaceSegment = /^[A-Za-z0-9._-]+$/u
 const isBuildScript = (name) => name.split(":").some((segment) => buildLifecycleNames.has(segment))
 const browserPairingBuild = /^pnpm\s+--filter\s+"?@knpkv\/browser-pairing"?\s+build\s*$/u
 const reviewGraphBuild = /^pnpm\s+--filter\s+"?@knpkv\/review\.\.\."?\s+build\s*$/u
+const storybookTestCommand = /^pnpm\s+(?:run\s+)?test:storybook\s*$/u
 const codeCommitWebRoleCheck = /^tsc\s+-p\s+tsconfig\.roles\.json\s+--noEmit$/u
 const protectedExecutableName = (matcher) =>
-  matcher === browserPairingBuild || matcher === reviewGraphBuild
+  matcher === browserPairingBuild || matcher === reviewGraphBuild || matcher === storybookTestCommand
     ? "pnpm"
     : matcher === codeCommitWebRoleCheck
       ? "tsc"
@@ -1502,6 +1503,43 @@ export const findNonPortableBuildScripts = (manifestPath, scripts) =>
     )
     .map(([name]) => `${manifestPath}: scripts.${name} uses a POSIX-only environment assignment`)
 
+/** Storybook play and accessibility checks must run from the workspace browser gate. */
+export const findStorybookLifecycleGaps = (manifestPath, scripts, hasStorybookConfig) => {
+  if (!hasStorybookConfig || scripts?.["test:storybook"] === undefined) return []
+  return hasReachableLifecycleCommand(scripts?.["test:browser"] ?? "", storybookTestCommand)
+    ? []
+    : [`${manifestPath}: scripts.test:browser must invoke pnpm test:storybook`]
+}
+
+const storybookScripts = { "test:storybook": "vitest run --config vitest.storybook.config.ts --project storybook" }
+for (const command of [
+  "pnpm --filter '@knpkv/agent-usage^...' --sort run build && vite build && playwright test",
+  'echo "pnpm test:storybook" && playwright test',
+  "pnpm test:storybook || true",
+  "exit 0; pnpm test:storybook",
+  "alias pnpm=:; pnpm test:storybook"
+]) {
+  assert.deepEqual(
+    findStorybookLifecycleGaps(
+      "packages/agent-usage/package.json",
+      { ...storybookScripts, "test:browser": command },
+      true
+    ),
+    ["packages/agent-usage/package.json: scripts.test:browser must invoke pnpm test:storybook"]
+  )
+}
+for (const command of [
+  "pnpm test:storybook && pnpm test:visual",
+  "pnpm --filter '@knpkv/agent-usage^...' --sort run build && pnpm test:storybook && vite build && playwright test"
+]) {
+  assert.deepEqual(
+    findStorybookLifecycleGaps("packages/rly/package.json", { ...storybookScripts, "test:browser": command }, true),
+    []
+  )
+}
+assert.deepEqual(findStorybookLifecycleGaps("packages/other/package.json", {}, true), [])
+assert.deepEqual(findStorybookLifecycleGaps("packages/other/package.json", storybookScripts, false), [])
+
 export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependencies, devDependencies) => {
   if (manifestPath === "package.json" || manifestPath === "packages/review/package.json") {
     const lifecycles = manifestPath === "package.json" ? ["pretest", "precoverage"] : ["pretest"]
@@ -2962,6 +3000,12 @@ const program = Effect.gen(function* () {
       ...findNonPortableBuildScripts(location, manifest.scripts),
       ...findCodeCommitWebLifecycleGaps(location, manifest.scripts, manifest.dependencies, manifest.devDependencies)
     )
+    const hasStorybookConfig = yield* fileSystem.exists(
+      path.join(path.dirname(manifestPath), "vitest.storybook.config.ts")
+    )
+    for (const diagnostic of findStorybookLifecycleGaps(location, manifest.scripts, hasStorybookConfig)) {
+      diagnostics.push(diagnostic)
+    }
     checked += 1
   }
 

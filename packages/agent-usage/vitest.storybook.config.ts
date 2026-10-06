@@ -19,7 +19,18 @@ export default defineConfig({
         browser: {
           enabled: true,
           headless: true,
-          instances: [{ browser: "chromium" }],
+          instances: [
+            {
+              browser: "chromium",
+              name: "light-utc",
+              provider: playwright({ contextOptions: { colorScheme: "light", timezoneId: "UTC" } })
+            },
+            {
+              browser: "chromium",
+              name: "dark-amsterdam",
+              provider: playwright({ contextOptions: { colorScheme: "dark", timezoneId: "Europe/Amsterdam" } })
+            }
+          ],
           provider: playwright({}),
           screenshotFailures: false,
           trace: "retain-on-failure",

@@ -1,27 +1,29 @@
 /**
  * A synthetic but realistic week of one person's agent usage, built from facts (15-minute usage
  * groups and limit snapshots) and run through the same report builders the server uses, so every
- * story renders exactly what the API would return. Deterministic: a seeded generator, a fixed "now".
+ * story renders exactly what the API would return. Deterministic in the viewer's zone: a seeded
+ * generator and a fixed local "now".
  *
  * Nothing here is copied from a real store. Ticket keys, repos, and titles are invented.
  *
  * @example
  * const week = buildWeek("binding") // Claude 5-hour at 86%, resets in 1h 12m
  */
+import { rangeOf, type ViewRange } from "../../src/client/range.js"
 import { attribute, bookingId } from "../../src/core/Attribution.js"
 import type { BalanceReading, LimitSnapshot, TicketTitleValue, Tokens } from "../../src/core/Model.js"
 import { buildLimitsReport, buildUsageReport, periodsOf } from "../../src/core/Report.js"
 import { BUCKET_MILLIS, type UsageGroup } from "../../src/core/Store.js"
 import type { Bucket, LimitsReport, UsageReport } from "../../src/shared/contracts.js"
 
-export const TIME_ZONE = "Europe/Amsterdam"
+export const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone
 const MACHINE = "workstation"
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
 const DAY = 24 * HOUR
 
-/** Monday 5 October 2026, 15:30 in Amsterdam (13:30 UTC). */
-export const NOW = Date.UTC(2026, 9, 5, 13, 30)
+/** Monday 5 October 2026, 15:30 in the viewer's zone. */
+export const NOW = new Date(2026, 9, 5, 15, 30).getTime()
 export const WEEK_START = NOW - 7 * DAY
 
 /** What a story wants the page to say. */
@@ -231,7 +233,8 @@ const snapshot = (
 
 /**
  * Limit snapshots derived from the usage: a window opens at the first request after the previous
- * reset, fills in proportion to that agent's tokens, and is read while the agent is in use.
+ * reset, fills in proportion to that agent's tokens, and is read while the agent is in use. The
+ * binding Claude window uses a fixed reset so its narrative does not depend on session boundaries.
  */
 const generateSnapshots = (facts: Facts, scenario: Scenario): ReadonlyArray<LimitSnapshot> => {
   if (scenario === "empty") return []
@@ -258,8 +261,11 @@ const generateSnapshots = (facts: Facts, scenario: Scenario): ReadonlyArray<Limi
   for (const window of windows) {
     const length = window.minutes * MINUTE
     const ordered = facts.groups.filter((group) => group.agent === window.agent)
+    const bindingStart = NOW + 72 * MINUTE - length
     const openAt = (bucketStart: number, previous: number | null): number =>
-      window.minutes === 10_080
+      scenario === "binding" && window.agent === "claude" && window.label === "five_hour"
+        ? bindingStart + Math.floor((bucketStart - bindingStart) / length) * length
+        : window.minutes === 10_080
         ? weekStart + Math.floor((bucketStart - weekStart) / length) * length
         : previous !== null && bucketStart < previous + length
         ? previous
@@ -325,16 +331,16 @@ const balances = (scenario: Scenario): ReadonlyArray<BalanceReading> =>
 
 export interface Week {
   readonly now: number
-  readonly range: { readonly from: number; readonly to: number }
+  readonly range: ViewRange
   readonly usage: UsageReport
   readonly limits: LimitsReport
   readonly sessions: ReadonlyArray<FixtureSession>
 }
 
-/** The week as the API would report it, bucketed by hour (24h-style views) or day. */
-export const buildWeek = (scenario: Scenario, bucket: Bucket = "hour"): Week => {
+/** The week as the API would report the shipped 7d preset; custom stories may override its bucket. */
+export const buildWeek = (scenario: Scenario, bucket: Bucket = "day"): Week => {
   const facts = generateFacts(scenario)
-  const range = { from: WEEK_START, to: NOW }
+  const range = { ...rangeOf("7d", NOW, TIME_ZONE), bucket }
   const periods = periodsOf({ ...range, timeZone: TIME_ZONE, bucket })
   return {
     now: NOW,
