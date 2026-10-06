@@ -28,11 +28,21 @@ describe("DecisionBar", () => {
     expect(markup.match(new RegExp(`aria-describedby="${reasonId}"`, "g"))).toHaveLength(2)
   })
 
-  it("says it is waiting for the server while sending, without disabling natively", () => {
+  it("keeps an empty status region mounted while ready, so later messages are announced", () => {
+    expect(bar()).toMatch(/<p[^>]*role="status"[^>]*><\/p>/)
+  })
+
+  it("says it is waiting for the server in the status region while sending, without disabling natively", () => {
     const markup = bar({ state: { _tag: "sending", action: "reject" } })
     expect(markup).toContain('aria-busy="true"')
-    expect(markup).toContain("Reject sent; waiting for the server&#x27;s answer.")
+    expect(markup).toMatch(/role="status"[^>]*>Reject sent; waiting for the server&#x27;s answer\.<\/p>/)
     expect(markup).not.toContain(" disabled=")
+  })
+
+  it("announces the caller's server answer through the same status region", () => {
+    expect(bar({ status: "Refused: the request expired." })).toMatch(
+      /role="status"[^>]*>Refused: the request expired\.<\/p>/
+    )
   })
 
   it("applies the sticky placement only when asked", () => {

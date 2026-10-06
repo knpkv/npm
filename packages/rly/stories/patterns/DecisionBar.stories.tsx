@@ -55,7 +55,11 @@ export const States: Story = {
   args: { onApprove: () => undefined, onReject: () => undefined, state: { _tag: "ready" }, target },
   play: async ({ canvas }) => {
     const approve = canvas.getByRole("button", { name: `Approve: ${target}` })
+    const statuses = canvas.getAllByRole("status")
+    await expect(statuses).toHaveLength(3)
+    await expect(statuses[0]).toHaveTextContent("")
     await userEvent.click(approve)
+    await expect(statuses[0]).toHaveTextContent("Approve sent; waiting for the server's answer.")
     await expect(approve).toHaveAttribute("aria-disabled", "true")
     await expect(approve).toHaveFocus()
     await expect(canvas.getByText("Approve sent; waiting for the server's answer.")).toBeVisible()

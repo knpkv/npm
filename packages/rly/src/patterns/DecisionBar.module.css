@@ -46,7 +46,18 @@
     cursor: not-allowed;
   }
 
+  /* Kept in the accessibility tree while empty, so its first message is announced. */
+  .status:empty {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+  }
+
   .reason,
+  .status,
   .note {
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)

@@ -51,6 +51,12 @@ export type DecisionBarProps = Omit<ComponentPropsWithRef<"div">, "children" | "
   /** Visible reject label. Defaults to "Reject". */
   readonly rejectLabel?: string
   readonly state: RlyDecisionBarState
+  /**
+   * The server's answer once a sent decision settles, such as "Approved on the hub." or
+   * "Refused: the request expired before your approval arrived.". It is announced through the
+   * bar's status region, the same one that says a decision is waiting for the server.
+   */
+  readonly status?: string
   /** What is being decided, named in full ("Reassign Rotate signing keys from arch to arch-b"). */
   readonly target: string
 }
@@ -59,7 +65,8 @@ export type DecisionBarProps = Omit<ComponentPropsWithRef<"div">, "children" | "
  * Approve or reject one named target. The target and its clock stay visible above the actions,
  * and both buttons carry the target in their accessible names, so a tap never decides the wrong
  * thing. An `off` decision stays focusable with its reason linked; a sent decision waits for the
- * server, and the caller shows the server's answer (including a refusal), never an optimistic one.
+ * server, and the caller passes the server's answer (including a refusal) as `status`, never an
+ * optimistic one. Both are announced through one status region that stays mounted.
  */
 export const DecisionBar = ({
   approveLabel = "Approve",
@@ -71,18 +78,23 @@ export const DecisionBar = ({
   placement = RLY_DECISION_BAR_DEFAULT_VARIANTS.placement,
   rejectLabel = "Reject",
   state,
+  status,
   target,
   ...props
 }: DecisionBarProps): ReactElement => {
   const visibleTarget = requireText(target, "DecisionBar target")
-  const reasonId = `rly-decision-bar-${useId()}`
+  const id = useId()
+  const reasonId = `rly-decision-bar-reason-${id}`
+  const statusId = `rly-decision-bar-status-${id}`
   const inert = state._tag !== "ready"
-  const reason =
-    state._tag === "off"
-      ? state.reason
-      : state._tag === "sending"
-        ? `${state.action === "approve" ? approveLabel : rejectLabel} sent; waiting for the server's answer.`
-        : undefined
+  const reason = state._tag === "off" ? state.reason : undefined
+  // Mounted in every state, so a screen reader announces what lands in it: the waiting line while
+  // sending, then the caller's `status` with the server's answer.
+  const statusText =
+    state._tag === "sending"
+      ? `${state.action === "approve" ? approveLabel : rejectLabel} sent; waiting for the server's answer.`
+      : (status ?? "")
+  const describedBy = reason !== undefined ? reasonId : state._tag === "sending" ? statusId : undefined
   const guarded = (action: () => void) => () => {
     if (!inert) action()
   }
@@ -105,7 +117,7 @@ export const DecisionBar = ({
       </p>
       <div className={style("actions")}>
         <Button
-          aria-describedby={reason === undefined ? undefined : reasonId}
+          aria-describedby={describedBy}
           aria-disabled={inert ? true : undefined}
           aria-label={`${approveLabel}: ${visibleTarget}`}
           onClick={guarded(onApprove)}
@@ -114,7 +126,7 @@ export const DecisionBar = ({
           {approveLabel}
         </Button>
         <Button
-          aria-describedby={reason === undefined ? undefined : reasonId}
+          aria-describedby={describedBy}
           aria-disabled={inert ? true : undefined}
           aria-label={`${rejectLabel}: ${visibleTarget}`}
           onClick={guarded(onReject)}
@@ -128,6 +140,9 @@ export const DecisionBar = ({
           {reason}
         </p>
       )}
+      <p className={style("status")} id={statusId} role="status">
+        {statusText}
+      </p>
       {note === undefined ? null : <p className={style("note")}>{note}</p>}
     </div>
   )
