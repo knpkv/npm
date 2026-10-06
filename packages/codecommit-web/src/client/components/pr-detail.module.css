@@ -653,7 +653,7 @@
   outline-offset: var(--rly-space-2);
 }
 
-@media (max-width: 64rem) {
+@container pr-column (width <= 64rem) {
   .decisionWorkspace,
   .reviewWorkspace {
     grid-template-columns: minmax(var(--rly-space-0), 1fr);
@@ -664,7 +664,7 @@
   }
 }
 
-@media (max-width: 46rem) {
+@container pr-column (width <= 46rem) {
   .page {
     gap: var(--rly-space-40);
     padding: var(--rly-space-20) var(--rly-space-20) var(--rly-space-80);
@@ -704,7 +704,7 @@
   }
 }
 
-@media (max-width: 30rem) {
+@container pr-column (width <= 30rem) {
   .page {
     gap: var(--rly-space-32);
     padding-inline: var(--rly-space-16);

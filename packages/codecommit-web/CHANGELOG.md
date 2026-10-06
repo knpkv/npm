@@ -1,5 +1,28 @@
 # @knpkv/codecommit-web
 
+## 0.20.0
+
+### Minor Changes
+
+- [#492](https://github.com/knpkv/npm/pull/492) [`139ec4f`](https://github.com/knpkv/npm/commit/139ec4f66f1b790cb1364d1171a49f48496a60b8) Thanks [@konopkov](https://github.com/konopkov)! - Pull request pages now show the review queue beside the pull request in windows 800px and wider: what needs your review, what waits on a role pool you may be in, your own pull requests with the reason each is stuck, and what you are watching. The open pull request is marked, and arrow keys move through the list. Phones and 768px tablets keep the pull request alone.
+
+  Enter on a focused link or button on a pull request page now does only that, instead of also opening the AWS console.
+
+  The review count on the Pull requests tab, the review reminder, the pull request list's "needs my review" filter and the queue now count the same pull requests. A rule with no approval pool asks everyone but the author for review, and a pull request waiting only on a wildcard role pool is listed apart, not counted.
+
+  The live events stream no longer sends `pendingReviewCount`; the web client counts reviews itself. `AppState.pendingReviewCount` in codecommit-core is documented as unused by the web app.
+
+### Patch Changes
+
+- [#482](https://github.com/knpkv/npm/pull/482) [`a96616b`](https://github.com/knpkv/npm/commit/a96616bbea8a407f073563b8c6a8916c278e7e50) Thanks [@konopkov](https://github.com/konopkov)! - Remove the unreachable Control Center prototype fixtures. Nothing reachable changes.
+
+- [#488](https://github.com/knpkv/npm/pull/488) [`300c6fe`](https://github.com/knpkv/npm/commit/300c6fedd3e10c652a67a5e0b18e456b6b706353) Thanks [@konopkov](https://github.com/konopkov)! - Add the review Workbench queue model: which open pull requests need your review, which are yours and why they are stuck, and which you are watching. Nothing renders it yet.
+- Updated dependencies [[`487f2ba`](https://github.com/knpkv/npm/commit/487f2ba4fdb585f0cd0b2ab96fd4eeedce9da10d), [`139ec4f`](https://github.com/knpkv/npm/commit/139ec4f66f1b790cb1364d1171a49f48496a60b8)]:
+  - @knpkv/rly@0.8.0
+  - @knpkv/codecommit-core@0.17.1
+  - @knpkv/relay-product@0.2.2
+  - @knpkv/review@0.3.2
+
 ## 0.19.1
 
 ### Patch Changes

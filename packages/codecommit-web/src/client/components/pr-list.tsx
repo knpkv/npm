@@ -10,7 +10,6 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
-import { needsMyReview } from "@knpkv/codecommit-core/Domain.js"
 import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import { LogInIcon } from "lucide-react"
@@ -33,6 +32,7 @@ import {
 } from "./review-queue-state.js"
 import styles from "./review-queue.module.css"
 import { SearchBar } from "./search-bar.js"
+import { needsYourReview } from "./workbench-queue.js"
 
 type PullRequest = Domain.PullRequest
 
@@ -75,7 +75,7 @@ export function PRList() {
       open += 1
       if (pr.isApproved) approved += 1
       else pending += 1
-      if (needsMyReview(pr, appState.currentUser)) review += 1
+      if (needsYourReview(pr, appState.currentUser)) review += 1
     }
     return { approved, open, pending, review }
   }, [appState.currentUser, prs])
@@ -118,7 +118,7 @@ export function PRList() {
               : pr.creationDate.getTime()
           if (!isWithinQueueDateBounds(timestamp, fromMs, toMs)) return false
         }
-        return !review || needsMyReview(pr, appState.currentUser)
+        return !review || needsYourReview(pr, appState.currentUser)
       })
       .sort((left, right) => right.lastModifiedDate.getTime() - left.lastModifiedDate.getTime())
   }, [appState.currentUser, filterState, prs])

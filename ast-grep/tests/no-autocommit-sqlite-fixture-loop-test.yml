@@ -1,0 +1,174 @@
+id: no-autocommit-sqlite-fixture-loop
+valid:
+  - |
+    const database = new DatabaseSync(path)
+    database.exec("BEGIN")
+    for (let index = 0; index < 260; index++) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index)
+    }
+    database.exec("COMMIT")
+  - |
+    database.exec("BEGIN IMMEDIATE")
+    const insert = database.prepare("INSERT INTO rows VALUES (?)")
+    for (let index = 0; index < 500; index++) {
+      insert.run(index)
+    }
+    database.exec("COMMIT")
+  - |
+    withTransaction(database, () => {
+      for (let index = 0; index < 260; index++) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(index)
+      }
+    })
+  - |
+    database.prepare("INSERT INTO rows VALUES (?)").run(1)
+  - |
+    for (let index = 0; index < 2; index++) {
+      orchestrator.run(index)
+    }
+  - |
+    database.exec("BEGIN")
+    try {
+      for (let index = 0; index < 260; index++) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(index)
+      }
+      database.exec("COMMIT")
+    } catch (error) {
+      database.exec("ROLLBACK")
+      throw error
+    }
+  - |
+    database.exec("BEGIN")
+    for (const row of rows) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(row)
+    }
+    database.exec("COMMIT")
+  - |
+    database.exec(`
+      CREATE TABLE rows (id INTEGER);
+      BEGIN IMMEDIATE;
+    `)
+    for (const row of rows) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(row)
+    }
+    database.exec("COMMIT")
+  - |
+    for (
+      const tamper of [
+        { name: "delete", mutate: (database) => database.prepare("DELETE FROM rows").run() }
+      ]
+    ) {
+      tamper.mutate(database)
+    }
+  - |
+    withTransaction(database, () => {
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+    })
+  - |
+    for (const path of paths) {
+      const database = new DatabaseSync(path)
+      database.exec("BEGIN")
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+      database.exec("COMMIT")
+      database.close()
+    }
+  - |
+    for (const { name, value } of cases) {
+      const copy = fixtureDatabase(join(root, name))
+      copy.prepare("UPDATE rows SET value = ?").run(value)
+      copy.close()
+    }
+invalid:
+  - |
+    const oversizedLegacy = new DatabaseSync(oversizedLegacyPath)
+    for (let index = 0; index < 260; index++) {
+      oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)").run(index, index, index, index)
+    }
+    oversizedLegacy.close()
+  - |
+    const insert = database.prepare("INSERT INTO rows VALUES (?)")
+    for (let index = 0; index < 500; index++) {
+      insert.run(index)
+    }
+  - |
+    database.exec("BEGIN")
+    database.exec("COMMIT")
+    for (let index = 0; index < 260; index++) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index)
+    }
+  - |
+    other.exec("BEGIN")
+    for (let index = 0; index < 260; index++) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index)
+    }
+    other.exec("COMMIT")
+  - |
+    other.exec("BEGIN")
+    const insert = database.prepare("INSERT INTO rows VALUES (?)")
+    for (let index = 0; index < 500; index++) {
+      insert.run(index)
+    }
+  - |
+    try {
+      for (let index = 0; index < 260; index++) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(index)
+      }
+    } finally {
+      database.close()
+    }
+  - |
+    for (const row of rows) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(row)
+    }
+  - |
+    for (const key in rows) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(key)
+    }
+  - |
+    let index = 0
+    while (index < 260) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+    }
+  - |
+    let index = 0
+    do {
+      database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+    } while (index < 260)
+  - |
+    database.exec(`
+      CREATE TRIGGER rows_after_insert AFTER INSERT ON rows
+      BEGIN
+        UPDATE totals SET count = count + 1;
+      END;
+    `)
+    for (const row of rows) {
+      database.prepare("INSERT INTO rows VALUES (?)").run(row)
+    }
+  - |
+    withTransaction(other, () => {
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+    })
+  - |
+    for (const path of paths) {
+      const database = new DatabaseSync(path)
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+      database.close()
+    }
+  - |
+    database.exec("BEGIN")
+    try {
+      database.exec("COMMIT")
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+    } finally {
+      database.close()
+    }

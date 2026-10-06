@@ -282,6 +282,12 @@ narrower than the hierarchy.
 codecommit web [--port 3000] [--hostname 127.0.0.1]
 ```
 
+`--port` is the starting port: when it is taken, web mode tries the next one,
+up to ten times, and prints the URL it actually bound. During
+development, `CODECOMMIT_WEB_PUBLIC_ORIGIN=http://localhost:5173` advertises the
+Vite dev proxy instead; it applies only while the server holds the requested port,
+and an origin other than that proxy or the server's own fails startup.
+
 Web mode accepts only loopback hostnames. On startup it opens an owner URL whose
 fragment contains a short-lived, single-use bootstrap token. The token is
 exchanged for an HttpOnly SameSite cookie and a separate CSRF proof, then removed

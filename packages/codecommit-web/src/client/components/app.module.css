@@ -18,6 +18,11 @@
   padding-block: clamp(3rem, 7vw, 5.5rem);
 }
 
+/* Workbench routes: rail, pull request and Relay findings need more room than the 80rem reading width. */
+.wideMain {
+  inline-size: min(calc(100% - 2.5rem), 120rem);
+}
+
 .fullWidthMain {
   display: flex;
   min-inline-size: 0;
