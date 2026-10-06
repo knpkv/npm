@@ -1,5 +1,5 @@
 /**
- * Config commands: show, set (project/billable/jql), reset.
+ * Config commands: show, set, unset and reset.
  *
  * @module
  */
@@ -41,6 +41,11 @@ const printConfig = (config: JcfConfig) =>
     yield* Console.log(
       `  Yours anyway:    ${
         config.sessionOwnershipOverrides.length > 0 ? config.sessionOwnershipOverrides.join(", ") : "(none)"
+      }`
+    )
+    yield* Console.log(
+      `  Ignored tickets: ${
+        config.sessionIgnoredTickets.length > 0 ? config.sessionIgnoredTickets.join(", ") : "(none)"
       }`
     )
   })
@@ -291,6 +296,42 @@ const configSetMine = Command.make(
     })
 ).pipe(Command.withDescription("Treat one ticket as yours even when Jira assigns it to somebody else"))
 
+const configSetSessionIgnore = Command.make(
+  "session-ignore",
+  { key: Args.String("ISSUE-KEY") },
+  ({ key }) =>
+    Effect.gen(function*() {
+      const cfg = yield* ConfigService
+      const ticketKey = key.trim().toUpperCase()
+      if (!isTicketKey(ticketKey)) {
+        yield* Console.log("That is not an Issue Key, e.g. PROJ-123.")
+        return
+      }
+      const current = yield* cfg.get
+      yield* cfg.set({ sessionIgnoredTickets: [...new Set([...current.sessionIgnoredTickets, ticketKey])].sort() })
+      yield* Console.log(`${ticketKey} is ignored in all session scans.`)
+    })
+).pipe(Command.withDescription("Ignore one session ticket in every week"))
+
+const configUnsetSessionIgnore = Command.make(
+  "session-ignore",
+  { key: Args.String("ISSUE-KEY") },
+  ({ key }) =>
+    Effect.gen(function*() {
+      const cfg = yield* ConfigService
+      const ticketKey = key.trim().toUpperCase()
+      if (!isTicketKey(ticketKey)) {
+        yield* Console.log("That is not an Issue Key, e.g. PROJ-123.")
+        return
+      }
+      const current = yield* cfg.get
+      yield* cfg.set({
+        sessionIgnoredTickets: current.sessionIgnoredTickets.filter((ignored) => ignored !== ticketKey)
+      })
+      yield* Console.log(`${ticketKey} is restored to session scans.`)
+    })
+).pipe(Command.withDescription("Restore one globally ignored session ticket"))
+
 // ---------------------------------------------------------------------------
 // reset
 // ---------------------------------------------------------------------------
@@ -318,7 +359,8 @@ const configReset = Command.make(
         sessionDwellSeconds: defaultJcfConfig.sessionDwellSeconds,
         sessionAgent: defaultJcfConfig.sessionAgent,
         sessionOwnership: defaultJcfConfig.sessionOwnership,
-        sessionOwnershipOverrides: defaultJcfConfig.sessionOwnershipOverrides
+        sessionOwnershipOverrides: defaultJcfConfig.sessionOwnershipOverrides,
+        sessionIgnoredTickets: defaultJcfConfig.sessionIgnoredTickets
       })
       yield* Console.log("Config reset to defaults, including session roots and standing attributions.")
     })
@@ -329,7 +371,7 @@ const configSet = Command.make(
   {},
   () =>
     Console.log(
-      "Config set: project, billable, jql, session-root, session-ticket, idle-cap, dwell, ownership, mine"
+      "Config set: project, billable, jql, session-root, session-ticket, idle-cap, dwell, ownership, mine, session-ignore"
     )
 ).pipe(
   Command.withSubcommands([
@@ -341,15 +383,20 @@ const configSet = Command.make(
     configSetIdleCap,
     configSetDwell,
     configSetOwnership,
-    configSetMine
+    configSetMine,
+    configSetSessionIgnore
   ])
+)
+
+const configUnset = Command.make("unset", {}, () => Console.log("Config unset: session-ignore")).pipe(
+  Command.withSubcommands([configUnsetSessionIgnore])
 )
 
 // ---------------------------------------------------------------------------
 // Top-level config command
 // ---------------------------------------------------------------------------
 
-/** Top-level `config` command with show/set/reset subcommands. */
+/** Top-level `config` command with show/set/unset/reset subcommands. */
 export const config = Command.make(
   "config",
   {},
@@ -359,5 +406,5 @@ export const config = Command.make(
       yield* printConfig(yield* cfg.get)
     })
 ).pipe(
-  Command.withSubcommands([configShow, configSet, configReset])
+  Command.withSubcommands([configShow, configSet, configUnset, configReset])
 )

@@ -171,7 +171,10 @@ export const SavedEntriesLive = SavedEntriesLayer.pipe(
   Layer.provide(ClockifyApiLive),
   Layer.provide(ClockifyAuthLive),
   Layer.provide(JiraApiLive),
-  Layer.provide(JiraAuthLive)
+  Layer.provide(JiraAuthLive),
+  Layer.provide(ConfigLive),
+  Layer.provide(SourceLedgerLive),
+  Layer.provide(PlatformLayer)
 )
 
 export const ReconcileServiceLive = ReconcileServiceLayer.pipe(

@@ -129,6 +129,8 @@ export const ConfirmPanel = (props: {
   readonly blockIndex: number
   readonly onConfirm: (submission: ConfirmSubmission) => void
   readonly onCancel: () => void
+  /** Ignore this ticket in every week, so parallel time goes to the others on the next scan. */
+  readonly onIgnore: () => void
 }) => {
   const proposal = props.row.proposal
   const block = proposal?.blocks[props.blockIndex]
@@ -163,12 +165,18 @@ export const ConfirmPanel = (props: {
   const adjusted = requested !== null && requested !== selected
   const ticketProblem = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(ticketKey) ? null : "That is not an Issue Key."
   const noTargets = !targets.clockify && !targets.jira
+  const providers: ReadonlyArray<"jira" | "clockify"> = ["jira", "clockify"]
+  const heldTargets = providers.filter(
+    (provider) => targets[provider] && proposal.writeBlocked?.[provider] !== undefined
+  )
+  const allHeld = !noTargets && heldTargets.length === Number(targets.clockify) + Number(targets.jira)
   const requestSeconds = requested === selected ? undefined : (requested ?? undefined)
   const prepared =
     retargeted || amountProblem !== null || noTargets
       ? undefined
       : prepareProposal({
           evidence: {
+            writeBlocked: proposal.writeBlocked,
             blocks: proposal.blocks,
             credited: proposal.maxSeconds,
             ticketKey: props.row.ticketKey,
@@ -288,6 +296,12 @@ export const ConfirmPanel = (props: {
       ) : preview === undefined ? null : (
         <p className="jcf-muted">No additional time from this block in the current read.</p>
       )}
+      {heldTargets.length > 0 ? (
+        <p className="jcf-note" data-tone="warning" role="status">
+          {heldTargets.map((provider) => (provider === "jira" ? "Jira" : "Clockify")).join(" and ")} writes are held:
+          earlier entries need manual review before new session time can be logged.
+        </p>
+      ) : null}
       {preview?._tag === "Write" && preview.clockify.refusal === "unlinked-overlap" ? (
         <p className="jcf-note" data-tone="warning" role="status">
           An unlinked Clockify entry overlaps this block. Review it before logging Clockify time; Jira can proceed.
@@ -295,7 +309,7 @@ export const ConfirmPanel = (props: {
       ) : null}
       <div className="jcf-actions">
         <Button
-          disabled={props.unavailable || amountProblem !== null || ticketProblem !== null || noTargets}
+          disabled={props.unavailable || amountProblem !== null || ticketProblem !== null || noTargets || allHeld}
           loading={props.busy}
           onClick={() =>
             props.onConfirm({
@@ -313,6 +327,14 @@ export const ConfirmPanel = (props: {
         </Button>
         <Button disabled={props.busy} onClick={props.onCancel} variant="quiet">
           Cancel
+        </Button>
+        <Button
+          disabled={props.busy || props.unavailable}
+          onClick={props.onIgnore}
+          title={`Stop suggesting ${props.row.ticketKey} in every week; its parallel time goes to other tickets after a rescan`}
+          variant="quiet"
+        >
+          {`Ignore ${props.row.ticketKey}`}
         </Button>
       </div>
     </section>

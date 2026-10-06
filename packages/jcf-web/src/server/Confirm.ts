@@ -17,7 +17,7 @@
  */
 import { AgentWrite, ReconcileService, SourceConsumption, Time } from "@knpkv/jira-clockify"
 import type { PlannedWrite } from "@knpkv/jira-clockify/agent/writePlanning.js"
-import { Clock, Effect } from "effect"
+import { Clock, Effect, Predicate } from "effect"
 import { MINIMUM_WRITE_SECONDS, prepareProposal } from "../shared/writePlanning.js"
 import { ProposalRejectedError, type WriteResultResponse } from "./Api.js"
 import { evidenceBlockKey, evidenceMarker, type HeldPlan, reconcileConsumption } from "./WeekPlan.js"
@@ -72,40 +72,56 @@ const nothingOwed = (description: string, targets: AgentWrite.WriteTargets): Wri
   }
 }
 
-/**
- * Write one confirmed row.
- *
- * `summaryOf` supplies the issue title Clockify has no other way to know. It is asked for after the
- * row is known to be writable and is expected to answer null on failure: a missing title must never
- * cost a write that is otherwise correct.
- */
-export const confirmProposal = (options: {
-  readonly service: WriteCapableService
-  readonly plan: HeldPlan
-  readonly request: ConfirmRequest
-  readonly summaryOf: (ticketKey: string) => Effect.Effect<string | null>
-}): Effect.Effect<ConfirmOutcome, ReconcileService.ReconcileError> =>
-  Effect.gen(function*() {
-    const evidence = options.plan.evidence.get(options.request.rowId)
-    if (evidence === undefined) return { _tag: "UnknownRow" } satisfies ConfirmOutcome
-    const proposal = evidence.proposal
-    let consumption = options.plan.consumption
-    const prepared = prepareProposal({
-      evidence: { ...proposal, credited: proposal.sessionSeconds },
-      request: options.request,
-      targets: planSides(options.plan),
-      consumed: (block, source) => consumption.get(evidenceBlockKey(evidence.rowId, block))?.[source] ?? 0
-    })
-    if (prepared._tag !== "Prepared") return prepared
+/** Everything a confirmation needs from a re-read of the providers, reconciled into the plan. */
+interface FreshRead {
+  readonly refreshed: ReconcileService.SessionProposalReport
+  readonly expectedScopes: ReconcileService.ProviderScopes
+}
 
-    // Re-read the requested providers and timer state from retained evidence. Cached browser totals
-    // never authorize writes, and a timer started after the week was read must still withhold its day.
-    const refreshed = yield* options.service.refreshRecordedTime(
-      Time.isoWeekPeriod(new Date(`${options.plan.plan.monday}T12:00:00`)),
-      { ...options.plan.report, sides: prepared.targets },
-      { jiraIssueKeys: [...options.plan.jiraReceiptIssueKeys, prepared.ticketKey] }
+type Prepared = Extract<ReturnType<typeof prepareProposal>, { readonly _tag: "Prepared" }>
+
+/** A request sized against retained evidence and ready to be checked against a fresh read. */
+interface Ready {
+  readonly _tag: "Ready"
+  readonly evidence: NonNullable<ReturnType<HeldPlan["evidence"]["get"]>>
+  readonly prepared: Prepared
+}
+
+/** Size a request against the retained evidence; anything but `Prepared` is the outcome itself. */
+const prepare = (plan: HeldPlan, request: ConfirmRequest) => {
+  const evidence = plan.evidence.get(request.rowId)
+  if (evidence === undefined) return { _tag: "UnknownRow" } satisfies ConfirmOutcome
+  const prepared = prepareProposal({
+    evidence: { ...evidence.proposal, credited: evidence.proposal.sessionSeconds },
+    request,
+    targets: planSides(plan),
+    consumed: (block, source) => plan.consumption.get(evidenceBlockKey(evidence.rowId, block))?.[source] ?? 0
+  })
+  if (prepared._tag !== "Prepared") return prepared
+  return { _tag: "Ready", evidence, prepared } satisfies Ready
+}
+
+/**
+ * Re-read the providers and timer state, check the account is still the one the plan bound, and
+ * reconcile the plan's consumption from that read. Cached browser totals never authorize writes,
+ * and a timer started after the week was read must still withhold its day.
+ *
+ * Consumption is reconciled here, once per read: reconciling a later confirmation against a read
+ * that predates an earlier write in the same batch would forget that write.
+ */
+const freshRead = (
+  service: WriteCapableService,
+  plan: HeldPlan,
+  sides: AgentWrite.WriteTargets,
+  ticketKeys: ReadonlyArray<string>
+): Effect.Effect<FreshRead, ReconcileService.ReconcileError> =>
+  Effect.gen(function*() {
+    const refreshed = yield* service.refreshRecordedTime(
+      Time.isoWeekPeriod(new Date(`${plan.plan.monday}T12:00:00`)),
+      { ...plan.report, sides },
+      { jiraIssueKeys: [...plan.jiraReceiptIssueKeys, ...ticketKeys] }
     )
-    const retainedScopes = options.plan.boundScopes
+    const retainedScopes = plan.boundScopes
     const currentScopes = refreshed.sourceScopes
     const expectedScopes = currentScopes === undefined
       ? undefined
@@ -117,23 +133,45 @@ export const confirmProposal = (options: {
       }
     if (
       expectedScopes === undefined || currentScopes === undefined ||
-      (prepared.targets.clockify &&
-        expectedScopes.clockify !== null && expectedScopes.clockify !== currentScopes.clockify) ||
-      (prepared.targets.jira && expectedScopes.jira !== null && expectedScopes.jira !== currentScopes.jira)
+      (sides.clockify && expectedScopes.clockify !== null && expectedScopes.clockify !== currentScopes.clockify) ||
+      (sides.jira && expectedScopes.jira !== null && expectedScopes.jira !== currentScopes.jira)
     ) {
       return yield* new ReconcileService.ReconcileError({
         message: "The provider account changed or could not be verified; reload the week before confirming"
       })
     }
-    if (prepared.targets.clockify && expectedScopes.clockify !== null) {
-      options.plan.boundScopes.clockify = expectedScopes.clockify
+    if (sides.clockify && expectedScopes.clockify !== null) plan.boundScopes.clockify = expectedScopes.clockify
+    if (sides.jira && expectedScopes.jira !== null) plan.boundScopes.jira = expectedScopes.jira
+    const consumption = reconcileConsumption(refreshed, plan.consumption)
+    plan.consumption.clear()
+    for (const [key, value] of consumption) plan.consumption.set(key, value)
+    return { refreshed, expectedScopes }
+  })
+
+/** Write one prepared request against a fresh read, recording what it consumed into the plan. */
+const confirmAgainst = (
+  options: {
+    readonly service: WriteCapableService
+    readonly plan: HeldPlan
+    readonly request: ConfirmRequest
+    readonly summaryOf: (ticketKey: string) => Effect.Effect<string | null>
+  },
+  ready: Ready,
+  read: FreshRead
+): Effect.Effect<ConfirmOutcome, ReconcileService.ReconcileError> =>
+  Effect.gen(function*() {
+    const { evidence, prepared } = ready
+    const { expectedScopes, refreshed } = read
+    const proposal = evidence.proposal
+    const consumption = options.plan.consumption
+    // The retained proposal predates any ignore made since this plan was read. Check the policy the
+    // fresh read applied — for the row's own ticket and for a ticket the person retargeted to.
+    const ignored = [proposal.ticketKey, prepared.ticketKey].find((key) => refreshed.ignoredTickets.includes(key))
+    if (ignored !== undefined) {
+      return yield* new ReconcileService.ReconcileError({
+        message: `${ignored} is ignored; rescan the week before logging time to it`
+      })
     }
-    if (prepared.targets.jira && expectedScopes.jira !== null) {
-      options.plan.boundScopes.jira = expectedScopes.jira
-    }
-    consumption = reconcileConsumption(refreshed, consumption)
-    options.plan.consumption.clear()
-    for (const [key, value] of consumption) options.plan.consumption.set(key, value)
     const excluded = refreshed.excludedDays.find(({ day }) => day === prepared.day)
     if (excluded !== undefined) {
       return { _tag: "RunningTimer", reason: excluded.reason } satisfies ConfirmOutcome
@@ -149,6 +187,7 @@ export const confirmProposal = (options: {
     const freshPrepared = prepareProposal({
       evidence: {
         ...proposal,
+        writeBlocked: refreshed.writeBlocked,
         blocks: proposal.blocks.map((block, index) => ({
           ...block,
           clockifyRefusal: ambiguous[index] === true ? "unlinked-overlap" : undefined
@@ -178,6 +217,7 @@ export const confirmProposal = (options: {
     const providerWrite: PlannedWrite = write._tag === "NothingOwed"
       ? {
         _tag: "Write",
+        writeBlocked: refreshed.writeBlocked,
         ticketKey: freshPrepared.ticketKey,
         day: freshPrepared.day,
         targets: freshPrepared.targets,
@@ -242,6 +282,85 @@ export const confirmProposal = (options: {
         lines: AgentWrite.writeOutcomeLines(outcome)
       }
     } satisfies ConfirmOutcome
+  })
+
+/**
+ * Write one confirmed row.
+ *
+ * `summaryOf` supplies the issue title Clockify has no other way to know. It is asked for after the
+ * row is known to be writable and is expected to answer null on failure: a missing title must never
+ * cost a write that is otherwise correct.
+ */
+export const confirmProposal = (options: {
+  readonly service: WriteCapableService
+  readonly plan: HeldPlan
+  readonly request: ConfirmRequest
+  readonly summaryOf: (ticketKey: string) => Effect.Effect<string | null>
+}): Effect.Effect<ConfirmOutcome, ReconcileService.ReconcileError> =>
+  Effect.gen(function*() {
+    const ready = prepare(options.plan, options.request)
+    if (ready._tag !== "Ready") return ready
+    const read = yield* freshRead(options.service, options.plan, ready.prepared.targets, [ready.prepared.ticketKey])
+    return yield* confirmAgainst(options, ready, read)
+  })
+
+/** One request's outcome in a batch; a provider or account failure stays with the request it hit. */
+export type BatchConfirmOutcome = ConfirmOutcome | { readonly _tag: "Failed"; readonly message: string }
+
+/**
+ * Write several confirmed rows under one provider re-read.
+ *
+ * Each row's arithmetic depends only on its own ticket and day, so one read serves the batch. The
+ * exception is a request whose ticket and day an earlier request in the batch already wrote: that
+ * one re-reads first, because the earlier write changed exactly the totals it subtracts. Requests
+ * run in order, and a failure is that request's outcome — the rest of the batch still runs.
+ */
+export const confirmProposals = (options: {
+  readonly service: WriteCapableService
+  readonly plan: HeldPlan
+  readonly requests: ReadonlyArray<ConfirmRequest>
+  readonly summaryOf: (ticketKey: string) => Effect.Effect<string | null>
+}): Effect.Effect<ReadonlyArray<BatchConfirmOutcome>> =>
+  Effect.gen(function*() {
+    const readied = options.requests.map((request) => ({ request, ready: prepare(options.plan, request) }))
+    const writable = readied.flatMap(({ ready }) => ready._tag === "Ready" ? [ready.prepared] : [])
+    const sides = {
+      clockify: writable.some((prepared) => prepared.targets.clockify),
+      jira: writable.some((prepared) => prepared.targets.jira)
+    }
+    const failed = (error: ReconcileService.ReconcileError): BatchConfirmOutcome => ({
+      _tag: "Failed",
+      message: error.message
+    })
+    let read: FreshRead | ReconcileService.ReconcileError | undefined = undefined
+    const written = new Set<string>()
+    const outcomes: Array<BatchConfirmOutcome> = []
+    for (const { ready, request } of readied) {
+      if (ready._tag !== "Ready") {
+        outcomes.push(ready)
+        continue
+      }
+      const bucket = `${ready.prepared.ticketKey}\u0000${ready.prepared.day}`
+      if (read === undefined || written.has(bucket)) {
+        read = yield* freshRead(
+          options.service,
+          options.plan,
+          sides,
+          writable.map((prepared) => prepared.ticketKey)
+        ).pipe(Effect.catch((error) => Effect.succeed(error)))
+        written.clear()
+      }
+      if (Predicate.isTagged(read, "ReconcileError")) {
+        outcomes.push(failed(read))
+        continue
+      }
+      const outcome = yield* confirmAgainst({ ...options, request }, ready, read).pipe(
+        Effect.catch((error) => Effect.succeed(failed(error)))
+      )
+      if (outcome._tag === "Written") written.add(bucket)
+      outcomes.push(outcome)
+    }
+    return outcomes
   })
 
 export interface ManualRequest {

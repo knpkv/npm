@@ -1,10 +1,12 @@
 import { Data } from "effect"
 import { localDay } from "../utils/time.js"
+import { MINIMUM_WRITE_SECONDS } from "./writePlanning.js"
 
 interface Run {
   readonly startMs: number
   readonly endMs: number
   readonly bucketIds: ReadonlyArray<string>
+  readonly weights?: ReadonlyMap<string, number> | undefined
 }
 
 class ScheduleAllocationError extends Data.TaggedError("ScheduleAllocationError")<{ readonly message: string }> {}
@@ -17,17 +19,18 @@ export interface ScheduledRun extends Run {
 }
 
 /**
- * Arrange a contiguous stretch into sequential allocations. Keep the strongest tickets when there
- * is not enough time for every ticket to receive the floor. Wholly unplaced time and midnight are barriers. Mixed stretches reserve their unplaced credit
- * before allocating known tickets; changing unplaced shares must not fragment every known ticket.
- * A genuinely shorter stretch stays short: allocation must never invent time or bridge idle gaps.
+ * Pack a contiguous stretch into one block per ticket, then its reserved unplaced credit.
+ * First activity orders the blocks; priority determines writable shares when time is scarce.
+ * Blocks may move anywhere inside their source cluster, but never invent time or bridge idle gaps.
+ * Sub-minute shares fold upward in rank; an entirely shorter stretch keeps its raw short evidence.
  */
 export const scheduleRuns = (
   runs: ReadonlyArray<Run>,
-  minimumSeconds: number,
-  attributed: (id: string) => boolean
+  dwellSeconds: number,
+  attributed: (id: string) => boolean,
+  priority?: (id: string, day: string) => number
 ): ReadonlyArray<ScheduledRun> => {
-  if (minimumSeconds <= 0) {
+  if (dwellSeconds <= 0) {
     return runs.map((run) => ({ ...run, sourceStartMs: run.startMs, settlementEndMs: run.endMs }))
   }
   const settlementEndByRun = new Map<Run, number>()
@@ -56,25 +59,36 @@ export const scheduleRuns = (
     const settlementEndMs = settlementEndByRun.get(first) ?? last.endMs
     const weights = new Map<string, number>()
     const active = new Map<string, number>()
+    const firstActivity = new Map<string, { readonly startMs: number; readonly weight: number }>()
     for (const run of cluster) {
+      const totalWeight = run.bucketIds.reduce((sum, id) => sum + (run.weights?.get(id) ?? 1), 0)
       for (const id of run.bucketIds) {
-        weights.set(id, (weights.get(id) ?? 0) + (run.endMs - run.startMs) / run.bucketIds.length)
+        const weight = (run.endMs - run.startMs) * (run.weights?.get(id) ?? 1) / totalWeight
+        weights.set(id, (weights.get(id) ?? 0) + weight)
         active.set(id, (active.get(id) ?? 0) + run.endMs - run.startMs)
+        // Mention ratios may evolve while a group is live. Ordering uses its raw first presence,
+        // so later text cannot swap two same-start tickets after a restart.
+        if (!firstActivity.has(id)) {
+          firstActivity.set(id, { startMs: run.startMs, weight: (run.endMs - run.startMs) / run.bucketIds.length })
+        }
       }
     }
     const duration = Math.floor((last.endMs - first.startMs) / 1000)
     const unplaced = [...weights].filter(([id]) => !attributed(id))
     const reserved = Math.floor(unplaced.reduce((sum, [, weight]) => sum + weight, 0) / 1000)
     const available = duration - reserved
-    const limit = Math.max(1, Math.floor(available / minimumSeconds))
-    const rankedOwners = [...weights].filter(([id]) => attributed(id))
+    const day = localDay(new Date(first.startMs))
+    const stableOwners = [...weights].filter(([id]) => attributed(id))
       .sort(([a, weightA], [b, weightB]) => weightB - weightA || a.localeCompare(b))
-    const owners = rankedOwners.slice(0, limit)
+    const rankedOwners = [...stableOwners]
+      .sort(([a, weightA], [b, weightB]) =>
+        (priority?.(b, day) ?? 0) - (priority?.(a, day) ?? 0) || weightB - weightA || a.localeCompare(b)
+      )
     const allocations = new Map<string, number>()
     let remaining = available
-    let remainingWeight = owners.reduce((sum, [, weight]) => sum + weight, 0)
-    for (const [index, [id, weight]] of owners.entries()) {
-      const proportional = index === owners.length - 1
+    let remainingWeight = stableOwners.reduce((sum, [, weight]) => sum + weight, 0)
+    for (const [index, [id, weight]] of stableOwners.entries()) {
+      const proportional = index === stableOwners.length - 1
         ? remaining
         : Math.floor(remaining * weight / remainingWeight)
       const seconds = Math.min(proportional, Math.floor((active.get(id) ?? 0) / 1000))
@@ -82,102 +96,98 @@ export const scheduleRuns = (
       remaining -= seconds
       remainingWeight -= weight
     }
-    // An activity cap can leave part of a proportional share unused. Offer that residual to every
-    // attributable owner, including one omitted by the normal minimum-size limit, rather than
-    // silently losing credited time. The residual itself may be shorter than the normal floor.
-    for (const [id] of rankedOwners) {
-      if (remaining <= 0) break
-      const allocated = allocations.get(id) ?? 0
-      const capacity = Math.floor((active.get(id) ?? 0) / 1000) - allocated
-      const seconds = Math.min(remaining, Math.max(0, capacity))
-      allocations.set(id, allocated + seconds)
-      remaining -= seconds
+    // Place credit inside its supporting runs. An augmenting path can move an existing owner's
+    // credit to another supporting run, freeing room without stealing that owner's allocation.
+    const placed = cluster.map(() => new Map<string, number>())
+    const claimed = new Map<string, number>()
+    const move = (id: string, wantedMs: number, visited: Set<number>): number => {
+      let leftMs = wantedMs
+      for (const [index, run] of cluster.entries()) {
+        if (leftMs <= 0) break
+        if (!run.bucketIds.includes(id) || visited.has(index)) continue
+        const held = placed[index]
+        if (held === undefined) continue
+        visited.add(index)
+        const freeMs = run.endMs - run.startMs - [...held.values()].reduce((sum, value) => sum + value, 0)
+        const directMs = Math.min(leftMs, freeMs)
+        held.set(id, (held.get(id) ?? 0) + directMs)
+        leftMs -= directMs
+        for (const [donor, donorMs] of [...held]) {
+          if (leftMs <= 0) break
+          if (donor === id || donorMs <= 0) continue
+          const movedMs = move(donor, Math.min(leftMs, donorMs), visited)
+          held.set(donor, (held.get(donor) ?? 0) - movedMs)
+          held.set(id, (held.get(id) ?? 0) + movedMs)
+          leftMs -= movedMs
+        }
+      }
+      return wantedMs - leftMs
     }
-    const remainingMs = new Map([...allocations].map(([id, seconds]) => [id, seconds * 1000]))
-    const futureActiveMs = new Map(active)
-    const lastActiveMs = new Map<string, number>()
-    for (const run of cluster) for (const id of run.bucketIds) lastActiveMs.set(id, run.endMs)
-    const placementOrder = rankedOwners.map(([id]) => id).sort((a, b) =>
-      (lastActiveMs.get(a) ?? 0) - (lastActiveMs.get(b) ?? 0)
+    let budgetMs = available * 1000
+    const claim = (id: string, targetSeconds: number) => {
+      let wantedMs = Math.min(budgetMs, Math.max(0, targetSeconds * 1000 - (claimed.get(id) ?? 0)))
+      while (wantedMs > 0) {
+        const movedMs = move(id, wantedMs, new Set())
+        if (movedMs <= 0) break
+        claimed.set(id, (claimed.get(id) ?? 0) + movedMs)
+        budgetMs -= movedMs
+        wantedMs -= movedMs
+      }
+    }
+    // Retain each owner's first second, then offer writable minutes in priority order. A floor is
+    // bounded by joint source availability, not just the owner's independent active-time cap.
+    for (const [id] of rankedOwners) claim(id, 1)
+    for (const [id] of rankedOwners) claim(id, MINIMUM_WRITE_SECONDS)
+    for (const [id] of rankedOwners) claim(id, allocations.get(id) ?? 0)
+    for (const [id] of rankedOwners) claim(id, Math.floor((active.get(id) ?? 0) / 1000))
+    if (budgetMs > 0) {
+      throw new ScheduleAllocationError({ message: "Attribution cannot fit inside its source activity" })
+    }
+    if (available >= MINIMUM_WRITE_SECONDS) {
+      // Folding from lowest rank upward can combine two short shares into another writable minute.
+      for (let index = rankedOwners.length - 1; index > 0; index--) {
+        const owner = rankedOwners[index]
+        const higher = rankedOwners[index - 1]
+        if (owner === undefined || higher === undefined) continue
+        const milliseconds = claimed.get(owner[0]) ?? 0
+        if (milliseconds <= 0 || milliseconds >= MINIMUM_WRITE_SECONDS * 1000) continue
+        claimed.set(higher[0], (claimed.get(higher[0]) ?? 0) + milliseconds)
+        claimed.set(owner[0], 0)
+      }
+      const highest = rankedOwners[0]?.[0]
+      const highestMs = highest === undefined ? 0 : claimed.get(highest) ?? 0
+      if (highest !== undefined && highestMs > 0 && highestMs < MINIMUM_WRITE_SECONDS * 1000) {
+        const writable = rankedOwners.find(([id]) => (claimed.get(id) ?? 0) >= MINIMUM_WRITE_SECONDS * 1000)?.[0]
+        if (writable !== undefined) {
+          claimed.set(writable, (claimed.get(writable) ?? 0) + highestMs)
+          claimed.set(highest, 0)
+        }
+      }
+    }
+    // Later work may change total weights, but never the first-activity order. Logging can change
+    // advisory rank without moving an unchanged packed allocation and its consumed source identity.
+    const orderedOwners = [...stableOwners].sort(([a], [b]) =>
+      (firstActivity.get(a)?.startMs ?? 0) - (firstActivity.get(b)?.startMs ?? 0) ||
+      (firstActivity.get(b)?.weight ?? 0) - (firstActivity.get(a)?.weight ?? 0) || a.localeCompare(b)
     )
-    const gaps: Array<{
-      readonly startMs: number
-      readonly endMs: number
-      readonly bucketIds: ReadonlyArray<string>
-    }> = []
-    for (const run of cluster) {
-      const runMs = run.endMs - run.startMs
-      for (const id of run.bucketIds) futureActiveMs.set(id, (futureActiveMs.get(id) ?? 0) - runMs)
-      const present = placementOrder.filter((id) => run.bucketIds.includes(id) && (remainingMs.get(id) ?? 0) > 0)
-      let cursor = run.startMs
-      for (const id of present) {
-        const reservedForOthers = present.reduce((sum, other) =>
-          other === id ?
-            sum :
-            sum + Math.max(0, (remainingMs.get(other) ?? 0) - (futureActiveMs.get(other) ?? 0)), 0)
-        const placedMs = Math.min(remainingMs.get(id) ?? 0, Math.max(0, run.endMs - cursor - reservedForOthers))
-        if (placedMs <= 0) continue
-        result.push({
-          bucketIds: [id],
-          startMs: cursor,
-          endMs: cursor + placedMs,
-          sourceStartMs: first.startMs,
-          settlementEndMs
-        })
-        remainingMs.set(id, (remainingMs.get(id) ?? 0) - placedMs)
-        cursor += placedMs
-      }
-      if (cursor < run.endMs) {
-        gaps.push({ startMs: cursor, endMs: run.endMs, bucketIds: run.bucketIds })
-      }
-    }
-    let gapIndex = 0
-    let gapCursor = gaps[0]?.startMs ?? last.endMs
-    const nextGap = () => {
-      gapIndex++
-      gapCursor = gaps[gapIndex]?.startMs ?? last.endMs
-    }
-    let offset = available
-    for (const [index, [id, weight]] of unplaced.entries()) {
-      const seconds = index === unplaced.length - 1 ? duration - offset : Math.floor(weight / 1000)
-      let milliseconds = seconds * 1000
-      while (milliseconds > 0) {
-        const gap = gaps[gapIndex]
-        if (gap === undefined) throw new ScheduleAllocationError({ message: "Unplaced credit exceeds source activity" })
-        const placedMs = Math.min(milliseconds, gap.endMs - gapCursor)
-        result.push({
-          bucketIds: [id],
-          startMs: gapCursor,
-          endMs: gapCursor + placedMs,
-          sourceStartMs: first.startMs,
-          settlementEndMs
-        })
-        milliseconds -= placedMs
-        gapCursor += placedMs
-        if (gapCursor === gap.endMs) nextGap()
-      }
-      offset += seconds
-    }
-    let residualMs = [...remainingMs.values()].reduce((sum, milliseconds) => sum + milliseconds, 0)
-    for (let index = gapIndex; index < gaps.length && residualMs > 0; index++) {
-      const gap = gaps[index]
-      if (gap === undefined) continue
-      if (residualMs <= 0) break
-      const recipient = rankedOwners.find(([id]) => gap.bucketIds.includes(id))?.[0]
-      if (recipient === undefined) continue
-      const startMs = index === gapIndex ? gapCursor : gap.startMs
-      const placedMs = Math.min(residualMs, gap.endMs - startMs)
+    let cursor = first.startMs
+    const append = (id: string, milliseconds: number) => {
+      if (milliseconds <= 0) return
       result.push({
-        bucketIds: [recipient],
-        startMs,
-        endMs: startMs + placedMs,
+        bucketIds: [id],
+        startMs: cursor,
+        endMs: cursor + milliseconds,
         sourceStartMs: first.startMs,
         settlementEndMs
       })
-      residualMs -= placedMs
+      cursor += milliseconds
     }
-    if (residualMs > 0) {
-      throw new ScheduleAllocationError({ message: "Attribution cannot fit inside its source activity" })
+    for (const [id] of orderedOwners) append(id, claimed.get(id) ?? 0)
+    let offset = available
+    for (const [index, [id, weight]] of unplaced.entries()) {
+      const seconds = index === unplaced.length - 1 ? duration - offset : Math.floor(weight / 1000)
+      append(id, seconds * 1000)
+      offset += seconds
     }
     cluster = []
   }

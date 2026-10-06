@@ -1,6 +1,7 @@
 import { Data, Effect, Predicate } from "effect"
 import { Atom } from "effect/reactivity"
 import type {
+  ConfirmBatchItemResponse,
   ManualPayload,
   SavedEntry,
   UpdateSavedEntryRequest,
@@ -8,7 +9,7 @@ import type {
   WriteResultResponse
 } from "../shared/contracts.js"
 import { consumedFromWeekBlocks, prepareProposal } from "../shared/writePlanning.js"
-import { type ConfirmRequest, confirmRow, logManual, updateSavedEntry } from "./api.js"
+import { type ConfirmRequest, confirmRow, confirmRows, logManual, updateSavedEntry } from "./api.js"
 
 export type WeekWrite =
   | { readonly kind: "confirm"; readonly request: ConfirmRequest }
@@ -74,6 +75,7 @@ export const previewWrite = (view: WeekView, write: WeekWrite): ReadonlyArray<Op
   if (plan === null || row?.proposal === undefined) return []
   const prepared = prepareProposal({
     evidence: {
+      writeBlocked: row.proposal.writeBlocked,
       blocks: row.proposal.blocks,
       credited: row.proposal.maxSeconds,
       ticketKey: row.ticketKey,
@@ -87,6 +89,7 @@ export const previewWrite = (view: WeekView, write: WeekWrite): ReadonlyArray<Op
   const sized = prepared.plan(plan.rows)
   if (sized._tag !== "Write") return []
   return (["jira", "clockify"] satisfies Array<OptimisticEntry["source"]>).flatMap((source) => {
+    if (sized.writeBlocked?.[source] !== undefined) return []
     return sized[source].segments.map((segment, index) => {
       const startMs = segment.startedAt.getTime()
       return {
@@ -159,9 +162,10 @@ const editedView = (view: WeekView, entry: SavedEntry, pending: boolean): WeekVi
 /** One atom set per mounted week view; rejected mutations roll back to its last confirmed value. */
 export const makeWeekAtoms = (transport: {
   readonly confirmRow: typeof confirmRow
+  readonly confirmRows?: typeof confirmRows | undefined
   readonly logManual: typeof logManual
   readonly updateSavedEntry: typeof updateSavedEntry
-} = { confirmRow, logManual, updateSavedEntry }) => {
+} = { confirmRow, confirmRows, logManual, updateSavedEntry }) => {
   const source = Atom.make<WeekView>({ plan: null, entries: [] })
   const queued = Atom.make<ReadonlyArray<QueuedConfirmation>>([])
   // Optimistic completion refreshes its source. Refresh the projection, preserving the stored snapshot.
@@ -182,6 +186,40 @@ export const makeWeekAtoms = (transport: {
       return result
     }).pipe(Effect.ensuring(Effect.sync(() => {
       get.set(queued, get(queued).filter((held) => held.id !== item.id))
+    })))
+  )
+  // Several ready approvals under one provider re-read. Each item settles from its own outcome, and
+  // every item leaves the queue whether its write landed or not, preserving approvals added meanwhile.
+  const writeQueuedBatch = Atom.fn<ReadonlyArray<QueuedConfirmation>>()((items, get) =>
+    Effect.gen(function*() {
+      const message = (cause: unknown) => Predicate.isError(cause) ? cause.message : String(cause)
+      const confirm = transport.confirmRows
+      // A transport without the batch route confirms one at a time; outcomes keep the same shape.
+      const outcomes: ReadonlyArray<ConfirmBatchItemResponse> = confirm === undefined
+        ? yield* Effect.forEach(items, (item) =>
+          Effect.tryPromise({
+            try: () => transport.confirmRow(item.request),
+            catch: (cause) => new WeekWriteError({ message: message(cause) })
+          }).pipe(
+            Effect.map((result): ConfirmBatchItemResponse => ({ _tag: "Written", result })),
+            Effect.catch((error) =>
+              Effect.succeed<ConfirmBatchItemResponse>({ _tag: "Failed", message: error.message, reload: false })
+            )
+          ))
+        : yield* Effect.tryPromise({
+          try: () => confirm(items.map((item) => item.request)),
+          catch: (cause) => new WeekWriteError({ message: message(cause) })
+        })
+      const settled = items.flatMap((item, index) => {
+        const outcome = outcomes[index]
+        return outcome?._tag === "Written" ? settleEntries(item.entries, outcome.result) : []
+      })
+      const held = get(source)
+      get.set(source, { ...held, entries: [...held.entries, ...settled] })
+      return outcomes
+    }).pipe(Effect.ensuring(Effect.sync(() => {
+      const ids = new Set(items.map((item) => item.id))
+      get.set(queued, get(queued).filter((held) => !ids.has(held.id)))
     })))
   )
   const write = Atom.optimisticFn(visible, {
@@ -229,5 +267,5 @@ export const makeWeekAtoms = (transport: {
         })
       )
   })
-  return { source, visible, write, queued, writeQueued, editSaved }
+  return { source, visible, write, queued, writeQueued, writeQueuedBatch, editSaved }
 }
