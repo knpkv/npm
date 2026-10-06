@@ -29,6 +29,13 @@ import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js
 const failedOnlyOnApprovalEvaluation = (error: AwsClientError | CacheError): boolean =>
   error._tag === "AwsApiError" && Predicate.isTagged(error.cause, "ApprovalEvaluationError")
 
+/** The evaluation failure's own message, which names the operation and the provider's reason. */
+const approvalFailureMessage = (error: AwsClientError | CacheError): string =>
+  Predicate.hasProperty(error, "cause") && Predicate.hasProperty(error.cause, "message") &&
+    Predicate.isString(error.cause.message)
+    ? error.cause.message
+    : "EvaluatePullRequestApprovalRules failed"
+
 /** Resolve a stale cached PR: retain contradictory OPEN evidence, update a definitive merged/closed status. */
 const resolveStaleStatus = (
   prRepo: PullRequestRepoContract,
@@ -249,7 +256,18 @@ export const fetchAndUpsertPRs = (params: {
                       // The pull request was read; only its approval enrichment failed. That is not
                       // evidence it is gone, so the row stays for the next refresh to settle.
                       failedOnlyOnApprovalEvaluation(error)
-                        ? Effect.void
+                        ? notificationRepo.addSystem({
+                          type: "error",
+                          title: `${pr.accountProfile} (${pr.accountRegion})`,
+                          message: JSON.stringify({
+                            operation: "getPullRequest",
+                            profile: pr.accountProfile,
+                            region: pr.accountRegion,
+                            cause: approvalFailureMessage(error)
+                          }),
+                          profile: pr.accountProfile,
+                          deduplicate: true
+                        }).pipe(Effect.catch(() => Effect.void))
                         : prRepo.deleteOne(pr.awsAccountId, pr.id, {
                           repositoryName: pr.repositoryName,
                           accountRegion: pr.accountRegion

@@ -20,6 +20,7 @@ describe("fetchAndUpsertPRs", () => {
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
       const deleteCalls = yield* Ref.make(0)
+      const notifications = yield* Ref.make<Array<{ readonly type: string; readonly message: string }>>([])
       const account = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
@@ -48,7 +49,10 @@ describe("fetchAndUpsertPRs", () => {
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
           propagateRepoAccountId: () => Effect.void
         }),
-        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(NotificationRepo, {
+          addSystem: (notification) =>
+            Ref.update(notifications, (all) => [...all, { type: notification.type, message: notification.message }])
+        }),
         Layer.mock(SubscriptionRepo, {})
       )
 
@@ -64,6 +68,10 @@ describe("fetchAndUpsertPRs", () => {
       // An enrichment failure is not evidence the pull request is gone.
       expect(yield* Ref.get(deleteCalls)).toBe(0)
       expect(successfulScopes).toEqual([])
+      // Kept, but not silently: the account says why its queue is stale.
+      expect(yield* Ref.get(notifications)).toEqual([
+        { type: "error", message: expect.stringContaining("EvaluatePullRequestApprovalRules") }
+      ])
     }))
 
   const staleOpenPR = Schema.decodeSync(CachedPullRequest)({
