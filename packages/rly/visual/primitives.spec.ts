@@ -4,6 +4,7 @@ const story = (id: string, theme = "dark"): string =>
   `/iframe.html?id=${id}&viewMode=story&globals=theme:${theme};forcedColors:auto;reducedMotion:reduce;locale:en;density:comfortable`
 
 const iconButtonSizes: ReadonlyArray<readonly [name: string, size: number]> = [
+  ["Mark done", 32],
   ["Add item", 44],
   ["Search", 48],
   ["Continue", 56]
@@ -12,11 +13,13 @@ const iconButtonSizes: ReadonlyArray<readonly [name: string, size: number]> = [
 test("preserves deliberate control geometry and the shared focus treatment", async ({ page }) => {
   await page.goto(story("primitives-button--states"))
 
+  const dense = page.locator("[data-button-size=\"dense\"]")
   const compact = page.locator("[data-button-size=\"compact\"]")
   const standard = page.locator("[data-button-size=\"default\"]")
   const principal = page.locator("[data-button-size=\"principal\"]")
   await expect(compact).toBeVisible()
 
+  expect(Math.round((await dense.boundingBox())?.height ?? 0)).toBe(32)
   expect(Math.round((await compact.boundingBox())?.height ?? 0)).toBe(40)
   expect(Math.round((await standard.boundingBox())?.height ?? 0)).toBe(48)
   expect(Math.round((await principal.boundingBox())?.height ?? 0)).toBe(56)
