@@ -19,16 +19,15 @@ describe("AWS discovery failure copy", () => {
   })
 
   it("never prints the raw failure class", () => {
-    for (
-      const failureClass of [
-        "authentication",
-        "authorization",
-        "malformed-response",
-        "rate-limit",
-        "timeout",
-        "unavailable"
-      ] as const
-    ) {
+    const failureClasses: ReadonlyArray<Parameters<typeof discoveryFailureMessage>[2]["failureClass"]> = [
+      "authentication",
+      "authorization",
+      "malformed-response",
+      "rate-limit",
+      "timeout",
+      "unavailable"
+    ]
+    for (const failureClass of failureClasses) {
       const message = discoveryFailureMessage("CodePipeline", "dev", { _tag: "failed", failureClass })
       assert.notInclude(message, `(${failureClass})`)
     }
