@@ -140,6 +140,20 @@ describe("Work board with the observed overlay", () => {
     expect(host.querySelector(".work-facts")?.textContent).toContain("Pull requestNone known")
   })
 
+  it("says a pull request is not in this read only for a goal the trimmed overlay left out", async () => {
+    const agentOnly: WorkGoalObservedEntry = { ...nothing, displayState: "working", goalId: "kept" }
+    const host = await mount(
+      snapshotOf([goal("kept"), goal("left")], { observed: [agentOnly], observedOmitted: 1 }),
+      "kept"
+    )
+    expect(host.querySelector(".work-facts")?.textContent).toContain("Pull requestNone known")
+    const trimmed = await mount(
+      snapshotOf([goal("kept"), goal("left")], { observed: [agentOnly], observedOmitted: 1 }),
+      "left"
+    )
+    expect(trimmed.querySelector(".work-facts")?.textContent).toContain("Not in this read")
+  })
+
   it("flags a gone owner and an unreadable source, drawing the unreadable one hatched", async () => {
     const entry: WorkGoalObservedEntry = {
       ...nothing,

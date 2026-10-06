@@ -421,9 +421,9 @@ const GoalDetail = ({
             <dt>Pull request</dt>
             <dd>
               {observed?.pullRequest == null
-                ? snapshot.observedOmitted === undefined
-                  ? "None known"
-                  : "Not in this read: live state was trimmed to the most recently updated goals"
+                ? observed === null && snapshot.observedOmitted !== undefined
+                  ? "Not in this read: live state was trimmed to the most recently updated goals"
+                  : "None known"
                 : `#${observed.pullRequest.fact.pullRequest} ${pullRequestStateLabel[observed.pullRequest.fact.state]}, ${checksLabel[observed.pullRequest.fact.checks]}`}
             </dd>
           </div>
