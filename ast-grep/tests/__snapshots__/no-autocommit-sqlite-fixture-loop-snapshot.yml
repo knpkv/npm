@@ -66,6 +66,28 @@ snapshots:
         start: 47
         end: 153
   ? |
+    database.exec("BEGIN")
+    try {
+      database.exec("COMMIT")
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+    } finally {
+      database.close()
+    }
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
+        style: primary
+        start: 87
+        end: 143
+      - source: |-
+          for (const row of rows) {
+              database.prepare("INSERT INTO rows VALUES (?)").run(row)
+            }
+        style: secondary
+        start: 57
+        end: 147
+  ? |
     database.exec(`
       CREATE TRIGGER rows_after_insert AFTER INSERT ON rows
       BEGIN
@@ -103,6 +125,26 @@ snapshots:
         style: secondary
         start: 0
         end: 86
+  ? |
+    for (const path of paths) {
+      const database = new DatabaseSync(path)
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+      database.close()
+    }
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
+        style: primary
+        start: 102
+        end: 158
+      - source: |-
+          for (const row of rows) {
+              database.prepare("INSERT INTO rows VALUES (?)").run(row)
+            }
+        style: secondary
+        start: 72
+        end: 162
   ? |
     for (const row of rows) {
       database.prepare("INSERT INTO rows VALUES (?)").run(row)
@@ -222,3 +264,21 @@ snapshots:
         style: secondary
         start: 8
         end: 118
+  ? |
+    withTransaction(other, () => {
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+    })
+  : labels:
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
+        style: primary
+        start: 63
+        end: 119
+      - source: |-
+          for (const row of rows) {
+              database.prepare("INSERT INTO rows VALUES (?)").run(row)
+            }
+        style: secondary
+        start: 33
+        end: 123

@@ -1166,9 +1166,11 @@ describe("durable Work projection", () => {
            (event_id, goal_id, occurred_at, record, transaction_id)
          VALUES (?, ?, ?, ?, ?)`
       )
+      repaired.exec("BEGIN")
       for (const event of legacyEvents) {
         insert.run(event.eventId, event.goal.id, event.occurredAt, JSON.stringify(event), "transaction-legacy")
       }
+      repaired.exec("COMMIT")
       repaired.close()
 
       const driftedEvent = legacyEvents[1]
@@ -1225,6 +1227,7 @@ describe("durable Work projection", () => {
            (event_id, goal_id, occurred_at, record, transaction_id)
          VALUES (?, ?, ?, ?, ?)`
       )
+      database.exec("BEGIN")
       for (const event of legacyEvents) {
         insertEvent.run(
           event.eventId,
@@ -1234,6 +1237,7 @@ describe("durable Work projection", () => {
           "transaction-legacy-compact"
         )
       }
+      database.exec("COMMIT")
       database.prepare(
         "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
       ).run(

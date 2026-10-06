@@ -61,6 +61,22 @@ valid:
       tamper.mutate(database)
     }
   - |
+    withTransaction(database, () => {
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+    })
+  - |
+    for (const path of paths) {
+      const database = new DatabaseSync(path)
+      database.exec("BEGIN")
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+      database.exec("COMMIT")
+      database.close()
+    }
+  - |
     for (const { name, value } of cases) {
       const copy = fixtureDatabase(join(root, name))
       copy.prepare("UPDATE rows SET value = ?").run(value)
@@ -131,4 +147,28 @@ invalid:
     `)
     for (const row of rows) {
       database.prepare("INSERT INTO rows VALUES (?)").run(row)
+    }
+  - |
+    withTransaction(other, () => {
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+    })
+  - |
+    for (const path of paths) {
+      const database = new DatabaseSync(path)
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+      database.close()
+    }
+  - |
+    database.exec("BEGIN")
+    try {
+      database.exec("COMMIT")
+      for (const row of rows) {
+        database.prepare("INSERT INTO rows VALUES (?)").run(row)
+      }
+    } finally {
+      database.close()
     }
