@@ -109,12 +109,14 @@ const ApprovalHero = ({
       <Hero
         // Which hosts couldn't be checked is said once, in the notice under the hero.
         caption={
-          last === undefined
-            ? "No requests yet."
-            : `Last: ${factsLabel(last.record.payload.kind, snapshot.host)}, ${last.outcome.toLowerCase()} ${agoText(
-                last.at,
-                now
-              )}.`
+          last === undefined ? (
+            "No requests yet."
+          ) : (
+            <>
+              Last: {factsLabel(last.record.payload.kind, snapshot.host)}, {last.outcome.toLowerCase()}{" "}
+              <span className="countdown-nowrap">{agoText(last.at, now)}</span>.
+            </>
+          )
         }
         fact={
           unchecked > 0
@@ -273,7 +275,7 @@ const RequestDetail = ({
       </p>
       <h3 className="countdown-detail-title">{facts.title}</h3>
       <p className="countdown-requested">
-        Requested by {facts.actor}, {agoText(facts.createdAt, now)}
+        Requested by {facts.actor}, <span className="countdown-nowrap">{agoText(facts.createdAt, now)}</span>
       </p>
       <ApprovalRequestDisclosure id={facts.id} payload={payload} />
       {item._tag === "Local" && item.record.connectTarget !== undefined && item.record.worker !== undefined ? (
@@ -650,7 +652,7 @@ export const ApprovalsCountdown = ({
                   <span className="countdown-row-title">{jobTitle(record)}</span>
                   <small className="countdown-row-caption">
                     <code>{record.payload.kind}</code>
-                    {by === null ? "" : `, by ${by}`}, {agoText(at, now)}
+                    {by === null ? "" : `, by ${by}`}, <span className="countdown-nowrap">{agoText(at, now)}</span>
                   </small>
                   <ApprovalRequestDisclosure id={record.id} payload={record.payload} />
                 </li>
