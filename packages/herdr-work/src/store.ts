@@ -4972,14 +4972,26 @@ export class WorkStore implements WorkStoreService {
     }
     const reconcilerEvents = yield* Schema.decodeUnknownEffect(Schema.Array(ReconcilerEventRow))(source.reconcilerRows)
       .pipe(Effect.mapError(storeError("snapshot-input.decode-reconciler-events")))
-    // Each activity's origin: the first checkpoint in its goal's history that
-    // holds it. Provenance holds only while the activity still reads as written.
+    // Each current activity's origin: the checkpoint that started its current
+    // unchanged run. An activity that disappears, or reads differently, starts
+    // a new run, so a later owner rewrite or re-creation is never credited to
+    // whoever wrote an earlier version.
     const activityOrigins = new Map<string, { readonly eventId: string; readonly activity: WorkActivityType }>()
-    for (const event of events.toSorted((left, right) => left.occurredAt - right.occurredAt)) {
-      for (const activity of event.goal.activity ?? []) {
-        const key = `${event.goal.id}\u0000${activity.id}`
-        if (!activityOrigins.has(key)) activityOrigins.set(key, { activity, eventId: event.eventId })
+    const previousByGoal = new Map<string, ReadonlyMap<string, WorkActivityType>>()
+    const ordered = events.toSorted((left, right) =>
+      left.occurredAt - right.occurredAt || (left.eventId < right.eventId ? -1 : left.eventId > right.eventId ? 1 : 0)
+    )
+    for (const event of ordered) {
+      const previous = previousByGoal.get(event.goal.id) ?? new Map<string, WorkActivityType>()
+      const current = new Map((event.goal.activity ?? []).map((activity) => [activity.id, activity]))
+      for (const [id, activity] of current) {
+        const before = previous.get(id)
+        const unchanged = before !== undefined && before.kind === activity.kind &&
+          before.summary === activity.summary &&
+          before.occurredAt === activity.occurredAt
+        if (!unchanged) activityOrigins.set(`${event.goal.id}\u0000${id}`, { activity, eventId: event.eventId })
       }
+      previousByGoal.set(event.goal.id, current)
     }
     return { activityOrigins, approvals, events, facts, failures, logicalObservedAt, reconcilerEvents }
   })
@@ -4997,6 +5009,7 @@ export class WorkStore implements WorkStoreService {
     // look like later: a reopened goal stays the owner's.
     const stamped = new Map(source.reconcilerEvents.map(({ eventId, goalId }) => [goalId, eventId]))
     const cryptoService = this.#cryptoService
+    const now = yield* Clock.currentTimeMillis
     const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) => this.appendAt(checkpoint, guard)
     return yield* Effect.forEach(
       terminalCandidates(source.events, source.facts),
@@ -5012,14 +5025,11 @@ export class WorkStore implements WorkStoreService {
           utf8.encode(`${candidate.fact.observationId}\u0000${goalId}`)
         ).pipe(Effect.mapError(storeError("reconcile.digest")))
         const eventId = `${reconcilerEventPrefix}${Hex.encode(digest)}`
-        const checkpoint = terminalCheckpoint(candidate, eventId)
-        if (Result.isFailure(checkpoint)) {
-          return yield* new WorkProjectionError({
-            cause: checkpoint.failure,
-            detail: `goal ${goalId} cannot take a terminal checkpoint`,
-            reason: "malformed"
-          })
-        }
+        const checkpoint = terminalCheckpoint(candidate, eventId, now)
+        // A goal that cannot take its terminal checkpoint (an activity already
+        // holds the reconciler's id, a timestamp past the bound) is left for
+        // its owner: reported as a conflict, never failing the other goals.
+        if (Result.isFailure(checkpoint)) return { _tag: "conflict", goalId }
         return yield* appendAt(checkpoint.success, {
           fact: { observationId: candidate.fact.observationId, subject: candidate.fact.subject },
           head: candidate.head,

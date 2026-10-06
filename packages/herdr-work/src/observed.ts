@@ -271,7 +271,9 @@ export const withActivityProvenance = (
       const origin = activityOrigins.get(key)
       if (origin === undefined || !sameActivity(origin.activity, activity)) return []
       const job = approvalJob.get(key)
-      if (job !== undefined) {
+      // An approved operation writes its activity in its own checkpoint, whose
+      // event id is the activity id; any other origin is not its write.
+      if (job !== undefined && origin.eventId === activity.id) {
         return [{ activityId: activity.id, approvalJobId: job, goalId: goal.id, provenance: "approval" }]
       }
       return reconciler.has(`${goal.id}\u0000${origin.eventId}`)

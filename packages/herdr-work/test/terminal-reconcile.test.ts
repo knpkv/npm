@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Crypto, Deferred, Effect, Fiber, Ref, Result, Schema } from "effect"
+import { Hex } from "effect/encoding"
 import { TestClock } from "effect/testing"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -9,6 +10,7 @@ import { DatabaseSync } from "node:sqlite"
 import {
   makeWorkService,
   withActivityProvenance,
+  type WorkActivity,
   type WorkGoal,
   type WorkGoalCheckpoint,
   workHistoryMaxEvents,
@@ -381,5 +383,73 @@ describe("terminal reconcile", () => {
         updatedAt: 8_000
       })
       expect((yield* work.snapshots(100_000)).now.activityProvenance).toEqual([])
+    })))
+
+  it.effect("never stamps past the store's clock, whatever close time the provider reports", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{
+        observation: pullRequest({ closedAt: 9_000_000_000, state: "merged" }),
+        observedAt: 6_000
+      }])
+      yield* work.reconcile()
+      expect((yield* currentGoal(work))?.updatedAt).toBe(100_000)
+    })))
+
+  it.effect("keeps every owner activity when the goal's activity is full", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      const activity = Array.from({ length: 128 }, (_, index): WorkActivity => ({
+        id: `owner-${index}`,
+        kind: "note",
+        occurredAt: 1_000,
+        summary: `Owner note ${index}`
+      }))
+      yield* record(work, "goal-pr7.1", goal({ activity }))
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "merged" }), observedAt: 6_000 }])
+      expect((yield* work.reconcile())[0]?._tag).toBe("applied")
+      const completed = yield* currentGoal(work)
+      expect(completed?.state).toBe("completed")
+      expect(completed?.activity?.map(({ id }) => id)).toEqual(activity.map(({ id }) => id))
+    })))
+
+  it.effect("does not credit the reconciler with an activity its owner removed and later wrote again", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "merged" }), observedAt: 6_000 }])
+      yield* work.reconcile()
+      const stamped = yield* currentGoal(work)
+      const shipment = stamped?.activity?.at(-1)
+      if (stamped === undefined || shipment === undefined) return expect.unreachable()
+      yield* record(work, "goal-pr7.2", {
+        ...stamped,
+        activity: (stamped.activity ?? []).slice(0, -1),
+        updatedAt: 7_000
+      })
+      yield* record(work, "goal-pr7.3", { ...stamped, updatedAt: 8_000 })
+      expect((yield* work.snapshots(100_000)).now.activityProvenance).toEqual([])
+    })))
+
+  it.effect("reports a conflict, not a failed run, when an owner activity already holds the reconciler's id", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* fixture
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "merged" }), observedAt: 6_000 }])
+      const fact = (yield* store.snapshotInput()).facts[0]
+      if (fact === undefined) return expect.unreachable()
+      const digest = yield* Crypto.Crypto.pipe(
+        Effect.flatMap((service) =>
+          service.digest("SHA-256", new TextEncoder().encode(`${fact.observationId}\u0000goal-pr7`))
+        ),
+        provideNodeServices
+      )
+      const id = `reconciler.${Hex.encode(digest)}`
+      yield* record(
+        work,
+        "goal-pr7.1",
+        goal({ activity: [{ id, kind: "note", occurredAt: 1_000, summary: "Squatting" }] })
+      )
+      expect(yield* work.reconcile()).toEqual([{ _tag: "conflict", goalId: "goal-pr7" }])
     })))
 })

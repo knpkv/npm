@@ -111,6 +111,31 @@ describe("prospective existing-owner admission", () => {
       expect((yield* store.list()).length).toBe(2)
     })))
 
+  it.effect("credits the approval only while its own checkpoint started the activity's current run", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture()
+      const preflight = yield* work.admissionPreflight(target)
+      if (preflight._tag !== "prospective") return expect.unreachable()
+      const admitted = (yield* work.admitExistingOwner(requestFor(preflight.absenceToken))).goal
+      expect((yield* work.snapshots()).now.activityProvenance?.map(({ provenance }) => provenance)).toEqual([
+        "approval"
+      ])
+      // Removed, then written again by the owner, the activity is now the owner's.
+      yield* work.record({
+        eventId: "owner-removes-admission",
+        goal: { ...admitted, activity: [], updatedAt: admitted.updatedAt + 10 },
+        occurredAt: admitted.updatedAt + 10,
+        version: "herdr.work.event.v1"
+      })
+      yield* work.record({
+        eventId: "owner-restores-admission",
+        goal: { ...admitted, updatedAt: admitted.updatedAt + 20 },
+        occurredAt: admitted.updatedAt + 20,
+        version: "herdr.work.event.v1"
+      })
+      expect((yield* work.snapshots()).now.activityProvenance).toEqual([])
+    })))
+
   it.effect("rejects stale absence and hidden identity conflicts without mutation", () =>
     Effect.scoped(Effect.gen(function*() {
       const { store, work } = yield* fixture()

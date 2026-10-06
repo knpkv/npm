@@ -52,17 +52,20 @@ const goalActivityLimit = 128
 /**
  * The terminal checkpoint for one candidate. It is stamped with the pull
  * request's own close time, or one millisecond after the goal's head when an
- * owner wrote after the close, so it is the head of history and the same
- * candidate always yields the same checkpoint. A blocker cannot outlive a
+ * owner wrote after the close, so it is the head of history; a close time
+ * later than `now` is clamped to it. A blocker cannot outlive a
  * finished goal, so it is cleared; the activity names the observation.
  */
 export const terminalCheckpoint = (
   candidate: TerminalCandidate,
-  eventId: string
+  eventId: string,
+  now: number
 ): Result.Result<WorkGoalCheckpointType, Schema.SchemaError> => {
   const { head, pullRequest } = candidate
   const merged = pullRequest.state === "merged"
-  const occurredAt = Math.max(pullRequest.closedAt ?? 0, head.goal.updatedAt + 1)
+  // A provider's close time is trusted only up to the store's clock: a bad
+  // future date must not become the head of the goal's history.
+  const occurredAt = Math.max(Math.min(pullRequest.closedAt ?? 0, now), head.goal.updatedAt + 1)
   const url = `https://github.com/${pullRequest.repository}/pull/${pullRequest.pullRequest}`
   const observed: WorkActivity = {
     id: eventId,
@@ -72,7 +75,11 @@ export const terminalCheckpoint = (
       : `Observed by the reconciler: ${url} closed without merging`,
     occurredAt
   }
-  const activity = [...(head.goal.activity ?? []), observed].slice(-goalActivityLimit)
+  // Never drop the owner's activity to fit this note: a goal whose activity is
+  // full takes the checkpoint without it (the reconciler's own record still
+  // marks the checkpoint).
+  const existing = head.goal.activity ?? []
+  const activity = existing.length >= goalActivityLimit ? existing : [...existing, observed]
   const goal: WorkGoal = {
     ...head.goal,
     state: merged ? "completed" : "abandoned",
