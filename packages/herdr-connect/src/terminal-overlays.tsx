@@ -14,7 +14,7 @@ export const JumpToLatest = ({ linesBack, onJump }: { readonly linesBack: number
       role="status"
     >
       <span aria-hidden="true">
-        <span className="terminal-older-output-label">Older output · </span>
+        <span className="terminal-older-output-label">Older output, </span>
         {`${linesBack} ${linesBack === 1 ? "line" : "lines"} back`}
       </span>
       <button
