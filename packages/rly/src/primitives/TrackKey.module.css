@@ -1,0 +1,75 @@
+@layer rly.components {
+  .root {
+    color: var(--rly-color-text-2);
+    display: flex;
+    flex-wrap: wrap;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-6) var(--rly-space-16);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .item {
+    align-items: center;
+    display: inline-flex;
+    gap: var(--rly-space-6);
+  }
+  /* Same two-tone mark as LimitTrack. */
+  .near {
+    background: var(--rly-color-text-1);
+    box-shadow:
+      -1px 0 0 var(--rly-color-surface-1),
+      1px 0 0 var(--rly-color-surface-1);
+    block-size: var(--rly-space-12);
+    inline-size: 1px;
+  }
+  .projected {
+    border-block: 2px dotted var(--rly-color-held-ink);
+    block-size: var(--rly-space-6);
+    box-sizing: border-box;
+    inline-size: var(--rly-space-16);
+  }
+  .stale {
+    background: repeating-linear-gradient(135deg, var(--rly-color-text-2) 0 3px, transparent 3px 6px);
+    block-size: var(--rly-space-8);
+    border-radius: var(--rly-radius-tag);
+    inline-size: var(--rly-space-16);
+  }
+  /* Same faint hatch and dashed edge as a LimitTrack with no reading. */
+  .unknown {
+    background: repeating-linear-gradient(45deg, var(--rly-color-border-2) 0 1px, transparent 1px 5px)
+      var(--rly-color-surface-3);
+    block-size: var(--rly-space-8);
+    border-radius: var(--rly-radius-tag);
+    inline-size: var(--rly-space-16);
+    outline: 1px dashed var(--rly-color-border-2);
+    outline-offset: -1px;
+  }
+  /* The Storybook toolbar's forced-colours mode: the same edges as under the media query. */
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .stale {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .unknown {
+    outline: 1px dashed CanvasText;
+  }
+  @media (forced-colors: active) {
+    /* Keep the halo: forced colours drop box-shadow, and the tokens already map to system colours. */
+    .near {
+      forced-color-adjust: none;
+    }
+    /* Match the system-colour hatch on stale LimitTracks. */
+    .stale {
+      background: repeating-linear-gradient(135deg, CanvasText 0 3px, Canvas 3px 6px);
+      forced-color-adjust: none;
+      outline: 1px solid CanvasText;
+      outline-offset: -1px;
+    }
+    .unknown {
+      background: repeating-linear-gradient(45deg, CanvasText 0 1px, Canvas 1px 5px);
+      forced-color-adjust: none;
+      outline: 1px dashed CanvasText;
+    }
+  }
+}
