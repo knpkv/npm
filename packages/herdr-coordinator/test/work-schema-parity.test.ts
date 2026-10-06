@@ -230,13 +230,26 @@ const knownDivergences = ["index work_decision_handoffs_session"]
 type Snapshot = ReturnType<typeof schemaSnapshot>
 type SchemaObject = readonly [key: string, definition: unknown]
 
-/** Every table, index and trigger keyed as "<kind> <name>", with its normalized definition. */
+const isAutoindex = (index: { readonly name: string }) => index.name.startsWith("sqlite_autoindex_")
+
+/**
+ * Every table, index and trigger keyed as "<kind> <name>", with its normalized
+ * definition. Inline PRIMARY KEY and UNIQUE constraints exist only as
+ * `sqlite_autoindex_*` indexes, so they stay part of their table's definition,
+ * without the generated names and sorted by their keys.
+ */
 const objects = (snapshot: Snapshot): ReadonlyMap<string, unknown> =>
   new Map<string, unknown>([
     ...snapshot.tables.flatMap(({ indexes, name, ...table }): ReadonlyArray<SchemaObject> => [
-      [`table ${name}`, table],
+      [`table ${name}`, {
+        ...table,
+        constraints: indexes
+          .filter(isAutoindex)
+          .map(({ keys, partial, unique }) => ({ keys, partial, unique }))
+          .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)))
+      }],
       ...indexes
-        .filter((index) => !index.name.startsWith("sqlite_autoindex_"))
+        .filter((index) => !isAutoindex(index))
         .map((index): SchemaObject => [`index ${index.name}`, { ...index, table: name }])
     ]),
     ...snapshot.triggers.map((trigger): SchemaObject => [`trigger ${trigger.name}`, trigger])
