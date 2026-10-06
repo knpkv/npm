@@ -37,16 +37,17 @@ test("393x852 keeps a deep-linked goal outside the first page selected", async (
 
   await expect(page.locator(".work-board-row")).toHaveCount(10)
   await expect(page.getByRole("button", { name: /Goal 47/ })).toHaveAttribute("aria-pressed", "true")
-  await expect(page.getByRole("complementary", { name: "Goal details" })).toContainText(
+  // The open goal is a region named by its own title.
+  await expect(page.getByRole("region", { name: "Goal 47" })).toContainText(
     "Goal 47 has one focused detail"
   )
 })
 
-test("crowded desktop toolbar keeps the goal count fixed-width", async ({ page }) => {
+test("an 800px window wraps the status filters without horizontal overflow", async ({ page }) => {
   await page.setViewportSize({ height: 852, width: 800 })
   await page.goto("/test/browser/fixture.html")
 
-  const goalCount = page.getByText("Showing 10 of 47 goals")
-  await expect(goalCount).toBeVisible()
-  await expect(goalCount).toHaveCSS("flex-shrink", "0")
+  await expect(page.getByText("Showing 10 of 47 goals")).toBeVisible()
+  await expect(page.getByRole("group", { name: "Filter goals by status" })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(800)
 })

@@ -100,7 +100,7 @@ describe("WorkBoard interactions", () => {
 
     expect(host.querySelector('[aria-label="Goal details"]')).toBeNull()
     expect(host.querySelector('.work-board-row[aria-pressed="true"]')).toBeNull()
-    expect(host.textContent).not.toContain("Shipment path")
+    expect(host.querySelector('[aria-label="Delivery of Goal 2"]')).toBeNull()
     const goalRow = rowNamed(host, "Goal 2")
     expect(goalRow).not.toBeNull()
     if (goalRow === null) return
@@ -108,8 +108,9 @@ describe("WorkBoard interactions", () => {
     await act(async () => goalRow.click())
     const details = host.querySelector<HTMLElement>('[aria-label="Goal details"]')
     expect(details?.textContent).toContain("Goal 2 detail")
-    expect(host.textContent).toContain("Shipment path · Goal 2")
-    expect(document.activeElement).toBe(details)
+    expect(host.querySelector('[aria-label="Delivery of Goal 2"]')?.textContent).toContain("Local now")
+    // Opening a goal focuses its heading, so the detail is announced by name.
+    expect(document.activeElement).toBe(details?.querySelector("h2"))
 
     const close = buttonNamed(host, "Close details")
     expect(close).not.toBeNull()
