@@ -1,5 +1,22 @@
 # @knpkv/confluence-to-markdown
 
+## 2.5.0
+
+### Minor Changes
+
+- [#479](https://github.com/knpkv/npm/pull/479) [`1ef1847`](https://github.com/knpkv/npm/commit/1ef1847c867f83de237dec1c454b6bb5e40183ef) Thanks [@konopkov](https://github.com/konopkov)! - One error report for every Atlassian CLI (`jira`, `confluence`, `atlassian`), from the new `@knpkv/atlassian-common/cli` subpath (`handleCliError`, `withCliErrorHandling`, `Verbose`, `commandArgs`, `verboseRequested`).
+
+  - A failed command prints the error's message; a defect prints `Error: <message>`. The full cause, with stack traces, prints only with the new global `--verbose` flag or `DEBUG=1`.
+  - jira: stderr no longer prints the pretty-printed cause and stack trace by default.
+  - atlassian: tagged errors print their message instead of `String(error)`, and defects are reported too.
+  - Help and usage errors that the CLI already rendered are not printed a second time. Exit codes are unchanged.
+
+### Patch Changes
+
+- [#485](https://github.com/knpkv/npm/pull/485) [`3048770`](https://github.com/knpkv/npm/commit/30487706842612a798a17ce7d0d8e71973442fa2) Thanks [@konopkov](https://github.com/konopkov)! - `OAuthUserSchema`, `OAuthTokenSchema` and `OAuthConfigSchema` (and their types) in `@knpkv/confluence-to-markdown/Schemas` are now re-exported from `@knpkv/atlassian-common/config` instead of being a second copy. The types are unchanged: a type-equality check against the previous definitions passed before the switch.
+- Updated dependencies [[`1ef1847`](https://github.com/knpkv/npm/commit/1ef1847c867f83de237dec1c454b6bb5e40183ef)]:
+  - @knpkv/atlassian-common@1.9.0
+
 ## 2.4.1
 
 ### Patch Changes

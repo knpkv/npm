@@ -1,5 +1,16 @@
 # @knpkv/atlassian-common
 
+## 1.9.0
+
+### Minor Changes
+
+- [#479](https://github.com/knpkv/npm/pull/479) [`1ef1847`](https://github.com/knpkv/npm/commit/1ef1847c867f83de237dec1c454b6bb5e40183ef) Thanks [@konopkov](https://github.com/konopkov)! - One error report for every Atlassian CLI (`jira`, `confluence`, `atlassian`), from the new `@knpkv/atlassian-common/cli` subpath (`handleCliError`, `withCliErrorHandling`, `Verbose`, `commandArgs`, `verboseRequested`).
+
+  - A failed command prints the error's message; a defect prints `Error: <message>`. The full cause, with stack traces, prints only with the new global `--verbose` flag or `DEBUG=1`.
+  - jira: stderr no longer prints the pretty-printed cause and stack trace by default.
+  - atlassian: tagged errors print their message instead of `String(error)`, and defects are reported too.
+  - Help and usage errors that the CLI already rendered are not printed a second time. Exit codes are unchanged.
+
 ## 1.8.0
 
 ### Minor Changes
