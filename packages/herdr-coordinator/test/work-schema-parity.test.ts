@@ -295,9 +295,9 @@ const bridgeOnly = ["index work_dispatch_handoffs_lane", "table work_dispatch_ha
  * Shared objects the two drivers still define differently. Both use
  * `IF NOT EXISTS`, so whichever opens a file first decides; in production
  * WorkStore opens first. Remove an entry when its definitions are unified.
- * - The bridge makes the handoff session index UNIQUE; WorkStore does not.
+ * None remain: both drivers now make the handoff session index UNIQUE.
  */
-const knownDivergences = ["index work_decision_handoffs_session"]
+const knownDivergences: ReadonlyArray<string> = []
 
 type Snapshot = ReturnType<typeof schemaSnapshot>
 type SchemaObject = readonly [key: string, definition: unknown]
