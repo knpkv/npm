@@ -519,11 +519,7 @@ body,
   display: grid;
   gap: var(--rly-space-20);
   min-width: 0;
-  grid-template-columns: minmax(0, 1fr);
-}
-
-/* A side panel takes its column only while one is open; otherwise the calendar has the width. */
-.jcf-workspace:has(> :nth-child(2)) {
+  /* Keep controls at the same width when saving removes the editor. */
   grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
 }
 
@@ -904,8 +900,7 @@ body,
 }
 
 @media (max-width: 1100px) {
-  .jcf-workspace,
-  .jcf-workspace:has(> :nth-child(2)) {
+  .jcf-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
 
