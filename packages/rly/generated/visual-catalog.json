@@ -155,6 +155,23 @@
       ]
     },
     {
+      "name": "DecisionBar",
+      "paths": {
+        "source": "packages/rly/src/patterns/DecisionBar.tsx",
+        "story": "packages/rly/stories/patterns/DecisionBar.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/DecisionBar.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/DecisionBar.test.tsx"
+        ]
+      },
+      "storyId": "patterns-decisionbar--states",
+      "storyIds": [
+        "patterns-decisionbar--states"
+      ]
+    },
+    {
       "name": "Dialog",
       "paths": {
         "source": "packages/rly/src/primitives/Dialog.tsx",
@@ -946,7 +963,8 @@
       },
       "storyId": "patterns-timelinerow--actor-kinds",
       "storyIds": [
-        "patterns-timelinerow--actor-kinds"
+        "patterns-timelinerow--actor-kinds",
+        "patterns-timelinerow--provenance"
       ]
     },
     {

@@ -38,7 +38,7 @@
  */
 import { NodePath } from "@effect/platform-node"
 import type { ClockifyApiClientContract, TimeEntry } from "@knpkv/clockify-api-client"
-import { ClockifyApiClient } from "@knpkv/clockify-api-client"
+import { ClockifyApi, ClockifyApiClient } from "@knpkv/clockify-api-client"
 import {
   JiraApiClient,
   JiraApiConfig,
@@ -148,6 +148,8 @@ export interface PostedJiraWorklog {
 
 /** Everything a test can observe after running a command. */
 export interface FakeWorld {
+  readonly deletedClockifyEntries: Array<string>
+  readonly deletedJiraWorklogs: Array<{ readonly issueKey: string; readonly id: string }>
   readonly createdClockifyEntries: Array<CreatedClockifyEntry>
   readonly clockifyRequests: Array<{ readonly method: string; readonly url: string }>
   readonly jiraWorklogs: Array<PostedJiraWorklog>
@@ -206,6 +208,8 @@ export interface FakeWorld {
   jiraLoginStateReadFailuresRemaining: number
   jiraCurrentUserReadFailuresRemaining: number
   jiraWorklogReadFailuresRemaining: number
+  /** Worklog reads whose connection drops before any response, as opposed to a 5xx answer. */
+  jiraWorklogTransportFailuresRemaining: number
   jiraSearchFailuresRemaining: number
   /** Issues omitted from JQL search while direct worklog reads remain authoritative. */
   readonly jiraSearchHiddenIssues: Set<string>
@@ -378,6 +382,10 @@ export interface FakeHeadlessOptions {
     | undefined
   /** Make every Clockify entry creation fail, to model the write half refusing. */
   readonly clockifyWritesFail?: boolean | undefined
+  readonly clockifyDeletesFail?: boolean | undefined
+  readonly jiraDeletesFail?: boolean | undefined
+  readonly jiraPostsFail?: boolean | undefined
+  readonly jiraSprintTickets?: ReadonlyArray<string> | undefined
   /** Deterministic test gate immediately before a Clockify create reaches the fake provider. */
   readonly beforeClockifyWrite?: ((world: FakeWorld) => Effect.Effect<void>) | undefined
   /** Test-only boundary after a remote Clockify create but before its caller records the receipt. */
@@ -430,6 +438,7 @@ const defaultConfig: JcfConfig = {
   sessionConfidenceFloor: 0.7,
   sessionOwnership: "assigned",
   sessionOwnershipOverrides: [],
+  sessionIgnoredTickets: [],
   sessionDwellSeconds: 900
 }
 
@@ -744,6 +753,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   let jiraSiteUrl = "https://fake.atlassian.net"
   const world: FakeWorld = {
     createdClockifyEntries: [],
+    deletedClockifyEntries: [],
+    deletedJiraWorklogs: [],
     clockifyRequests: [],
     clockifyAuth: {
       baseUrl: "https://api.clockify.me/api",
@@ -832,6 +843,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     jiraLoginStateReadFailuresRemaining: 0,
     jiraCurrentUserReadFailuresRemaining: 0,
     jiraWorklogReadFailuresRemaining: 0,
+    jiraWorklogTransportFailuresRemaining: 0,
     jiraSearchFailuresRemaining: 0,
     jiraSearchHiddenIssues: new Set(options.jiraSearchHiddenIssues),
     setClockifyEntries: (entries) => {
@@ -1035,6 +1047,18 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     )
   }
 
+  /** A dropped connection on a worklog read: no response at all, which only a retry can survive. */
+  const droppedWorklogRead = (request: HttpClientRequest.HttpClientRequest) => {
+    if (world.jiraWorklogTransportFailuresRemaining <= 0) return undefined
+    if (request.method !== "GET" || !/\/issue\/[^/]+\/worklog/.test(request.url)) return undefined
+    world.jiraWorklogTransportFailuresRemaining--
+    return Effect.fail(
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({ request, description: "Connection reset" })
+      })
+    )
+  }
+
   /**
    * The single Jira boundary. Both the generated `JiraApiClient` (reads) and TimerService's raw
    * worklog POST (writes) go through it, so reads exercise the real client's decoding rather than
@@ -1043,7 +1067,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   const httpClientLayer = Layer.succeed(
     HttpClient.HttpClient,
     HttpClient.make((request) =>
-      Effect.sync(() => {
+      droppedWorklogRead(request) ?? Effect.sync(() => {
         const requestJiraLedger = jiraLedgerForUrl(request.url)
         if (request.url.includes("atlassian")) {
           world.jiraRequests.push({ method: request.method, url: request.url })
@@ -1097,6 +1121,38 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           return jsonResponse(request, 200, entries)
         }
         const exactClockifyEntry = request.url.match(/\/v1\/workspaces\/([^/]+)\/time-entries\/([^/?]+)/)
+        if (exactClockifyEntry !== null && request.method === "PUT") {
+          world.clockifyRequests.push({ method: request.method, url: request.url })
+          const index = clockifyLedger.findIndex((entry) => entry.id === exactClockifyEntry[2])
+          const existing = clockifyLedger[index]
+          if (existing === undefined) return jsonResponse(request, 404, { message: "synthetic time entry not found" })
+          const body = request.body
+          if (body._tag !== "Uint8Array") return jsonResponse(request, 400, { message: "missing body" })
+          const payload = Schema.decodeUnknownOption(Schema.fromJsonString(ClockifyApi.UpdateTimeEntryRequestJson))(
+            new TextDecoder().decode(body.body)
+          )
+          if (Option.isNone(payload)) return jsonResponse(request, 400, { message: "invalid body" })
+          const saved = makeTimeEntry({
+            ...existing,
+            ...payload.value,
+            description: payload.value.description ?? existing.description,
+            start: payload.value.start
+          }, existing.id)
+          clockifyLedger[index] = saved
+          world.updatedClockifyEntries.push({ id: existing.id, payload: payload.value })
+          return jsonResponse(request, 200, saved)
+        }
+        if (exactClockifyEntry !== null && request.method === "DELETE") {
+          world.clockifyRequests.push({ method: request.method, url: request.url })
+          if (options.clockifyDeletesFail === true) {
+            return jsonResponse(request, 503, { message: "synthetic delete failure" })
+          }
+          const index = clockifyLedger.findIndex((entry) => entry.id === exactClockifyEntry[2])
+          if (index < 0) return jsonResponse(request, 404, { message: "synthetic time entry not found" })
+          clockifyLedger.splice(index, 1)
+          world.deletedClockifyEntries.push(exactClockifyEntry[2] ?? "")
+          return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }))
+        }
         if (exactClockifyEntry !== null && request.method === "GET") {
           world.clockifyRequests.push({ method: request.method, url: request.url })
           const fault = options.clockifyExactEntryReadFault
@@ -1164,6 +1220,14 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           if (fault === "empty-404") return jsonResponse(request, 404, {})
           if (fault !== undefined) return jsonResponse(request, Number(fault), { errorMessages: ["synthetic failure"] })
           if (entry === undefined) return jsonResponse(request, 404, { errorMessages: ["Worklog not found"] })
+          if (request.method === "DELETE") {
+            if (options.jiraDeletesFail === true) {
+              return jsonResponse(request, 500, { errorMessages: ["synthetic delete failure"] })
+            }
+            entries.splice(index, 1)
+            world.deletedJiraWorklogs.push({ issueKey, id })
+            return HttpClientResponse.fromWeb(request, new Response(null, { status: 204 }))
+          }
           if (request.method === "PUT") {
             const payload = requestPayload(request.body)
             entries[index] = {
@@ -1187,6 +1251,9 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
         }
         const worklogMatch = request.url.match(/issue\/([^/]+)\/worklog/)
         if (request.method === "POST" && worklogMatch !== null) {
+          if (options.jiraPostsFail === true) {
+            return jsonResponse(request, 500, { errorMessages: ["synthetic create failure"] })
+          }
           const payload = requestPayload(request.body)
           const issueKey = worklogMatch[1] ?? "unknown"
           let nextId = 0
@@ -1307,6 +1374,9 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           // behaviour: whatever the ledger happens to hold. The query lives in `urlParams` rather
           // than in `url` — the client keeps them apart until the request is actually sent.
           const jql = request.urlParams.params.find(([name]) => name === "jql")?.[1]
+          if (jql?.includes("sprint in openSprints()") === true && options.jiraSprintTickets !== undefined) {
+            return jsonResponse(request, 200, { issues: options.jiraSprintTickets.map((key) => ({ key })) })
+          }
           const clause = jql === undefined ? null : jql.match(/key in \(([^)]*)\)/)
           if (clause !== null) {
             const keys = (clause[1] ?? "").split(",").map((key) => key.trim()).filter((key) => key !== "")
@@ -1579,7 +1649,11 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     Layer.provide(ReaderLive),
     Layer.provide(SourceLedgerLive)
   )
-  const SavedLive = savedEntriesLayer.pipe(Layer.provide(Externals), Layer.provide(JiraLayer))
+  const SavedLive = savedEntriesLayer.pipe(
+    Layer.provide(Externals),
+    Layer.provide(JiraLayer),
+    Layer.provide(SourceLedgerLive)
+  )
   const TicketLive = ticketServiceLayer.pipe(Layer.provide(Externals), Layer.provide(JiraLayer))
   const IssueFactsLive = issueFactsLayer.pipe(Layer.provide(Externals), Layer.provide(JiraLayer))
 

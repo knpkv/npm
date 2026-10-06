@@ -24,6 +24,7 @@ type RoutePayload =
   | SessionAgentSettings
   | { readonly cwd: string; readonly ticketKey: string }
   | { readonly ticketKey: string }
+  | { readonly ticketKey: string; readonly ignored: boolean }
   | Schema.Schema.Type<typeof ConfirmPayload>
   | Schema.Schema.Type<typeof ManualPayload>
   | Omit<DescribeRowRequest, "rowId">
@@ -144,6 +145,22 @@ it("keeps concurrent standing and ownership decisions without losing unrelated c
     })
     expect(await mine.json()).toMatchObject({ ownershipOverrides: ["PROJ-101", "PROJ-102"] })
     expect(await (await app.get("/api/config/agent")).json()).toEqual(codex)
+  } finally {
+    await app.web.dispose()
+  }
+})
+
+// Ignoring is a global, reversible decision; the read-back is what reaches the browser.
+it("ignores and restores a ticket through the config route", async () => {
+  const app = await makeApplication()
+  try {
+    const ignored = await app.post("/api/config/ignore", { ticketKey: "PROJ-101", ignored: true })
+    expect(ignored.status).toBe(200)
+    expect(await ignored.json()).toEqual({ ignoredTickets: ["PROJ-101"] })
+    const restored = await app.post("/api/config/ignore", { ticketKey: "PROJ-101", ignored: false })
+    expect(await restored.json()).toEqual({ ignoredTickets: [] })
+    const invalid = await app.post("/api/config/ignore", { ticketKey: "not-a-key", ignored: true })
+    expect(invalid.status).toBe(400)
   } finally {
     await app.web.dispose()
   }

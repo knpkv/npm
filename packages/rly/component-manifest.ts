@@ -216,6 +216,29 @@ export const componentManifest = {
         tests: ["test/patterns/Hero.test.tsx"]
       }
     },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "DecisionBar" },
+        { kind: "value", name: "RLY_DECISION_BAR_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_DECISION_BAR_VARIANTS" },
+        { kind: "type", name: "DecisionBarProps" },
+        { kind: "type", name: "RlyDecisionBarPlacement" },
+        { kind: "type", name: "RlyDecisionBarState" }
+      ],
+      name: "DecisionBar",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/DecisionBar.tsx",
+      status: "experimental",
+      styles: ["src/patterns/DecisionBar.module.css"],
+      variants: [{ defaultValue: "inline", name: "placement", values: ["inline", "sticky"] }],
+      visual: {
+        story: "stories/patterns/DecisionBar.stories.tsx",
+        storyId: "patterns-decisionbar--states",
+        tests: ["test/patterns/DecisionBar.test.tsx"]
+      }
+    },
     // scaffold:components:insert
     {
       category: "diff",
@@ -1531,9 +1554,13 @@ export const componentManifest = {
     {
       category: "pattern",
       exports: [
+        { kind: "value", name: "TimelineProvenanceKey" },
         { kind: "value", name: "TimelineRow" },
         { kind: "type", name: "RlyTimelineActorKind" },
         { kind: "type", name: "RlyTimelineEvent" },
+        { kind: "type", name: "RlyTimelineProvenance" },
+        { kind: "type", name: "RlyTimelineProvenanceKind" },
+        { kind: "type", name: "TimelineProvenanceKeyProps" },
         { kind: "type", name: "TimelineRowProps" }
       ],
       name: "TimelineRow",
@@ -1544,6 +1571,7 @@ export const componentManifest = {
       styles: ["src/patterns/TimelineRow.module.css"],
       variants: [],
       visual: {
+        coverageStoryIds: ["patterns-timelinerow--provenance"],
         story: "stories/patterns/TimelineRow.stories.tsx",
         storyId: "patterns-timelinerow--actor-kinds",
         tests: ["test/patterns/TimelineRow.test.tsx"]

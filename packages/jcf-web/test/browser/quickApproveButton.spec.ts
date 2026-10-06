@@ -1,6 +1,6 @@
 import { expect, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
-import { ConfirmPayload } from "../../src/shared/contracts.js"
+import { ConfirmBatchPayload, type ConfirmPayload } from "../../src/shared/contracts.js"
 import { fixtureWeek } from "../fixture.js"
 
 const open = async (page: Page) => {
@@ -92,15 +92,23 @@ test("another + queues during a held write in Review first and totals refresh on
     release = resolve
   })
   const requests: Array<typeof ConfirmPayload.Type> = []
-  await page.route("**/api/rows/confirm", async (route) => {
-    requests.push(Schema.decodeUnknownSync(ConfirmPayload)(route.request().postDataJSON()))
-    if (requests.length === 1) await held
+  // The queue sends ready approvals as batches; `requests` records each approval in send order.
+  await page.route("**/api/rows/confirm-batch", async (route) => {
+    const batch = Schema.decodeUnknownSync(ConfirmBatchPayload)(route.request().postDataJSON()).requests
+    const first = requests.length === 0
+    for (const payload of batch) requests.push(payload)
+    if (first) await held
     await route.fulfill({
       json: {
-        clockify: { _tag: "Written", seconds: 3600 },
-        jira: { _tag: "Written", seconds: 3600 },
-        description: "Queued work",
-        lines: ["Logged queued work"]
+        items: batch.map(() => ({
+          _tag: "Written",
+          result: {
+            clockify: { _tag: "Written", seconds: 3600 },
+            jira: { _tag: "Written", seconds: 3600 },
+            description: "Queued work",
+            lines: ["Logged queued work"]
+          }
+        }))
       }
     })
   })

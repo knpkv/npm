@@ -271,6 +271,7 @@ const acquireEphemeralPort = Effect.tryPromise({
     new Promise<number>((resolve, reject) => {
       const probe = createServer()
       probe.once("error", reject)
+      // ast-grep-ignore: no-released-ephemeral-test-port -- the built CLI takes its port as an argument; follow-up: let it bind 0 and report its port.
       probe.listen(0, "127.0.0.1", () => {
         const address = probe.address()
         if (address === null || Predicate.isString(address)) {

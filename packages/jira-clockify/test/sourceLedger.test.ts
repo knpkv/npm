@@ -25,6 +25,38 @@ const withLedger = <A, E>(
     return yield* use(Context.get(context, SourceLedger))
   }))
 
+it.effect("copies a replacement claim before deletion and releases only the exact provider entry scope", () => {
+  const fake = makeFakeHeadless()
+  return withLedger(fake, (ledger) =>
+    Effect.gen(function*() {
+      const foreign = { ...identity, scope: "foreign-account" }
+      yield* ledger.ensureWindow(
+        { provider: foreign.provider, scope: foreign.scope, fromMs: 0, toMs: 2_000_000 },
+        [],
+        []
+      )
+      yield* ledger.reserve(identity)
+      yield* ledger.bind(identity, "old")
+      yield* ledger.reserve(foreign)
+      yield* ledger.bind(foreign, "old")
+      const entry = { provider: identity.provider, scope: identity.scope, entryId: "old" }
+      yield* ledger.copyEntry(entry, { entryId: "new", ticketKey: "PROJ-9" })
+      const copied = (yield* ledger.read).bindings
+      expect(copied).toHaveLength(3)
+      expect(copied.find((binding) => binding.entryId === "new")).toEqual({
+        ...identity,
+        ticketKey: "PROJ-9",
+        entryId: "new"
+      })
+      yield* ledger.removeEntry(entry)
+      expect((yield* ledger.read).bindings).toEqual([{ ...foreign, entryId: "old" }, {
+        ...identity,
+        ticketKey: "PROJ-9",
+        entryId: "new"
+      }])
+    }))
+})
+
 it.effect("persists a pending write and its provider binding across service restarts", () => {
   const first = makeFakeHeadless()
   return Effect.gen(function*() {
@@ -41,6 +73,47 @@ it.effect("persists a pending write and its provider binding across service rest
         const stored = yield* ledger.read
         expect(stored.pending).toEqual([])
         expect(stored.bindings).toEqual([{ ...identity, entryId: "provider-entry-1" }])
+      }))
+  })
+})
+
+it.effect("persists a replacement hold across restart and blocks only that provider account", () => {
+  const first = makeFakeHeadless()
+  const request = {
+    provider: identity.provider,
+    scope: identity.scope,
+    entryId: "ordinary-original",
+    originalTicketKey: "PROJ-1",
+    ticketKey: "PROJ-2",
+    startMs: identity.startMs,
+    endMs: identity.endMs,
+    description: "replacement description"
+  }
+  return Effect.gen(function*() {
+    yield* withLedger(first, (ledger) =>
+      Effect.gen(function*() {
+        yield* ledger.reserveReplacement(request)
+        expect((yield* Effect.flip(ledger.reserve(identity))).message).toContain("replacement")
+        expect((yield* Effect.flip(ledger.reserveReplacement(request))).message).toContain("unresolved")
+        yield* ledger.identifyReplacement(request, "replacement-id")
+      }))
+    const restarted = makeFakeHeadless({ writtenFiles: first.world.writtenFiles })
+    yield* withLedger(restarted, (ledger) =>
+      Effect.gen(function*() {
+        expect((yield* ledger.read).replacementIntents).toEqual([{
+          _tag: "Pending",
+          ...request,
+          replacementId: "replacement-id"
+        }])
+        expect((yield* Effect.flip(ledger.reserve(identity))).message).toContain("replacement")
+        const foreign = { ...identity, scope: "other-workspace" }
+        yield* ledger.ensureWindow(
+          { provider: foreign.provider, scope: foreign.scope, fromMs: 0, toMs: 2_000_000 },
+          [],
+          []
+        )
+        yield* ledger.reserve(foreign)
+        expect((yield* ledger.read).pending).toEqual([foreign])
       }))
   })
 })
@@ -69,7 +142,7 @@ it.effect("keeps a Jira provider-created checkpoint with the exact binding acros
     yield* withLedger(restarted, (ledger) =>
       Effect.gen(function*() {
         const stored = yield* ledger.read
-        expect(stored.version).toBe(4)
+        expect(stored.version).toBe(5)
         expect(stored.pending).toEqual([])
         expect(stored.bindings).toEqual([{
           ...jiraIdentity,
@@ -94,7 +167,7 @@ it.effect("migrates old bindings without inventing a Jira checkpoint or releasin
   return withLedger(fake, (ledger) =>
     Effect.gen(function*() {
       const loaded = yield* ledger.read
-      expect(loaded.version).toBe(4)
+      expect(loaded.version).toBe(5)
       expect(loaded.bindings).toEqual([oldBinding])
       expect(loaded.pending).toEqual([pending])
       expect(fake.world.writtenFiles[file]).toBe(original)
@@ -193,7 +266,7 @@ it.effect("preserves all four legacy Clockify evidence classes through a strict 
   return withLedger(fake, (ledger) =>
     Effect.gen(function*() {
       const loaded = yield* ledger.read
-      expect(loaded.version).toBe(4)
+      expect(loaded.version).toBe(5)
       expect(loaded.reviewedWindows).toEqual([window])
       expect(loaded.observedUnbound).toHaveLength(1)
       expect(loaded.pending).toEqual([oldIdentity])
@@ -381,7 +454,7 @@ it.effect("migrates strict v1 state on a successful write without inventing earl
   return withLedger(fake, (ledger) =>
     Effect.gen(function*() {
       const loaded = yield* ledger.read
-      expect(loaded.version).toBe(4)
+      expect(loaded.version).toBe(5)
       expect(loaded.observedUnbound).toEqual([])
       expect(fake.world.writtenFiles[file]).toBe(v1)
       expect(
@@ -396,7 +469,7 @@ it.effect("migrates strict v1 state on a successful write without inventing earl
         { entryId: "ordinary-tail", startMs: 3_000_000 }
       ], [marker])
       const migrated = yield* ledger.read
-      expect(migrated.version).toBe(4)
+      expect(migrated.version).toBe(5)
       expect(migrated.pending).toEqual([identity])
       expect(migrated.bindings).toEqual([marker])
       expect(migrated.observedUnbound).toEqual([{

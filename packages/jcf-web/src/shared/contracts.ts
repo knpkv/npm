@@ -79,9 +79,29 @@ export const UpdateSavedEntryRequest = Schema.Struct({
     Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 8640000000000000 }))
   ),
   endMs: Schema.Number.pipe(Schema.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 8640000000000000 }))),
-  description: Schema.String.pipe(Schema.check(Schema.isMaxLength(32000)))
+  description: Schema.String.pipe(Schema.check(Schema.isMaxLength(32000))),
+  /** A different ticket: the provider gets a replacement entry before the original is deleted. */
+  ticketKey: Schema.optionalKey(Schema.String.pipe(Schema.check(Schema.isPattern(/^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/))))
 })
 export interface UpdateSavedEntryRequest extends Schema.Schema.Type<typeof UpdateSavedEntryRequest> {}
+
+/** Delete one saved provider entry. Its source evidence becomes proposable again. */
+export const DeleteSavedEntryRequest = Schema.Struct({
+  ...DescribeSavedEntryRequest.fields,
+  revision: SavedEntry.fields.revision
+})
+export interface DeleteSavedEntryRequest extends Schema.Schema.Type<typeof DeleteSavedEntryRequest> {}
+
+export const DeleteSavedEntryResponse = Schema.Struct({ planId: Schema.String })
+
+/** Offer one low-confidence match as an ordinary suggestion in the retained week. */
+export const PromoteWithheldRequest = Schema.Struct({
+  planId: Schema.String,
+  ticketKey: Schema.String,
+  day: Day
+})
+export interface PromoteWithheldRequest extends Schema.Schema.Type<typeof PromoteWithheldRequest> {}
+export interface DeleteSavedEntryResponse extends Schema.Schema.Type<typeof DeleteSavedEntryResponse> {}
 
 export const UpdateSavedEntryResponse = Schema.Struct({ planId: Schema.String, entry: SavedEntry })
 export interface UpdateSavedEntryResponse extends Schema.Schema.Type<typeof UpdateSavedEntryResponse> {}
@@ -108,6 +128,22 @@ export class ForbiddenApiError extends Schema.TaggedError<ForbiddenApiError>()(
  * Separate from a rejected write because the repair is different and the browser can do it without
  * asking anyone: re-read the week and offer the row again.
  */
+const EntryIdentity = Schema.Struct({
+  source: Schema.Literals(["clockify", "jira"]),
+  id: Schema.String,
+  ticketKey: Schema.NullOr(Schema.String)
+})
+
+/**
+ * A ticket change whose replacement was created but whose original could not be deleted. Both
+ * entries now exist in the provider; the ids are named so the duplicate can be reviewed exactly.
+ */
+export class RetargetPartialError extends Schema.TaggedError<RetargetPartialError>()(
+  "RetargetPartialError",
+  { message: Schema.String, original: EntryIdentity, replacement: EntryIdentity },
+  { httpApiStatus: 409 }
+) {}
+
 export class PlanExpiredError extends Schema.TaggedError<PlanExpiredError>()(
   "PlanExpiredError",
   { message: Schema.String },
@@ -145,7 +181,7 @@ export const ProposalBlock = Schema.Struct({
 })
 
 /** Which evidence placed a row on its Issue Key. */
-export const AttributionSignal = Schema.Literals(["branch", "path", "standing", "agent", "none"])
+export const AttributionSignal = Schema.Literals(["branch", "path", "standing", "agent", "split", "none"])
 
 /**
  * Which systems a week is about.
@@ -171,6 +207,15 @@ export const RecordedInterval = Schema.Struct({
 })
 
 /**
+ * Providers whose session writes are held until an earlier entry is reviewed by hand. Only the
+ * category crosses HTTP; the ledger's own explanation stays on the server.
+ */
+export const WriteHolds = Schema.Struct({
+  clockify: Schema.optionalKey(Schema.Literal("review-required")),
+  jira: Schema.optionalKey(Schema.Literal("review-required"))
+})
+
+/**
  * What a row's sessions say, and what accepting it would write.
  *
  * `maxSeconds` is the credited evidence: the ceiling on an edited amount. Editing below it is a
@@ -189,7 +234,8 @@ export const RowProposal = Schema.Struct({
   jiraDelta: Schema.Number,
   maxSeconds: Schema.Number,
   sessionCount: Schema.Number,
-  signal: AttributionSignal
+  signal: AttributionSignal,
+  writeBlocked: Schema.optionalKey(WriteHolds)
 })
 
 /**
@@ -260,6 +306,13 @@ export const ExcludedDay = Schema.Struct({
   reason: Schema.String
 })
 
+/** Raw evidenced time of an ignored ticket on one day: explanatory, never offered or added up. */
+export const IgnoredRow = Schema.Struct({
+  ticketKey: Schema.String,
+  day: Day,
+  seconds: Schema.Number
+})
+
 export const WeekPlan = Schema.Struct({
   /**
    * True when a Coding Agent was needed and could not be reached. The deterministic rows are still
@@ -291,6 +344,10 @@ export const WeekPlan = Schema.Struct({
   sessionRootCount: Schema.Number,
   /** Hours on tickets assigned to somebody else. Empty when ownership is not being enforced. */
   notMine: Schema.Array(NotMineRow),
+  /** Time on tickets you ignored. Not offered; other tickets took their share of parallel work. */
+  ignored: Schema.Array(IgnoredRow),
+  /** Every ignored ticket, in every week — so each can be restored even with no time this week. */
+  ignoredTickets: Schema.Array(Schema.String),
   /**
    * True when Jira actually answered about who owns these tickets.
    *
@@ -367,6 +424,27 @@ export const ConfirmPayload = Schema.Struct({
   ticketKey: Schema.optional(TicketKey)
 })
 
+/** The most approvals one batch carries; a long queue drains as several batches. */
+export const MAX_CONFIRM_BATCH = 50
+
+/**
+ * Several queued approvals confirmed under one provider re-read, in click order. Every request names
+ * the same plan; the server re-reads again only before a request whose ticket and day an earlier
+ * request in the batch already wrote.
+ */
+export const ConfirmBatchPayload = Schema.Struct({
+  requests: Schema.Array(ConfirmPayload).check(Schema.isMinLength(1)).check(Schema.isMaxLength(MAX_CONFIRM_BATCH))
+})
+
+/** One request's outcome. `reload` means the plan moved under it and the week should be read again. */
+export const ConfirmBatchItem = Schema.Union([
+  Schema.TaggedStruct("Written", { result: WriteResult }),
+  Schema.TaggedStruct("Failed", { message: Schema.String, reload: Schema.Boolean })
+])
+
+/** Outcomes in request order, one per request. */
+export const ConfirmBatchResult = Schema.Struct({ items: Schema.Array(ConfirmBatchItem) })
+
 /**
  * Log time no session evidences — a meeting, a whiteboard, a review away from the keyboard.
  *
@@ -395,6 +473,16 @@ export const OwnershipResult = Schema.Struct({
   ownershipOverrides: Schema.Array(Schema.String)
 })
 
+/** Ignore a ticket in every week, or restore it. Its sessions stop competing for parallel time. */
+export const IgnorePayload = Schema.Struct({
+  ticketKey: TicketKey,
+  ignored: Schema.Boolean
+})
+
+export const IgnoreResult = Schema.Struct({
+  ignoredTickets: Schema.Array(Schema.String)
+})
+
 /** Map a directory prefix to an Issue Key, so recurring ticket-less work stops being unplaced. */
 export const StandingPayload = Schema.Struct({
   cwd: Schema.String.pipe(Schema.check(Schema.isPattern(/^(?:\/|~|[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+)/))),
@@ -410,6 +498,8 @@ export type WeekRowResponse = Schema.Schema.Type<typeof WeekRow>
 export type RowProposalResponse = Schema.Schema.Type<typeof RowProposal>
 export type UnattributedDayResponse = Schema.Schema.Type<typeof UnattributedDay>
 export type WriteResultResponse = Schema.Schema.Type<typeof WriteResult>
+export type ConfirmBatchItemResponse = Schema.Schema.Type<typeof ConfirmBatchItem>
+export type ConfirmBatchPayloadRequest = Schema.Schema.Type<typeof ConfirmBatchPayload>
 export type WeekScopeName = Schema.Schema.Type<typeof WeekScope>
 export type WriteTargetsRequest = Schema.Schema.Type<typeof WriteTargets>
 export type RecordedIntervalResponse = Schema.Schema.Type<typeof RecordedInterval>

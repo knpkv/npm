@@ -131,4 +131,117 @@
       grid-row: 3;
     }
   }
+
+  /* Provenance shapes: they keep their meaning in forced colours (shape, not hue). */
+  .markAuto,
+  .markApproved,
+  .markPending,
+  .markUnknown,
+  .markFlag {
+    align-self: center;
+    block-size: 10px;
+    box-sizing: border-box;
+    display: inline-block;
+    inline-size: 10px;
+  }
+
+  .markAuto {
+    border: var(--rly-space-2) solid var(--rly-color-text-2);
+    border-radius: var(--rly-radius-round);
+  }
+
+  .markApproved {
+    background: var(--rly-color-text-1);
+    border-radius: var(--rly-radius-round);
+  }
+
+  .markPending {
+    background: var(--rly-color-held-ink);
+    rotate: 45deg;
+  }
+
+  .markFlag {
+    background: var(--rly-color-held-ink);
+    clip-path: polygon(50% 0, 100% 100%, 0 100%);
+  }
+
+  .markUnknown {
+    background: repeating-linear-gradient(
+      135deg,
+      var(--rly-color-text-2) 0 var(--rly-space-2),
+      transparent var(--rly-space-2) var(--rly-space-4)
+    );
+    border: 1px solid var(--rly-color-text-2);
+  }
+
+  .provenance {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    margin: var(--rly-space-0);
+  }
+
+  .provenance[data-rly-timeline-provenance-label="pending"] {
+    color: var(--rly-color-held-ink);
+  }
+
+  .key {
+    color: var(--rly-color-text-2);
+    display: flex;
+    list-style: none;
+    padding: var(--rly-space-0);
+    flex-wrap: wrap;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-6) var(--rly-space-16);
+    margin: var(--rly-space-0);
+  }
+
+  .keyItem {
+    align-items: center;
+    display: inline-flex;
+    gap: var(--rly-space-6);
+    white-space: nowrap;
+  }
+
+  /*
+   * Forced colours drop background fills and may flatten the unknown hatch, which would leave it
+   * looking like auto's ring. Draw fills and the hatch in system colours instead. The same rules
+   * apply under the Storybook toolbar's forced-colours attribute.
+   */
+  @media (forced-colors: active) {
+    .markApproved,
+    .markPending,
+    .markFlag {
+      background: CanvasText;
+      forced-color-adjust: none;
+    }
+
+    .markUnknown {
+      background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 4px);
+      border-color: CanvasText;
+      forced-color-adjust: none;
+    }
+
+    .markAuto {
+      border-color: CanvasText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .markApproved,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .markPending,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .markFlag {
+    background: CanvasText;
+    forced-color-adjust: none;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .markUnknown {
+    background: repeating-linear-gradient(135deg, CanvasText 0 2px, Canvas 2px 4px);
+    border-color: CanvasText;
+    forced-color-adjust: none;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .markAuto {
+    border-color: CanvasText;
+  }
 }

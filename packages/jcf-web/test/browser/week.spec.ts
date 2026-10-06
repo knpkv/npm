@@ -70,29 +70,32 @@ for (const width of [1440, 390]) {
   })
 }
 
-test("streams detailed progress, keeps the previous week visible, and cancels a read", async ({ page, request }) => {
-  await open(page)
-  await request.get("/__test/hold")
-  await page.getByRole("button", { name: "Rescan sessions", exact: true }).first().click()
-  await expect(page.getByRole("status")).toContainText("2 of 8 sessions checked.")
-  await expect(page.getByRole("progressbar", { name: "Sessions checked" })).toHaveAttribute("value", "2")
-  await expect(page.getByRole("region", { name: "Agent activity" })).toContainText(
-    "Checking session context. Matched PROJ-5662."
-  )
-  const terminal = page.getByRole("region", { name: "Agent activity" })
-  await expect(terminal.getByRole("region", { name: "Agent response", exact: true })).toBeVisible()
-  await expect(terminal.locator("textarea, input, [contenteditable=true]")).toHaveCount(0)
-  await expect(terminal.getByRole("region", { name: "Agent response", exact: true }).locator("pre")).toBeVisible()
-  await page.getByText("Loading details", { exact: false }).click()
-  await expect(page.getByText("Read logged time", { exact: true })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "7–13 September 2026" })).toBeVisible()
-  await page.screenshot({ path: "test-results/read-progress.png", fullPage: true })
-  await page.getByRole("button", { name: "Cancel read" }).click()
-  await expect(page.getByText("Read cancelled", { exact: true })).toBeVisible()
-  await request.get("/__test/finish")
-  await page.getByRole("button", { name: "Rescan sessions", exact: true }).first().click()
-  await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
-})
+test(
+  "streams detailed progress, keeps the previous week visible, and cancels a read",
+  async ({ page, request }, testInfo) => {
+    await open(page)
+    await request.get("/__test/hold")
+    await page.getByRole("button", { name: "Rescan sessions", exact: true }).first().click()
+    await expect(page.getByRole("status")).toContainText("2 of 8 sessions checked.")
+    await expect(page.getByRole("progressbar", { name: "Sessions checked" })).toHaveAttribute("value", "2")
+    await expect(page.getByRole("region", { name: "Agent activity" })).toContainText(
+      "Checking session context. Matched PROJ-5662."
+    )
+    const terminal = page.getByRole("region", { name: "Agent activity" })
+    await expect(terminal.getByRole("region", { name: "Agent response", exact: true })).toBeVisible()
+    await expect(terminal.locator("textarea, input, [contenteditable=true]")).toHaveCount(0)
+    await expect(terminal.getByRole("region", { name: "Agent response", exact: true }).locator("pre")).toBeVisible()
+    await page.getByText("Loading details", { exact: false }).click()
+    await expect(page.getByText("Read logged time", { exact: true })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "7–13 September 2026" })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath("read-progress.png"), fullPage: true })
+    await page.getByRole("button", { name: "Cancel read" }).click()
+    await expect(page.getByText("Read cancelled", { exact: true })).toBeVisible()
+    await request.get("/__test/finish")
+    await page.getByRole("button", { name: "Rescan sessions", exact: true }).first().click()
+    await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
+  }
+)
 
 test("a newer scope wins over a slow older read", async ({ page }) => {
   await open(page)
@@ -263,7 +266,7 @@ test("preview keeps provider consumption separate after a Clockify-only correcte
   expect(observations.jiraWriteSeconds).toEqual([3600])
 })
 
-test("mobile agenda, manual date selection, validation and partial-write feedback", async ({ page }) => {
+test("mobile agenda, manual date selection, validation and partial-write feedback", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await open(page)
   await expect(page.locator(".jcf-agenda")).toBeVisible()
@@ -300,20 +303,23 @@ test("mobile agenda, manual date selection, validation and partial-write feedbac
     note: "Team meeting\nReviewed next steps."
   })
   await page.getByLabel("Appearance", { exact: true }).selectOption("dark")
-  await page.screenshot({ path: "test-results/mobile-dark.png", fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath("mobile-dark.png"), fullPage: true })
 })
 
-test("light and dark calendars fit desktop and narrow calendar scroll stays inside the page", async ({ page }) => {
-  await open(page)
-  await page.getByLabel("Appearance", { exact: true }).selectOption("light")
-  await page.screenshot({ path: "test-results/desktop-light.png", fullPage: true })
-  await page.getByLabel("Appearance", { exact: true }).selectOption("dark")
-  await page.screenshot({ path: "test-results/desktop-dark.png", fullPage: true })
-  await page.setViewportSize({ width: 320, height: 700 })
-  await page.getByRole("button", { name: "Calendar", exact: true }).click()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await expect(page.getByRole("region", { name: "Scrollable weekly calendar" })).toBeVisible()
-})
+test(
+  "light and dark calendars fit desktop and narrow calendar scroll stays inside the page",
+  async ({ page }, testInfo) => {
+    await open(page)
+    await page.getByLabel("Appearance", { exact: true }).selectOption("light")
+    await page.screenshot({ path: testInfo.outputPath("desktop-light.png"), fullPage: true })
+    await page.getByLabel("Appearance", { exact: true }).selectOption("dark")
+    await page.screenshot({ path: testInfo.outputPath("desktop-dark.png"), fullPage: true })
+    await page.setViewportSize({ width: 320, height: 700 })
+    await page.getByRole("button", { name: "Calendar", exact: true }).click()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+    await expect(page.getByRole("region", { name: "Scrollable weekly calendar" })).toBeVisible()
+  }
+)
 
 test("failed reads preserve the visible week and offer a working retry", async ({ page }) => {
   await open(page)
@@ -467,7 +473,7 @@ test("failed post-write refresh retries totals without rescanning or repeating t
   expect(writes).toBe(1)
 })
 
-test("fifteen-minute allocations have readable labels and do not overlap visually", async ({ page }) => {
+test("fifteen-minute allocations have readable labels and do not overlap visually", async ({ page }, testInfo) => {
   const plan = fixtureWeek()
   const template = plan.rows[0]!
   const start = new Date(`${plan.monday}T10:00:00`).getTime()
@@ -519,10 +525,10 @@ test("fifteen-minute allocations have readable labels and do not overlap visuall
     expect(bounds.height).toBeGreaterThanOrEqual(28)
     end = bounds.y + bounds.height
   }
-  await page.screenshot({ path: "test-results/allocated-quarter-hours.png", fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath("allocated-quarter-hours.png"), fullPage: true })
 })
 
-test("read-only conversation fits mobile and typing cannot send commands", async ({ page, request }) => {
+test("read-only conversation fits mobile and typing cannot send commands", async ({ page, request }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await open(page)
   await request.get("/__test/hold")
@@ -539,7 +545,7 @@ test("read-only conversation fits mobile and typing cannot send commands", async
   await page.keyboard.press("Enter")
   expect(mutations).toEqual([])
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-  await page.screenshot({ path: "test-results/mobile-agent-terminal.png", fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath("mobile-agent-terminal.png"), fullPage: true })
   await page.getByRole("button", { name: "Cancel read" }).click()
   await expect(terminal).toHaveCount(0)
   await request.get("/__test/finish")
