@@ -122,6 +122,25 @@ describe("approved goal abandonment", () => {
       expect(result.checkpoint.goal).toMatchObject({ state: "abandoned", blocker: null, blockers: [] })
     })))
 
+  it.effect("shows an abandonment stamped past the clock in the default snapshot", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture({ lane: false })
+      // A head accepted from a clock that ran ahead: the abandonment is stamped one past it.
+      yield* work.record({
+        ...original,
+        eventId: "goal-future",
+        occurredAt: 5_000,
+        goal: { ...original.goal, updatedAt: 5_000 }
+      })
+      const result = yield* work.abandon({
+        ...request,
+        expectedGoalEventId: "goal-future",
+        expectedGoalUpdatedAt: 5_000
+      })
+      expect(result.checkpoint.occurredAt).toBe(5_001)
+      expect((yield* work.snapshots()).now.goals.find(({ id }) => id === original.goal.id)?.state).toBe("abandoned")
+    })))
+
   it.effect("replays the exact job and refuses a changed payload under the same job id", () =>
     Effect.scoped(Effect.gen(function*() {
       const { store, work } = yield* fixture({ lane: false })

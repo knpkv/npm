@@ -5212,6 +5212,13 @@ export class WorkStore implements WorkStoreService {
     const reassignmentRows = yield* Schema.decodeUnknownEffect(Schema.Array(ReassignmentApprovalRow))(
       source.reassignments
     ).pipe(Effect.mapError(storeError("snapshot-input.decode-reassignments")))
+    // An approved reassignment or abandonment may be stamped past the clock
+    // (one past a future-dated head); like a binding, it moves logical time so
+    // a default snapshot shows what the approved job wrote.
+    for (const { approvalJobId } of reassignmentRows) {
+      const written = eventById.get(approvalJobId)
+      if (written !== undefined) logicalObservedAt = Math.max(logicalObservedAt ?? 0, written.occurredAt)
+    }
     const approvals: Array<WorkApprovedActivity> = reassignmentRows.map(({ approvalJobId, goalId }) => ({
       activityId: approvalJobId,
       approvalJobId,
