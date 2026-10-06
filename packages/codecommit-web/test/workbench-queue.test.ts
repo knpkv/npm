@@ -274,6 +274,33 @@ describe("workbenchQueue with role pools", () => {
     expect(own.rows.map((row) => row.group)).toEqual(["yours"])
   })
 
+  it("treats a role wildcard ending in the user's name as a maybe, not a certain membership", () => {
+    const roleWildcard = rule("Reviewers", 1, ["andrey"], false, [
+      "arn:aws:sts::111122223333:assumed-role/Review*/andrey"
+    ])
+    const queue = workbenchQueue([make({ approvalRules: [roleWildcard], id: "1" })], "andrey", NOW)
+    expect(queue.rows.map((row) => row.group)).toEqual(["pool"])
+    expect(queue.summary).toMatchObject({ _tag: "Clear", pooled: 1 })
+    const named = rule("Maintainers", 1, ["andrey"], false, ["CodeCommitApprovers:111122223333:andrey"])
+    const both = workbenchQueue([make({ approvalRules: [roleWildcard, named], id: "2" })], "andrey", NOW)
+    expect(both.rows.map((row) => row.group)).toEqual(["review"])
+  })
+
+  it("puts an unsatisfied rule without a pool in Needs your review, since any approval counts", () => {
+    const queue = workbenchQueue(
+      [
+        make({ approvalRules: [rule("Any one", 1, [], false)], id: "open" }),
+        make({ approvalRules: [rule("Any one", 1, [], true)], id: "met" }),
+        make({ approvalRules: [rule("Any one", 1, [], false)], approvedBy: ["andrey"], id: "approved" }),
+        make({ approvalRules: [rule("Any one", 1, [], false)], author: "andrey", id: "own" })
+      ],
+      "andrey",
+      NOW
+    )
+    expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["open", "review"], ["own", "yours"]])
+    expect(queue.summary._tag).toBe("Waiting")
+  })
+
   it("keeps a named pool membership in Needs your review ahead of role pools", () => {
     const queue = workbenchQueue(
       [

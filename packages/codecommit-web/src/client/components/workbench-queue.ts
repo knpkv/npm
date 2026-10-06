@@ -8,7 +8,7 @@
  * to the client yet), *quiet* runs from the last modification. An unknown caller identity is
  * reported as `Unknown`, never as an empty queue.
  */
-import { identityMatches, needsMyReview } from "@knpkv/codecommit-core/Domain.js"
+import { identityMatches } from "@knpkv/codecommit-core/Domain.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { Data } from "effect"
 
@@ -101,9 +101,18 @@ const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule)
     .length
 }
 
-const hasWildcardPool = (rule: Domain.ApprovalRule): boolean =>
-  rule.poolMembers.some((member) => member.includes("*")) ||
-  rule.poolMemberArns.some((entry) => entry.includes("*"))
+/**
+ * Whether the caller, known only by user name, is in one rule's approval pool. `open` means the
+ * rule has no pool, so any approver counts. A wildcard entry (a role pattern ending in a name, or
+ * a whole role) leaves it `maybe`, because the caller's role and account are unknown. Raw pool
+ * entries decide when the provider sent them; the normalized names only stand in when it did not.
+ */
+const poolStanding = (rule: Domain.ApprovalRule, currentUser: string): "member" | "maybe" | "open" | "out" => {
+  const entries = rule.poolMemberArns.length > 0 ? rule.poolMemberArns : rule.poolMembers
+  if (entries.length === 0) return "open"
+  if (entries.some((entry) => !entry.includes("*") && identityMatches(currentUser, entry))) return "member"
+  return entries.some((entry) => entry.includes("*")) ? "maybe" : "out"
+}
 
 /**
  * The rule furthest from being met: lowest share approved, then most approvals still missing, so
@@ -134,11 +143,18 @@ const stuckReason = (pullRequest: Domain.PullRequest, quietMs: number): StuckRea
   return pullRequest.isApproved ? "ready" : "unverified"
 }
 
+/**
+ * Yours first; then, unless the caller already approved, `review` when some unsatisfied rule
+ * certainly counts their approval (named member, or no pool at all) and `pool` when one only might.
+ */
 const groupOf = (pullRequest: Domain.PullRequest, currentUser: string): WorkbenchGroup | undefined => {
   if (identityMatches(currentUser, pullRequest.author)) return "yours"
-  if (needsMyReview(pullRequest, currentUser)) return "review"
   const approved = pullRequest.approvedBy.some((approver) => identityMatches(currentUser, approver))
-  if (!approved && pullRequest.approvalRules.some((rule) => !rule.satisfied && hasWildcardPool(rule))) return "pool"
+  const standings = approved
+    ? []
+    : pullRequest.approvalRules.filter((rule) => !rule.satisfied).map((rule) => poolStanding(rule, currentUser))
+  if (standings.some((standing) => standing === "member" || standing === "open")) return "review"
+  if (standings.includes("maybe")) return "pool"
   if (pullRequest.commentedBy.some((name) => identityMatches(currentUser, name))) return "watching"
   return undefined
 }
