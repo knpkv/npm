@@ -6,7 +6,7 @@ import {
   workReassignIsRecordable,
   WorkRecover
 } from "@knpkv/herdr-fleet/model"
-import { Equal, Schema } from "effect"
+import { Equal, Schema, Struct } from "effect"
 
 const Identifier = Schema.String.check(
   Schema.isNonEmpty(),
@@ -429,6 +429,19 @@ export const WorkAgentBindingRequest = Schema.Struct({
     approvalJobId: Identifier,
     approvalActor: Identifier
   })),
+  /**
+   * Set when the reconciler admitted an observed worker without an approval:
+   * the same evidence as a prospective admission, credited to the observation
+   * that showed it.
+   */
+  observedAdmission: Schema.optionalKey(Schema.Struct({
+    sessionId: CodexSessionId,
+    workAssignment: Text,
+    baseHead: ExactHead,
+    expectedAbsenceToken: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+    actor: Schema.Literal("reconciler"),
+    observationId: Identifier
+  })),
   existingGoalRecovery: Schema.optionalKey(
     Schema.Struct({
       sessionId: CodexSessionId,
@@ -457,13 +470,24 @@ export const WorkAgentBindingRequest = Schema.Struct({
   )
 }).check(
   Schema.makeFilter(
-    ({ existingGoalRecovery, ownerReassignment, prospectiveAdmission }) =>
-      [existingGoalRecovery, ownerReassignment, prospectiveAdmission].filter((kind) => kind !== undefined).length <=
-        1,
+    ({ existingGoalRecovery, observedAdmission, ownerReassignment, prospectiveAdmission }) =>
+      [existingGoalRecovery, observedAdmission, ownerReassignment, prospectiveAdmission].filter((kind) =>
+        kind !== undefined
+      ).length <= 1,
     { expected: "one truthful owner-linkage provenance kind" }
   )
 )
 export interface WorkAgentBindingRequest extends Schema.Schema.Type<typeof WorkAgentBindingRequest> {}
+
+/**
+ * The admission evidence a binding was created with, whether an approved job
+ * (`prospectiveAdmission`) or the reconciler (`observedAdmission`) admitted it.
+ * Session, assignment and base-head checks read it so both kinds behave alike.
+ */
+export const admissionEvidence = (
+  request: WorkAgentBindingRequest
+): WorkAgentBindingRequest["prospectiveAdmission"] | WorkAgentBindingRequest["observedAdmission"] =>
+  request.prospectiveAdmission ?? request.observedAdmission
 
 /** Durable result of atomically binding a started worker to its Work goal. */
 export const WorkAgentBinding = Schema.Struct({
@@ -574,6 +598,23 @@ export const WorkProspectiveAdmission = Schema.Struct({
   { expected: "an exact canonical PR URL" }
 ))
 export type WorkProspectiveAdmission = typeof WorkProspectiveAdmission.Type
+
+/**
+ * An admission the reconciler makes without an approval, for a worker it
+ * observed: the same fields as an approved admission, with the observation in
+ * place of the job. The caller (hostd) has already checked what the store can't
+ * see: the pane is on this host with lineage, and its worktree is the canonical
+ * toplevel on the PR branch at the PR head with an origin equal to the PR's
+ * repository. The store re-checks the absence evidence in its transaction.
+ */
+export const WorkObservedAdmission = Schema.Struct({
+  ...Struct.omit(WorkAdmit.fields, ["kind"]),
+  observationId: Identifier
+}).check(Schema.makeFilter(
+  ({ pullRequest, repository, reviewUrl }) => reviewUrl === `https://github.com/${repository}/pull/${pullRequest}`,
+  { expected: "an exact canonical PR URL" }
+))
+export type WorkObservedAdmission = typeof WorkObservedAdmission.Type
 
 /** Read-only evidence for a genuine, existing unlinked canonical goal. */
 export const WorkRecoveryTarget = Schema.Struct({

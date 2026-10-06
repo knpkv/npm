@@ -36,6 +36,7 @@ import type {
   WorkLaneClaim,
   WorkLaneClaimed,
   WorkObservationEnvelope,
+  WorkObservedAdmission,
   WorkObserveReport,
   WorkProspectiveAdmission,
   WorkReconcileOutcome,
@@ -78,6 +79,15 @@ export interface WorkService {
   ) => Effect.Effect<WorkAdmissionPreflight, WorkProjectionError | WorkStoreError>
   readonly admitExistingOwner: (
     request: WorkProspectiveAdmission
+  ) => Effect.Effect<WorkPullRequestLink, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
+  /**
+   * Admits a worker the reconciler observed, without an approval: the same
+   * write as `admitExistingOwner`, credited to the observation. The caller has
+   * checked the pane's host, lineage and worktree; the store re-checks the
+   * absence evidence.
+   */
+  readonly admitObserved: (
+    request: WorkObservedAdmission
   ) => Effect.Effect<WorkPullRequestLink, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
   readonly inspectPullRequest: (
     request: WorkPullRequestLinkRequest
@@ -206,6 +216,9 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
   const admitExistingOwner = Effect.fn("HerdrWork.admitExistingOwner")((request: WorkProspectiveAdmission) =>
     store.admitExistingOwner(request)
   )
+  const admitObserved = Effect.fn("HerdrWork.admitObserved")((request: WorkObservedAdmission) =>
+    store.admitObserved(request)
+  )
   const linkError = (request: WorkPullRequestLinkRequest, reason: WorkPullRequestLinkError["reason"]) =>
     new WorkPullRequestLinkError({ goalId: request.goalId, laneId: request.laneId, reason })
   const inspectPullRequest = Effect.fn("HerdrWork.inspectPullRequest")(function*(request: WorkPullRequestLinkRequest) {
@@ -306,7 +319,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       withActivityProvenance(
         yield* projectWorkSnapshots(source.events, timestamp),
         source.approvals,
-        source.reconcilerEvents,
+        [...source.reconcilerEvents, ...source.observedAdmissions],
         source.activityOrigins,
         workSnapshotBudgetBytes
       ),
@@ -339,6 +352,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       reassign,
       admissionPreflight,
       admitExistingOwner,
+      admitObserved,
       agentBinding,
       inspectPullRequest,
       reconcileExistingOwner,
