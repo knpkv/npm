@@ -770,7 +770,7 @@ function ApproversCard({
         )}
         {!showPicker && prefix.length > 0 && addable.length > 0 && (
           <div className={styles.suggestedApprovers}>
-            <Text tone="tertiary" variant="meta">
+            <Text tone="secondary" variant="meta">
               Suggested
             </Text>
             {addable.slice(0, 5).map(([name, arn]) => (
@@ -1394,7 +1394,7 @@ export function PRDetail() {
               Open in Console
             </RlyButton>
           </div>
-          <Text tone="tertiary" variant="meta">
+          <Text tone="secondary" variant="meta">
             Enter or O opens CodeCommit. Period opens the sandbox. Esc returns to the list.
           </Text>
         </aside>

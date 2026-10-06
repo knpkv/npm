@@ -453,11 +453,9 @@
 }
 
 .prFact dt {
-  color: var(--rly-color-text-3);
+  color: var(--rly-color-text-2);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .prFact dd {
