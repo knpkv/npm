@@ -18,7 +18,7 @@ import {
   PermissionGateLiveLayer,
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Config, Deferred, Effect, Fiber, Layer, Option, Predicate, Ref, Stream } from "effect"
+import { Config, Deferred, Effect, Layer, Option, Predicate, Ref, Stream } from "effect"
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import * as Path from "effect/Path"
@@ -322,9 +322,26 @@ const updatePortOnConflict = (
     )
   )
 
-export const CodeCommitServerLive = Effect.gen(function*() {
+/** How `serveCodeCommit` binds. Every field is optional; the defaults are the web package's own entry. */
+export interface CodeCommitServeOptions {
+  /** Loopback hostname to listen on. Default `127.0.0.1`. */
+  readonly hostname?: string
+  /** First port to try; a taken port moves to the next, up to ten times. Default `PORT`, else 3000. */
+  readonly port?: number
+  /** Runs once the server is listening and the bootstrap URL is printed, e.g. to open a browser. */
+  readonly onReady?: (url: string) => Effect.Effect<void>
+}
+
+/**
+ * Serve CodeCommit web until the server stops: mint fresh owner secrets for each bind attempt, move
+ * to the next port when one is taken, print the bootstrap URL (on `CODECOMMIT_WEB_PUBLIC_ORIGIN` when
+ * set and the requested port was free), then run `onReady`. `codecommit web` and this package's
+ * entry both start the server this way.
+ */
+export const serveCodeCommit = Effect.fn("CodeCommitServer.serve")(function*(options: CodeCommitServeOptions = {}) {
   const stdio = yield* Stdio.Stdio
-  const requestedPort = yield* Port.pipe(Effect.orDie)
+  const hostname = options.hostname ?? "127.0.0.1"
+  const requestedPort = options.port ?? (yield* Port.pipe(Effect.orDie))
   const portRef = yield* Ref.make(requestedPort)
   const retriesRef = yield* Ref.make(10)
   const publicOriginOverride = yield* PublicOrigin.pipe(Effect.orDie)
@@ -332,29 +349,28 @@ export const CodeCommitServerLive = Effect.gen(function*() {
   return yield* Effect.forever(
     Effect.gen(function*() {
       const p = yield* Ref.get(portRef)
-      const directOrigin = OwnerSession.loopbackOrigin("127.0.0.1", p)
+      const directOrigin = OwnerSession.loopbackOrigin(hostname, p)
       // Rotate every authority-bearing secret on each bind attempt so a URL
       // emitted for an occupied port cannot authenticate to a later retry.
       const security = yield* makeOwnerSession(directOrigin)
       const publicOrigin = yield* resolveCodeCommitPublicOriginForBind(
         Option.getOrUndefined(publicOriginOverride),
         requestedPort,
-        p
+        p,
+        directOrigin
       )
-      const ready = yield* Deferred.make<string>()
-      const serverFiber = yield* Layer.launch(makeServer({ port: p, publicOrigin, ready, security })).pipe(
-        Effect.forkChild({ startImmediately: true })
+      return yield* OwnerSession.serveWithBootstrapUrl(
+        (ready) => makeServer({ hostname, port: p, publicOrigin, ready, security }),
+        (url) =>
+          Effect.gen(function*() {
+            yield* Effect.logInfo(`Authenticated server ready at ${directOrigin}`)
+            yield* Stream.make(`Authenticated bootstrap URL: ${url}\n`).pipe(Stream.run(stdio.stdout()))
+            if (options.onReady !== undefined) yield* options.onReady(url)
+          })
       )
-      // The server only ends this race by failing; until it is listening there is no link to print.
-      const bootstrapUrl = yield* Effect.raceFirst(
-        Deferred.await(ready),
-        Fiber.join(serverFiber).pipe(Effect.andThen(Effect.never))
-      )
-      yield* Effect.logInfo(`Authenticated server ready at ${directOrigin}`)
-      yield* Stream.make(`Authenticated bootstrap URL: ${bootstrapUrl}\n`).pipe(
-        Stream.run(stdio.stdout())
-      )
-      return yield* Fiber.join(serverFiber)
     }).pipe(updatePortOnConflict(portRef, retriesRef))
   )
 })
+
+/** The web package's entry: `serveCodeCommit` with its defaults. */
+export const CodeCommitServerLive = serveCodeCommit()

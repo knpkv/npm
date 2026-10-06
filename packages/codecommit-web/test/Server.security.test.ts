@@ -476,11 +476,15 @@ describe("CodeCommit web security boundary", () => {
       expect(yield* resolveCodeCommitPublicOrigin(undefined, 3000)).toBe(authorityOrigin)
       const unsupported = yield* Effect.result(resolveCodeCommitPublicOrigin("http://localhost:4173", 3000))
       expect(Result.isFailure(unsupported) && unsupported.failure._tag).toBe("UnsafeLoopbackAddressError")
-      expect(yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3001)).toBe(
-        "http://127.0.0.1:3001"
-      )
-      expect(yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3000)).toBe(
-        "http://localhost:5173"
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3001, "http://127.0.0.1:3001")
+      ).toBe("http://127.0.0.1:3001")
+      expect(
+        yield* resolveCodeCommitPublicOriginForBind("http://localhost:5173", 3000, 3000, "http://127.0.0.1:3000")
+      ).toBe("http://localhost:5173")
+      // `--hostname localhost` advertises the host it was asked to bind, not 127.0.0.1.
+      expect(yield* resolveCodeCommitPublicOriginForBind(undefined, 3000, 3000, "http://localhost:3000")).toBe(
+        "http://localhost:3000"
       )
     }))
 

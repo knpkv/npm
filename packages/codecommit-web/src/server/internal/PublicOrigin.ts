@@ -8,10 +8,18 @@ export const resolveCodeCommitPublicOrigin = Effect.fn("CodeCommitServer.resolve
   }
 )
 
-/** Keep a retrying backend off the stale Vite proxy port; advertise it directly. */
+/**
+ * The origin to advertise for one bind attempt at `authorityOrigin`. A retrying backend has moved
+ * off the port the Vite proxy forwards to, so it advertises itself directly instead.
+ */
 export const resolveCodeCommitPublicOriginForBind = Effect.fn("CodeCommitServer.resolvePublicOriginForBind")(
-  function*(configuredOrigin: string | undefined, requestedPort: number, actualPort: number) {
+  function*(
+    configuredOrigin: string | undefined,
+    requestedPort: number,
+    actualPort: number,
+    authorityOrigin: string
+  ) {
     const originOverride = requestedPort === actualPort ? configuredOrigin : undefined
-    return yield* resolveCodeCommitPublicOrigin(originOverride, actualPort)
+    return yield* resolvePublicOrigin(originOverride, authorityOrigin)
   }
 )
