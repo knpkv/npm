@@ -18,7 +18,7 @@ import {
   PermissionGateLiveLayer,
   PermissionGateLiveTag
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Config, Deferred, Effect, Fiber, Layer, Option, Predicate, Ref, Stream } from "effect"
+import { Config, Deferred, Effect, Layer, Option, Ref, Stream } from "effect"
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import * as Path from "effect/Path"
@@ -41,6 +41,7 @@ import { BackgroundScopeLive } from "./internal/BackgroundScope.js"
 import { autoRefreshLayer, sandboxStartupLayer } from "./internal/BackgroundWorkers.js"
 import { makeOwnerSession, ownerSessionAuthLayer } from "./internal/OwnerSession.js"
 import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
+import { updatePortOnConflict } from "./internal/PortRetry.js"
 import { resolveCodeCommitPublicOriginForBind } from "./internal/PublicOrigin.js"
 import { staticClient } from "./internal/StaticClient.js"
 import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
@@ -304,57 +305,58 @@ export const makeCodeCommitServer = (port: number, security: OwnerSession.OwnerS
 export const Port = Config.Int("PORT").pipe(Config.withDefault(3000))
 const PublicOrigin = Config.option(Config.String("CODECOMMIT_WEB_PUBLIC_ORIGIN"))
 
-const updatePortOnConflict = (
-  portRef: Ref.Ref<number>,
-  retriesRef: Ref.Ref<number>
-) =>
-<A, E, R>(self: Effect.Effect<A, E, R>) =>
-  self.pipe(
-    Effect.catchDefect((defect) =>
-      Predicate.isError(defect) && defect.message.includes("port")
-        ? Effect.gen(function*() {
-          const remaining = yield* Ref.getAndUpdate(retriesRef, (r) => r - 1)
-          if (remaining <= 0) return yield* Effect.die(defect)
-          const p = yield* Ref.getAndUpdate(portRef, (prev) => prev + 1)
-          yield* Effect.logWarning(`Port ${p} in use, trying ${p + 1}`)
-        })
-        : Effect.die(defect)
-    )
-  )
+/** How `serveCodeCommit` binds. Every field is optional; the defaults are the web package's own entry. */
+export interface CodeCommitServeOptions {
+  /** Loopback hostname to listen on. Default `127.0.0.1`. */
+  readonly hostname?: string
+  /** First port to try; a taken port moves to the next, up to ten times. Default `PORT`, else 3000. */
+  readonly port?: number
+  /** Runs once the server is listening and the bootstrap URL is printed, e.g. to open a browser. */
+  readonly onReady?: (url: string) => Effect.Effect<void>
+}
 
-export const CodeCommitServerLive = Effect.gen(function*() {
+/**
+ * Serve CodeCommit web until the server stops: mint fresh owner secrets for each bind attempt, move
+ * to the next port when one is taken, print the bootstrap URL (on `CODECOMMIT_WEB_PUBLIC_ORIGIN` when
+ * set and the requested port was free), then run `onReady`. `codecommit web` and this package's
+ * entry both start the server this way.
+ */
+export const serveCodeCommit = Effect.fn("CodeCommitServer.serve")(function*(options: CodeCommitServeOptions = {}) {
   const stdio = yield* Stdio.Stdio
-  const requestedPort = yield* Port.pipe(Effect.orDie)
-  const portRef = yield* Ref.make(requestedPort)
+  const hostname = options.hostname ?? "127.0.0.1"
+  // The Vite dev proxy forwards to PORT, whatever port this server was asked to start on.
+  const proxyPort = yield* Port.pipe(Effect.orDie)
+  const portRef = yield* Ref.make(options.port ?? proxyPort)
   const retriesRef = yield* Ref.make(10)
+  const listening = yield* Ref.make(false)
   const publicOriginOverride = yield* PublicOrigin.pipe(Effect.orDie)
 
   return yield* Effect.forever(
     Effect.gen(function*() {
       const p = yield* Ref.get(portRef)
-      const directOrigin = OwnerSession.loopbackOrigin("127.0.0.1", p)
+      const directOrigin = OwnerSession.loopbackOrigin(hostname, p)
       // Rotate every authority-bearing secret on each bind attempt so a URL
       // emitted for an occupied port cannot authenticate to a later retry.
       const security = yield* makeOwnerSession(directOrigin)
       const publicOrigin = yield* resolveCodeCommitPublicOriginForBind(
         Option.getOrUndefined(publicOriginOverride),
-        requestedPort,
-        p
+        proxyPort,
+        p,
+        directOrigin
       )
-      const ready = yield* Deferred.make<string>()
-      const serverFiber = yield* Layer.launch(makeServer({ port: p, publicOrigin, ready, security })).pipe(
-        Effect.forkChild({ startImmediately: true })
+      return yield* OwnerSession.serveWithBootstrapUrl(
+        (ready) => makeServer({ hostname, port: p, publicOrigin, ready, security }),
+        (url) =>
+          Effect.gen(function*() {
+            yield* Ref.set(listening, true)
+            yield* Effect.logInfo(`Authenticated server ready at ${directOrigin}`)
+            yield* Stream.make(`Authenticated bootstrap URL: ${url}\n`).pipe(Stream.run(stdio.stdout()))
+            if (options.onReady !== undefined) yield* options.onReady(url)
+          })
       )
-      // The server only ends this race by failing; until it is listening there is no link to print.
-      const bootstrapUrl = yield* Effect.raceFirst(
-        Deferred.await(ready),
-        Fiber.join(serverFiber).pipe(Effect.andThen(Effect.never))
-      )
-      yield* Effect.logInfo(`Authenticated server ready at ${directOrigin}`)
-      yield* Stream.make(`Authenticated bootstrap URL: ${bootstrapUrl}\n`).pipe(
-        Stream.run(stdio.stdout())
-      )
-      return yield* Fiber.join(serverFiber)
-    }).pipe(updatePortOnConflict(portRef, retriesRef))
+    }).pipe(updatePortOnConflict(portRef, retriesRef, listening))
   )
 })
+
+/** The web package's entry: `serveCodeCommit` with its defaults. */
+export const CodeCommitServerLive = serveCodeCommit()

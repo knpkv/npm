@@ -17,11 +17,12 @@ import {
   decodeCodeCommitMockEndpointEffect,
   withCodeCommitMock
 } from "@knpkv/codecommit-core/MockTransport.js"
-import { loopbackOrigin, makeOwnerSession, makeServer, requireLoopbackHostname } from "@knpkv/codecommit-web"
-import { Console, Deferred, Effect, Fiber, Layer, Stream } from "effect"
+import { requireLoopbackHostname, serveCodeCommit } from "@knpkv/codecommit-web"
+import { Console, Effect, Layer } from "effect"
 import { Command, Flag as Options } from "effect/cli"
 import * as HttpClient from "effect/http/HttpClient"
 import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
 import pkg from "../package.json"
@@ -46,36 +47,28 @@ const web = Command.make("web", {
 }, ({ hostname, port }) =>
   Effect.gen(function*() {
     yield* requireLoopbackHostname(hostname)
-    const origin = loopbackOrigin(hostname, port)
-    const security = yield* makeOwnerSession(origin)
-    const ready = yield* Deferred.make<string>()
-    const stdio = yield* Stdio.Stdio
-    const serverFiber = yield* Layer.launch(makeServer({ port, hostname, ready, security })).pipe(
-      Effect.forkChild({ startImmediately: true })
-    )
-    // The server only ends this race by failing; the URL exists once it is listening.
-    const url = yield* Effect.raceFirst(
-      Deferred.await(ready),
-      Fiber.join(serverFiber).pipe(Effect.andThen(Effect.never))
-    )
-    yield* Effect.logInfo(`Authenticated web server ready at ${origin}`)
-    yield* Stream.make(`Authenticated bootstrap URL: ${url}\n`).pipe(Stream.run(stdio.stdout()))
-
-    // Open browser
-    const exitCode = (command: ChildProcess.Command) =>
-      Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
-    yield* exitCode(ChildProcess.make("open", [url])).pipe(
-      Effect.catchIf(() => true, () => exitCode(ChildProcess.make("xdg-open", [url]))),
-      Effect.catchIf(
-        () => true,
-        () => exitCode(ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url]))
-      ),
-      Effect.catchIf(() => true, () => Effect.void)
-    )
-
-    // Keep the supervised server alive after readiness and bootstrap handoff.
-    return yield* Fiber.join(serverFiber)
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    // The same start as the web package's own entry; this command adds opening the browser.
+    return yield* serveCodeCommit({
+      hostname,
+      onReady: (url) => openBrowser(url).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+      port
+    })
   }))
+
+/** Best effort: the URL is already printed, so a missing browser leaves nothing unfinished. */
+const openBrowser = (url: string) => {
+  const exitCode = (command: ChildProcess.Command) =>
+    Effect.scoped(command.pipe(Effect.flatMap((handle) => handle.exitCode)))
+  return exitCode(ChildProcess.make("open", [url])).pipe(
+    Effect.catchIf(() => true, () => exitCode(ChildProcess.make("xdg-open", [url]))),
+    Effect.catchIf(
+      () => true,
+      () => exitCode(ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url]))
+    ),
+    Effect.ignore
+  )
+}
 
 // PR Command (parent)
 const pr = Command.make("pr", {}, () => Console.log("Usage: codecommit pr <command>")).pipe(
