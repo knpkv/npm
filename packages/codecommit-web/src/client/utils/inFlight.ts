@@ -13,3 +13,15 @@ export const makeInFlight = <A>() => {
     return started
   }
 }
+
+/**
+ * The in-flight key for refreshing one pull request: the route's account (which stays the same while
+ * the loaded PR's account id replaces it), the PR id, its repository and region. Two accounts' PRs
+ * with the same number, repository and region never share a request.
+ */
+export const pullRequestRefreshKey = (
+  routeAccount: string | undefined,
+  pullRequestId: string,
+  repositoryName: string | undefined,
+  region: string | undefined
+): string => [routeAccount ?? "", pullRequestId, repositoryName ?? "", region ?? ""].join("\u0000")

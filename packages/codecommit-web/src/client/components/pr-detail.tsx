@@ -93,7 +93,7 @@ import {
 } from "../review-comment-navigation.js"
 import { StorageKeys } from "../storage-keys.js"
 import { extractScope } from "../utils/extractScope.js"
-import { makeInFlight } from "../utils/inFlight.js"
+import { makeInFlight, pullRequestRefreshKey } from "../utils/inFlight.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog.js"
@@ -910,9 +910,9 @@ export function PRDetail() {
   const refreshRegion = pr === null ? (searchParams.get("region") ?? undefined) : String(pr.account.region)
   const requestRefresh = useCallback(
     (accountId: string, id: string) =>
-      // Keyed by the pull request, not the account's spelling: the route's account and the loaded
-      // PR's account id name the same pull request.
-      shareRefresh(`${id}:${refreshRepositoryName ?? ""}:${refreshRegion ?? ""}`, () =>
+      // Keyed by the route's account, which stays the same while the loaded PR's account id replaces it,
+      // so the mount refresh and a later click share one request, and another account's PR never does.
+      shareRefresh(pullRequestRefreshKey(accountId, id, refreshRepositoryName, refreshRegion), () =>
         refreshSingleWithResult({
           params: { awsAccountId: accountId, prId: PullRequestId.make(id) },
           query:
@@ -921,7 +921,7 @@ export function PRDetail() {
               : {}
         })
       ),
-    [refreshRegion, refreshRepositoryName, refreshSingleWithResult, shareRefresh]
+    [accountId, refreshRegion, refreshRepositoryName, refreshSingleWithResult, shareRefresh]
   )
 
   // Collect ALL known users from all PRs (authors, approvers, commenters, pool members)

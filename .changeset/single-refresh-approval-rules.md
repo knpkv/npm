@@ -1,5 +1,5 @@
 ---
-"@knpkv/codecommit-core": patch
+"@knpkv/codecommit-core": minor
 "@knpkv/codecommit-web": patch
 ---
 

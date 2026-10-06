@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { makeInFlight } from "../src/client/utils/inFlight.js"
+import { makeInFlight, pullRequestRefreshKey } from "../src/client/utils/inFlight.js"
 
 describe("makeInFlight", () => {
   it("shares one pending request per key, and starts afresh once it settles", async () => {
@@ -25,5 +25,12 @@ describe("makeInFlight", () => {
     const share = makeInFlight<string>()
     await expect(share("pr-44", () => Promise.reject(new Error("boom")))).rejects.toThrow("boom")
     await expect(share("pr-44", () => Promise.resolve("again"))).resolves.toBe("again")
+  })
+
+  it("keys a refresh by account, so two accounts' same-numbered PRs never share one", () => {
+    expect(pullRequestRefreshKey("dev", "44", "payments", "eu-west-1"))
+      .not.toBe(pullRequestRefreshKey("prod", "44", "payments", "eu-west-1"))
+    expect(pullRequestRefreshKey("dev", "44", "payments", "eu-west-1"))
+      .toBe(pullRequestRefreshKey("dev", "44", "payments", "eu-west-1"))
   })
 })
