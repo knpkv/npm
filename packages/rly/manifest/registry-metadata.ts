@@ -26,6 +26,16 @@ export const COMPONENT_REGISTRY_METADATA = {
     "line",
     "display"
   ], ["present", "status"]),
+  DecisionBar: registryMetadata(
+    "Approve or reject one named target, with an off reason, a clock and the server's answer",
+    [
+      "ready",
+      "off",
+      "sending",
+      "sticky"
+    ],
+    ["decide", "present"]
+  ),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"
@@ -34,6 +44,17 @@ export const COMPONENT_REGISTRY_METADATA = {
     "agent",
     "overlay"
   ]),
+  ChartLegend: registryMetadata("Say which colour is which series, a square swatch before each label", [
+    "series",
+    "other"
+  ], ["present", "explain"]),
+  LimitTrack: registryMetadata("Show how full a limit is, with a near mark, a projection, and a stale hatch", [
+    "near",
+    "full",
+    "projected",
+    "stale",
+    "unknown"
+  ], ["present", "measure"]),
   RelayDock: registryMetadata("Present one adapter-owned Relay thread in explicit page context", [
     "collapsed",
     "empty",
@@ -318,8 +339,17 @@ export const COMPONENT_REGISTRY_METADATA = {
     "agent",
     "human",
     "service",
-    "system"
+    "system",
+    "provenance"
   ], ["audit", "timeline"]),
+  TrackKey: registryMetadata(
+    "Explain the marks a set of limit tracks draws",
+    ["near", "projected", "stale", "unknown"],
+    [
+      "present",
+      "explain"
+    ]
+  ),
   Verdict: registryMetadata("State a release verdict with text, icon, and color-independent tone", [
     "caution",
     "critical",

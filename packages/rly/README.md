@@ -177,6 +177,44 @@ state, contain and restore focus, lock document scrolling, and become
 full-screen at compact widths. Titles are always visible and required, while
 motion is governed by the central theme tokens.
 
+## Limits and chart keys
+
+`LimitTrack` shows how full a limit is on a 0–100% track: the fill is the latest
+reading, a two-tone hairline marks the near threshold (80% unless `near` says otherwise),
+a dotted extension shows a `projected` level the application computed, and a
+`stale` reading is hatched. Rly derives only the tone (`limitTrackTone`); it never
+estimates a projection. The track is decorative by default because the number sits
+beside it, so that text must also carry the age and the projection ("61%, old
+reading", "84%, about 103% at reset"). A non-finite `value` is drawn as no reading,
+and a non-finite `near` throws. No reading draws a faint full-width hatch in a dashed edge, so it
+never reads as 0%. Under forced colours the track keeps a `CanvasText` edge. Pass `decorative={false}` with a `label` and the caller's `valueText`
+to expose it as a meter instead. With `value={null}`, it is a named image whose
+accessible label combines `label` and `valueText`, without a numeric range.
+
+`TrackKey` explains the marks the tracks draw, listing only the marks in use.
+`ChartLegend` says which colour is which series, with the swatch before each label.
+Series colours are the tokens `--rly-color-series-1` to `-8` plus
+`--rly-color-series-other` for folded series. Use `rlySeriesColor(series)` in SVG
+fills, and keep an id on the same slot while it is visible. Colour is never the only
+carrier: every chart ships a labelled key and a table equivalent, and forced-colours
+mode collapses the series to `CanvasText`.
+
+```tsx
+import { ChartLegend, LimitTrack, TrackKey } from "@knpkv/rly/primitives"
+
+<p>
+  Weekly <LimitTrack projected={103} value={84} /> 84%, about 103% at reset
+</p>
+<TrackKey
+  label="What the track marks mean"
+  items={[
+    { mark: "near", label: "80%, near the limit" },
+    { mark: "projected", label: "Where it is heading at reset" }
+  ]}
+/>
+<ChartLegend label="Bookings by colour" items={[{ id: "b1", label: "RLY-142", series: 1 }]} />
+```
+
 ## Provenance and collaborators
 
 The first product patterns keep source, freshness, and human responsibility as

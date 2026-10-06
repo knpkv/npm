@@ -2,7 +2,13 @@
 
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { type RlyTimelineActorKind, type RlyTimelineEvent, TimelineRow } from "../../src/patterns/TimelineRow.js"
+import {
+  type RlyTimelineActorKind,
+  type RlyTimelineEvent,
+  type RlyTimelineProvenance,
+  TimelineProvenanceKey,
+  TimelineRow
+} from "../../src/patterns/TimelineRow.js"
 import { render } from "../primitives/render.js"
 
 const eventAt = (index: number, actorKind: RlyTimelineActorKind = "system"): RlyTimelineEvent => ({
@@ -100,5 +106,51 @@ describe("TimelineRow", () => {
     const invalidActor = { ...valid }
     Reflect.set(invalidActor, "actorKind", "vendor")
     expect(() => renderToStaticMarkup(<TimelineRow continued={false} event={invalidActor} />)).toThrow("actorKind")
+  })
+
+  it("draws the provenance as the marker shape and says it in words", () => {
+    const markup = renderToStaticMarkup(
+      <TimelineRow
+        continued={false}
+        event={{ ...eventAt(0), provenance: { kind: "pending", label: "Waiting for your approval" } }}
+      />
+    )
+    expect(markup).toContain('data-rly-timeline-provenance="pending"')
+    expect(markup).toMatch(/data-rly-timeline-provenance-label="pending"[^>]*>Waiting for your approval<\/p>/)
+  })
+
+  it("keeps the plain dot when no provenance is given", () => {
+    const markup = renderToStaticMarkup(<TimelineRow continued={false} event={eventAt(0)} />)
+    expect(markup).not.toContain("data-rly-timeline-provenance=")
+    expect(markup).not.toContain("data-rly-timeline-provenance-label")
+  })
+
+  it("rejects an unknown provenance kind and an empty label", () => {
+    const provenance: RlyTimelineProvenance = { kind: "auto", label: "x" }
+    const badKind = { ...eventAt(0), provenance }
+    Reflect.set(badKind.provenance, "kind", "guessed")
+    expect(() => renderToStaticMarkup(<TimelineRow continued={false} event={badKind} />)).toThrow("provenance kind")
+    expect(() =>
+      renderToStaticMarkup(
+        <TimelineRow continued={false} event={{ ...eventAt(0), provenance: { kind: "auto", label: " " } }} />
+      )
+    ).toThrow("provenance label")
+  })
+
+  it("keys every shape with its words, or only the kinds asked for", () => {
+    const all = renderToStaticMarkup(<TimelineProvenanceKey label="Observation key" />)
+    expect(all).toMatch(/<ul[^>]*aria-label="Observation key"[^>]*role="list"/)
+    expect(all.match(/<li/g)).toHaveLength(5)
+    expect(all.match(/data-rly-timeline-provenance=/g)).toHaveLength(5)
+    expect(all).toContain("couldn&#x27;t read")
+    const two = renderToStaticMarkup(
+      <TimelineProvenanceKey kinds={["auto", "pending"]} label="Key" labels={{ pending: "waiting for you" }} />
+    )
+    expect(two.match(/data-rly-timeline-provenance=/g)).toHaveLength(2)
+    expect(two).toContain("waiting for you")
+  })
+
+  it("refuses a key without a name", () => {
+    expect(() => renderToStaticMarkup(<TimelineProvenanceKey label=" " />)).toThrow("TimelineProvenanceKey label")
   })
 })

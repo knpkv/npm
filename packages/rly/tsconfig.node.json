@@ -21,6 +21,7 @@
     "visual",
     "vite.config.ts",
     "vitest.config.ts",
+    "../../playwright-ports.ts",
     "../../vitest.workspace-sources.ts",
     "vitest.storybook.config.ts"
   ],
