@@ -119,6 +119,18 @@ test("keeps the track scale in forced colours and draws no reading unlike an emp
   }
 })
 
+test("draws the track edge when the Storybook toolbar turns forced colours on", async ({ page }) => {
+  await page.goto(story("primitives-limittrack--gallery").replace("forcedColors:auto", "forcedColors:active"))
+  const partial = page.locator("[data-limit=\"5-hour window\"] [data-tone]")
+  await expect(partial).toHaveCSS("outline-style", "solid")
+  await expect(partial).toHaveCSS("outline-width", "1px")
+  await expect(page.locator("[data-limit=\"Codex 5-hour\"] [data-tone]")).toHaveCSS("outline-style", "dashed")
+  await expect(page.locator("[data-mark=\"unknown\"]")).toHaveCSS("outline-style", "dashed")
+  // The default story keeps its normal styling: no edge on a known track.
+  await page.goto(story("primitives-limittrack--gallery"))
+  await expect(page.locator("[data-limit=\"5-hour window\"] [data-tone]")).toHaveCSS("outline-style", "none")
+})
+
 test("keeps the near mark two-toned over the empty track and over a full fill, in forced colours too", async ({ page }) => {
   await page.goto(story("primitives-limittrack--gallery"))
   const marks = [

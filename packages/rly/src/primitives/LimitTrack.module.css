@@ -61,6 +61,14 @@
     inset-block: 0;
     position: absolute;
   }
+  /* The Storybook toolbar's forced-colours mode maps the tokens to system colours too; draw the same edge. */
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[data-tone="unknown"] {
+    outline-style: dashed;
+  }
   @media (forced-colors: active) {
     /*
      * The system palette paints the empty track as Canvas, so an inset edge keeps the 0–100% scale

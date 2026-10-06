@@ -46,6 +46,14 @@
     outline: 1px dashed var(--rly-color-border-2);
     outline-offset: -1px;
   }
+  /* The Storybook toolbar's forced-colours mode: the same edges as under the media query. */
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .stale {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .unknown {
+    outline: 1px dashed CanvasText;
+  }
   @media (forced-colors: active) {
     /* Keep the halo: forced colours drop box-shadow, and the tokens already map to system colours. */
     .near {
