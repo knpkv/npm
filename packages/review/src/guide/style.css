@@ -318,6 +318,11 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   margin-block-end: var(--rly-space-12);
   overflow-wrap: break-word;
 }
+/* A path is one unbreakable token: as a flex item it would keep its full width, so let it shrink and wrap. */
+.review-file-header code {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
 .review-file [data-rly-patch-diff] table {
   color: var(--review-reading-ink);
   font-size: var(--rly-type-code-size);

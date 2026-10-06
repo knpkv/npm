@@ -5,20 +5,26 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { pathToFileURL } from "node:url"
 import { exportGuide } from "../../dist/guide/export.js"
 
-const example = (name: string) => JSON.parse(readFileSync(`examples/approval-guide/${name}`, "utf8"))
 const patch = readFileSync("examples/approval-guide/guide.patch", "utf8")
 
 /** The illustrative guide, optionally with one unbreakable identifier in its title and first chapter. */
+const longPath = "packages/codecommit-web/src/client/components/sandbox-workspace-release-coordinator.ts"
+
+/**
+ * The illustrative guide. The long variant puts one unbreakable identifier in the title and first
+ * chapter, and renames a diffed file to a long path, as real patches have in every file header.
+ */
 const guideHtml = (longIdentifiers = false) => {
-  const guide = example("guide.json")
+  const rename = (text: string) => longIdentifiers ? text.replaceAll("src/release.ts", longPath) : text
+  const guide = JSON.parse(rename(readFileSync("examples/approval-guide/guide.json", "utf8")))
   if (longIdentifiers) {
     guide.title = "Bind CodeCommitRevisionIdentifiersForSignedApprovalReleases to the approved revision"
     guide.sections[0].title = "verifySignedApprovalAgainstRequestedRevisionBeforeShipping"
   }
-  return Effect.runPromise(exportGuide({ guide, findings: example("findings.json"), patch })).then((page) => page.html)
+  const findings = JSON.parse(rename(readFileSync("examples/approval-guide/findings.json", "utf8")))
+  return Effect.runPromise(exportGuide({ guide, findings, patch: rename(patch) })).then((page) => page.html)
 }
 
-/** Open the export as a file, the way a reader opens it; Mermaid does not draw under `about:blank`. */
 const load = async (page: Page, html: string, testInfo: TestInfo) => {
   const file = testInfo.outputPath("guide.html")
   writeFileSync(file, html)
