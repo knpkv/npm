@@ -175,10 +175,11 @@ describe("ApprovalsCountdown", () => {
         }
       })
     })
-    expect(view.bar()?.dataset["state"]).toBe("off")
-    expect(view.bar()?.textContent).toContain("Decided on BETA.")
-    expect(view.container.querySelector("a[href='https://beta.example.test/approve/remote-1']")?.textContent).toBe(
-      "Review on BETA"
+    // Decided on its own host: no inert bar, the review link is the action.
+    expect(view.bar()).toBeNull()
+    expect(view.container.querySelector(".countdown-remote-note")?.textContent).toBe("Approve or reject it on BETA.")
+    expect(view.container.querySelector("a.countdown-review-link")?.getAttribute("href")).toBe(
+      "https://beta.example.test/approve/remote-1"
     )
     view.press("Enter")
     expect(view.decisions).toEqual([])
@@ -362,7 +363,9 @@ describe("ApprovalsCountdown", () => {
         records: [record("job-1", { approvedAt: Date.now(), approvedBy: "owner@example.com", status: "queued" })]
       })
     })
-    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("This request left BETA's queue.")
+    expect(view.container.querySelector(".countdown-remote-status")?.textContent).toBe(
+      "This request left BETA's queue."
+    )
     view.unmount()
   })
 
@@ -461,7 +464,7 @@ describe("ApprovalsCountdown", () => {
         }
       })
     })
-    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("")
+    expect(view.container.querySelector(".countdown-remote-status")?.textContent).toBe("")
     expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("job-9")
     view.unmount()
   })

@@ -187,12 +187,12 @@ const decisionState = ({
   settled
 }: {
   readonly approvalsEnabled: boolean
-  readonly gone: boolean
+  readonly gone: Departure | null
   readonly item: PendingItem
   readonly sending: ApprovalDecision | null
   readonly settled: boolean
 }): RlyDecisionBarState => {
-  if (gone) return { _tag: "off", reason: "This request has left the queue." }
+  if (gone !== null) return { _tag: "off", reason: gone.word }
   if (item._tag === "Remote") return { _tag: "off", reason: `Decided on ${item.host}.` }
   if (sending !== null && sending.jobId === item.record.id) return { _tag: "sending", action: sending.decision }
   if (settled) return { _tag: "off", reason: "The hub has answered this decision; the list shows its current state." }
@@ -210,23 +210,37 @@ const decisionState = ({
 /** What a request the hub expired says, wherever it is shown. */
 const EXPIRED_TEXT = "Expired just now. Nothing was applied."
 
-const departureOf = (snapshot: DashboardSnapshot, item: PendingItem): string | null => {
+/** How a request left the queue: a short word for the bar's reason, and the full sentence. */
+interface Departure {
+  readonly word: string
+  readonly text: string
+}
+
+/**
+ * Why a request the reader was looking at is no longer listed, or `null` when its absence proves
+ * nothing: a local request still pending, or one on a page not loaded yet, and a remote request
+ * on a host that could not be checked or has more pages. Only local history is consulted, and only
+ * for local requests.
+ */
+const departureOf = (snapshot: DashboardSnapshot, item: PendingItem): Departure | null => {
   if (item._tag === "Remote") {
     const sameHost = (host: string) => host.toLowerCase() === item.host.toLowerCase()
     const unproven =
       snapshot.pendingApprovals.failures.some(({ host }) => sameHost(host)) ||
       snapshot.pendingApprovals.nextCursors.some(({ host }) => sameHost(host))
-    return unproven ? null : `This request left ${item.host}'s queue.`
+    return unproven ? null : { text: `This request left ${item.host}'s queue.`, word: "Left the queue." }
   }
   const record = snapshot.records.find((candidate) => candidate.id === item.record.id)
   if (record !== undefined && record.status === "pending_approval") return null
   const decided = record === undefined ? null : decidedOf(record)
   if (decided !== null) {
     return decided.outcome === "Expired"
-      ? EXPIRED_TEXT
-      : `${decided.outcome}${decided.by === null ? "" : ` by ${decided.by}`}.`
+      ? { text: EXPIRED_TEXT, word: "Expired." }
+      : { text: `${decided.outcome}${decided.by === null ? "" : ` by ${decided.by}`}.`, word: `${decided.outcome}.` }
   }
-  return snapshot.pendingApprovals.nextCursors.length > 0 ? null : "This request left the queue."
+  return snapshot.pendingApprovals.nextCursors.length > 0
+    ? null
+    : { text: "This request left the queue.", word: "Left the queue." }
 }
 
 const RequestDetail = ({
@@ -270,21 +284,44 @@ const RequestDetail = ({
           Open {item.record.worker.name} in Connect
         </a>
       ) : null}
-      <DecisionBar
-        {...(clock === null ? {} : { clock: clock === "expiring" ? "expiring" : `${clock} left` })}
-        note={
-          item._tag === "Remote" ? (
-            <a href={item.approvalUrl}>Review on {item.host}</a>
-          ) : (
-            "If it expires before your decision reaches the hub, you'll see the hub's refusal, not a success."
-          )
-        }
-        onApprove={decide("approve")}
-        onReject={decide("reject")}
-        state={state}
-        {...(answer === undefined ? {} : { status: answer })}
-        target={`${facts.title} on ${facts.host}`}
-      />
+      {item._tag === "Remote" ? (
+        // Decided on its own host: the review link is the action here, not an inert bar.
+        <div className="countdown-remote">
+          <p className="countdown-remote-target">
+            {facts.kind} on {facts.host}
+            {clock === null ? null : (
+              <>
+                , <span className="countdown-nowrap">{clock === "expiring" ? "expiring" : `${clock} left`}</span>
+              </>
+            )}
+          </p>
+          <a className="countdown-review-link" href={item.approvalUrl}>
+            Review on {facts.host}
+          </a>
+          <p className="countdown-remote-note">Approve or reject it on {facts.host}.</p>
+          <p aria-atomic="true" className="countdown-remote-status" role="status">
+            {answer ?? ""}
+          </p>
+        </div>
+      ) : (
+        <DecisionBar
+          {...(clock === null
+            ? {}
+            : {
+                clock: <span className="countdown-nowrap">{clock === "expiring" ? "expiring" : `${clock} left`}</span>
+              })}
+          {...(state._tag === "ready" || state._tag === "sending"
+            ? {
+                note: "If it expires before your decision reaches the hub, you'll see the hub's refusal, not a success."
+              }
+            : {})}
+          onApprove={decide("approve")}
+          onReject={decide("reject")}
+          state={state}
+          {...(answer === undefined ? {} : { status: answer })}
+          target={`${facts.kind} on ${facts.host}`}
+        />
+      )}
     </article>
   )
 }
@@ -336,9 +373,8 @@ export const ApprovalsCountdown = ({
   const selectedKey = shown?.key ?? null
   // Absent from the list is "gone" only when the hub's own record or a complete read proves it.
   const departure = selected === undefined || shownIndex >= 0 ? null : departureOf(snapshot, selected)
-  const gone = departure !== null
 
-  const stateOf = (item: PendingItem, itemGone: boolean): RlyDecisionBarState => {
+  const stateOf = (item: PendingItem, itemGone: Departure | null): RlyDecisionBarState => {
     if (onDecision === undefined) return { _tag: "off", reason: "Decisions are unavailable here." }
     const id = factsOf(item, snapshot.host).id
     return decisionState({
@@ -418,10 +454,10 @@ export const ApprovalsCountdown = ({
       : selected._tag === "Local" && decisionStatus?.jobId === selectedId
         ? // A later read that proves the outcome beats an uncertain answer, and a confirmed expiry
           // beats an earlier refusal (a decision that reached the hub after its deadline).
-          departure !== null && (!decisionStatus.settles || departure === EXPIRED_TEXT)
-          ? departure
+          departure !== null && (!decisionStatus.settles || departure.text === EXPIRED_TEXT)
+          ? departure.text
           : decisionStatus.text
-        : (departure ?? undefined)
+        : departure?.text
 
   // Deciding pins the decided request, so the bar and its status stay on it when it leaves the queue.
   const decideItem = (item: PendingItem, decision: ApprovalDecision["decision"]): void => {
@@ -444,7 +480,7 @@ export const ApprovalsCountdown = ({
     const target = rowIndex >= 0 ? items[rowIndex] : selected
     if (target === undefined) return
     event.preventDefault()
-    const state = stateOf(target, rowIndex < 0 && gone)
+    const state = stateOf(target, rowIndex < 0 ? departure : null)
     if (state._tag === "ready") decideItem(target, decision)
     else if (rowIndex >= 0) pick(target)
   }
@@ -592,12 +628,12 @@ export const ApprovalsCountdown = ({
           <Region className="countdown-selected" title="Selected request">
             <RequestDetail
               answer={answer}
-              gone={gone}
+              gone={departure !== null}
               item={selected}
               now={now}
               onDecision={decideItem}
               snapshot={snapshot}
-              state={stateOf(selected, gone)}
+              state={stateOf(selected, departure)}
             />
           </Region>
         )}

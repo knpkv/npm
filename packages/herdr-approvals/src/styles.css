@@ -386,9 +386,13 @@
     padding-block-start: var(--rly-space-12);
   }
 
+  /* A 32px target (44px on touch) that keeps the native disclosure marker. */
   .approval-request-disclosure summary {
+    box-sizing: border-box;
     color: var(--rly-color-text-2);
     cursor: pointer;
+    min-block-size: 32px;
+    padding-block: var(--rly-space-6);
     font-size: var(--rly-type-meta-size);
     font-weight: 650;
   }
@@ -925,12 +929,15 @@
     grid-template-columns: minmax(0, 1fr) minmax(20rem, 28rem);
     grid-template-areas:
       "waiting selected"
-      "decided selected";
+      "decided decided";
   }
 
+  /* Nothing waiting: one column, so an empty queue doesn't sit as a short box beside history. */
   .countdown-regions[data-has-selection="false"] {
-    grid-template-areas: "waiting decided";
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas:
+      "waiting"
+      "decided";
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .countdown-waiting {
@@ -984,6 +991,14 @@
     background: var(--rly-color-surface-3);
   }
 
+  /* Forced colours drop backgrounds; the selected row keeps an outline. */
+  @media (forced-colors: active) {
+    .countdown-row[aria-current="true"] {
+      outline: 2px solid Highlight;
+      outline-offset: -2px;
+    }
+  }
+
   .countdown-row:focus-visible {
     outline: 2px solid var(--rly-color-focus);
     outline-offset: -2px;
@@ -1011,16 +1026,6 @@
       var(--rly-type-label-font);
     font-variant-numeric: tabular-nums;
     grid-area: clock;
-  }
-
-  /* The word carries urgency; ink only reinforces it. */
-  .countdown-row-clock[data-urgency="soon"] {
-    color: var(--rly-color-held-ink);
-  }
-
-  .countdown-row-clock[data-urgency="imminent"],
-  .countdown-row-clock[data-urgency="due"] {
-    color: var(--rly-color-blocked-ink);
   }
 
   .countdown-row-track {
@@ -1054,7 +1059,7 @@
       "outcome caption"
       "outcome request";
     grid-template-columns: 5.5rem minmax(0, 1fr);
-    padding: var(--rly-space-12) var(--rly-space-16);
+    padding-block: var(--rly-space-12);
     row-gap: var(--rly-space-2);
   }
 
@@ -1079,10 +1084,62 @@
     padding-block-start: 0;
   }
 
+  /* The Region body already pads its content; the detail aligns with the region title. */
   .countdown-detail {
     display: grid;
     gap: var(--rly-space-12);
-    padding: var(--rly-space-16);
+  }
+
+  .countdown-nowrap {
+    white-space: nowrap;
+  }
+
+  .countdown-remote {
+    display: grid;
+    gap: var(--rly-space-8);
+    justify-items: start;
+  }
+
+  .countdown-remote-target,
+  .countdown-remote-note,
+  .countdown-remote-status {
+    margin: 0;
+  }
+
+  .countdown-remote-target {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+  }
+
+  .countdown-remote-note,
+  .countdown-remote-status {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+
+  /* The remote request's one action, styled as a button. */
+  .countdown-review-link {
+    align-items: center;
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-control);
+    color: var(--rly-color-text-1);
+    display: inline-flex;
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    min-block-size: 40px;
+    padding-inline: var(--rly-space-16);
+    text-decoration: none;
+  }
+
+  .countdown-review-link:hover {
+    background: var(--rly-color-surface-2);
+  }
+
+  .countdown-review-link:focus-visible {
+    outline: 2px solid var(--rly-color-focus);
+    outline-offset: 2px;
   }
 
   .countdown-kicker,
@@ -1126,8 +1183,8 @@
     .countdown-regions,
     .countdown-regions[data-has-selection="false"] {
       grid-template-areas:
-        "selected"
         "waiting"
+        "selected"
         "decided";
       grid-template-columns: minmax(0, 1fr);
     }
@@ -1233,6 +1290,10 @@
   }
 
   @media (hover: none), (pointer: coarse) {
+    .approval-request-disclosure summary {
+      min-block-size: 44px;
+    }
+
     .fleet-key-rail,
     .keyboard-hints,
     .activity-keyboard-help {
