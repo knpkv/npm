@@ -473,7 +473,12 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     setBusyJobId(null)
     setSendingDecision(null)
     const answer = decisionAnswerOf(decision, exit)
-    setDecisionStatus({ jobId: decision.jobId, settles: answerSettles(answer), text: answerText(answer) })
+    setDecisionStatus({
+      jobId: decision.jobId,
+      observedAt: currentSnapshot?.observedAt ?? 0,
+      settles: answerSettles(answer),
+      text: answerText(answer)
+    })
     // Whatever the answer, the queue is re-read so the page shows the hub's own state next.
     if (!Exit.isSuccess(exit)) refreshDashboard()
     if (Exit.isSuccess(exit)) {

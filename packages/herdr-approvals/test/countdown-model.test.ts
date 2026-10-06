@@ -132,7 +132,7 @@ describe("countdown model", () => {
   })
 
   it("words the hub's answer by what it proves, never that nothing ran", () => {
-    expect(answerText(DecisionAnswer.Refused({ status: 409 }))).toContain("already changed")
+    expect(answerText(DecisionAnswer.Refused({ status: 409 }))).toContain("approval session ended")
     expect(answerText(DecisionAnswer.Refused({ status: 409 }))).not.toContain("Nothing")
     expect(answerForStatus(409)._tag).toBe("Refused")
     expect(answerForStatus(503)._tag).toBe("Uncertain")

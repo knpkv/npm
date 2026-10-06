@@ -36,8 +36,13 @@ import { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.
 /** The hub's answer to the last decision sent from this page, for the job it decided. */
 export interface DecisionStatus {
   readonly jobId: string
-  /** The hub accepted or refused it: the bar stays off for this request until the queue shows its state. */
+  /**
+   * The hub accepted or refused it: the bar stays off for this request until a newer snapshot than
+   * `observedAt` shows its state. A newer read that still lists it as decidable lets it be retried.
+   */
   readonly settles: boolean
+  /** `observedAt` of the snapshot on screen when the answer arrived. */
+  readonly observedAt: number
   readonly text: string
 }
 
@@ -200,9 +205,11 @@ const decisionState = ({
  */
 const departureOf = (snapshot: DashboardSnapshot, item: PendingItem): string | null => {
   if (item._tag === "Remote") {
-    return snapshot.pendingApprovals.failures.some(({ host }) => host === item.host)
-      ? null
-      : `This request left ${item.host}'s queue.`
+    const sameHost = (host: string) => host.toLowerCase() === item.host.toLowerCase()
+    const unproven =
+      snapshot.pendingApprovals.failures.some(({ host }) => sameHost(host)) ||
+      snapshot.pendingApprovals.nextCursors.some(({ host }) => sameHost(host))
+    return unproven ? null : `This request left ${item.host}'s queue.`
   }
   const record = snapshot.records.find((candidate) => candidate.id === item.record.id)
   if (record !== undefined && record.status === "pending_approval") return null
@@ -329,7 +336,11 @@ export const ApprovalsCountdown = ({
       gone: itemGone,
       item,
       sending,
-      settled: item._tag === "Local" && decisionStatus?.jobId === id && decisionStatus.settles
+      settled:
+        item._tag === "Local" &&
+        decisionStatus?.jobId === id &&
+        decisionStatus.settles &&
+        snapshot.observedAt <= decisionStatus.observedAt
     })
   }
 
@@ -342,7 +353,9 @@ export const ApprovalsCountdown = ({
     const crossed = crossedIntoLastMinute(facts, previousNow.current, now)
     previousNow.current = now
     if (crossed.length > 0) {
-      setAnnouncement(crossed.map(({ host, title }) => `One minute left to decide ${title} on ${host}.`).join(" "))
+      setAnnouncement(
+        crossed.map(({ host, id, title }) => `One minute left to decide ${title} (${id}) on ${host}.`).join(" ")
+      )
     }
   }, [facts, now])
   const previousFacts = useRef(new Map<string, PendingFacts>())
@@ -355,7 +368,9 @@ export const ApprovalsCountdown = ({
     })
     previousFacts.current = new Map(facts.map((entry) => [itemKey(entry), entry]))
     if (expired.length > 0) {
-      setAnnouncement(expired.map(({ host, title }) => `${title} on ${host} expired. Nothing was applied.`).join(" "))
+      setAnnouncement(
+        expired.map(({ host, id, title }) => `${title} (${id}) on ${host} expired. Nothing was applied.`).join(" ")
+      )
     }
   }, [snapshot])
   const selectedId = selected === undefined ? null : factsOf(selected, snapshot.host).id

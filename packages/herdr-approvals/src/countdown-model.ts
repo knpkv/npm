@@ -204,7 +204,7 @@ export const answerText = (answer: DecisionAnswer): string =>
         : "The hub recorded your approval.",
     Refused: ({ status }) =>
       status === 409
-        ? "The hub refused: this request already changed. It may have expired or been decided by someone else."
+        ? "The hub refused: the request changed, or its approval session ended. The list refreshes with its current state."
         : status === 403
         ? "The hub refused: you can't decide this request."
         : status === 404

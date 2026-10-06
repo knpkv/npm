@@ -184,7 +184,7 @@ describe("ApprovalsCountdown", () => {
     view.press("Enter")
     expect(view.decisions).toEqual([])
     view.render({
-      decisionStatus: { jobId: "job-1", settles: true, text: "The hub refused: this request already changed." },
+      decisionStatus: { jobId: "job-1", observedAt: Date.now(), settles: true, text: "The hub refused: this request already changed." },
       snapshot: snapshot()
     })
     expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe(
@@ -245,7 +245,7 @@ describe("ApprovalsCountdown", () => {
     act(() => view.bar()?.querySelector<HTMLButtonElement>("button")?.click())
     expect(view.decisions).toEqual([{ decision: "approve", jobId: "job-1" }])
     view.render({
-      decisionStatus: { jobId: "job-1", settles: true, text: "The hub recorded your approval; the job is queued." },
+      decisionStatus: { jobId: "job-1", observedAt: Date.now(), settles: true, text: "The hub recorded your approval; the job is queued." },
       snapshot: snapshot({
         pendingApprovals: {
           failures: [],
@@ -351,7 +351,7 @@ describe("ApprovalsCountdown", () => {
 
   it("keeps a request off once the hub refused it", () => {
     const view = mount({
-      decisionStatus: { jobId: "job-1", settles: true, text: "The hub refused: this request already changed." },
+      decisionStatus: { jobId: "job-1", observedAt: Date.now(), settles: true, text: "The hub refused: this request already changed." },
       snapshot: snapshot()
     })
     expect(view.bar()?.dataset["state"]).toBe("off")
@@ -398,8 +398,49 @@ describe("ApprovalsCountdown", () => {
       })
     })
     expect(view.container.querySelector(".countdown-announcer")?.textContent).toBe(
-      "Apply Nix configuration on ALPHA expired. Nothing was applied."
+      "Apply Nix configuration (job-2) on ALPHA expired. Nothing was applied."
     )
+    view.unmount()
+  })
+
+  it("lets a refused request be retried once a newer read still lists it as decidable", () => {
+    const answeredAt = Date.now() - 1_000
+    const status = { jobId: "job-1", observedAt: answeredAt, settles: true, text: "The hub refused." }
+    const view = mount({ decisionStatus: status, snapshot: snapshot({ observedAt: answeredAt }) })
+    expect(view.bar()?.dataset["state"]).toBe("off")
+    view.render({ decisionStatus: status, snapshot: snapshot({ observedAt: answeredAt + 5_000 }) })
+    expect(view.bar()?.dataset["state"]).toBe("ready")
+    view.unmount()
+  })
+
+  it("does not call a remote request gone while its host has more pages", () => {
+    const remote: DashboardSnapshot["pendingApprovals"]["remote"][number] = {
+      approval: {
+        actor: "ops@example.com",
+        approvalExpiresAt: Date.now() + 3 * 60_000,
+        createdAt: Date.now(),
+        id: "job-9",
+        payload: { kind: "nix.check", ref: "main" },
+        status: "pending_approval"
+      },
+      approvalUrl: "https://beta.example.test/approve/job-9",
+      host: "BETA"
+    }
+    const view = mount({
+      snapshot: snapshot({ pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [remote] } })
+    })
+    view.render({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [],
+          nextCursors: [{ cursor: { createdAt: 1, id: "job-1" }, host: "beta" }],
+          remote: []
+        }
+      })
+    })
+    expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("")
+    expect(view.container.querySelector(".countdown-kicker")?.textContent).toContain("job-9")
     view.unmount()
   })
 })
