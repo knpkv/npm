@@ -21,6 +21,11 @@ export const COMPONENT_REGISTRY_METADATA = {
     ],
     ["compose", "present"]
   ),
+  Hero: registryMetadata("State the one fact a screen leads with as a sentence, with an optional caption", [
+    "heading",
+    "line",
+    "display"
+  ], ["present", "status"]),
   DecisionBar: registryMetadata(
     "Approve or reject one named target, with an off reason, a clock and the server's answer",
     [

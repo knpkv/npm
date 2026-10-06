@@ -190,6 +190,35 @@ export const componentManifest = {
     {
       category: "pattern",
       exports: [
+        { kind: "value", name: "Hero" },
+        { kind: "value", name: "HeroWord" },
+        { kind: "value", name: "RLY_HERO_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_HERO_VARIANTS" },
+        { kind: "value", name: "RLY_HERO_WORD_VARIANTS" },
+        { kind: "type", name: "HeroProps" },
+        { kind: "type", name: "HeroWordProps" },
+        { kind: "type", name: "RlyHeroSize" },
+        { kind: "type", name: "RlyHeroWordTone" }
+      ],
+      name: "Hero",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/Hero.tsx",
+      status: "experimental",
+      styles: ["src/patterns/Hero.module.css"],
+      variants: [
+        { defaultValue: "heading", name: "size", values: ["heading", "line", "display"] },
+        { name: "tone", values: ["blocked", "held"] }
+      ],
+      visual: {
+        story: "stories/patterns/Hero.stories.tsx",
+        storyId: "patterns-hero--states",
+        tests: ["test/patterns/Hero.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
         { kind: "value", name: "DecisionBar" },
         { kind: "value", name: "RLY_DECISION_BAR_DEFAULT_VARIANTS" },
         { kind: "value", name: "RLY_DECISION_BAR_VARIANTS" },

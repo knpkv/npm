@@ -71,5 +71,6 @@ export const signalMeaning: AttributionExplanations = {
   branch: "the git branch names this ticket",
   none: "nothing placed this work",
   path: "the working directory names this ticket",
+  split: "an orchestrating session mentioned several sprint tickets and its time was shared by mentions",
   standing: "a Standing Attribution maps this directory"
 }

@@ -50,10 +50,12 @@ same work twice into a combined total. Layer switches filter the calendar and ph
 only selected provider layers receive new time. The header scope controls which systems are read.
 Saved cards name their provider without comparing its total to the other system.
 
-Overlapping ticket proposals become sequential allocations within the evidenced
-stretch. Tickets share it evenly, with a fifteen-minute floor by default. When
-there is not enough time for every ticket, the tickets with the most credited
-evidence keep the available slots. These are proposed allocations, not exact
+Overlapping ticket proposals become one block per ticket within the evidenced
+stretch, ordered by first activity and packed back to back with no gaps inside
+the stretch. Every evidenced ticket keeps a share, with a writable minute each when
+there is room; a ticket that cannot reach a minute folds into the one ranked above it. Open-sprint tickets assigned to you rank first, then tickets not
+yet logged that day, then evidence weight. The calendar offers blocks with at
+least one minute of credit and executable provider time. These are proposed allocations, not exact
 per-ticket activity timestamps. Separate work, idle gaps, wholly unplaced stretches and local
 midnight remain boundaries. Mixed stretches reserve their unplaced share before
 allocating known tickets, so changing shares do not create tiny blocks. A standalone stretch shorter than the floor stays
@@ -120,8 +122,18 @@ Two things may be overruled, and both are said out loud in what gets written:
 - Browser confirmations, manual entries and saved-entry edits share the machine writer guard with
   `jcf watch`. A browser write is refused while the watch runs; a browser mutation holds the guard
   only until its provider operation finishes and does not publish a watch resume cursor.
-- Reconciliation only adds. Nothing is ever deleted in either system, and the only edits are the
-  ones you save explicitly in the saved-entry editor, which update that Jira worklog or Clockify entry.
+- Reconciliation only adds. Nothing is deleted unless you delete it yourself: the saved-entry editor
+  edits a Jira worklog or Clockify entry, moves it to another ticket, or — after a second, explicit
+  confirmation — deletes it. A ticket change creates the replacement before deleting the original; if
+  the original cannot be removed, both entry ids are reported and the original may still exist.
+  Deleting an entry releases its session claim, so that time is suggested again; moving one carries
+  the claim to the replacement, so the time is not offered twice. Moves persist an intent before
+  create: uncertain or partial results remain held across restart and retries cannot POST another
+  replacement. Both operations are refused while the provider is held for manual review, except
+  explicit deletion of either entry in a verified partial pair, which resolves its replacement intent
+  while retaining the other entry's tracking. Unverified outcomes require private recovery.
+- Low-confidence matches — the agent's pick fell below your confidence floor — are listed with their
+  confidence. "Log as" offers exactly that one as an ordinary suggestion; a rescan may withhold it again.
 
 ## Responsive review and progress
 
@@ -191,7 +203,7 @@ mode; their visible activity streams into the conversation.
 Rescan sessions reads both Claude Code and Codex history within the configured session roots,
 regardless of the matching agent selected. Codex sessions resumed from older date directories
 are included. Reload continues to restore the existing plan; use Rescan sessions to pick up new
-work or newly supported transcripts. The 15-minute suggestion minimum still applies.
+work or newly supported transcripts. The one-minute suggestion minimum still applies.
 
 Effect Atom shows pending Jira and Clockify slots immediately when a write starts.
 Each provider settles separately: failed entries disappear and successful entries
@@ -203,7 +215,11 @@ with the current provider layers and default note. It skips the editor and never
 requests a generated description. The ordinary card keeps its selected Review first
 or Quick approve behavior. Its provider slots appear
 immediately, with Undo available for at least five seconds and until saving starts.
-Keep selecting other suggestions while the queue saves serially in the background.
+Keep selecting other suggestions while the queue saves in the background. Approvals whose
+Undo window has passed are sent together, up to fifty at a time, in click order: the server
+re-reads Jira and Clockify once for the batch, and again only before an approval whose ticket
+and day an earlier one in the same batch already wrote. Each approval still reports its own
+outcome, and one refusal does not stop the rest.
 The bounded queue floats beside the calendar, so + and Undo keep the visible time fixed.
 The app refreshes provider totals once the queue drains. A queued write captures the
 selected provider layers; hiding a provider before dispatch removes it from that
@@ -236,7 +252,7 @@ are pending writes. Provider totals stay visible when their calendar layer is hi
 
 Calendar placement is memoized per plan, pending writes and layer selection. Minimum card height
 participates in collision detection, so adjacent short intervals cannot cover each other.
-Suggestions require at least 15 minutes of credited time, wall duration and remaining
+Suggestions require at least one minute of credited time, wall duration and remaining
 time in a selected provider. This filter also applies to restored scans and retains
 the original block indexes. Short saved Jira/Clockify records keep their actual duration.
 Narrow cards prioritize the ticket key; provider labels remain in their accessible

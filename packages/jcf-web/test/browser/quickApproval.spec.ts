@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 import { Schema } from "effect"
-import { ConfirmPayload } from "../../src/shared/contracts.js"
+import { ConfirmBatchPayload, type ConfirmPayload } from "../../src/shared/contracts.js"
 
 test.beforeEach(async ({ page }) => {
   await page.clock.install()
@@ -15,7 +15,7 @@ test.beforeEach(async ({ page }) => {
 test("one click previews approval and Undo restores the suggestion without a write", async ({ page }) => {
   const writes: Array<string> = []
   page.on("request", (request) => {
-    if (new URL(request.url()).pathname === "/api/rows/confirm") writes.push(request.url())
+    if (new URL(request.url()).pathname.startsWith("/api/rows/confirm")) writes.push(request.url())
   })
   const suggestion = page.getByRole("button", { name: /PROJ-123, 11:00/ })
   await suggestion.click()
@@ -48,16 +48,23 @@ test("queues while saving, intersects changed layers, then refreshes totals once
     release = resolve
   })
   const requests: Array<typeof ConfirmPayload.Type> = []
-  await page.route("**/api/rows/confirm", async (route) => {
-    const payload = Schema.decodeUnknownSync(ConfirmPayload)(route.request().postDataJSON())
-    requests.push(payload)
-    if (requests.length === 1) await held
+  // The queue sends ready approvals as batches; `requests` records each approval in send order.
+  await page.route("**/api/rows/confirm-batch", async (route) => {
+    const batch = Schema.decodeUnknownSync(ConfirmBatchPayload)(route.request().postDataJSON()).requests
+    const first = requests.length === 0
+    for (const payload of batch) requests.push(payload)
+    if (first) await held
     await route.fulfill({
       json: {
-        clockify: payload.targets?.clockify === true ? { _tag: "Written", seconds: 3600 } : { _tag: "Skipped" },
-        jira: { _tag: "Written", seconds: 3600 },
-        description: "Queued work",
-        lines: ["Logged queued work"]
+        items: batch.map((payload) => ({
+          _tag: "Written",
+          result: {
+            clockify: payload.targets?.clockify === true ? { _tag: "Written", seconds: 3600 } : { _tag: "Skipped" },
+            jira: { _tag: "Written", seconds: 3600 },
+            description: "Queued work",
+            lines: ["Logged queued work"]
+          }
+        }))
       }
     })
   })
