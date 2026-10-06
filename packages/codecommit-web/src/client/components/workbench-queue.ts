@@ -308,19 +308,23 @@ const groupOrder = { review: 0, pool: 1, yours: 2, watching: 3, unsorted: 4 } sa
 
 /**
  * Builds the queue for one user. Only open pull requests take part; within a group the longest
- * open comes first. With no identity, every open pull request is listed under `unsorted` and the
- * summary is `Unknown`, because membership cannot be decided.
+ * open comes first. A pull request whose account has neither a resolved identity nor the user-name
+ * fallback is `unsorted`; with no identity at all the summary is `Unknown`, because membership
+ * cannot be decided.
  */
 export const workbenchQueue = (
   pullRequests: ReadonlyArray<Domain.PullRequest>,
   caller: Caller,
   now: Date
 ): WorkbenchQueue => {
-  const known = caller.username !== undefined && caller.username.length > 0
+  // Known when some account can decide: an app-wide user name, or any account's resolved identity.
+  // A pull request whose own account cannot is still `unsorted`, the same rule `needsYourReview` uses.
+  const known = (caller.username !== undefined && caller.username.length > 0) ||
+    Object.values(caller.identities ?? {}).some((identity) => identity._tag === "Resolved")
   const rows = pullRequests
     .filter((pullRequest) => pullRequest.status === "OPEN")
     .flatMap((pullRequest): ReadonlyArray<WorkbenchRow> => {
-      const viewer = known ? viewerOf(caller, pullRequest) : undefined
+      const viewer = viewerOf(caller, pullRequest)
       const group = viewer === undefined ? "unsorted" : groupOf(pullRequest, viewer)
       if (group === undefined) return []
       const quietMs = Math.max(0, now.getTime() - pullRequest.lastModifiedDate.getTime())

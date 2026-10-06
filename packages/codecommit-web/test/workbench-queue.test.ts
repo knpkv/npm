@@ -484,6 +484,27 @@ describe("workbenchQueue with the caller's resolved identity", () => {
     expect(groups([byMe], resolved)).toEqual([])
   })
 
+  it("decides by a resolved identity even without an app-wide user name", () => {
+    const nameless: Caller = {
+      identities: {
+        "platform-prod": { _tag: "Resolved", arn: me, username: "andrey" },
+        staging: { _tag: "Unresolved" }
+      },
+      username: undefined
+    }
+    const prod = make({ approvalRules: [reviewers], id: "prod" })
+    const staging = make({
+      account: { profile: "staging", region: "eu-west-1" },
+      approvalRules: [reviewers],
+      id: "stg"
+    })
+    const queue = workbenchQueue([prod, staging], nameless, NOW)
+    expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["prod", "review"], ["stg", "unsorted"]])
+    expect(queue.summary._tag).toBe("Waiting")
+    expect(yourReviewCount([prod, staging], nameless)).toBe(1)
+    expect(workbenchQueue([prod], { identities: undefined, username: undefined }, NOW).summary._tag).toBe("Unknown")
+  })
+
   it("counts the badge with the same identity as the queue", () => {
     const resolved = caller({ _tag: "Resolved", arn: me, username: "andrey" })
     const pullRequests = [make({ approvalRules: [reviewers], id: "1" })]
