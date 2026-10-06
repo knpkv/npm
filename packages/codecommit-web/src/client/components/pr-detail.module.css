@@ -160,7 +160,10 @@
 .revisionHeading {
   align-items: start;
   gap: var(--rly-space-16);
-  grid-template-columns: minmax(var(--rly-space-0), 1fr) auto;
+}
+
+.revisionHeading > div {
+  justify-items: start;
 }
 
 .revisionHeading > div {

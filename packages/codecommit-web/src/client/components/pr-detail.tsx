@@ -34,14 +34,16 @@ import {
   type HealthScore,
   type HealthScoreCategory
 } from "@knpkv/codecommit-core/HealthScore.js"
-import { ServiceMark, Verdict, type RlyVerdictTone } from "@knpkv/rly/patterns"
+import { ServiceMark } from "@knpkv/rly/patterns"
 import {
   Button as RlyButton,
   Field,
+  Notice,
   StateLabel,
   StatePanel,
   Surface,
   Text,
+  type RlyNoticeTone,
   type RlyStateTone
 } from "@knpkv/rly/primitives"
 import { Exit, Option } from "effect"
@@ -835,7 +837,7 @@ function ApproversCard({
 
 interface PullRequestDecisionPresentation {
   readonly reason: string
-  readonly tone: RlyVerdictTone
+  readonly tone: RlyNoticeTone
   readonly verdict: string
 }
 
@@ -1337,7 +1339,7 @@ export function PRDetail() {
       </nav>
 
       <header className={styles.hero}>
-        <Text as="h1" className={styles.title} variant="page-title">
+        <Text as="h1" className={styles.title} variant="section-title">
           {pr.title}
         </Text>
         <div className={styles.heroMeta}>
@@ -1356,7 +1358,12 @@ export function PRDetail() {
       </header>
 
       <section aria-label="Pull request decision and actions" className={styles.decisionWorkspace}>
-        <Verdict className={styles.verdict} reason={decision.reason} tone={decision.tone} verdict={decision.verdict} />
+        {/* The review state is a sentence under the title, not the largest thing on the page. */}
+        <Notice className={styles.verdict} tone={decision.tone}>
+          <Text as="span" tone="inherit" variant="body-large">
+            <strong>{decision.verdict}</strong> {decision.reason}
+          </Text>
+        </Notice>
         <aside className={styles.actionRail}>
           <div className={styles.actionHeading}>
             <Text tone="secondary" variant="label">
@@ -1414,11 +1421,12 @@ export function PRDetail() {
             <Text tone="secondary" variant="label">
               Current revision
             </Text>
-            <Text as="h2" variant="section-title">
+            <Text as="h2" variant="card-title">
               {pr.repositoryName}
             </Text>
+            {/* In the text flow, not the corner, so the floating Relay dock can't cover it. */}
+            <ScoreBadge score={score} />
           </div>
-          <ScoreBadge score={score} />
         </header>
 
         <div aria-label={`${pr.sourceBranch} into ${pr.destinationBranch}`} className={styles.branchPair}>
@@ -1540,7 +1548,7 @@ export function PRDetail() {
           {pr.description && (
             <Surface as="section" className={styles.contentSection} padding="spacious" form="grouped">
               <header className={styles.sectionHeading}>
-                <Text as="h2" variant="section-title">
+                <Text as="h2" variant="card-title">
                   Description
                 </Text>
                 <Text tone="secondary" variant="meta">
@@ -1580,7 +1588,7 @@ export function PRDetail() {
         <aside className={styles.evidenceColumn}>
           <section className={styles.approvalSection}>
             <header className={styles.sectionHeading}>
-              <Text as="h2" variant="section-title">
+              <Text as="h2" variant="card-title">
                 Decision evidence
               </Text>
               <Text tone="secondary" variant="meta">

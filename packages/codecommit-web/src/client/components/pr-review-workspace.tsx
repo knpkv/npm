@@ -1508,7 +1508,7 @@ const ReadyReviewWorkspace = ({
             <Text tone="secondary" variant="label">
               Exact-revision review
             </Text>
-            <Text as="h2" variant="section-title">
+            <Text as="h2" variant="card-title">
               Diff
             </Text>
             <Text tone="secondary" variant="meta">
@@ -1596,7 +1596,7 @@ const ReadyReviewWorkspace = ({
               <div className={styles.agentTitle}>
                 <span>
                   <BotIcon aria-hidden="true" />
-                  <Text as="h2" variant="section-title">
+                  <Text as="h2" variant="card-title">
                     Relay
                   </Text>
                 </span>
