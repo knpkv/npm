@@ -9,11 +9,14 @@ import type {
   WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
   WorkDecisionRevisionConflictError,
+  WorkGoalAbandonmentConflictError,
   WorkGoalAgentTargetConflictError,
   WorkGoalBindingRequiresAgentError,
+  WorkGoalLaneActiveError,
   WorkGoalOwnerMismatchError,
   WorkGoalReassignmentConflictError,
   WorkGoalRevisionConflictError,
+  WorkGoalTerminalError,
   WorkLaneClaimConflictError,
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
@@ -30,6 +33,8 @@ import type {
   WorkDecisionHandoff,
   WorkExistingGoalRecovery,
   WorkExistingOwnerReconciliation,
+  WorkGoalAbandoned,
+  WorkGoalAbandonment,
   WorkGoalCheckpoint,
   WorkGoalReassigned,
   WorkGoalReassignment,
@@ -71,6 +76,23 @@ export interface WorkService {
     | WorkGoalOwnerMismatchError
     | WorkGoalReassignmentConflictError
     | WorkGoalRevisionConflictError
+    | WorkProjectionError
+    | WorkStoreError
+  >
+  /**
+   * Approval-bound move of a goal to `abandoned`; refuses a goal with an active
+   * lane or one already finished. Replaying the same approval job returns the
+   * prior result.
+   */
+  readonly abandon: (
+    request: WorkGoalAbandonment
+  ) => Effect.Effect<
+    WorkGoalAbandoned,
+    | WorkGoalAbandonmentConflictError
+    | WorkGoalLaneActiveError
+    | WorkGoalOwnerMismatchError
+    | WorkGoalRevisionConflictError
+    | WorkGoalTerminalError
     | WorkProjectionError
     | WorkStoreError
   >
@@ -210,6 +232,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
     store.recoverExistingGoal(request)
   )
   const reassign = Effect.fn("HerdrWork.reassign")((request: WorkGoalReassignment) => store.reassign(request))
+  const abandon = Effect.fn("HerdrWork.abandon")((request: WorkGoalAbandonment) => store.abandon(request))
   const admissionPreflight = Effect.fn("HerdrWork.admissionPreflight")((target: WorkAdmissionTarget) =>
     store.admissionPreflight(target)
   )
@@ -350,6 +373,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       recoveryPreflight,
       recoverExistingGoal,
       reassign,
+      abandon,
       admissionPreflight,
       admitExistingOwner,
       admitObserved,
