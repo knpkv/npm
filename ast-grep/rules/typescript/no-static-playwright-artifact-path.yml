@@ -9,6 +9,16 @@ rule:
   has:
     field: key
     regex: "^path$"
+  # Only a Playwright artifact call: `x.screenshot({ path })`, `testInfo.attach(name, { path })`.
+  inside:
+    kind: object
+    inside:
+      kind: arguments
+      inside:
+        kind: call_expression
+        has:
+          field: function
+          regex: "\\.(screenshot|attach)$"
   all:
     - has:
         field: value

@@ -4,8 +4,12 @@ valid:
     await page.screenshot({ fullPage: true, path: testInfo.outputPath("pr-review-workspace.png") })
   - |
     await page.goto({ path: "/test-results/page" })
+  - |
+    expect(value).toEqual({ path: "test-results/example" })
 invalid:
   - |
     await page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })
   - |
     await page.screenshot({ path: `./test-results/${name}.png` })
+  - |
+    await testInfo.attach("trace", { path: "test-results/trace.zip" })

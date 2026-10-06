@@ -1,11 +1,12 @@
 import { defineConfig } from "@playwright/test"
 import { join } from "node:path"
-import { keepLastRunAt, playwrightPort } from "../../playwright-ports.ts"
+import { keepLastRunAt, playwrightPort, pruneStaleRunDirectories } from "../../playwright-ports.ts"
 
 // A free port per run, so this suite can run beside another copy of itself.
 const port = await playwrightPort("PLAYWRIGHT_CODECOMMIT_WEB_PORT")
 const origin = `http://127.0.0.1:${port}`
 keepLastRunAt(join(import.meta.dirname, "test-results", "codecommit-web.last-run.json"))
+pruneStaleRunDirectories(join(import.meta.dirname, "test-results"), "codecommit-web-", 24 * 60 * 60 * 1_000, Date.now())
 
 export default defineConfig({
   expect: {

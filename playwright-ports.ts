@@ -14,7 +14,9 @@
  * run together over one build, but not while either is rebuilding it.
  */
 import { Data, Option, Schema } from "effect"
+import { readdirSync, rmSync, statSync } from "node:fs"
 import { createServer } from "node:net"
+import { join } from "node:path"
 import { env } from "node:process"
 
 /** The OS answered a port-0 listen without a TCP port. */
@@ -70,4 +72,35 @@ export const playwrightPort = async (variable: string): Promise<number> => {
  */
 export const keepLastRunAt = (file: string): void => {
   env["PLAYWRIGHT_LAST_RUN_OUTPUT_FILE"] ??= file
+}
+
+/**
+ * Removes this suite's earlier run directories (`<prefix><port>` under
+ * `parent`) that nothing has written to for `maxAgeMillis`. Playwright only
+ * empties the current run's `outputDir`, so without this every run's folder
+ * stays forever. A concurrent run is minutes old and is never touched.
+ * Returns the removed directory names.
+ */
+export const pruneStaleRunDirectories = (
+  parent: string,
+  prefix: string,
+  maxAgeMillis: number,
+  now: number
+): ReadonlyArray<string> => {
+  const entries = (() => {
+    try {
+      return readdirSync(parent, { withFileTypes: true })
+    } catch {
+      return []
+    }
+  })()
+  return entries.flatMap((entry) => {
+    if (!entry.isDirectory() || !entry.name.startsWith(prefix) || !/^\d+$/.test(entry.name.slice(prefix.length))) {
+      return []
+    }
+    const path = join(parent, entry.name)
+    if (now - statSync(path).mtimeMs <= maxAgeMillis) return []
+    rmSync(path, { force: true, recursive: true })
+    return [entry.name]
+  })
 }
