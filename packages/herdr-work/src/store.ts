@@ -123,6 +123,7 @@ import {
   WorkObservedFailure,
   WorkProspectiveAdmission,
   WorkPullRequestLink,
+  WorkReconcileOptions,
   workReconcilerHeadroom,
   WorkRecoveryTarget,
   workSnapshotMaxGoals
@@ -150,7 +151,6 @@ import type {
   WorkProspectiveAdmission as WorkProspectiveAdmissionType,
   WorkPullRequestLink as WorkPullRequestLinkType,
   WorkPullRequestObservation as WorkPullRequestObservationType,
-  WorkReconcileOptions,
   WorkReconcileOutcome,
   WorkRecoveryPreflight as WorkRecoveryPreflightType,
   WorkRecoveryTarget as WorkRecoveryTargetType
@@ -1312,9 +1312,12 @@ interface ReconcilerGuard {
   readonly head: WorkGoalCheckpointType
   readonly fact: { readonly subject: string; readonly observationId: string }
   readonly reserve: number
+  /** The caller's freshness floor, re-checked against the fact's last confirmation in the write. */
+  readonly confirmedSince: number | undefined
 }
 
-const ObservationIdRow = Schema.Struct({ observationId: Schema.String })
+const ObservationIdRow = Schema.Struct({ observationId: Schema.String, confirmedAt: Schema.Number })
+const FailureLastAtRow = Schema.Struct({ lastAt: Schema.Number })
 type AppendDecision =
   | { readonly _tag: "inserted"; readonly changes: bigint | number }
   | { readonly _tag: "replayed"; readonly event: WorkGoalCheckpointType }
@@ -3939,10 +3942,24 @@ export class WorkStore implements WorkStoreService {
               JSON.parse(Schema.decodeUnknownSync(StoredEventRow)(headRow).record)
             )
             const factRow = this.#database.prepare(
-              "SELECT observation_id AS observationId FROM work_observed_facts WHERE subject = ?"
+              `SELECT observation_id AS observationId, confirmed_at AS confirmedAt
+               FROM work_observed_facts WHERE subject = ?`
             ).get(guard.fact.subject)
             const fact = factRow === undefined ? null : Schema.decodeUnknownSync(ObservationIdRow)(factRow)
-            if (head?.eventId !== guard.head.eventId || fact?.observationId !== guard.fact.observationId) {
+            const failureRow = this.#database.prepare(
+              "SELECT last_at AS lastAt FROM work_observed_failures WHERE subject = ?"
+            ).get(guard.fact.subject)
+            const failedAt = failureRow === undefined
+              ? null
+              : Schema.decodeUnknownSync(FailureLastAtRow)(failureRow).lastAt
+            // The plan's freshness, re-checked here: a failed read or a missing
+            // confirmation that arrived while the plan was made also makes it stale.
+            const stillFresh = fact !== null &&
+              (failedAt === null || failedAt <= fact.confirmedAt) &&
+              (guard.confirmedSince === undefined || fact.confirmedAt >= guard.confirmedSince)
+            if (
+              head?.eventId !== guard.head.eventId || fact?.observationId !== guard.fact.observationId || !stillFresh
+            ) {
               return reject(
                 new WorkGoalRevisionConflictError({
                   actualEventId: head?.eventId ?? null,
@@ -5345,7 +5362,10 @@ export class WorkStore implements WorkStoreService {
     }
   })
 
-  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore, options?: WorkReconcileOptions) {
+  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore, request?: WorkReconcileOptions) {
+    const options = yield* Schema.decodeUnknownEffect(WorkReconcileOptions)(request ?? {}).pipe(
+      Effect.mapError(storeError("reconcile.options"))
+    )
     const source = yield* this.snapshotInput()
     if (workHistoryMaxEvents - source.events.length < workReconcilerHeadroom) {
       return yield* new WorkProjectionError({
@@ -5361,7 +5381,7 @@ export class WorkStore implements WorkStoreService {
     const now = yield* Clock.currentTimeMillis
     const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) => this.appendAt(checkpoint, guard)
     return yield* Effect.forEach(
-      terminalCandidates(source.events, source.facts, source.failures, options?.confirmedSince),
+      terminalCandidates(source.events, source.facts, source.failures, options.confirmedSince),
       Effect.fnUntraced(function*(candidate): Effect.fn.Return<
         WorkReconcileOutcome,
         WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
@@ -5382,7 +5402,8 @@ export class WorkStore implements WorkStoreService {
         return yield* appendAt(checkpoint.success, {
           fact: { observationId: candidate.fact.observationId, subject: candidate.fact.subject },
           head: candidate.head,
-          reserve: workReconcilerHeadroom
+          reserve: workReconcilerHeadroom,
+          confirmedSince: options.confirmedSince
         }).pipe(
           Effect.as<WorkReconcileOutcome>({
             _tag: "applied",

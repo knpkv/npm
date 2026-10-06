@@ -970,9 +970,10 @@ export const workReconcilerHeadroom = 256
  * re-read every pull request passes the start of its read, so a fact stored
  * earlier (the pull request may since have reopened) is never acted on.
  */
-export interface WorkReconcileOptions {
-  readonly confirmedSince?: number
-}
+export const WorkReconcileOptions = Schema.Struct({
+  confirmedSince: Schema.optionalKey(Timestamp)
+})
+export interface WorkReconcileOptions extends Schema.Schema.Type<typeof WorkReconcileOptions> {}
 
 export const WorkReconcileOutcome = Schema.TaggedUnion({
   applied: { goalId: WorkGoalId, eventId: Identifier, state: Schema.Literals(["completed", "abandoned"]) },

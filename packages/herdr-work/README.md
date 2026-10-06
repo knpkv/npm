@@ -66,7 +66,7 @@ its last confirmation. `reconcile({ confirmedSince })` also skips any fact not
 read again at or after `confirmedSince`: a caller that has just re-read its pull
 requests passes the start of that read, so a fact stored earlier (the pull
 request may since have reopened, or the read was refused as stale) never closes
-a goal, including one the snapshot hides as superseded. The checkpoint adds a `reconciler.` activity unless the goal's
+a goal, including one the snapshot hides as superseded. Both checks run again inside the write's transaction, so a failed read recorded while the reconciler plans also stops the close. A malformed `confirmedSince` fails with `WorkStoreError` rather than being ignored. The checkpoint adds a `reconciler.` activity unless the goal's
 activity list is full; owner activity is never dropped to make room.
 `abandon` applies an approved `work.abandon` job. The goal, owned by exactly the
 approved owner and still at the approved head, becomes `abandoned`: its blocker

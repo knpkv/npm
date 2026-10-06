@@ -204,6 +204,41 @@ describe("terminal reconcile", () => {
       expect((yield* currentGoal(work))?.state).toBe("review")
     })))
 
+  it.effect("re-checks freshness in the write: a failed read during planning stops the close", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { entered, release, suspend, work } = yield* suspendingFixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 6_000 }])
+      yield* Ref.set(suspend, true)
+      const running = yield* Effect.forkChild(work.reconcile({ confirmedSince: 6_000 }))
+      yield* Deferred.await(entered)
+      yield* Ref.set(suspend, false)
+      yield* work.observe([{
+        observation: {
+          _tag: "unknown",
+          reason: "GitHub returned 502",
+          source: "github",
+          subject: "github:knpkv/npm#7"
+        },
+        observedAt: 7_000
+      }])
+      yield* Deferred.succeed(release, undefined)
+      expect(yield* Fiber.join(running)).toEqual([{ _tag: "conflict", goalId: "goal-pr7" }])
+      expect((yield* currentGoal(work))?.state).toBe("review")
+    })))
+
+  it.effect("refuses a malformed freshness floor instead of ignoring it", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 6_000 }])
+      const history = yield* store.list()
+      expect(yield* Effect.result(work.reconcile({ confirmedSince: Number.NaN }))).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "reconcile.options" }
+      })
+      expect(yield* store.list()).toEqual(history)
+    })))
+
   it.effect("records a pull request closed without merging as abandoned", () =>
     Effect.scoped(Effect.gen(function*() {
       const { work } = yield* fixture
