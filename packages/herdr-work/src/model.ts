@@ -1,6 +1,8 @@
 import {
   AgentConnectTarget,
   AgentWorkerIdentity,
+  WorkAbandon,
+  workAbandonIsRecordable,
   WorkAdmit,
   WorkReassign,
   workReassignIsRecordable,
@@ -663,6 +665,35 @@ export const WorkExistingGoalRecovery = Schema.Struct({
 export type WorkExistingGoalRecovery = typeof WorkExistingGoalRecovery.Type
 
 /** The approved Fleet job supplies actor, job identity, and immutable hash. */
+/** An approved `work.abandon` job, with the approval the Fleet service persisted. */
+export const WorkGoalAbandonment = Schema.Struct({
+  ...WorkAbandon.fields,
+  approvalJobId: Identifier,
+  approvalActor: Identifier,
+  approvalApprovedBy: Identifier,
+  approvalApprovedAt: Timestamp,
+  approvalHash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+}).check(
+  Schema.makeFilter(workAbandonIsRecordable, { expected: "a bounded single-line activity summary" })
+)
+export type WorkGoalAbandonment = typeof WorkGoalAbandonment.Type
+
+/** Durable result of one abandonment: its checkpoint, identified by the approval job id. */
+export const WorkGoalAbandoned = Schema.Struct({
+  abandonment: WorkGoalAbandonment,
+  checkpoint: WorkGoalCheckpoint
+}).check(
+  Schema.makeFilter(
+    ({ abandonment, checkpoint }) =>
+      checkpoint.eventId === abandonment.approvalJobId &&
+      checkpoint.goal.id === abandonment.goalId &&
+      checkpoint.goal.state === "abandoned" &&
+      Equal.equals(checkpoint.goal.owner, abandonment.owner),
+    { expected: "an abandoned checkpoint for the approved goal and owner" }
+  )
+)
+export interface WorkGoalAbandoned extends Schema.Schema.Type<typeof WorkGoalAbandoned> {}
+
 export const WorkGoalReassignment = Schema.Struct({
   ...WorkReassign.fields,
   approvalJobId: Identifier,

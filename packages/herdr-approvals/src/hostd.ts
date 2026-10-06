@@ -8,6 +8,7 @@ import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-j
 import { makeHostOperations } from "./operations.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
+export { runWorkAbandon } from "./work-abandon.js"
 export { runWorkReassign } from "./work-reassign.js"
 
 export type HostdLifetimeFork = <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<void>

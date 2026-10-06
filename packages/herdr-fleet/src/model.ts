@@ -310,8 +310,48 @@ export const WorkReassign = Schema.Struct({
 )
 export type WorkReassign = typeof WorkReassign.Type
 
+/** Activity text the Work store records for an approved abandonment. */
+export const workAbandonActivitySummary = (
+  payload: { readonly reason: string },
+  approvalJobId: string,
+  approvalHash: string
+): string => `Abandoned: ${payload.reason} (approved Fleet job ${approvalJobId}, hash ${approvalHash})`
+
+/**
+ * Accepts an abandonment only when its longest possible activity summary fits
+ * Work's durable limits, so nothing approved can fail to record for size or
+ * control characters.
+ */
+export const workAbandonIsRecordable = (payload: Parameters<typeof workAbandonActivitySummary>[0]): boolean => {
+  const summary = workAbandonActivitySummary(payload, "j".repeat(256), "0".repeat(64))
+  return summary.length <= workReassignActivityMaxLength && workReassignActivityText.test(summary)
+}
+
+/**
+ * Approval-bound move of one Work goal, owned by exactly `owner` and at the
+ * exact head the approver saw, to `abandoned`. A goal with an active lane, or
+ * already finished, is refused: releasing a lane is its own approved action.
+ */
+export const WorkAbandon = Schema.Struct({
+  kind: Schema.Literal("work.abandon"),
+  goalId: WorkAdmit.fields.goalId,
+  owner: WorkAdmit.fields.owner,
+  reason: WorkReassign.fields.reason,
+  expectedGoalEventId: WorkRecover.fields.expectedGoalEventId,
+  expectedGoalUpdatedAt: WorkRecover.fields.expectedGoalUpdatedAt
+}).check(
+  Schema.makeFilter(workAbandonIsRecordable, { expected: "a bounded single-line activity summary" })
+)
+export type WorkAbandon = typeof WorkAbandon.Type
+
 /** Fleet job kinds that change Work authority; only a composed Work adapter executes them. */
-export const WorkJobKind = Schema.Literals(["work.reconcile", "work.admit", "work.recover", "work.reassign"])
+export const WorkJobKind = Schema.Literals([
+  "work.reconcile",
+  "work.admit",
+  "work.recover",
+  "work.reassign",
+  "work.abandon"
+])
 export type WorkJobKind = typeof WorkJobKind.Type
 export const isWorkJobKind = Schema.is(WorkJobKind)
 
@@ -325,7 +365,8 @@ export const CoreJobPayload = Schema.Union([
   WorkReconcile,
   WorkAdmit,
   WorkRecover,
-  WorkReassign
+  WorkReassign,
+  WorkAbandon
 ])
 export type CoreJobPayload = typeof CoreJobPayload.Type
 
@@ -642,6 +683,7 @@ export const requiresApproval = (payload: JobPayload): boolean =>
   payload.kind === "work.admit" ||
   payload.kind === "work.recover" ||
   payload.kind === "work.reassign" ||
+  payload.kind === "work.abandon" ||
   (payload.kind === "agent.delegate" && payload.mode === "work")
 
 /**
