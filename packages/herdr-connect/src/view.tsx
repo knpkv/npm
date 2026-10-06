@@ -422,6 +422,8 @@ type TerminalKeyRailProps = {
   readonly onSelectText?: () => void
   /** Return to the newest output; always offered because the client may not know it is behind. */
   readonly onJumpToLatest?: () => void
+  /** Lines this client knows it scrolled back; above 0 the rail says so beside Latest. */
+  readonly linesBack?: number
 }
 
 const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
@@ -430,6 +432,7 @@ const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctr
 export const TerminalKeyRail = ({
   disabled = false,
   error = null,
+  linesBack = 0,
   modifier,
   onFocusTerminal,
   onJumpToLatest,
@@ -534,10 +537,20 @@ export const TerminalKeyRail = ({
         </div>
         {viewActions.length === 0 ? null : (
           <div aria-label="Terminal view" className="terminal-key-group terminal-key-group-pinned" role="group">
+            {linesBack > 0 ? (
+              <span
+                aria-label={`Older output, ${linesBack} ${linesBack === 1 ? "line" : "lines"} back`}
+                className="terminal-older-output"
+                role="status"
+              >
+                <span aria-hidden="true">{`${linesBack} ${linesBack === 1 ? "line" : "lines"} back`}</span>
+              </span>
+            ) : null}
             {viewActions.map((action, index) => (
               <button
                 aria-label={action.ariaLabel}
                 className="terminal-key"
+                data-behind={action.key === "latest" && linesBack > 0 ? "true" : undefined}
                 data-terminal-key={action.key}
                 disabled={disabled}
                 key={action.key}

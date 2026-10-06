@@ -183,11 +183,13 @@ test.describe("touch", () => {
       })
     }
     await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
-    const jump = olderOutput(page).getByRole("button", { name: "Jump to latest output" })
+    const jump = page.getByRole("toolbar", { name: "Terminal keyboard controls" })
+      .getByRole("button", { name: "Jump to latest output" })
     await expect(jump).toBeVisible()
     await page.waitForTimeout(200)
+    await expect(olderOutput(page)).toBeVisible()
     await jump.tap()
-    await expect(jump).toHaveCount(0)
+    await expect(olderOutput(page)).toHaveCount(0)
     await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith("300 "))).toBe(true)
     // Once a page down changes nothing, the jump stops sending.
     const settled = (await commands(page)).length
@@ -237,3 +239,29 @@ test.describe("touch", () => {
     await expect(layer).toHaveCount(0)
   })
 })
+
+// The rail must never cut a key or hide one off to the side on a phone.
+for (const width of [320, 390]) {
+  test(`every rail key is whole and inside the bar at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 844 })
+    await open(page)
+    const rail = page.getByRole("toolbar", { name: "Terminal keyboard controls" })
+    const bar = await rail.boundingBox()
+    if (bar === null) throw new Error("rail missing")
+    const keys = await rail.getByRole("button").all()
+    expect(keys.length).toBeGreaterThanOrEqual(10)
+    for (const key of keys) {
+      const box = await key.boundingBox()
+      if (box === null) throw new Error("key missing")
+      expect(box.x).toBeGreaterThanOrEqual(bar.x)
+      expect(box.x + box.width).toBeLessThanOrEqual(bar.x + bar.width + 0.5)
+      expect(box.height).toBeGreaterThanOrEqual(32)
+    }
+    expect(
+      await rail.evaluate((element) => {
+        const scroller = element.querySelector(".terminal-key-scroll")
+        return scroller === null ? 0 : scroller.scrollWidth - scroller.clientWidth
+      })
+    ).toBeLessThanOrEqual(0)
+  })
+}

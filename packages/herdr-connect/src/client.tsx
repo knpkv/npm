@@ -26,7 +26,7 @@ import {
   type TerminalInteraction,
   type TerminalInteractionView
 } from "./terminal-interaction.js"
-import { JumpToLatest, TerminalTextLayer } from "./terminal-overlays.js"
+import { TerminalTextLayer } from "./terminal-overlays.js"
 import {
   makeTerminalInputHandler,
   makeTerminalOutputBoundary,
@@ -1066,6 +1066,7 @@ export const ConnectSurface = ({
         onModifierChange={changeTerminalModifier}
         onSelectText={() => terminalInteractionRef.current?.selectText()}
         onJumpToLatest={() => terminalInteractionRef.current?.jumpToLatest()}
+        linesBack={terminalLinesBack}
       />
       <div className="terminal-viewport-stage">
         <div
@@ -1073,9 +1074,7 @@ export const ConnectSurface = ({
           className="ghostty-terminal"
           ref={terminalRef}
         />
-        {terminalTextLines === null ? (
-          <JumpToLatest linesBack={terminalLinesBack} onJump={() => terminalInteractionRef.current?.jumpToLatest()} />
-        ) : (
+        {terminalTextLines === null ? null : (
           <TerminalTextLayer
             lines={terminalTextLines}
             onCopy={copyTerminalText}
