@@ -110,6 +110,17 @@ describe("workTriage summary", () => {
     expect(workTriageGroupTitle.done).toBe("Done in the last 24 hours")
   })
 
+  it("speaks of a historical window in the past tense", () => {
+    expect(workTriageSentence({ _tag: "Attention", blocked: 2, needsYou: 3, oldestRequest: null }, "past")).toBe(
+      "3 goals needed you, 2 blocked"
+    )
+    expect(workTriageSentence({ _tag: "Attention", blocked: 1, needsYou: 0, oldestRequest: null }, "past")).toBe(
+      "Nothing needed you, 1 blocked"
+    )
+    expect(workTriageSentence({ _tag: "Clear", latest: null, moving: 0 }, "past")).toBe("Nothing needed you")
+    expect(workTriageSentence({ _tag: "Empty" }, "past")).toBe("No goals")
+  })
+
   it("leaves the blocked count out when nothing is blocked", () => {
     expect(workTriageSentence({ _tag: "Attention", blocked: 0, needsYou: 2, oldestRequest: null })).toBe(
       "2 goals need you"

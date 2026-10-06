@@ -51,3 +51,27 @@ test("an 800px window wraps the status filters without horizontal overflow", asy
   await expect(page.getByRole("group", { name: "Filter goals by status" })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(800)
 })
+
+for (const viewport of iPhoneViewports) {
+  test(`${viewport.width}x${viewport.height} wraps an unbroken branch inside the page`, async ({ page }) => {
+    await page.setViewportSize(viewport)
+    const widths = async () =>
+      page.evaluate(() => ({
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth
+      }))
+
+    await page.goto("/test/browser/fixture.html?long")
+    await expect(page.getByText("feat/implementWorkCheckpointRecoveryAndReconciliation").first()).toBeVisible()
+    const board = await widths()
+    expect(board.scrollWidth).toBeLessThanOrEqual(board.clientWidth)
+
+    await page.goto("/test/browser/fixture.html?long&goal=goal-2")
+    await expect(
+      page.getByRole("region", { name: "Work checkpoint recovery and reconciliation for the fleet coordinator" })
+    )
+      .toBeVisible()
+    const detail = await widths()
+    expect(detail.scrollWidth).toBeLessThanOrEqual(detail.clientWidth)
+  })
+}

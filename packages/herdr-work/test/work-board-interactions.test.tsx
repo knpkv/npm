@@ -63,10 +63,12 @@ const snapshots: WorkSnapshots = {
 const mountBoard = async ({
   boardSnapshots = snapshots,
   initialGoalId,
+  initialWindow,
   navigation
 }: {
   readonly boardSnapshots?: WorkSnapshots
   readonly initialGoalId?: string
+  readonly initialWindow?: WorkSnapshot["window"]
   readonly navigation?: (selection: {
     readonly goalId: string | null
     readonly window: WorkSnapshot["window"]
@@ -77,7 +79,14 @@ const mountBoard = async ({
   const root = createRoot(host)
   roots.push(root)
   await act(async () =>
-    root.render(<WorkBoard initialGoalId={initialGoalId} navigation={navigation} snapshots={boardSnapshots} />)
+    root.render(
+      <WorkBoard
+        initialGoalId={initialGoalId}
+        initialWindow={initialWindow}
+        navigation={navigation}
+        snapshots={boardSnapshots}
+      />
+    )
   )
   return host
 }
@@ -346,5 +355,37 @@ describe("WorkBoard interactions", () => {
     await act(async () => planned.click())
     expect(host.querySelectorAll(".work-board-row")).toHaveLength(0)
     expect(host.textContent).toContain("No goals match this status")
+  })
+})
+
+describe("Work summary per snapshot window", () => {
+  // A request open yesterday and approved since: the Day view is history, not a call to act now.
+  const requested = (state: "open" | "approved"): WorkGoal => ({
+    ...goal(1),
+    blocker: null,
+    requests: [{ approvalTarget: null, id: "request-1", requestedAt: 500, state, summary: "Apply to production" }],
+    state: "working"
+  })
+  const windowed = (window: WorkSnapshot["window"], state: "open" | "approved"): WorkSnapshot => ({
+    asOf: window === "now" ? 2_000 : 1_000,
+    goals: [requested(state)],
+    observedAt: 2_000,
+    window
+  })
+  const summary = (host: HTMLElement): string => host.querySelector("[aria-label='Work summary']")?.textContent ?? ""
+
+  it("says the live window's state in the present and a past window's state as of its time", async () => {
+    const boardSnapshots: WorkSnapshots = {
+      day: windowed("day", "open"),
+      month: windowed("month", "open"),
+      now: windowed("now", "approved"),
+      observedAt: 2_000,
+      week: windowed("week", "open")
+    }
+    const live = await mountBoard({ boardSnapshots })
+    expect(summary(live)).toContain("Nothing needs you")
+    const day = await mountBoard({ boardSnapshots, initialWindow: "day" })
+    expect(summary(day)).toMatch(/^As of .+, 1 goal needed you/)
+    expect(summary(day)).not.toContain("needs you")
   })
 })

@@ -20,7 +20,8 @@ import {
   workTriage,
   workTriageGroups,
   workTriageGroupTitle,
-  workTriageSentence
+  workTriageSentence,
+  type WorkTriageTense
 } from "./work-triage.js"
 
 const windows: ReadonlyArray<WorkSnapshotWindow> = ["now", "day", "week", "month"]
@@ -165,12 +166,12 @@ const rowCaption = (goal: WorkGoal): WorkRowCaption => {
 }
 
 /** The caption under the hero: the request waiting longest, or the latest change. */
-const summaryCaption = (summary: WorkTriageSummary): string | undefined => {
+const summaryCaption = (summary: WorkTriageSummary, tense: WorkTriageTense): string | undefined => {
   switch (summary._tag) {
     case "Attention":
       return summary.oldestRequest === null
         ? undefined
-        : `Waiting longest: ${summary.oldestRequest.request.summary} on ${summary.oldestRequest.goal.title}, requested ${formatTimestamp(summary.oldestRequest.request.requestedAt)}.`
+        : `${tense === "present" ? "Waiting longest" : "Waiting longest then"}: ${summary.oldestRequest.request.summary} on ${summary.oldestRequest.goal.title}, requested ${formatTimestamp(summary.oldestRequest.request.requestedAt)}.`
     case "Clear":
       return summary.latest === null
         ? undefined
@@ -192,6 +193,14 @@ const GoalDetail = ({
 }): ReactElement => {
   const family = familyForGoal(snapshot, goal.id)
   const activity = activityFor(goal).toSorted((a, b) => b.occurredAt - a.occurredAt)
+  // A goal-level approval target (older checkpoints carry one without requests); skipped when a
+  // request already links the same approval.
+  const goalApproval =
+    goal.approvalTarget === undefined ||
+    goal.approvalTarget === null ||
+    requestsFor(goal).some(({ approvalTarget }) => approvalTarget?.url === goal.approvalTarget?.url)
+      ? null
+      : goal.approvalTarget
   return (
     <div className="work-detail">
       <Text tone="secondary">{goal.detail}</Text>
@@ -352,6 +361,13 @@ const GoalDetail = ({
             Open the agent in Connect
           </a>
         )}
+        {goalApproval === null ? null : externalLinks === "disabled" ? (
+          <Text tone="secondary" variant="meta">
+            Approval target recorded on {goalApproval.host}.
+          </Text>
+        ) : (
+          exactLink(goalApproval, `Open ${goalApproval.host} approval`)
+        )}
       </div>
     </div>
   )
@@ -421,6 +437,13 @@ export const WorkBoard = ({
   const selectedLinkRowRef = useRef<HTMLAnchorElement | null>(null)
   const selectedRowRef = useRef<HTMLButtonElement | null>(null)
   const triage = workTriage(snapshot)
+  // A historical window is the state as of its time; say so, never in the present tense.
+  const tense: WorkTriageTense = window === "now" ? "present" : "past"
+  const sentence = workTriageSentence(triage.summary, tense)
+  const heroFact =
+    tense === "present"
+      ? sentence
+      : `As of ${formatTimestamp(snapshot.asOf)}, ${sentence.charAt(0).toLowerCase()}${sentence.slice(1)}`
   const groupById = new Map(triage.rows.map((row) => [row.goal.id, row.group]))
   const ordered = triage.rows.map((row) => row.goal)
   const filteredGoals = statusFilter === "all" ? ordered : ordered.filter(({ state }) => state === statusFilter)
@@ -619,7 +642,7 @@ export const WorkBoard = ({
           {window === "now" ? "Live" : windowLabel[window]}, as of {formatTimestamp(snapshot.asOf)}
         </Text>
       </header>
-      <Hero caption={summaryCaption(triage.summary)} fact={workTriageSentence(triage.summary)} label="Work summary" />
+      <Hero caption={summaryCaption(triage.summary, tense)} fact={heroFact} label="Work summary" />
       {timeTravel}
       {snapshot.goals.length === 0 ? (
         <Region title="Goals">

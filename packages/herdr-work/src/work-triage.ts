@@ -10,7 +10,7 @@
  * within 24 hours of the snapshot, labelled as such, never as "since you looked"; older terminal
  * goals stay listed last, as "Finished earlier", so a status filter still finds them.
  */
-import type { WorkGoal, WorkRequest, WorkSnapshot } from "./model.js"
+import type { WorkGoal, WorkRequest, WorkSnapshot, WorkState } from "./model.js"
 
 const DAY_MS = 86_400_000
 
@@ -48,11 +48,26 @@ export interface WorkTriage {
   readonly summary: WorkTriageSummary
 }
 
-const terminal = (goal: WorkGoal): boolean => goal.state === "completed" || goal.state === "deployed"
+/** Which states have finished. Keyed by every WorkState, so a new state must be placed here to compile. */
+const terminalState = {
+  planned: false,
+  working: false,
+  blocked: false,
+  review: false,
+  deployed: true,
+  completed: true
+} satisfies Readonly<Record<WorkState, boolean>>
+
+const terminal = (goal: WorkGoal): boolean => terminalState[goal.state]
 
 const openRequestsOf = (goal: WorkGoal): ReadonlyArray<WorkRequest> =>
   (goal.requests ?? []).filter((request) => request.state === "open").toSorted((a, b) => a.requestedAt - b.requestedAt)
 
+/**
+ * One group per goal, first match wins. An open request outranks every state, so a blocked goal
+ * with an open request is in "needs you" and not in the blocked count. A request without an
+ * approval target still counts: a person must act, even when the hub link is missing.
+ */
 const groupOf = (goal: WorkGoal, openRequests: ReadonlyArray<WorkRequest>, asOf: number): WorkTriageGroup => {
   if (openRequests.length > 0) return "needs-you"
   if (goal.state === "blocked") return "blocked"
@@ -81,7 +96,11 @@ const compareRows = (left: WorkTriageRow, right: WorkTriageRow): number => {
   return left.index - right.index
 }
 
-/** Sorts one snapshot's goals into the triage groups and states the summary. */
+/**
+ * Sorts one snapshot's goals into the triage groups and states the summary. The snapshot holds
+ * every goal (the model rejects a snapshot over `workSnapshotMaxGoals` rather than truncating it),
+ * so a zero here is a real zero.
+ */
 export const workTriage = (snapshot: Pick<WorkSnapshot, "asOf" | "goals">): WorkTriage => {
   const rows = snapshot.goals
     .map((goal, index): WorkTriageRow => {
@@ -111,18 +130,30 @@ export const workTriage = (snapshot: Pick<WorkSnapshot, "asOf" | "goals">): Work
 
 const plural = (count: number, one: string, many: string): string => `${count} ${count === 1 ? one : many}`
 
-/** The summary as its one sentence: "3 goals need you, 2 blocked", "Nothing needs you", "No goals yet". */
-export const workTriageSentence = (summary: WorkTriageSummary): string => {
+/**
+ * `present` for the live snapshot; `past` for a historical window, which is the state as of its
+ * time, not now: requests answered since still count there, and newer ones are missing.
+ */
+export type WorkTriageTense = "present" | "past"
+
+/**
+ * The summary as its one sentence: "3 goals need you, 2 blocked", "Nothing needs you", "No goals
+ * yet"; in the past tense "3 goals needed you, 2 blocked", "Nothing needed you", "No goals".
+ */
+export const workTriageSentence = (summary: WorkTriageSummary, tense: WorkTriageTense = "present"): string => {
+  const [one, many, nothing] = tense === "present"
+    ? ["goal needs", "goals need", "Nothing needs you"]
+    : ["goal needed", "goals needed", "Nothing needed you"]
   switch (summary._tag) {
     case "Attention":
-      if (summary.needsYou === 0) return `Nothing needs you, ${summary.blocked} blocked`
+      if (summary.needsYou === 0) return `${nothing}, ${summary.blocked} blocked`
       return summary.blocked === 0
-        ? `${plural(summary.needsYou, "goal needs", "goals need")} you`
-        : `${plural(summary.needsYou, "goal needs", "goals need")} you, ${summary.blocked} blocked`
+        ? `${plural(summary.needsYou, one, many)} you`
+        : `${plural(summary.needsYou, one, many)} you, ${summary.blocked} blocked`
     case "Clear":
-      return "Nothing needs you"
+      return nothing
     case "Empty":
-      return "No goals yet"
+      return tense === "present" ? "No goals yet" : "No goals"
   }
 }
 

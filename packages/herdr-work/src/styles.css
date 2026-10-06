@@ -127,6 +127,27 @@
     outline-offset: -1px;
   }
 
+  /* Long unbroken values (branch names, titles) wrap inside their column. The grids below bound
+     their single track to the container (minmax(0, 1fr)) so an unbroken word cannot size it. */
+  .work-page,
+  .work-group,
+  .work-rows,
+  .work-row-title,
+  .work-facts,
+  .work-detail,
+  .work-detail-section,
+  .work-detail-list > li {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .work-row-title,
+  .work-row-meta,
+  .work-row-caption,
+  .work-facts dd,
+  .work-detail-list > li {
+    overflow-wrap: break-word;
+  }
+
   .work-row-title {
     display: grid;
     gap: var(--rly-space-2);
