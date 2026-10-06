@@ -211,8 +211,10 @@ export const statsSyncAtom = ApiClient.mutation("stats", "sync")
 // FTS search
 export const searchPrsAtom = ApiClient.mutation("prs", "search")
 
-// Refresh single PR
-export const refreshSinglePrAtom = ApiClient.mutation("prs", "refreshSingle")
+// Refresh single PR: one mutation per pull-request route key, because a mutation interrupts its own
+// pending call. With one shared mutation, refreshing PR B would cancel PR A's refresh and hand A B's
+// result; per key, different pull requests never interfere.
+export const refreshSinglePrAtom = Atom.family((_routeKey: string) => ApiClient.mutation("prs", "refreshSingle"))
 
 // Approval rule CRUD
 export const createApprovalRuleAtom = ApiClient.mutation("prs", "createApprovalRule")

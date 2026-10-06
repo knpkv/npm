@@ -890,9 +890,19 @@ export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
   const [searchParams] = useSearchParams()
   const state = useAtomValue(appStateAtom)
-  const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom, { mode: "promise" })
+  // The pull request as the route names it: these never change while the page shows it, unlike the
+  // account id and coordinates the loaded PR supplies later.
+  const refreshKey = pullRequestRefreshKey(
+    accountId,
+    prId ?? "",
+    searchParams.get("repository") ?? undefined,
+    searchParams.get("region") ?? undefined
+  )
+  const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom(refreshKey), { mode: "promise" })
   // One refresh per pull request at a time: overlapping triggers share it instead of cancelling it.
-  const shareRefresh = useMemo(() => makeInFlight<Awaited<ReturnType<typeof refreshSingleWithResult>>>(), [])
+  // Scoped to the route: leaving a pull request abandons its refresh, which then never settles, so a
+  // later visit must start from a fresh map rather than wait on it.
+  const shareRefresh = useMemo(() => makeInFlight<Awaited<ReturnType<typeof refreshSingleWithResult>>>(), [refreshKey])
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
@@ -909,19 +919,19 @@ export function PRDetail() {
   const refreshRepositoryName = pr === null ? (searchParams.get("repository") ?? undefined) : String(pr.repositoryName)
   const refreshRegion = pr === null ? (searchParams.get("region") ?? undefined) : String(pr.account.region)
   const requestRefresh = useCallback(
-    (accountId: string, id: string) =>
-      // Keyed by the route's account, which stays the same while the loaded PR's account id replaces it,
-      // so the mount refresh and a later click share one request, and another account's PR never does.
-      shareRefresh(pullRequestRefreshKey(accountId, id, refreshRepositoryName, refreshRegion), () =>
+    (requestAccountId: string, id: string) =>
+      // Keyed by the route, so the mount refresh and a later click share one request even after the
+      // loaded PR replaces the account id and coordinates the request uses.
+      shareRefresh(refreshKey, () =>
         refreshSingleWithResult({
-          params: { awsAccountId: accountId, prId: PullRequestId.make(id) },
+          params: { awsAccountId: requestAccountId, prId: PullRequestId.make(id) },
           query:
             refreshRepositoryName !== undefined && refreshRegion !== undefined
               ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
               : {}
         })
       ),
-    [accountId, refreshRegion, refreshRepositoryName, refreshSingleWithResult, shareRefresh]
+    [refreshKey, refreshRegion, refreshRepositoryName, refreshSingleWithResult, shareRefresh]
   )
 
   // Collect ALL known users from all PRs (authors, approvers, commenters, pool members)

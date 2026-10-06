@@ -3,7 +3,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, FileSystem, Layer, Option } from "effect"
-import { DatabaseLive } from "../src/CacheService/Database.js"
 import { PullRequestRepo, type UpsertInput } from "../src/CacheService/repos/PullRequestRepo/index.js"
 
 /**
@@ -46,9 +45,10 @@ describe("PullRequestRepo.upsert approval rules", () => {
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-upsert-rules-" })
-      const services = Layer.mergeAll(PullRequestRepo.Default, DatabaseLive).pipe(
-        Layer.provideMerge(NodeServices.layer),
-        Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: root } })))
+      // The production graph: the repository brings its own database layer.
+      const services = PullRequestRepo.Default.pipe(
+        Layer.provide(NodeServices.layer),
+        Layer.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: root } })))
       )
       yield* Effect.gen(function*() {
         const repo = yield* PullRequestRepo
