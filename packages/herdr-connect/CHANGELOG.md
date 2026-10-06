@@ -1,5 +1,13 @@
 # @knpkv/herdr-connect
 
+## 0.4.4
+
+### Patch Changes
+
+- Updated dependencies [[`487f2ba`](https://github.com/knpkv/npm/commit/487f2ba4fdb585f0cd0b2ab96fd4eeedce9da10d), [`8363bd4`](https://github.com/knpkv/npm/commit/8363bd4dd5fc6df3b15ae70132c080bd52d19a0f)]:
+  - @knpkv/rly@0.8.0
+  - @knpkv/herdr-work@0.5.3
+
 ## 0.4.3
 
 ### Patch Changes
