@@ -221,6 +221,22 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
     ).pipe(provideNodeServices)
   })
 
+  it.effect("passes the apply command the ref and then the job id", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-apply-arguments-test-"))
+    return Effect.gen(function*() {
+      const operations = yield* makeHostOperations({
+        ...config(root, ["true"]),
+        applyCommand: ["sh", "-c", "printf '%s %s' \"$1\" \"$2\"", "apply"]
+      })
+      expect(
+        yield* operations.run({ kind: "nix.apply", ref: "a".repeat(40) }, () => Effect.void, "job-7")
+      ).toBe(`${"a".repeat(40)} job-7`)
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("preserves bounded output and rejects the first byte over the cap", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-command-output-test-"))
     return Effect.gen(function*() {
