@@ -1,0 +1,46 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-static-playwright-artifact-path
+language: tsx
+severity: error
+message: "Write Playwright artifacts under testInfo.outputPath(...), not a fixed test-results path"
+rule:
+  kind: pair
+  has:
+    field: key
+    regex: "^path$"
+  # Only a Playwright artifact call: `x.screenshot({ path })`, `testInfo.attach(name, { path })`.
+  inside:
+    kind: object
+    inside:
+      kind: arguments
+      inside:
+        kind: call_expression
+        has:
+          field: function
+          regex: "\\.(screenshot|attach)$"
+  all:
+    - has:
+        field: value
+        any:
+          - kind: string
+          - kind: template_string
+        regex: "^[\"'`](\\./)?test-results/"
+
+files:
+  - "packages/*/e2e/**/*.ts"
+  - "packages/*/e2e/**/*.tsx"
+  - "packages/*/visual/**/*.ts"
+  - "packages/*/visual/**/*.tsx"
+  - "packages/*/test/browser/**/*.ts"
+  - "packages/*/test/browser/**/*.tsx"
+
+note: |
+  A fixed `test-results/...` path is shared by every run of the suite and is
+  not cleaned with Playwright's `outputDir`, so concurrent runs overwrite each
+  other's file and a stale file from an earlier run survives. Use
+  `testInfo.outputPath("name.png")`, which writes under the run's `outputDir`.
+  That keeps artifacts per run only when the config's `outputDir` is per run
+  (see `playwright-ports.ts`); a fixed `outputDir` is the config's to fix. For a
+  deliberately shared golden file, suppress with
+  `// ast-grep-ignore: no-static-playwright-artifact-path` and a reason.

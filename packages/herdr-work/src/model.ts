@@ -729,6 +729,177 @@ export const WorkDispatchHandoff = Schema.Struct({
 )
 export interface WorkDispatchHandoff extends Schema.Schema.Type<typeof WorkDispatchHandoff> {}
 
+/**
+ * The key one subject's facts and failures are stored under, such as
+ * `github:<owner>/<repo>#<n>` or `herdr:<host>/<agentId>`. Composite, so it is
+ * bounded on its own rather than by `Identifier`.
+ */
+export const WorkObservationSubject = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(1_024),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
+)
+
+/**
+ * A branch name as a provider reported it. Looser than the lane `Branch`
+ * authority type: any one-line name a provider accepts (`renovate/@types-x`).
+ */
+const ObservedBranch = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
+)
+
+/** Why a source could not be read: one bounded line, so failures stay small in every snapshot. */
+const FailureReason = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(512),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
+)
+
+/** CI status of a pull request's head, rolled up from its check runs and statuses. */
+export const WorkObservedChecks = Schema.Literals(["none", "pending", "passing", "failing"])
+export type WorkObservedChecks = typeof WorkObservedChecks.Type
+
+/** A pull request as GitHub reported it. Facts only; never approval to act on it. */
+export const WorkPullRequestObservation = Schema.TaggedStruct("pull_request", {
+  repository: RepositoryName,
+  pullRequest: PullRequestNumber,
+  state: Schema.Literals(["open", "merged", "closed"]),
+  branch: ObservedBranch,
+  head: ExactHead,
+  review: WorkReviewState,
+  checks: WorkObservedChecks,
+  /** GitHub's mergedAt or closedAt; null while open. A terminal checkpoint is stamped with it, never the wall clock. */
+  closedAt: Schema.NullOr(Timestamp)
+}).check(Schema.makeFilter(
+  ({ closedAt, state }) => (state === "open") === (closedAt === null),
+  { expected: "a close time exactly when the pull request is merged or closed" }
+))
+export interface WorkPullRequestObservation extends Schema.Schema.Type<typeof WorkPullRequestObservation> {}
+
+/** An agent pane as Herdr reported it; `gone` means the pane is no longer in the host's snapshot. */
+export const WorkAgentObservation = Schema.TaggedStruct("agent", {
+  host: ApprovalHostName,
+  agentId: Identifier,
+  status: Schema.Literals(["idle", "working", "blocked", "done", "gone"])
+})
+export interface WorkAgentObservation extends Schema.Schema.Type<typeof WorkAgentObservation> {}
+
+/** A source that could not be read. It is reported, never turned into a fact about a goal. */
+export const WorkUnknownObservation = Schema.TaggedStruct("unknown", {
+  source: Schema.Literals(["github", "herdr", "git"]),
+  subject: WorkObservationSubject,
+  reason: FailureReason
+})
+export interface WorkUnknownObservation extends Schema.Schema.Type<typeof WorkUnknownObservation> {}
+
+export const WorkObservation = Schema.Union([
+  WorkPullRequestObservation,
+  WorkAgentObservation,
+  WorkUnknownObservation
+])
+export type WorkObservation = typeof WorkObservation.Type
+
+/** One observation and when it was made. Observing the same facts again is a no-op. */
+export const WorkObservationEnvelope = Schema.Struct({
+  observation: WorkObservation,
+  observedAt: Timestamp
+})
+export interface WorkObservationEnvelope extends Schema.Schema.Type<typeof WorkObservationEnvelope> {}
+
+/**
+ * The latest stored fact for one subject. `observedAt` is when these exact
+ * facts were first seen, so for a `gone` agent it is the time it went away;
+ * `confirmedAt` is the last time a read returned them again.
+ */
+export const WorkObservedFact = Schema.Struct({
+  subject: WorkObservationSubject,
+  observationId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  observedAt: Timestamp,
+  confirmedAt: Timestamp,
+  observation: Schema.Union([WorkPullRequestObservation, WorkAgentObservation])
+}).check(Schema.makeFilter(
+  ({ confirmedAt, observedAt }) => confirmedAt >= observedAt,
+  { expected: "a confirmation no earlier than the first observation" }
+))
+export interface WorkObservedFact extends Schema.Schema.Type<typeof WorkObservedFact> {}
+
+/**
+ * The current run of failed reads for one subject. `since` is the first
+ * failure of the run; a later failure keeps it, a good read newer than every
+ * failure ends the run, and a good read inside it restarts the run at its
+ * latest failure.
+ */
+export const WorkObservedFailure = Schema.Struct({
+  subject: WorkObservationSubject,
+  source: WorkUnknownObservation.fields.source,
+  reason: FailureReason,
+  since: Timestamp,
+  /** The latest failed read of the run; `source` and `reason` are from it. */
+  lastAt: Timestamp
+}).check(Schema.makeFilter(
+  ({ lastAt, since }) => lastAt >= since,
+  { expected: "a latest failed read no earlier than the run's first" }
+))
+export interface WorkObservedFailure extends Schema.Schema.Type<typeof WorkObservedFailure> {}
+
+/** The overlay keeps one latest fact per subject, within its own bounds; over them, the oldest facts go first. */
+/** How far ahead of the store's clock an observation may be stamped before it is skipped as stale. */
+export const workObservationMaxSkewMillis = 5 * 60 * 1_000
+
+export const workObservedFactMaxRecords = 4_096
+export const workObservedFactMaxBytes = 2 * 1024 * 1024
+
+/**
+ * What `observe` did with one envelope: stored a new fact, found the same
+ * facts already stored, skipped it as older than the stored fact, or reported
+ * a source it could not read.
+ */
+export const WorkObserveOutcome = Schema.TaggedUnion({
+  stored: { subject: WorkObservationSubject },
+  unchanged: { subject: WorkObservationSubject },
+  stale: { subject: WorkObservationSubject },
+  unknown: { subject: WorkObservationSubject, reason: FailureReason }
+})
+export type WorkObserveOutcome = typeof WorkObserveOutcome.Type
+
+export const WorkObserveReport = Schema.Struct({
+  outcomes: Schema.Array(WorkObserveOutcome),
+  evicted: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+})
+export interface WorkObserveReport extends Schema.Schema.Type<typeof WorkObserveReport> {}
+
+/** What the Work tab shows for a goal: its recorded state, or a newer observed one. */
+export const WorkDisplayState = Schema.Literals([...WorkState.literals, "abandoned"])
+export type WorkDisplayState = typeof WorkDisplayState.Type
+
+/** Observed facts overlaid on one goal at read time. Nothing here is goal history. */
+export const WorkGoalObserved = Schema.Struct({
+  pullRequest: Schema.NullOr(
+    Schema.Struct({ fact: WorkPullRequestObservation, observedAt: Timestamp, confirmedAt: Timestamp })
+  ),
+  agent: Schema.NullOr(Schema.Struct({ fact: WorkAgentObservation, observedAt: Timestamp, confirmedAt: Timestamp })),
+  /**
+   * A source that can't currently be read for this goal; the oldest failing
+   * run when both its pull request and its agent fail. `lastGoodAt` is when
+   * that subject last read successfully, null if it never has. A goal with no
+   * pull request URL or no agent has no subject there, so no failure either.
+   */
+  unknown: Schema.NullOr(Schema.Struct({
+    source: WorkUnknownObservation.fields.source,
+    reason: FailureReason,
+    since: Timestamp,
+    lastGoodAt: Schema.NullOr(Timestamp)
+  })),
+  displayState: WorkDisplayState,
+  stale: Schema.Boolean
+})
+export interface WorkGoalObserved extends Schema.Schema.Type<typeof WorkGoalObserved> {}
+
+export const WorkGoalObservedEntry = Schema.Struct({ goalId: WorkGoalId, ...WorkGoalObserved.fields })
+export interface WorkGoalObservedEntry extends Schema.Schema.Type<typeof WorkGoalObservedEntry> {}
+
 export const WorkSnapshotWindow = Schema.Literals(["now", "day", "week", "month"])
 export type WorkSnapshotWindow = typeof WorkSnapshotWindow.Type
 
@@ -737,7 +908,19 @@ export const WorkSnapshot = Schema.Struct({
   observedAt: Timestamp,
   asOf: Timestamp,
   goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals)),
-  families: Schema.optionalKey(Schema.Array(WorkGoalFamilyGroup).check(Schema.isMaxLength(workSnapshotMaxGoals)))
+  families: Schema.optionalKey(Schema.Array(WorkGoalFamilyGroup).check(Schema.isMaxLength(workSnapshotMaxGoals))),
+  /**
+   * Observed facts per goal, merged at read time; only the `now` window
+   * carries them, and only for goals something was observed about.
+   */
+  observed: Schema.optionalKey(
+    Schema.Array(WorkGoalObservedEntry).check(Schema.isMaxLength(workSnapshotMaxGoals))
+  ),
+  /**
+   * How many goals' observed entries were left out to keep the snapshot within
+   * the response budget; the most recently updated goals keep theirs.
+   */
+  observedOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)))
 }).check(
   Schema.makeFilter(
     (snapshot) => {
@@ -782,5 +965,13 @@ export const WorkSnapshots = Schema.Struct({
   day: WorkSnapshot,
   week: WorkSnapshot,
   month: WorkSnapshot
-})
+}).check(Schema.makeFilter(
+  ({ day, month, now, week }) =>
+    [day, week, month].every((window) => window.observed === undefined && window.observedOmitted === undefined) &&
+    (now.observed === undefined || (
+      new Set(now.observed.map(({ goalId }) => goalId)).size === now.observed.length &&
+      now.observed.every(({ goalId }) => now.goals.some(({ id }) => id === goalId))
+    )),
+  { expected: "observed facts only on the now window, at most one entry per goal in that window" }
+))
 export interface WorkSnapshots extends Schema.Schema.Type<typeof WorkSnapshots> {}

@@ -1,4 +1,12 @@
 import { defineConfig } from "@playwright/test"
+import { join } from "node:path"
+import { keepLastRunAt, playwrightPort, pruneStaleRunDirectories } from "../../playwright-ports.ts"
+
+// A free port per run, so this suite can run beside another copy of itself.
+const port = await playwrightPort("PLAYWRIGHT_CODECOMMIT_WEB_PORT")
+const origin = `http://127.0.0.1:${port}`
+keepLastRunAt(join(import.meta.dirname, "test-results", "codecommit-web.last-run.json"))
+pruneStaleRunDirectories(join(import.meta.dirname, "test-results"), "codecommit-web-", 24 * 60 * 60 * 1_000, Date.now())
 
 export default defineConfig({
   expect: {
@@ -6,13 +14,14 @@ export default defineConfig({
   },
   forbidOnly: true,
   fullyParallel: false,
-  outputDir: "test-results/codecommit-web",
+  // Per-run, so a concurrent copy never shares trace or screenshot files.
+  outputDir: `test-results/codecommit-web-${port}`,
   reporter: "list",
   retries: 0,
   testDir: "e2e",
   timeout: 20_000,
   use: {
-    baseURL: "http://127.0.0.1:4174",
+    baseURL: origin,
     colorScheme: "light",
     contextOptions: {
       reducedMotion: "reduce"
@@ -22,13 +31,13 @@ export default defineConfig({
     trace: "off"
   },
   webServer: {
-    command: "pnpm exec vite preview --host 127.0.0.1 --port 4174",
+    command: `pnpm exec vite preview --host 127.0.0.1 --port ${port} --strictPort`,
     gracefulShutdown: { signal: "SIGTERM", timeout: 1_000 },
     reuseExistingServer: false,
     stderr: "pipe",
     stdout: "ignore",
     timeout: 30_000,
-    url: "http://127.0.0.1:4174"
+    url: origin
   },
   workers: 1
 })

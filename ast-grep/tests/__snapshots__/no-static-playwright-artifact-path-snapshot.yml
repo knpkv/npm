@@ -1,0 +1,95 @@
+id: no-static-playwright-artifact-path
+snapshots:
+  ? |
+    await page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })
+  : labels:
+      - source: 'path: "test-results/codecommit-web/pr-review-workspace.png"'
+        style: primary
+        start: 40
+        end: 99
+      - source: '"test-results/codecommit-web/pr-review-workspace.png"'
+        style: secondary
+        start: 46
+        end: 99
+      - source: page.screenshot
+        style: secondary
+        start: 6
+        end: 21
+      - source: 'page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })'
+        style: secondary
+        start: 6
+        end: 102
+      - source: '({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })'
+        style: secondary
+        start: 21
+        end: 102
+      - source: '{ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" }'
+        style: secondary
+        start: 22
+        end: 101
+      - source: path
+        style: secondary
+        start: 40
+        end: 44
+  ? |
+    await page.screenshot({ path: `./test-results/${name}.png` })
+  : labels:
+      - source: "path: `./test-results/${name}.png`"
+        style: primary
+        start: 24
+        end: 58
+      - source: "`./test-results/${name}.png`"
+        style: secondary
+        start: 30
+        end: 58
+      - source: page.screenshot
+        style: secondary
+        start: 6
+        end: 21
+      - source: "page.screenshot({ path: `./test-results/${name}.png` })"
+        style: secondary
+        start: 6
+        end: 61
+      - source: "({ path: `./test-results/${name}.png` })"
+        style: secondary
+        start: 21
+        end: 61
+      - source: "{ path: `./test-results/${name}.png` }"
+        style: secondary
+        start: 22
+        end: 60
+      - source: path
+        style: secondary
+        start: 24
+        end: 28
+  ? |
+    await testInfo.attach("trace", { path: "test-results/trace.zip" })
+  : labels:
+      - source: 'path: "test-results/trace.zip"'
+        style: primary
+        start: 33
+        end: 63
+      - source: '"test-results/trace.zip"'
+        style: secondary
+        start: 39
+        end: 63
+      - source: testInfo.attach
+        style: secondary
+        start: 6
+        end: 21
+      - source: 'testInfo.attach("trace", { path: "test-results/trace.zip" })'
+        style: secondary
+        start: 6
+        end: 66
+      - source: '("trace", { path: "test-results/trace.zip" })'
+        style: secondary
+        start: 21
+        end: 66
+      - source: '{ path: "test-results/trace.zip" }'
+        style: secondary
+        start: 31
+        end: 65
+      - source: path
+        style: secondary
+        start: 33
+        end: 37

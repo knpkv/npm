@@ -27,7 +27,16 @@ export const RLY_COLOR_TOKEN_NAMES = tokenNames([
   "service-codepipeline",
   "service-jira",
   "service-confluence",
-  "service-clockify"
+  "service-clockify",
+  "series-1",
+  "series-2",
+  "series-3",
+  "series-4",
+  "series-5",
+  "series-6",
+  "series-7",
+  "series-8",
+  "series-other"
 ])
 export type RlyColorToken = (typeof RLY_COLOR_TOKEN_NAMES)[number]
 

@@ -1,0 +1,25 @@
+@layer rly.components {
+  .root {
+    color: var(--rly-color-text-1);
+    display: flex;
+    flex-wrap: wrap;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-6) var(--rly-space-16);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .item {
+    align-items: center;
+    display: inline-flex;
+    gap: var(--rly-space-6);
+    min-inline-size: 0;
+  }
+  .swatch {
+    block-size: var(--rly-space-12);
+    border-radius: 2px;
+    flex: none;
+    inline-size: var(--rly-space-12);
+  }
+}
