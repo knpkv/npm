@@ -42,6 +42,8 @@ export const ChartLegend = ({ className, items, label, ...props }: ChartLegendPr
       {...props}
       aria-label={requireText(label, "ChartLegend label")}
       className={classNames(style("root"), className)}
+      // Flex styling with no list markers drops list semantics in WebKit, so the role is explicit.
+      role="list"
     >
       {items.map((item) => (
         <li className={style("item")} key={item.id}>

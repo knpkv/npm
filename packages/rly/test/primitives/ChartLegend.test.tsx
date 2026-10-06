@@ -30,6 +30,8 @@ describe("ChartLegend", () => {
       />
     )
     expect(root.tagName).toBe("UL")
+    // Explicit, because WebKit drops the implicit role of a list styled without markers.
+    expect(root.getAttribute("role")).toBe("list")
     expect(root.getAttribute("aria-label")).toBe("Bookings by colour")
     const items = [...root.querySelectorAll("li")]
     expect(items.map((item) => item.textContent)).toEqual(["RLY-142", "RLY-150", "Other (3)"])

@@ -30,7 +30,13 @@ export const TrackKey = ({ className, items, label, ...props }: TrackKeyProps): 
     marks.add(item.mark)
   }
   return (
-    <ul {...props} aria-label={requireText(label, "TrackKey label")} className={classNames(style("root"), className)}>
+    // Flex styling with no list markers drops list semantics in WebKit, so the role is explicit.
+    <ul
+      {...props}
+      aria-label={requireText(label, "TrackKey label")}
+      className={classNames(style("root"), className)}
+      role="list"
+    >
       {items.map((item) => (
         <li className={style("item")} key={item.mark}>
           <span aria-hidden="true" className={style(item.mark)} data-mark={item.mark} />

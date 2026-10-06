@@ -21,15 +21,19 @@ export type RlyLimitTrackTone = "unknown" | "ok" | "near" | "full"
 /** A reading that is not a finite number (for example a failed division) is no reading at all. */
 const readingOf = (value: number | null): number | null => (value !== null && Number.isFinite(value) ? value : null)
 
-/** Tone of a reading in percent against the near mark; 100% and above is full, non-finite is unknown. */
-export const limitTrackTone = (value: number | null, near: number): RlyLimitTrackTone => {
-  const reading = readingOf(value)
-  return reading === null ? "unknown" : reading >= 100 ? "full" : reading >= near ? "near" : "ok"
-}
-
 const requireFinite = (value: number, label: string): number => {
   if (!Number.isFinite(value)) throw new Error(`${label} must be a finite number`)
   return value
+}
+
+/**
+ * Tone of a reading in percent against the near mark; 100% and above is full, a non-finite reading
+ * is unknown, and a non-finite near mark throws, as it does on the component.
+ */
+export const limitTrackTone = (value: number | null, near: number): RlyLimitTrackTone => {
+  const mark = requireFinite(near, "limitTrackTone near")
+  const reading = readingOf(value)
+  return reading === null ? "unknown" : reading >= 100 ? "full" : reading >= mark ? "near" : "ok"
 }
 
 const percent = (value: number): number => Math.min(100, Math.max(0, value))
@@ -108,7 +112,11 @@ export const LimitTrack = ({
           style={{ inlineSize: `${projection.length}%`, insetInlineStart: `${projection.start}%` }}
         />
       )}
-      <span className={style("near")} data-part="near" style={{ insetInlineStart: `${percent(nearMark)}%` }} />
+      <span
+        className={style("near")}
+        data-part="near"
+        style={{ insetInlineStart: `min(${percent(nearMark)}%, 100% - 1px)` }}
+      />
     </span>
   )
 }

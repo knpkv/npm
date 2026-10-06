@@ -23,6 +23,7 @@ describe("TrackKey", () => {
       />
     )
     expect(root.tagName).toBe("UL")
+    expect(root.getAttribute("role")).toBe("list")
     expect(root.getAttribute("aria-label")).toBe("What the track marks mean")
     const items = [...root.querySelectorAll("li")]
     expect(items.map((item) => item.textContent)).toEqual(["80%, near the limit", "Old reading"])

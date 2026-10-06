@@ -30,7 +30,7 @@ describe("LimitTrack", () => {
     const root = render(<LimitTrack value={130} />)
     expect(root.dataset.tone).toBe("full")
     expect(part(root, "fill")?.style.inlineSize).toBe("100%")
-    expect(part(root, "near")?.style.insetInlineStart).toBe("80%")
+    expect(part(root, "near")?.style.insetInlineStart).toBe("min(80%, 100% - 1px)")
     expect(root.getAttribute("aria-hidden")).toBe("true")
     expect(root.className).toContain(RLY_LIMIT_TRACK_VARIANTS.size.default.className)
   })
@@ -85,5 +85,8 @@ describe("LimitTrack", () => {
     expect(part(render(<LimitTrack projected={Number.NaN} value={62} />), "projection")).toBeNull()
     expect(part(render(<LimitTrack projected={Number.POSITIVE_INFINITY} value={62} />), "projection")).toBeNull()
     expect(() => render(<LimitTrack near={Number.NaN} value={62} />)).toThrow("finite")
+    for (const near of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(() => limitTrackTone(62, near)).toThrow("finite")
+    }
   })
 })
