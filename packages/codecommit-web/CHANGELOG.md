@@ -1,5 +1,23 @@
 # @knpkv/codecommit-web
 
+## 0.21.0
+
+### Minor Changes
+
+- [#493](https://github.com/knpkv/npm/pull/493) [`e45eba3`](https://github.com/knpkv/npm/commit/e45eba30991dc662b7a8b09506d2d85b878fec97) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/browser-pairing/owner-session` adds `serveWithBootstrapUrl(server, onReady)`. It runs a server layer, waits until it is listening, hands its bootstrap URL to `onReady`, and keeps serving. A launch that fails before it is listening fails without announcing a URL, and a failing `onReady` stops the server. `agent-usage serve`, `jcf-web` and `codecommit-web` now start their servers through it instead of three copies of that code. `@knpkv/codecommit-web` also exports `serveCodeCommit(options)` (`hostname`, `port`, `onReady`), the start sequence its own entry uses.
+
+### Patch Changes
+
+- [#495](https://github.com/knpkv/npm/pull/495) [`34cfd71`](https://github.com/knpkv/npm/commit/34cfd71a66f76a25313637036e5d5324982ee236) Thanks [@konopkov](https://github.com/konopkov)! - The queue rail stays below the app header at the bottom of a long pull request page; it used to slide under the header by the page's bottom padding.
+
+- [#507](https://github.com/knpkv/npm/pull/507) [`ceb59a9`](https://github.com/knpkv/npm/commit/ceb59a90f535a15c164c7e4e373366ab45acd699) Thanks [@konopkov](https://github.com/konopkov)! - The review queue model takes the caller's per-account identity, ready for the server to publish it: once an account's identity resolves, the caller's ARN decides wildcard role pools exactly, and an approval by another session of the same role no longer counts as yours. Until then nothing changes; every account keeps the user-name rules.
+- Updated dependencies [[`43ab828`](https://github.com/knpkv/npm/commit/43ab8288a02a03924c66b5488d20ac7576e348e1), [`934843b`](https://github.com/knpkv/npm/commit/934843bbcea57cbf3266fce950c020733046cac1), [`148daa6`](https://github.com/knpkv/npm/commit/148daa6be147dca74bc642bd552b603deb760eae), [`4e8f346`](https://github.com/knpkv/npm/commit/4e8f346b926b859ea2b3be07ec7dc6cb77ca8e76), [`e57bb6d`](https://github.com/knpkv/npm/commit/e57bb6db1b393dbff8e116573cf2db23992c1cf4), [`7df3dbb`](https://github.com/knpkv/npm/commit/7df3dbb9875ab31f369351df2de898b36d40e613), [`8924289`](https://github.com/knpkv/npm/commit/89242895271072b83185d6cc02376b2c56830f6a), [`f8d2612`](https://github.com/knpkv/npm/commit/f8d2612e09b20974dd8eccc8ff197bb072c40cbf), [`e45eba3`](https://github.com/knpkv/npm/commit/e45eba30991dc662b7a8b09506d2d85b878fec97)]:
+  - @knpkv/codecommit-core@0.18.0
+  - @knpkv/rly@0.9.0
+  - @knpkv/browser-pairing@0.4.0
+  - @knpkv/relay-product@0.2.3
+  - @knpkv/review@0.3.3
+
 ## 0.20.0
 
 ### Minor Changes

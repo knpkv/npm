@@ -125,6 +125,8 @@ export const jobTitle = (record: Pick<SanitizedJobRecord, "payload">): string =>
       return "Link existing unlinked Work goal"
     case "work.reassign":
       return "Reassign Work goal owner"
+    case "work.abandon":
+      return "Abandon Work goal"
   }
 }
 
@@ -150,6 +152,8 @@ const safeSummary = (record: SanitizedJobRecord): string => {
       return `Linked the existing goal for ${record.payload.repository}#${record.payload.pullRequest}.`
     case "work.reassign":
       return `Reassigned ${record.payload.goalId} from ${record.payload.from.name} to ${record.payload.to.name}.`
+    case "work.abandon":
+      return `Abandon ${record.payload.goalId}: ${record.payload.reason}`
   }
 }
 
@@ -164,7 +168,8 @@ const categoriesFor = (record: SanitizedJobRecord): ReadonlyArray<Exclude<Activi
     record.payload.kind === "work.reconcile" ||
     record.payload.kind === "work.admit" ||
     record.payload.kind === "work.recover" ||
-    record.payload.kind === "work.reassign"
+    record.payload.kind === "work.reassign" ||
+    record.payload.kind === "work.abandon"
   )
     categories.push("work")
   if (requiresApproval(record.payload)) categories.push("approvals")
