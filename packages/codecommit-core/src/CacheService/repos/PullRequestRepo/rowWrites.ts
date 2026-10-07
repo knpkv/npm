@@ -48,10 +48,6 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
       OR (pull_requests.last_modified_date = ${version.lastActivity}
         AND pull_requests.observation_seq <= ${version.observation}))`
 
-  /** The version in columns `at` and `seq` is not older than `version`. */
-  const notOlder = (at: Statement.Fragment, seq: Statement.Fragment, version: StoredVersion) =>
-    sql`(${at} > ${version.lastActivity} OR (${at} = ${version.lastActivity} AND ${seq} >= ${version.observation}))`
-
   const applied = (rows: ReadonlyArray<unknown>) => rows.length > 0
 
   return {
@@ -81,14 +77,13 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
             ${req.sourceBranch}, ${req.destinationBranch}, ${req.isMergeable}, ${req.isApproved}, ${req.approvalUnknownReason},
             ${req.commentCount}, ${req.link}, ${approvedByStr}, ${approvedByArnsStr}, ${approvalRulesJson}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
             ${observation}
-          -- A pull request deleted at this listing's version or later stays deleted.
+          -- A deleted pull request comes back only from a read that began after the deletion, of a
+          -- revision no older than the deleted row's.
           WHERE NOT EXISTS (
             SELECT 1 FROM pull_request_tombstones t
             WHERE t.aws_account_id = ${req.awsAccountId} AND t.id = ${req.id}
               AND t.repository_name = ${req.repositoryName} AND t.account_region = ${req.accountRegion}
-              AND ${
-        notOlder(sql`t.version`, sql`t.observation_seq`, { lastActivity: req.lastModifiedDate, observation })
-      }
+              AND (t.observation_seq >= ${observation} OR t.version > ${req.lastModifiedDate})
           )
           ON CONFLICT (aws_account_id, id, repository_name, account_region) DO UPDATE SET
             account_profile = excluded.account_profile,
@@ -134,27 +129,27 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
     },
 
     /**
-     * Delete the row matched by `where` unless its version is newer than `version`, leaving a
-     * tombstone at `version` so an insert observed at or before it is a no-op.
+     * Delete the row matched by `where` for a not-found read begun at `observation`, unless a read
+     * that began later has written the row since. A not-found answer carries no revision, so only its
+     * observation orders it. Leaves a tombstone at the row's last activity and `observation`. True when
+     * the row was deleted.
      */
-    deleteIfNotNewer: (where: Statement.Fragment, version: RowVersion) => {
-      const v = stored(version)
-      return sql.withTransaction(
+    deleteIfNotNewer: (where: Statement.Fragment, observation: number) =>
+      sql.withTransaction(
         sql`INSERT INTO pull_request_tombstones
             (aws_account_id, id, repository_name, account_region, version, observation_seq)
-          SELECT aws_account_id, id, repository_name, account_region, ${v.lastActivity}, ${v.observation}
-          FROM pull_requests WHERE ${where} AND ${notNewer(v)}
+          SELECT aws_account_id, id, repository_name, account_region, last_modified_date, ${observation}
+          FROM pull_requests WHERE ${where} AND observation_seq <= ${observation}
           ON CONFLICT (aws_account_id, id, repository_name, account_region) DO UPDATE SET
             version = excluded.version, observation_seq = excluded.observation_seq,
             deleted_at = excluded.deleted_at`.pipe(
           Effect.andThen(
-            sql<{ readonly applied: number }>`DELETE FROM pull_requests WHERE ${where} AND ${notNewer(v)}
-              RETURNING 1 AS applied`
+            sql<{ readonly applied: number }>`DELETE FROM pull_requests
+              WHERE ${where} AND observation_seq <= ${observation} RETURNING 1 AS applied`
           ),
           Effect.map(applied)
         )
-      )
-    },
+      ),
 
     /**
      * Cache expiry: delete rows (only OPEN ones with `openOnly`) not fetched since `olderThan`, and

@@ -266,6 +266,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
         const initialState: Domain.AppState = { pullRequests: [pullRequest], accounts: [], status: "idle" }
         const state = yield* SubscriptionRef.make(initialState)
         const added = yield* Ref.make<ReadonlyArray<string>>([])
+        const commentWrites = yield* Ref.make(0)
         const approvedCache = Schema.decodeSync(CachedPullRequest)({
           ...Schema.encodeSync(CachedPullRequest)(cachedPullRequest),
           isApproved: 1
@@ -305,7 +306,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
               findAll: () => Effect.succeed([approvedCache]),
               upsert: () => Effect.succeed(applied)
             }),
-            Layer.mock(CommentRepo, { find: () => Effect.succeed(Option.none()), upsert: () => Effect.succeed(true) }),
+            Layer.mock(CommentRepo, {
+              find: () => Effect.succeed(Option.none()),
+              upsert: () => Ref.update(commentWrites, (n) => n + 1).pipe(Effect.as(true))
+            }),
             Layer.mock(NotificationRepo, { add: (n) => Ref.update(added, (all) => [...all, n.type]) }),
             Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(true) }),
             Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -313,6 +317,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
           )
         )
         expect((yield* Ref.get(added)).filter((type) => type === "approval_changed")).toHaveLength(expected)
+        // The comment cache moves with the pull request's row: a rejected read leaves it alone.
+        expect(yield* Ref.get(commentWrites)).toBe(expected)
       })
   )
 

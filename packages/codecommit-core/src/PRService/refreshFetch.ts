@@ -199,7 +199,7 @@ export const fetchAndUpsertPRs = (params: {
     ) =>
       Effect.gen(function*() {
         const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
-        yield* prRepo.recordApprovalEvaluation(
+        const recorded = yield* prRepo.recordApprovalEvaluation(
           pr.awsAccountId,
           pr.id,
           detail,
@@ -207,7 +207,8 @@ export const fetchAndUpsertPRs = (params: {
           coordinates
         )
         const reason = detail.approvalUnknown
-        if (reason === undefined) {
+        // A rejected write is older than the cached row: its unknown approval isn't current.
+        if (!recorded || reason === undefined) {
           return
         }
         yield* Ref.update(
@@ -231,19 +232,6 @@ export const fetchAndUpsertPRs = (params: {
     yield* Stream.mergeAll(streams, { concurrency: 2 }).pipe(
       Stream.runForEach(({ awsAccountId, label, observation, pr, profile, region }) =>
         Effect.gen(function*() {
-          const unknownReason = pr.approvalUnknown
-          if (unknownReason !== undefined) {
-            // The pull request is listed and upserted with its last known approval; the account's other
-            // pull requests carry on, and its refresh counts as partial rather than successful.
-            yield* Ref.update(unevaluated, (all) => [...all, {
-              profile,
-              region,
-              pullRequestId: pr.id,
-              repositoryName: pr.repositoryName,
-              message: approvalUnknownReasonText(unknownReason)
-            }])
-            yield* Ref.update(partialScopes, (scopes) => new Set(scopes).add(accountRegionKey(profile, region)))
-          }
           // Diff subscribed PRs against cache. The notifications are sent only once the upsert applies:
           // a listing older than the cached row changes nothing, so it announces nothing.
           const pending: ReadonlyArray<NewNotification> = yield* Effect.gen(function*() {
@@ -295,6 +283,21 @@ export const fetchAndUpsertPRs = (params: {
               Effect.tapError((e) => Effect.logWarning("cache upsert error", e)),
               Effect.catch(() => withholdScopeSuccess(pr.account.profile, pr.account.region).pipe(Effect.as(false)))
             )
+            // Everything below acts on what this read saw, so only when the cache took it: a rejected
+            // write is older than the cached row, and nothing it saw is current.
+            const unknownReason = pr.approvalUnknown
+            if (applied && unknownReason !== undefined) {
+              // Upserted with its last known approval; the account's other pull requests carry on, and
+              // its refresh counts as partial rather than successful.
+              yield* Ref.update(unevaluated, (all) => [...all, {
+                profile,
+                region,
+                pullRequestId: pr.id,
+                repositoryName: pr.repositoryName,
+                message: approvalUnknownReasonText(unknownReason)
+              }])
+              yield* Ref.update(partialScopes, (scopes) => new Set(scopes).add(accountRegionKey(profile, region)))
+            }
             if (applied) {
               yield* Effect.forEach(pending, (n) => notificationRepo.add(n), { discard: true }).pipe(
                 Effect.catch(() => Effect.void)
@@ -303,7 +306,7 @@ export const fetchAndUpsertPRs = (params: {
             const isAuthor = currentUser !== undefined && currentUser !== "" && pr.author === currentUser
             const isApprover = currentUser !== undefined && currentUser !== "" &&
               pr.approvalRules.some((r) => r.poolMembers.includes(currentUser))
-            if (isAuthor || isApprover) {
+            if (applied && (isAuthor || isApprover)) {
               yield* subscriptionRepo.subscribe(awsAccountId, pr.id, {
                 repositoryName: pr.repositoryName,
                 accountRegion: pr.account.region
@@ -355,10 +358,7 @@ export const fetchAndUpsertPRs = (params: {
                             isAuthFailure(error)
                               ? markAuthFailed(pr.accountProfile)
                               : isPullRequestGone(error)
-                              ? prRepo.deleteOne(pr.awsAccountId, pr.id, {
-                                lastActivity: pr.lastModifiedDate,
-                                observation
-                              }, {
+                              ? prRepo.deleteOne(pr.awsAccountId, pr.id, observation, {
                                 repositoryName: pr.repositoryName,
                                 accountRegion: pr.accountRegion
                               }).pipe(Effect.catch(() => Effect.void))

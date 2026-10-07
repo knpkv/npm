@@ -247,7 +247,7 @@ describe("fetchAndUpsertPRs", () => {
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void,
           upsert: () => Effect.succeed(true),
-          recordApprovalEvaluation: () => Effect.void
+          recordApprovalEvaluation: () => Effect.succeed(true)
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
         Layer.mock(SubscriptionRepo, {})
@@ -440,7 +440,7 @@ describe("fetchAndUpsertPRs", () => {
             Ref.update(
               marked,
               (all) => [...all, [id, evaluation.approvalUnknown?._tag ?? "Evaluated"]]
-            ),
+            ).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -884,7 +884,7 @@ describe("fetchAndUpsertPRs", () => {
         }),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
-          recordApprovalEvaluation: () => Effect.void,
+          recordApprovalEvaluation: () => Effect.succeed(true),
           findStaleOpen: () => Effect.succeed([staleOpenPR]),
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
           propagateRepoAccountId: () => Effect.void
@@ -969,7 +969,8 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([unknownRow]),
-          recordApprovalEvaluation: (_, id, evaluation) => Ref.update(recorded, (all) => [...all, [id, evaluation]]),
+          recordApprovalEvaluation: (_, id, evaluation) =>
+            Ref.update(recorded, (all) => [...all, [id, evaluation]]).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -1068,7 +1069,7 @@ describe("fetchAndUpsertPRs", () => {
         }),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
-          recordApprovalEvaluation: () => Effect.void,
+          recordApprovalEvaluation: () => Effect.succeed(true),
           upsert: () => Effect.succeed(true),
           // PR 35 closed at the provider; PR 36 was just listed, so it is not stale.
           findStaleOpen: () => Effect.succeed([staleOpenPR]),
@@ -1113,7 +1114,7 @@ describe("fetchAndUpsertPRs", () => {
         }),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
-          recordApprovalEvaluation: () => Effect.void,
+          recordApprovalEvaluation: () => Effect.succeed(true),
           findStaleOpen: () => Effect.succeed([staleOpenPR]),
           updateStatusAndClosedAt: () => Ref.update(statusUpdates, (count) => count + 1),
           propagateRepoAccountId: () => Effect.void
@@ -1274,7 +1275,8 @@ describe("fetchAndUpsertPRs", () => {
         }),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
-          upsert: (input) => Ref.update(upserted, (rows) => [...rows, [input.id, input.approvalUnknownReason]]),
+          upsert: (input) =>
+            Ref.update(upserted, (rows) => [...rows, [input.id, input.approvalUnknownReason]]).pipe(Effect.as(true)),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1309,6 +1311,47 @@ describe("fetchAndUpsertPRs", () => {
       expect(yield* Ref.get(notifications)).toEqual([
         expect.stringMatching(/^1 pull request in us-east-1 couldn't be re-evaluated, so their approval is unknown/)
       ])
+    }))
+
+  // A rejected write is an older read than the cached row: nothing it saw is current, so it marks
+  // nothing unevaluated, makes no scope partial, and subscribes no one.
+  it.effect("ignores an unknown approval, and subscribes no one, from a listing the cache rejected as older", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribed = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.make(unknownPR("36"))
+        }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          upsert: () => Effect.succeed(false),
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, { subscribe: () => Ref.update(subscribed, (n) => n + 1) })
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        // The listed pull request's author, so an applied write would auto-subscribe.
+        currentUser: unknownPR("36").author,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect((yield* SubscriptionRef.get(state)).unevaluatedPullRequests).toEqual([])
+      expect(successfulScopes).toHaveLength(1)
+      expect(yield* Ref.get(subscribed)).toBe(0)
     }))
 
   it.effect("sends one notification per profile, naming every region with unevaluated pull requests", () =>

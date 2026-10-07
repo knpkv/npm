@@ -108,20 +108,44 @@ const writers: ReadonlyArray<readonly [string, Writer]> = [
     "healthScore",
     (repo, version, tag) => repo.updateHealthScore(account, "60", tag === "older" ? 1 : 7, version, coordinates)
   ],
-  ["delete", (repo, version) => repo.deleteOne(account, "60", version, coordinates)]
+  ["delete", (repo, version) => repo.deleteOne(account, "60", version.observation, coordinates)]
 ]
 
-/** The older write's version: an older provider revision, or the same revision read earlier. */
-const families: ReadonlyArray<readonly [string, RowVersion, RowVersion]> = [
-  ["an older revision", { lastActivity: newer, observation: 2 }, { lastActivity: older, observation: 3 }],
-  ["the same revision read earlier", { lastActivity: newer, observation: 3 }, { lastActivity: newer, observation: 2 }]
+/**
+ * The older write's version: an older revision read earlier, the same revision read earlier, or an
+ * older revision read later (a lagging provider replica). A not-found read has no revision, so its
+ * observation alone orders it: the third family leaves deletion out on both sides (a later not-found
+ * read deletes whatever the row holds, and a later read that still sees the pull request brings it
+ * back; both are tested on their own).
+ */
+const families: ReadonlyArray<readonly [string, RowVersion, RowVersion, boolean]> = [
+  [
+    "an older revision read earlier",
+    { lastActivity: newer, observation: 3 },
+    { lastActivity: older, observation: 2 },
+    true
+  ],
+  [
+    "the same revision read earlier",
+    { lastActivity: newer, observation: 3 },
+    { lastActivity: newer, observation: 2 },
+    true
+  ],
+  [
+    "an older revision read later",
+    { lastActivity: newer, observation: 3 },
+    { lastActivity: older, observation: 4 },
+    false
+  ]
 ]
 
 const pairs: ReadonlyArray<readonly [string, Writer, RowVersion, Writer, RowVersion]> = families.flatMap((
-  [family, newerVersion, olderVersion]
+  [family, newerVersion, olderVersion, includeDelete]
 ) =>
-  writers.flatMap(([newerName, newerWrite]) =>
-    writers.map(([olderName, olderWrite]): readonly [string, Writer, RowVersion, Writer, RowVersion] => [
+  writers.filter(([newerName]) => includeDelete || newerName !== "delete").flatMap(([newerName, newerWrite]) =>
+    writers.filter(([olderName]) => includeDelete || olderName !== "delete").map((
+      [olderName, olderWrite]
+    ): readonly [string, Writer, RowVersion, Writer, RowVersion] => [
       `${newerName}, then ${olderName} from ${family}`,
       newerWrite,
       newerVersion,
@@ -215,14 +239,15 @@ describe("pull-request row writes", () => {
     })))
 
   // The tombstone holds a deletion's version: a listing newer than it still brings the row back.
-  it.effect("re-inserts a deleted pull request from a listing newer than the deletion", () =>
+  it.effect("re-inserts a deleted pull request only from a read begun after the deletion", () =>
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
       yield* seed(repo)
-      yield* repo.deleteOne(account, "60", { lastActivity: newer, observation: 2 }, coordinates)
-      yield* repo.upsert(listed(older, "older"), 3)
+      const before = yield* repo.observe()
+      yield* repo.deleteOne(account, "60", yield* repo.observe(), coordinates)
+      yield* repo.upsert(listed(older, "older"), before)
       expect(Option.isNone(yield* snapshot)).toBe(true)
-      yield* repo.upsert(listed(newest, "newest"), 4)
+      yield* repo.upsert(listed(newest, "newest"), yield* repo.observe())
       expect(Option.map(yield* snapshot, (row) => row.title)).toEqual(Option.some("PR newest"))
     })))
 
@@ -232,14 +257,44 @@ describe("pull-request row writes", () => {
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
       yield* seed(repo)
-      yield* repo.deleteOne(account, "60", { lastActivity: newer, observation: 2 }, coordinates)
+      const before = yield* repo.observe()
+      yield* repo.deleteOne(account, "60", yield* repo.observe(), coordinates)
       // Before the deletion, after its provider version.
       yield* repo.deleteStale("2026-10-05T00:00:00.000Z")
-      yield* repo.upsert(listed(older, "older"), 3)
+      yield* repo.upsert(listed(older, "older"), before)
       expect(Option.isNone(yield* snapshot)).toBe(true)
       // After the deletion: the tombstone expires with the rest of the stale cache.
       yield* repo.deleteStale("2999-01-01T00:00:00.000Z")
-      yield* repo.upsert(listed(older, "older"), 4)
+      yield* repo.upsert(listed(older, "older"), before)
       expect(Option.isSome(yield* snapshot)).toBe(true)
+    })))
+
+  // A not-found read carries no revision: its order is its observation. The reviewer's case: a
+  // listing that began before it but read a newer revision must not bring the row back, in either
+  // completion order; a listing that began after it may.
+  it.effect.each([["the listing lands first", true], ["the deletion lands first", false]])(
+    "keeps a pull request deleted by a later not-found read when an earlier listing saw a newer revision (%s)",
+    ([, listingFirst]) =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        yield* seed(repo)
+        const listing = yield* repo.observe()
+        const notFound = yield* repo.observe()
+        const land = repo.upsert(listed(older, "older"), listing)
+        const remove = repo.deleteOne(account, "60", notFound, coordinates)
+        yield* listingFirst ? land.pipe(Effect.andThen(remove)) : remove.pipe(Effect.andThen(land))
+        expect(Option.isNone(yield* snapshot)).toBe(true)
+        yield* repo.upsert(listed(newest, "newest"), yield* repo.observe())
+        expect(Option.isSome(yield* snapshot)).toBe(true)
+      }))
+  )
+
+  it.effect("deletes a row from a not-found read that began after its last write, whatever revision it held", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      yield* seed(repo)
+      yield* repo.upsert(listed(newest, "newest"), yield* repo.observe())
+      expect(yield* repo.deleteOne(account, "60", yield* repo.observe(), coordinates)).toBe(true)
+      expect(Option.isNone(yield* snapshot)).toBe(true)
     })))
 })

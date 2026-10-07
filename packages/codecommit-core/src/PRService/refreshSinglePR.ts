@@ -13,7 +13,7 @@ import { Effect, Option, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { diffApprovalPools, diffComments, diffPR } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
-import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
+import { type NewNotification, NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type {
   CachedPullRequest,
   PullRequestRepoContract,
@@ -298,39 +298,37 @@ export const makeRefreshSinglePR = (
       ]
       : []
 
-    if (isSubscribed && Option.isSome(cachedPR)) {
-      // Diff comments
-      const cachedComments = yield* commentRepo.find(durableAccountId, prId, identity).pipe(
-        Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
+    // Diff comments against the cache before it is written, for the same subscribed pull requests.
+    const commentNotifications: ReadonlyArray<NewNotification> = isSubscribed && Option.isSome(cachedPR)
+      ? yield* commentRepo.find(durableAccountId, prId, identity).pipe(
+        Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>())),
+        Effect.map(Option.match({
+          onNone: () => [],
+          onSome: (cachedComments) =>
+            diffComments(
+              cachedComments,
+              locs,
+              prId,
+              durableAccountId,
+              identity.repositoryName,
+              identity.accountRegion
+            )
+        }))
       )
-      if (Option.isSome(cachedComments)) {
-        const commentNotifications = diffComments(
-          cachedComments.value,
-          locs,
-          prId,
-          durableAccountId,
-          identity.repositoryName,
-          identity.accountRegion
-        )
-        yield* Effect.forEach(commentNotifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
-          Effect.catch(() => Effect.void)
-        )
-      }
-    }
+      : []
 
-    // Cache comments
-    yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(locs), identity).pipe(
-      Effect.catch(() => Effect.void)
-    )
-
-    // Always upsert fresh data to cache
     const applied = yield* prRepo.upsert(freshUpsert, observation).pipe(
       Effect.mapError((cause) => new RefreshError({ failedAccounts: [durableAccountId], cause }))
     )
+    // Everything below acts on what this read saw, so only when the cache took it: a rejected write is
+    // older than the cached row, and its comments and transitions aren't current.
     if (applied) {
-      yield* Effect.forEach(pending, (n) => notificationRepo.add(n), { discard: true }).pipe(
+      yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(locs), identity).pipe(
         Effect.catch(() => Effect.void)
       )
+      yield* Effect.forEach([...pending, ...commentNotifications], (n) => notificationRepo.add(n), {
+        discard: true
+      }).pipe(Effect.catch(() => Effect.void))
     }
     return {
       revisionId: detail.revisionId,

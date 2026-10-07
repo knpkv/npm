@@ -98,10 +98,13 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
     deleteStaleOpen: (olderThan: string) =>
       deleteStaleOpen_({ olderThan }).pipe(Effect.tap(() => publish), cacheError("deleteStaleOpen")),
 
-    /** Delete a row observed at `version`, unless a newer write has reached it since. */
-    deleteOne: (awsAccountId: string, id: string, version: RowVersion, coordinates?: PullRequestCoordinates) =>
+    /**
+     * Delete a row the provider answered "does not exist" for, in a read begun at `observation`,
+     * unless a read that began later has written it since. True when the row was deleted.
+     */
+    deleteOne: (awsAccountId: string, id: string, observation: number, coordinates?: PullRequestCoordinates) =>
       ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(writes.deleteIfNotNewer(pullRequestWhere(awsAccountId, id, coordinates), version)),
+        Effect.andThen(writes.deleteIfNotNewer(pullRequestWhere(awsAccountId, id, coordinates), observation)),
         Effect.tap(publishIfApplied),
         cacheError("deleteOne")
       ),
