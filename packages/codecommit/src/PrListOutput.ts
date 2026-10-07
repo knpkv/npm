@@ -23,6 +23,7 @@ export const renderFlags = (pr: Domain.PullRequest): string =>
 
 const approvalFlag: (approval: Domain.Approval) => string = Match.valueTags({
   Approved: () => "approved",
+  NotRequired: () => Domain.approvalNotRequiredLabel.toLowerCase(),
   Pending: () => "",
   Unknown: () => Domain.approvalUnknownLabel.toLowerCase()
 })

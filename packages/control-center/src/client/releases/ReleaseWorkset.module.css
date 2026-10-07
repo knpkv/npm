@@ -148,14 +148,14 @@
 
 .traceDetails:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .traceConnection a:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .runbooks {
@@ -176,8 +176,8 @@
 
 .runbook:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 @media (max-width: 48rem) {

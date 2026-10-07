@@ -40,10 +40,22 @@ describe("pull request row presentation", () => {
   })
 
   it("labels an unknown approval as unknown, whatever its last known value", () => {
-    const open = { isMergeable: true, status: "OPEN" } satisfies Partial<Parameters<typeof pullRequestRowStatus>[0]>
+    const open = {
+      isMergeable: true,
+      status: "OPEN",
+      approvalRules: [{
+        ruleName: "reviewers",
+        requiredApprovals: 1,
+        poolMembers: [],
+        poolMemberArns: [],
+        satisfied: true
+      }]
+    } satisfies Partial<Parameters<typeof pullRequestRowStatus>[0]>
     expect(pullRequestRowStatus({ ...open, isApproved: true, approvalUnknown: { _tag: "NotPermitted" } }))
       .toEqual({ label: "Approval unknown", tone: "neutral" })
     expect(pullRequestRowStatus({ ...open, isApproved: true })).toEqual({ label: "Approved", tone: "positive" })
     expect(pullRequestRowStatus({ ...open, isApproved: false })).toEqual({ label: "Pending", tone: "caution" })
+    expect(pullRequestRowStatus({ ...open, isApproved: true, approvalRules: [] }))
+      .toEqual({ label: "No approval required", tone: "neutral" })
   })
 })

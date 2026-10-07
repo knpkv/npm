@@ -71,6 +71,8 @@ export interface HealthRow {
   readonly total: number
   readonly withComments: number
   readonly approved: number
+  /** Evaluated pull requests with approval rules: the approval rate's denominator. */
+  readonly ruleBacked: number
 }
 
 export interface FilterOptionsRow {

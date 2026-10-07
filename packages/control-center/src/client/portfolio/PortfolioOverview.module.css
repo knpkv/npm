@@ -94,8 +94,8 @@
 .filter:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .filterCount {
@@ -181,8 +181,8 @@
 }
 
 .serviceChoice:focus-visible {
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: 3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .serviceAction {

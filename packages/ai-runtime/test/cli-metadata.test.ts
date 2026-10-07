@@ -1,11 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Layer, Result, Sink, Stream } from "effect"
+import { ConfigProvider, Effect, Result, Sink, Stream } from "effect"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 import { readLocalCliRuntimeMetadata } from "../src/index.js"
 
-const fakeProcessLayer = (
+const fakeSpawner = (
   calls: Array<ChildProcess.Command>,
   options: {
     readonly all?: string
@@ -13,29 +13,36 @@ const fakeProcessLayer = (
     readonly output: string
     readonly stderr?: string
   }
-): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner> =>
-  Layer.succeed(
-    ChildProcessSpawner.ChildProcessSpawner,
-    ChildProcessSpawner.make((command) => {
-      calls.push(command)
-      const stdout = Stream.make(options.output).pipe(Stream.encodeText)
-      const stderr = Stream.make(options.stderr ?? "").pipe(Stream.encodeText)
-      const all = Stream.make(options.all ?? `${options.output}${options.stderr ?? ""}`).pipe(Stream.encodeText)
-      return Effect.succeed(ChildProcessSpawner.makeHandle({
-        all,
-        exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(options.exitCode ?? 0)),
-        getInputFd: () => Sink.drain,
-        getOutputFd: () => Stream.empty,
-        isRunning: Effect.succeed(false),
-        kill: () => Effect.void,
-        pid: ChildProcessSpawner.ProcessId(42),
-        reref: Effect.void,
-        stderr,
-        stdin: Sink.drain,
-        stdout,
-        unref: Effect.succeed(Effect.void)
-      }))
-    })
+) =>
+  ChildProcessSpawner.make((command) => {
+    calls.push(command)
+    const stdout = Stream.make(options.output).pipe(Stream.encodeText)
+    const stderr = Stream.make(options.stderr ?? "").pipe(Stream.encodeText)
+    const all = Stream.make(options.all ?? `${options.output}${options.stderr ?? ""}`).pipe(Stream.encodeText)
+    return Effect.succeed(ChildProcessSpawner.makeHandle({
+      all,
+      exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(options.exitCode ?? 0)),
+      getInputFd: () => Sink.drain,
+      getOutputFd: () => Stream.empty,
+      isRunning: Effect.succeed(false),
+      kill: () => Effect.void,
+      pid: ChildProcessSpawner.ProcessId(42),
+      stderr,
+      stdin: Sink.drain,
+      stdout,
+      unref: Effect.succeed(Effect.void)
+    }))
+  })
+
+/** Run `effect` against the fake CLI, with `env` as the only environment it can read. */
+const withFakeCli = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  env: Record<string, string>
+) =>
+<A, E>(effect: Effect.Effect<A, E, ChildProcessSpawner.ChildProcessSpawner>) =>
+  effect.pipe(
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnv({ env }))
   )
 
 describe("local CLI runtime metadata", () => {
@@ -47,17 +54,17 @@ describe("local CLI runtime metadata", () => {
         executable: "./bin/codex",
         implementation: "codex-cli"
       }).pipe(
-        Effect.provide(fakeProcessLayer(calls, {
-          all: "credential-canary\ncodex-cli 1.2.3\nignored\n",
-          output: "codex-cli 1.2.3\nignored\n",
-          stderr: "credential-canary\n"
-        })),
-        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
-          env: {
+        withFakeCli(
+          fakeSpawner(calls, {
+            all: "credential-canary\ncodex-cli 1.2.3\nignored\n",
+            output: "codex-cli 1.2.3\nignored\n",
+            stderr: "credential-canary\n"
+          }),
+          {
             AWS_SECRET_ACCESS_KEY: "must-not-be-forwarded",
             PATH: "/trusted/bin"
           }
-        })))
+        )
       )
 
       expect(metadata).toEqual({
@@ -82,10 +89,7 @@ describe("local CLI runtime metadata", () => {
         executable: "codex",
         implementation: "codex-cli"
       }).pipe(
-        Effect.provide(fakeProcessLayer([], { output: "x".repeat(4_097) })),
-        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
-          env: { PATH: "/trusted/bin" }
-        }))),
+        withFakeCli(fakeSpawner([], { output: "x".repeat(4_097) }), { PATH: "/trusted/bin" }),
         Effect.result
       )
 
@@ -102,10 +106,7 @@ describe("local CLI runtime metadata", () => {
           executable: "codex",
           implementation: "codex-cli"
         }).pipe(
-          Effect.provide(fakeProcessLayer([], { output })),
-          Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
-            env: { PATH: "/trusted/bin" }
-          }))),
+          withFakeCli(fakeSpawner([], { output }), { PATH: "/trusted/bin" }),
           Effect.result
         )
 
@@ -122,13 +123,13 @@ describe("local CLI runtime metadata", () => {
         executable: "codex",
         implementation: "codex-cli"
       }).pipe(
-        Effect.provide(fakeProcessLayer([], {
-          exitCode: 1,
-          output: "credential-canary"
-        })),
-        Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({
-          env: { PATH: "/trusted/bin" }
-        }))),
+        withFakeCli(
+          fakeSpawner([], {
+            exitCode: 1,
+            output: "credential-canary"
+          }),
+          { PATH: "/trusted/bin" }
+        ),
         Effect.result
       )
 

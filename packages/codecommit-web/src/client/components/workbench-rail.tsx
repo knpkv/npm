@@ -7,6 +7,7 @@
  *
  * @module
  */
+import { approvalOf } from "@knpkv/codecommit-core/Domain.js"
 import { useAtomValue } from "@effect/atom-react"
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router"
@@ -48,7 +49,9 @@ const stuckText = (row: WorkbenchRow): string | undefined => {
     case "unverified":
       return "approval state unknown"
     case "ready":
-      return "approved, not merged"
+      return approvalOf(row.pullRequest)._tag === "NotRequired"
+        ? "no approval required, not merged"
+        : "approved, not merged"
     case undefined:
       return undefined
   }
