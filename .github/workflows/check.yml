@@ -149,13 +149,13 @@ jobs:
       - run: pnpm build
       - run: pnpm check
 
-  test:
-    name: Test
+  test-unit:
+    name: Test unit
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    # Recent successful baseline runs need almost the full ten minutes; leave
-    # enough runner variance for teardown to complete after assertions pass.
+    # The vitest suite alone; packed-package checks run in test-pack so neither
+    # pushes the other past its timeout.
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -176,7 +176,49 @@ jobs:
       - name: Install neovim for nvim plugin specs
         run: sudo apt-get update && sudo apt-get install -y neovim
       - run: pnpm build
-      - run: pnpm test
+      - run: pnpm test:unit
+
+  test-pack:
+    name: Test pack
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: 26.7.0
+          bun-version: 1.3.14
+      - name: Verify runtime pins
+        run: |
+          test "$(node --version)" = "v26.7.0"
+          test "$(bun --version)" = "1.3.14"
+      - run: pnpm build
+      - run: pnpm test:pack
+
+  test:
+    name: Test
+    needs: [test-unit, test-pack]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 2
+    steps:
+      - name: Require both test partitions
+        env:
+          TEST_UNIT_RESULT: ${{ needs.test-unit.result }}
+          TEST_PACK_RESULT: ${{ needs.test-pack.result }}
+        run: |
+          set -euo pipefail
+          if [ "${TEST_UNIT_RESULT:-}" != "success" ] || [ "${TEST_PACK_RESULT:-}" != "success" ]; then
+            echo "Both test partitions must succeed (unit: ${TEST_UNIT_RESULT:-missing}, pack: ${TEST_PACK_RESULT:-missing})"
+            exit 1
+          fi
 
   edge-runtimes:
     name: Edge runtimes
