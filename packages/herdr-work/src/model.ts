@@ -897,9 +897,12 @@ export interface WorkObservationEnvelope extends Schema.Schema.Type<typeof WorkO
  * facts were first seen, so for a `gone` agent it is the time it went away;
  * `confirmedAt` is the last time a read returned them again.
  */
+/** A stored observation's id: the SHA-256 of its canonical record, in lowercase hex. */
+export const WorkObservationId = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+
 export const WorkObservedFact = Schema.Struct({
   subject: WorkObservationSubject,
-  observationId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  observationId: WorkObservationId,
   observedAt: Timestamp,
   confirmedAt: Timestamp,
   observation: Schema.Union([WorkPullRequestObservation, WorkAgentObservation])
@@ -941,8 +944,8 @@ export const workObservedFactMaxBytes = 2 * 1024 * 1024
  * a source it could not read.
  */
 export const WorkObserveOutcome = Schema.TaggedUnion({
-  stored: { subject: WorkObservationSubject, observationId: Identifier },
-  unchanged: { subject: WorkObservationSubject, observationId: Identifier },
+  stored: { subject: WorkObservationSubject, observationId: WorkObservationId },
+  unchanged: { subject: WorkObservationSubject, observationId: WorkObservationId },
   stale: { subject: WorkObservationSubject },
   unknown: { subject: WorkObservationSubject, reason: FailureReason }
 })
@@ -965,17 +968,15 @@ export const workReconcilerHeadroom = 256
  * again on the next run).
  */
 /**
- * Options for `reconcile`. `confirmed` limits it to the pull request facts the
- * caller has just read and the store accepted: the `subject` and
+ * What `reconcile` may act on: `confirmed` lists the pull request facts the
+ * caller has just read and the store accepted, the `subject` and
  * `observationId` of each `stored` or `unchanged` outcome from that `observe`.
  * A read refused as stale, or one that failed, confirms nothing, so a fact
  * stored earlier (the pull request may since have reopened) is never acted on.
  */
 export const WorkReconcileOptions = Schema.Struct({
-  confirmed: Schema.optionalKey(
-    Schema.Array(Schema.Struct({ subject: WorkObservationSubject, observationId: Identifier })).check(
-      Schema.isMaxLength(workObservedFactMaxRecords)
-    )
+  confirmed: Schema.Array(Schema.Struct({ subject: WorkObservationSubject, observationId: WorkObservationId })).check(
+    Schema.isMaxLength(workObservedFactMaxRecords)
   )
 })
 export interface WorkReconcileOptions extends Schema.Schema.Type<typeof WorkReconcileOptions> {}

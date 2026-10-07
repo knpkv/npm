@@ -61,17 +61,16 @@ goal's latest checkpoint and the pull request's fact are still the ones it was
 planned from (otherwise that goal is reported as a conflict), and 256
 checkpoints of history stay free. A goal is stamped at most once, by the
 reconciler's own record of what it wrote, so a goal its owner reopens stays
-reopened. A pull request fact is never acted on after a failed read newer than
-its last confirmation. `reconcile({ confirmed })` also acts only on facts the
-caller has just read and the store accepted: `confirmed` lists the `subject`
-and `observationId` of each `stored` or `unchanged` outcome from that
-`observe`. A read refused as stale, or one that failed, confirms nothing, so a
-fact stored earlier (the pull request may since have reopened) never closes a
-goal, including one the snapshot hides as superseded. A confirmation that is no
-longer the subject's stored fact fails with `WorkStoreError`
-(`reconcile.confirmed`), and a malformed one with `reconcile.options`. The
-failure check runs again inside the write's transaction, so a failed read
-recorded while the reconciler plans also stops the close. The checkpoint adds a `reconciler.` activity unless the goal's
+reopened. `reconcile({ confirmed })` acts only on facts the caller has just
+read and the store accepted: `confirmed` lists the `subject` and
+`observationId` of each `stored` or `unchanged` outcome from that `observe`. A
+read refused as stale, or one that failed, confirms nothing, so a fact stored
+earlier (the pull request may since have reopened) never closes a goal,
+including one the snapshot hides as superseded, and evicting old failure records
+can't change that. A confirmation that is no longer the subject's stored fact
+fails with `WorkStoreError` (`reconcile.confirmed`), and a malformed one with
+`reconcile.options`. A failed read newer than a fact's confirmation is also
+checked, inside the write's transaction too, while that failure is retained. The checkpoint adds a `reconciler.` activity unless the goal's
 activity list is full; owner activity is never dropped to make room.
 `abandon` applies an approved `work.abandon` job. The goal, owned by exactly the
 approved owner and still at the approved head, becomes `abandoned`: its blocker

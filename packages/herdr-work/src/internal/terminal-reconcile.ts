@@ -32,14 +32,14 @@ const latestPerGoal = (events: ReadonlyArray<WorkGoalCheckpointType>): ReadonlyA
 /**
  * Goals not yet terminal whose pull request's latest observed fact is merged
  * or closed. Goals with no pull request, or already finished, are left alone,
- * and so is a fact a newer failed read has put in doubt, or one missing from
- * the caller's `confirmed` list when that is given.
+ * and so is a fact missing from the caller's `confirmed` list, or one a newer
+ * failed read has put in doubt.
  */
 export const terminalCandidates = (
   events: ReadonlyArray<WorkGoalCheckpointType>,
   facts: ReadonlyArray<WorkObservedFact>,
   failures: ReadonlyArray<WorkObservedFailure>,
-  confirmed: ReadonlySet<string> | undefined
+  confirmed: ReadonlySet<string>
 ): ReadonlyArray<TerminalCandidate> => {
   const factBySubject = new Map(facts.map((fact) => [fact.subject, fact]))
   const failedAt = new Map(failures.map((failure) => [failure.subject, failure.lastAt]))
@@ -48,11 +48,11 @@ export const terminalCandidates = (
     const subject = goalPullRequestSubject(head.goal)
     const fact = subject === null ? undefined : factBySubject.get(subject)
     if (fact === undefined || fact.observation._tag !== "pull_request") return []
-    // A fact is acted on only while it is the latest word: never after a
-    // failed read newer than its last confirmation, and, when the caller lists
-    // what it confirmed, only if this exact fact is on that list.
+    // Only a fact the caller read and the store accepted in this pass is acted
+    // on. A failed read newer than its confirmation is also checked, as
+    // defense in depth while that failure is retained.
+    if (!confirmed.has(`${fact.subject}\u0000${fact.observationId}`)) return []
     if ((failedAt.get(fact.subject) ?? -1) > fact.confirmedAt) return []
-    if (confirmed !== undefined && !confirmed.has(`${fact.subject}\u0000${fact.observationId}`)) return []
     const pullRequest = fact.observation
     return pullRequest.state === "open" ? [] : [{ fact, head, pullRequest }]
   })

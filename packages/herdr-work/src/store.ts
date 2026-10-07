@@ -2005,7 +2005,7 @@ export interface WorkStoreService {
    * completed or abandoned, stamped with the close time. Only these terminal
    * facts are ever written to goal history; everything else stays an overlay.
    */
-  readonly reconcile: (options?: WorkReconcileOptions) => Effect.Effect<
+  readonly reconcile: (options: WorkReconcileOptions) => Effect.Effect<
     ReadonlyArray<WorkReconcileOutcome>,
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
@@ -5357,8 +5357,8 @@ export class WorkStore implements WorkStoreService {
     }
   })
 
-  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore, request?: WorkReconcileOptions) {
-    const options = yield* Schema.decodeUnknownEffect(WorkReconcileOptions)(request ?? {}).pipe(
+  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore, request: WorkReconcileOptions) {
+    const options = yield* Schema.decodeUnknownEffect(WorkReconcileOptions)(request).pipe(
       Effect.mapError(storeError("reconcile.options"))
     )
     const source = yield* this.snapshotInput()
@@ -5371,12 +5371,10 @@ export class WorkStore implements WorkStoreService {
     }
     // A confirmation names the fact the caller read; one that is no longer the
     // subject's stored fact (replaced, evicted) is the caller's stale view.
-    if (options.confirmed !== undefined) {
-      const current = new Map(source.facts.map((fact) => [fact.subject, fact.observationId]))
-      const outdated = options.confirmed.filter(({ observationId, subject }) => current.get(subject) !== observationId)
-      if (outdated.length > 0) {
-        return yield* new WorkStoreError({ cause: outdated, operation: "reconcile.confirmed" })
-      }
+    const current = new Map(source.facts.map((fact) => [fact.subject, fact.observationId]))
+    const outdated = options.confirmed.filter(({ observationId, subject }) => current.get(subject) !== observationId)
+    if (outdated.length > 0) {
+      return yield* new WorkStoreError({ cause: outdated, operation: "reconcile.confirmed" })
     }
     // A goal is stamped by the reconciler at most once, whatever its facts
     // look like later: a reopened goal stays the owner's.
@@ -5389,9 +5387,7 @@ export class WorkStore implements WorkStoreService {
         source.events,
         source.facts,
         source.failures,
-        options.confirmed === undefined
-          ? undefined
-          : new Set(options.confirmed.map(({ observationId, subject }) => `${subject}\u0000${observationId}`))
+        new Set(options.confirmed.map(({ observationId, subject }) => `${subject}\u0000${observationId}`))
       ),
       Effect.fnUntraced(function*(candidate): Effect.fn.Return<
         WorkReconcileOutcome,
