@@ -145,6 +145,9 @@ test("titles the drawer once, fills it, and names the missing profile", async ({
   const drawer = page.getByRole("dialog", { name: "Relay" })
   await expect(drawer).toBeVisible()
   await expect(drawer.getByRole("heading", { exact: true, name: "Relay" })).toHaveCount(1)
+  // Without its icon row the subtitle starts at the pane's edge rather than under a missing icon.
+  const subtitle = drawer.getByText("Review findings and discuss evidence")
+  await expect(subtitle).toHaveCSS("padding-inline-start", "0px")
 
   await expect(drawer.getByText("No Relay profile yet.")).toBeVisible()
   await expect(drawer.getByRole("link", { name: "Add one in Settings" })).toHaveAttribute("href", "/settings/relay")

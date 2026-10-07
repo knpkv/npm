@@ -335,6 +335,11 @@
   padding-inline-start: calc(var(--rly-space-16) + var(--rly-space-8));
 }
 
+/* In the drawer the icon-and-title row is dropped, so the subtitle starts at the edge. */
+.agentTitle > small:first-child {
+  padding-inline-start: var(--rly-space-0);
+}
+
 .agentEmpty {
   align-content: center;
   display: grid;
