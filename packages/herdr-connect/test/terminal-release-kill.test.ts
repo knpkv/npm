@@ -164,6 +164,26 @@ describe("Herdr terminal release failures", () => {
       yield* Fiber.join(cleanup)
       const warnings = logged.filter(({ level }) => level === "Warn").map(({ message }) => message).join("\n")
       expect(warnings).toContain("terminal release command could not be sent")
+      expect(warnings).toContain("terminal did not exit within the release timeout; killing it")
       expect(warnings).toContain("terminal kill after the release timeout failed")
+    }))
+
+  it.effect("warns when herdr outlives the release timeout, even when the kill then works", () =>
+    Effect.gen(function*() {
+      const logged: Array<{ readonly level: string; readonly message: string }> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        logged.push({ level: entry.logLevel, message: String(entry.message) })
+      })
+      // The release goes out, but herdr never exits; the kill succeeds.
+      const cleanup = yield* releaseTerminalControl(Effect.void, Effect.never, Effect.void).pipe(
+        Effect.withLogger(logger),
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(cleanup)
+      expect(logged).toEqual([{
+        level: "Warn",
+        message: "terminal did not exit within the release timeout; killing it"
+      }])
     }))
 })

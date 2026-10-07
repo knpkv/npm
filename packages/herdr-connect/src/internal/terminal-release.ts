@@ -42,6 +42,7 @@ export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(
           Effect.timeoutOption(terminalKillOptions.forceKillAfter)
         )
         if (Option.isNone(released)) {
+          yield* Effect.logWarning("terminal did not exit within the release timeout; killing it")
           yield* Effect.sync(() => releaseFiber.interruptUnsafe())
           yield* kill.pipe(
             Effect.ignore({ log: "Warn", message: "terminal kill after the release timeout failed" })
