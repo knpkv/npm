@@ -14,12 +14,12 @@ import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
-import { Config, Effect, Layer, Option } from "effect"
+import { Config, Data, Effect, Layer, Option } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
-import type * as Schema from "effect/Schema"
+import * as Schema from "effect/Schema"
 import * as yaml from "js-yaml"
 import { AttachmentService, layer as AttachmentServiceLayer } from "../src/AttachmentService.js"
 import { insertJiraAttachmentReference } from "../src/internal/attachmentInsertion.js"
@@ -45,14 +45,21 @@ const nonEmptyOrDefault = (value: Option.Option<string>, fallback: string): stri
     onSome: (some) => some.trim().length > 0 ? some : fallback
   })
 
-const requireNonEmpty = (name: string, value: string): Effect.Effect<string, Error> =>
-  value.trim().length > 0 ? Effect.succeed(value) : Effect.fail(new Error(`${name} must be set`))
+/** An integration setting that is set but empty. */
+class EmptySetting extends Data.TaggedError("EmptySetting")<{ readonly name: string }> {
+  override get message() {
+    return `${this.name} must be set`
+  }
+}
+
+const requireNonEmpty = (name: string, value: string): Effect.Effect<string, EmptySetting> =>
+  value.trim().length > 0 ? Effect.succeed(value) : Effect.fail(new EmptySetting({ name }))
 
 const requireNonEmptyRedacted = (
   name: string,
   value: Redacted.Redacted<string>
-): Effect.Effect<Redacted.Redacted<string>, Error> =>
-  Redacted.value(value).trim().length > 0 ? Effect.succeed(value) : Effect.fail(new Error(`${name} must be set`))
+): Effect.Effect<Redacted.Redacted<string>, EmptySetting> =>
+  Redacted.value(value).trim().length > 0 ? Effect.succeed(value) : Effect.fail(new EmptySetting({ name }))
 
 const SHOULD_RUN_INTEGRATION = Effect.runSync(
   Config.option(Config.String("JIRA_INTEGRATION")).pipe(
@@ -164,10 +171,9 @@ const expectCanonicalIssueIncludesAttachmentMedia = (
 
 const parseFrontMatter = (markdown: string): Record<string, Schema.Json> => {
   const match = /^---\n([\s\S]*?)\n---/.exec(markdown)
-  const parsed = match?.[1] ? yaml.load(match[1]) : {}
-  return parsed !== null && Predicate.isObjectOrArray(parsed) && !Array.isArray(parsed)
-    ? Object.fromEntries(Object.entries(parsed))
-    : {}
+  return Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Json))(
+    match?.[1] === undefined ? {} : yaml.load(match[1])
+  )
 }
 
 const getIssueAsMarkdown = (config: IntegrationConfig, testDir: string) =>

@@ -214,3 +214,29 @@ test("keeps service context and actor provenance visible", async ({ page }, test
   }
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("timeline-actors.png") })
 })
+
+test("keeps timeline titles and details whole-word at 320 pixels", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 320 })
+  await page.goto(story("patterns-timelinerow--actor-kinds"))
+  await expect(page.locator("[data-rly-timeline-actor]").first()).toBeVisible()
+  // Every word of every title and detail lies on one line: wrapping happens only between words.
+  const split = await page.evaluate(() =>
+    [...document.querySelectorAll(
+      "[data-rly-timeline-actor] h2, [data-rly-timeline-actor] p, li article h2, li article p"
+    )].flatMap((element) => {
+      const text = element.firstChild
+      if (text === null || text.nodeType !== Node.TEXT_NODE) return []
+      const content = text.textContent ?? ""
+      const words: Array<string> = []
+      for (const match of content.matchAll(/\S+/g)) {
+        const range = document.createRange()
+        range.setStart(text, match.index)
+        range.setEnd(text, match.index + match[0].length)
+        const lines = new Set([...range.getClientRects()].map((rect) => Math.round(rect.top)))
+        if (lines.size > 1) words.push(match[0])
+      }
+      return words
+    })
+  )
+  expect(split).toEqual([])
+})

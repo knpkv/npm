@@ -93,7 +93,7 @@
     "test:integration": "vitest run --config vitest.config.integration.ts",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc -p test/tsconfig.json --noEmit",
     "link": "npm link"
   },
   "peerDependencies": {

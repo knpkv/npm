@@ -11,8 +11,7 @@
  * this file stayed green. That coverage is asserted at compile time in
  * `commands/layers.ts`; do not read a passing run here as proof of wiring.
  */
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
-import * as NodePath from "@effect/platform-node/NodePath"
+import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Command } from "effect/cli"
 import * as Effect from "effect/Effect"
@@ -69,7 +68,7 @@ const AuthLayer = Layer.succeed(
 const CaptureTerminalLayer = (stdout: Ref.Ref<string>) =>
   Layer.succeed(
     Terminal.Terminal,
-    Terminal.Terminal.of({
+    Terminal.make({
       columns: Effect.succeed(80),
       rows: Effect.succeed(24),
       readInput: Effect.die("readInput should not be called"),
@@ -124,11 +123,9 @@ const MovedOnClientLayer = (updates: Ref.Ref<ReadonlyArray<UpdateCall>>) =>
     })
   )
 
-const runCommand = (
-  command:
-    | ReturnType<typeof makePagePatchCommand>
-    | ReturnType<typeof makePageCreateCommand>
-    | ReturnType<typeof makePagePutCommand>,
+/** Runs one of the page commands with stub auth, a capturing terminal and the real ADF validator. */
+const runCommand = <Name extends string, Input, E, R>(
+  command: Command.Command<Name, Input, {}, E, R>,
   args: ReadonlyArray<string>
 ) =>
   Effect.gen(function*() {
@@ -136,11 +133,11 @@ const runCommand = (
     const cli = Command.runWith(command, { version: "0.0.0-test" })
     const exit = yield* cli(args).pipe(
       Effect.provide(Layer.mergeAll(
+        // The platform first, so the capturing Terminal below replaces its own.
+        NodeServices.layer,
         AuthLayer,
         CaptureTerminalLayer(stdout),
-        AdfSchemaValidatorLayer.pipe(Layer.provide(AtlaskitTransformersLayer)),
-        NodePath.layer,
-        NodeFileSystem.layer
+        AdfSchemaValidatorLayer.pipe(Layer.provide(AtlaskitTransformersLayer))
       )),
       Effect.exit
     )
