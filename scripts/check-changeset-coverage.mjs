@@ -320,6 +320,11 @@ const packageCompilerOptions = (
   return compilerOptionsFromConfig(selectedConfigPath, selectedConfigText, normalizedConfigFiles)
 }
 
+// Compiler options compared by content: each entry point reads its configuration into a fresh object, and
+// keying analyses by object identity kept one full analysis alive per entry point (codecommit-core: 250, ~4 GB).
+const compilerOptionsKey = (compilerOptions) =>
+  JSON.stringify(Object.entries(compilerOptions).toSorted(([left], [right]) => left.localeCompare(right)))
+
 const analyzeSources = (
   sources,
   recursiveDeclarations = new Set(),
@@ -327,7 +332,7 @@ const analyzeSources = (
 ) => {
   const cachedByFactory = sourceAnalysisCache.get(sources)
   const cachedByOptions = cachedByFactory?.get(programFactory)
-  const cached = cachedByOptions?.get(compilerOptions)
+  const cached = cachedByOptions?.get(compilerOptionsKey(compilerOptions))
   if (cached !== undefined) {
     return cached.recursiveDeclarations === recursiveDeclarations ? cached : { ...cached, recursiveDeclarations }
   }
@@ -485,7 +490,7 @@ const analyzeSources = (
   const analysis = { getChecker, modules, recursiveDeclarations, releaseChecker, sources }
   const analyses = cachedByFactory ?? new Map()
   const analysesByOptions = cachedByOptions ?? new Map()
-  analysesByOptions.set(compilerOptions, analysis)
+  analysesByOptions.set(compilerOptionsKey(compilerOptions), analysis)
   analyses.set(programFactory, analysesByOptions)
   sourceAnalysisCache.set(sources, analyses)
   return analysis
@@ -4714,6 +4719,16 @@ const validatePublicCallableChangesets = (changes, releaseTypes) =>
   ].toSorted()
 
 const runSelfTest = () => {
+  // Entry points read their configuration into fresh but equal option objects; they must share one analysis,
+  // or a package with many entry points keeps one analysis per entry alive (codecommit-core: ~4 GB).
+  const sharedSources = new Map([["packages/public/src/index.ts", "export const shared = 1\n"]])
+  const sharedDeclarations = new Set()
+  assert.equal(
+    analyzeSources(sharedSources, sharedDeclarations, { compilerOptions: { ...defaultCompilerOptions } }).modules,
+    analyzeSources(sharedSources, sharedDeclarations, {
+      compilerOptions: Object.fromEntries(Object.entries(defaultCompilerOptions).toReversed())
+    }).modules
+  )
   const records = [
     {
       changedReleaseManifest: false,
