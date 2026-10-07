@@ -13,11 +13,14 @@
  *   approval state arrives with `approvalOf`, as its own capability.
  * - **Posting re-reads the provider.** The comment is pinned to the revision CodeCommit reports at the
  *   moment of posting, through the review client's preflight, never to a cached revision.
+ * - **Posting goes through the host's gate.** `post_comment` needs a {@link PullRequestCommentPoster}, not
+ *   the review client: a host with its own permission prompt and audit log provides the poster from those,
+ *   so Relay's confirmation never replaces them.
  *
  * @module
  */
 import { defineContract, implement, type ObjectRef } from "@knpkv/capability"
-import { Effect, Option, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as Crypto from "effect/Crypto"
 import { PullRequestRepo } from "../CacheService/index.js"
 import type { CachedPullRequest } from "../CacheService/index.js"
@@ -26,7 +29,7 @@ import { enabledProfiles } from "../PRService/visibility.js"
 import { CodeCommitReadAccount, CodeCommitReadClient } from "../ReadClient/index.js"
 import type { CodeCommitReadError } from "../ReadClient/index.js"
 import { CodeCommitReviewClient } from "../ReviewClient/index.js"
-import type { CodeCommitReviewError } from "../ReviewClient/index.js"
+import type { CodeCommitReviewAction, CodeCommitReviewError, CodeCommitReviewReceipt } from "../ReviewClient/index.js"
 
 /** The coordinates that name one CodeCommit pull request across every configured account. */
 export const PullRequestCoordinates = Schema.Struct({
@@ -43,6 +46,23 @@ export const pullRequestRef = (coordinates: PullRequestCoordinates): ObjectRef =
   kind: "pull-request",
   id: `${coordinates.accountId}/${coordinates.region}/${coordinates.repositoryName}/${coordinates.pullRequestId}`
 })
+
+/** A top-level comment on an exact pull-request revision. */
+export type PullRequestCommentAction = Extract<CodeCommitReviewAction, { readonly _tag: "comment" }>
+
+/** Posts one comment. Hosts provide it from their own permission gate and audit log. */
+export class PullRequestCommentPoster extends Context.Service<PullRequestCommentPoster, {
+  readonly post: (action: PullRequestCommentAction) => Effect.Effect<CodeCommitReviewReceipt, CodeCommitReviewError>
+}>()("@knpkv/codecommit-core/RelayCapabilities/PullRequestCommentPoster") {
+  /** Post straight through the review client, for hosts without a gate of their own. */
+  static readonly fromReviewClient = Layer.effect(
+    PullRequestCommentPoster,
+    Effect.gen(function*() {
+      const client = yield* CodeCommitReviewClient
+      return { post: client.execute }
+    })
+  )
+}
 
 /** The cache holds no such pull request in a configured account. */
 export class PullRequestNotCached extends Schema.TaggedError<PullRequestNotCached>()("PullRequestNotCached", {
@@ -253,7 +273,7 @@ export const capabilities = {
     Effect.gen(function*() {
       const cached = yield* findCached(input.pullRequest)
       const readClient = yield* CodeCommitReadClient
-      const reviewClient = yield* CodeCommitReviewClient
+      const poster = yield* PullRequestCommentPoster
       const account = yield* decodeAccount({ profile: cached.accountProfile, region: cached.accountRegion }).pipe(
         Effect.mapError(() =>
           new CodeCommitUnavailable({
@@ -264,7 +284,7 @@ export const capabilities = {
       )
       const revision = yield* readClient.getPullRequest({ account, pullRequestId: input.pullRequest.pullRequestId })
         .pipe(Effect.mapError(providerUnavailable("reading the pull request")))
-      const receipt = yield* reviewClient.execute({
+      const receipt = yield* poster.post({
         _tag: "comment",
         target: {
           account,

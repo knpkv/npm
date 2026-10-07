@@ -7,9 +7,13 @@ import { ConfigService } from "../src/ConfigService/index.js"
 import { TuiConfig } from "../src/ConfigService/internal.js"
 import { AwsCredentialError } from "../src/Errors.js"
 import { CodeCommitPullRequestRevision, CodeCommitReadClient } from "../src/ReadClient/index.js"
-import { capabilities, postComment } from "../src/RelayCapabilities/index.js"
-import { CodeCommitReviewClient, CodeCommitReviewReceipt } from "../src/ReviewClient/index.js"
-import type { CodeCommitReviewAction } from "../src/ReviewClient/index.js"
+import {
+  capabilities,
+  postComment,
+  type PullRequestCommentAction,
+  PullRequestCommentPoster
+} from "../src/RelayCapabilities/index.js"
+import { CodeCommitReviewReceipt } from "../src/ReviewClient/index.js"
 
 const {
   getPullRequest: getPullRequestCapability,
@@ -82,7 +86,7 @@ const revision = new CodeCommitPullRequestRevision({
   lastActivityDate: new Date("2026-08-02T00:00:00.000Z")
 })
 
-const posted: Array<CodeCommitReviewAction> = []
+const posted: Array<PullRequestCommentAction> = []
 
 const services = (options: {
   readonly load?: ConfigService["Service"]["load"]
@@ -102,8 +106,8 @@ const services = (options: {
       getPullRequest: options.getPullRequest ?? (() =>
         Effect.succeed(revision))
     }),
-    Layer.mock(CodeCommitReviewClient, {
-      execute: (action) =>
+    Layer.mock(PullRequestCommentPoster, {
+      post: (action) =>
         Effect.sync(() => {
           posted.push(action)
           return new CodeCommitReviewReceipt({ operationId: "comment:c-1", summary: "Pull request comment posted" })
@@ -158,7 +162,7 @@ layer(services())("CodeCommit Relay capabilities", (it) => {
         content: "Looks good",
         target: { account: { profile: "work", region: "us-east-1" }, revisionId: "rev-7", sourceCommit: "a".repeat(40) }
       })
-      const tokens = posted.map((action) => ("clientRequestToken" in action ? action.clientRequestToken : ""))
+      const tokens = posted.map((action) => action.clientRequestToken)
       expect(tokens[0]).toBe(tokens[1])
       expect(tokens[2]).not.toBe(tokens[0])
     }))
