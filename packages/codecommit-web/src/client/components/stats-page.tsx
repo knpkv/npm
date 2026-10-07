@@ -509,7 +509,7 @@ export function StatsPage() {
         .onSuccess((data) => (
           <StatsContent data={data} navigate={navigate} goToPR={goToPR} handleSync={handleSync} syncing={syncing} />
         ))
-        .render()}
+        .exhaustive()}
     </div>
   )
 }

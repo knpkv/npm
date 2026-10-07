@@ -204,12 +204,33 @@ never reads as 0%. Under forced colours the track keeps a `CanvasText` edge. Pas
 to expose it as a meter instead. With `value={null}`, it is a named image whose
 accessible label combines `label` and `valueText`, without a numeric range.
 
+`StackedBars` stacks values per period on a time axis, with optional `bands` of
+limit levels above the bars on the same axis, and an optional `window` (such as the
+current limit window) shaded across bands and bars and named in a key under the axis. Narrow containers bin periods so every
+bar's hit area stays at least 24px wide, a full pointer target (the drawn fill is 2px narrower, for the gap). The plot is one tab stop: ←/→ move and select, Shift
+extends, Home/End jump and Escape clears. Click selects, and Shift+click or a second
+tap elsewhere extends the span. The caller owns `selection` and words it through
+`describeSelection`. Only a selection the user makes is announced, politely, once it
+settles: the first render and a data refresh under the same selection stay quiet. Charts
+are presentation only: the application computes columns, bands and any projection.
+`columns` must be in time order without overlaps (gaps are fine), or the chart throws an error naming
+the first column out of place. Every bar stacks its series in one chart-wide order, the order
+each id first appears. Bins group every N columns, so hourly columns that start on the
+hour bin on clock hours. The selection is outlined above the bars, and the window is a
+neutral dashed stretch, never the focus colour. A chart on a surface other than
+`surface-1` sets `--rly-stacked-bars-gap` to that background, so the gaps between bars
+match it.
+Everything the bands draw is named in that key in the caller's words: each band's
+`near: { level, label }` mark, and `noReadingLabel`, which is required once any band has
+a stretch with `level: null`. Zero, negative and non-finite values draw nothing.
+
 `TrackKey` explains the marks the tracks draw, listing only the marks in use.
 `ChartLegend` says which colour is which series, with the swatch before each label.
 Series colours are the tokens `--rly-color-series-1` to `-8` plus
 `--rly-color-series-other` for folded series. Use `rlySeriesColor(series)` in SVG
 fills, and keep an id on the same slot while it is visible. Colour is never the only
-carrier: every chart ships a labelled key and a table equivalent, and forced-colours
+carrier: every chart ships a labelled key and a table equivalent (a readable-resolution
+table, each band's intervals, and a selection announcement naming every series' value), and forced-colours
 mode collapses the series to `CanvasText`.
 
 ```tsx
