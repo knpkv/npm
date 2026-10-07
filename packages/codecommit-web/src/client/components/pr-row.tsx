@@ -73,11 +73,8 @@ export function PRRow({ caller, pr, showUpdated, to }: PRRowProps) {
         ) : null}
         <div className={styles.prByline}>
           <Text tone="secondary" variant="meta">
-            {pr.author}
+            {pr.author},
           </Text>
-          <span aria-hidden="true" className={styles.metaSeparator}>
-            ·
-          </span>
           <Text
             as="time"
             dateTime={pullRequestRowTimestamp(pr, showUpdated === true).toISOString()}
@@ -102,8 +99,8 @@ export function PRRow({ caller, pr, showUpdated, to }: PRRowProps) {
         </div>
         <div className={styles.prFact}>
           <dt>Revision</dt>
-          <dd title={`${pr.sourceBranch} to ${pr.destinationBranch}`}>
-            {pr.sourceBranch} → {pr.destinationBranch}
+          <dd title={`${pr.sourceBranch} into ${pr.destinationBranch}`}>
+            {pr.sourceBranch} into {pr.destinationBranch}
           </dd>
         </div>
       </dl>
