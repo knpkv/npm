@@ -124,16 +124,18 @@ export interface PaneScrollReporter {
  */
 export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporter")(function*(
   read: Effect.Effect<number, PaneScrollReadError>,
-  hostWindow: ReadWindow
+  hostWindow: ReadWindow,
+  forwardedScrolls: () => number
 ): Effect.fn.Return<PaneScrollReporter, never, Scope.Scope> {
   const requests = yield* Queue.sliding<void>(1)
   const states = yield* Queue.unbounded<TerminalScrollState>()
   const sessionWindow = makeReadWindow(sessionReadsPerSecond)
   // undefined until the first report, so a first read that fails is still reported as unknown.
   let lastOffset: number | null | undefined = undefined
+  let lastCommands = 0
   let failureLogged = false
-  const report = (offsetFromBottom: number | null) =>
-    Queue.offer(states, { type: "terminal.scroll_state", offsetFromBottom })
+  const report = (offsetFromBottom: number | null, scrollCommands: number) =>
+    Queue.offer(states, { type: "terminal.scroll_state", offsetFromBottom, scrollCommands })
   yield* Effect.forkScoped(
     Effect.forever(Effect.gen(function*() {
       yield* Queue.take(requests)
@@ -145,6 +147,7 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
       const at = yield* Clock.currentTimeMillis
       if (!hostWindow.tryTake(at)) return
       sessionWindow.tryTake(at)
+      const scrollCommands = forwardedScrolls()
       const offset = yield* read.pipe(
         Effect.catch((error) =>
           Effect.gen(function*() {
@@ -156,9 +159,12 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
           })
         )
       )
-      if (offset === lastOffset) return
+      // A reading that covers more scrolls is news even at the same offset: the client may have
+      // assumed those scrolls moved the pane.
+      if (offset === lastOffset && scrollCommands === lastCommands) return
       lastOffset = offset
-      yield* report(offset)
+      lastCommands = scrollCommands
+      yield* report(offset, scrollCommands)
     }))
   )
   return {
@@ -167,3 +173,10 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
     states: Stream.fromQueue(states)
   }
 })
+
+/** For a client that did not ask for scroll states: no reads, no states. */
+export const silentScrollReporter: PaneScrollReporter = {
+  request: Effect.void,
+  scrolledBack: () => false,
+  states: Stream.empty
+}

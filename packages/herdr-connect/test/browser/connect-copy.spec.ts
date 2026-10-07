@@ -337,6 +337,53 @@ test.describe("scroll position from the hub", () => {
     await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith("300 "))).toBe(true)
   })
 
+  test("a jump deeper than 120,000 lines still lands on the newest line in one press", async ({ page }) => {
+    test.setTimeout(90_000)
+    await open(page, { mode: "known", start: 120_400, lines: 121_000 })
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 120400 lines back")
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    await expect(olderOutput(page)).toHaveCount(0, { timeout: 60_000 })
+    expect((await downs(page)).reduce((total, lines) => total + lines, 0)).toBe(120_400)
+  })
+
+  test("from a known position, Page Down scrolls toward the newest output; at the bottom it sends nothing", async ({ page }) => {
+    await open(page, { mode: "known", start: 50 })
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back")
+    const point = await cellPoint(page, "2", 2)
+    await page.mouse.click(point.x, point.y)
+    await page.keyboard.press("PageDown")
+    await expect.poll(() => downs(page)).not.toEqual([])
+    const sent = (await downs(page)).reduce((total, lines) => total + lines, 0)
+    // A page is the screen's height, but never more than the 50 lines the pane is back.
+    expect(sent).toBe(Math.min(50, (await screen(page)).rows.length))
+    if (sent < 50) await expect(olderOutput(page)).toHaveAccessibleName(`Older output, ${String(50 - sent)} lines back`)
+    else await expect(olderOutput(page)).toHaveCount(0)
+
+    await open(page, { mode: "known", start: 0 })
+    const bottom = await cellPoint(page, "295 ", 2)
+    await page.mouse.click(bottom.x, bottom.y)
+    await page.keyboard.press("PageDown")
+    await page.waitForTimeout(300)
+    expect(await downs(page)).toEqual([])
+  })
+
+  test("a reading taken before a local scroll does not undo it", async ({ page }) => {
+    await open(page, { mode: "known", start: 0 })
+    await page.request.post("/__test/scroll-state/mute?on=1")
+    const point = await cellPoint(page, "295 ", 2)
+    await page.mouse.click(point.x, point.y)
+    await page.keyboard.press("PageUp")
+    await expect.poll(async () => (await commands(page)).some((command) => command.direction === "up")).toBe(true)
+    const ups = (await commands(page)).filter((command) => command.direction === "up").map((command) =>
+      command.lines ?? 0
+    )
+    // herdr was sampled at the bottom before the Page Up reached it.
+    await page.request.post("/__test/reading?offset=0&commands=0")
+    await expect(olderOutput(page)).toHaveAccessibleName(`Older output, ${String(ups[0] ?? 0)} lines back`)
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    await expect.poll(() => downs(page)).toEqual(ups)
+  })
+
   test("an unreadable position falls back to the local estimate and the page-by-page jump", async ({ page }) => {
     await open(page, { mode: "unknown", start: 30 })
     await expect(olderOutput(page)).toHaveCount(0)

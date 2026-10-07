@@ -57,7 +57,12 @@ export interface ScrollTrack {
   readonly reset: () => void
 }
 
-export const makeScrollTrack = (cellHeight: () => number): ScrollTrack => {
+/**
+ * `floorLines` is how far toward the newest output the track may go, in lines relative to where it
+ * was last reset: 0 when the client only knows it started at the bottom, negative when the server
+ * says the pane is that many lines back.
+ */
+export const makeScrollTrack = (cellHeight: () => number, floorLines: () => number = () => 0): ScrollTrack => {
   let travel = 0
   let requested = 0
   let applied = 0
@@ -66,10 +71,11 @@ export const makeScrollTrack = (cellHeight: () => number): ScrollTrack => {
   const cell = (): number => Math.max(1, cellHeight())
   return {
     pan: (dy) => {
-      travel = Math.max(0, travel + dy)
+      travel = Math.max(Math.min(0, floorLines()) * cell(), travel + dy)
     },
     take: () => {
-      const wanted = Math.floor(travel / cell())
+      // Whole lines travelled, toward zero, so a part-line in either direction is never sent.
+      const wanted = Math.trunc(travel / cell())
       const difference = wanted - requested
       if (difference === 0) return null
       const lines = Math.min(maximumLinesPerCommand, Math.abs(difference))

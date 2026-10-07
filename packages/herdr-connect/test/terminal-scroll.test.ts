@@ -45,6 +45,18 @@ describe("scroll track", () => {
     expect(track.take()).toEqual({ direction: "down", lines: 2 })
   })
 
+  it("scrolls toward the newest output as far as the floor allows", () => {
+    // A server that says the pane is 3 lines back lets the client come down those 3, no further.
+    const track = makeScrollTrack(() => cell, () => -3)
+    track.pan(-200)
+    expect(track.take()).toEqual({ direction: "down", lines: 3 })
+    expect(track.take()).toBeNull()
+    // Part of a line toward the bottom is never sent.
+    const partial = makeScrollTrack(() => cell, () => -3)
+    partial.pan(-20)
+    expect(partial.take()).toEqual({ direction: "down", lines: 1 })
+  })
+
   it("stops following a server that has not answered for three lines", () => {
     const track = makeScrollTrack(() => cell)
     track.pan(200)

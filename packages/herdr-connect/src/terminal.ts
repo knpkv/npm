@@ -9,7 +9,8 @@ import {
   hostReadsPerSecond,
   makePaneScrollReporter,
   makeReadWindow,
-  readPaneScrollOffset
+  readPaneScrollOffset,
+  silentScrollReporter
 } from "./internal/pane-scroll.js"
 import { boundedTerminalLines, terminalEventMaxLineBytes } from "./internal/terminal-lines.js"
 import { releaseTerminalControl, terminalKillOptions, terminalReleaseKillOptions } from "./internal/terminal-release.js"
@@ -122,10 +123,14 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
       )
       .pipe(Effect.mapError(transportError("herdr.terminal.spawn")))
 
-    const scroll = yield* makePaneScrollReporter(
-      readPaneScrollOffset(spawner, config.herdrCommand, config.repository, agent.paneId),
-      scrollReads
-    )
+    let forwardedScrolls = 0
+    const scroll = selection.scrollState === true
+      ? yield* makePaneScrollReporter(
+        readPaneScrollOffset(spawner, config.herdrCommand, config.repository, agent.paneId),
+        scrollReads,
+        () => forwardedScrolls
+      )
+      : silentScrollReporter
     yield* scroll.request
 
     const send = Effect.fn("HerdrTerminal.send")(function*(command: TerminalClientCommand) {
@@ -134,7 +139,10 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
         Stream.run(handle.stdin),
         Effect.mapError(transportError("herdr.terminal.write"))
       )
-      if (command.type === "terminal.scroll") yield* scroll.request
+      if (command.type === "terminal.scroll") {
+        forwardedScrolls += 1
+        yield* scroll.request
+      }
     })
 
     yield* Effect.addFinalizer(() =>

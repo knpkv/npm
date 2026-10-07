@@ -1483,10 +1483,11 @@ describe("Connect public seams", () => {
     const command = join(root, "herdr-test")
     const argumentsPath = join(root, "arguments")
     const inputPath = join(root, "input")
+    const paneReadsPath = join(root, "pane-reads")
     writeFileSync(
       command,
       `#!/bin/sh
-case "$1" in pane) printf '%s\\n' '{"result":{"pane":{"scroll":{"offset_from_bottom":0}}}}'; exit 0 ;; esac
+case "$1" in pane) echo "$*" >> '${paneReadsPath}'; printf '%s\\n' '{"result":{"pane":{"scroll":{"offset_from_bottom":0}}}}'; exit 0 ;; esac
 printf '%s\\n' "$@" > '${argumentsPath}'
 dd if=/dev/zero bs=131072 count=1 2>/dev/null >&2
 printf '%s\\n' '{"type":"terminal.frame","seq":1,"encoding":"ansi","width":100,"height":30,"full":true,"bytes":"b2s="}'
@@ -1610,6 +1611,29 @@ done
           expect(readFileSync(inputPath, "utf8")).toContain(
             "{\"type\":\"terminal.release\"}"
           )
+          // The session above did not opt in, so it never read the pane.
+          expect(existsSync(paneReadsPath)).toBe(false)
+
+          // An opted-in session reports the pane's position, stamped with the scrolls it forwarded.
+          const state = yield* Effect.scoped(
+            Effect.gen(function*() {
+              const session = yield* connector.open({
+                agentId,
+                cols: 100,
+                host: config.host,
+                rows: 30,
+                scrollState: true
+              })
+              yield* session.send({ type: "terminal.scroll", direction: "up", lines: 3, source: "wheel", modifiers: 0 })
+              const first = yield* Stream.runHead(
+                Stream.filter(session.events, (event) => event.type === "terminal.scroll_state")
+              ).pipe(Effect.forkChild({ startImmediately: true }))
+              yield* TestClock.adjust("1 second")
+              return Option.getOrNull(yield* Fiber.join(first))
+            })
+          )
+          expect(state).toEqual({ type: "terminal.scroll_state", offsetFromBottom: 0, scrollCommands: 1 })
+          expect(readFileSync(paneReadsPath, "utf8")).toContain("pane get w1:p1")
 
           if (platform() !== "win32") {
             const forcedReadyPath = join(root, "forced-ready")

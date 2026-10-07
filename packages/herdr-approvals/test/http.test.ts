@@ -6,6 +6,7 @@ import {
   terminalCommandMaxPayloadBytes,
   type TerminalConnector,
   terminalFrameMaxEncodedBytes,
+  TerminalSelection,
   type TerminalSession
 } from "@knpkv/herdr-connect"
 import { ChatHistory, chatHistoryMaxEntries, ChatStore, type StoredChatTurn } from "@knpkv/herdr-coordinator"
@@ -62,6 +63,7 @@ import {
   startHttpServer
 } from "../src/http.js"
 import { dashboardDocumentTitle } from "../src/internal/html.js"
+import { remoteTerminalUrl, terminalSelectionInput } from "../src/internal/terminal-selection.js"
 import {
   makeLatestSignalSender,
   relayTerminalCloseCode,
@@ -2504,6 +2506,23 @@ esac
     expect(terminalBufferCanAccept(terminalBufferLimitBytes - 1, 1)).toBe(true)
   })
 
+  it("passes the scroll-state opt-in through the hub only when the client sent it", () => {
+    const decode = Schema.decodeUnknownSync(TerminalSelection)
+    const base = { host: "SER9", agentId: "agent-1", cols: 100, rows: 30 }
+    const browser = new URL("wss://hub.example.test/v1/connect/session?host=SER9&agent=agent-1&cols=100&rows=30")
+    // An older client never asked, so the remote host must stay silent toward it.
+    const legacy = decode(terminalSelectionInput(browser))
+    expect(legacy).toEqual(base)
+    expect(remoteTerminalUrl("wss://ser9.example.test/v1/connect/terminal", legacy).searchParams.has("scrollState"))
+      .toBe(false)
+    browser.searchParams.set("scrollState", "1")
+    const current = decode(terminalSelectionInput(browser))
+    expect(current).toEqual({ ...base, scrollState: true })
+    const remote = remoteTerminalUrl("wss://ser9.example.test/v1/connect/terminal", current)
+    expect(remote.searchParams.get("scrollState")).toBe("1")
+    expect(decode(terminalSelectionInput(remote))).toEqual(current)
+  })
+
   it("holds the newest scroll state under backpressure and sends it once the socket drains", () => {
     vi.useFakeTimers()
     try {
@@ -4013,7 +4032,7 @@ esac
             events: attempt === 2
               ? Stream.empty
               : attempt === 4
-              ? Stream.make({ type: "terminal.scroll_state", offsetFromBottom: 42 }, {
+              ? Stream.make({ type: "terminal.scroll_state", offsetFromBottom: 42, scrollCommands: 0 }, {
                 bytes: Buffer.alloc((terminalFrameMaxEncodedBytes / 4) * 3).toString("base64"),
                 encoding: "ansi",
                 full: true,
@@ -4166,7 +4185,9 @@ esac
             expect(maximumFrameClose).toBe(1_000)
             expect(maximumFrameBytes).toBe((terminalFrameMaxEncodedBytes / 4) * 3)
             // The scroll position is relayed as a signal and does not end the session.
-            expect(signals).toContain(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 42 }))
+            expect(signals).toContain(
+              JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 42, scrollCommands: 0 })
+            )
 
             const held = yield* Effect.promise(
               () =>

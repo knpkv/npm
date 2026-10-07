@@ -46,7 +46,7 @@ export interface TerminalInteraction {
   readonly frameArrived: (data: Uint8Array) => void
   readonly jumpToLatest: () => void
   /** The pane's real scroll position from the server; `null` when the server could not read it. */
-  readonly serverScrollState: (offsetFromBottom: number | null) => void
+  readonly serverScrollState: (offsetFromBottom: number | null, scrollCommands: number) => void
   /** Ask the view to show the screen as selectable text, as a long-press does. */
   readonly selectText: () => void
   readonly dispose: () => void
@@ -78,6 +78,8 @@ const frameKey = (data: Uint8Array): string => {
 const maximumJumpCommands = 300
 /** Jump-to-latest gives up only after this long without a screen, so a slow host still gets there. */
 const jumpSilenceMs = 2_000
+/** A known jump re-reads at most this many times when output keeps arriving behind it. */
+const maximumSettleRounds = 8
 
 /** What the server has said about herdr's scroll position. */
 type ServerPosition =
@@ -91,14 +93,13 @@ type Timer = ReturnType<typeof setTimeout>
 type Jump =
   // Position unknown: a page per frame until a frame comes back unchanged.
   | { readonly _tag: "Frames"; readonly previous: string | null; readonly sent: number; readonly timer: Timer }
-  // Position known: the exact lines left, then a reading taken after the last page decides — output
-  // that arrived meanwhile is sent too, and only a reading of 0 ends it.
+  // Position known: the exact lines left, a page per frame, then a reading that covers the last
+  // page decides — output that arrived meanwhile is sent too, and only a reading of 0 ends it.
   | {
     readonly _tag: "Known"
     readonly remaining: number
-    readonly inFlight: boolean
-    readonly reading: number | null
-    readonly sent: number
+    readonly lastCommand: number
+    readonly rounds: number
     readonly timer: Timer
   }
 
@@ -121,7 +122,11 @@ export const bindTerminalInteraction = (
   disableCopyOnSelect(terminal)
   const canvas = (): HTMLCanvasElement | null => container.querySelector("canvas")
   const cellHeight = (): number => (canvas()?.getBoundingClientRect().height ?? 0) / Math.max(1, terminal.rows)
-  const track = makeScrollTrack(cellHeight)
+  // With a known position the client may scroll toward the bottom as far as the server says.
+  const track = makeScrollTrack(
+    cellHeight,
+    () => serverPosition._tag === "Known" ? track.linesBack() - serverPosition.offset : 0
+  )
   const gesture = makeTouchGesture()
   let velocity = 0
   let frame: number | null = null
@@ -130,6 +135,10 @@ export const bindTerminalInteraction = (
   // The server's reading of herdr's position. Without a known one — an older hub, or a read that
   // failed — the local estimate and the frame-by-frame jump stand in.
   let serverPosition: ServerPosition = { _tag: "NoSignal" }
+  // Scrolls sent since the last reading that covered them, as signed lines (up positive). A reading
+  // taken before a scroll reached herdr must not undo it, so the uncovered ones are re-applied.
+  let sentScrolls = 0
+  let uncovered: ReadonlyArray<{ readonly command: number; readonly lines: number }> = []
   let holdTimer: ReturnType<typeof setTimeout> | null = null
   let wheelTimer: ReturnType<typeof setTimeout> | null = null
   let jump: Jump | null = null
@@ -164,9 +173,11 @@ export const bindTerminalInteraction = (
   // Every scroll this client sends moves a known position by the same lines, so it never goes stale
   // between readings; the next reading corrects any clamping at either end.
   const sendLines = (scroll: LineScroll): void => {
+    const lines = scroll.direction === "up" ? scroll.lines : -scroll.lines
+    sentScrolls += 1
+    if (serverPosition._tag !== "NoSignal") uncovered = [...uncovered, { command: sentScrolls, lines }]
     if (serverPosition._tag === "Known") {
-      const moved = serverPosition.offset + (scroll.direction === "up" ? scroll.lines : -scroll.lines)
-      serverPosition = { _tag: "Known", offset: Math.max(0, moved) }
+      serverPosition = { _tag: "Known", offset: Math.max(0, serverPosition.offset + lines) }
     }
     send({ type: "terminal.scroll", direction: scroll.direction, lines: scroll.lines, source: "wheel", modifiers: 0 })
   }
@@ -303,21 +314,11 @@ export const bindTerminalInteraction = (
     jump = { _tag: "Frames", previous, sent: sent + 1, timer: silence() }
     sendLines({ direction: "down", lines: maximumLinesPerCommand })
   }
-  const knownStep = (remaining: number, sent: number): void => {
+  const knownStep = (remaining: number, rounds: number): void => {
     const lines = Math.min(maximumLinesPerCommand, remaining)
-    jump = {
-      _tag: "Known",
-      remaining: remaining - lines,
-      inFlight: true,
-      reading: null,
-      sent: sent + 1,
-      timer: silence()
-    }
+    const timer = silence()
     sendLines({ direction: "down", lines })
-  }
-  const settleKnown = (reading: number, sent: number): void => {
-    if (reading === 0 || sent >= maximumJumpCommands) endJump()
-    else knownStep(reading, sent)
+    jump = { _tag: "Known", remaining: remaining - lines, lastCommand: sentScrolls, rounds, timer }
   }
 
   const copySelection = (): string | null => {
@@ -371,13 +372,7 @@ export const bindTerminalInteraction = (
         const key = frameKey(data)
         if (key === jump.previous || jump.sent >= maximumJumpCommands) endJump()
         else frameStep(key, jump.sent)
-      } else if (jump.inFlight) {
-        if (jump.remaining > 0) {
-          if (jump.sent >= maximumJumpCommands) endJump()
-          else knownStep(jump.remaining, jump.sent)
-        } else if (jump.reading !== null) settleKnown(jump.reading, jump.sent)
-        else jump = { ...jump, inFlight: false }
-      }
+      } else if (jump.remaining > 0) knownStep(jump.remaining, jump.rounds)
     },
     selectText: showText,
     jumpToLatest: () => {
@@ -388,15 +383,19 @@ export const bindTerminalInteraction = (
       else if (serverPosition.offset > 0) knownStep(serverPosition.offset, 0)
       draw()
     },
-    serverScrollState: (offsetFromBottom) => {
-      serverPosition = offsetFromBottom === null ? { _tag: "Unknown" } : { _tag: "Known", offset: offsetFromBottom }
+    serverScrollState: (offsetFromBottom, scrollCommands) => {
+      uncovered = uncovered.filter((scroll) => scroll.command > scrollCommands)
+      const pending = uncovered.reduce((total, scroll) => total + scroll.lines, 0)
+      serverPosition = offsetFromBottom === null
+        ? { _tag: "Unknown" }
+        : { _tag: "Known", offset: Math.max(0, offsetFromBottom + pending) }
       if (jump?._tag === "Known") {
         // A reading that fails mid-jump hands the rest to the page-per-frame jump.
-        if (offsetFromBottom === null) {
-          if (jump.inFlight) jump = { _tag: "Frames", previous: null, sent: jump.sent, timer: jump.timer }
-          else frameStep(null, jump.sent)
-        } else if (jump.inFlight) jump = { ...jump, reading: offsetFromBottom }
-        else if (jump.remaining === 0) settleKnown(offsetFromBottom, jump.sent)
+        if (serverPosition._tag === "Unknown") frameStep(null, 0)
+        else if (jump.remaining === 0 && scrollCommands >= jump.lastCommand) {
+          if (serverPosition.offset === 0 || jump.rounds >= maximumSettleRounds) endJump()
+          else knownStep(serverPosition.offset, jump.rounds + 1)
+        }
       }
       draw()
     },

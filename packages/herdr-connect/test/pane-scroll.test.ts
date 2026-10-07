@@ -36,6 +36,7 @@ describe("read window", () => {
 const reporterWith = (outcomes: ReadonlyArray<number | "fail">, hostLimit = 10) =>
   Effect.gen(function*() {
     let calls = 0
+    let forwarded = 0
     const read = Effect.suspend(() => {
       const outcome = outcomes[Math.min(calls, outcomes.length - 1)]
       calls += 1
@@ -43,12 +44,25 @@ const reporterWith = (outcomes: ReadonlyArray<number | "fail">, hostLimit = 10) 
         ? Effect.fail(new PaneScrollReadError({ cause: "scripted", detail: "scripted failure" }))
         : Effect.succeed(outcome)
     })
-    const reporter = yield* makePaneScrollReporter(read, makeReadWindow(hostLimit))
+    const reporter = yield* makePaneScrollReporter(read, makeReadWindow(hostLimit), () => forwarded)
     const seen: Array<number | null> = []
+    const commands: Array<number> = []
     yield* Effect.forkScoped(
-      Stream.runForEach(reporter.states, (state) => Effect.sync(() => seen.push(state.offsetFromBottom)))
+      Stream.runForEach(reporter.states, (state) =>
+        Effect.sync(() => {
+          seen.push(state.offsetFromBottom)
+          commands.push(state.scrollCommands)
+        }))
     )
-    return { reporter, seen, calls: () => calls }
+    return {
+      reporter,
+      seen,
+      commands,
+      calls: () => calls,
+      forward: () => {
+        forwarded += 1
+      }
+    }
   })
 
 describe("pane scroll reporter", () => {
@@ -98,6 +112,23 @@ describe("pane scroll reporter", () => {
       }
       expect(seen).toEqual([null, 5])
       expect(reporter.scrolledBack()).toBe(true)
+    })).pipe(provideTestClock))
+})
+
+describe("pane scroll reporter coverage", () => {
+  it.effect("stamps each reading with the scrolls forwarded before it and reports the same offset again once more are covered", () =>
+    Effect.scoped(Effect.gen(function*() {
+      // A scroll clamped at the top leaves the offset unchanged, but the client already assumed it moved.
+      const { commands, forward, reporter, seen } = yield* reporterWith([40, 40, 40])
+      yield* reporter.request
+      yield* TestClock.adjust("1 second")
+      forward()
+      yield* reporter.request
+      yield* TestClock.adjust("1 second")
+      yield* reporter.request
+      yield* TestClock.adjust("1 second")
+      expect(seen).toEqual([40, 40])
+      expect(commands).toEqual([0, 1])
     })).pipe(provideTestClock))
 })
 

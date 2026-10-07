@@ -249,6 +249,7 @@ const socketUrl = (agent: ConnectAgent, dimensions: TerminalDimensions): string 
   url.searchParams.set("agent", agent.id)
   url.searchParams.set("cols", String(cols))
   url.searchParams.set("rows", String(rows))
+  url.searchParams.set("scrollState", "1")
   return url.toString()
 }
 
@@ -481,7 +482,7 @@ const terminalWorker = (
             return
           }
           if (decoded.success.type === "terminal.scroll_state") {
-            interaction.serverScrollState(decoded.success.offsetFromBottom)
+            interaction.serverScrollState(decoded.success.offsetFromBottom, decoded.success.scrollCommands)
             return
           }
           if (decoded.success.type === "terminal.ready") {

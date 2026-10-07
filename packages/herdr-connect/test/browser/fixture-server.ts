@@ -17,8 +17,10 @@
  * position as the hub does — off by default, which is how a hub without that signal behaves; `lines=N`
  * gives them N lines of history instead of 300. `POST /__test/scroll-state/mute?on=1` holds readings
  * back, as a slow or rate-limited hub would; `POST /__test/grow?lines=N` streams N lines into the
- * latest session without a reading. `GET /__test/in-flight` returns the most scroll commands that
- * were ever waiting to render at once.
+ * latest session without a reading, and `POST /__test/reading?offset=N&commands=M` sends it a
+ * reading taken before its last scrolls, as a slow `herdr pane get` would. Readings only go to
+ * sessions whose URL opted in with `scrollState=1`, like the real hosts. `GET /__test/in-flight`
+ * returns the most scroll commands that were ever waiting to render at once.
  */
 import { NodeRuntime } from "@effect/platform-node"
 import { Config, Console, Effect, Option, Schema } from "effect"
@@ -123,13 +125,21 @@ let readingsMuted = false
 let scrollsInFlight = 0
 let mostScrollsInFlight = 0
 let growLatest: (lines: number) => void = () => {}
+let readingToLatest: (offsetFromBottom: number, scrollCommands: number) => void = () => {}
 
 /** One session: a screen of `rows` lines ending `offset` lines above the newest. */
-const session = (socket: WebSocket, cols: number, rows: number, { rttMs, tickMs }: SessionTiming) => {
+const session = (
+  socket: WebSocket,
+  cols: number,
+  rows: number,
+  optedIn: boolean,
+  { rttMs, tickMs }: SessionTiming
+) => {
   const history = initialHistory(scrollStateMode.historyLines)
   let offset = scrollStateMode.startOffset
   let width = cols
   let height = rows
+  let appliedScrolls = 0
   // Soft-wraps long lines to the terminal width, as the pane would before herdr renders it.
   const screenRows = (): Array<string> => {
     const wrapped = history.flatMap((line) => {
@@ -143,10 +153,10 @@ const session = (socket: WebSocket, cols: number, rows: number, { rttMs, tickMs 
     return wrapped.slice(Math.max(0, end - height), end)
   }
   const reportScroll = (): void => {
-    if (scrollStateMode.report === "off" || readingsMuted) return
+    if (scrollStateMode.report === "off" || readingsMuted || !optedIn) return
     screenRows()
     const offsetFromBottom = scrollStateMode.report === "known" ? offset : null
-    socket.send(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom }))
+    socket.send(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom, scrollCommands: appliedScrolls }))
   }
   const render = (report = true): void => {
     if (socket.readyState !== socket.OPEN) return
@@ -167,6 +177,8 @@ const session = (socket: WebSocket, cols: number, rows: number, { rttMs, tickMs 
     render(report)
   }
   growLatest = (lines) => stream(lines, false)
+  readingToLatest = (offsetFromBottom, scrollCommands) =>
+    socket.send(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom, scrollCommands }))
   socket.send(JSON.stringify({ type: "terminal.ready" }))
   render()
   const ticker = tickMs > 0 ? setInterval(() => stream(1, true), tickMs) : undefined
@@ -180,6 +192,7 @@ const session = (socket: WebSocket, cols: number, rows: number, { rttMs, tickMs 
       mostScrollsInFlight = Math.max(mostScrollsInFlight, scrollsInFlight)
       setTimeout(() => {
         scrollsInFlight -= 1
+        appliedScrolls += 1
         offset += command.direction === "up" ? command.lines : -command.lines
         render()
       }, rttMs)
@@ -231,6 +244,9 @@ const handle = (request: IncomingMessage, response: ServerResponse): void => {
   } else if (url.pathname === "/__test/grow" && request.method === "POST") {
     growLatest(Number(url.searchParams.get("lines") ?? "1"))
     json(response, JSON.stringify({ ok: true }))
+  } else if (url.pathname === "/__test/reading" && request.method === "POST") {
+    readingToLatest(Number(url.searchParams.get("offset") ?? "0"), Number(url.searchParams.get("commands") ?? "0"))
+    json(response, JSON.stringify({ ok: true }))
   } else if (url.pathname === "/__test/in-flight") {
     json(response, JSON.stringify({ most: mostScrollsInFlight }))
   } else if (url.pathname === "/__test/reset" && request.method === "POST") {
@@ -262,10 +278,13 @@ const main = Effect.gen(function*() {
       socket,
       head,
       (client) =>
-        session(client, Number(url.searchParams.get("cols") ?? "80"), Number(url.searchParams.get("rows") ?? "24"), {
-          rttMs,
-          tickMs
-        })
+        session(
+          client,
+          Number(url.searchParams.get("cols") ?? "80"),
+          Number(url.searchParams.get("rows") ?? "24"),
+          url.searchParams.get("scrollState") === "1",
+          { rttMs, tickMs }
+        )
     )
   })
   const listening = yield* Effect.callback<number>((resume) => {

@@ -97,7 +97,10 @@ export const TerminalSelection = Schema.Struct({
   host: BoundedString,
   agentId: BoundedString,
   cols: TerminalColumns,
-  rows: TerminalRows
+  rows: TerminalRows,
+  // The client understands `terminal.scroll_state`. Absent for older clients, which would close
+  // the terminal on an unknown signal, so hosts send scroll states only when it is set.
+  scrollState: Schema.optionalKey(Schema.Boolean)
 })
 export type TerminalSelection = typeof TerminalSelection.Type
 
@@ -164,7 +167,10 @@ export type HerdrTerminalEvent = typeof HerdrTerminalEvent.Type
  */
 export const TerminalScrollState = Schema.Struct({
   type: Schema.Literal("terminal.scroll_state"),
-  offsetFromBottom: Schema.NullOr(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)))
+  offsetFromBottom: Schema.NullOr(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+  // How many `terminal.scroll` commands the connector had forwarded when it took the reading, so
+  // the client can re-apply the ones the reading does not cover yet.
+  scrollCommands: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 })
 export type TerminalScrollState = typeof TerminalScrollState.Type
 

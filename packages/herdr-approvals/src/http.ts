@@ -116,6 +116,7 @@ import { DashboardView } from "./dashboard-view.js"
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { dashboardDocumentTitle } from "./internal/html.js"
+import { remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
 import { makeLatestSignalSender, relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
 import { LanWorkPage, LanWorkPairPage } from "./lan-work-view.js"
 import {
@@ -1300,12 +1301,7 @@ const rejectUpgrade = (
 }
 
 const terminalSelectionFromUrl = (url: URL) =>
-  Schema.decodeUnknownEffect(TerminalSelection)({
-    host: url.searchParams.get("host"),
-    agentId: url.searchParams.get("agent"),
-    cols: Number(url.searchParams.get("cols")),
-    rows: Number(url.searchParams.get("rows"))
-  }).pipe(
+  Schema.decodeUnknownEffect(TerminalSelection)(terminalSelectionInput(url)).pipe(
     Effect.mapError(
       (cause) =>
         new FleetValidationError({
@@ -2203,11 +2199,7 @@ export const startHttpServer = async (
         closeSocket(socket, 4404, "host unavailable")
         return
       }
-      const remoteUrl = new URL(peer.terminalUrl)
-      remoteUrl.searchParams.set("host", selection.host)
-      remoteUrl.searchParams.set("agent", selection.agentId)
-      remoteUrl.searchParams.set("cols", String(selection.cols))
-      remoteUrl.searchParams.set("rows", String(selection.rows))
+      const remoteUrl = remoteTerminalUrl(peer.terminalUrl, selection)
       const remote = new WebSocketClient(remoteUrl, {
         headers: { host: remoteUrl.host },
         maxPayload: terminalFrameMaxPayload,
