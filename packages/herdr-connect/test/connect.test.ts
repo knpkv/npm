@@ -1151,14 +1151,14 @@ describe("Connect public seams", () => {
           reason: "invalid_response"
         })
       }
-    })
+    }).pipe(provideNodeHttpClient)
   })
 
   it.effect("pages a 700-agent three-host forest within the response budget", () => {
     const hosts = ["a".repeat(253), `b${"a".repeat(252)}`, `c${"a".repeat(252)}`]
     const text = "界".repeat(256)
     const agents = Array.from({ length: 700 }, (_, index): ConnectAgent => {
-      const host = hosts[index % hosts.length] ?? hosts[0]
+      const host = hosts[index % hosts.length] ?? "a".repeat(253)
       const hostRootIndex = index % hosts.length
       const idPrefix = `agent-${index.toString().padStart(4, "0")}-`
       const id = `${idPrefix}${"a".repeat(256 - idPrefix.length)}`
@@ -1192,7 +1192,7 @@ describe("Connect public seams", () => {
       let cursor: typeof FleetConnectAgentPage.Type["nextCursor"] = null
       let pageIndex = 0
       do {
-        const page = yield* pageFleetConnectAgents(directory, cursor)
+        const page: typeof FleetConnectAgentPage.Type = yield* pageFleetConnectAgents(directory, cursor)
         expect(page.agents.length).toBeLessThanOrEqual(connectAgentPageMaxRecords)
         expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(
           fleetResponseBodyMaxBytes
