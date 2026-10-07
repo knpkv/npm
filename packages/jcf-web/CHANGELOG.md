@@ -1,5 +1,13 @@
 # @knpkv/jcf-web
 
+## 0.6.1
+
+### Patch Changes
+
+- Updated dependencies [[`0573403`](https://github.com/knpkv/npm/commit/057340343fcc727fd0c56329d840a668170376ad), [`d76d2d8`](https://github.com/knpkv/npm/commit/d76d2d8af1e266a88414a36e0d41ad27fa143b7d), [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5)]:
+  - @knpkv/jira-clockify@1.6.0
+  - @knpkv/rly@0.11.0
+
 ## 0.6.0
 
 ### Minor Changes

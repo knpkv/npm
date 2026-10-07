@@ -1,5 +1,13 @@
 # @knpkv/jira-cli
 
+## 1.6.1
+
+### Patch Changes
+
+- Updated dependencies [[`0573403`](https://github.com/knpkv/npm/commit/057340343fcc727fd0c56329d840a668170376ad), [`d76d2d8`](https://github.com/knpkv/npm/commit/d76d2d8af1e266a88414a36e0d41ad27fa143b7d)]:
+  - @knpkv/jira-api-client@2.1.0
+  - @knpkv/agent-skills@0.3.4
+
 ## 1.6.0
 
 ### Minor Changes

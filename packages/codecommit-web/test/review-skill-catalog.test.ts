@@ -235,7 +235,7 @@ describe("Relay review skill catalog", () => {
         )
 
       const first = yield* discoverWith(["SKILL.md", ...ordinary])
-      const second = yield* discoverWith([...ordinary.toReversed(), "SKILL.md"])
+      const second = yield* discoverWith([...[...ordinary].reverse(), "SKILL.md"])
       expect(first.find(({ id }) => id === "env:order:.")?.prompt).toBe("Deterministic skill.")
       expect(second.find(({ id }) => id === "env:order:.")?.prompt).toBe("Deterministic skill.")
     }).pipe(
