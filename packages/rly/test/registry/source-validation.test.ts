@@ -5,7 +5,7 @@ import { findRegistrySourceFailures } from "../../scripts/registry/source-valida
 
 const packageRoot = new URL("../../", import.meta.url).pathname
 
-const registryFiles = (): ReadonlyMap<string, string> => {
+const readRegistryFiles = (): ReadonlyMap<string, string> => {
   const paths = new Set(
     componentManifest.components.flatMap((component) => [
       component.source,
@@ -21,6 +21,10 @@ const registryFiles = (): ReadonlyMap<string, string> => {
   }
   return files
 }
+
+// Read once per file: every test copies the map before mutating it, so sharing the read is safe.
+const cachedFiles = readRegistryFiles()
+const registryFiles = (): ReadonlyMap<string, string> => cachedFiles
 
 interface FocusedRegistry {
   readonly manifest: ComponentManifest
@@ -53,7 +57,9 @@ const withDiffCodeCoverageStory = (storyId: string): ComponentManifest => ({
   )
 })
 
-describe("registry source validation", () => {
+// Each case parses every component's source (about 1s locally, 2s+ on a loaded CI runner), so the
+// suite gets a realistic budget instead of the 5s default it outgrew under load.
+describe("registry source validation", { timeout: 30_000 }, () => {
   it("accepts complete source, style, story, test, docs, a11y, and variant coverage", () => {
     expect(findRegistrySourceFailures(componentManifest, registryFiles())).toEqual([])
   })
