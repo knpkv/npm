@@ -7,6 +7,7 @@ import { Console, Effect, Option } from "effect"
 import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import { TimerService } from "../../services/TimerService.js"
 import { formatDuration, isFullIsoTimestamp, parseDuration, parseStartTime } from "../../utils/time.js"
+import { toCommandFailed } from "../CommandFailed.js"
 import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "../fetchTicket.js"
 
 /** Today's calendar day in the user's *local* timezone as `YYYY-MM-DD`. */
@@ -89,9 +90,7 @@ export const log = Command.make(
         start: started,
         durationSeconds: totalSeconds,
         comment: Option.isSome(comment) ? comment.value : undefined
-      }).pipe(
-        Effect.catch((e) => Console.log(`Error: ${e.message}`).pipe(Effect.as(null)))
-      )
+      }).pipe(Effect.mapError(toCommandFailed))
 
       if (result) {
         yield* Console.log(`  Clockify:     ${result.clockifyLogged ? "✓" : "✗"}`)
