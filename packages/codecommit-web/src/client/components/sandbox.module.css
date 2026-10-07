@@ -102,8 +102,8 @@
 
 .sandboxOpen:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-4);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .sandboxHeading {
@@ -302,8 +302,8 @@
 }
 
 .credentialButton:focus-visible {
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .workspaceContent {

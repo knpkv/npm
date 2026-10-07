@@ -92,3 +92,53 @@ describe("NotificationRepo.addSystem", () => {
       expect(next?.id).toBeGreaterThan(first?.id ?? 0)
     })))
 })
+
+describe("NotificationRepo.add", () => {
+  // A restart re-diffs every subscribed pull request against the cache. An announcement already
+  // waiting unread must not be added again; once read, a new one may be.
+  it.effect("keeps one unread copy of the same pull-request notification across repeated diffs", () =>
+    withRepo(Effect.gen(function*() {
+      const repo = yield* NotificationRepo
+      const sql = yield* SqlClient.SqlClient
+      const granted = {
+        pullRequestId: "44",
+        awsAccountId: "123456789012",
+        type: "approval_changed",
+        message: "Approval granted on #44 Fix (repo)",
+        title: "Fix",
+        profile: "dev",
+        repositoryName: "repo",
+        accountRegion: "eu-central-1"
+      }
+      const prRows = sql<{ id: number; read: number }>`
+        SELECT id, read FROM notifications WHERE pull_request_id = '44' ORDER BY id
+      `
+      yield* repo.add(granted)
+      yield* repo.add(granted)
+      // The same text for another region's pull request is a different notification.
+      yield* repo.add({ ...granted, accountRegion: "us-east-1" })
+      expect((yield* prRows).length).toBe(2)
+      yield* repo.markAllRead()
+      yield* repo.add(granted)
+      expect((yield* prRows).length).toBe(3)
+    })))
+
+  // A bulk and a single refresh can announce the same change at once; the check and the insert are one
+  // statement, so only one copy is written.
+  it.effect("writes one unread copy when the same notification is added concurrently", () =>
+    withRepo(Effect.gen(function*() {
+      const repo = yield* NotificationRepo
+      const sql = yield* SqlClient.SqlClient
+      const granted = {
+        pullRequestId: "45",
+        awsAccountId: "123456789012",
+        type: "approval_changed",
+        message: "Approval granted on #45 Fix (repo)",
+        repositoryName: "repo",
+        accountRegion: "eu-central-1"
+      }
+      yield* Effect.all(Array.from({ length: 8 }, () => repo.add(granted)), { concurrency: "unbounded" })
+      const rows = yield* sql<{ id: number }>`SELECT id FROM notifications WHERE pull_request_id = '45'`
+      expect(rows.length).toBe(1)
+    })))
+})

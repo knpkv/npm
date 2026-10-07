@@ -90,7 +90,7 @@ export const checkedProjects = (checkScript) => {
   if (/\|\||;|(?<![&|])[&|](?![&|])/u.test(script)) return []
   return script.split("&&").flatMap((segment) => {
     // tsc must be the command itself, optionally behind `pnpm exec`/`npm exec`/`npx`; `echo tsc …` is not a check.
-    const command = segment.trim().match(/^(?:(?:pnpm|npm)\s+exec\s+|npx\s+)?(?:tsc|tspc|tsgo)(?:\s+(.*))?$/u)
+    const command = segment.trim().match(/^(?:(?:pnpm|npm)\s+exec\s+|npx\s+)?(?:tsc|tsc6|tspc|tsgo)(?:\s+(.*))?$/u)
     if (command === null) return []
     return invocationProjects(command[1] ?? "")
   })

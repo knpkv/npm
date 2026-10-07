@@ -47,4 +47,18 @@ test("unbroken task and branch names wrap inside their tile at 390px", async ({ 
     Math.max(...elements.map((element) => element.getBoundingClientRect().right))
   )
   expect(tile !== null && widest <= tile.x + tile.width + 1).toBe(true)
+  // QA-104: the branch broke at arbitrary letters ("Checkpoi/ntRecovery"). Each word now stays whole
+  // on its line: every segment between break opportunities renders as one box.
+  const brokenWords = await page.locator(".agent dd.identifier").evaluateAll((elements) =>
+    elements.flatMap((element) =>
+      [...element.childNodes].flatMap((node) => {
+        if (node.nodeType !== Node.TEXT_NODE) return []
+        const range = document.createRange()
+        range.selectNodeContents(node)
+        return range.getClientRects().length > 1 ? [node.textContent ?? ""] : []
+      })
+    )
+  )
+  expect(brokenWords).toEqual([])
+  await expect(page.locator(".agent dd.identifier")).toHaveText(`feat/${token(155)}`)
 })

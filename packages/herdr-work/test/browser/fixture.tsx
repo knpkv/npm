@@ -81,7 +81,7 @@ createRoot(rootElement).render(
   <WorkBoard
     initialGoalId={selectedGoalId}
     initialWindow={initialWindow}
-    navigation={navigation}
+    {...(navigation === undefined ? {} : { navigation })}
     snapshots={snapshots}
   />
 )

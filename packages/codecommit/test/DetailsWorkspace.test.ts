@@ -2670,16 +2670,31 @@ describe("PR detail workspace", () => {
   })
 
   it("keeps approval and mergeability independent", () => {
-    expect(humanReviewState({ isApproved: true, isMergeable: false })).toEqual({
+    const rules = [
+      Schema.decodeSync(Domain.ApprovalRule)({ ruleName: "r", requiredApprovals: 1, poolMembers: [], satisfied: true })
+    ]
+    expect(humanReviewState({ isApproved: true, approvalRules: rules, isMergeable: false })).toEqual({
       approval: "APPROVED",
       mergeability: "CONFLICTS"
     })
-    expect(humanReviewState({ isApproved: false, isMergeable: true })).toEqual({
+    expect(humanReviewState({ isApproved: false, approvalRules: rules, isMergeable: true })).toEqual({
       approval: "NEEDS REVIEW",
       mergeability: "MERGEABLE"
     })
-    expect(humanReviewState({ isApproved: true, approvalUnknown: { _tag: "Throttled" }, isMergeable: true })).toEqual({
+    expect(
+      humanReviewState({
+        isApproved: true,
+        approvalRules: rules,
+        approvalUnknown: { _tag: "Throttled" },
+        isMergeable: true
+      })
+    ).toEqual({
       approval: "APPROVAL UNKNOWN",
+      mergeability: "MERGEABLE"
+    })
+    // No rules: CodeCommit reads "approved", but nobody signed off.
+    expect(humanReviewState({ isApproved: true, approvalRules: [], isMergeable: true })).toEqual({
+      approval: "NO APPROVAL REQUIRED",
       mergeability: "MERGEABLE"
     })
     expect(exactRevisionReviewState()).toEqual({
