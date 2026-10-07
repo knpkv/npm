@@ -44,6 +44,15 @@ export const PermissionsLive = HttpApiBuilder.group(
         .handle("reset", () => permService.resetAll().pipe(Effect.map(() => "ok")))
         .handle("updateCategory", ({ payload }) =>
           permService.setCategory(payload.category, payload.state).pipe(
+            // Calls already waiting in this category follow the saved grant (or refusal); "allow" means
+            // "ask each time", so they keep waiting for their own answer.
+            Effect.andThen(
+              payload.state === "always_allow"
+                ? gate.resolveCategory(payload.category, "allow_once")
+                : payload.state === "deny"
+                ? gate.resolveCategory(payload.category, "deny")
+                : Effect.void
+            ),
             Effect.map(() => "ok"),
             Effect.mapError((error) => new ApiError({ message: error.message }))
           ))

@@ -69,6 +69,19 @@ describe("empty queue cause", () => {
     expect(cause({ snapshotSeen: false })._tag).toBe("Connecting")
   })
 
+  it("keeps a lost or refused stream in front of the last snapshot's empty result", () => {
+    expect(cause({ connection: { _tag: "Failed", cause: "Down.", retryAt: 1 }, enabledAccounts: 2 })).toEqual({
+      _tag: "Failed",
+      cause: "Down.",
+      retrying: true
+    })
+    expect(cause({ cachedPullRequests: 3, connection: { _tag: "Unauthenticated", detail: null } })._tag).toBe(
+      "Unauthenticated"
+    )
+    // Reconnecting after a snapshot keeps explaining what that snapshot showed.
+    expect(cause({ connection: { _tag: "Connecting" }, enabledAccounts: 2 })._tag).toBe("NothingOpen")
+  })
+
   it("tells no profiles apart from profiles that are all switched off", () => {
     expect(cause({})).toEqual({ _tag: "NoAccounts" })
     expect(cause({ detectedAccounts: 3 })).toEqual({ _tag: "NoneSwitchedOn", detected: 3 })

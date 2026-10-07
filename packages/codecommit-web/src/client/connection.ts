@@ -89,8 +89,10 @@ export type EmptyQueueCause =
   | { readonly _tag: "NothingOpen"; readonly accounts: number }
 
 /**
- * The cause behind an empty queue. Before any snapshot only the connection is known; after one, the
- * snapshot says whether accounts exist and whether filters hide rows.
+ * The cause behind an empty queue. A lost or refused stream wins whatever the last snapshot said: its
+ * rows are stale, so an empty result from it must not read as a real one. Before any snapshot only the
+ * connection is known; after one on a live stream, the snapshot says whether accounts exist and whether
+ * filters hide rows.
  */
 export const emptyQueueCause = (input: {
   readonly connection: StreamConnection
@@ -99,16 +101,14 @@ export const emptyQueueCause = (input: {
   readonly enabledAccounts: number
   readonly detectedAccounts: number
 }): EmptyQueueCause => {
-  if (!input.snapshotSeen) {
-    switch (input.connection._tag) {
-      case "Unauthenticated":
-        return { _tag: "Unauthenticated", detail: connectionDetail(input.connection) ?? "" }
-      case "Failed":
-        return { _tag: "Failed", cause: input.connection.cause, retrying: input.connection.retryAt !== null }
-      case "Connecting":
-      case "Live":
-        return { _tag: "Connecting" }
-    }
+  switch (input.connection._tag) {
+    case "Unauthenticated":
+      return { _tag: "Unauthenticated", detail: connectionDetail(input.connection) ?? "" }
+    case "Failed":
+      return { _tag: "Failed", cause: input.connection.cause, retrying: input.connection.retryAt !== null }
+    case "Connecting":
+    case "Live":
+      if (!input.snapshotSeen) return { _tag: "Connecting" }
   }
   if (input.cachedPullRequests > 0) return { _tag: "Filtered", cached: input.cachedPullRequests }
   if (input.enabledAccounts === 0) {

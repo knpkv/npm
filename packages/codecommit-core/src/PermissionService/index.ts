@@ -6,6 +6,8 @@
  * On construction (Layer build time), reads the file
  * into a Ref. All subsequent `check()` calls are O(1) Ref lookups — no disk
  * I/O. Only `set()` mutates the Ref AND writes to disk (atomic: tmp → rename).
+ * Every mutation runs under one lock, so a read-modify-write can't be overwritten by a concurrent one
+ * finishing in between, and the shared temp file is only ever written by one save at a time.
  *
  * Key invariant: an operation missing from the file defaults to `"allow"`,
  * which means "prompt the user". A fresh install with empty permissions.json
@@ -13,7 +15,7 @@
  *
  * @module
  */
-import { Config, Context, Effect, Layer, Ref, Schema } from "effect"
+import { Config, Context, Effect, Layer, Ref, Schema, Semaphore } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { ConfigError } from "../Errors.js"
 import { allOperations, getOperationMeta, type OperationName, registerOperation } from "./operations.js"
@@ -112,6 +114,7 @@ const makePermissionService = Effect.gen(function*() {
   // Only set() mutates it AND writes to disk.
   const initial = yield* loadFromDisk(fs, permPath)
   const configRef = yield* Ref.make<PermissionsConfig>(initial)
+  const mutation = yield* Semaphore.make(1)
 
   // O(1) — Ref.get + property lookup. The "allow" default is the key invariant:
   // missing operation → prompt the user.
@@ -125,7 +128,7 @@ const makePermissionService = Effect.gen(function*() {
         permissions: { ...c.permissions, [operation]: state }
       }))
       yield* saveToDisk(fs, permPath, yield* Ref.get(configRef))
-    })
+    }).pipe(mutation.withPermit)
 
   const setCategory = (category: "read" | "write", state: PermissionState): Effect.Effect<void, ConfigError> =>
     Effect.gen(function*() {
@@ -136,9 +139,9 @@ const makePermissionService = Effect.gen(function*() {
           .map(([operation]) => [operation, state])
       )
       const next = { ...current, permissions: { ...current.permissions, ...granted } }
-      yield* writeToDisk(fs, permPath, next)
-      yield* Ref.set(configRef, next)
-    })
+      // Saved, then applied, with no interruption between: memory never disagrees with a saved file.
+      yield* Effect.uninterruptible(writeToDisk(fs, permPath, next).pipe(Effect.andThen(Ref.set(configRef, next))))
+    }).pipe(mutation.withPermit)
 
   const getAll = (): Effect.Effect<Record<string, PermissionState>> =>
     Ref.get(configRef).pipe(Effect.map((c) => c.permissions))
@@ -147,7 +150,7 @@ const makePermissionService = Effect.gen(function*() {
     Effect.gen(function*() {
       yield* Ref.update(configRef, (c) => ({ ...c, permissions: {} }))
       yield* saveToDisk(fs, permPath, yield* Ref.get(configRef))
-    })
+    }).pipe(mutation.withPermit)
 
   const isAuditEnabled = (): Effect.Effect<boolean> => Ref.get(configRef).pipe(Effect.map((c) => c.audit.enabled))
 
@@ -166,7 +169,7 @@ const makePermissionService = Effect.gen(function*() {
         }
       }))
       yield* saveToDisk(fs, permPath, yield* Ref.get(configRef))
-    })
+    }).pipe(mutation.withPermit)
 
   return {
     check,

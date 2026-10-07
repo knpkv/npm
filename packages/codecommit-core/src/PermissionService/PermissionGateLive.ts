@@ -33,6 +33,14 @@ interface PendingEntry {
 export interface PermissionGateLive {
   readonly request: (prompt: PermissionPrompt) => Effect.Effect<PermissionResponse, PermissionDeniedError>
   readonly resolve: (promptId: string, response: PermissionResponse) => Effect.Effect<void>
+  /**
+   * Answers every pending prompt of one category, after a standing grant for it was saved: calls that
+   * were already waiting when the grant landed go ahead too instead of each asking again.
+   */
+  readonly resolveCategory: (
+    category: PermissionPrompt["category"],
+    response: PermissionResponse
+  ) => Effect.Effect<void>
   readonly getFirstPending: () => Effect.Effect<PermissionPrompt | undefined>
 }
 
@@ -84,6 +92,20 @@ const makePermissionGateLive = Effect.gen(function*() {
       })
     )
 
+  const resolveCategory = (
+    category: PermissionPrompt["category"],
+    response: PermissionResponse
+  ): Effect.Effect<void> =>
+    Ref.get(pending).pipe(
+      Effect.flatMap((m) =>
+        Effect.forEach(
+          [...m.values()].filter((entry) => entry.prompt.category === category),
+          (entry) => Deferred.succeed(entry.deferred, response),
+          { discard: true }
+        )
+      )
+    )
+
   // For SSE payload builder — shows one prompt at a time (FIFO).
   // Remaining prompts queue behind; they'll surface as each resolves.
   const getFirstPending = (): Effect.Effect<PermissionPrompt | undefined> =>
@@ -94,7 +116,7 @@ const makePermissionGateLive = Effect.gen(function*() {
       })
     )
 
-  return { request, resolve, getFirstPending } satisfies PermissionGateLive
+  return { request, resolve, resolveCategory, getFirstPending } satisfies PermissionGateLive
 })
 
 export class PermissionGateLiveTag extends Context.Service<

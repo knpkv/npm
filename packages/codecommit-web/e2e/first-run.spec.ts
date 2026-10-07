@@ -84,8 +84,116 @@ test("sends a first run with no AWS profiles to setup, which shows where it look
   await expect(page.getByText("/home/new/.aws/config", { exact: true })).toBeVisible()
   await expect(page.getByText("aws configure sso", { exact: false })).toBeVisible()
   await expect(page.getByText("Not logged in")).toBeHidden()
+})
+
+test("reports Detect again only once the re-read finished", async ({ page }) => {
+  await routeCommon(page)
+  await page.route(
+    "**/api/events/",
+    (route) => route.fulfill({ body: `data: ${JSON.stringify(emptySnapshot)}\n\n`, contentType: "text/event-stream" })
+  )
+  const reread = Promise.withResolvers<void>()
+  let configReads = 0
+  await page.route("**/api/config", async (route) => {
+    configReads += 1
+    if (configReads > 1) await reread.promise
+    await route.fulfill({ json: config })
+  })
+
+  await page.goto("/settings/accounts")
   await page.getByRole("button", { name: "Detect again" }).click()
+  await expect(page.getByRole("button", { name: "Detecting…" })).toBeDisabled()
+  await expect(page.getByText("still no profiles", { exact: false })).toHaveCount(0)
+  reread.resolve()
   await expect(page.getByRole("status").filter({ hasText: "still no profiles" })).toBeVisible()
+})
+
+test("with auto-detect off, detecting switches it on before reading again", async ({ page }) => {
+  await routeCommon(page)
+  await page.route(
+    "**/api/events/",
+    (route) => route.fulfill({ body: `data: ${JSON.stringify(emptySnapshot)}\n\n`, contentType: "text/event-stream" })
+  )
+  const saves: Array<string> = []
+  let configReads = 0
+  await page.route("**/api/config", (route) => {
+    configReads += 1
+    return route.fulfill({ json: { ...config, autoDetect: saves.length === 0 ? false : true } })
+  })
+  await page.route("**/api/config/save", (route) => {
+    saves.push(route.request().postData() ?? "")
+    return route.fulfill({ json: "ok" })
+  })
+
+  await page.goto("/settings/accounts")
+  await page.getByRole("button", { name: "Turn on auto-detect and detect" }).click()
+  await expect.poll(() => saves.length).toBe(1)
+  expect(JSON.parse(saves[0]!).autoDetect).toBe(true)
+  await expect.poll(() => configReads).toBeGreaterThan(1)
+  await expect(page.getByRole("status").filter({ hasText: "still no profiles" })).toBeVisible()
+})
+
+test("keeps the auto-detect choice, and an account switched next saves it too", async ({ page }) => {
+  await routeCommon(page)
+  await page.route(
+    "**/api/events/",
+    (route) => route.fulfill({ body: `data: ${JSON.stringify(emptySnapshot)}\n\n`, contentType: "text/event-stream" })
+  )
+  await page.route(
+    "**/api/config",
+    (route) =>
+      route.fulfill({ json: { ...config, accounts: [{ enabled: false, profile: "dev", regions: ["eu-central-1"] }] } })
+  )
+  const saves: Array<{ readonly autoDetect: boolean }> = []
+  await page.route("**/api/config/save", (route) => {
+    saves.push(JSON.parse(route.request().postData() ?? "{}"))
+    return route.fulfill({ json: "ok" })
+  })
+
+  await page.goto("/settings/accounts")
+  const autoDetect = page.getByRole("checkbox", { name: "Add new profiles from your AWS configuration automatically" })
+  await autoDetect.click()
+  await expect(autoDetect).not.toBeChecked()
+  await expect.poll(() => saves.length).toBe(1)
+  await page.getByRole("switch", { name: /^dev/ }).click()
+  await expect.poll(() => saves.length).toBe(2)
+  expect(saves.map((save) => save.autoDetect)).toEqual([false, false])
+  await expect(autoDetect).not.toBeChecked()
+})
+
+test("finishes a switched-on account's save after leaving Settings", async ({ page }) => {
+  await page.clock.install()
+  await routeCommon(page)
+  await page.route(
+    "**/api/events/",
+    (route) => route.fulfill({ body: `data: ${JSON.stringify(emptySnapshot)}\n\n`, contentType: "text/event-stream" })
+  )
+  await page.route(
+    "**/api/config",
+    (route) =>
+      route.fulfill({ json: { ...config, accounts: [{ enabled: false, profile: "dev", regions: ["eu-central-1"] }] } })
+  )
+  const held = Promise.withResolvers<void>()
+  const saved: Array<string> = []
+  const aborted: Array<string> = []
+  page.on("requestfailed", (request) => {
+    if (request.url().includes("/api/config/save")) aborted.push(request.failure()?.errorText ?? "failed")
+  })
+  await page.route("**/api/config/save", async (route) => {
+    await held.promise
+    await route.fulfill({ json: "ok" }).then(() => saved.push(route.request().postData() ?? ""), () => {})
+  })
+
+  await page.goto("/settings/accounts")
+  await page.getByRole("switch", { name: /^dev/ }).click()
+  // Leave before the debounce fires; the save starts on the way out and must outlive the page.
+  await page.getByRole("link", { name: "Pull requests" }).first().click()
+  await expect(page.getByRole("switch", { name: /^dev/ })).toHaveCount(0)
+  await page.clock.runFor(5_000)
+  held.resolve()
+  await expect.poll(() => saved.length).toBe(1)
+  expect(JSON.parse(saved[0]!).accounts[0].enabled).toBe(true)
+  expect(aborted).toEqual([])
 })
 
 const withPrompt = (category: "read" | "write", operation: string, context: string) => ({
@@ -119,10 +227,11 @@ test("asks for a read inline, so the first account isn't blocked by a modal", as
   await expect(page.getByText("CodeCommit asks before reading from AWS: Get identity for dev.", { exact: false }))
     .toBeVisible()
   await page.getByRole("button", { name: "Allow every read" }).click()
-  await expect.poll(() => calls.length).toBe(2)
+  await expect.poll(() => calls.length).toBe(1)
   expect(calls[0]).toContain("\"category\":\"read\"")
   expect(calls[0]).toContain("\"state\":\"always_allow\"")
-  expect(calls[1]).toContain("\"response\":\"allow_once\"")
+  // Saving the grant releases every waiting read on the server; the bar sends no answer of its own.
+  await expect.poll(() => calls.length, { timeout: 1_000 }).toBe(1)
 })
 
 test("still asks for each write in a modal, with Allow once as the default", async ({ page }) => {

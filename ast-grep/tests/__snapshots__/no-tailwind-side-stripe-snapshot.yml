@@ -15,9 +15,30 @@ snapshots:
         start: 33
         end: 67
   ? |
+    const hairline = <div className="border-l border-l-blue-500" />
+  : labels:
+      - source: '"border-l border-l-blue-500"'
+        style: primary
+        start: 32
+        end: 60
+  ? |
     const row = <div className={`flex ${unread ? "border-l-2 border-l-blue-500" : ""}`} />
   : labels:
       - source: '"border-l-2 border-l-blue-500"'
         style: primary
         start: 45
         end: 75
+  ? |
+    const thick = <div className="border-l-[10px]" />
+  : labels:
+      - source: '"border-l-[10px]"'
+        style: primary
+        start: 29
+        end: 46
+  ? |
+    const wide = <div className="border-r-12" />
+  : labels:
+      - source: '"border-r-12"'
+        style: primary
+        start: 28
+        end: 41
