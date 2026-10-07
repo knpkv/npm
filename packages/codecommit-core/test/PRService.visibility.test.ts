@@ -96,8 +96,14 @@ const syncDependencies = (
 ) =>
   Layer.mergeAll(
     Layer.mock(AwsClient, {
-      getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "123456789012" }),
-      getPullRequests: () => Stream.empty
+      getCallerIdentity: () =>
+        Effect.succeed({
+          username: "viewer",
+          accountId: "123456789012",
+          arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
+        }),
+      getPullRequests: () => Stream.empty,
+      getPullRequestRefresh: () => Stream.empty
     }),
     Layer.mock(PullRequestRepo, {
       findAll,

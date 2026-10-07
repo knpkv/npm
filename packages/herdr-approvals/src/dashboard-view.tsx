@@ -73,6 +73,8 @@ const jobSummary = (record: Pick<SanitizedJobRecord, "payload">): string => {
       return `${record.payload.repository}#${record.payload.pullRequest} · existing goal recovery`
     case "work.reassign":
       return `${record.payload.goalId} · ${record.payload.from.name} → ${record.payload.to.name}`
+    case "work.abandon":
+      return `${record.payload.goalId} · abandon`
   }
 }
 

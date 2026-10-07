@@ -38,7 +38,8 @@ export const Matrix: Story = {
   args: { state: "current" },
   play: async ({ canvas, canvasElement }) => {
     for (const word of ["Current", "Cached", "Stale", "Missing", "Unavailable"]) {
-      await expect(canvas.getAllByText(word)).toHaveLength(2)
+      // With a time the word carries its comma ("Current,"); without one it stands alone.
+      await expect(canvas.getAllByText(new RegExp(`^${word},?$`))).toHaveLength(2)
     }
     await expect(canvasElement.querySelectorAll("[data-rly-freshness-state]")).toHaveLength(10)
     await expect(canvasElement.querySelectorAll("time[datetime='2026-07-13T14:00:00Z']")).toHaveLength(5)

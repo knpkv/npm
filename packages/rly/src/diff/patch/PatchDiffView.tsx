@@ -1,5 +1,6 @@
 import { Fragment, type ReactElement, type ReactNode } from "react"
 import styles from "../bounded/BoundedDiffCodeView.module.css"
+import { RLY_SPLIT_DIFF_MIN_WIDTH, useNarrowerThan } from "../../internal/useNarrowerThan.js"
 import type { DiffLine, FileDiff, Hunk } from "./parse.js"
 
 export { findFile, parsePatch, pathsOf } from "./parse.js"
@@ -69,6 +70,9 @@ export const PatchDiffView = ({
   renderAnnotation,
   wrap = false
 }: PatchDiffViewProps): ReactElement => {
+  // A split view stacks in a narrow container, so neither side is clipped to a sliver.
+  const [narrow, measureRef] = useNarrowerThan<HTMLDivElement>(RLY_SPLIT_DIFF_MIN_WIDTH)
+  const shown = mode === "split" && narrow ? "stacked" : mode
   const cell = (line: DiffLine | undefined, side: "old" | "new") => {
     const number = side === "old" ? line?.oldNo : line?.newNo
     return (
@@ -103,7 +107,7 @@ export const PatchDiffView = ({
     )
   }
   return (
-    <div className={styles.root} data-rly-patch-diff="" data-rly-diff-mode={mode}>
+    <div className={styles.root} data-rly-patch-diff="" data-rly-diff-mode={shown} ref={measureRef}>
       {file.oldMode === undefined && file.newMode === undefined ? null : (
         <p className={styles.noChanges}>
           {file.oldMode === undefined
@@ -120,7 +124,7 @@ export const PatchDiffView = ({
           <table className={styles.table} aria-label={`Changes in ${file.path}`}>
             <thead>
               <tr>
-                {mode === "split" ? (
+                {shown === "split" ? (
                   <>
                     <th colSpan={2} scope="colgroup">
                       Before
@@ -148,7 +152,7 @@ export const PatchDiffView = ({
                       @@ {hunk.oldStart} → {hunk.newStart} {hunk.header}
                     </td>
                   </tr>
-                  {mode === "split"
+                  {shown === "split"
                     ? pairRows(hunk).map((row, rowIndex) => (
                         <Fragment key={rowIndex}>
                           <tr className={row.left?.kind === "context" ? styles.context : styles.change}>

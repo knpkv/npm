@@ -9,11 +9,14 @@ import type {
   WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
   WorkDecisionRevisionConflictError,
+  WorkGoalAbandonmentConflictError,
   WorkGoalAgentTargetConflictError,
   WorkGoalBindingRequiresAgentError,
+  WorkGoalLaneActiveError,
   WorkGoalOwnerMismatchError,
   WorkGoalReassignmentConflictError,
   WorkGoalRevisionConflictError,
+  WorkGoalTerminalError,
   WorkLaneClaimConflictError,
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
@@ -30,12 +33,15 @@ import type {
   WorkDecisionHandoff,
   WorkExistingGoalRecovery,
   WorkExistingOwnerReconciliation,
+  WorkGoalAbandoned,
+  WorkGoalAbandonment,
   WorkGoalCheckpoint,
   WorkGoalReassigned,
   WorkGoalReassignment,
   WorkLaneClaim,
   WorkLaneClaimed,
   WorkObservationEnvelope,
+  WorkObservedAdmission,
   WorkObserveReport,
   WorkProspectiveAdmission,
   WorkReconcileOutcome,
@@ -73,11 +79,37 @@ export interface WorkService {
     | WorkProjectionError
     | WorkStoreError
   >
+  /**
+   * Approval-bound move of a goal to `abandoned`; refuses a goal with an active
+   * lane or one already finished. Replaying the same approval job returns the
+   * prior result.
+   */
+  readonly abandon: (
+    request: WorkGoalAbandonment
+  ) => Effect.Effect<
+    WorkGoalAbandoned,
+    | WorkGoalAbandonmentConflictError
+    | WorkGoalLaneActiveError
+    | WorkGoalOwnerMismatchError
+    | WorkGoalRevisionConflictError
+    | WorkGoalTerminalError
+    | WorkProjectionError
+    | WorkStoreError
+  >
   readonly admissionPreflight: (
     target: WorkAdmissionTarget
   ) => Effect.Effect<WorkAdmissionPreflight, WorkProjectionError | WorkStoreError>
   readonly admitExistingOwner: (
     request: WorkProspectiveAdmission
+  ) => Effect.Effect<WorkPullRequestLink, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
+  /**
+   * Admits a worker the reconciler observed, without an approval: the same
+   * write as `admitExistingOwner`, credited to the observation. The caller has
+   * checked the pane's host, lineage and worktree; the store re-checks the
+   * absence evidence.
+   */
+  readonly admitObserved: (
+    request: WorkObservedAdmission
   ) => Effect.Effect<WorkPullRequestLink, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
   readonly inspectPullRequest: (
     request: WorkPullRequestLinkRequest
@@ -200,11 +232,15 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
     store.recoverExistingGoal(request)
   )
   const reassign = Effect.fn("HerdrWork.reassign")((request: WorkGoalReassignment) => store.reassign(request))
+  const abandon = Effect.fn("HerdrWork.abandon")((request: WorkGoalAbandonment) => store.abandon(request))
   const admissionPreflight = Effect.fn("HerdrWork.admissionPreflight")((target: WorkAdmissionTarget) =>
     store.admissionPreflight(target)
   )
   const admitExistingOwner = Effect.fn("HerdrWork.admitExistingOwner")((request: WorkProspectiveAdmission) =>
     store.admitExistingOwner(request)
+  )
+  const admitObserved = Effect.fn("HerdrWork.admitObserved")((request: WorkObservedAdmission) =>
+    store.admitObserved(request)
   )
   const linkError = (request: WorkPullRequestLinkRequest, reason: WorkPullRequestLinkError["reason"]) =>
     new WorkPullRequestLinkError({ goalId: request.goalId, laneId: request.laneId, reason })
@@ -306,7 +342,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       withActivityProvenance(
         yield* projectWorkSnapshots(source.events, timestamp),
         source.approvals,
-        source.reconcilerEvents,
+        [...source.reconcilerEvents, ...source.observedAdmissions],
         source.activityOrigins,
         workSnapshotBudgetBytes
       ),
@@ -337,8 +373,10 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       recoveryPreflight,
       recoverExistingGoal,
       reassign,
+      abandon,
       admissionPreflight,
       admitExistingOwner,
+      admitObserved,
       agentBinding,
       inspectPullRequest,
       reconcileExistingOwner,

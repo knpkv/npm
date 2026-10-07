@@ -2,7 +2,7 @@ import type { ReactElement } from "react"
 import { decodeRlyTheme, RLY_THEME_NAMES, type RlyTheme } from "../foundations/ThemeProvider.js"
 import { Field } from "./Field.js"
 import { classNames, cssClass } from "../internal/component.js"
-import { type RlySelectOption, type RlySelectSize, Select } from "./Select.js"
+import { RLY_SELECT_DEFAULT_VARIANTS, type RlySelectOption, type RlySelectSize, Select } from "./Select.js"
 import styles from "./ThemeSelect.module.css"
 
 const themeLabels = {
@@ -34,18 +34,19 @@ export interface ThemeSelectProps {
  *
  * Settings pages show the label and fill the field width. Compact headers pass
  * `labelVisibility="hidden"`, which keeps the name for assistive technology through
- * `aria-label` and sizes the trigger to its longest option.
+ * `aria-label` and sizes the trigger to its longest option. Dense by default, like the
+ * controls beside it in a header.
  *
  * @example
  * const [theme, setTheme] = useStoredTheme("jcf_theme", browserStorage)
- * <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} size="compact" value={theme} />
+ * <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} value={theme} />
  */
 export const ThemeSelect = ({
   className,
   label = "Appearance",
   labelVisibility = "visible",
   onValueChange,
-  size = "compact",
+  size = RLY_SELECT_DEFAULT_VARIANTS.size,
   value
 }: ThemeSelectProps): ReactElement => {
   const onChange = (next: string): void => {

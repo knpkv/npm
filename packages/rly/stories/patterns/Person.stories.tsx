@@ -16,7 +16,8 @@ const people = [
   { id: "avery", name: "Avery Diaz", role: "Code reviewer" },
   {
     avatarFallback: "BM",
-    avatarSrc: "/fixtures/broken-person-avatar.png",
+    // An undecodable image: exercises the initials fallback without a network 404.
+    avatarSrc: "data:image/png;base64,AAAA",
     id: "broken",
     name: "Beatriz Martínez-van der Meer with a deliberately long full name",
     role: "Deployment operator for production verification"

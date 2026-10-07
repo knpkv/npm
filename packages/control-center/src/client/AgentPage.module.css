@@ -77,7 +77,8 @@
 
 .templatePicker {
   background: color-mix(in srgb, var(--rly-color-service-confluence) 6%, var(--rly-color-surface-2));
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-confluence);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
   gap: var(--rly-space-16);
   padding: var(--rly-space-20);
 }

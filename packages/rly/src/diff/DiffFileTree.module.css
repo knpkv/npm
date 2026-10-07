@@ -5,14 +5,18 @@
     border-radius: var(--rly-radius-group);
     container-type: inline-size;
     display: grid;
+    /* One bounded track: an implicit auto track can't shrink below its content, so it overflowed at 320. */
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
     min-inline-size: var(--rly-space-0);
     overflow: hidden;
   }
 
+  /* Heading and count share a row while they fit; the count wraps below in a narrow tree. */
   .header {
-    align-items: end;
+    align-items: baseline;
     display: flex;
-    gap: var(--rly-space-16);
+    flex-wrap: wrap;
+    gap: var(--rly-space-4) var(--rly-space-16);
     justify-content: space-between;
     padding: var(--rly-space-20);
   }
@@ -29,10 +33,9 @@
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
-  .eyebrow,
   .notice,
   .empty,
   .error,
@@ -42,14 +45,10 @@
       var(--rly-type-meta-font);
   }
 
-  .eyebrow {
-    text-transform: uppercase;
-  }
-
   .count {
-    color: var(--rly-color-text-1);
-    font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / 0.8 var(--rly-type-page-title-font);
-    letter-spacing: var(--rly-type-page-title-tracking);
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
     white-space: nowrap;
   }
 
@@ -62,7 +61,7 @@
   }
 
   .error {
-    border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink);
+    background: var(--rly-color-held-tint);
     display: grid;
     gap: var(--rly-space-2);
   }
@@ -98,8 +97,8 @@
 
   .group > li::before {
     block-size: 20px;
-    border-block-end: 1px solid color-mix(in srgb, var(--rly-color-text-3) 70%, transparent);
-    border-inline-start: 1px solid color-mix(in srgb, var(--rly-color-text-3) 70%, transparent);
+    border-block-end: 1px solid var(--rly-color-border-2);
+    border-inline-start: 1px solid var(--rly-color-border-2);
     content: "";
     inline-size: var(--rly-space-12);
     inset-block-start: var(--rly-space-0);
@@ -110,7 +109,7 @@
   }
 
   .group > li:not(:last-child)::after {
-    border-inline-start: 1px solid color-mix(in srgb, var(--rly-color-text-3) 70%, transparent);
+    border-inline-start: 1px solid var(--rly-color-border-2);
     content: "";
     inset-block: 20px var(--rly-space-0);
     inset-inline-start: var(--rly-space-0);
@@ -146,24 +145,38 @@
 
   .chevron {
     block-size: var(--rly-space-8);
-    border-block-end: 1.5px solid currentcolor;
-    border-inline-end: 1.5px solid currentcolor;
+    border-block-end: 1.5px solid currentcolor; /* stripe-ok: drawn chevron, two edges of a rotated square */
+    border-inline-end: 1.5px solid currentcolor; /* stripe-ok: drawn chevron, mirrors in right-to-left text */
     inline-size: var(--rly-space-8);
     justify-self: center;
-    transform: rotate(45deg) translate(-1px, -1px);
+    /* --rly-diff-tree-turn is 1 in left-to-right text and -1 in right-to-left; see below. */
+    transform: rotate(calc(45deg * var(--rly-diff-tree-turn, 1)))
+      translate(calc(-1px * var(--rly-diff-tree-turn, 1)), -1px);
     transition: transform var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 
   .directoryButton[aria-expanded="false"] .chevron {
-    transform: rotate(-45deg);
+    transform: rotate(calc(-45deg * var(--rly-diff-tree-turn, 1)));
+  }
+
+  /*
+   * In right-to-left text the edges sit on the left, so the turns mirror: down when open, left when
+   * shut. Each dir attribute sets the sign and the nearest one is inherited, so an LTR tree inside an
+   * RTL page turns the LTR way. (The build lowers :dir() to a :lang() list, so it cannot be used.)
+   */
+  [dir="rtl"] {
+    --rly-diff-tree-turn: -1;
+  }
+
+  [dir="ltr"] {
+    --rly-diff-tree-turn: 1;
   }
 
   .directoryName {
     font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
       var(--rly-type-code-font);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: break-word;
   }
 
   .directoryCount {
@@ -195,7 +208,7 @@
 
   .file[aria-current="true"] {
     background: var(--rly-color-surface-3);
-    box-shadow: inset var(--rly-space-4) 0 var(--rly-color-focus);
+    box-shadow: inset 0 0 0 1px var(--rly-color-border-2);
   }
 
   .file:focus-visible {
@@ -208,11 +221,11 @@
     min-inline-size: var(--rly-space-0);
   }
 
+  /* A path is the file's identity: it wraps after a slash (or, for one long name, inside it), never ellipsised. */
   .path,
   .previousPath {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: break-word;
   }
 
   .path {
@@ -237,6 +250,9 @@
     block-size: var(--rly-space-16);
     inline-size: var(--rly-space-16);
   }
+  .statusIcon svg {
+    display: block;
+  }
 
   .loadingIcon {
     animation: rly-diff-file-tree-spin 800ms linear infinite;
@@ -251,10 +267,6 @@
   @container (max-width: 24rem) {
     .header {
       align-items: start;
-    }
-
-    .count {
-      font-size: var(--rly-type-section-title-size);
     }
 
     .file {

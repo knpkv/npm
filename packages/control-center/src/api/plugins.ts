@@ -319,7 +319,14 @@ const AwsResourceNames = Schema.Array(AwsResourceName).check(
 export const AwsServiceResourceDiscovery = Schema.Union([
   Schema.TaggedStruct("available", { names: AwsResourceNames, truncated: Schema.Boolean }),
   Schema.TaggedStruct("failed", {
-    failureClass: Schema.Literals(["authorization", "malformed-response", "rate-limit", "timeout", "unavailable"])
+    failureClass: Schema.Literals([
+      "authentication",
+      "authorization",
+      "malformed-response",
+      "rate-limit",
+      "timeout",
+      "unavailable"
+    ])
   })
 ]).pipe(Schema.toTaggedUnion("_tag"), Schema.annotate({ identifier: "AwsServiceResourceDiscovery" }))
 

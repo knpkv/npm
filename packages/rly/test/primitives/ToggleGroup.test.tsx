@@ -43,8 +43,14 @@ const option = (label: string) =>
 
 describe("ToggleGroup", () => {
   it("publishes meaningful size metadata", () => {
-    expect(RLY_TOGGLE_GROUP_DEFAULT_VARIANTS).toEqual({ size: "default" })
-    expect(Object.keys(RLY_TOGGLE_GROUP_VARIANTS.size)).toEqual(["compact", "default"])
+    expect(RLY_TOGGLE_GROUP_DEFAULT_VARIANTS).toEqual({ size: "dense" })
+    expect(Object.keys(RLY_TOGGLE_GROUP_VARIANTS.size)).toEqual(["dense", "compact", "default"])
+  })
+
+  it("renders the dense size when none is given", () => {
+    render(<ToggleGroup aria-label="Range" items={items} onValueChange={() => undefined} value="7d" />)
+    const group = document.querySelector('[role="radiogroup"]')
+    expect(group?.className).toContain(RLY_TOGGLE_GROUP_VARIANTS.size.dense.className)
   })
 
   it("names the group and marks exactly the chosen option as on", () => {

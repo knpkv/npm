@@ -54,7 +54,7 @@ export const CompactForcedColors: Story = {
       await expect(canvas.getByRole("img", { name })).toBeVisible()
     }
     for (const word of ["Current", "Cached", "Stale", "Missing", "Unavailable"]) {
-      await expect(canvas.getByText(word)).toBeVisible()
+      await expect(canvas.getByText(new RegExp(`^${word},?$`))).toBeVisible()
     }
 
     const gallery = canvasElement.querySelector<HTMLElement>("[data-evidence-gallery]")

@@ -80,10 +80,10 @@ try:
         assert evaluate("() => document.documentElement.scrollWidth <= innerWidth && [...document.querySelectorAll('.agent')].every(n=>n.getBoundingClientRect().right <= innerWidth)")
     report = call("lighthouse_audit", mode="snapshot", device="desktop")
     assert "Accessibility: 100" in report, report
-    panel("RUNNING: offline state keeps Lock reachable")
+    panel("RUNNING: offline state keeps the last snapshot, its age and Lock")
     call("emulate", networkConditions="Offline", viewport="1180x820x1,touch")
     call("wait_for", text=["Offline"], timeout=20000)
-    assert evaluate("() => !document.getElementById('lock').hidden && document.getElementById('board-view').hidden")
+    assert evaluate("() => !document.getElementById('lock').hidden && !document.getElementById('board-view').hidden && document.getElementById('connection').textContent.startsWith('Offline: showing the snapshot from')")
     call("click", uid=uid("button", "Lock board"))
     assert evaluate("() => !document.querySelector('main').textContent.includes('Synthetic acceptance') && !document.querySelector('main').textContent.includes('DEMO-42') && document.activeElement.id === 'credential' && localStorage.length === 0 && sessionStorage.length === 0 && document.cookie === ''")
     call("emulate", viewport="1180x820x1,touch")

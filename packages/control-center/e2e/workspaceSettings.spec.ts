@@ -116,6 +116,9 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   await page.goto(`/w/${workspaceId}/settings`)
   await expect(page.getByRole("heading", { level: 1, name: "Workspace settings" })).toBeVisible()
   await expect(page.getByLabel("Theme")).toHaveValue("system")
+  // Nothing to save yet: the state alone, with no disabled primary button beside it.
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Save settings" })).toHaveCount(0)
 
   const evidence = page.getByLabel("Evidence (days)")
   await evidence.fill("0")

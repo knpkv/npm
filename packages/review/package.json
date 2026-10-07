@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/review",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Provider-neutral review contracts, runtime state, and controls",
   "license": "MIT",
   "author": "knpkv",
@@ -55,9 +55,10 @@
     "build": "rimraf dist && tsc -b --force && tsx scripts/build-guide-assets.ts",
     "check": "tsc -b tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo",
-    "lint": "eslint \"{src,test,scripts}/**/*.{ts,tsx}\"",
+    "lint": "eslint \"{src,test,scripts}/**/*.{ts,tsx}\" playwright.config.ts",
     "test": "vitest run",
-    "pretest": "pnpm --filter @knpkv/review... build"
+    "pretest": "pnpm --filter @knpkv/review... build",
+    "test:browser": "pnpm --filter '@knpkv/review^...' --sort run build && pnpm build && playwright test"
   },
   "dependencies": {
     "@knpkv/rly": "workspace:^",
@@ -66,6 +67,7 @@
   "devDependencies": {
     "@effect/platform-node": "4.0.0",
     "@effect/vitest": "4.0.0",
+    "@playwright/test": "1.63.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "esbuild": "^0.28.2",

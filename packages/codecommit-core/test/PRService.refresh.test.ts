@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Layer, Predicate, Ref, Schema, Stream, SubscriptionRef } from "effect"
-import { AwsClient } from "../src/AwsClient/index.js"
+import { AwsClient, type PullRequestRefreshItem } from "../src/AwsClient/index.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
 import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
@@ -11,6 +11,9 @@ import { ConfigService } from "../src/ConfigService/index.js"
 import { TuiConfig } from "../src/ConfigService/internal.js"
 import { type AppState, PullRequest } from "../src/Domain.js"
 import { makeRefresh } from "../src/PRService/refresh.js"
+
+/** A provider pull request as the refresh stream delivers it. */
+const fetched = (pullRequest: PullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest })
 
 /** Stands in for a config read failing mid-write. */
 class ConfigUnreadable extends Schema.TaggedError<ConfigUnreadable>()("ConfigUnreadable", {
@@ -115,8 +118,13 @@ describe("PRService.refresh", () => {
       })
       const liveDependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "123456789012" }),
-          getPullRequests: () => Stream.make(fetchedPR),
+          getCallerIdentity: () =>
+            Effect.succeed({
+              username: "viewer",
+              accountId: "123456789012",
+              arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
+            }),
+          getPullRequestRefresh: () => Stream.make(fetched(fetchedPR)),
           getCommentsForPullRequest: () => Effect.succeed([])
         }),
         Layer.mock(EventsHub, {
@@ -333,9 +341,14 @@ describe("PRService.refresh", () => {
       const liveDependencies = (switchedOffEnabled: boolean) =>
         Layer.mergeAll(
           Layer.mock(AwsClient, {
-            getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "123456789012" }),
+            getCallerIdentity: () =>
+              Effect.succeed({
+                username: "viewer",
+                accountId: "123456789012",
+                arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
+              }),
             // Empty provider results: anything in the published state came from cache.
-            getPullRequests: (options: { readonly profile: string }) =>
+            getPullRequestRefresh: (options: { readonly profile: string }) =>
               Stream.fromEffect(Ref.update(queriedProfiles, (seen) => [...seen, options.profile])).pipe(
                 Stream.flatMap(() => Stream.empty)
               ),
@@ -430,8 +443,13 @@ describe("PRService.refresh", () => {
       // @effect-diagnostics-next-line strictEffectProvide:off
       yield* makeRefresh(state).pipe(Effect.provide(Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "123456789012" }),
-          getPullRequests: () => Stream.empty,
+          getCallerIdentity: () =>
+            Effect.succeed({
+              username: "viewer",
+              accountId: "123456789012",
+              arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
+            }),
+          getPullRequestRefresh: () => Stream.empty,
           getCommentsForPullRequest: () => Effect.succeed([])
         }),
         Layer.mock(EventsHub, { batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect }),
