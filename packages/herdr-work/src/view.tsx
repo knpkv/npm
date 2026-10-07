@@ -233,19 +233,18 @@ const decisionBarFor = (request: WorkRequest, decisions: WorkRequestDecisions | 
         ? { _tag: "off", reason: "Another decision is waiting for the hub." }
         : // The hub took a decision; the host's pending list has not caught up yet, so nothing else may be sent.
           answer?.outcome === "accepted" && pending
-          ? { _tag: "off", reason: "The hub has your decision." }
+          ? { _tag: "off", reason: "Waiting for the hub's queue to update." }
           : pending
             ? { _tag: "ready" }
             : { _tag: "off", reason: outcome }
-  // An uncertain answer stands only until the snapshot proves what happened, then the proof replaces it.
+  // An uncertain answer stands only until the snapshot proves what happened; the proof is then the
+  // off reason, so the status says nothing more.
   const status =
-    answer === null
+    answer === null || (answer.outcome === "uncertain" && proven && !pending)
       ? undefined
       : answer.outcome !== "uncertain" || pending
         ? answer.text
-        : proven
-          ? outcome
-          : `${outcome} ${answer.text}`
+        : `${outcome} ${answer.text}`
   const decide = (decision: "approve" | "reject") => () => {
     if (state._tag === "ready") decisions.onDecision({ decision, jobId })
   }
