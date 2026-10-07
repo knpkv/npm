@@ -4,7 +4,7 @@
  * @module
  */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { Console, Effect } from "effect"
+import { Console, Effect, Path } from "effect"
 import { Argument as Args, Command, Flag as Options, Prompt } from "effect/cli"
 import { isTicketKey } from "../agent/sessions.js"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
@@ -15,40 +15,54 @@ import { CommandFailed } from "./CommandFailed.js"
 // show
 // ---------------------------------------------------------------------------
 
-/** One printer so `jcf config` and `jcf config show` cannot drift apart. */
+/**
+ * One printer so `jcf config` and `jcf config show` cannot drift apart. It says whether the file exists,
+ * and marks each value that is jcf's own default, so a reader can tell what was chosen from what was not.
+ */
 const printConfig = (config: JcfConfig) =>
   Effect.gen(function*() {
-    yield* Console.log("~/.jcf/config.json:")
+    const cfg = yield* ConfigService
+    const path = yield* Path.Path
+    const file = path.join(yield* cfg.configDir, "config.json")
+    const exists = yield* cfg.fileExists
+    yield* Console.log(
+      exists
+        ? `Settings in ${file}. "(default)" marks a value that is jcf's own.`
+        : `No config file yet (${file}): every value below is jcf's default. Change one with jcf config set.`
+    )
     yield* Console.log("")
-    yield* Console.log(`  Default JQL:     ${config.defaultJql}`)
-    yield* Console.log(`  Refresh (sec):   ${config.refreshInterval}`)
-    yield* Console.log(`  Default project: ${config.defaultProjectName ?? config.defaultProjectId ?? "(none)"}`)
-    yield* Console.log(`  Default billable:${config.defaultBillable ? " yes" : " no"}`)
-    yield* Console.log(`  Project map:     ${JSON.stringify(config.projectMap)}`)
-    yield* Console.log(
-      `  Session roots:   ${config.sessionRoots.length > 0 ? config.sessionRoots.join(", ") : "(none)"}`
+    const line = <K extends keyof JcfConfig>(label: string, key: K, shown: string) =>
+      Console.log(
+        `  ${label.padEnd(18)}${shown}${
+          exists && JSON.stringify(config[key]) === JSON.stringify(defaultJcfConfig[key]) ? "  (default)" : ""
+        }`
+      )
+    const list = (values: ReadonlyArray<string>) => values.length > 0 ? values.join(", ") : "(none)"
+    yield* line("Default JQL:", "defaultJql", config.defaultJql)
+    yield* line("Refresh (sec):", "refreshInterval", String(config.refreshInterval))
+    yield* line(
+      "Default project:",
+      "defaultProjectId",
+      config.defaultProjectName ?? config.defaultProjectId ?? "(none)"
     )
-    yield* Console.log(`  Session tickets: ${JSON.stringify(config.sessionTicketMap)}`)
-    yield* Console.log(`  Idle cap (sec):  ${config.sessionIdleCapSeconds}`)
-    yield* Console.log(
-      `  Dwell (sec):     ${config.sessionDwellSeconds === 0 ? "off" : config.sessionDwellSeconds}`
+    yield* line("Default billable:", "defaultBillable", config.defaultBillable ? "yes" : "no")
+    yield* line("Project map:", "projectMap", JSON.stringify(config.projectMap))
+    yield* line("Session roots:", "sessionRoots", list(config.sessionRoots))
+    yield* line("Session tickets:", "sessionTicketMap", JSON.stringify(config.sessionTicketMap))
+    yield* line("Idle cap (sec):", "sessionIdleCapSeconds", String(config.sessionIdleCapSeconds))
+    yield* line(
+      "Dwell (sec):",
+      "sessionDwellSeconds",
+      config.sessionDwellSeconds === 0 ? "off" : String(config.sessionDwellSeconds)
     )
-    yield* Console.log(`  Confidence floor:${` ${config.sessionConfidenceFloor}`}`)
-    yield* Console.log(
-      `  Ownership:       ${
-        config.sessionOwnership === "assigned" ? "assigned to you only" : "any ticket a signal placed"
-      }`
+    yield* line("Confidence floor:", "sessionConfidenceFloor", String(config.sessionConfidenceFloor))
+    yield* line(
+      "Ownership:",
+      "sessionOwnership",
+      config.sessionOwnership === "assigned" ? "assigned to you only" : "any ticket a signal placed"
     )
-    yield* Console.log(
-      `  Yours anyway:    ${
-        config.sessionOwnershipOverrides.length > 0 ? config.sessionOwnershipOverrides.join(", ") : "(none)"
-      }`
-    )
-    yield* Console.log(
-      `  Ignored tickets: ${
-        config.sessionIgnoredTickets.length > 0 ? config.sessionIgnoredTickets.join(", ") : "(none)"
-      }`
-    )
+    yield* line("Yours anyway:", "sessionOwnershipOverrides", list(config.sessionOwnershipOverrides))
+    yield* line("Ignored tickets:", "sessionIgnoredTickets", list(config.sessionIgnoredTickets))
   })
 
 const configShow = Command.make(

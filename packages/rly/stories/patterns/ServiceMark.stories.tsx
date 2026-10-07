@@ -13,12 +13,14 @@ const ServiceMarkGallery = () => (
     </Text>
     <Text tone="secondary">
       Provider color identifies where evidence came from; each code-owned silhouette and full name carries the identity.
+      Beside a title that already names the provider, the hidden name variant prints the glyph alone.
     </Text>
     <div style={gridStyle}>
       {services.map((service) => (
         <div key={service} style={swatchStyle}>
           <ServiceMark service={service} />
           <ServiceMark service={service} size="compact" />
+          <ServiceMark name="hidden" service={service} size="compact" />
         </div>
       ))}
     </div>
@@ -38,10 +40,10 @@ export const Gallery: Story = {
   args: { service: "codecommit" },
   play: async ({ canvas, canvasElement }) => {
     for (const name of ["CodeCommit", "CodePipeline", "Jira", "Confluence", "Clockify"]) {
-      await expect(canvas.getAllByRole("img", { name })).toHaveLength(2)
+      await expect(canvas.getAllByRole("img", { name })).toHaveLength(3)
     }
-    await expect(canvasElement.querySelectorAll("[data-rly-service]")).toHaveLength(10)
-    await expect(canvasElement.querySelectorAll("[data-rly-service] svg")).toHaveLength(10)
+    await expect(canvasElement.querySelectorAll("[data-rly-service]")).toHaveLength(15)
+    await expect(canvasElement.querySelectorAll("[data-rly-service] svg")).toHaveLength(15)
     canvasElement.dataset.serviceMarkPlayComplete = "true"
   },
   render: () => <ServiceMarkGallery />

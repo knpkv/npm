@@ -82,7 +82,6 @@ export function SandboxesPageView({
     <div className={styles.page}>
       <header className={styles.hero}>
         <div className={styles.heroCopy}>
-          <span className={styles.eyebrow}>Isolated review environments</span>
           <Text as="h1" className={styles.title} variant="page-title">
             Sandboxes
           </Text>
@@ -90,10 +89,9 @@ export function SandboxesPageView({
             Open a revision in its own authenticated workspace, then keep lifecycle and logs in view.
           </Text>
         </div>
-        <StateLabel
-          label={runningCount === 1 ? "1 running" : `${String(runningCount)} running`}
-          tone={runningCount > 0 ? "positive" : "neutral"}
-        />
+        <Text className={styles.running} tone="secondary">
+          {runningCount === 1 ? "1 running" : `${String(runningCount)} running`}
+        </Text>
       </header>
 
       {sandboxes.length === 0 ? (
@@ -143,25 +141,15 @@ export function SandboxesPageView({
                         />
                       </span>
                       <span className={styles.sandboxMeta}>
-                        <span>PR #{sandbox.pullRequestId}</span>
-                        <span aria-hidden="true" className={styles.metaSeparator}>
-                          ·
-                        </span>
-                        <span>{formatTime(sandbox.createdAt)}</span>
+                        Pull request {sandbox.pullRequestId}, created {formatTime(sandbox.createdAt)}
                         {sandbox.port !== null && sandbox.status === "running" ? (
                           <>
-                            <span aria-hidden="true" className={styles.metaSeparator}>
-                              ·
-                            </span>
-                            <span className={styles.port}>port {sandbox.port}</span>
+                            , <span className={styles.port}>port {sandbox.port}</span>
                           </>
                         ) : null}
                         {sandbox.statusDetail !== null && isProvisioning(sandbox.status) ? (
                           <>
-                            <span aria-hidden="true" className={styles.metaSeparator}>
-                              ·
-                            </span>
-                            <span className={styles.statusDetailInline}>{sandbox.statusDetail}</span>
+                            . <span className={styles.statusDetailInline}>{sandbox.statusDetail}</span>
                           </>
                         ) : null}
                       </span>

@@ -30,7 +30,7 @@ test("preserves deliberate control geometry and the shared focus treatment", asy
     const style = getComputedStyle(element)
     return { offset: style.outlineOffset, width: style.outlineWidth }
   })
-  expect(focus).toEqual({ offset: "2px", width: "3px" })
+  expect(focus).toEqual({ offset: "2px", width: "2px" })
 
   await page.goto(story("primitives-iconbutton--states"))
   for (const [name, size] of iconButtonSizes) {
@@ -267,4 +267,26 @@ test("keeps the selected toggle option marked in forced colours", async ({ page 
   await expect(selected).toBeVisible()
   await expect(selected).toHaveCSS("outline-style", "solid")
   await expect(selected).toHaveCSS("outline-width", "2px")
+})
+
+test("shows the focus ring on a checked toggle option in forced colours", async ({ page }) => {
+  await page.emulateMedia({ forcedColors: "active" })
+  await page.goto(story("primitives-togglegroup--interaction"))
+  const checked = page.locator("#storybook-root [role='radio'][data-state='checked']").first()
+  await expect(checked).toBeVisible()
+  await checked.focus()
+  await expect(checked).toBeFocused()
+  const ring = await checked.evaluate((element) => {
+    const probe = document.createElement("span")
+    probe.style.color = "Highlight"
+    document.body.append(probe)
+    const highlight = getComputedStyle(probe).color
+    probe.remove()
+    const style = getComputedStyle(element)
+    return { color: style.outlineColor, highlight, offset: style.outlineOffset, width: style.outlineWidth }
+  })
+  // The focus ring, not the checked ring: Highlight, 2px, drawn outside the option.
+  expect(ring.color).toBe(ring.highlight)
+  expect(ring.width).toBe("2px")
+  expect(ring.offset).toBe("2px")
 })

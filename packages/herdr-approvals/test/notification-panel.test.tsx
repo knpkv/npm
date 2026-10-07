@@ -2,10 +2,11 @@ import { describe, expect, it } from "@effect/vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import { NotificationPanel, type NotificationState } from "../src/approval-app-view.js"
 
-const render = (state: NotificationState): string =>
+const render = (state: NotificationState, failure?: string): string =>
   renderToStaticMarkup(
     <NotificationPanel
       canonicalUrl="https://ser8.example.test/"
+      failure={failure}
       onDisable={() => undefined}
       onEnable={() => undefined}
       state={state}
@@ -36,5 +37,21 @@ describe("approval notification panel", () => {
     expect(markup).toContain("Add to Home Screen")
     expect(markup).toContain(">Enable<")
     expect(markup).not.toContain("section-title")
+  })
+
+  it("names the cause when checking notifications failed, and offers Enable again", () => {
+    const markup = render("error", "the push service answered 410")
+    expect(markup).toContain("Couldn&#x27;t check notifications: the push service answered 410.")
+    expect(markup).toContain(">Enable<")
+    expect(markup).not.toContain("Refresh and retry")
+  })
+
+  it("explains a blocked or unsupported browser instead of offering an Enable that can't work", () => {
+    const inert: ReadonlyArray<NotificationState> = ["denied", "unsupported"]
+    for (const state of inert) {
+      expect(render(state)).not.toContain(">Enable<")
+    }
+    expect(render("denied")).toContain("blocked notifications for the hub")
+    expect(render("unsupported")).toContain("add this page to the Home Screen first")
   })
 })
