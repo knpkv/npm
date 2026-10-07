@@ -39,7 +39,8 @@ import {
   type CategoryStatus,
   getScoreTier,
   type HealthScore,
-  type HealthScoreCategory
+  type HealthScoreCategory,
+  healthUnknownReason
 } from "@knpkv/codecommit-core/HealthScore.js"
 import { ServiceMark } from "@knpkv/rly/patterns"
 import {
@@ -269,17 +270,24 @@ function CommentsCountReporter({
 }
 
 function ScoreBadge({ score }: { readonly score: HealthScore | undefined }) {
-  if (score === undefined) return null
+  // Unknown reads as a dash, never a red 0: the breakdown says which date is missing.
+  if (score === undefined) return <StateLabel label="Health —" size="compact" tone="neutral" />
   const tier = getScoreTier(score.total)
 
   return <StateLabel label={`Health ${score.total.toFixed(1)} / 10`} size="compact" tone={healthTone(tier)} />
 }
 
-function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) {
+function ScoreBreakdown({
+  score,
+  unknownReason
+}: {
+  readonly score: HealthScore | undefined
+  readonly unknownReason: Option.Option<string>
+}) {
   if (score === undefined) {
     return (
       <Text tone="secondary" variant="meta">
-        Waiting for comment count…
+        {`Not enough data to score: ${Option.getOrElse(unknownReason, () => "no dates")}.`}
       </Text>
     )
   }
@@ -999,6 +1007,7 @@ export function PRDetail() {
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
     [pr]
   )
+  const scoreUnknownReason = useMemo(() => (pr !== null ? healthUnknownReason(pr) : Option.none<string>()), [pr])
   const navigate = useNavigate()
   const openPr = useAtomSet(openPrAtom)
   const granted = useDismissable(StorageKeys.grantedDismissed)
@@ -1667,7 +1676,7 @@ export function PRDetail() {
           </section>
 
           <CollapsibleSection title="Health Score Breakdown">
-            {() => <ScoreBreakdown score={score} />}
+            {() => <ScoreBreakdown score={score} unknownReason={scoreUnknownReason} />}
           </CollapsibleSection>
         </aside>
       </div>

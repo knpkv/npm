@@ -61,6 +61,18 @@ const COMMENTS_COUNTED = 3
 const saturating = (max: number, scale: number, days: number): number => max * (1 - Math.exp(-days / scale))
 
 /**
+ * Why a pull request can't be scored: the dates CodeCommit left out. None when it can be scored (a
+ * missing comment count still scores, as a lower bound). Shown wherever the score reads Unknown.
+ */
+export const healthUnknownReason = (pr: PullRequest): Option.Option<string> => {
+  const missing = [
+    ...(isMissingDate(pr.creationDate) ? ["creation"] : []),
+    ...(isMissingDate(pr.lastModifiedDate) ? ["last-activity"] : [])
+  ]
+  return missing.length === 0 ? Option.none() : Option.some(`CodeCommit gave no ${missing.join(" or ")} date`)
+}
+
+/**
  * Score an open pull request from 0 to 10: a base of 8, minus saturating penalties for idleness (up to
  * 6) and age (up to 2), plus bounded bonuses. Unknown (`Option.none()`) when CodeCommit gave no
  * activity or creation date, since those dominate the score. A comment count that hasn't loaded yet

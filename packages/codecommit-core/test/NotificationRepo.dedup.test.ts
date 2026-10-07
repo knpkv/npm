@@ -122,4 +122,23 @@ describe("NotificationRepo.add", () => {
       yield* repo.add(granted)
       expect((yield* prRows).length).toBe(3)
     })))
+
+  // A bulk and a single refresh can announce the same change at once; the check and the insert are one
+  // statement, so only one copy is written.
+  it.effect("writes one unread copy when the same notification is added concurrently", () =>
+    withRepo(Effect.gen(function*() {
+      const repo = yield* NotificationRepo
+      const sql = yield* SqlClient.SqlClient
+      const granted = {
+        pullRequestId: "45",
+        awsAccountId: "123456789012",
+        type: "approval_changed",
+        message: "Approval granted on #45 Fix (repo)",
+        repositoryName: "repo",
+        accountRegion: "eu-central-1"
+      }
+      yield* Effect.all(Array.from({ length: 8 }, () => repo.add(granted)), { concurrency: "unbounded" })
+      const rows = yield* sql<{ id: number }>`SELECT id FROM notifications WHERE pull_request_id = '45'`
+      expect(rows.length).toBe(1)
+    })))
 })

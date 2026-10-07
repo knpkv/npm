@@ -6,7 +6,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Option, Schema } from "effect"
 import { PullRequest } from "../src/Domain.js"
-import { calculateHealthScore, getScoreTier } from "../src/HealthScore.js"
+import { calculateHealthScore, getScoreTier, healthUnknownReason } from "../src/HealthScore.js"
 
 const now = new Date("2026-10-06T21:00:00.000Z")
 
@@ -261,6 +261,22 @@ describe("health curve A", () => {
     const base = table[0]![1]
     expect(total({ ...base, lastModifiedDate: new Date(0).toISOString() })).toEqual(Option.none())
     expect(total({ ...base, creationDate: new Date(0).toISOString() })).toEqual(Option.none())
+  })
+
+  it("names the date CodeCommit left out when the score is Unknown", () => {
+    const base = table[0]![1]
+    const epoch = new Date(0).toISOString()
+    expect(healthUnknownReason(pullRequest({ ...base, lastModifiedDate: epoch }))).toEqual(
+      Option.some("CodeCommit gave no last-activity date")
+    )
+    expect(healthUnknownReason(pullRequest({ ...base, creationDate: epoch }))).toEqual(
+      Option.some("CodeCommit gave no creation date")
+    )
+    expect(healthUnknownReason(pullRequest({ ...base, creationDate: epoch, lastModifiedDate: epoch }))).toEqual(
+      Option.some("CodeCommit gave no creation or last-activity date")
+    )
+    // Missing comments still score, as a lower bound.
+    expect(healthUnknownReason(pullRequest({ ...base, commentCount: undefined }))).toEqual(Option.none())
   })
 
   it("scores missing comments as a lower bound and says so", () => {
