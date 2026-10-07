@@ -1861,6 +1861,9 @@ describe("fleet local authority", () => {
       // Owner ids are not in the summary any more, but Work still cannot store these.
       expect(decode({ to: { id: "owner-\ud800", name: "b" } })).toBe("Failure")
       expect(decode({ from: { id: "owner-\u0007", name: "a" } })).toBe("Failure")
+      // Both ids are length-bounded on their own now that the summary no longer bounds them.
+      expect(decode({ from: { id: "o".repeat(257), name: "a" } })).toBe("Failure")
+      expect(decode({ from: { id: "o".repeat(256), name: "a" } })).toBe("Success")
     }))
 
   it.effect("binds every reassignment field and owner identity into approval", () =>

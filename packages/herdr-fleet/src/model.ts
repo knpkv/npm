@@ -284,9 +284,11 @@ export const workReassignIsRecordable = (
   payload: Parameters<typeof workReassignActivitySummary>[0]
 ): boolean => {
   const summary = workReassignActivitySummary(payload)
-  // The ids are no longer in the summary, so check them directly: an id Work cannot store (a
-  // control character or a lone surrogate) must be refused before approval, not fail on record.
+  // The ids are no longer in the summary, so check them directly: an id Work cannot store (too
+  // long, a control character or a lone surrogate) must be refused before approval, not fail on
+  // record. The schema only requires them to be non-empty.
   return payload.from.id !== payload.to.id &&
+    payload.from.id.length <= workReassignOwnerIdMaxLength &&
     payload.to.id.length <= workReassignOwnerIdMaxLength &&
     workReassignActivityText.test(payload.from.id) &&
     workReassignActivityText.test(payload.to.id) &&
