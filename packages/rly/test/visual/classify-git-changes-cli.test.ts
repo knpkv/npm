@@ -8,9 +8,10 @@ const packageRoot = join(import.meta.dirname, "../..")
 // parsing stdout failed exactly when it should have scheduled every visual test.
 describe("visual classifier CLI", () => {
   it("keeps stdout to the full-run JSON and writes the fallback warning to stderr", () => {
+    // tsx directly, not `pnpm exec`, which can print install notices to stdout on a cold store.
     const run = spawnSync(
-      "pnpm",
-      ["exec", "tsx", "scripts/visual/classify-git-changes.ts", "--base", "refs/heads/no-such-base", "--head", "HEAD"],
+      join(packageRoot, "node_modules/.bin/tsx"),
+      ["scripts/visual/classify-git-changes.ts", "--base", "refs/heads/no-such-base", "--head", "HEAD"],
       { cwd: packageRoot, encoding: "utf8", timeout: 60_000 }
     )
     expect(run.status).toBe(0)
