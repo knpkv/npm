@@ -27,7 +27,7 @@ Run `herdr-monitor serve` in the isolated monitor environment. On the trusted pu
 
 The origin must be a valid canonical URL origin. Invalid ports and noncanonical spellings fail startup. Use `https://monitor.example`, without an explicit default `:443` port; nondefault ports such as `:8443` are supported.
 
-Open the configured origin and enter the board identifier and view key. The page polls the monitor every ten seconds. The key lives only in page memory, is cleared from the input after submission and is forgotten on Lock or page exit. No application cookies, local storage or session storage are used. Browser password managers and extensions remain outside this guarantee.
+Open the configured origin and enter the board identifier and view key. The page polls the monitor every ten seconds. When a poll fails, the board keeps the last snapshot on screen and says when it was received; a rejected view key locks the board and clears it. The key lives only in page memory, is cleared from the input after submission and is forgotten on Lock or page exit. No application cookies, local storage or session storage are used. Browser password managers and extensions remain outside this guarantee.
 
 ## Snapshot contract
 
