@@ -79,19 +79,21 @@ export const diffPR = (
 
   // Only a real change is announced: the fresh evaluation is known, and so is what it is compared with
   // (a known cached evaluation, or the last known value an unknown row keeps over a known baseline; a
-  // pull request first seen while its evaluation fails holds a placeholder instead). Without rules on
-  // either side, no rule was satisfied or withdrawn, so a flip of the evaluation is not announced either.
+  // pull request first seen while its evaluation fails holds a placeholder instead). Approval is
+  // compared as a state, not a flag: only reaching rule-backed Approved is a grant, and only leaving it
+  // for rule-backed Pending a revocation. Without rules nothing was approved, so adding or removing
+  // rules, or a flip of the evaluation with none, is not announced.
   const ruleBacked = (pr: DiffablePR) => (pr.approvalRules?.length ?? 0) > 0
+  const approvedByRules = (pr: DiffablePR, approved: boolean) => ruleBacked(pr) && approved
   const cachedKnown = cached.approvalUnknownReason == null || isEnabled(cached.approvalBaselineKnown ?? false)
-  if (
-    fresh.approvalUnknownReason == null && cachedKnown && ruleBacked(fresh) && ruleBacked(cached) &&
-    freshApproved !== cachedApproved
-  ) {
+  const granted = approvedByRules(fresh, freshApproved) && !approvedByRules(cached, cachedApproved)
+  const revoked = approvedByRules(cached, cachedApproved) && ruleBacked(fresh) && !freshApproved
+  if (fresh.approvalUnknownReason == null && cachedKnown && (granted || revoked)) {
     notifications.push({
       ...base,
       type: "approval_changed",
       title: fresh.title,
-      message: `Approval ${freshApproved ? "granted" : "revoked"} on ${label}`
+      message: `Approval ${granted ? "granted" : "revoked"} on ${label}`
     })
   }
 

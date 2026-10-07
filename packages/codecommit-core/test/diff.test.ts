@@ -136,6 +136,19 @@ describe("diffPR approval without rules", () => {
   const approvalChanges = (cached: DiffablePR, fresh: DiffablePR) =>
     diffPR(cached, fresh, "acc").filter((n) => n.type === "approval_changed")
 
+  // A rule added and satisfied since the last read turns "no approval required" into a real approval.
+  it("announces a grant when a pull request without rules becomes rule-backed and approved", () => {
+    expect(approvalChanges(pr(true, 0), pr(true, 1)).map((n) => n.message)).toEqual([
+      "Approval granted on #44 Fix (repo)"
+    ])
+    // No rules on either side, a pending rule added, or a rule removed: nothing approved or withdrawn.
+    expect([
+      approvalChanges(pr(true, 0), pr(true, 0)),
+      approvalChanges(pr(true, 0), pr(false, 1)),
+      approvalChanges(pr(true, 1), pr(true, 0))
+    ]).toEqual([[], [], []])
+  })
+
   // With no rules CodeCommit evaluates "approved" though nobody signed off (AWS shows 0 approvals).
   it("announces no approval for a pull request with no rules, whatever its evaluation flips to", () => {
     expect(approvalChanges(pr(false, 0), pr(true, 0))).toEqual([])

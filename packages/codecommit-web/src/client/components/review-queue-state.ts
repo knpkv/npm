@@ -25,11 +25,13 @@ export const resolveQueueMode = (state: QueueModeState, currentUser: string | un
   return "all"
 }
 
-// "unknown" is an open approval status of its own, so the composite All open group keeps those pull requests.
+// "unknown" and "not-required" are open approval statuses of their own, so the composite All open
+// group keeps those pull requests.
 export const openSubStatuses: ReadonlySet<string> = new Set([
   "approved",
   "pending",
   "unknown",
+  "not-required",
   "mergeable",
   "conflicts"
 ])
@@ -44,6 +46,7 @@ export const statusAxis: StatusAxisLookup = {
   approved: "approval",
   pending: "approval",
   unknown: "approval",
+  "not-required": "approval",
   mergeable: "merge",
   conflicts: "merge"
 }
@@ -98,6 +101,8 @@ export const matchesQueueFilter = (pr: Domain.PullRequest, entry: FilterEntry): 
           return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "Pending"
         case "unknown":
           return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "Unknown"
+        case "not-required":
+          return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "NotRequired"
         case "mergeable":
           return pr.status === "OPEN" && pr.isMergeable
         case "conflicts":
@@ -156,7 +161,7 @@ export const queueFilterOptions = (
     commenter: [...commenters].sort(),
     scope: [...scopes].sort(),
     repo: [...repositories].sort(),
-    status: ["open", "approved", "pending", "unknown", "mergeable", "conflicts", "merged", "closed"],
+    status: ["open", "approved", "pending", "unknown", "not-required", "mergeable", "conflicts", "merged", "closed"],
     size: ["small", "medium", "large", "xlarge"]
   }
 }
