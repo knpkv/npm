@@ -2184,8 +2184,17 @@ const writeObservations = (
         const changes = removeDisputedFact.run(subject, subject).changes
         return Number(changes)
       })
+    // Reported last, after every write and eviction in this call: a stored or
+    // unchanged fact that a later envelope replaced, or eviction removed, is no
+    // longer the subject's fact and confirms nothing.
+    const finalOutcomes = outcomes.map((outcome): WorkObserveOutcome => {
+      if (outcome._tag !== "stored" && outcome._tag !== "unchanged") return outcome
+      const row = readFact.get(outcome.subject)
+      const current = row === undefined ? undefined : Schema.decodeUnknownSync(StoredFactRow)(row)
+      return current?.observationId === outcome.observationId ? outcome : { _tag: "stale", subject: outcome.subject }
+    })
     database.exec("COMMIT")
-    return { evicted, outcomes }
+    return { evicted, outcomes: finalOutcomes }
   } catch (cause) {
     if (database.isTransaction) database.exec("ROLLBACK")
     throw cause

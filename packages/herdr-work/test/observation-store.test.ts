@@ -199,7 +199,10 @@ describe("observed facts", () => {
       )
       const report = yield* work.observe([at(100_000, agent("idle", "agent-newest"))])
       expect(report.evicted).toBe(1)
-      expect((yield* work.observe([at(1, agent("idle", "agent-0"))])).outcomes[0]?._tag).toBe("stored")
+      // The evicted subject can be stored again; an older read of it would be
+      // evicted again in the same call, and is reported stale.
+      expect((yield* work.observe([at(200_000, agent("idle", "agent-0"))])).outcomes[0]?._tag).toBe("stored")
+      expect((yield* work.observe([at(1, agent("idle", "agent-1"))])).outcomes[0]?._tag).toBe("stale")
     })))
 
   it.effect("keeps the latest failure's reason and the earliest failure's start, whatever order they arrive in", () =>

@@ -371,6 +371,18 @@ describe("terminal reconcile", () => {
       expect(confirmedIn(older)).toEqual([])
     })))
 
+  it.effect("a fact replaced later in the same observe call is reported stale, so its report reconciles", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      const report = yield* work.observe([
+        { observation: pullRequest({ closedAt: null, state: "open" }), observedAt: 6_000 },
+        { observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 7_000 }
+      ])
+      expect(report.outcomes.map(({ _tag }) => _tag)).toEqual(["stale", "stored"])
+      expect((yield* work.reconcile({ confirmed: confirmedIn(report) }))[0]?._tag).toBe("applied")
+    })))
+
   it.effect("records a pull request closed without merging as abandoned", () =>
     Effect.scoped(Effect.gen(function*() {
       const { store, work } = yield* fixture
