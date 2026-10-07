@@ -13,7 +13,7 @@
   .caption {
     color: var(--rly-color-text-2);
     margin: var(--rly-space-0);
-    max-inline-size: 62ch;
+    max-inline-size: 41.3em;
   }
 
   .heading .fact {
