@@ -15,7 +15,7 @@ import {
   FleetOperationError,
   fleetResponseBodyMaxBytes,
   type FleetService,
-  FleetStoreError,
+  FleetStoreBusyError,
   FleetValidationError,
   type HostConfiguration,
   type HostOperations,
@@ -499,12 +499,12 @@ esac
             approve: (jobId, approval, actor) => {
               if (failApproval) {
                 failApproval = false
-                // A store write that fails once: the approval proof must survive it so a retry succeeds.
+                // The job store is locked once: a retryable 503, and the approval proof must survive it so a retry succeeds.
                 return Effect.fail(
-                  new FleetStoreError({
+                  new FleetStoreBusyError({
                     cause: "transient test failure",
-                    detail: "approval store temporarily unavailable",
-                    operation: "test.approve"
+                    detail: "database is locked",
+                    operation: "transition"
                   })
                 )
               }
@@ -594,8 +594,11 @@ esac
               method: "POST"
             })
           )
-          expect(transientFailure.status).toBe(500)
-          yield* Effect.promise(() => transientFailure.text())
+          expect(transientFailure.status).toBe(503)
+          // Decoding fails the test unless the 503 names the retryable busy store.
+          yield* Schema.decodeUnknownEffect(
+            Schema.fromJsonString(Schema.Struct({ error: Schema.Literal("FleetStoreBusyError") }))
+          )(yield* Effect.promise(() => transientFailure.text()))
 
           const decided = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
