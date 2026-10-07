@@ -71,6 +71,14 @@ describe("focus ring policy", () => {
     expect(rules(":root { --ring: var(--rly-color-focus); } .window { stroke: var(--ring); }")).toEqual([
       "focus-colour"
     ])
+    // Spaces, a fallback, or a chain of aliases still name the focus colour.
+    expect(rules(":root { --ring: var(--rly-color-focus); } .window { stroke: var( --ring , red); }")).toEqual([
+      "focus-colour"
+    ])
+    expect(
+      rules(":root { --b: var(--a); --a: var(--rly-color-focus); } .window { stroke: var(--b); }")
+    ).toEqual(["focus-colour"])
+    expect(rules(":root { --ring-soft: red; } .window { stroke: var(--ring-soft); }")).toEqual([])
     expect(rules(":root { --ring: var(--rly-color-focus); } .x:focus-visible { outline-color: var(--ring); }")).toEqual(
       []
     )

@@ -17,6 +17,8 @@ const FORCED_COLOURS_SELECTOR = /data-(?:rly-)?forced-colors/
 const WIDTH = /var\(\s*--rly-focus-ring-width\s*\)/
 const COLOUR = /var\(\s*--rly-color-focus\s*\)/
 const NO_OUTLINE = /^(?:none|0|0px)$/i
+// A custom property reference, with optional spaces and fallback: `var( --ring , red)`.
+const VAR_REFERENCE = /var\(\s*(--[\w-]+)\s*[,)]/g
 // `:not(...)` arguments are dropped first: `.a:focus:not(:focus-visible)` is the mouse-focus state.
 const VISIBLE_FOCUS = (selector: string): boolean => /:focus-visible/.test(selector.replace(/:not\([^()]*\)/g, ""))
 // The offset token outside the control, the ring's width pulled inside, or flush.
@@ -107,14 +109,27 @@ export const findFocusRingViolations = (path: string, source: string): ReadonlyA
     violations.push({ column: start.column, declaration: `${node.prop}: ${node.value}`, line: start.line, path, rule })
   }
   const root = postcss.parse(source)
-  // Custom properties that alias the focus colour in this sheet, so `var(--ring)` counts as it.
+  // Custom properties that alias the focus colour in this sheet, directly or through other aliases
+  // (`--a: var(--rly-color-focus); --b: var(--a, red)`), so their use counts as the focus colour.
   // An alias defined in another sheet is out of reach of a per-file walk.
-  const aliases = new Set<string>()
+  const custom: Array<Declaration> = []
   root.walkDecls((node) => {
-    if (node.prop.startsWith("--") && COLOUR.test(node.value)) aliases.add(node.prop)
+    if (node.prop.startsWith("--")) custom.push(node)
   })
-  const usesFocusColour = (value: string): boolean =>
-    COLOUR.test(value) || [...aliases].some((alias) => value.includes(`var(${alias})`))
+  const aliases = new Set<string>()
+  const referencesAlias = (value: string): boolean =>
+    [...value.matchAll(VAR_REFERENCE)].some((match) => match[1] !== undefined && aliases.has(match[1]))
+  const usesFocusColour = (value: string): boolean => COLOUR.test(value) || referencesAlias(value)
+  // Grow the alias set until a pass adds nothing, so chains of any length resolve.
+  for (let grew = true; grew;) {
+    grew = false
+    for (const node of custom) {
+      if (!aliases.has(node.prop) && usesFocusColour(node.value)) {
+        aliases.add(node.prop)
+        grew = true
+      }
+    }
+  }
   root.walkRules((rule) => {
     if (inForcedColours(rule)) return
     if (!FOCUS_SELECTOR.test(rule.selector)) {
