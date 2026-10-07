@@ -8,7 +8,9 @@ test("unbroken task and branch names wrap inside their tile at 390px", async ({ 
   // The monitor accepts one publication per second, after the demo board.spec published.
   await page.waitForTimeout(1100)
   const now = Date.now()
-  const long = "verifySignedApprovalAgainstRequestedRevisionBeforeShipping".repeat(3)
+  // Unbroken tokens at the schema's limits: name 80, task and branch 160, status 280.
+  const token = (length: number) =>
+    "verifySignedApprovalAgainstRequestedRevisionBeforeShipping".repeat(5).slice(0, length)
   const file = testInfo.outputPath("snapshot.json")
   writeFileSync(
     file,
@@ -20,13 +22,13 @@ test("unbroken task and branch names wrap inside their tile at 390px", async ({ 
       title: "Long names",
       agents: [{
         id: "long",
-        name: long,
-        task: long,
+        name: token(80),
+        task: token(160),
         state: "working",
-        status: long,
+        status: token(280),
         blocker: null,
         jiraKey: null,
-        branch: `feat/${long}`,
+        branch: `feat/${token(155)}`,
         pullRequest: null,
         clockify: null,
         elapsedSeconds: 60
