@@ -50,6 +50,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "pnpm lint:oxlint",
     "pnpm lint:ast",
     "pnpm lint:rly-colors",
+    "pnpm lint:rly-focus-rings",
     "pnpm lint:rly-stripes",
     "pnpm lint:rly-css-tokens"
   ])

@@ -106,8 +106,8 @@ button {
   color: var(--rly-color-text-1);
 }
 :focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 /* Forced colours: system button colours keep every label visible. */
 @media (forced-colors: active) {

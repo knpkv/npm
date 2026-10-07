@@ -58,8 +58,8 @@ html[data-review-fonts="loading"] body {
 }
 .review-nav li a:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 .review-muted {
   color: var(--rly-color-text-2);
@@ -106,8 +106,8 @@ html[data-review-fonts="loading"] body {
   border-color: var(--rly-color-text-1);
 }
 .review-checkbox input:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 @media (forced-colors: active) {
   .review-checkbox input {
@@ -199,8 +199,8 @@ html[data-review-fonts="loading"] body {
   font-size: var(--rly-type-code-size);
 }
 .review-prose pre:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 .review-prose code {
   font-size: 0.875em;
@@ -436,8 +436,8 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   transform: translateY(0.1em) rotate(-135deg);
 }
 .review-usage summary:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 .review-usage > section,
 .review-usage > div {
