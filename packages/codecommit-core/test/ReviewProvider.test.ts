@@ -8,7 +8,10 @@ import { isAmbiguousMergeProviderError } from "../src/ReviewClient/errors.js"
 import { CodeCommitReviewAction } from "../src/ReviewClient/models.js"
 import { authorizeAndMerge, type CodeCommitMergeOperations } from "../src/ReviewClient/ReviewProvider.js"
 
-const mergeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+// Each action decoded by its own case, so a fixture keeps its variant type.
+const ReviewActions = CodeCommitReviewAction.pipe(Schema.toTaggedUnion("_tag"))
+
+const mergeAction = Schema.decodeUnknownSync(ReviewActions.cases["merge"])({
   _tag: "merge",
   target: {
     account: { profile: "production", region: "eu-west-1" },

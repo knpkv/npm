@@ -24,7 +24,7 @@ export {
   versionsOf
 } from "./internal.js"
 export type { CachedPullRequest as CachedPullRequestType } from "./internal.js"
-export { PullRequestAmbiguityError } from "./queries.js"
+export { PullRequestAmbiguityError, StaleOpenRow } from "./queries.js"
 export type { ApprovalGroup, DerivedColumns, GroupsWritten, RowGroup, RowVersion, RowVersions } from "./rowWrites.js"
 
 const makePullRequestRepo = Effect.gen(function*() {

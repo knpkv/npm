@@ -220,7 +220,7 @@ const isTextInputTarget = (target: EventTarget | null): boolean => {
  * True when Enter on the focused element already does something (follow a link, press a button),
  * so the page-wide Enter shortcut must not also fire. Used by the PR page's keydown handler.
  */
-export const ownsEnterKey = (target: EventTarget | null): boolean => {
+export const ownsEnterKey = (target: unknown): boolean => {
   const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
   return tagName === "A" || tagName === "BUTTON" || tagName === "SELECT" || tagName === "SUMMARY"
 }

@@ -79,7 +79,7 @@ const secondPullRequest = Schema.decodeSync(Domain.PullRequest)({
 const secondCachedPullRequest = Schema.encodeSync(CachedPullRequest)({
   ...cachedPullRequest,
   accountRegion: "us-east-1",
-  repositoryName: "identity"
+  repositoryName: Domain.RepositoryName.make("identity")
 })
 
 const foreignPullRequest = Schema.decodeSync(Domain.PullRequest)({
@@ -138,8 +138,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const result = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "eu-west-1",
-          repositoryName: "payments"
+          region: Domain.AwsRegion.make("eu-west-1"),
+          repositoryName: Domain.RepositoryName.make("payments")
         }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
@@ -211,8 +211,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
         })
         yield* runWithLayer(
           makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
-            region: "eu-west-1",
-            repositoryName: "payments"
+            region: Domain.AwsRegion.make("eu-west-1"),
+            repositoryName: Domain.RepositoryName.make("payments")
           }),
           Layer.mergeAll(
             Layer.mock(AwsClient, {
@@ -284,8 +284,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
         })
         yield* runWithLayer(
           makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
-            region: "eu-west-1",
-            repositoryName: "payments"
+            region: Domain.AwsRegion.make("eu-west-1"),
+            repositoryName: Domain.RepositoryName.make("payments")
           }),
           Layer.mergeAll(
             Layer.mock(AwsClient, {
@@ -356,8 +356,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const failure = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "us-east-1",
-          repositoryName: "payments"
+          region: Domain.AwsRegion.make("us-east-1"),
+          repositoryName: Domain.RepositoryName.make("payments")
         }).pipe(Effect.flip),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
@@ -400,8 +400,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "eu-west-1",
-          repositoryName: "payments"
+          region: Domain.AwsRegion.make("eu-west-1"),
+          repositoryName: Domain.RepositoryName.make("payments")
         }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
@@ -454,8 +454,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const failure = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "eu-west-1",
-          repositoryName: "other-repository"
+          region: Domain.AwsRegion.make("eu-west-1"),
+          repositoryName: Domain.RepositoryName.make("other-repository")
         }).pipe(Effect.flip),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
@@ -602,8 +602,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const failure = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          repositoryName: "payments",
-          region: "eu-west-1",
+          repositoryName: Domain.RepositoryName.make("payments"),
+          region: Domain.AwsRegion.make("eu-west-1"),
           accountIdSource: "coordinate-token"
         }).pipe(Effect.flip),
         Layer.mergeAll(
@@ -684,7 +684,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const upserted = yield* Ref.make<string | undefined>(undefined)
       const service = makeRefreshSinglePR(state)
       yield* runWithLayer(
-        service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
+        service("production", pullRequest.id, {
+          repositoryName: Domain.RepositoryName.make("payments"),
+          region: Domain.AwsRegion.make("eu-west-1")
+        }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
             getPullRequest: () =>
@@ -730,7 +733,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const upserted = yield* Ref.make<string | undefined>(undefined)
       const service = makeRefreshSinglePR(state)
       yield* runWithLayer(
-        service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
+        service("production", pullRequest.id, {
+          repositoryName: Domain.RepositoryName.make("payments"),
+          region: Domain.AwsRegion.make("eu-west-1")
+        }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
             getCallerIdentity: () =>

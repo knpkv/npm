@@ -3,7 +3,7 @@ import { Effect, Layer, Logger, Ref, Schema, Stream, SubscriptionRef } from "eff
 import { AwsClient } from "../src/AwsClient/index.js"
 import { PullRequestDetail } from "../src/AwsClient/internal.js"
 import { CacheError } from "../src/CacheService/CacheError.js"
-import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
+import { CachedPullRequest, PullRequestRepo, StaleOpenRow } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { ConfigService } from "../src/ConfigService/index.js"
 import { TuiConfig } from "../src/ConfigService/internal.js"
 import type { AppState } from "../src/Domain.js"
@@ -80,6 +80,9 @@ const historyCases: ReadonlyArray<readonly [string, { readonly _tag: "NotPermitt
   ["a successful evaluation replaces the last known approval", undefined, "Evaluated"]
 ]
 
+// The stale-open read of a cached row: its coordinates and versions.
+const staleOpen = (row: CachedPullRequest) => Schema.decodeSync(StaleOpenRow)(Schema.encodeSync(CachedPullRequest)(row))
+
 describe("history sync approval evaluation", () => {
   // The history sync re-reads every cached open PR; that read's evaluation must reach the cache like
   // the refresh's stale pass does, or a cached approval would be republished as known.
@@ -96,7 +99,7 @@ describe("history sync approval evaluation", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed([cachedRow("kept-profile", "11")]),
-          findStaleOpen: () => Effect.succeed([cachedRow("kept-profile", "11")]),
+          findStaleOpen: () => Effect.succeed([staleOpen(cachedRow("kept-profile", "11"))]),
           writeRead: (_, __, evaluation) =>
             Ref.update(recorded, (all) => [...all, evaluation.approvalUnknown?._tag ?? "Evaluated"]).pipe(
               Effect.as({ row: true, approval: true, versions: undefined })
@@ -133,7 +136,7 @@ describe("history sync approval evaluation", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed([cachedRow("kept-profile", "11")]),
-          findStaleOpen: () => Effect.succeed([cachedRow("kept-profile", "11")]),
+          findStaleOpen: () => Effect.succeed([staleOpen(cachedRow("kept-profile", "11"))]),
           writeRead: () => Effect.fail(new CacheError({ operation: "recordApprovalEvaluation", cause: "disk full" })),
           refreshCommentedBy: () => Effect.void
         }),

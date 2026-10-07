@@ -11,10 +11,6 @@
     "owner": "arch2",
     "reason": "114 type errors in tests when typechecked (after #525/#532); remove this entry in the PR that adds test/tsconfig.json to check"
   },
-  "codecommit-web": {
-    "owner": "arch2",
-    "reason": "84 type errors in tests and e2e when typechecked (after #525/#532); remove this entry in the PR that adds test/tsconfig.json to check"
-  },
   "confluence-to-markdown": {
     "owner": "qa-fix",
     "reason": "121 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"
