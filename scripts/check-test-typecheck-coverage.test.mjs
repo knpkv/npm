@@ -1,7 +1,16 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { checkedProjects, coverageFailures, isTestSource } from "./check-test-typecheck-coverage.mjs"
+import { fileURLToPath, URL } from "node:url"
+
+import {
+  allowlistAdditions,
+  checkedProjects,
+  configDirectory,
+  coverageFailures,
+  isTestSource,
+  projectFiles
+} from "./check-test-typecheck-coverage.mjs"
 
 test("treats test, e2e and dtslint sources and *.test/*.spec files as test code", () => {
   assert.equal(isTestSource("test/store.test.ts"), true)
@@ -15,16 +24,54 @@ test("treats test, e2e and dtslint sources and *.test/*.spec files as test code"
   assert.equal(isTestSource("vitest.config.ts"), false)
 })
 
-test("reads the projects a check script typechecks", () => {
+test("reads the projects a check script typechecks, and whether tsc runs in build mode", () => {
   assert.deepEqual(checkedProjects("tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit"), [
-    "tsconfig.json",
-    "test/tsconfig.json"
+    { project: "tsconfig.json", build: true },
+    { project: "test/tsconfig.json", build: false }
   ])
-  assert.deepEqual(checkedProjects("tsc --noEmit"), ["tsconfig.json"])
-  assert.deepEqual(checkedProjects("tsc -b"), ["tsconfig.json"])
-  assert.deepEqual(checkedProjects("tsc -b ./scripts"), ["scripts/tsconfig.json"])
+  assert.deepEqual(checkedProjects("tsc --noEmit"), [{ project: "tsconfig.json", build: false }])
+  assert.deepEqual(checkedProjects("tsc -b"), [{ project: "tsconfig.json", build: true }])
+  assert.deepEqual(checkedProjects("tsc -b ./scripts"), [{ project: "scripts/tsconfig.json", build: true }])
   assert.deepEqual(checkedProjects("vitest run && eslint src"), [])
   assert.deepEqual(checkedProjects(undefined), [])
+})
+
+test("counts only tsc commands that gate the script", () => {
+  assert.deepEqual(checkedProjects("tsc -p test/tsconfig.json || true"), [])
+  assert.deepEqual(checkedProjects("tsc -p test/tsconfig.json; echo done"), [])
+  assert.deepEqual(checkedProjects("tsc -p test/tsconfig.json | tee out.txt"), [])
+  assert.deepEqual(checkedProjects("tsc -p test/tsconfig.json --noEmit && echo done"), [
+    { project: "test/tsconfig.json", build: false }
+  ])
+})
+
+test("follows project references only in build mode, as tsc does", () => {
+  const fixture = fileURLToPath(new URL("./fixtures/test-typecheck-coverage/tsconfig.json", import.meta.url))
+  const isFixtureTest = (file) => file.endsWith("/fixtures/test-typecheck-coverage/test/example.test.ts")
+  assert.equal(projectFiles(fixture, true).some(isFixtureTest), true)
+  assert.equal(projectFiles(fixture, false).some(isFixtureTest), false)
+})
+
+test("finds a config's directory for POSIX and Windows paths", () => {
+  assert.equal(configDirectory("/repo/packages/demo/test/tsconfig.json"), "/repo/packages/demo/test")
+  assert.equal(configDirectory("C:\\repo\\packages\\demo\\test\\tsconfig.json"), "C:/repo/packages/demo/test")
+})
+
+test("the allowlist may only shrink against its base", () => {
+  const base = { listed: { owner: "lane", reason: "follow-up" } }
+  assert.deepEqual(allowlistAdditions({ ...base, "new-package": { owner: "lane", reason: "new" } }, base), [
+    "new-package"
+  ])
+  assert.deepEqual(allowlistAdditions({}, base), [])
+  assert.deepEqual(allowlistAdditions(base, undefined), [])
+  assert.deepEqual(
+    coverageFailures(
+      new Map([["new-package", ["test/a.test.ts"]]]),
+      { "new-package": { owner: "lane", reason: "new" } },
+      {}
+    ),
+    [{ _tag: "AllowlistGrew", package: "new-package" }]
+  )
 })
 
 test("fails a package with untypechecked tests unless it is allowlisted", () => {
