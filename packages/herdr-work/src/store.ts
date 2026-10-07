@@ -3008,7 +3008,7 @@ export class WorkStore implements WorkStoreService {
               {
                 id: jobId,
                 kind: "status",
-                summary: workReassignActivitySummary(decoded, jobId, decoded.approvalHash),
+                summary: workReassignActivitySummary(decoded),
                 occurredAt: at
               }
             ],
@@ -3278,7 +3278,7 @@ export class WorkStore implements WorkStoreService {
               {
                 id: jobId,
                 kind: "status",
-                summary: workAbandonActivitySummary(decoded, jobId, decoded.approvalHash),
+                summary: workAbandonActivitySummary(decoded),
                 occurredAt: at
               }
             ],

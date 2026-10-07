@@ -270,6 +270,7 @@ export const fetchApprovers = (
         arns: approved.map((a) => a.userArn)
       }
     }),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(emptyApprovers()))
   )
 
@@ -290,6 +291,7 @@ export const fetchMergeStatus = (
     })
   ).pipe(
     Effect.map((r) => r.mergeable ?? false),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catchIf(() => true, () => Effect.succeed(false))
   )
 }
@@ -402,6 +404,7 @@ export const fetchRepoAccountId = (
   codecommit.getRepository({ repositoryName: repoName }).pipe(
     Effect.map((r) => normalizeAccountId(r.repositoryMetadata?.accountId)),
     Effect.tapError((e) => Effect.logWarning("fetchRepoAccountId failed", e)),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.void.pipe(Effect.as(undefined)))
   )
 

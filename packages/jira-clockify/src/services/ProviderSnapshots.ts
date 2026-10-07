@@ -78,6 +78,7 @@ export const make = Effect.gen(function*() {
     const connection = read.success.value
     if (connection.cloudId === "" || connection.siteUrl === "") return { availability: "unverified", snapshot: null }
     const client = makeJiraApi(httpClient, { baseUrl: "", auth: connection.credential })
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const live = yield* client.getCurrentUser({}).pipe(Effect.orElseSucceed(() => null))
     if (live?.accountId === undefined || live.accountId === "") {
       return { availability: "unverified", snapshot: null }

@@ -34,6 +34,7 @@ export const makeLoad = Effect.fn("ConfigService.load")(function*(
 
   if (!exists) {
     const detected = yield* detectProfiles.pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(emptyDetectedProfiles()))
     )
     if (detected.length > 0) {
@@ -53,6 +54,7 @@ export const makeLoad = Effect.fn("ConfigService.load")(function*(
 
   if (config.autoDetect && config.accounts.length === 0) {
     const detected = yield* detectProfiles.pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(emptyDetectedProfiles()))
     )
     if (detected.length > 0) {

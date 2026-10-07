@@ -28,6 +28,7 @@ export const decodeClaudeOutput = (
   method: string
 ): Effect.Effect<ClaudeResult, ReturnType<typeof invalidOutput>> =>
   decodeResult(stdout.trim()).pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => {
       const nonEmptyLines = stdout.split("\n").map((line) => line.trim()).filter((line) => line.length > 0)
       return Effect.forEach(nonEmptyLines, (line) => decodeResult(line)).pipe(

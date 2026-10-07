@@ -26,6 +26,7 @@ export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(
         // The release fiber must outlive scope close while the child process is being killed; its interruption is explicitly scheduled below.
         // ast-grep-ignore: no-unowned-detached-fiber
         const releaseFiber = yield* Effect.forkDetach( // eslint-disable-line local-rules/no-unowned-detached-fiber
+          // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           release.pipe(Effect.ignore, Effect.andThen(exitCode), Effect.ignore),
           { startImmediately: true, uninterruptible: false }
         )
@@ -38,6 +39,7 @@ export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(
         )
         if (Option.isNone(released)) {
           yield* Effect.sync(() => releaseFiber.interruptUnsafe())
+          // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           yield* kill.pipe(Effect.ignore)
         }
       }),

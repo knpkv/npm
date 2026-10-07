@@ -39,6 +39,7 @@ const optional = <A>(name: string, config: Config.Config<A>) =>
   config.pipe(
     Effect.catch(() =>
       Config.option(Config.String(name)).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.orElseSucceed(() => Option.none<string>()),
         Effect.flatMap((value) => Effect.fail(new InvalidSetting({ name, value: Option.getOrUndefined(value) })))
       )

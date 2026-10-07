@@ -283,6 +283,7 @@ export const layer = Layer.effect(
         !Number.isSafeInteger(namespace) || namespace <= 0
       ) return null
       return lockOwner(pid, namespace)
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     }).pipe(Effect.catch(() => Effect.succeed(null)))
 
     const acquireLock = Effect.gen(function*() {

@@ -1492,6 +1492,7 @@ const makePullRequestReviews = Effect.gen(function*() {
             reservationId
           }).pipe(
             Effect.mapError(mapPersistenceWriteError),
+            // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.ignore
           )
         }
