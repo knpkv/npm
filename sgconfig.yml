@@ -4,6 +4,7 @@ ruleDirs:
   - ast-grep/rules/effect
   - ast-grep/rules/packaging
   - ast-grep/rules/typescript
+  - ast-grep/rules/css
 
 languageGlobs:
   tsx:

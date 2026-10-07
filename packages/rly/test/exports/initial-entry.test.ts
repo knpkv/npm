@@ -134,6 +134,7 @@ describe("public entries", () => {
       "RLY_TRACK_KEY_MARKS",
       "TrackKey",
       "RLY_COLOR_TOKEN_NAMES",
+      "RLY_CONTROL_HEIGHT_TOKEN_NAMES",
       "RLY_MOTION_TOKEN_NAMES",
       "RLY_RADIUS_TOKEN_NAMES",
       "RLY_SPACE_TOKEN_NAMES",
@@ -146,6 +147,7 @@ describe("public entries", () => {
 
     expect(Object.keys(Tokens)).toEqual([
       "RLY_COLOR_TOKEN_NAMES",
+      "RLY_CONTROL_HEIGHT_TOKEN_NAMES",
       "RLY_MOTION_TOKEN_NAMES",
       "RLY_RADIUS_TOKEN_NAMES",
       "RLY_SPACE_TOKEN_NAMES",

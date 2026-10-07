@@ -1,42 +1,38 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { expect } from "storybook/test"
+import { Text } from "../src/primitives/Text.js"
+import { pageStyle, stackStyle } from "./primitives/storyStyles.js"
 
+const sections: ReadonlyArray<{ readonly id: string; readonly title: string; readonly summary: string }> = [
+  { id: "foundations", summary: "Tokens, themes, icons, links, and portals.", title: "Foundations" },
+  { id: "primitives", summary: "Reusable framework-neutral interface elements.", title: "Primitives" },
+  { id: "patterns", summary: "Release, entity, provenance, and governed-action patterns.", title: "Patterns" },
+  { id: "diff", summary: "Complete CodeCommit pull-request diff presentation.", title: "Diff workbench" }
+]
+
+// The catalog's front page in rly's own type and tokens: a page title, one line of purpose, and the sections.
 const CatalogOverview = () => (
-  <main aria-labelledby="catalog-title" style={{ margin: "0 auto", maxWidth: "72rem", padding: "4rem 2rem" }}>
-    <p style={{ fontSize: "1rem", letterSpacing: "0.12em", textTransform: "uppercase" }}>rly · Release Relay</p>
-    <h1 id="catalog-title" style={{ fontSize: "clamp(3rem, 9vw, 8rem)", letterSpacing: "-0.07em", lineHeight: 0.88 }}>
-      Component catalog
-    </h1>
-    <p style={{ fontSize: "clamp(1.25rem, 3vw, 2.5rem)", lineHeight: 1.1, maxWidth: "24ch" }}>
-      A quiet system for seeing people, evidence, delivery, and agents together.
-    </p>
-
-    <nav
-      aria-label="Catalog sections"
-      style={{ display: "flex", flexWrap: "wrap", gap: "1.5rem", marginBlock: "4rem" }}
-    >
-      <a href="#foundations">Foundations</a>
-      <a href="#primitives">Primitives</a>
-      <a href="#patterns">Patterns</a>
-      <a href="#diff">Diff workbench</a>
-    </nav>
-
-    <section id="foundations">
-      <h2>Foundations</h2>
-      <p>Tokens, themes, icons, links, and portals.</p>
-    </section>
-    <section id="primitives">
-      <h2>Primitives</h2>
-      <p>Reusable framework-neutral interface elements.</p>
-    </section>
-    <section id="patterns">
-      <h2>Patterns</h2>
-      <p>Release, entity, provenance, and governed-action patterns.</p>
-    </section>
-    <section id="diff">
-      <h2>Diff workbench</h2>
-      <p>Complete CodeCommit pull-request diff presentation.</p>
-    </section>
+  <main aria-labelledby="catalog-title" style={pageStyle}>
+    <div style={stackStyle}>
+      <Text as="h1" id="catalog-title" variant="page-title">
+        Component catalog
+      </Text>
+      <Text tone="secondary" variant="body-large">
+        Release Relay: a quiet system for seeing people, evidence, delivery, and agents together.
+      </Text>
+      <nav aria-label="Catalog sections">
+        <ul style={{ display: "grid", gap: "var(--rly-space-16)", listStyle: "none", margin: 0, padding: 0 }}>
+          {sections.map((section) => (
+            <li id={section.id} key={section.id}>
+              <Text as="h2" variant="card-title">
+                {section.title}
+              </Text>
+              <Text tone="secondary">{section.summary}</Text>
+            </li>
+          ))}
+        </ul>
+      </nav>
+    </div>
   </main>
 )
 

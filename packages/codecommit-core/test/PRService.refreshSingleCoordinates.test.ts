@@ -525,7 +525,12 @@ describe("PRService.refreshSinglePR coordinates", () => {
         service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
-            getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "111122223333" }),
+            getCallerIdentity: () =>
+              Effect.succeed({
+                username: "viewer",
+                accountId: "111122223333",
+                arn: "arn:aws:sts::111122223333:assumed-role/Viewer/viewer"
+              }),
             getPullRequest: () =>
               Effect.succeed({
                 revisionId: "revision-uncached-profile",

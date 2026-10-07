@@ -72,7 +72,7 @@ type Story = StoryObj<typeof meta>
 
 export const HumanAndAgent: Story = {
   play: async ({ args, canvas, canvasElement }) => {
-    await expect(canvas.getByText("Agent finding · not an approval")).toBeVisible()
+    await expect(canvas.getByText("Agent finding, not an approval")).toBeVisible()
     await expect(canvas.getByText("Prevent recurrence")).toBeVisible()
     const prevention = canvasElement.querySelector<HTMLDetailsElement>("[data-rly-diff-finding-prevention='eslint']")
     if (prevention === null) throw new Error("Agent prevention disclosure did not render")
@@ -135,8 +135,11 @@ export const CompactForcedColors: Story = {
     canvasElement.dataset.diffFindingCompactPlayComplete = "true"
   },
   render: (args) => (
-    <main data-diff-finding-compact="" style={{ ...pageStyle, ...narrowStyle }}>
-      <DiffFinding {...args} />
+    <main style={pageStyle}>
+      {/* The 320px slot sits inside the page padding, so the canary is 320px at every viewport. */}
+      <div data-diff-finding-compact="" style={{ display: "grid", gap: "var(--rly-space-24)", ...narrowStyle }}>
+        <DiffFinding {...args} />
+      </div>
     </main>
   )
 }

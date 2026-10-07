@@ -210,7 +210,7 @@ export const ConnectionAdministration = ({
             Values are sent directly to the machine-local secret store and are never returned by this page.
           </Text>
           {manualCredentialFields.map((field) => (
-            <Field description={field.description} key={field.key} label={field.label} size="compact">
+            <Field description={field.description} key={field.key} label={field.label}>
               {(controlProps) => (
                 <input
                   {...controlProps}
@@ -245,7 +245,7 @@ export const ConnectionAdministration = ({
                   <Text tone="secondary" variant="meta">
                     Configure the OAuth callback URL in Atlassian: {oauthCallbackUrl}
                   </Text>
-                  <Field label="OAuth client ID" size="compact">
+                  <Field label="OAuth client ID">
                     {(controlProps) => (
                       <input
                         {...controlProps}
@@ -254,7 +254,7 @@ export const ConnectionAdministration = ({
                       />
                     )}
                   </Field>
-                  <Field label="OAuth client secret" size="compact">
+                  <Field label="OAuth client secret">
                     {(controlProps) => (
                       <input
                         {...controlProps}

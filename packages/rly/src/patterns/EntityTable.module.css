@@ -16,7 +16,7 @@
   .heading {
     color: var(--rly-color-text-1);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .sectionHeading .heading {
@@ -145,7 +145,7 @@
     font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
       var(--rly-type-body-font);
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     padding: var(--rly-space-12) var(--rly-space-16);
     vertical-align: top;
   }

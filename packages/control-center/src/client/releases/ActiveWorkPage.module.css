@@ -118,3 +118,12 @@
     border-inline-start: 0;
   }
 }
+
+/* Forced colours: the selected item takes the system's selected pair, so it stays both readable and distinct. */
+@media (forced-colors: active) {
+  .releaseChoice[data-active="true"] {
+    background: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
+}
