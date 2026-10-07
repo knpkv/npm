@@ -135,6 +135,24 @@ describe("WorkbenchRailView", () => {
     expect([...host.querySelectorAll("h3")].map((heading) => heading.textContent)).toEqual(["Open to a role pool 1"])
   })
 
+  it("says pull requests with approval unknown apart from the review count, with their shared reason", async () => {
+    const unknown = (id: string, tag: "NotPermitted" | "Throttled") =>
+      make(id, { approvalUnknown: { _tag: tag }, isApproved: true })
+    const host = await render([make("1"), unknown("2", "NotPermitted"), unknown("3", "NotPermitted")], "andrey")
+    expect(host.textContent).toContain("1 pull request waits on your review.")
+    expect(host.textContent).toContain(
+      "2 pull requests with approval unknown: Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules)."
+    )
+    const row = rowLinks(host).find((link) => link.textContent?.includes("Change 2"))
+    expect(row?.querySelector("[title]")?.getAttribute("title")).toContain("Not allowed to check approval rules")
+
+    await draw([make("1"), unknown("2", "NotPermitted"), unknown("3", "Throttled")], "andrey")
+    expect(host.textContent).toContain("2 pull requests with approval unknown; open one to see why.")
+
+    await draw([make("1")], "andrey")
+    expect(host.textContent).not.toContain("approval unknown")
+  })
+
   it("explains an unknown identity instead of showing an empty queue", async () => {
     const host = await render([make("1")], undefined)
     expect(host.textContent).toContain("Can't tell what waits on you.")

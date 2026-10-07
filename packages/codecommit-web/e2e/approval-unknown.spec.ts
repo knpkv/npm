@@ -74,6 +74,12 @@ test("labels an unknown approval and keeps it out of the approved filter", async
   })
     .last()
   await expect(unknownRow.getByText("Approval unknown")).toBeVisible()
+  // The reason is the row link's description (heard after its name) and the label's hover text.
+  const unknownLink = page.getByRole("link").filter({ hasText: "Unknown approval" }).first()
+  await expect(unknownLink).toHaveAccessibleDescription(
+    "Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules)."
+  )
+  await expect(unknownRow.locator("[title^='Not allowed to check approval rules']")).toContainText("Approval unknown")
 
   await page.goto("/?f=status:approved")
   await expect(page.getByRole("link", { name: "Known approval" })).toBeVisible()
