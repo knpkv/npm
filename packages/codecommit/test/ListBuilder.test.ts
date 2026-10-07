@@ -52,7 +52,9 @@ const pr4 = decodePR({
   title: "chore(deps): bump",
   account: acc2,
   isApproved: true,
-  isMergeable: false
+  isMergeable: false,
+  // A rule, so the approval is a real sign-off (no rules reads "No approval required").
+  approvalRules: [{ ruleName: "reviewers", requiredApprovals: 1, poolMembers: [], satisfied: true }]
 })
 
 const accs = (enabled1 = true, enabled2 = true): Domain.AppState["accounts"] => [

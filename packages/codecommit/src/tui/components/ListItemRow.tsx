@@ -114,6 +114,10 @@ function PRItemRow({
     <Badge variant="success" minWidth={12}>
       APPROVED
     </Badge>
+  ) : Domain.approvalOf(pr)._tag === "NotRequired" ? (
+    <Badge variant="neutral" minWidth={12}>
+      {Domain.approvalNotRequiredLabel.toUpperCase()}
+    </Badge>
   ) : Domain.approvalOf(pr)._tag === "Unknown" ? (
     <Badge variant="warning" minWidth={12}>
       {Domain.approvalUnknownLabel.toUpperCase()}

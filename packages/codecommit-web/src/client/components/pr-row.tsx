@@ -8,7 +8,12 @@
  * @module
  */
 import type { PullRequest } from "@knpkv/codecommit-core/Domain.js"
-import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
+import {
+  calculateHealthScore,
+  getScoreTier,
+  type HealthScore,
+  healthUnknownReason
+} from "@knpkv/codecommit-core/HealthScore.js"
 import { ServiceMark } from "@knpkv/rly/patterns"
 import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { Option } from "effect"
@@ -115,7 +120,20 @@ export function PRRow({ caller, pr, showUpdated, to }: PRRowProps) {
               {score.total.toFixed(1)}
             </span>
           </div>
-        ) : null}
+        ) : (
+          // Unknown: CodeCommit left out a date the score depends on.
+          <div
+            className={styles.health}
+            title={`Not enough data to score: ${Option.getOrElse(healthUnknownReason(pr), () => "no dates")}.`}
+          >
+            <Text tone="tertiary" variant="meta">
+              Health
+            </Text>
+            <span aria-label="unknown" className={styles.healthScore}>
+              —
+            </span>
+          </div>
+        )}
         <Text className={styles.approvalCount} tone="tertiary" variant="meta">
           {decision.summary}
         </Text>

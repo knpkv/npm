@@ -81,6 +81,8 @@ export const CachedPullRequest = Schema.Struct({
   isMergeable: BooleanFromNumber,
   isApproved: BooleanFromNumber,
   approvalUnknownReason: ApprovalUnknownColumn,
+  /** The `approval_baseline_known` column: whether `isApproved` came from a successful evaluation. */
+  approvalBaselineKnown: BooleanFromNumber,
   commentCount: Schema.NullOr(Schema.Number),
   healthScore: Schema.NullOr(Schema.Number),
   link: Schema.String,
