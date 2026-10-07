@@ -2188,13 +2188,6 @@
     {
       "package": "jcf-web",
       "kind": "effect-diagnostics",
-      "file": "packages/jcf-web/src/main.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "jcf-web",
-      "kind": "effect-diagnostics",
       "file": "packages/jcf-web/test/browser/server.ts",
       "text": "@effect-diagnostics strictEffectProvide:off",
       "reasoned": true
@@ -2238,6 +2231,13 @@
       "package": "jcf-web",
       "kind": "effect-diagnostics",
       "file": "packages/jcf-web/test/savedEntryRoutes.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jcf-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/jcf-web/test/signInAndSources.test.ts",
       "text": "@effect-diagnostics strictEffectProvide:off",
       "reasoned": true
     },

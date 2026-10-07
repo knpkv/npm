@@ -461,7 +461,6 @@ Total: **391** directives, **148** without a reason (grandfathered).
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
 | [packages/jcf-web/src/client/transport.ts](../packages/jcf-web/src/client/transport.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/jcf-web/src/main.ts](../packages/jcf-web/src/main.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/browser/server.ts](../packages/jcf-web/test/browser/server.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/confirm.test.ts](../packages/jcf-web/test/confirm.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/confirmDst.test.ts](../packages/jcf-web/test/confirmDst.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
@@ -469,6 +468,7 @@ Total: **391** directives, **148** without a reason (grandfathered).
 | [packages/jcf-web/test/readRoute.test.ts](../packages/jcf-web/test/readRoute.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/recordedWeek.test.ts](../packages/jcf-web/test/recordedWeek.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/savedEntryRoutes.test.ts](../packages/jcf-web/test/savedEntryRoutes.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
+| [packages/jcf-web/test/signInAndSources.test.ts](../packages/jcf-web/test/signInAndSources.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 
 ## jira-cli
 
