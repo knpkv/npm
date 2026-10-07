@@ -11,8 +11,8 @@ a timesheet is actually read.
 ## Running it
 
 ```bash
-pnpm --filter @knpkv/jcf-web build   # the client is a static bundle the server serves
-pnpm --filter @knpkv/jcf-web start   # prints the URL that gets you in
+pnpm --filter "@knpkv/jcf-web..." build   # this package and jcf, which it imports
+pnpm --filter @knpkv/jcf-web start        # prints the URL that gets you in
 ```
 
 When installed from the published package, run `jcf-web` from the package's bin directory
@@ -23,7 +23,8 @@ The printed URL carries a one-time code in its fragment. Opening it exchanges th
 cookie and strips it from the address bar; reloading afterwards works because the cookie is what
 authenticates. The code expires a minute after the server binds, so restart to get a fresh one.
 
-For development, `pnpm --filter @knpkv/jcf-web dev` runs the server and Vite together and prints a
+For development, `pnpm --filter @knpkv/jcf-web dev` rebuilds jcf whenever its source changes, so the
+server never runs an old build of it, and runs the server and Vite together. It prints a
 URL on the dev origin, which proxies the API and the bootstrap exchange so the browser stays on one
 origin.
 

@@ -47,7 +47,8 @@ pnpm install
   pnpm build
   ```
 
-- **Run all tests**:
+- **Run all tests**: vitest resolves workspace packages to source and needs no build; `pnpm test` then
+  runs `test:pack`, which checks the built packages and executables, so run `pnpm build` first.
 
   ```bash
   pnpm test

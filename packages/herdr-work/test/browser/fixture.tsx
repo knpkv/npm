@@ -131,7 +131,7 @@ const render = (boardSnapshots: typeof WorkSnapshots.Type) =>
     <WorkBoard
       initialGoalId={selectedGoalId}
       initialWindow={initialWindow}
-      navigation={navigation}
+      {...(navigation === undefined ? {} : { navigation })}
       snapshots={boardSnapshots}
     />
   )

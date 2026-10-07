@@ -26,7 +26,7 @@ const makeDetail = (prId: string, durationMs: number) => ({
 })
 
 type Detail = ReturnType<typeof makeDetail>
-const emptyHealth = { total: 0, withComments: 0, approved: 0 }
+const emptyHealth = { total: 0, withComments: 0, approved: 0, ruleBacked: 0 }
 const emptySize = { small: 0, medium: 0, large: 0, extraLarge: 0 }
 const emptyFilterOpts = {
   repos: [],
@@ -59,7 +59,7 @@ const mockStatsRepo = (overrides: Partial<{
   contributors: Array<{ author: string; prCount: number }>
   mostActivePRs: WeeklyStats["mostActivePRs"]
   stalePRs: WeeklyStats["stalePRs"]
-  health: { total: number; withComments: number; approved: number }
+  health: { total: number; withComments: number; approved: number; ruleBacked: number }
   mergeDetails: Array<Detail>
   reviewerData: ReviewerData
 }> = {}) =>
@@ -109,7 +109,7 @@ describe("StatsService", () => {
       const svc = yield* StatsService
       const stats = yield* svc.getWeeklyStats("2026-W10", {})
       expect(stats.reviewCoverage).toBe(0.8)
-    }).pipe(Effect.provide(testLayer({ health: { total: 10, withComments: 8, approved: 6 } }))))
+    }).pipe(Effect.provide(testLayer({ health: { total: 10, withComments: 8, approved: 6, ruleBacked: 10 } }))))
 
   // approvalRate = approved / total — fraction of PRs formally approved
   it.effect("computes approvalRate from health indicators", () =>
@@ -117,7 +117,15 @@ describe("StatsService", () => {
       const svc = yield* StatsService
       const stats = yield* svc.getWeeklyStats("2026-W10", {})
       expect(stats.approvalRate).toBe(0.6)
-    }).pipe(Effect.provide(testLayer({ health: { total: 10, withComments: 8, approved: 6 } }))))
+    }).pipe(Effect.provide(testLayer({ health: { total: 10, withComments: 8, approved: 6, ruleBacked: 10 } }))))
+
+  // A pull request without rules is neither approved nor pending: it leaves the approval rate alone.
+  it.effect("computes approvalRate over the pull requests that have approval rules", () =>
+    Effect.gen(function*() {
+      const svc = yield* StatsService
+      const stats = yield* svc.getWeeklyStats("2026-W10", {})
+      expect(stats.approvalRate).toBe(1)
+    }).pipe(Effect.provide(testLayer({ health: { total: 2, withComments: 0, approved: 1, ruleBacked: 1 } }))))
 
   // Both metrics must be null when no PRs exist — avoids division by zero
   it.effect("returns null coverage and approval for zero PRs", () =>

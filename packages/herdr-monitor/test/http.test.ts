@@ -7,7 +7,7 @@ import { TestClock } from "effect/testing"
 import { createServer } from "node:http"
 import type { Snapshot } from "../src/model.js"
 import { publish } from "../src/publisher.js"
-import { makeMonitor } from "../src/server.js"
+import { makeMonitor, type MonitorSetting } from "../src/server.js"
 
 const testServer = HttpServer.layerTestClient.pipe(
   Layer.provide(NodeHttpClient.layerNodeHttp),
@@ -186,17 +186,22 @@ describe("actual HTTP authority boundary", () => {
       expect(spans.some((span) => Array.from(span.attributes.values()).includes(publishToken))).toBe(false)
     }).pipe(withServer))
 
-  it.effect("fails startup for missing, confused or reused credentials", () =>
+  // QA-J50: startup failed with no name; the error now says which setting to fix, and nothing of its value.
+  it.effect("fails startup for missing, confused or reused credentials, naming the setting", () =>
     Effect.gen(function*() {
-      for (
-        const options of [{ publishToken: "", viewToken }, { publishToken: viewToken, viewToken }, {
-          publishToken,
-          viewToken: `view_${"p".repeat(43)}`
-        }]
-      ) {
-        const result = yield* makeMonitor({ boardId: "main", origin: "http://127.0.0.1:4319", ...options }, assets)
-          .pipe(Effect.result)
-        expect(result._tag).toBe("Failure")
+      const cases: ReadonlyArray<
+        readonly [{ readonly publishToken: string; readonly viewToken: string }, MonitorSetting]
+      > = [
+        [{ publishToken: "", viewToken }, "publishToken"],
+        [{ publishToken: viewToken, viewToken }, "publishToken"],
+        [{ publishToken, viewToken: publishToken }, "viewToken"],
+        [{ publishToken, viewToken: `view_${publishToken.slice(8)}` }, "independentTokens"]
+      ]
+      for (const [options, setting] of cases) {
+        const error = yield* makeMonitor({ boardId: "main", origin: "http://127.0.0.1:4319", ...options }, assets)
+          .pipe(Effect.flip)
+        expect(error.setting).toBe(setting)
+        expect(JSON.stringify(error)).not.toContain(publishToken.slice(8))
       }
     }))
 

@@ -5,9 +5,21 @@ import { Crypto, Effect, Predicate, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TerminalAgentNotFoundError, TerminalProtocolError, TerminalTransportError } from "./errors.js"
 import { connectAgentId } from "./id.js"
+import {
+  hostReadsPerSecond,
+  makePaneScrollReporter,
+  makeReadWindow,
+  readPaneScrollOffset,
+  silentScrollReporter
+} from "./internal/pane-scroll.js"
 import { boundedTerminalLines, terminalEventMaxLineBytes } from "./internal/terminal-lines.js"
 import { releaseTerminalControl, terminalKillOptions, terminalReleaseKillOptions } from "./internal/terminal-release.js"
-import { HerdrTerminalEvent, type TerminalClientCommand, type TerminalSelection } from "./model.js"
+import {
+  HerdrTerminalEvent,
+  type TerminalClientCommand,
+  type TerminalSelection,
+  type TerminalSessionEvent
+} from "./model.js"
 
 export type TerminalError =
   | TerminalAgentNotFoundError
@@ -15,7 +27,8 @@ export type TerminalError =
   | TerminalTransportError
 
 export interface TerminalSession {
-  readonly events: Stream.Stream<HerdrTerminalEvent, TerminalError>
+  /** herdr's frames and close, plus the pane's scroll position as the connector reads it. */
+  readonly events: Stream.Stream<TerminalSessionEvent, TerminalError>
   readonly send: (command: TerminalClientCommand) => Effect.Effect<void, TerminalTransportError>
 }
 
@@ -38,6 +51,8 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const cryptoService = yield* Crypto.Crypto
+  // Shared by every session this connector opens, so the host as a whole stays under the cap.
+  const scrollReads = makeReadWindow(hostReadsPerSecond)
 
   const open = Effect.fn("HerdrTerminal.open")(function*(selection: TerminalSelection) {
     if (selection.host.toLowerCase() !== config.host.toLowerCase()) {
@@ -108,12 +123,21 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
       )
       .pipe(Effect.mapError(transportError("herdr.terminal.spawn")))
 
+    const scroll = selection.scrollState === true
+      ? yield* makePaneScrollReporter(
+        readPaneScrollOffset(spawner, config.herdrCommand, config.repository, agent.paneId),
+        scrollReads
+      )
+      : silentScrollReporter
+    yield* scroll.request
+
     const send = Effect.fn("HerdrTerminal.send")(function*(command: TerminalClientCommand) {
       const bytes = new TextEncoder().encode(`${JSON.stringify(command)}\n`)
       yield* Stream.make(bytes).pipe(
         Stream.run(handle.stdin),
         Effect.mapError(transportError("herdr.terminal.write"))
       )
+      if (command.type === "terminal.scroll") yield* scroll.scrollForwarded
     })
 
     yield* Effect.addFinalizer(() =>
@@ -146,6 +170,7 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
           )
         )
       ),
+      Stream.tap((event) => event.type === "terminal.frame" ? scroll.frameSeen : Effect.void),
       Stream.mapError((cause) =>
         Predicate.isTagged(cause, "TerminalProtocolError")
           ? cause
@@ -170,10 +195,12 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
         )),
       Stream.runDrain
     )
-    const events = Stream.merge(
+    const herdrEvents = Stream.merge(
       terminalEvents,
       Stream.fromEffect(stderrDrain).pipe(Stream.drain)
-    ).pipe(
+    )
+    // The scroll states never end on their own; the session ends when herdr's stream does.
+    const events = Stream.merge(herdrEvents, scroll.states, { haltStrategy: "left" }).pipe(
       Stream.concat(
         Stream.fromEffect(
           handle.exitCode.pipe(

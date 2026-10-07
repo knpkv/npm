@@ -1234,9 +1234,12 @@ export const currentFileDiffOutcome = <A extends { readonly identity: FileDiffId
 ): A | null =>
   outcome !== null && expected !== null && fileDiffIdentityMatches(outcome.identity, expected) ? outcome : null
 
-export const humanReviewState = (pr: Pick<Domain.PullRequest, "isApproved" | "approvalUnknown" | "isMergeable">) => ({
+export const humanReviewState = (
+  pr: Pick<Domain.PullRequest, "isApproved" | "approvalUnknown" | "approvalRules" | "isMergeable">
+) => ({
   approval: Match.valueTags(Domain.approvalOf(pr), {
     Approved: () => "APPROVED",
+    NotRequired: () => Domain.approvalNotRequiredLabel.toUpperCase(),
     Pending: () => "NEEDS REVIEW",
     Unknown: () => Domain.approvalUnknownLabel.toUpperCase()
   }),

@@ -89,7 +89,8 @@ const makeStatsService = Effect.gen(function*() {
       ], { concurrency: "unbounded" })
 
       const reviewCoverage = health.total > 0 ? health.withComments / health.total : null
-      const approvalRate = health.total > 0 ? health.approved / health.total : null
+      // Over the pull requests with rules: one without is neither approved nor pending.
+      const approvalRate = health.ruleBacked > 0 ? health.approved / health.ruleBacked : null
 
       const busFactor = topContributors.length > 0
         ? {

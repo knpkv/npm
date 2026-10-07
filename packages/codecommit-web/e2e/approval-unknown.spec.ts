@@ -45,14 +45,20 @@ test("labels an unknown approval and keeps it out of the approved filter", async
           currentUser: "viewer",
           pullRequests: [
             pullRequest("31", "Unknown approval", { isApproved: true, approvalUnknown: { _tag: "NotPermitted" } }),
-            pullRequest("32", "Known approval", { isApproved: true }),
+            // Approved means a rule exists and is satisfied; with no rules it would read "No approval required".
+            {
+              ...pullRequest("32", "Known approval", { isApproved: true }),
+              approvalRules: [{ ruleName: "r", requiredApprovals: 1, poolMembers: [], satisfied: true }]
+            },
             {
               ...pullRequest("33", "Conflicted unknown", {
                 isApproved: false,
                 approvalUnknown: { _tag: "NotPermitted" }
               }),
               isMergeable: false
-            }
+            },
+            // CodeCommit gave no creation date: the score is Unknown, never a red 0.
+            { ...pullRequest("34", "Undated change", { isApproved: false }), creationDate: "1970-01-01T00:00:00.000Z" }
           ],
           sandboxes: [],
           status: "idle",
@@ -72,6 +78,16 @@ test("labels an unknown approval and keeps it out of the approved filter", async
   await page.goto("/?f=status:approved")
   await expect(page.getByRole("link", { name: "Known approval" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Unknown approval" })).toHaveCount(0)
+
+  const undatedRow = page.locator("article, li, div").filter({
+    has: page.getByRole("link", { name: "Undated change" })
+  })
+    .last()
+  await page.goto("/")
+  await expect(undatedRow.getByLabel("unknown")).toHaveText("—")
+  await expect(undatedRow.getByTitle("Not enough data to score: CodeCommit gave no creation date.")).toBeVisible()
+  await page.goto("/accounts/production/prs/34?repository=example-repository&region=eu-west-1")
+  await expect(page.getByText("Health —", { exact: true })).toBeVisible()
 
   // A conflict decides the verdict, but the detail page still says why approval is unknown.
   await page.goto("/accounts/production/prs/33?repository=example-repository&region=eu-west-1")
