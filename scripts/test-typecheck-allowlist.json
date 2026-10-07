@@ -1,8 +1,4 @@
 {
-  "ai-runtime": {
-    "owner": "arch2-b",
-    "reason": "37 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"
-  },
   "herdr-approvals": {
     "owner": "arch-b",
     "reason": "82 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"

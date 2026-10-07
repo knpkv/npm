@@ -338,7 +338,9 @@ const RawToPullRequest = RawPullRequest.pipe(
         author: raw.authorArn === undefined || raw.authorArn === "" ? "unknown" : normalizeAuthor(raw.authorArn),
         repositoryName: raw.repoName,
         creationDate: raw.creationDate ?? EpochFallback,
-        lastModifiedDate: raw.lastActivityDate ?? EpochFallback,
+        // Without a last-activity date, the creation date: activity is never earlier, so it is a safe
+        // floor, and both reads give the row the same comparable version.
+        lastModifiedDate: raw.lastActivityDate ?? raw.creationDate ?? EpochFallback,
         link: codecommitConsoleUrl(raw.accountRegion, raw.repoName, raw.pullRequestId ?? ""),
         account: decodeAccount({
           profile: raw.accountProfile,

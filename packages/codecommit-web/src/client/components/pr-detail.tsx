@@ -27,10 +27,12 @@ import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
 import {
+  approvalNotRequiredLabel,
   approvalOf,
   approvalUnknownLabel,
   approvalUnknownReasonText,
   AwsRegion,
+  identityMatches,
   PullRequestId
 } from "@knpkv/codecommit-core/Domain.js"
 import {
@@ -38,7 +40,8 @@ import {
   type CategoryStatus,
   getScoreTier,
   type HealthScore,
-  type HealthScoreCategory
+  type HealthScoreCategory,
+  healthUnknownReason
 } from "@knpkv/codecommit-core/HealthScore.js"
 import { ServiceMark } from "@knpkv/rly/patterns"
 import {
@@ -212,6 +215,14 @@ const focusedElement = (target: EventTarget | null): Pick<Element, "tagName"> | 
   Predicate.hasProperty(target, "tagName") && Predicate.isString(target.tagName) ? { tagName: target.tagName } : null
 
 /**
+ * Whether someone other than the author signed off, as review evidence for time to first review. Any
+ * sign-off counts: one of two required, or a voluntary one where no rules apply. An unknown approval
+ * holds only a last known one, so it doesn't.
+ */
+export const signedOffByOthers = (pr: Domain.PullRequest): boolean =>
+  approvalOf(pr)._tag !== "Unknown" && pr.approvedBy.some((approver) => !identityMatches(approver, pr.author))
+
+/**
  * True when Enter on the focused element already does something (follow a link, press a button),
  * so the page-wide Enter shortcut must not also fire. Used by the PR page's keydown handler.
  */
@@ -272,17 +283,24 @@ function CommentsCountReporter({
 }
 
 function ScoreBadge({ score }: { readonly score: HealthScore | undefined }) {
-  if (score === undefined) return null
+  // Unknown reads as a dash, never a red 0: the breakdown says which date is missing.
+  if (score === undefined) return <StateLabel label="Health —" size="compact" tone="neutral" />
   const tier = getScoreTier(score.total)
 
   return <StateLabel label={`Health ${score.total.toFixed(1)} / 10`} size="compact" tone={healthTone(tier)} />
 }
 
-function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) {
+function ScoreBreakdown({
+  score,
+  unknownReason
+}: {
+  readonly score: HealthScore | undefined
+  readonly unknownReason: Option.Option<string>
+}) {
   if (score === undefined) {
     return (
       <Text tone="secondary" variant="meta">
-        Waiting for comment count…
+        {`Not enough data to score: ${Option.getOrElse(unknownReason, () => "no dates")}.`}
       </Text>
     )
   }
@@ -524,7 +542,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     const firstComment = allComments.find((c) => c.author !== pr.author)
     const commentMs = firstComment !== undefined ? firstComment.date.getTime() - pr.creationDate.getTime() : null
     // Approval as review fallback: use lastModifiedDate as proxy for approval time
-    const hasNonAuthorApproval = approvalOf(pr)._tag === "Approved" && pr.approvedBy.some((a) => a !== pr.author)
+    const hasNonAuthorApproval = signedOffByOthers(pr)
     const approvalMs = hasNonAuthorApproval ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
     const ttfr = commentMs != null && approvalMs != null ? Math.min(commentMs, approvalMs) : (commentMs ?? approvalMs)
 
@@ -893,7 +911,10 @@ const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresent
         }
       }
       return {
-        reason: "CodeCommit reports a clean merge and the provider approval is satisfied.",
+        reason:
+          approval._tag === "NotRequired"
+            ? "CodeCommit reports a clean merge, and no approval rules apply to this pull request."
+            : "CodeCommit reports a clean merge and the provider approval is satisfied.",
         tone: "positive",
         verdict: "Ready to merge."
       }
@@ -999,6 +1020,7 @@ export function PRDetail() {
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
     [pr]
   )
+  const scoreUnknownReason = useMemo(() => (pr !== null ? healthUnknownReason(pr) : Option.none<string>()), [pr])
   const navigate = useNavigate()
   const openPr = useAtomSet(openPrAtom)
   const granted = useDismissable(StorageKeys.grantedDismissed)
@@ -1510,6 +1532,8 @@ export function PRDetail() {
               <>
                 {approvalOf(pr)._tag === "Unknown" ? (
                   <StateLabel label={approvalUnknownLabel} size="compact" tone="neutral" />
+                ) : approvalOf(pr)._tag === "NotRequired" ? (
+                  <StateLabel label={approvalNotRequiredLabel} size="compact" tone="neutral" />
                 ) : (
                   <Link
                     className={styles.stateLink}
@@ -1668,7 +1692,7 @@ export function PRDetail() {
           </section>
 
           <CollapsibleSection title="Health Score Breakdown">
-            {() => <ScoreBreakdown score={score} />}
+            {() => <ScoreBreakdown score={score} unknownReason={scoreUnknownReason} />}
           </CollapsibleSection>
         </aside>
       </div>

@@ -32,6 +32,10 @@ test("reads the projects a check script typechecks, and whether tsc runs in buil
   assert.deepEqual(checkedProjects("tsc --noEmit"), [{ project: "tsconfig.json", build: false }])
   assert.deepEqual(checkedProjects("tsc -b"), [{ project: "tsconfig.json", build: true }])
   assert.deepEqual(checkedProjects("tsc -b ./scripts"), [{ project: "scripts/tsconfig.json", build: true }])
+  // The TypeScript 6 compiler checks fixtures that the Effect language-service plugin would double-report.
+  assert.deepEqual(checkedProjects("tsc6 -p tsconfig.contract-fixture.json"), [
+    { project: "tsconfig.contract-fixture.json", build: false }
+  ])
   assert.deepEqual(checkedProjects("vitest run && eslint src"), [])
   assert.deepEqual(checkedProjects(undefined), [])
 })

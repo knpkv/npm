@@ -32,6 +32,7 @@ const cachedRow = (profile: string, id: string) =>
     isMergeable: 1,
     isApproved: 0,
     approvalUnknownReason: null,
+    approvalBaselineKnown: 1,
     observationSeq: 0,
     approvalVersion: "2026-08-02T00:00:00.000Z",
     approvalObservationSeq: 0,
