@@ -21,18 +21,34 @@ class AstGrepRuleLanguageError extends Data.TaggedError("AstGrepRuleLanguageErro
 
 const fail = (reason) => new AstGrepRuleLanguageError({ reason })
 
-// ast-grep's built-in extension mapping, for extensions sgconfig `languageGlobs` does not override.
-const defaultLanguages = new Map([
-  ["ts", "typescript"],
-  ["cts", "typescript"],
-  ["mts", "typescript"],
-  ["tsx", "tsx"],
-  ["js", "javascript"],
-  ["cjs", "javascript"],
-  ["mjs", "javascript"],
-  ["jsx", "javascript"],
-  ["css", "css"]
-])
+// ast-grep's built-in extension mapping (0.45), for paths sgconfig `languageGlobs` does not claim.
+const defaultLanguages = new Map(
+  Object.entries({
+    bash: ["bash", "sh", "zsh"],
+    c: ["c", "h"],
+    cpp: ["cc", "cpp", "cxx", "hpp", "hxx"],
+    csharp: ["cs"],
+    css: ["css"],
+    elixir: ["ex", "exs"],
+    go: ["go"],
+    haskell: ["hs"],
+    html: ["htm", "html"],
+    java: ["java"],
+    javascript: ["cjs", "js", "jsx", "mjs"],
+    json: ["json"],
+    kotlin: ["kt", "ktm", "kts"],
+    lua: ["lua"],
+    php: ["php"],
+    python: ["py", "py3", "pyi"],
+    ruby: ["rb"],
+    rust: ["rs"],
+    scala: ["scala", "sc"],
+    swift: ["swift"],
+    tsx: ["tsx"],
+    typescript: ["cts", "mts", "ts"],
+    yaml: ["yaml", "yml"]
+  }).flatMap(([language, extensions]) => extensions.map((extension) => [extension, language]))
+)
 
 // `{a,b}` alternatives in a glob, expanded left to right.
 const expandBraces = (glob) => {
@@ -67,30 +83,50 @@ export const languagesFor = (relativePath, languageGlobs) => {
 }
 
 /**
+ * Concrete repository-relative paths that `glob` selects, unique to the rule and glob index: a shallow one named
+ * after the rule and a deeper one with different names, so a languageGlobs override that happens to claim one
+ * sample path cannot stand in for the whole glob.
+ */
+export const samplePaths = (glob, ruleId, index) => {
+  const pattern = expandBraces(glob)[0]
+  const concrete = (deep, name) =>
+    pattern
+      .replaceAll("**", deep)
+      .replaceAll("*", name)
+      .replaceAll("?", "x")
+      .replace(/\[[^\]]*\]/gu, (set) => set.replace(/^\[!?/u, "").charAt(0))
+  return [
+    ...new Set([concrete("smoke", `${ruleId}-${index}`), concrete("smoke/deep/nested", `${ruleId}-alt-${index}`)])
+  ]
+}
+
+/**
  * Rule globs whose files ast-grep parses as a different language than the rule's, so the rule never runs on
- * them, plus globs whose language cannot be determined.
+ * them, plus globs whose language cannot be determined or differs between the files they select.
  */
 export const languageFailures = (rule, languageGlobs) =>
   (rule.files ?? []).flatMap((glob) => {
     const extensions = extensionsOf(glob)
     if (extensions === undefined) return [{ _tag: "LanguageUndetermined", rule: rule.id, glob }]
-    return expandBraces(glob).flatMap((variant) => {
-      const path = samplePath(variant, rule.id, 0)
-      const languages = languagesFor(path, languageGlobs)
-      if (languages.length > 1) return [{ _tag: "LanguageAmbiguous", rule: rule.id, glob, path, languages }]
-      return languages[0] === rule.language
-        ? []
-        : [{ _tag: "LanguageMismatch", rule: rule.id, ruleLanguage: rule.language, glob, path, language: languages[0] }]
-    })
+    return expandBraces(glob).flatMap((variant) =>
+      samplePaths(variant, rule.id, 0).flatMap((path) => {
+        const languages = languagesFor(path, languageGlobs)
+        if (languages.length > 1) return [{ _tag: "LanguageAmbiguous", rule: rule.id, glob, path, languages }]
+        return languages[0] === rule.language
+          ? []
+          : [
+              {
+                _tag: "LanguageMismatch",
+                rule: rule.id,
+                ruleLanguage: rule.language,
+                glob,
+                path,
+                language: languages[0]
+              }
+            ]
+      })
+    )
   })
-
-/** A concrete repository-relative path that `glob` matches, unique to the rule and glob index. */
-export const samplePath = (glob, ruleId, index) =>
-  expandBraces(glob)[0]
-    .replaceAll("**", "smoke")
-    .replaceAll("*", `${ruleId}-${index}`)
-    .replaceAll("?", "x")
-    .replace(/\[[^\]]*\]/gu, (set) => set.replace(/^\[!?/u, "").charAt(0))
 
 const extensionFor = (language, languageGlobs) =>
   [...defaultLanguages.keys()].find((extension) => {
@@ -98,10 +134,12 @@ const extensionFor = (language, languageGlobs) =>
     return languages.length === 1 && languages[0] === language
   })
 
-/** The fixture files to scan: one per `files` glob, holding the rule's first invalid fixture. */
+/** The fixture files to scan: every sample path of every `files` glob, holding the rule's first invalid fixture. */
 export const smokeFiles = (rule, invalid, languageGlobs) => {
   const globs = rule.files ?? [`smoke/*.${extensionFor(rule.language, languageGlobs) ?? rule.language}`]
-  return globs.map((glob, index) => ({ glob, path: samplePath(glob, rule.id, index), source: invalid }))
+  return globs.flatMap((glob, index) =>
+    samplePaths(glob, rule.id, index).map((path) => ({ glob, path, source: invalid }))
+  )
 }
 
 const describeFailure = (failure) => {
@@ -115,7 +153,7 @@ const describeFailure = (failure) => {
     case "MissingFixture":
       return `${failure.rule}: no invalid fixture in ast-grep/tests. Fix: add ${failure.rule}-test.yml with valid and invalid cases.`
     case "FixtureNotMatched":
-      return `${failure.rule}: its first invalid fixture, written to ${failure.path} (from glob ${failure.glob}), produced no finding under the repository sgconfig. The rule does not fire on real files there.`
+      return `${failure.rule}: its first invalid fixture, written to ${failure.path} (from glob ${failure.glob}), produced no finding under the repository sgconfig and ignore files. The rule does not fire on real files there. Fix: drop the glob if those files are ignored, or fix the rule's language.`
   }
 }
 
@@ -141,22 +179,38 @@ const readYaml = Effect.fn("AstGrepRuleLanguages.readYaml")(function* (file, sch
   )
 })
 
+// Every YAML file under `directory`, recursively as ast-grep discovers them, skipping test snapshots.
 const yamlFiles = Effect.fn("AstGrepRuleLanguages.yamlFiles")(function* (directory) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const entries = yield* fs
-    .readDirectory(directory)
+    .readDirectory(directory, { recursive: true })
     .pipe(Effect.mapError((cause) => fail(`${directory}: ${cause.message}`)))
   return entries
-    .filter((entry) => entry.endsWith(".yml") || entry.endsWith(".yaml"))
+    .filter((entry) => /\.ya?ml$/u.test(entry) && !entry.split(/[\\/]/u).includes("__snapshots__"))
     .toSorted()
     .map((entry) => path.join(directory, entry))
 })
 
-// Scan `root` with ast-grep and return the findings; exit 1 only means findings were reported.
-const scan = Effect.fn("AstGrepRuleLanguages.scan")(function* (astGrep, root) {
+/**
+ * Git environment pinned to the scratch repository at `root`. A git hook (such as the pre-commit gate) exports
+ * GIT_DIR and GIT_INDEX_FILE; inherited, they would point scratch-repo commands at the real repository's index
+ * and config.
+ */
+export const scratchGitEnv = (root) => ({
+  GIT_DIR: `${root}/.git`,
+  GIT_WORK_TREE: root,
+  GIT_INDEX_FILE: `${root}/.git/index`
+})
+
+// Git environment that discovers the repository from the working directory, ignoring a hook's GIT_* exports.
+const discoveredGitEnv = { GIT_DIR: undefined, GIT_WORK_TREE: undefined, GIT_INDEX_FILE: undefined }
+
+const run = Effect.fn("AstGrepRuleLanguages.run")(function* (command, args, cwd, env) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const handle = yield* spawner.spawn(ChildProcess.make(astGrep, ["scan", "--json=compact"], { cwd: root }))
+  const handle = yield* spawner.spawn(
+    ChildProcess.make(command, args, env === undefined ? { cwd } : { cwd, env, extendEnv: true })
+  )
   const [stdout, stderr, exitCode] = yield* Effect.all(
     [
       Stream.decodeText(handle.stdout).pipe(Stream.mkString),
@@ -164,6 +218,23 @@ const scan = Effect.fn("AstGrepRuleLanguages.scan")(function* (astGrep, root) {
       handle.exitCode
     ],
     { concurrency: "unbounded" }
+  )
+  return { stdout, stderr, exitCode }
+})
+
+const git = Effect.fn("AstGrepRuleLanguages.git")(function* (args, cwd, env) {
+  const { stdout, stderr, exitCode } = yield* run("git", args, cwd, env)
+  if (exitCode !== ChildProcessSpawner.ExitCode(0))
+    return yield* fail(`git ${args.join(" ")} failed:\n${stderr.trim()}`)
+  return stdout
+})
+
+// Scan `root` as `pnpm lint:ast` scans the repository; exit 1 only means findings were reported.
+const scan = Effect.fn("AstGrepRuleLanguages.scan")(function* (astGrep, root) {
+  const { stdout, stderr, exitCode } = yield* run(
+    astGrep,
+    ["scan", "--globs", "!**/generated/**", "--json=compact"],
+    root
   )
   if (exitCode !== ChildProcessSpawner.ExitCode(0) && exitCode !== ChildProcessSpawner.ExitCode(1)) {
     return yield* fail(`ast-grep scan exited with ${exitCode}:\n${stderr.trim()}`)
@@ -173,10 +244,13 @@ const scan = Effect.fn("AstGrepRuleLanguages.scan")(function* (astGrep, root) {
   )
 })
 
-const program = Effect.gen(function* () {
+/**
+ * Checks every rule under `repositoryRoot`'s sgconfig, scanning with the `astGrep` binary. Returns the failures
+ * (empty when the rules are sound) with the rule and fixture-path counts. Needs a Scope for its scratch tree.
+ */
+export const checkRuleLanguages = Effect.fn("AstGrepRuleLanguages.check")(function* (repositoryRoot, astGrep) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
-  const repositoryRoot = path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url))))
   const sgconfigPath = path.join(repositoryRoot, "sgconfig.yml")
   const sgconfig = yield* readYaml(sgconfigPath, SgConfig)
 
@@ -200,10 +274,19 @@ const program = Effect.gen(function* () {
     ...(firstInvalid.has(rule.id) ? [] : [{ _tag: "MissingFixture", rule: rule.id }])
   ])
 
-  // Smoke: copy the real sgconfig and rules into a scratch tree, write each rule's first invalid fixture
-  // at a path every one of its `files` globs selects, and require a finding from that rule in each file.
+  // Smoke: copy the real sgconfig, rules and tracked .gitignore files into a scratch git repository (ast-grep
+  // honours .gitignore only inside one), write each rule's first invalid fixture at the sample paths of every
+  // `files` glob, and require a finding from that rule in each file.
   const root = yield* fs.makeTempDirectoryScoped({ prefix: "ast-grep-rule-languages-" })
+  yield* git(["init", "--quiet"], root, scratchGitEnv(root))
   yield* fs.copyFile(sgconfigPath, path.join(root, "sgconfig.yml"))
+  const ignoreFiles = (yield* git(["ls-files", "-z"], repositoryRoot, discoveredGitEnv))
+    .split("\0")
+    .filter((file) => file === ".gitignore" || file.endsWith("/.gitignore"))
+  for (const file of ignoreFiles) {
+    yield* fs.makeDirectory(path.dirname(path.join(root, file)), { recursive: true })
+    yield* fs.copyFile(path.join(repositoryRoot, file), path.join(root, file))
+  }
   for (const ruleDir of sgconfig.ruleDirs) {
     yield* fs.copy(path.join(repositoryRoot, ruleDir), path.join(root, ruleDir))
   }
@@ -217,7 +300,7 @@ const program = Effect.gen(function* () {
     yield* fs.makeDirectory(path.dirname(path.join(root, file.path)), { recursive: true })
     yield* fs.writeFileString(path.join(root, file.path), file.source)
   }
-  const findings = yield* scan(path.join(repositoryRoot, "node_modules", ".bin", "ast-grep"), root)
+  const findings = yield* scan(astGrep, root)
   const found = new Set(findings.map(({ file, ruleId }) => `${ruleId}\0${path.normalize(file)}`))
   for (const file of expected) {
     if (!found.has(`${file.rule}\0${path.normalize(file.path)}`)) {
@@ -225,11 +308,21 @@ const program = Effect.gen(function* () {
     }
   }
 
-  if (failures.length > 0) {
-    return yield* fail(`ast-grep rule languages failed:\n- ${failures.map(describeFailure).join("\n- ")}`)
+  return { failures, rules: rules.length, paths: expected.length }
+})
+
+const program = Effect.gen(function* () {
+  const path = yield* Path.Path
+  const repositoryRoot = path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url))))
+  const result = yield* checkRuleLanguages(
+    repositoryRoot,
+    path.join(repositoryRoot, "node_modules", ".bin", "ast-grep")
+  )
+  if (result.failures.length > 0) {
+    return yield* fail(`ast-grep rule languages failed:\n- ${result.failures.map(describeFailure).join("\n- ")}`)
   }
   yield* Console.log(
-    `ast-grep rule languages: ${rules.length} rules match their sgconfig language and fire on ${expected.length} fixture paths`
+    `ast-grep rule languages: ${result.rules} rules match their sgconfig language and fire on ${result.paths} fixture paths`
   )
 }).pipe(Effect.mapError((cause) => (cause._tag === "AstGrepRuleLanguageError" ? cause : fail(String(cause)))))
 
