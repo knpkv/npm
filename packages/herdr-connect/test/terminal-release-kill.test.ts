@@ -102,7 +102,6 @@ describe("Herdr terminal release", () => {
                 observedKillOptions = options
               }),
             pid: ChildProcessSpawner.ProcessId(42),
-            reref: Effect.void,
             stderr: Stream.empty,
             stdin: Sink.drain,
             stdout,
