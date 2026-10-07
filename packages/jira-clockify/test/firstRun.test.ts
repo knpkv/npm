@@ -1,4 +1,3 @@
-/** @effect-diagnostics strictEffectProvide:skip-file — each case builds its own synthetic world, so it is the entry point. */
 /**
  * What a first-time user sees: Jira not connected, no terminal to answer a prompt, nothing set up.
  *
@@ -21,9 +20,10 @@ import { NOT_LOGGED_IN_HINT } from "../src/utils/hints.js"
 const jcf = (args: ReadonlyArray<string>, options: { readonly jiraLoggedIn: boolean }) =>
   Effect.gen(function*() {
     const fake = makeFakeHeadless({ jiraLoggedIn: options.jiraLoggedIn })
+    const world = yield* Layer.build(fake.layer)
     const exit = yield* Command.runWith(root, { version: "0.0.0-test" })(args).pipe(
       Effect.exit,
-      Effect.provide(fake.layer)
+      Effect.provideContext(world)
     )
     return {
       stdout: fake.world.stdout,
@@ -85,13 +85,7 @@ describe("no terminal to answer", () => {
   // QA-J1: bare `jcf` with nothing set up printed raw prompt escapes, then "Setup incomplete", exit 0.
   it.effect("first run with nothing connected names both commands and fails", () =>
     Effect.gen(function*() {
-      const failure = yield* Effect.flip(checkAuthOrSetup)
-      expect(failure.message).toBe(
-        "This step needs an interactive terminal. " +
-          "Connect Jira with jcf auth jira token, or Clockify with jcf auth clockify setup."
-      )
-    }).pipe(
-      Effect.provide(Layer.mergeAll(
+      const world = yield* Layer.build(Layer.mergeAll(
         Layer.succeed(ClockifyAuth, {
           getConfig: Effect.die("unused"),
           save: () => Effect.die("unused"),
@@ -107,5 +101,10 @@ describe("no terminal to answer", () => {
         Layer.succeed(HttpClient.HttpClient, HttpClient.make(() => Effect.die("unused"))),
         NodeServices.layer
       ))
-    ))
+      const failure = yield* Effect.flip(checkAuthOrSetup).pipe(Effect.provideContext(world))
+      expect(failure.message).toBe(
+        "This step needs an interactive terminal. " +
+          "Connect Jira with jcf auth jira token, or Clockify with jcf auth clockify setup."
+      )
+    }))
 })
