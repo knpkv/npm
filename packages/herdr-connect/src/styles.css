@@ -826,8 +826,8 @@
     }
   }
 
-  /* The narrowest phones: tighter option padding keeps the five status words on one row. */
-  @media (max-width: 360px) {
+  /* Phones: tighter option padding keeps the five status words on one row, with room for wider font metrics. */
+  @media (max-width: 420px) {
     .connect-group-filter,
     .connect-status-filter {
       gap: var(--rly-space-0);
