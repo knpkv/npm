@@ -172,9 +172,9 @@ describe("Work requests decided in place", () => {
     const uncertain = "Couldn't reach the hub, so the decision may not have arrived."
     const { decisions } = decisionsOf({}, { answer: { jobId: "job-1", outcome: "uncertain", text: uncertain } })
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
-    const status = [...host.querySelectorAll("[role='status']")].map(({ textContent }) => textContent)
-    expect(status).toContain("Approved.")
     expect(host.textContent).not.toContain(uncertain)
+    // The proven outcome is said once, as the reason the bar is off.
+    expect(host.textContent?.split("Approved.").length).toBe(2)
     expect(host.textContent).not.toContain("no longer lists")
   })
 
@@ -188,7 +188,7 @@ describe("Work requests decided in place", () => {
     expect(reject?.getAttribute("aria-disabled")).toBe("true")
     await act(async () => reject?.click())
     expect(sent).toEqual([])
-    expect(host.textContent).toContain("The hub has your decision.")
+    expect(host.textContent).toContain("Waiting for the hub's queue to update.")
   })
 
   it("lets a refused decision be tried again while the job is still pending", async () => {
