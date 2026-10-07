@@ -42,6 +42,7 @@ import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import { Data, Effect, Predicate, Schema, SchemaGetter, Stream } from "effect"
 import { HttpClient } from "effect/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
+import { isCredentialInvalidCause } from "../AwsCredentialErrors.js"
 import {
   Account,
   ApprovalRule,
@@ -74,7 +75,8 @@ const listPullRequestsPages = (
 // Sub-helpers
 // ---------------------------------------------------------------------------
 
-class MissingPullRequestResponse extends Data.TaggedError("MissingPullRequestResponse")<{
+/** CodeCommit answered GetPullRequest without a pull request: nothing was read, so nothing can be reported about it. */
+export class MissingPullRequestResponse extends Data.TaggedError("MissingPullRequestResponse")<{
   readonly pullRequestId: string
 }> {}
 
@@ -164,12 +166,14 @@ export const evaluateApproval = (
     readonly satisfiedNames: Set<string>
     readonly approvalUnknown: ApprovalUnknownReason | undefined
   },
-  never,
+  ApprovalEvaluationError,
   AwsMethodEnv
 > =>
   fetchApprovalEvaluation(pullRequestId, revisionId).pipe(
     Effect.map((evaluation) => ({ ...evaluation, approvalUnknown: undefined })),
-    Effect.catchTag("ApprovalEvaluationError", (error) =>
+    // Credentials that stopped working are not an unknown approval: the failure stays typed, so the
+    // refresh marks the account signed out rather than listing it as signed in.
+    Effect.catchIf((error) => !isCredentialInvalidCause(error.cause), (error) =>
       Effect.logWarning(error.message).pipe(
         Effect.as({
           isApproved: false,

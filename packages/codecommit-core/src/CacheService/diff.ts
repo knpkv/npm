@@ -73,9 +73,13 @@ export const diffPR = (
   const freshMergeable = isEnabled(fresh.isMergeable)
   const cachedMergeable = isEnabled(cached.isMergeable)
 
-  // An unknown fresh approval is no transition. A cached unknown still holds its last known value, so
-  // recovery compares last known against the fresh evaluation.
-  if (fresh.approvalUnknownReason == null && freshApproved !== cachedApproved) {
+  // Only a change between two known evaluations is announced. An unknown fresh approval is no
+  // transition, and neither is recovery: a pull request first seen while its evaluation fails is cached
+  // as not approved, a placeholder indistinguishable from a last known value.
+  if (
+    fresh.approvalUnknownReason == null && cached.approvalUnknownReason == null &&
+    freshApproved !== cachedApproved
+  ) {
     notifications.push({
       ...base,
       type: "approval_changed",

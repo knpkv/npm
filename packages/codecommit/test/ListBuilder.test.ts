@@ -232,6 +232,21 @@ describe("buildListItems", () => {
       expect(ids).toEqual([])
     })
 
+    it("filters by status unknown, listing only PRs whose approval is unknown", () => {
+      const unknown = decodePR({
+        ...base,
+        id: "5",
+        title: "feat: unknown",
+        account: acc1,
+        isApproved: true,
+        approvalUnknown: { _tag: "NotPermitted" }
+      })
+      const qf: QuickFilter = { type: "status", value: "unknown", currentUser: "" }
+      const ids = buildListItems(state([unknown, pr1], accs()), "prs", "", [], qf)
+        .flatMap((i) => i.type === "pr" ? [i.pr.id] : [])
+      expect(ids).toEqual(["5"])
+    })
+
     // Status "conflicts" shows only non-mergeable PRs.
     it("filters by status conflicts", () => {
       const qf: QuickFilter = { type: "status", value: "conflicts", currentUser: "" }

@@ -119,6 +119,8 @@ export const buildListItems = (
                   return Domain.approvalOf(pr)._tag === "Approved"
                 case "pending":
                   return Domain.approvalOf(pr)._tag === "Pending"
+                case "unknown":
+                  return Domain.approvalOf(pr)._tag === "Unknown"
                 case "mergeable":
                   return pr.isMergeable
                 case "conflicts":

@@ -1,12 +1,14 @@
 import * as DistilledRetry from "@distilled.cloud/aws/Retry"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Ref, Schema, Stream } from "effect"
+import { Effect, Exit, Layer, Option, Predicate, Ref, Schema, Stream } from "effect"
 import type { HttpClientRequest } from "effect/http"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { getPullRequest } from "../src/AwsClient/getPullRequest.js"
 import { getPullRequests } from "../src/AwsClient/getPullRequests.js"
 import { layer as awsClientConfigLayer } from "../src/AwsClientConfig.js"
+import { isCredentialInvalidCause } from "../src/AwsCredentialErrors.js"
 import { AwsProfileName, AwsRegion } from "../src/Domain.js"
+import type { AwsClientError } from "../src/Errors.js"
 import { codeCommitMockAwsClientConfig } from "../src/MockTransport.js"
 
 const account = {
@@ -39,8 +41,10 @@ const pullRequest = {
  * `"three-approved"`: three open pull requests in one repository, all approved.
  * `"throttled"`: one pull request whose evaluation is always throttled.
  * `"broken"`: one pull request whose evaluation fails with a provider error that is neither.
+ * `"expired"`: one pull request whose evaluation fails because the session expired.
+ * `"empty"`: GetPullRequest answers without a pull request, and evaluation fails.
  */
-type Evaluation = "approved" | "denied" | "8-denied" | "three-approved" | "throttled" | "broken"
+type Evaluation = "approved" | "denied" | "8-denied" | "three-approved" | "throttled" | "broken" | "expired" | "empty"
 
 const threePullRequests = (evaluation: Evaluation) => evaluation === "8-denied" || evaluation === "three-approved"
 
@@ -96,7 +100,9 @@ const answer = (
     case "ListPullRequests":
       return json({ pullRequestIds: threePullRequests(evaluation) ? ["7", "8", "9"] : ["7"] })
     case "GetPullRequest":
-      return json({ pullRequest: { ...pullRequest, pullRequestId: requestedPullRequestId(request.body) } })
+      return evaluation === "empty"
+        ? json({})
+        : json({ pullRequest: { ...pullRequest, pullRequestId: requestedPullRequestId(request.body) } })
     case "GetRepository":
       return json({ repositoryMetadata: { accountId: "111111111111" } })
     case "GetPullRequestApprovalStates":
@@ -108,6 +114,8 @@ const answer = (
         ? awsError("ThrottlingException", "Rate exceeded")
         : evaluation === "broken"
         ? awsError("InvalidRevisionIdException", "revision is not valid")
+        : evaluation === "expired"
+        ? awsError("ExpiredTokenException", "The security token included in the request is expired")
         : evaluation === "approved" || evaluation === "three-approved" ||
             (evaluation === "8-denied" && requestedPullRequestId(request.body) !== "8")
         ? json({ evaluation: { approved: true, approvalRulesSatisfied: ["two-reviewers"] } })
@@ -116,6 +124,11 @@ const answer = (
       return awsError("UnknownOperationException")
   }
 }
+
+/** Whether a read failed because the credentials stopped working, as the refresh classifies it. */
+const credentialFailure = (error: AwsClientError): boolean =>
+  error._tag === "AwsApiError" && Predicate.isTagged(error.cause, "ApprovalEvaluationError") &&
+  Predicate.hasProperty(error.cause, "cause") && isCredentialInvalidCause(error.cause.cause)
 
 describe("approval evaluation", () => {
   it.layer(codeCommit("approved"))((it) => {
@@ -150,6 +163,34 @@ describe("approval evaluation", () => {
         expect(
           [...prs].map((pr) => `${pr.id} ${pr.approvalUnknown?._tag ?? "evaluated"}`).toSorted()
         ).toEqual(["7 evaluated", "8 NotPermitted", "9 evaluated"])
+      }))
+  })
+
+  // Expired credentials are not an unknown approval: they fail the read with their typed cause, so the
+  // refresh marks the account signed out instead of listing it as still signed in.
+  it.layer(codeCommit("expired"))((it) => {
+    it.effect("fails the listing when evaluation finds the session expired", () =>
+      Effect.gen(function*() {
+        const exit = yield* Effect.exit(Stream.runCollect(getPullRequests(account)))
+        expect(exit._tag).toBe("Failure")
+        expect(Exit.findErrorOption(exit).pipe(Option.map(credentialFailure))).toEqual(Option.some(true))
+      }))
+
+    it.effect("fails the detail read when evaluation finds the session expired", () =>
+      Effect.gen(function*() {
+        const exit = yield* Effect.exit(getPullRequest({ account, pullRequestId: "7" }))
+        expect(Exit.findErrorOption(exit).pipe(Option.map(credentialFailure))).toEqual(Option.some(true))
+      }))
+  })
+
+  // Approval unknown is only truthful about a pull request that was actually read.
+  it.layer(codeCommit("empty"))((it) => {
+    it.effect("fails a detail read whose response has no pull request", () =>
+      Effect.gen(function*() {
+        const exit = yield* Effect.exit(getPullRequest({ account, pullRequestId: "7" }))
+        expect(Exit.findErrorOption(exit).pipe(Option.map((error) => error._tag))).toEqual(
+          Option.some("AwsApiError")
+        )
       }))
   })
 

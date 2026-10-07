@@ -25,7 +25,13 @@
  */
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Schema, SchemaGetter } from "effect"
-import { buildApprovalRules, evaluateApproval, fetchApprovers, fetchRepoAccountId } from "./getPullRequests.js"
+import {
+  buildApprovalRules,
+  evaluateApproval,
+  fetchApprovers,
+  fetchRepoAccountId,
+  MissingPullRequestResponse
+} from "./getPullRequests.js"
 import {
   type GetPullRequestParams,
   makeApiError,
@@ -109,8 +115,12 @@ const decodePullRequestDetail = <UnparsedInput>(raw: UnparsedInput) =>
 const callGetPullRequest = (params: GetPullRequestParams) =>
   Effect.gen(function*() {
     const resp = yield* codecommit.getPullRequest({ pullRequestId: params.pullRequestId })
-    const revisionId = resp.pullRequest?.revisionId ?? ""
-    const repoName = resp.pullRequest?.pullRequestTargets?.[0]?.repositoryName ?? ""
+    // Approval unknown is only truthful about a pull request that was read.
+    if (resp.pullRequest === undefined) {
+      return yield* new MissingPullRequestResponse({ pullRequestId: params.pullRequestId })
+    }
+    const revisionId = resp.pullRequest.revisionId ?? ""
+    const repoName = resp.pullRequest.pullRequestTargets?.[0]?.repositoryName ?? ""
     const [detail, approvers, evaluation, repoAccountId] = yield* Effect.all([
       decodePullRequestDetail(resp),
       fetchApprovers(params.pullRequestId, revisionId),

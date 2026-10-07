@@ -25,7 +25,14 @@ export const resolveQueueMode = (state: QueueModeState, currentUser: string | un
   return "all"
 }
 
-export const openSubStatuses: ReadonlySet<string> = new Set(["approved", "pending", "mergeable", "conflicts"])
+// "unknown" is an open approval status of its own, so the composite All open group keeps those pull requests.
+export const openSubStatuses: ReadonlySet<string> = new Set([
+  "approved",
+  "pending",
+  "unknown",
+  "mergeable",
+  "conflicts"
+])
 const recognizedStatuses: ReadonlySet<string> = new Set(["open", "merged", "closed", ...openSubStatuses])
 
 interface StatusAxisLookup extends Readonly<Record<string, string>> {}
@@ -36,6 +43,7 @@ export const statusAxis: StatusAxisLookup = {
   closed: "lifecycle",
   approved: "approval",
   pending: "approval",
+  unknown: "approval",
   mergeable: "merge",
   conflicts: "merge"
 }
@@ -88,6 +96,8 @@ export const matchesQueueFilter = (pr: Domain.PullRequest, entry: FilterEntry): 
           return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "Approved"
         case "pending":
           return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "Pending"
+        case "unknown":
+          return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "Unknown"
         case "mergeable":
           return pr.status === "OPEN" && pr.isMergeable
         case "conflicts":
@@ -146,7 +156,7 @@ export const queueFilterOptions = (
     commenter: [...commenters].sort(),
     scope: [...scopes].sort(),
     repo: [...repositories].sort(),
-    status: ["open", "approved", "pending", "mergeable", "conflicts", "merged", "closed"],
+    status: ["open", "approved", "pending", "unknown", "mergeable", "conflicts", "merged", "closed"],
     size: ["small", "medium", "large", "xlarge"]
   }
 }

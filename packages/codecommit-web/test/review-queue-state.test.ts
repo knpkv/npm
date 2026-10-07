@@ -2,9 +2,12 @@ import { describe, expect, it } from "@effect/vitest"
 import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 
+import type { FilterEntry } from "../src/client/atoms/ui.js"
 import {
+  groupQueueFilters,
   isWithinQueueDateBounds,
   matchesQueueFilter,
+  openSubStatuses,
   queueFilterOptions,
   resolveQueueFacet,
   resolveQueueMode
@@ -51,7 +54,7 @@ describe("resolveQueueFacet", () => {
   it("recognizes the composite open-status group as All open", () => {
     expect(
       resolveQueueFacet({
-        filters: ["approved", "pending", "mergeable", "conflicts"].map((value) => ({ key: "status", value })),
+        filters: [...openSubStatuses].map((value) => ({ key: "status", value })),
         review: false
       })
     ).toBe("open")
@@ -63,7 +66,7 @@ describe("resolveQueueFacet", () => {
         filters: [
           { key: "account", value: "production" },
           { key: "status", value: "approved" },
-          { key: "status", value: "unknown" }
+          { key: "status", value: "stale" }
         ],
         review: false
       })
@@ -137,5 +140,24 @@ describe("approval filters with an unknown approval", () => {
     })
     expect(matchesQueueFilter(unknown, { key: "status", value: "approved" })).toBe(false)
     expect(matchesQueueFilter(unknown, { key: "status", value: "pending" })).toBe(false)
+  })
+
+  // An unknown approval is its own status, so it can be filtered for, and the composite "All open"
+  // (every open sub-status) still includes it rather than dropping it from the approval axis.
+  it("matches status unknown, and stays in the composite All open group", () => {
+    const unknown = Schema.decodeSync(PullRequest)({
+      ...Schema.encodeSync(PullRequest)(pullRequest),
+      isApproved: true,
+      approvalUnknown: { _tag: "NotPermitted" }
+    })
+    expect(matchesQueueFilter(unknown, { key: "status", value: "unknown" })).toBe(true)
+    expect(matchesQueueFilter(pullRequest, { key: "status", value: "unknown" })).toBe(false)
+    expect(queueFilterOptions([unknown]).status).toContain("unknown")
+    const allOpen = [...openSubStatuses].map((value): FilterEntry => ({ key: "status", value }))
+    expect(resolveQueueFacet({ filters: allOpen, review: false })).toBe("open")
+    const listed = [...groupQueueFilters(allOpen).values()].every((group) =>
+      group.some((entry) => matchesQueueFilter(unknown, entry))
+    )
+    expect(listed).toBe(true)
   })
 })
