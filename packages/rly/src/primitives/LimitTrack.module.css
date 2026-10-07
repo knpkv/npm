@@ -65,7 +65,7 @@
     box-shadow:
       -1px 0 0 var(--rly-color-surface-1),
       1px 0 0 var(--rly-color-surface-1);
-    inline-size: 1px;
+    inline-size: 1px; /* stripe-ok: the near mark, a 1px data tick across the track */
     inset-block: 0;
     position: absolute;
   }

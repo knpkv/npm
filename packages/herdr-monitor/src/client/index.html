@@ -7,10 +7,10 @@
     <link rel="icon" href="data:," />
   </head>
   <body>
-    <header>
-      <p class="eyebrow">HERDR / MONITOR</p>
-      <h1>Agent board</h1>
-      <p>Published agent status, at a glance.</p>
+    <header class="masthead">
+      <h1>Herdr monitor</h1>
+      <p id="connection" role="status" aria-live="polite"><strong>Locked</strong></p>
+      <button id="lock" type="button" hidden>Lock board</button>
     </header>
     <main id="main">
       <form id="login" method="post" action="/">
@@ -35,18 +35,21 @@
           aria-describedby="key-help"
         />
         <p id="key-help">Use the view key provided by the board owner.</p>
+        <p id="key-error" class="error" hidden></p>
         <button>Open board</button>
       </form>
-      <p id="connection" role="status" aria-live="polite">Locked</p>
-      <button id="lock" type="button" hidden>Lock board</button>
-      <section id="board-view" hidden>
-        <div class="toolbar"><h2 id="title">Board</h2></div>
-        <p id="freshness"></p>
-        <div id="totals"></div>
-        <ul id="agents" role="list"></ul>
+      <section id="board-view" aria-labelledby="title" hidden>
+        <p id="headline"></p>
+        <div class="region">
+          <div class="region-header">
+            <h2 id="title">Board</h2>
+            <p id="totals"></p>
+          </div>
+          <ul id="agents" role="list"></ul>
+        </div>
       </section>
     </main>
-    <footer>Published snapshots only · No session controls</footer>
+    <footer>Published snapshots only. This board cannot control sessions.</footer>
     <script type="module" src="./main.ts"></script>
   </body>
 </html>

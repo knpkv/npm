@@ -191,7 +191,7 @@ const ConnectionCard = ({
             {connection.displayName}
           </Text>
         </div>
-        <StateLabel label={status.label} size="compact" tone={status.tone} />
+        <StateLabel className={styles.status} label={status.label} size="compact" tone={status.tone} />
       </div>
       <ConnectionTestEvidence state={testState} />
       <ConnectionSynchronization
@@ -291,7 +291,7 @@ const SetupForm = ({
 
   return (
     <form className={styles.setupForm} onSubmit={submit}>
-      <Field label="Connection name" required size="compact">
+      <Field label="Connection name" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -302,13 +302,7 @@ const SetupForm = ({
         )}
       </Field>
       {catalog.configurationFields.map((field) => (
-        <Field
-          description={field.description}
-          key={field.key}
-          label={field.label}
-          required={field.required}
-          size="compact"
-        >
+        <Field description={field.description} key={field.key} label={field.label} required={field.required}>
           {(controlProps) => (
             <input
               {...controlProps}
@@ -409,6 +403,7 @@ const CatalogCard = ({
           </Text>
         </div>
         <StateLabel
+          className={styles.status}
           label={isRecovery ? "Needs correction" : isAdditional ? "Add another" : "Not configured"}
           size="compact"
           tone={isRecovery ? "critical" : "neutral"}
@@ -466,22 +461,24 @@ const CatalogCard = ({
   )
 }
 
+/**
+ * One installed service before its connections load. `onEnable` adds the card's own action; while
+ * connections are loading or failed everywhere, the page shows one action, so cards carry none.
+ */
 const ServicePreviewCard = ({
   actionLabel = "Pair to enable",
-  isActionDisabled = false,
   onEnable,
   service,
   statusLabel = "Available",
   statusTone = "positive"
 }: {
   readonly actionLabel?: string
-  readonly isActionDisabled?: boolean
-  readonly onEnable: () => void
+  readonly onEnable?: () => void
   readonly service: FirstPartyServiceIdentity
   readonly statusLabel?: string
   readonly statusTone?: "critical" | "neutral" | "positive" | "progress"
 }): ReactElement => (
-  <Surface as="article" className={styles.card} padding="default" form="grouped">
+  <Surface as="article" className={`${styles.card} ${styles.previewCard}`} padding="default" form="grouped">
     <div className={styles.cardHeading}>
       <div className={styles.connectionIdentity}>
         <ServiceMark service={service.providerId} size="compact" />
@@ -489,16 +486,18 @@ const ServicePreviewCard = ({
           {service.displayName}
         </Text>
       </div>
-      <StateLabel label={statusLabel} size="compact" tone={statusTone} />
+      <StateLabel className={styles.status} label={statusLabel} size="compact" tone={statusTone} />
     </div>
     <Text tone="secondary" variant="body">
       {service.description}
     </Text>
-    <div className={styles.cardAction}>
-      <Button disabled={isActionDisabled} onClick={onEnable} variant="primary">
-        {actionLabel}
-      </Button>
-    </div>
+    {onEnable === undefined ? null : (
+      <div className={styles.cardAction}>
+        <Button onClick={onEnable} variant="primary">
+          {actionLabel}
+        </Button>
+      </div>
+    )}
   </Surface>
 )
 
@@ -1219,10 +1218,7 @@ export const ServicesPage = ({
         <div className={styles.grid}>
           {firstPartyServiceIdentities.map((service) => (
             <ServicePreviewCard
-              actionLabel="Loading connections"
-              isActionDisabled
               key={service.providerId}
-              onEnable={() => undefined}
               service={service}
               statusLabel="Loading"
               statusTone="progress"
@@ -1239,9 +1235,7 @@ export const ServicesPage = ({
           <div className={styles.grid}>
             {firstPartyServiceIdentities.map((service) => (
               <ServicePreviewCard
-                actionLabel="Retry connections"
                 key={service.providerId}
-                onEnable={() => setRequestRevision((revision) => revision + 1)}
                 service={service}
                 statusLabel="Installed"
                 statusTone="neutral"

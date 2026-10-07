@@ -89,3 +89,11 @@ export const RLY_MOTION_TOKEN_NAMES = tokenNames([
   "slow"
 ])
 export type RlyMotionToken = (typeof RLY_MOTION_TOKEN_NAMES)[number]
+
+export const RLY_CONTROL_HEIGHT_TOKEN_NAMES = tokenNames([
+  "dense",
+  "compact",
+  "default",
+  "principal"
+])
+export type RlyControlHeightToken = (typeof RLY_CONTROL_HEIGHT_TOKEN_NAMES)[number]

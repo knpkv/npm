@@ -8,6 +8,7 @@ import {
   type DiffLineAnnotation
 } from "@pierre/diffs/react"
 import { forwardRef, type ComponentType, type Ref, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { RLY_SPLIT_DIFF_MIN_WIDTH, useNarrowerThan } from "../internal/useNarrowerThan.js"
 import { cssClass } from "../internal/component.js"
 import { DiffCodeAnnotation, requireDiffCodeAnnotations } from "./annotation.js"
 import styles from "./DiffCodeView.module.css"
@@ -146,6 +147,9 @@ export const createDiffCodeView = (Renderer: DiffCodeRendererAdapter) =>
     const workerState = useDiffWorkerState()
     const rendererContainerRef = useRef<HTMLDivElement>(null)
     const rendererRef = useRef<CodeViewHandle<AnnotationMetadata, undefined>>(null)
+    // A split view stacks in a narrow container, so neither side is clipped to a sliver.
+    const [narrow, measureRef] = useNarrowerThan<HTMLDivElement>(RLY_SPLIT_DIFF_MIN_WIDTH)
+    const shown = mode === "split" && narrow ? "stacked" : mode
     const annotationsRef = useRef(annotations)
     const previousAnnotationsRef = useRef(annotations)
     annotationsRef.current = annotations
@@ -214,7 +218,7 @@ export const createDiffCodeView = (Renderer: DiffCodeRendererAdapter) =>
     }
 
     return (
-      <div className={joinClassNames(className)} data-rly-diff-code-view="" data-rly-diff-mode={mode}>
+      <div className={joinClassNames(className)} data-rly-diff-code-view="" data-rly-diff-mode={shown} ref={measureRef}>
         {workerState.status === "fallback" ? (
           <p aria-live="polite" className={styles.fallbackNotice} role="status">
             Worker acceleration is unavailable. The complete diff is rendered on this device.
@@ -232,7 +236,7 @@ export const createDiffCodeView = (Renderer: DiffCodeRendererAdapter) =>
             options: {
               collapsedContextThreshold: contextLines,
               diffIndicators: "bars",
-              diffStyle: mode === "split" ? "split" : "unified",
+              diffStyle: shown === "split" ? "split" : "unified",
               disableVirtualizationBuffers: virtualization === "strict",
               enableLineSelection: true,
               expandUnchanged: expandContext,

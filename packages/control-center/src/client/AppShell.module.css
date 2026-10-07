@@ -41,6 +41,14 @@
     var(--rly-type-label-font);
 }
 
+/* Forced colours flatten the mark's fill to the page colour; an outline keeps its shape. */
+@media (forced-colors: active) {
+  .brandMark {
+    outline: 1px solid CanvasText;
+    outline-offset: -1px;
+  }
+}
+
 .nav {
   grid-column: 2;
   grid-row: 1;
@@ -82,29 +90,36 @@
   grid-column: 3;
   grid-row: 1;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 0.5rem;
   justify-self: end;
+  min-inline-size: 0;
 }
 
+/* Header actions sit beside rly's dense Search button, so they share its height and radius. */
 .agent {
   display: inline-flex;
-  min-block-size: 3rem;
+  min-block-size: var(--rly-control-height-dense);
   align-items: center;
-  padding-inline: 1rem;
+  padding-inline: var(--rly-space-12);
   border: 1px solid var(--rly-color-border-2);
-  border-radius: var(--rly-radius-control);
+  border-radius: var(--rly-radius-tag);
   background: var(--rly-color-surface-1);
   color: var(--rly-color-text-1);
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
   text-decoration: none;
+  /* A two-word action stays one label; the row wraps between actions instead. */
+  white-space: nowrap;
 }
 
 .main {
   inline-size: min(100% - 2.5rem, 80rem);
   margin-inline: auto;
-  padding-block: clamp(3.5rem, 8vw, 7rem);
+  /* The page heading starts a region-gap below the header rule, not a screen's height lower. */
+  padding-block: clamp(var(--rly-space-24), 3vw, var(--rly-space-40)) clamp(3.5rem, 8vw, 7rem);
 }
 
 .root[data-workspace-density="compact"] .header {
@@ -119,13 +134,8 @@
   padding: 0.4rem 0.75rem;
 }
 
-.root[data-workspace-density="compact"] .agent {
-  min-block-size: 2.5rem;
-  padding-inline: 0.75rem;
-}
-
 .root[data-workspace-density="compact"] .main {
-  padding-block: clamp(2.5rem, 6vw, 5rem);
+  padding-block: clamp(var(--rly-space-16), 2vw, var(--rly-space-32)) clamp(2.5rem, 6vw, 5rem);
 }
 
 :global(::view-transition-group(*)) {

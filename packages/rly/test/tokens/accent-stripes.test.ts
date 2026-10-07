@@ -1,0 +1,213 @@
+import { describe, expect, it } from "@effect/vitest"
+import { findAccentStripes } from "../../scripts/tokens/accent-stripes.js"
+
+const declarations = (css: string) => findAccentStripes("x.css", css).map((violation) => violation.declaration)
+
+describe("findAccentStripes", () => {
+  it("allows a chevron drawn from two borders meeting at a corner, but not one coloured side", () => {
+    const chevron =
+      `.a::after { border-block-end: 1.5px solid currentColor; border-inline-end: 1.5px solid currentColor; transform: rotate(45deg); }`
+    expect(findAccentStripes("x.css", chevron)).toEqual([])
+    const side = `.a { border-inline-end: 1.5px solid currentColor; }`
+    expect(findAccentStripes("x.css", side)).toHaveLength(1)
+    // Three coloured edges are not a corner: the lone inline one still counts as the stripe it is.
+    const bracket =
+      `.a { border-block: 1px solid var(--rly-color-border-1); border-inline-start: 4px solid var(--rly-color-held-ink); }`
+    expect(findAccentStripes("x.css", bracket)).toHaveLength(1)
+  })
+
+  it("flags a thick one-sided border used as a severity bar", () => {
+    expect(declarations(".card { border-inline-start: 4px solid var(--rly-color-held-ink); }")).toEqual([
+      "border-inline-start: 4px solid var(--rly-color-held-ink)"
+    ])
+  })
+
+  it("flags a spacing-token width and an accent-coloured side", () => {
+    expect(declarations(".a { border-left: var(--rly-space-4) solid var(--rly-color-agent) }")).toHaveLength(1)
+    expect(declarations(".a { border-inline-start-color: var(--rly-color-blocked-ink) }")).toHaveLength(1)
+    expect(declarations(".a { border-inline-start: 1px solid var(--rly-color-blocked-ink) }")).toHaveLength(1)
+  })
+
+  it("flags a stripe drawn with a one-sided inset shadow", () => {
+    expect(declarations(".row { box-shadow: inset 3px 0 0 var(--rly-color-text-1); }")).toHaveLength(1)
+  })
+
+  it("flags an inset bar with the blur omitted, the colour first, or on the far edge", () => {
+    expect(declarations(".a { box-shadow: inset var(--rly-space-4) 0 var(--rly-color-focus); }")).toHaveLength(1)
+    expect(declarations(".a { box-shadow: var(--rly-color-held-ink) inset 3px 0; }")).toHaveLength(1)
+    expect(declarations(".a { box-shadow: 0 1px 2px black, inset -2px 0 0 var(--rly-color-agent); }")).toHaveLength(1)
+  })
+
+  it("flags any side border that is not a neutral hairline, whatever its unit or colour spelling", () => {
+    expect(declarations(".a { border-inline-start: 1px solid currentColor; }")).toHaveLength(1)
+    expect(declarations(".a { border-left: 1px solid red; }")).toHaveLength(1)
+    expect(declarations(".a { border-left: 1px solid var(--brand-accent); }")).toHaveLength(1)
+    expect(declarations(".a { border-left: .125rem solid var(--rly-color-border-1); }")).toHaveLength(1)
+    expect(declarations(".a { border-inline-start-width: thick; }")).toHaveLength(1)
+  })
+
+  it("follows CSS priority, ignores quoted text, and exempts only the declaration a reason sits beside", () => {
+    expect(
+      declarations(
+        ".card { border: 0; border-style: none none none solid !important; border-style: none; border-width: 4px; border-color: red; }"
+      )
+    ).toHaveLength(1)
+    expect(
+      declarations(
+        ".card { border: 0; border-style: none none none solid; border-style: none; border-width: 4px; border-color: red; }"
+      )
+    ).toEqual([])
+    expect(declarations(".example::before { content: \"border-left: 4px solid red\"; }")).toEqual([])
+    expect(
+      declarations(
+        ".shape { border-inline-end: 2px solid currentcolor; /* stripe-ok: drawn chevron */ border-inline-start: 4px solid red; }"
+      )
+    ).toEqual(["border-inline-start: 4px solid red"])
+    expect(declarations(".shape { border-inline-end: 2px solid currentcolor; /* stripe-ok: drawn chevron */ }"))
+      .toEqual([])
+  })
+
+  it("flags a thin coloured bar element, like ServiceMark's old rail, and allows neutral or horizontal lines", () => {
+    expect(
+      declarations(
+        ".rail { align-self: stretch; background: currentcolor; border-radius: var(--rly-radius-round); inline-size: 3px; min-block-size: var(--rly-space-24); }"
+      )
+    ).toEqual(["inline-size: 3px"])
+    expect(
+      declarations(
+        ".bar { position: absolute; inset-inline-start: 0; width: 4px; background: var(--rly-color-held-ink); }"
+      )
+    )
+      .toEqual(["width: 4px"])
+    expect(declarations(".divider { inline-size: 1px; background: var(--rly-color-border-1); }")).toEqual([])
+    expect(declarations(".underline { block-size: 2px; background: var(--rly-color-focus); }")).toEqual([])
+    expect(declarations(".swatch { inline-size: var(--rly-space-16); background: var(--rly-color-series-1); }"))
+      .toEqual([])
+  })
+
+  it("flags a stripe assembled from border longhands, per edge", () => {
+    expect(
+      declarations(".card { border: 4px solid red; border-style: none; border-inline-start-style: solid; }")
+    ).toEqual(["border-inline-start-style: solid"])
+    expect(declarations(".card { border-width: 4px; border-style: none none none solid; }")).toEqual([
+      "border-style: none none none solid"
+    ])
+    expect(
+      declarations(".card { border: 4px solid transparent; border-color: transparent transparent transparent red; }")
+    )
+      .toEqual(["border-color: transparent transparent transparent red"])
+    expect(declarations(".grid { border: 1px solid var(--rly-color-border-1); }")).toEqual([])
+    expect(declarations(".box { border: 2px solid var(--rly-color-held-ink); }")).toEqual([])
+    expect(declarations(".tab { border-style: none none solid; border-width: 3px; }")).toEqual([])
+  })
+
+  it("allows a neutral 1px inset divider and flags a coloured or thick one", () => {
+    expect(declarations(".col { box-shadow: inset 1px 0 0 var(--rly-color-border-1); }")).toEqual([])
+    expect(declarations(".col { box-shadow: inset -1px 0 0 var(--rly-color-border-2); }")).toEqual([])
+    expect(declarations(".col { box-shadow: inset 1px 0 0 var(--rly-color-held-ink); }")).toEqual([
+      "box-shadow: inset 1px 0 0 var(--rly-color-held-ink)"
+    ])
+    expect(declarations(".col { box-shadow: inset 3px 0 0 var(--rly-color-border-1); }")).toEqual([
+      "box-shadow: inset 3px 0 0 var(--rly-color-border-1)"
+    ])
+    expect(declarations(".col { box-shadow: inset 1px 0; }")).toEqual(["box-shadow: inset 1px 0"])
+  })
+
+  it("reads only the rule's own declarations and ignores !important", () => {
+    expect(
+      declarations(
+        ".card { border-style: solid; border-width: 0; border-left-width: 1px; .child { border-color: var(--rly-color-border-1); } }"
+      )
+    ).toEqual(["border-left-width: 1px"])
+    expect(
+      declarations(
+        ".row { border: 0 solid var(--rly-color-border-1); border-left-width: 1px; .child { border-color: var(--rly-color-held-ink); } }"
+      )
+    ).toEqual([])
+    expect(declarations(".col { border-left: 1px solid var(--rly-color-border-1) !important; }")).toEqual([])
+    expect(declarations(".col { border-left: none ! IMPORTANT; }")).toEqual([])
+    expect(declarations(".col { border-left: 4px solid red !important; }")).toEqual([
+      "border-left: 4px solid red !important"
+    ])
+  })
+
+  it("checks a split side width against its rule's colour and ignores custom-property names", () => {
+    expect(declarations(".card { border: 0 solid var(--rly-color-held-ink); border-left-width: 1px; }")).toEqual([
+      "border-left-width: 1px"
+    ])
+    expect(declarations(".card { border: 0 solid var(--rly-color-border-1); border-left-width: 1px; }")).toEqual([])
+    expect(declarations(".theme { --card-border-left: 4px solid red; --panel-box-shadow: inset 3px 0 red; }")).toEqual(
+      []
+    )
+    expect(declarations(".card { border-left: 4px solid red; }")).toEqual(["border-left: 4px solid red"])
+  })
+
+  it("flags a coloured hairline on one inline edge and passes block underlines and neutral hairlines", () => {
+    expect(declarations(".card { border: solid var(--rly-color-held-ink); border-width: 0 0 0 1px; }")).toEqual([
+      "border-width: 0 0 0 1px"
+    ])
+    expect(declarations(".card { border-style: solid; border-width: 0 1px 0 0; }")).toEqual(["border-width: 0 1px 0 0"])
+    expect(declarations(".card { border: solid var(--rly-color-held-ink); border-inline-width: 1px 0; }")).toEqual([
+      "border-inline-width: 1px 0"
+    ])
+    expect(declarations(".row { border: solid var(--rly-color-border-1); border-width: 0 0 0 1px; }")).toEqual([])
+    expect(declarations(".card { border: 1px solid var(--rly-color-held-ink); }")).toEqual([])
+    expect(declarations(".tab { border: solid var(--rly-color-focus); border-width: 0 0 3px; }")).toEqual([])
+    expect(declarations(".tab { border-width: 0 0 3px 0; }")).toEqual([])
+    expect(declarations(".a { border-inline-width: 4px 0; }")).toEqual(["border-inline-width: 4px 0"])
+  })
+
+  it("flags a stripe built from border-width, and a side border whose width is left at medium", () => {
+    expect(declarations(".card { border: solid var(--rly-color-held-ink); border-width: 0 0 0 4px; }")).toEqual([
+      "border-width: 0 0 0 4px"
+    ])
+    expect(declarations(".a { border-left: solid var(--rly-color-border-1); }")).toHaveLength(1)
+    expect(declarations(".a { border-width: 1px; border-width: 0 1px 1px 0; }")).toEqual([])
+    expect(declarations(".card { border: solid var(--rly-color-border-1); border-width: 1px 1px 1px 4px; }")).toEqual([
+      "border-width: 1px 1px 1px 4px"
+    ])
+    // An omitted colour is currentColor, so a coloured text tints the side.
+    expect(declarations(".card { color: var(--rly-color-blocked-ink); border-left: 1px solid; }")).toHaveLength(1)
+  })
+
+  it("lets a drawn shape opt out per declaration, with a reason", () => {
+    expect(
+      declarations(".chevron { border-inline-end: 1.5px solid currentcolor; /* stripe-ok: drawn chevron */ }")
+    ).toEqual([])
+    expect(declarations(".chevron { border-inline-end: 1.5px solid currentcolor; /* stripe-ok: */ }")).toHaveLength(1)
+  })
+
+  it("treats an inset whose offsets cannot be read as a stripe", () => {
+    expect(declarations(".a { box-shadow: inset calc(-1 * var(--rly-space-4)) 0 var(--rly-color-focus); }"))
+      .toHaveLength(1)
+  })
+
+  it("flags an accent mixed with transparent on one side", () => {
+    expect(
+      declarations(".a { border-left: 1px solid color-mix(in srgb, var(--rly-color-blocked-ink), transparent); }")
+    ).toHaveLength(1)
+  })
+
+  it("keeps neutral 1px column dividers, zeroed sides and full rings", () => {
+    expect(
+      declarations(`
+        .col { border-inline-start: 1px solid var(--rly-color-border-1); }
+        .reset { border-inline-start: 0; border-left: none; }
+        .ring { box-shadow: inset 0 0 0 2px var(--rly-color-focus); }
+        .soft { box-shadow: inset 0 1px 3px var(--rly-color-border-2); }
+        .clear { border-inline-end: 1px solid transparent; }
+        .tab { box-shadow: inset 0 -3px var(--rly-color-focus); }
+        .even { border: 1px solid var(--rly-color-held-ink); }
+        /* border-inline-start: 4px solid red; */
+      `)
+    ).toEqual([])
+  })
+
+  it("reports the line of the offending declaration", () => {
+    const [violation] = findAccentStripes(
+      "x.css",
+      ".a {\n  color: red;\n  border-left: 3px solid var(--rly-color-held-ink);\n}"
+    )
+    expect(violation?.line).toBe(3)
+  })
+})

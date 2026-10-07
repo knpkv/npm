@@ -1,0 +1,131 @@
+[
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/agent-usage/src/client/usage.css"
+  },
+  {
+    "declaration": "border-inline-start-color: LinkText",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "border-inline-start: 2px solid var(--rly-color-border-1)",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codecommit)",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/pr-detail.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-2) solid var(--rly-color-action-background)",
+    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-action-background)",
+    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-border-2)",
+    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink)",
+    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
+  },
+  {
+    "declaration": "box-shadow: inset var(--rly-space-4) 0 var(--rly-color-action-background)",
+    "path": "packages/codecommit-web/src/client/components/pr-review-workspace.module.css"
+  },
+  {
+    "declaration": "inline-size: 3px",
+    "path": "packages/codecommit-web/src/client/components/sandbox.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/sandbox.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/sandbox.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/sandbox.module.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/codecommit-web/src/client/components/workbench-rail.module.css"
+  },
+  {
+    "declaration": "border-inline-start-color: var(--rly-color-agent)",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "border-inline-start: 2px solid var(--rly-color-agent)",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink)",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-approvals/src/styles.css"
+  },
+  {
+    "declaration": "box-shadow: inset 3px 0 0 var(--rly-color-agent)",
+    "path": "packages/herdr-connect/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-connect/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-connect/src/styles.css"
+  },
+  {
+    "declaration": "overflow-wrap: anywhere",
+    "path": "packages/herdr-connect/src/styles.css",
+    "reason": "Terminal output (.terminal-text-lines) wraps anywhere like a terminal; it has no word boundaries to keep."
+  },
+  {
+    "declaration": "inline-size: 3px",
+    "path": "packages/rly/src/patterns/ServiceMark.module.css"
+  }
+]

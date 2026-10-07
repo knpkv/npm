@@ -58,7 +58,8 @@ export const States: Story = {
       />
       <Hero
         label="Board summary"
-        caption="arch: needs approval for work.admit RLY-142."
+        // A word joiner keeps the id whole at the hyphen.
+        caption={"arch: needs approval for work.admit RLY-\u2060142."}
         fact={
           <>
             2 agents are <HeroWord tone="blocked">blocked</HeroWord>

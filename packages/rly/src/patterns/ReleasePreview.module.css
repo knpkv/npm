@@ -44,6 +44,11 @@
     padding: var(--rly-space-4);
   }
 
+  /* The surface clips overflow, so the scroll region's ring sits inside its edge to stay whole. */
+  .dialogScroll:focus-visible {
+    outline-offset: calc(-1 * var(--rly-space-2));
+  }
+
   .summary {
     gap: var(--rly-space-32);
   }
@@ -66,7 +71,7 @@
       var(--rly-type-code-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     text-align: end;
   }
 
@@ -115,7 +120,7 @@
       var(--rly-type-label-font);
     letter-spacing: var(--rly-type-label-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .slot {

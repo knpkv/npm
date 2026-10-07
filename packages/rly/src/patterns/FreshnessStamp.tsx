@@ -103,17 +103,16 @@ export const FreshnessStamp = ({
     >
       <span className={style("stateWord")}>
         <Icon decorative name={freshnessIcons[state]} size="small" />
-        <span>{freshnessWords[state]}</span>
+        {/* A comma on the word, not a middot: the stamp reads as one phrase ("Current, 10:18"). */}
+        <span>
+          {freshnessWords[state]}
+          {visibleTime === undefined || machineTime === undefined ? null : ","}
+        </span>
       </span>
       {visibleTime === undefined || machineTime === undefined ? null : (
-        <>
-          <span aria-hidden="true" className={style("separator")}>
-            ·
-          </span>
-          <time className={style("time")} dateTime={machineTime}>
-            {visibleTime}
-          </time>
-        </>
+        <time className={style("time")} dateTime={machineTime}>
+          {visibleTime}
+        </time>
       )}
     </span>
   )
