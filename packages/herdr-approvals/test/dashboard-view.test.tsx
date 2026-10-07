@@ -410,7 +410,7 @@ describe("dashboard approval capability", () => {
 
   it("keeps agent activity and general job history out of the approval-only surface", () => {
     const markup = renderApprovalOnly()
-    expect(markup).toContain("Recent approval history")
+    expect(markup).toContain("Recently decided")
     expect(markup).not.toContain("Agent activity")
     expect(markup).not.toContain("Activity history")
   })
