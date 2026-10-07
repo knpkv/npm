@@ -11,14 +11,21 @@
  * @category Rendering
  * @module
  */
-import type { Domain } from "@knpkv/codecommit-core"
+import { Domain } from "@knpkv/codecommit-core"
+import { Match } from "effect"
 
-/** `approved`/`mergeable` decoration, in the fixed order the list has always used. */
+/** Approval and mergeability decoration, in the fixed order the list has always used. */
 export const renderFlags = (pr: Domain.PullRequest): string =>
   [
-    pr.isApproved ? "approved" : "",
+    approvalFlag(Domain.approvalOf(pr)),
     pr.isMergeable ? "mergeable" : "conflicts"
   ].filter(Boolean).join(" ")
+
+const approvalFlag: (approval: Domain.Approval) => string = Match.valueTags({
+  Approved: () => "approved",
+  Pending: () => "",
+  Unknown: () => Domain.approvalUnknownLabel.toLowerCase()
+})
 
 /**
  * One pull request as the lines to print, trailing blank line included.
