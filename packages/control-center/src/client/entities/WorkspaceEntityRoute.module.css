@@ -44,7 +44,7 @@
 .principalAction:focus-visible,
 .releasePath a:focus-visible {
   outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-4);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .principalAction {
@@ -94,7 +94,7 @@
 
 .secondaryAction:focus-visible {
   outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-4);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .content {

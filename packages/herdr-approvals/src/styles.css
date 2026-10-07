@@ -325,8 +325,8 @@
   }
 
   .agenda-item:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--rly-color-agent) 55%, transparent);
-    outline-offset: 3px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .agenda-item[data-approval-target="true"] {
@@ -472,7 +472,7 @@
 
   .remote-approval-link:focus-visible {
     outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-    outline-offset: var(--rly-space-2);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .empty {
@@ -546,8 +546,8 @@
   .activity-filters button:focus-visible,
   .activity-row:focus-visible {
     border-color: var(--rly-color-agent);
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--rly-color-agent) 20%, transparent);
-    outline: none;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .activity-filters {
@@ -919,8 +919,8 @@
 
   .chat-compose textarea:focus-visible {
     border-color: var(--rly-color-agent);
-    outline: 2px solid color-mix(in srgb, var(--rly-color-agent) 35%, transparent);
-    outline-offset: 2px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .notice {

@@ -283,7 +283,7 @@
 
 .reviewPresetList input:focus-visible + span {
   outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .reviewPresetList small {
@@ -989,7 +989,7 @@
 
 .filesLink:focus-visible {
   outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-4);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 @media (max-width: 52rem) {

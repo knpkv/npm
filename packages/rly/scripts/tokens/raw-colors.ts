@@ -62,8 +62,8 @@ const cssComparable = (source: string): string => {
 }
 
 /**
- * The focus-ring rules, shared by rly's colour policy and the repo-wide focus-ring lint: an outline
- * in the focus colour takes its width from the token, and an inset ring negates the width.
+ * rly's own focus-ring rules: an outline in the focus colour takes its width from the token, and an
+ * inset ring negates the width. `focus-rings.ts` checks every package's focus rules by selector.
  */
 const FOCUS_RING_PATTERNS: ReadonlyArray<readonly [RegExp, ColorPolicyRule]> = [
   // One focus ring everywhere: an outline in the focus colour takes its width from the token.
@@ -100,10 +100,6 @@ const cssViolations = (path: string, source: string): ReadonlyArray<ColorPolicyV
     [/(?:data-theme|prefers-color-scheme|\bcolor-scheme\s*:)/gi, "local-theme"],
     ...FOCUS_RING_PATTERNS
   ])
-
-/** Focus-ring violations only, for product stylesheets that keep their own colours. */
-export const findFocusRingViolations = (path: string, source: string): ReadonlyArray<ColorPolicyViolation> =>
-  patternViolations(path, source, FOCUS_RING_PATTERNS)
 
 const propertyName = (node: ts.PropertyName | ts.BindingName): string | undefined => {
   if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node)) return node.text

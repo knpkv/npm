@@ -150,8 +150,8 @@
 
   .connect-search input:focus-visible {
     border-color: var(--rly-color-agent);
-    outline: 2px solid color-mix(in srgb, var(--rly-color-agent) 35%, transparent);
-    outline-offset: 1px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .connect-filter-row {
@@ -302,8 +302,8 @@
   }
 
   .connect-agent:focus-visible {
-    outline: 1px solid var(--rly-color-agent);
-    outline-offset: -1px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
   }
 
   /* Selected: a filled row with a full outline, never a one-sided bar. */

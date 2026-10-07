@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { findColorPolicyViolations, findFocusRingViolations } from "../../scripts/tokens/raw-colors.js"
+import { findColorPolicyViolations } from "../../scripts/tokens/raw-colors.js"
 
 const rules = (path: string, source: string): ReadonlyArray<string> =>
   findColorPolicyViolations(path, source).map(({ rule }) => rule)
@@ -63,18 +63,6 @@ describe("component color policy", () => {
       export const Note = () => <a href="#face">{message}{value}</a>
     `
     )).toEqual([])
-  })
-
-  it("checks only focus rings in product stylesheets, which keep their own colours", () => {
-    const rules = (source: string) =>
-      findFocusRingViolations("packages/app/src/app.css", source).map(({ rule }) => rule)
-    expect(rules(".a:focus-visible { outline: 3px solid var(--rly-color-focus); color: #123456; }")).toEqual([
-      "raw-focus-ring"
-    ])
-    expect(
-      rules(".a:focus-visible { outline: var(--rly-focus-ring-width) solid var(--rly-color-focus); color: #123456; }")
-    )
-      .toEqual([])
   })
 
   it("requires an inset focus ring to negate the ring width, not the offset", () => {

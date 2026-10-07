@@ -89,7 +89,7 @@
 .findingActions button:focus-visible,
 .conversation textarea:focus-visible {
   outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .reviewFailure {
@@ -241,7 +241,7 @@
 
 .lineComment button:focus-visible {
   outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .agentPane {
@@ -403,7 +403,7 @@
 
 .findingDetails summary:focus-visible {
   outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .findingDetails > div {
@@ -596,7 +596,7 @@
 
 .conversation > header > button:focus-visible {
   outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .conversation[data-collapsed="true"] {

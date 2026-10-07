@@ -6,12 +6,12 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
-import { findFocusRingViolations } from "./raw-colors.js"
+import { findFocusRingViolations } from "./focus-rings.js"
 
 /**
- * Every product draws the one rly focus ring: a stylesheet anywhere under `packages/*\/src` that
- * outlines in `--rly-color-focus` takes its width from `--rly-focus-ring-width`, and an inset ring
- * negates the width. rly's own sources get the same rules from `lint:colors`.
+ * Every product draws the one rly focus ring: each `:focus`, `:focus-visible` and `:focus-within`
+ * rule in a stylesheet under `packages/*\/src` is checked by `findFocusRingViolations`, whatever
+ * colour it draws in. Forced-colours blocks are exempt.
  */
 class FocusRingLintError extends Data.TaggedError("FocusRingLintError")<{
   readonly reason: string
@@ -65,7 +65,7 @@ const program = Effect.gen(function*() {
     return yield* Effect.fail(
       new FocusRingLintError({
         reason: violations.map((violation) =>
-          `${violation.path}:${violation.line}:${violation.column} ${violation.rule}`
+          `${violation.path}:${violation.line}:${violation.column} ${violation.rule} (${violation.declaration})`
         ).join("\n")
       })
     )
