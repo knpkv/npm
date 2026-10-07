@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import { SystemError } from "effect/PlatformError"
+import { type PlatformError, systemError } from "effect/PlatformError"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
 import {
   ConfigService,
@@ -19,14 +19,14 @@ const configPath = `${TEST_HOME}/.codecommit/config.json`
 
 const fsError = (method: string) =>
   Effect.fail(
-    new SystemError({ _tag: "NotFound", module: "FileSystem", method, description: "mock not found" })
+    systemError({ _tag: "NotFound", module: "FileSystem", method, description: "mock not found" })
   )
 
 const makeMockFS = (files: Record<string, string>) => {
   const store = { ...files }
   const partial: Partial<FileSystem.FileSystem> = {
     exists: (path) => Effect.succeed(path in store),
-    readFileString: (path): Effect.Effect<string, SystemError> =>
+    readFileString: (path): Effect.Effect<string, PlatformError> =>
       path in store ? Effect.succeed(store[path]!) : fsError("readFileString"),
     writeFileString: (path: string, content: string) => {
       store[path] = content
@@ -47,7 +47,7 @@ const makeMockFS = (files: Record<string, string>) => {
   }
   return {
     store,
-    layer: Layer.succeed(FileSystem.FileSystem, FileSystem.FileSystem.of(partial))
+    layer: FileSystem.layerNoop(partial)
   }
 }
 

@@ -1,5 +1,20 @@
 # @knpkv/agent-skills
 
+## 0.3.4
+
+### Patch Changes
+
+- [#540](https://github.com/knpkv/npm/pull/540) [`0573403`](https://github.com/knpkv/npm/commit/057340343fcc727fd0c56329d840a668170376ad) Thanks [@konopkov](https://github.com/konopkov)! - Connect Jira with an API token, and set up each system on its own:
+
+  - `jcf auth jira token` asks for your Jira address, email and an API token, checks them with Jira, and saves them to `~/.jcf/jira.json` (owner-only). The token is never printed. Classic and scoped tokens both work; a scoped token is used through Atlassian's gateway for the site. A failed check says whether the site, the token or the network was wrong. The OAuth app (`create`, `configure`, `login`) stays as the advanced option; when both exist the token is used.
+  - `jcf` with nothing connected asks about Jira and Clockify in turn, and either can be skipped. With one connected it opens straight away. Without a terminal it prints both commands and exits 1.
+  - Commands that need Jira (`issue list`, `timer start`, `sync reconcile`) fail with "Jira is not connected. Run jcf auth jira token to connect it." and exit 1, instead of reporting no issues. `auth clockify setup` takes `--api-key` and fails without a terminal. Failed `timer` and `config set project` steps and a failed reconcile exit non-zero.
+  - `jcf auth status` names the Clockify workspace and the next command for anything not connected. Every command has a help description, and `--version` reports the package version.
+  - `@knpkv/jira-api-client`: a basic-auth credential may carry its `siteUrl`, used as the request host, so a credential re-read per request keeps its site.
+  - `@knpkv/agent-skills`: the jcf skill names `jcf auth jira token` as the way to connect Jira.
+
+- [#563](https://github.com/knpkv/npm/pull/563) [`d76d2d8`](https://github.com/knpkv/npm/commit/d76d2d8af1e266a88414a36e0d41ad27fa143b7d) Thanks [@konopkov](https://github.com/konopkov)! - `jcf sync reconcile --agent --only clockify|jira` reconciles one system without touching the other, and its `--json` report names what was read in `sides`. An agent run with a system not connected stops before planning instead of writing half a plan. `jcf config show` says when there is no config file and marks default values. An unknown command, at any depth, prints one line naming the nearest command instead of the whole help.
+
 ## 0.3.3
 
 ### Patch Changes

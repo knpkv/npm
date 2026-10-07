@@ -49,7 +49,10 @@ describe("updatePortOnConflict", () => {
           const server = createServer()
           server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)))
         }),
-        (server) => Effect.callback<void>((resume) => server.close(() => resume(Effect.void)))
+        (server) =>
+          Effect.callback<void>((resume) => {
+            server.close(() => resume(Effect.void))
+          })
       )
       const address = holder.address()
       if (address === null || Predicate.isString(address)) return yield* Effect.die("holder has no port")

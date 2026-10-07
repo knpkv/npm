@@ -33,7 +33,17 @@ const emptyFilterOpts = {
   authors: [],
   accounts: []
 } satisfies { repos: Array<string>; authors: Array<string>; accounts: Array<string> }
-const emptyReviewer = {
+type ReviewerData = {
+  topReviewers: Array<{ author: string; commentCount: number }>
+  topApprovers: Array<{ author: string; approvalCount: number }>
+  avgTimeToFirstReview: number | null
+  avgTimeToMerge: null
+  avgTimeToAddressFeedback: number | null
+  firstReviewDetails: Array<Detail>
+  feedbackDetails: Array<Detail>
+}
+
+const emptyReviewer: ReviewerData = {
   topReviewers: [],
   topApprovers: [],
   avgTimeToFirstReview: null,
@@ -41,14 +51,6 @@ const emptyReviewer = {
   avgTimeToAddressFeedback: null,
   firstReviewDetails: [],
   feedbackDetails: []
-} satisfies {
-  topReviewers: Array<{ author: string; commentCount: number }>
-  topApprovers: Array<{ author: string; approvalCount: number }>
-  avgTimeToFirstReview: number | null
-  avgTimeToMerge: number | null
-  avgTimeToAddressFeedback: number | null
-  firstReviewDetails: Array<Detail>
-  feedbackDetails: Array<Detail>
 }
 
 /** Build a mock StatsRepo with overridable query results */
@@ -59,7 +61,7 @@ const mockStatsRepo = (overrides: Partial<{
   stalePRs: WeeklyStats["stalePRs"]
   health: { total: number; withComments: number; approved: number }
   mergeDetails: Array<Detail>
-  reviewerData: typeof emptyReviewer
+  reviewerData: ReviewerData
 }> = {}) =>
   Layer.succeed(
     StatsRepo,
@@ -86,7 +88,7 @@ const testLayer = (overrides?: Parameters<typeof mockStatsRepo>[0]) =>
   StatsService.Default.pipe(
     Layer.provide(Layer.mergeAll(
       mockStatsRepo(overrides),
-      Layer.mock(PullRequestRepo, { _tag: "PullRequestRepo" }),
+      Layer.mock(PullRequestRepo, {}),
       Layer.mock(ConfigService, {}),
       Layer.mock(AwsClient, {})
     ))
