@@ -68,6 +68,12 @@ describe("focus ring policy", () => {
     expect(rules(".plot:focus-visible { outline-color: var(--rly-color-focus); }")).toEqual([])
     // An alias is checked where it is used, and forced colours draw their own system colours.
     expect(rules(":root { --ring: var(--rly-color-focus); }")).toEqual([])
+    expect(rules(":root { --ring: var(--rly-color-focus); } .window { stroke: var(--ring); }")).toEqual([
+      "focus-colour"
+    ])
+    expect(rules(":root { --ring: var(--rly-color-focus); } .x:focus-visible { outline-color: var(--ring); }")).toEqual(
+      []
+    )
     expect(rules("@media (forced-colors: active) { .window { stroke: var(--rly-color-focus); } }")).toEqual([])
   })
 })

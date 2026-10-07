@@ -207,7 +207,7 @@ accessible label combines `label` and `valueText`, without a numeric range.
 `StackedBars` stacks values per period on a time axis, with optional `bands` of
 limit levels above the bars on the same axis, and an optional `window` (such as the
 current limit window) shaded across bands and bars and named in a key under the axis. Narrow containers bin periods so every
-bar stays at least 24px wide, a full pointer target. The plot is one tab stop: ←/→ move and select, Shift
+bar's hit area stays at least 24px wide, a full pointer target (the drawn fill is 2px narrower, for the gap). The plot is one tab stop: ←/→ move and select, Shift
 extends, Home/End jump and Escape clears. Click selects, and Shift+click or a second
 tap elsewhere extends the span. The caller owns `selection` and words it through
 `describeSelection`. Only a selection the user makes is announced, politely, once it

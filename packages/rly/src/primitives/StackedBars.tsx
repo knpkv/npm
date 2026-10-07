@@ -211,7 +211,8 @@ const Band = ({
 /**
  * Stacked values per period on a time axis, with optional limit bands above. Bars, bands, the window
  * and the selection share one time scale, so a short final bin is drawn narrower. Narrow containers
- * bin periods so every bar stays at least 24px wide, a full pointer target; the selection keeps its columns across rebinning.
+ * bin periods so every bar's hit area stays at least 24px wide, a full pointer target (the drawn
+ * fill is 2px narrower, for the gap); the selection keeps its columns across rebinning.
  * One tab stop: ←/→ move and select, Shift extends, Home/End jump, Escape clears. Click selects;
  * Shift+click, or a second touch tap elsewhere, extends. The SVG is hidden from assistive technology,
  * so callers render the same data beside it: a table at a readable resolution (a row per day for a
@@ -310,6 +311,11 @@ export const StackedBars = ({
     const timer = setTimeout(() => setAnnouncement(description.current), ANNOUNCE_AFTER)
     return () => clearTimeout(timer)
   }, [announceRequest])
+
+  // A new binning or axis brings new labels; measure them afresh so shorter ones pack closer again.
+  useLayoutEffect(() => {
+    setLabelWidth(LABEL_WIDTH)
+  }, [binSize, axisStart, axisEnd])
 
   useLayoutEffect(() => {
     const labels = axisRef.current?.querySelectorAll<HTMLElement>("[data-anchor]") ?? []
@@ -445,16 +451,6 @@ export const StackedBars = ({
               x={selected.x}
             />
           )}
-          {/* One focus ring above every bar, so the next bar never paints over half of it. */}
-          {focusSlot === null ? null : (
-            <rect
-              className={style("focusRing")}
-              data-part="focus-ring"
-              height={100}
-              width={focusSlot.width}
-              x={focusSlot.x}
-            />
-          )}
           {/* The window's edges again over the bars, so a narrow window stays visible where bars cover its fill. */}
           {shaded === null || shaded.width <= 0 ? null : (
             <rect
@@ -463,6 +459,16 @@ export const StackedBars = ({
               height={100}
               width={shaded.width}
               x={shaded.x}
+            />
+          )}
+          {/* One focus ring above every bar and the window's edge, so neither breaks the ring. */}
+          {focusSlot === null ? null : (
+            <rect
+              className={style("focusRing")}
+              data-part="focus-ring"
+              height={100}
+              width={focusSlot.width}
+              x={focusSlot.x}
             />
           )}
         </svg>

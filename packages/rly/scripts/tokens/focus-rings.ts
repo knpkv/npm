@@ -44,6 +44,11 @@ const FOCUS_COLOUR_BASELINE: ReadonlyArray<{ readonly path: string; readonly sel
     path: "packages/control-center/src/client/timeline/TimelinePage.module.css",
     selector: ".summary div[data-source=\"system\"]"
   },
+  // The default entity accent (no provider) is the focus colour, through the `--entity-accent` alias.
+  {
+    path: "packages/control-center/src/client/entities/WorkspaceEntityRoute.module.css",
+    selector: ".workingCircle::before"
+  },
   { path: "packages/rly/src/diff/DiffHeader.module.css", selector: ".progress progress" },
   { path: "packages/rly/src/primitives/Select.module.css", selector: ".trigger[data-state=\"open\"]" }
 ]
@@ -62,22 +67,22 @@ const inForcedColours = (rule: Rule): boolean => {
   return false
 }
 
-const verdict = (declaration: Declaration): FocusRingRule | undefined => {
+const verdict = (declaration: Declaration, isFocusColour: (value: string) => boolean): FocusRingRule | undefined => {
   const value = declaration.value.trim()
   switch (declaration.prop.toLowerCase()) {
     case "outline":
-      return NO_OUTLINE.test(value) || (WIDTH.test(value) && COLOUR.test(value)) ? undefined : "focus-outline"
+      return NO_OUTLINE.test(value) || (WIDTH.test(value) && isFocusColour(value)) ? undefined : "focus-outline"
     case "outline-width":
       return NO_OUTLINE.test(value) || WIDTH.test(value) ? undefined : "focus-outline"
     case "outline-color":
-      return COLOUR.test(value) ? undefined : "focus-outline"
+      return isFocusColour(value) ? undefined : "focus-outline"
     case "outline-offset":
       return OFFSETS.some((offset) => offset.test(value)) ? undefined : "focus-offset"
     case "box-shadow":
       return /^none$/i.test(value) ? undefined : "focus-shadow"
     // An SVG ring: the same width token and focus colour as an outline.
     case "stroke":
-      return /^none$/i.test(value) || COLOUR.test(value) ? undefined : "focus-stroke"
+      return /^none$/i.test(value) || isFocusColour(value) ? undefined : "focus-stroke"
     case "stroke-width":
       return WIDTH.test(value) ? undefined : "focus-stroke"
     default:
@@ -101,13 +106,24 @@ export const findFocusRingViolations = (path: string, source: string): ReadonlyA
     if (start === undefined) return
     violations.push({ column: start.column, declaration: `${node.prop}: ${node.value}`, line: start.line, path, rule })
   }
-  postcss.parse(source).walkRules((rule) => {
+  const root = postcss.parse(source)
+  // Custom properties that alias the focus colour in this sheet, so `var(--ring)` counts as it.
+  // An alias defined in another sheet is out of reach of a per-file walk.
+  const aliases = new Set<string>()
+  root.walkDecls((node) => {
+    if (node.prop.startsWith("--") && COLOUR.test(node.value)) aliases.add(node.prop)
+  })
+  const usesFocusColour = (value: string): boolean =>
+    COLOUR.test(value) || [...aliases].some((alias) => value.includes(`var(${alias})`))
+  root.walkRules((rule) => {
     if (inForcedColours(rule)) return
     if (!FOCUS_SELECTOR.test(rule.selector)) {
       if (inFocusColourBaseline(path, rule)) return
       // Custom properties only alias the token (`--ring: var(--rly-color-focus)`); their use is checked where it lands.
       for (const node of rule.nodes) {
-        if (node.type === "decl" && !node.prop.startsWith("--") && COLOUR.test(node.value)) push(node, "focus-colour")
+        if (node.type === "decl" && !node.prop.startsWith("--") && usesFocusColour(node.value)) {
+          push(node, "focus-colour")
+        }
       }
       return
     }
@@ -122,7 +138,9 @@ export const findFocusRingViolations = (path: string, source: string): ReadonlyA
       if (node.type !== "decl") continue
       const prop = node.prop.toLowerCase()
       const removesOutline = (prop === "outline" || prop === "outline-width") && NO_OUTLINE.test(node.value.trim())
-      const failed = removesOutline && (ringDrawn || (keyboardFocus && !drawsRing)) ? "focus-outline" : verdict(node)
+      const failed = removesOutline && (ringDrawn || (keyboardFocus && !drawsRing))
+        ? "focus-outline"
+        : verdict(node, usesFocusColour)
       if (prop === "outline" && !removesOutline) ringDrawn = true
       if (failed !== undefined) push(node, failed)
     }
