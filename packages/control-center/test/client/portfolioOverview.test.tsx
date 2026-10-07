@@ -60,6 +60,31 @@ describe("PortfolioOverviewView", () => {
     expect(markup).not.toContain("No releases yet")
   })
 
+  it("does not call a workspace with connected sources a first run", () => {
+    const markup = renderOverview({
+      _tag: "ready",
+      ...livePortfolioState,
+      portfolio: presentPortfolio(makePortfolioSnapshot("connected-empty"))
+    })
+    expect(markup).not.toContain("Choose your first service")
+    expect(markup).toContain("No releases yet")
+    expect(markup).toContain("CodeCommit connected")
+    expect(markup).toContain("connect Jira to start tracking them")
+    expect(markup).not.toContain('href="/services?enable=codecommit"')
+    expect(markup).toContain('href="/services?enable=jira"')
+  })
+
+  it("names connected sources once Jira is connected but no release has items", () => {
+    const markup = renderOverview({
+      _tag: "ready",
+      ...livePortfolioState,
+      portfolio: { ...presentPortfolio(makePortfolioSnapshot("empty")), connectedProviders: ["codecommit", "jira"] }
+    })
+    expect(markup).toContain("CodeCommit and Jira connected")
+    expect(markup).toContain("once a Jira release version has items")
+    expect(markup).not.toContain('href="/services?enable=jira"')
+  })
+
   it("explains the authenticated empty portfolio without fake metrics", () => {
     const markup = renderOverview({
       _tag: "ready",

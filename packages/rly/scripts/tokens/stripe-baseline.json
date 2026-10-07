@@ -45,10 +45,7 @@
   },
   {
     "declaration": "overflow-wrap: anywhere",
-    "path": "packages/herdr-connect/src/styles.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/herdr-monitor/src/client/styles.css"
+    "path": "packages/herdr-connect/src/styles.css",
+    "reason": "Terminal output (.terminal-text-lines) wraps anywhere like a terminal; it has no word boundaries to keep."
   }
 ]
