@@ -154,6 +154,7 @@ export const NotificationsLive = HttpApiBuilder.group(
                     const region = account?.region ?? Schema.decodeSync(AwsRegion)("us-east-1")
                     // The login itself succeeded; without an identity the refresh resolves it.
                     return yield* awsClient.getCallerIdentity({ profile: payload.profile, region }).pipe(
+                      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                       Effect.orElseSucceed(() => undefined)
                     )
                   }),

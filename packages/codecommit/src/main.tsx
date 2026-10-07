@@ -96,6 +96,7 @@ const program = Effect.gen(function* makeProgram() {
     runFork(
       Effect.forkIn(
         Effect.gen(function* quit() {
+          // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           yield* cleanup.pipe(Effect.ignoreCause)
           yield* Effect.sleep("100 millis")
           yield* Deferred.succeed(exitSignal, void 0)

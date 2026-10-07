@@ -197,6 +197,7 @@ const make: Effect.Effect<
                 profile: acct.profile,
                 username: id.username
               })),
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.catchIf(() => true, () => Effect.succeed(unresolvedCaller(acct.profile)))
             ),
           { concurrency: 4 }

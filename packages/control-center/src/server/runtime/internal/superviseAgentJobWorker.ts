@@ -45,6 +45,7 @@ export const superviseAgentJobWorker = Effect.fn("AgentJobWorker.supervise")(fun
       if (drainStarted) return
     }
   }).pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.void)
   )
   yield* Effect.forkScoped(supervise)

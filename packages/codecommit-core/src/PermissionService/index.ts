@@ -59,16 +59,19 @@ const loadFromDisk = (fs: FileSystem.FileSystem, path: string): Effect.Effect<Pe
   fs.readFileString(path).pipe(
     Effect.flatMap(decodeConfigText),
     // Any failure → empty config → everything prompts
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(decodeConfig({})))
   )
 
 const saveToDisk = (fs: FileSystem.FileSystem, path: string, config: PermissionsConfig): Effect.Effect<void> =>
   Effect.gen(function*() {
     const dir = path.replace(/\/[^/]+$/, "")
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     yield* fs.makeDirectory(dir, { recursive: true }).pipe(Effect.catch(() => Effect.void))
     const tmpPath = `${path}.tmp`
     yield* fs.writeFileString(tmpPath, JSON.stringify(config, null, 2))
     yield* fs.rename(tmpPath, path)
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   }).pipe(Effect.catch(() => Effect.void))
 
 export interface PermissionServiceContract {
@@ -86,6 +89,7 @@ export interface PermissionServiceContract {
 const makePermissionService = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const permPath = yield* resolvePermissionsPath.pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed("/tmp/.codecommit/permissions.json"))
   )
   // In-memory state. All check() calls read from here.

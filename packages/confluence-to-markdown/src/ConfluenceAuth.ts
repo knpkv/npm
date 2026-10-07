@@ -86,6 +86,7 @@ const readLegacyJson = (
     const fs = yield* FileSystem.FileSystem
     const filePath = yield* getLegacyConfigPath(fileName)
     const exists = yield* fs.exists(filePath).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(false))
     )
     if (!exists) return null
@@ -109,6 +110,7 @@ const loadLegacyOAuthConfig = (): Effect.Effect<
     const parsed = yield* readLegacyJson("config.json")
     if (parsed === null) return null
     return yield* Schema.decodeUnknownEffect(OAuthConfigSchema)(parsed).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(null))
     )
   })

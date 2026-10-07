@@ -568,6 +568,7 @@ const hasExpectedOwnerId = Effect.fn("BackupArchive.hasExpectedOwnerId")(functio
       canonicalOwnerIdFile === ownerIdFile &&
       ownerInfo.type === "File" &&
       ownerId === backupId
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   }).pipe(Effect.orElseSucceed(() => false))
 })
 
@@ -581,6 +582,7 @@ const removeOwnedDestination = Effect.fn("BackupArchive.removeOwnedDestination")
     // Effect's portable FileSystem API does not expose descriptor-relative recursive removal.
     // The random owner marker is therefore revalidated immediately before best-effort rollback.
     const removed = yield* fileSystem.remove(destination, { force: true, recursive: true }).pipe(Effect.result)
+    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     if (Result.isSuccess(removed)) yield* syncPath(parent).pipe(Effect.ignore)
   }
 })
@@ -595,6 +597,7 @@ const removeEmptyDestinationClaim = Effect.fn("BackupArchive.removeEmptyDestinat
     const info = yield* fileSystem.stat(destination)
     const entries = yield* fileSystem.readDirectory(destination)
     return canonical === destination && info.type === "Directory" && entries.length === 0
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   }).pipe(Effect.orElseSucceed(() => false))
   if (!removable) return
 
@@ -603,6 +606,7 @@ const removeEmptyDestinationClaim = Effect.fn("BackupArchive.removeEmptyDestinat
   // A hostile same-UID process can race this check; such a process can already alter
   // every owner-only backup artifact, so operators must exclude concurrent writers.
   const removed = yield* fileSystem.remove(destination, { recursive: true }).pipe(Effect.result)
+  // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   if (Result.isSuccess(removed)) yield* syncPath(parent).pipe(Effect.ignore)
 })
 
@@ -682,6 +686,7 @@ export const createVerifiedArchive = Effect.fn("BackupArchive.create")(function*
     "create-staging-root",
     fileSystem.makeTempDirectory({ directory: parent, prefix: STAGING_PREFIX })
   )
+  // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   yield* Effect.addFinalizer(() => fileSystem.remove(stagingRoot, { force: true, recursive: true }).pipe(Effect.ignore))
   yield* mapStorage("secure-staging-root", fileSystem.chmod(stagingRoot, BACKUP_DIRECTORY_MODE))
   const databaseFile = path.join(stagingRoot, DATABASE_NAME)

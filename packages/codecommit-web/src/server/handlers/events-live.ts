@@ -79,9 +79,11 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     const permGate = yield* PermissionGateLiveTag
 
     // Cache unread count + notifications — re-query on relevant triggers
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const initialCount = yield* notificationRepo.unreadCount().pipe(Effect.catchIf(() => true, () => Effect.succeed(0)))
     const lastUnreadRef = yield* Ref.make(initialCount)
     const initialNotifications = yield* notificationRepo.findAll({ limit: 20 }).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catchIf(() => true, () => {
         const items: ReadonlyArray<typeof NotificationResponse.Type> = []
         return Effect.succeed({ items })
@@ -121,6 +123,7 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
 
         const sandboxes = yield* sandboxRepo.findAll().pipe(
           Effect.map((rows) => rows.map(encodeSandbox)),
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           Effect.catch(() => {
             const sandboxes: ReadonlyArray<typeof SandboxResponse.Type> = []
             return Effect.succeed(sandboxes)

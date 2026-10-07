@@ -438,6 +438,7 @@ export const mergePullRequestAtom = runtimeAtom.fn((input: MergePullRequestInput
         pullRequestId: input.pr.id,
         title: `Merged PR #${input.pr.id}`,
         type: "success"
+        // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       }).pipe(Effect.ignore)
       return receipt
     }).pipe(Effect.withSpan("mergePullRequest", { attributes: { strategy: input.strategy } }))

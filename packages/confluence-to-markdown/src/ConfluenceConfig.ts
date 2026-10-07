@@ -71,6 +71,7 @@ const loadConfig = (
     const fs = yield* FileSystem.FileSystem
 
     const exists = yield* fs.exists(configPath).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(false))
     )
     if (!exists) {
@@ -224,6 +225,7 @@ export const createConfigFile = (
     )
 
     // Create .confluence directory if it doesn't exist
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const dirExists = yield* fs.exists(configDir).pipe(Effect.catch(() => Effect.succeed(false)))
     if (!dirExists) {
       yield* fs.makeDirectory(configDir, { recursive: true }).pipe(

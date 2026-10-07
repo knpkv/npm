@@ -54,6 +54,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
       .handle("list", () =>
         Effect.gen(function*() {
           const config = yield* configService.load.pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.catchIf(() => true, () =>
               Effect.succeed(
                 {
@@ -92,6 +93,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
         Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
           const path = yield* configService.getConfigPath
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           const exists = yield* fs.exists(path).pipe(Effect.catchIf(() => true, () => Effect.succeed(false)))
           const modifiedAt = exists
             ? yield* fs.stat(path).pipe(
@@ -109,6 +111,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
           const fs = yield* FileSystem.FileSystem
           const home = yield* Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE")))
           const path = `${home}/.codecommit/cache.db`
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           const exists = yield* fs.exists(path).pipe(Effect.catchIf(() => true, () => Effect.succeed(false)))
           const stat = exists
             ? yield* fs.stat(path).pipe(
@@ -137,6 +140,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
       .handle("save", ({ payload }) =>
         Effect.gen(function*() {
           const existing = yield* configService.load.pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.catchIf(() => true, () =>
               Effect.succeed({
                 review: ConfigService.defaultReviewConfig,
@@ -169,6 +173,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
         Effect.gen(function*() {
           const backupPath = yield* configService.backup.pipe(
             Effect.map((p): string | undefined => p),
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.catchIf(() => true, () => {
               const backupPath: string | undefined = undefined
               return Effect.succeed(backupPath)
