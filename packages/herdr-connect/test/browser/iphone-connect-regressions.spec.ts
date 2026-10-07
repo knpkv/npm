@@ -107,7 +107,7 @@ const setKeyboardTerminal = async (page: Page): Promise<void> => {
                       <section class="terminal-stage">
                         <div class="terminal-bar">
                           <button class="terminal-back" type="button">Agents</button>
-                          <div><strong>host-coordinator</strong><small>SER8 · codex</small></div>
+                          <div><strong>host-coordinator</strong><small>codex on SER8</small></div>
                           <span class="fixture-state">connected</span>
                         </div>
                         <div aria-label="Terminal keyboard controls" class="terminal-key-rail" role="toolbar">
@@ -326,7 +326,7 @@ test("terminal transitions move focus before hiding either screen", async ({ pag
     <div class="connect-shell" tabindex="-1">
       <div class="connect-workspace" data-mode="directory" tabindex="-1">
         <div aria-hidden="false" class="connect-directory-screen" tabindex="-1"><button data-agent-key="SER8:agent-01">agent-01</button></div>
-        <div aria-hidden="true" class="connect-terminal-screen" inert><button class="terminal-back">Agents</button><small data-focus-rejection-message role="alert">Terminal focus transition failed · focus_rejected</small></div>
+        <div aria-hidden="true" class="connect-terminal-screen" inert><button class="terminal-back">Agents</button><small data-focus-rejection-message role="alert">Terminal focus transition failed: focus_rejected</small></div>
       </div>
     </div>`)
   await page.addScriptTag({
