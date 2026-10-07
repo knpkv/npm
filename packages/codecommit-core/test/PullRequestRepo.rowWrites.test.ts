@@ -1,9 +1,9 @@
 /**
- * Every write to a pull-request row is a compare-and-set on the row's version: (provider last
- * activity, observation number), compared in that order. A write observed at an older version than
- * the row's is a no-op. The table runs every writer pair, newer first and older second, and expects
- * the row exactly as the newer write left it, both when the older write saw an older provider
- * revision and when it saw the same revision but began earlier.
+ * Every write to a pull-request row is a compare-and-set per column group: the row, and the approval
+ * (approval, unknown reason, rules), each with its own version (provider last activity, observation
+ * number), compared in that order. A write observed at an older version than a group's leaves that
+ * group alone. The table runs every writer pair, newer first and older second, and expects every group
+ * the newer write touched exactly as it left it; a group only the older write touches may still move.
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
@@ -13,9 +13,9 @@ import {
   CachedPullRequest,
   PullRequestRepo,
   type PullRequestRepoContract,
+  type RowVersion,
   UpsertInput
 } from "../src/CacheService/repos/PullRequestRepo/index.js"
-import type { RowVersion } from "../src/CacheService/repos/PullRequestRepo/rowWrites.js"
 
 const account = "123456789012"
 const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
@@ -61,11 +61,16 @@ const listed = (lastActivity: Date, tag: Tag) =>
   })
 
 type Writer = (repo: PullRequestRepoContract, version: RowVersion, tag: Tag) => Effect.Effect<unknown, unknown>
+type Group = "row" | "approval"
 
-/** Each writer, writing values that differ by `tag`, observed at `version`. */
-const writers: ReadonlyArray<readonly [string, Writer]> = [
-  ["upsert", (repo, version, tag) => repo.upsert(listed(version.lastActivity, tag), version.observation)],
-  ["evaluated", (repo, version, tag) =>
+/** Each writer, the column groups it touches, and what it writes (differing by `tag`) at `version`. */
+const writers: ReadonlyArray<readonly [string, ReadonlyArray<Group>, Writer]> = [
+  [
+    "upsert",
+    ["row", "approval"],
+    (repo, version, tag) => repo.upsert(listed(version.lastActivity, tag), version.observation)
+  ],
+  ["evaluated", ["approval"], (repo, version, tag) =>
     repo.recordApprovalEvaluation(
       account,
       "60",
@@ -73,7 +78,7 @@ const writers: ReadonlyArray<readonly [string, Writer]> = [
       version,
       coordinates
     )],
-  ["unknown", (repo, version, tag) =>
+  ["unknown", ["approval"], (repo, version, tag) =>
     repo.recordApprovalEvaluation(
       account,
       "60",
@@ -85,7 +90,7 @@ const writers: ReadonlyArray<readonly [string, Writer]> = [
       version,
       coordinates
     )],
-  ["closed", (repo, version, tag) =>
+  ["closed", ["row"], (repo, version, tag) =>
     repo.updateStatusAndClosedAt(
       account,
       "60",
@@ -98,17 +103,20 @@ const writers: ReadonlyArray<readonly [string, Writer]> = [
     )],
   [
     "diffStats",
+    ["row"],
     (repo, version, tag) => repo.updateDiffStats(account, "60", tag === "older" ? 1 : 5, 2, 3, version, coordinates)
   ],
   [
     "commentCount",
+    ["row"],
     (repo, version, tag) => repo.updateCommentCount(account, "60", tag === "older" ? 1 : 9, version, coordinates)
   ],
   [
     "healthScore",
+    ["row"],
     (repo, version, tag) => repo.updateHealthScore(account, "60", tag === "older" ? 1 : 7, version, coordinates)
   ],
-  ["delete", (repo, version) => repo.deleteOne(account, "60", version.observation, coordinates)]
+  ["delete", ["row", "approval"], (repo, version) => repo.deleteOne(account, "60", version.observation, coordinates)]
 ]
 
 /**
@@ -139,21 +147,21 @@ const families: ReadonlyArray<readonly [string, RowVersion, RowVersion, boolean]
   ]
 ]
 
-const pairs: ReadonlyArray<readonly [string, Writer, RowVersion, Writer, RowVersion]> = families.flatMap((
-  [family, newerVersion, olderVersion, includeDelete]
-) =>
-  writers.filter(([newerName]) => includeDelete || newerName !== "delete").flatMap(([newerName, newerWrite]) =>
-    writers.filter(([olderName]) => includeDelete || olderName !== "delete").map((
-      [olderName, olderWrite]
-    ): readonly [string, Writer, RowVersion, Writer, RowVersion] => [
+type Pair = readonly [string, Writer, RowVersion, Writer, RowVersion, ReadonlyArray<Group>]
+
+const pairs: ReadonlyArray<Pair> = families.flatMap(([family, newerVersion, olderVersion, includeDelete]) => {
+  const eligible = writers.filter(([name]) => includeDelete || name !== "delete")
+  return eligible.flatMap(([newerName, touched, newerWrite]) =>
+    eligible.map(([olderName, , olderWrite]): Pair => [
       `${newerName}, then ${olderName} from ${family}`,
       newerWrite,
       newerVersion,
       olderWrite,
-      olderVersion
+      olderVersion,
+      touched
     ])
   )
-)
+})
 
 const withCache = <A, E>(body: Effect.Effect<A, E, PullRequestRepo>) =>
   Effect.gen(function*() {
@@ -179,29 +187,91 @@ const snapshot = Effect.flatMap(
   return rest
 })))
 
+const approvalColumns: ReadonlySet<string> = new Set(["isApproved", "approvalUnknownReason", "approvalRules"])
+
+/** The stored row's columns in `group`, or nothing when the row is gone. */
+const groupOf = <Row extends object>(row: Option.Option<Row>, group: Group) =>
+  Option.map(row, (columns) =>
+    Object.fromEntries(
+      Object.entries(columns).filter(([column]) => approvalColumns.has(column) === (group === "approval"))
+    ))
+
 const seed = (repo: PullRequestRepoContract) => repo.upsert(listed(t0, "seed"), 1)
+
+/** A full read of the `older` revision that saw conflicts and no approval. */
+const fullRead = Schema.decodeSync(UpsertInput)({
+  ...Schema.encodeSync(UpsertInput)(listed(older, "older")),
+  title: "Conflicting change",
+  isMergeable: 0
+})
 
 describe("pull-request row writes", () => {
   it.effect.each(pairs)(
-    "%s: the older write is a no-op",
-    ([, newerWrite, newerVersion, olderWrite, olderVersion]) =>
+    "%s: the older write leaves the newer write's groups alone",
+    ([, newerWrite, newerVersion, olderWrite, olderVersion, touched]) =>
       withCache(Effect.gen(function*() {
         const repo = yield* PullRequestRepo
         yield* seed(repo)
         yield* newerWrite(repo, newerVersion, "newer")
         const afterNewer = yield* snapshot
         yield* olderWrite(repo, olderVersion, "older")
-        expect(yield* snapshot).toEqual(afterNewer)
+        const afterOlder = yield* snapshot
+        // A deleted row stays deleted; otherwise each group the newer write touched is as it left it.
+        expect(Option.isSome(afterOlder)).toBe(Option.isSome(afterNewer))
+        for (const group of touched) expect(groupOf(afterOlder, group)).toEqual(groupOf(afterNewer, group))
       }))
   )
 
-  it.effect.each(writers)("%s still applies at a newer version", ([, write]) =>
+  it.effect.each(writers)("%s still applies at a newer version", ([, , write]) =>
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
       yield* seed(repo)
       const before = yield* snapshot
-      yield* write(repo, { lastActivity: newest, observation: 5 }, "newest")
+      // The "older" values differ from the seed for every writer; the version is the newest.
+      yield* write(repo, { lastActivity: newest, observation: 5 }, "older")
       expect(yield* snapshot).not.toEqual(before)
+    })))
+
+  // Cross-group: an approval re-read never makes the rest of the row look newer than it is. The
+  // reviewer's case: a full read and a later approval read of the same new revision, in either order.
+  it.effect.each([["the approval read lands first", true], ["the full read lands first", false]])(
+    "keeps a full read's row and a later approval read's approval of the same revision (%s)",
+    ([, approvalFirst]) =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        yield* seed(repo)
+        const full = yield* repo.observe()
+        const approvalRead = yield* repo.observe()
+        const writeFull = repo.upsert(fullRead, full)
+        const writeApproval = repo.recordApprovalEvaluation(
+          account,
+          "60",
+          { isApproved: true, approvalRules: [rule(true)] },
+          { lastActivity: older, observation: approvalRead },
+          coordinates
+        )
+        yield* approvalFirst
+          ? writeApproval.pipe(Effect.andThen(writeFull))
+          : writeFull.pipe(Effect.andThen(writeApproval))
+        const row = Option.getOrThrow(yield* snapshot)
+        expect([row.title, row.isMergeable, row.isApproved]).toEqual(["Conflicting change", 0, 1])
+      }))
+  )
+
+  it.effect("reports which groups an upsert wrote", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      yield* seed(repo)
+      const full = yield* repo.observe()
+      yield* repo.recordApprovalEvaluation(
+        account,
+        "60",
+        { isApproved: true, approvalRules: [rule(true)] },
+        { lastActivity: older, observation: yield* repo.observe() },
+        coordinates
+      )
+      expect(yield* repo.upsert(fullRead, full)).toEqual({ row: true, approval: false })
+      expect(yield* repo.upsert(listed(t0, "older"), 0)).toEqual({ row: false, approval: false })
     })))
 
   // The case the provider date alone missed: approval turned unknown without the revision moving.
@@ -222,11 +292,10 @@ describe("pull-request row writes", () => {
         { lastActivity: t0, observation: fast },
         coordinates
       )
-      const late = yield* repo.upsert(listed(t0, "older"), slow)
-      expect(late).toBe(false)
+      expect((yield* repo.upsert(listed(t0, "older"), slow)).approval).toBe(false)
       expect(Option.map(yield* snapshot, (row) => row.approvalUnknownReason)).toEqual(Option.some("NotPermitted"))
       // A read that began after both still recovers it.
-      expect(yield* repo.upsert(listed(t0, "newest"), yield* repo.observe())).toBe(true)
+      expect((yield* repo.upsert(listed(t0, "newest"), yield* repo.observe())).approval).toBe(true)
       expect(Option.map(yield* snapshot, (row) => row.approvalUnknownReason)).toEqual(Option.some(null))
     })))
 
@@ -234,11 +303,10 @@ describe("pull-request row writes", () => {
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
       const numbers = yield* Effect.all([repo.observe(), repo.observe(), repo.observe()], { concurrency: 3 })
-      expect(new Set(numbers).size).toBe(3)
       expect([...numbers].sort((a, b) => a - b)).toEqual([1, 2, 3])
     })))
 
-  // The tombstone holds a deletion's version: a listing newer than it still brings the row back.
+  // The tombstone holds a deletion: only a read begun after it, of a revision no older, brings it back.
   it.effect("re-inserts a deleted pull request only from a read begun after the deletion", () =>
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
@@ -259,19 +327,16 @@ describe("pull-request row writes", () => {
       yield* seed(repo)
       const before = yield* repo.observe()
       yield* repo.deleteOne(account, "60", yield* repo.observe(), coordinates)
-      // Before the deletion, after its provider version.
       yield* repo.deleteStale("2026-10-05T00:00:00.000Z")
       yield* repo.upsert(listed(older, "older"), before)
       expect(Option.isNone(yield* snapshot)).toBe(true)
-      // After the deletion: the tombstone expires with the rest of the stale cache.
       yield* repo.deleteStale("2999-01-01T00:00:00.000Z")
       yield* repo.upsert(listed(older, "older"), before)
       expect(Option.isSome(yield* snapshot)).toBe(true)
     })))
 
-  // A not-found read carries no revision: its order is its observation. The reviewer's case: a
-  // listing that began before it but read a newer revision must not bring the row back, in either
-  // completion order; a listing that began after it may.
+  // A not-found read carries no revision: its order is its observation. A listing that began before it
+  // but read a newer revision must not bring the row back, in either completion order.
   it.effect.each([["the listing lands first", true], ["the deletion lands first", false]])(
     "keeps a pull request deleted by a later not-found read when an earlier listing saw a newer revision (%s)",
     ([, listingFirst]) =>

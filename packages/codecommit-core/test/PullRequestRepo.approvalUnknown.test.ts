@@ -247,7 +247,8 @@ describe("PullRequestRepo approval unknown", () => {
         coordinates
       )
       const row = yield* read("53")
-      expect([row.isApproved, row.lastModifiedDate.toISOString()]).toEqual([false, "2026-10-07T00:00:00.000Z"])
+      // The newer evaluation wins; an evaluation moves only the approval group, so the row keeps its date.
+      expect([row.isApproved, row.lastModifiedDate.toISOString()]).toEqual([false, "2026-10-05T00:00:00.000Z"])
     })))
 
   // A stale CLOSED read must not rewind a newer row, which would then let its evaluation through.

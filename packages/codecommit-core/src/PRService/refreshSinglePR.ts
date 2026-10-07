@@ -11,7 +11,7 @@
 
 import { Effect, Option, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
-import { diffApprovalPools, diffComments, diffPR } from "../CacheService/diff.js"
+import { diffApprovalPools, diffComments, diffPR, notificationsFor } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { type NewNotification, NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type {
@@ -317,19 +317,21 @@ export const makeRefreshSinglePR = (
       )
       : []
 
-    const applied = yield* prRepo.upsert(freshUpsert, observation).pipe(
+    const written = yield* prRepo.upsert(freshUpsert, observation).pipe(
       Effect.mapError((cause) => new RefreshError({ failedAccounts: [durableAccountId], cause }))
     )
-    // Everything below acts on what this read saw, so only when the cache took it: a rejected write is
-    // older than the cached row, and its comments and transitions aren't current.
-    if (applied) {
+    // Everything below acts on what this read saw, so only for the groups the cache took: a group not
+    // written was older than the cache. Comments follow the row.
+    if (written.row) {
       yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(locs), identity).pipe(
         Effect.catch(() => Effect.void)
       )
-      yield* Effect.forEach([...pending, ...commentNotifications], (n) => notificationRepo.add(n), {
-        discard: true
-      }).pipe(Effect.catch(() => Effect.void))
     }
+    yield* Effect.forEach(
+      notificationsFor([...pending, ...commentNotifications], written),
+      (n) => notificationRepo.add(n),
+      { discard: true }
+    ).pipe(Effect.catch(() => Effect.void))
     return {
       revisionId: detail.revisionId,
       sourceCommit: detail.sourceCommit

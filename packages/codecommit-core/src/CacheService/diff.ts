@@ -238,3 +238,16 @@ export const diffComments = (
 
   return notifications
 }
+
+/** Notification types about a pull request's approval, written with its approval group. */
+const approvalNotificationTypes: ReadonlySet<string> = new Set(["approval_changed", "approval_requested"])
+
+/**
+ * The notifications a write actually backs: approval ones when its approval group was written, the
+ * rest when its row was. A group not written was older than the cache, so what it saw isn't current.
+ */
+export const notificationsFor = (
+  notifications: ReadonlyArray<NewNotification>,
+  written: { readonly row: boolean; readonly approval: boolean }
+): ReadonlyArray<NewNotification> =>
+  notifications.filter((n) => approvalNotificationTypes.has(n.type) ? written.approval : written.row)

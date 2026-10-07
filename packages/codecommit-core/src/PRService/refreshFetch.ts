@@ -11,7 +11,7 @@ import { Array as Arr, Cause, Effect, Option, Predicate, Ref, Stream, Subscripti
 import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
 import { isCredentialInvalidCause } from "../AwsCredentialErrors.js"
-import { diffApprovalPools, diffPR } from "../CacheService/diff.js"
+import { diffApprovalPools, diffPR, notificationsFor } from "../CacheService/diff.js"
 import { type NewNotification, NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import {
   type CachedPullRequest,
@@ -279,14 +279,18 @@ export const fetchAndUpsertPRs = (params: {
 
           // Upsert to cache + auto-subscribe current user's PRs
           if (awsAccountId !== "") {
-            const applied = yield* prRepo.upsert(prToUpsertInput(pr, awsAccountId), observation).pipe(
+            const written = yield* prRepo.upsert(prToUpsertInput(pr, awsAccountId), observation).pipe(
               Effect.tapError((e) => Effect.logWarning("cache upsert error", e)),
-              Effect.catch(() => withholdScopeSuccess(pr.account.profile, pr.account.region).pipe(Effect.as(false)))
+              Effect.catch(() =>
+                withholdScopeSuccess(pr.account.profile, pr.account.region).pipe(
+                  Effect.as({ row: false, approval: false })
+                )
+              )
             )
-            // Everything below acts on what this read saw, so only when the cache took it: a rejected
-            // write is older than the cached row, and nothing it saw is current.
+            // Everything below acts on what this read saw, so only for the groups the cache took: a
+            // group not written was older than the cache, and what this read saw of it isn't current.
             const unknownReason = pr.approvalUnknown
-            if (applied && unknownReason !== undefined) {
+            if (written.approval && unknownReason !== undefined) {
               // Upserted with its last known approval; the account's other pull requests carry on, and
               // its refresh counts as partial rather than successful.
               yield* Ref.update(unevaluated, (all) => [...all, {
@@ -298,15 +302,13 @@ export const fetchAndUpsertPRs = (params: {
               }])
               yield* Ref.update(partialScopes, (scopes) => new Set(scopes).add(accountRegionKey(profile, region)))
             }
-            if (applied) {
-              yield* Effect.forEach(pending, (n) => notificationRepo.add(n), { discard: true }).pipe(
-                Effect.catch(() => Effect.void)
-              )
-            }
+            yield* Effect.forEach(notificationsFor(pending, written), (n) => notificationRepo.add(n), {
+              discard: true
+            }).pipe(Effect.catch(() => Effect.void))
             const isAuthor = currentUser !== undefined && currentUser !== "" && pr.author === currentUser
             const isApprover = currentUser !== undefined && currentUser !== "" &&
               pr.approvalRules.some((r) => r.poolMembers.includes(currentUser))
-            if (applied && (isAuthor || isApprover)) {
+            if ((written.row && isAuthor) || (written.approval && isApprover)) {
               yield* subscriptionRepo.subscribe(awsAccountId, pr.id, {
                 repositoryName: pr.repositoryName,
                 accountRegion: pr.account.region

@@ -2,9 +2,12 @@ import * as Effect from "effect/Effect"
 import * as SqlClient from "effect/sql/SqlClient"
 
 /**
- * Row versions for `pull_requests`: (`last_modified_date`, `observation_seq`), compared in that
- * order. `observation_seq` comes from `observation_sequence`, incremented once per read before the
- * provider call, so two reads of the same provider revision are still ordered by when they began.
+ * Row versions for `pull_requests`, one per column group, each (provider last activity, observation)
+ * compared in that order: `last_modified_date`/`observation_seq` for the row, and
+ * `approval_version`/`approval_observation_seq` for the approval (`is_approved`,
+ * `approval_unknown_reason`, `approval_rules`), which an approval re-read writes on its own. The
+ * observation comes from `observation_sequence`, incremented once per read before the provider call,
+ * so two reads of the same provider revision are still ordered by when they began.
  *
  * `pull_request_tombstones` keeps the version at which a row was deleted: an insert observed at or
  * before it is a no-op, so a slower read can't bring a deleted pull request back, while a newer one
@@ -13,6 +16,9 @@ import * as SqlClient from "effect/sql/SqlClient"
 export default Effect.flatMap(SqlClient.SqlClient, (sql) =>
   Effect.all([
     sql`ALTER TABLE pull_requests ADD COLUMN observation_seq INTEGER NOT NULL DEFAULT 0`,
+    sql`ALTER TABLE pull_requests ADD COLUMN approval_version TEXT NOT NULL DEFAULT ''`,
+    sql`ALTER TABLE pull_requests ADD COLUMN approval_observation_seq INTEGER NOT NULL DEFAULT 0`,
+    sql`UPDATE pull_requests SET approval_version = last_modified_date`,
     sql`CREATE TABLE IF NOT EXISTS observation_sequence (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       value INTEGER NOT NULL

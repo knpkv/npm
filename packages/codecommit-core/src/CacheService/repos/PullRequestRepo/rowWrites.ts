@@ -36,17 +36,46 @@ interface StoredVersion {
   readonly observation: number
 }
 
+/** Which column groups an upsert wrote. */
+export interface GroupsWritten {
+  readonly row: boolean
+  readonly approval: boolean
+}
+
+interface GroupVersions {
+  readonly rowAt: string
+  readonly rowSeq: number
+  readonly approvalAt: string
+  readonly approvalSeq: number
+}
+
+/** A group was written when its stored version is now exactly the write's. */
+const groupsWritten = (rows: ReadonlyArray<GroupVersions>, version: StoredVersion): GroupsWritten => {
+  const after = rows[0]
+  return {
+    row: after !== undefined && after.rowAt === version.lastActivity && after.rowSeq === version.observation,
+    approval: after !== undefined && after.approvalAt === version.lastActivity &&
+      after.approvalSeq === version.observation
+  }
+}
+
 const stored = (version: RowVersion): StoredVersion => ({
   lastActivity: version.lastActivity.toISOString(),
   observation: version.observation
 })
 
 export const rowWrites = (sql: SqlClient.SqlClient) => {
-  /** The row's version is not newer than `version`. */
-  const notNewer = (version: StoredVersion) =>
+  /** The row group's version is not newer than `version`. */
+  const rowNotNewer = (version: StoredVersion) =>
     sql`(pull_requests.last_modified_date < ${version.lastActivity}
       OR (pull_requests.last_modified_date = ${version.lastActivity}
         AND pull_requests.observation_seq <= ${version.observation}))`
+
+  /** The approval group's version is not newer than `version`. */
+  const approvalNotNewer = (version: StoredVersion) =>
+    sql`(pull_requests.approval_version < ${version.lastActivity}
+      OR (pull_requests.approval_version = ${version.lastActivity}
+        AND pull_requests.approval_observation_seq <= ${version.observation}))`
 
   const applied = (rows: ReadonlyArray<unknown>) => rows.length > 0
 
@@ -66,17 +95,22 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
       const approvalRulesJson = req.approvalRules !== undefined && req.approvalRules.length > 0
         ? JSON.stringify(req.approvalRules)
         : "[]"
-      return sql<{ readonly applied: number }>`INSERT INTO pull_requests
+      const version = { lastActivity: req.lastModifiedDate, observation }
+      // Each group is written only where this read is not older than that group's version.
+      const row = rowNotNewer(version)
+      const approval = approvalNotNewer(version)
+      return sql<GroupVersions>`INSERT INTO pull_requests
           (id, aws_account_id, repo_account_id, account_profile, account_region, title, description,
            author, repository_name, creation_date, last_modified_date, status,
            source_branch, destination_branch, is_mergeable, is_approved, approval_unknown_reason,
-           comment_count, link, approved_by, approved_by_arns, approval_rules, fetched_at, observation_seq)
+           comment_count, link, approved_by, approved_by_arns, approval_rules, fetched_at, observation_seq,
+           approval_version, approval_observation_seq)
           SELECT ${req.id}, ${req.awsAccountId}, ${req.repoAccountId}, ${req.accountProfile}, ${req.accountRegion},
             ${req.title}, ${req.description}, ${req.author}, ${req.repositoryName},
             ${req.creationDate}, ${req.lastModifiedDate}, ${req.status},
             ${req.sourceBranch}, ${req.destinationBranch}, ${req.isMergeable}, ${req.isApproved}, ${req.approvalUnknownReason},
             ${req.commentCount}, ${req.link}, ${approvedByStr}, ${approvedByArnsStr}, ${approvalRulesJson}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-            ${observation}
+            ${observation}, ${req.lastModifiedDate}, ${observation}
           -- A deleted pull request comes back only from a read that began after the deletion, of a
           -- revision no older than the deleted row's.
           WHERE NOT EXISTS (
@@ -86,46 +120,69 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
               AND (t.observation_seq >= ${observation} OR t.version > ${req.lastModifiedDate})
           )
           ON CONFLICT (aws_account_id, id, repository_name, account_region) DO UPDATE SET
-            account_profile = excluded.account_profile,
-            account_region = excluded.account_region,
-            title = excluded.title,
-            description = excluded.description,
-            author = excluded.author,
-            repository_name = excluded.repository_name,
-            creation_date = excluded.creation_date,
-            last_modified_date = excluded.last_modified_date,
-            status = excluded.status,
-            source_branch = excluded.source_branch,
-            destination_branch = excluded.destination_branch,
-            is_mergeable = excluded.is_mergeable,
-            -- An unknown evaluation keeps the last known approval and rules; a successful one replaces both.
-            is_approved = CASE WHEN excluded.approval_unknown_reason IS NULL
-              THEN excluded.is_approved ELSE pull_requests.is_approved END,
-            approval_unknown_reason = excluded.approval_unknown_reason,
-            comment_count = COALESCE(excluded.comment_count, pull_requests.comment_count),
-            health_score = pull_requests.health_score,
-            link = excluded.link,
-            approved_by = COALESCE(excluded.approved_by, pull_requests.approved_by),
-            approved_by_arns = COALESCE(excluded.approved_by_arns, pull_requests.approved_by_arns),
-            -- Rules are fetched fresh on every evaluated sync, unlike approved_by which accumulates
-            approval_rules = CASE WHEN excluded.approval_unknown_reason IS NULL
-              THEN excluded.approval_rules ELSE pull_requests.approval_rules END,
+            account_profile = CASE WHEN ${row} THEN excluded.account_profile ELSE pull_requests.account_profile END,
+            account_region = CASE WHEN ${row} THEN excluded.account_region ELSE pull_requests.account_region END,
+            title = CASE WHEN ${row} THEN excluded.title ELSE pull_requests.title END,
+            description = CASE WHEN ${row} THEN excluded.description ELSE pull_requests.description END,
+            author = CASE WHEN ${row} THEN excluded.author ELSE pull_requests.author END,
+            repository_name = CASE WHEN ${row} THEN excluded.repository_name ELSE pull_requests.repository_name END,
+            creation_date = CASE WHEN ${row} THEN excluded.creation_date ELSE pull_requests.creation_date END,
+            status = CASE WHEN ${row} THEN excluded.status ELSE pull_requests.status END,
+            source_branch = CASE WHEN ${row} THEN excluded.source_branch ELSE pull_requests.source_branch END,
+            destination_branch = CASE WHEN ${row} THEN excluded.destination_branch ELSE pull_requests.destination_branch END,
+            is_mergeable = CASE WHEN ${row} THEN excluded.is_mergeable ELSE pull_requests.is_mergeable END,
+            link = CASE WHEN ${row} THEN excluded.link ELSE pull_requests.link END,
+            comment_count = CASE WHEN ${row} THEN COALESCE(excluded.comment_count, pull_requests.comment_count)
+              ELSE pull_requests.comment_count END,
+            approved_by = CASE WHEN ${row} THEN COALESCE(excluded.approved_by, pull_requests.approved_by)
+              ELSE pull_requests.approved_by END,
+            approved_by_arns = CASE WHEN ${row} THEN COALESCE(excluded.approved_by_arns, pull_requests.approved_by_arns)
+              ELSE pull_requests.approved_by_arns END,
             repo_account_id = COALESCE(excluded.repo_account_id, pull_requests.repo_account_id),
             fetched_at = excluded.fetched_at,
-            observation_seq = excluded.observation_seq
-          WHERE ${notNewer({ lastActivity: req.lastModifiedDate, observation })}
-          RETURNING 1 AS applied`.pipe(Effect.map(applied))
+            -- The approval group: an unknown evaluation keeps the last known approval and rules, a
+            -- successful one replaces both. Rules are fetched fresh on every evaluated sync, unlike
+            -- approved_by, which accumulates.
+            is_approved = CASE WHEN ${approval} AND excluded.approval_unknown_reason IS NULL
+              THEN excluded.is_approved ELSE pull_requests.is_approved END,
+            approval_rules = CASE WHEN ${approval} AND excluded.approval_unknown_reason IS NULL
+              THEN excluded.approval_rules ELSE pull_requests.approval_rules END,
+            approval_unknown_reason = CASE WHEN ${approval}
+              THEN excluded.approval_unknown_reason ELSE pull_requests.approval_unknown_reason END,
+            -- SQLite evaluates every SET expression on the row as it was, so each guard sees the old versions.
+            approval_version = CASE WHEN ${approval} THEN excluded.approval_version ELSE pull_requests.approval_version END,
+            approval_observation_seq = CASE WHEN ${approval}
+              THEN excluded.approval_observation_seq ELSE pull_requests.approval_observation_seq END,
+            last_modified_date = CASE WHEN ${row} THEN excluded.last_modified_date ELSE pull_requests.last_modified_date END,
+            observation_seq = CASE WHEN ${row} THEN excluded.observation_seq ELSE pull_requests.observation_seq END
+          WHERE ${row} OR ${approval}
+          RETURNING last_modified_date AS rowAt, observation_seq AS rowSeq,
+            approval_version AS approvalAt, approval_observation_seq AS approvalSeq`.pipe(
+        Effect.map((rows) => groupsWritten(rows, version))
+      )
     },
 
     /**
-     * Apply `set` to the row matched by `where` unless its version is newer than `version`, and move
-     * it to `version`. True when the row was written.
+     * Apply `set` to the row group matched by `where` unless that group's version is newer than
+     * `version`, and move the group to `version`. True when the row was written.
      */
     compareAndSet: (where: Statement.Fragment, version: RowVersion, set: Statement.Fragment) => {
       const v = stored(version)
       return sql<{ readonly applied: number }>`UPDATE pull_requests
         SET ${set}, last_modified_date = ${v.lastActivity}, observation_seq = ${v.observation}
-        WHERE ${where} AND ${notNewer(v)} RETURNING 1 AS applied`.pipe(Effect.map(applied))
+        WHERE ${where} AND ${rowNotNewer(v)} RETURNING 1 AS applied`.pipe(Effect.map(applied))
+    },
+
+    /**
+     * Apply `set` (approval columns only) unless the approval group's version is newer than
+     * `version`, and move only that group to it: an approval re-read never makes the rest of the row
+     * look newer than it is. True when the row was written.
+     */
+    compareAndSetApproval: (where: Statement.Fragment, version: RowVersion, set: Statement.Fragment) => {
+      const v = stored(version)
+      return sql<{ readonly applied: number }>`UPDATE pull_requests
+        SET ${set}, approval_version = ${v.lastActivity}, approval_observation_seq = ${v.observation}
+        WHERE ${where} AND ${approvalNotNewer(v)} RETURNING 1 AS applied`.pipe(Effect.map(applied))
     },
 
     /**
@@ -139,13 +196,15 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
         sql`INSERT INTO pull_request_tombstones
             (aws_account_id, id, repository_name, account_region, version, observation_seq)
           SELECT aws_account_id, id, repository_name, account_region, last_modified_date, ${observation}
-          FROM pull_requests WHERE ${where} AND observation_seq <= ${observation}
+          FROM pull_requests
+          WHERE ${where} AND observation_seq <= ${observation} AND approval_observation_seq <= ${observation}
           ON CONFLICT (aws_account_id, id, repository_name, account_region) DO UPDATE SET
             version = excluded.version, observation_seq = excluded.observation_seq,
             deleted_at = excluded.deleted_at`.pipe(
           Effect.andThen(
             sql<{ readonly applied: number }>`DELETE FROM pull_requests
-              WHERE ${where} AND observation_seq <= ${observation} RETURNING 1 AS applied`
+              WHERE ${where} AND observation_seq <= ${observation} AND approval_observation_seq <= ${observation}
+              RETURNING 1 AS applied`
           ),
           Effect.map(applied)
         )

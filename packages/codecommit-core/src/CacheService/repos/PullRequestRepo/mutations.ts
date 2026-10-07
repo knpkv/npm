@@ -80,11 +80,15 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
     observe: () => writes.observe().pipe(cacheError("observe")),
 
     /**
-     * Write a listed pull request observed by `observation`, unless its row is newer. True when the
-     * row was written; a false result means a newer read already reached it.
+     * Write a listed pull request observed by `observation`. The row and its approval are written
+     * each unless that group is newer; the result says which were, and a group not written means a
+     * newer read already reached it.
      */
     upsert: (input: UpsertInput, observation: number) =>
-      upsert_(input, observation).pipe(Effect.tap(publishIfApplied), cacheError("upsert")),
+      upsert_(input, observation).pipe(
+        Effect.tap((written) => publishIfApplied(written.row || written.approval)),
+        cacheError("upsert")
+      ),
 
     upsertMany: (prs: ReadonlyArray<UpsertInput>, observation: number) =>
       sql.withTransaction(Effect.forEach(prs, (pr) => upsert_(pr, observation), { discard: true })).pipe(
@@ -150,7 +154,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
           approval_rules = ${read.approvalRules.length > 0 ? JSON.stringify(read.approvalRules) : "[]"}`
       return ensureUnambiguous(awsAccountId, id, coordinates).pipe(
         Effect.andThen(
-          writes.compareAndSet(pullRequestWhere(awsAccountId, id, coordinates), version, set)
+          writes.compareAndSetApproval(pullRequestWhere(awsAccountId, id, coordinates), version, set)
         ),
         Effect.tap(publishIfApplied),
         cacheError("recordApprovalEvaluation")

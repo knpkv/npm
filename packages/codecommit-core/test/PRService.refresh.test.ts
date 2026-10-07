@@ -133,7 +133,7 @@ describe("PRService.refresh", () => {
           batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
         }),
         Layer.mock(CommentRepo, {
-          upsert: () => Effect.succeed(true)
+          upsert: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
         Layer.mock(PullRequestRepo, {
@@ -360,7 +360,7 @@ describe("PRService.refresh", () => {
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(EventsHub, { batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.succeed(true) }),
+          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(PullRequestRepo, {
             observe: () => Effect.succeed(1),
@@ -461,7 +461,7 @@ describe("PRService.refresh", () => {
           getCommentsForPullRequest: () => Effect.succeed([])
         }),
         Layer.mock(EventsHub, { batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect }),
-        Layer.mock(CommentRepo, { upsert: () => Effect.succeed(true) }),
+        Layer.mock(CommentRepo, { upsert: () => Effect.void }),
         Layer.mock(NotificationRepo, {}),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),

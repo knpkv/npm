@@ -18,6 +18,7 @@ import * as Q from "./queries.js"
 export { approvalColumnsOf, type ApprovalRead, CachedPullRequest, type SearchResult, UpsertInput } from "./internal.js"
 export type { CachedPullRequest as CachedPullRequestType } from "./internal.js"
 export { PullRequestAmbiguityError } from "./queries.js"
+export type { GroupsWritten, RowVersion } from "./rowWrites.js"
 
 const makePullRequestRepo = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient

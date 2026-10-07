@@ -246,7 +246,7 @@ describe("fetchAndUpsertPRs", () => {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void,
-          upsert: () => Effect.succeed(true),
+          upsert: () => Effect.succeed({ row: true, approval: true }),
           recordApprovalEvaluation: () => Effect.succeed(true)
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -1023,7 +1023,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findByCoordinates: () => Effect.succeed(Option.some(cachedRow)),
-          upsert: () => Effect.succeed(true),
+          upsert: () => Effect.succeed({ row: true, approval: true }),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1070,7 +1070,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           recordApprovalEvaluation: () => Effect.succeed(true),
-          upsert: () => Effect.succeed(true),
+          upsert: () => Effect.succeed({ row: true, approval: true }),
           // PR 35 closed at the provider; PR 36 was just listed, so it is not stale.
           findStaleOpen: () => Effect.succeed([staleOpenPR]),
           updateStatusAndClosedAt: () => Ref.update(statusUpdates, (count) => count + 1),
@@ -1276,7 +1276,9 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           upsert: (input) =>
-            Ref.update(upserted, (rows) => [...rows, [input.id, input.approvalUnknownReason]]).pipe(Effect.as(true)),
+            Ref.update(upserted, (rows) => [...rows, [input.id, input.approvalUnknownReason]]).pipe(
+              Effect.as({ row: true, approval: true })
+            ),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1330,7 +1332,7 @@ describe("fetchAndUpsertPRs", () => {
         }),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
-          upsert: () => Effect.succeed(false),
+          upsert: () => Effect.succeed({ row: false, approval: false }),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1369,7 +1371,7 @@ describe("fetchAndUpsertPRs", () => {
         }),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
-          upsert: () => Effect.succeed(true),
+          upsert: () => Effect.succeed({ row: true, approval: true }),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1414,7 +1416,8 @@ describe("fetchAndUpsertPRs", () => {
         }),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
-          upsert: (input) => Ref.set(upsertedRepoAccountId, input.repoAccountId),
+          upsert: (input) =>
+            Ref.set(upsertedRepoAccountId, input.repoAccountId).pipe(Effect.as({ row: true, approval: true })),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1455,7 +1458,7 @@ describe("fetchAndUpsertPRs", () => {
           findByAccountAndId: () => Effect.succeed(Option.some(staleOpenPR)),
           findByCoordinates: () => Effect.succeed(Option.some(staleOpenPR)),
           findStaleOpen: () => Effect.succeed([]),
-          upsert: () => Effect.succeed(true),
+          upsert: () => Effect.succeed({ row: true, approval: true }),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {
@@ -1518,7 +1521,7 @@ describe("fetchAndUpsertPRs", () => {
             findByAccountAndId: () => Effect.succeed(Option.some(cachedPending)),
             findByCoordinates: () => Effect.succeed(Option.some(cachedPending)),
             findStaleOpen: () => Effect.succeed([]),
-            upsert: () => Effect.succeed(applied),
+            upsert: () => Effect.succeed({ row: applied, approval: applied }),
             propagateRepoAccountId: () => Effect.void
           }),
           Layer.mock(NotificationRepo, {
