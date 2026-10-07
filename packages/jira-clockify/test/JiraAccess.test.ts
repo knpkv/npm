@@ -35,6 +35,12 @@ const siteClient = (site: Site | "offline") =>
         request,
         new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
       ))
+    // Atlassian's gateway for this site accepts a scoped token, which the site itself refuses.
+    if (url.origin === "https://api.atlassian.com" && url.pathname === `/ex/jira/${site.cloudId}/rest/api/3/myself`) {
+      return request.headers.authorization === `Basic ${btoa(`dev@example.com:scoped-token`)}`
+        ? respond(200, { accountId: "account-1", displayName: "Dev" })
+        : respond(401, {})
+    }
     if (url.origin !== site.origin) return respond(404, {})
     if (url.pathname === "/_edge/tenant_info") {
       return site.cloudId === null ? respond(404, {}) : respond(200, { cloudId: site.cloudId })
@@ -184,6 +190,26 @@ describe("JiraAccess", () => {
         )
         expect(yield* access.removeToken).toBe(true)
         expect(Option.map(yield* access.connection, (value) => value.method)).toEqual(Option.some("oauth"))
+      })))
+
+  // Review finding: a scoped token only works through api.atlassian.com/ex/jira/<cloudId>; the site
+  // refuses it. It must verify there, and every later request must keep using the gateway.
+  it.effect("connects a scoped token through Atlassian's gateway and keeps using it", () =>
+    withAccess({}, () =>
+      Effect.gen(function*() {
+        const access = yield* JiraAccess
+        const verified = yield* connect({ site: "team", token: "scoped-token" })
+        expect(verified).toMatchObject({ siteUrl: site.origin, apiUrl: "https://api.atlassian.com/ex/jira/cloud-1" })
+        yield* access.saveToken(verified)
+        const connection = yield* access.connection
+        expect(Option.map(connection, (value) => [value.siteUrl, value.credential])).toEqual(
+          Option.some([site.origin, {
+            type: "basic",
+            email: "dev@example.com",
+            apiToken: expect.anything(),
+            siteUrl: "https://api.atlassian.com/ex/jira/cloud-1"
+          }])
+        )
       })))
 
   // Coord: a failed check names its cause — wrong site, bad token, or no network — never the token.

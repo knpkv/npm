@@ -561,7 +561,7 @@
       "name": "Button",
       "props": {
         "defaults": {
-          "size": "default",
+          "size": "dense",
           "variant": "secondary"
         },
         "types": [
@@ -573,6 +573,7 @@
       "states": [
         "compact",
         "default",
+        "dense",
         "disabled",
         "loading",
         "primary",
@@ -583,7 +584,7 @@
       "status": "stable",
       "variants": [
         {
-          "defaultValue": "default",
+          "defaultValue": "dense",
           "description": "Controls the size presentation axis of Button.",
           "name": "size",
           "values": [
@@ -594,6 +595,10 @@
             {
               "description": "Use default for the size presentation.",
               "name": "default"
+            },
+            {
+              "description": "Use dense for the size presentation.",
+              "name": "dense"
             },
             {
               "description": "Use principal for the size presentation.",
@@ -2050,7 +2055,7 @@
       "name": "Field",
       "props": {
         "defaults": {
-          "size": "default"
+          "size": "dense"
         },
         "types": [
           "FieldControlProps",
@@ -2063,12 +2068,13 @@
       ],
       "states": [
         "compact",
-        "default"
+        "default",
+        "dense"
       ],
       "status": "stable",
       "variants": [
         {
-          "defaultValue": "default",
+          "defaultValue": "dense",
           "description": "Controls the size presentation axis of Field.",
           "name": "size",
           "values": [
@@ -2079,6 +2085,10 @@
             {
               "description": "Use default for the size presentation.",
               "name": "default"
+            },
+            {
+              "description": "Use dense for the size presentation.",
+              "name": "dense"
             }
           ]
         }
@@ -2651,7 +2661,7 @@
       "name": "IconButton",
       "props": {
         "defaults": {
-          "size": "default",
+          "size": "dense",
           "variant": "secondary"
         },
         "types": [
@@ -2663,6 +2673,7 @@
       "states": [
         "compact",
         "default",
+        "dense",
         "disabled",
         "loading",
         "primary",
@@ -2673,7 +2684,7 @@
       "status": "stable",
       "variants": [
         {
-          "defaultValue": "default",
+          "defaultValue": "dense",
           "description": "Controls the size presentation axis of IconButton.",
           "name": "size",
           "values": [
@@ -2684,6 +2695,10 @@
             {
               "description": "Use default for the size presentation.",
               "name": "default"
+            },
+            {
+              "description": "Use dense for the size presentation.",
+              "name": "dense"
             },
             {
               "description": "Use principal for the size presentation.",
@@ -3989,7 +4004,7 @@
       "name": "Select",
       "props": {
         "defaults": {
-          "size": "default"
+          "size": "dense"
         },
         "types": [
           "SelectProps"
@@ -4000,12 +4015,13 @@
       "states": [
         "compact",
         "default",
+        "dense",
         "disabled"
       ],
       "status": "stable",
       "variants": [
         {
-          "defaultValue": "default",
+          "defaultValue": "dense",
           "description": "Controls the size presentation axis of Select.",
           "name": "size",
           "values": [
@@ -4016,6 +4032,10 @@
             {
               "description": "Use default for the size presentation.",
               "name": "default"
+            },
+            {
+              "description": "Use dense for the size presentation.",
+              "name": "dense"
             }
           ]
         }
@@ -4055,6 +4075,10 @@
         },
         {
           "kind": "value",
+          "name": "RLY_CONTROL_HEIGHT_TOKEN_NAMES"
+        },
+        {
+          "kind": "value",
           "name": "RLY_MOTION_TOKEN_NAMES"
         },
         {
@@ -4072,6 +4096,10 @@
         {
           "kind": "type",
           "name": "RlyColorToken"
+        },
+        {
+          "kind": "type",
+          "name": "RlyControlHeightToken"
         },
         {
           "kind": "type",
@@ -5405,7 +5433,8 @@
       "name": "ThemeSelect",
       "props": {
         "defaults": {
-          "labelVisibility": "visible"
+          "labelVisibility": "visible",
+          "size": "dense"
         },
         "types": [
           "ThemeSelectProps"
@@ -5414,7 +5443,9 @@
       "purpose": "Let the viewer choose the system, light, or dark theme",
       "slots": [],
       "states": [
+        "compact",
         "default",
+        "dense",
         "hidden",
         "visible"
       ],
@@ -5432,6 +5463,25 @@
             {
               "description": "Use visible for the labelVisibility presentation.",
               "name": "visible"
+            }
+          ]
+        },
+        {
+          "defaultValue": "dense",
+          "description": "Controls the size presentation axis of ThemeSelect.",
+          "name": "size",
+          "values": [
+            {
+              "description": "Use compact for the size presentation.",
+              "name": "compact"
+            },
+            {
+              "description": "Use default for the size presentation.",
+              "name": "default"
+            },
+            {
+              "description": "Use dense for the size presentation.",
+              "name": "dense"
             }
           ]
         }
@@ -5598,7 +5648,7 @@
       "name": "ToggleGroup",
       "props": {
         "defaults": {
-          "size": "default"
+          "size": "dense"
         },
         "types": [
           "ToggleGroupProps"
@@ -5609,12 +5659,13 @@
       "states": [
         "checked",
         "compact",
-        "default"
+        "default",
+        "dense"
       ],
       "status": "experimental",
       "variants": [
         {
-          "defaultValue": "default",
+          "defaultValue": "dense",
           "description": "Controls the size presentation axis of ToggleGroup.",
           "name": "size",
           "values": [
@@ -5625,6 +5676,10 @@
             {
               "description": "Use default for the size presentation.",
               "name": "default"
+            },
+            {
+              "description": "Use dense for the size presentation.",
+              "name": "dense"
             }
           ]
         }

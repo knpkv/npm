@@ -7,9 +7,13 @@
     border-radius: var(--rly-radius-group);
     color: var(--rly-color-text-1);
     cursor: pointer;
-    display: grid;
-    gap: var(--rly-space-16);
-    grid-template-columns: auto minmax(var(--rly-space-0), 1fr) auto;
+    /*
+     * Intrinsic, not viewport-keyed: the jobs sit beside the copy while there is room and wrap below
+     * it in a narrow slot, so the button fits a 320px column on any page.
+     */
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-12) var(--rly-space-16);
     inline-size: 100%;
     min-block-size: var(--rly-space-96);
     padding: var(--rly-space-20);
@@ -53,6 +57,7 @@
   }
 
   .copy {
+    flex: 1 1 12rem;
     gap: var(--rly-space-4);
   }
 
@@ -81,20 +86,20 @@
   .context {
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
+  /* A job count is plain text ("Review ready 1"), not a chip, and wraps between words in a narrow row. */
   .job {
     align-items: center;
-    border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-round);
     color: var(--rly-color-text-2);
     display: inline-flex;
+    flex-wrap: wrap;
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
-    gap: var(--rly-space-8);
-    padding: var(--rly-space-6) var(--rly-space-12);
-    white-space: nowrap;
+    gap: var(--rly-space-4) var(--rly-space-8);
+    margin-inline-start: auto;
+    min-inline-size: var(--rly-space-0);
   }
 
   .count {
@@ -105,14 +110,7 @@
   @media (max-width: 25rem) {
     .root {
       align-items: start;
-      grid-template-columns: auto minmax(var(--rly-space-0), 1fr);
       padding: var(--rly-space-16);
-    }
-
-    .job {
-      grid-column: 2;
-      justify-self: start;
-      white-space: normal;
     }
   }
 }

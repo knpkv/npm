@@ -1,0 +1,9 @@
+id: no-unconfirmed-sso-logout
+snapshots:
+  ? |
+    const ssoLogout = useAtomSet(notificationsSsoLogoutAtom)
+  : labels:
+      - source: notificationsSsoLogoutAtom
+        style: primary
+        start: 29
+        end: 55

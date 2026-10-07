@@ -30,7 +30,8 @@ jcf auth jira token        # Site, email and an API token from https://id.atlass
 
 The token is checked against Jira before it is saved to `~/.jcf/jira.json` (owner-only, `0600`) and is
 never printed. Only Jira Cloud addresses (`*.atlassian.net`) are accepted, so a typo or look-alike
-domain never receives the token. A failed check says whether the site, the token or the network was
+domain never receives the token. Classic and scoped tokens both work: a scoped token, which the
+site itself refuses, is used through Atlassian's gateway for that site (`api.atlassian.com/ex/jira/<cloud id>`). A failed check says whether the site, the token or the network was
 the problem.
 
 Advanced: connect through your own Atlassian OAuth app instead.

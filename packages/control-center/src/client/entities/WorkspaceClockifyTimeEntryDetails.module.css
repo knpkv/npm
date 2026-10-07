@@ -102,7 +102,8 @@
 .entry dd,
 .people dd {
   margin: var(--rly-space-0);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .section {
@@ -135,14 +136,15 @@
 }
 
 .attribution {
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-clockify);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
   gap: var(--rly-space-20);
   padding: var(--rly-space-20);
 }
 
 .attribution[data-state="missing"] {
   background: var(--rly-color-held-tint);
-  border-inline-start-color: var(--rly-color-held-ink);
+  border-color: var(--rly-color-held-ink);
 }
 
 .attribution > div {

@@ -58,7 +58,8 @@
 .heroHeading strong {
   font: var(--rly-type-verdict-weight) var(--rly-type-verdict-size) / var(--rly-type-verdict-line-height)
     var(--rly-type-verdict-font);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .summary {
@@ -86,7 +87,8 @@
 .actions dd,
 .deliveryCounts dd {
   margin: var(--rly-space-0);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .heroFacts dd {
@@ -134,14 +136,16 @@
 }
 
 .peopleLanes > div {
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codepipeline);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
   gap: var(--rly-space-8);
   padding: var(--rly-space-16);
 }
 
 .partial {
   background: color-mix(in srgb, var(--rly-color-service-codepipeline) 8%, var(--rly-color-surface-2));
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codepipeline);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
   margin: var(--rly-space-0);
   padding: var(--rly-space-16);
 }
@@ -155,7 +159,6 @@
 
 .actions > li {
   border: 1px solid var(--rly-color-border-1);
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codepipeline);
   border-radius: var(--rly-radius-control);
   gap: var(--rly-space-16);
   padding: var(--rly-space-20);
@@ -234,7 +237,8 @@
 .sourceArtifacts code {
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .sourceArtifacts small {

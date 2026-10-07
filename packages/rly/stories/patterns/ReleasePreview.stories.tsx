@@ -317,12 +317,14 @@ export const ExternalMotionOwnership: Story = {
     const reopenedLayer = canvasElement.querySelector<HTMLElement>("[data-rly-dialog-layer]")
     if (reopenedLayer === null) throw new Error("Reopened preview modal layer did not render")
     await expect(reopenedLayer).toHaveAttribute("data-rly-dialog-entry-motion", "intrinsic")
-    await expect(getComputedStyle(reopenedDialog).animationName).toMatch(/dialog-enter$/)
+    // Intrinsic entry: the centred dialog's keyframes, or the full-screen compact ones on a phone.
+    await expect(getComputedStyle(reopenedDialog).animationName).toMatch(/dialog-(enter|compact-in)$/)
     canvasElement.dataset.releasePreviewExternalMotionPlayComplete = "true"
   },
   render: () => <ExternalMotionPreview />
 }
 
+/** A canary pinned to a phone in dark forced colours, whatever the toolbar says. */
 export const CompactForcedColors: Story = {
   args: {
     agentEntry: agentSlot,

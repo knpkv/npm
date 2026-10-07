@@ -577,6 +577,15 @@ const testPluginConnection = Effect.fn("PluginAdministration.testConnection")(fu
 
   if (Result.isFailure(outcome)) {
     const failure = outcome.failure
+    yield* Effect.logWarning("Plugin connection test failed").pipe(
+      Effect.annotateLogs({
+        pluginConnectionId,
+        providerId: record.providerId,
+        failure: failure._tag,
+        ...("operation" in failure && { operation: failure.operation }),
+        ...("diagnosticCode" in failure && { diagnosticCode: failure.diagnosticCode })
+      })
+    )
     return connectionTestWithDiscovery({
       _tag: "failed",
       pluginConnectionId,

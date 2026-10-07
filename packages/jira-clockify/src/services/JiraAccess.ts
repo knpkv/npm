@@ -36,6 +36,11 @@ export { CONNECT_JIRA_COMMAND as connectJiraCommand } from "../utils/hints.js"
 /** What `~/.jcf/jira.json` holds. The token stays in this file and in request headers only. */
 const StoredToken = Schema.Struct({
   siteUrl: Schema.String,
+  /**
+   * Where requests go: the site itself for a classic token, or Atlassian's gateway for the site
+   * (`https://api.atlassian.com/ex/jira/<cloudId>`) for a scoped token, which the site refuses.
+   */
+  apiUrl: Schema.String,
   cloudId: Schema.String,
   email: Schema.String,
   apiToken: Schema.String,
@@ -172,7 +177,7 @@ export const layer = Layer.effect(
           type: "basic",
           email: stored.email,
           apiToken: Redacted.make(stored.apiToken),
-          siteUrl: stored.siteUrl
+          siteUrl: stored.apiUrl
         },
         cloudId: stored.cloudId,
         siteUrl: stored.siteUrl,
@@ -229,15 +234,20 @@ export const layer = Layer.effect(
         )
 
         const authorization = `Basic ${Base64.encode(`${input.email}:${Redacted.value(input.apiToken)}`)}`
-        const myself = yield* httpClient.execute(
-          HttpClientRequest.get(`${siteUrl}/rest/api/3/myself`).pipe(
-            HttpClientRequest.setHeader("Authorization", authorization),
-            HttpClientRequest.setHeader("Accept", "application/json")
-          )
-        ).pipe(Effect.mapError(unreachable))
-        if (myself.status === 401 || myself.status === 403) {
-          return yield* new JiraTokenRejected({ siteUrl, email: input.email })
-        }
+        const askMyself = (apiUrl: string) =>
+          httpClient.execute(
+            HttpClientRequest.get(`${apiUrl}/rest/api/3/myself`).pipe(
+              HttpClientRequest.setHeader("Authorization", authorization),
+              HttpClientRequest.setHeader("Accept", "application/json")
+            )
+          ).pipe(Effect.mapError(unreachable))
+        const refused = (status: number) => status === 401 || status === 403
+        // A classic token works on the site; a scoped one only through Atlassian's gateway for it.
+        const gateway = `https://api.atlassian.com/ex/jira/${cloudId}`
+        const onSite = yield* askMyself(siteUrl)
+        const apiUrl = refused(onSite.status) ? gateway : siteUrl
+        const myself = apiUrl === gateway ? yield* askMyself(gateway) : onSite
+        if (refused(myself.status)) return yield* new JiraTokenRejected({ siteUrl, email: input.email })
         if (myself.status !== 200) return yield* unreachable()
         const user = yield* myself.json.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Myself)),
@@ -245,6 +255,7 @@ export const layer = Layer.effect(
         )
         return {
           siteUrl,
+          apiUrl,
           cloudId,
           email: input.email,
           apiToken: Redacted.value(input.apiToken),

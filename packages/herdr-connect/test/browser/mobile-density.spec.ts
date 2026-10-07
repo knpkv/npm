@@ -281,9 +281,10 @@ test("390x844 keeps the terminal rail reachable with truthful button semantics",
   await expect(ctrl).toHaveAccessibleName("Ctrl")
   expect(await page.locator("[aria-keyshortcuts]").count()).toBe(0)
   await expect(page.locator("[data-terminal-key=\"tab\"]")).toBeEnabled()
-  expect(await rail.locator(".terminal-key-scroll").evaluate((element) => getComputedStyle(element).overflowX)).toBe(
-    "auto"
-  )
+  // Phones lay every key out whole in a grid; nothing hides off to the side.
+  const scroller = rail.locator(".terminal-key-scroll")
+  expect(await scroller.evaluate((element) => getComputedStyle(element).display)).toBe("grid")
+  expect(await scroller.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
   await ctrl.focus()
   expect(await ctrl.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid")
@@ -333,7 +334,9 @@ test("desktop terminal rail preserves the three-row stage and accessible key lab
     )
   ).toBe(3)
   expect(await page.locator(".terminal-key").count()).toBe(8)
-  await expect(page.locator(".terminal-key-error")).toBeVisible()
+  // The announcement line stays in the DOM for screen readers but takes no space until there is an error.
+  await expect(page.locator(".terminal-key-error")).toBeAttached()
+  await expect(page.locator(".terminal-key-error")).toBeHidden()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
 })
 
