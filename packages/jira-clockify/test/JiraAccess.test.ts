@@ -1,4 +1,3 @@
-/** @effect-diagnostics strictEffectProvide:skip-file — each case builds its own home and site, so it is the entry point. */
 /**
  * Jira through an API token or the OAuth login, and what a failed token check says.
  *
@@ -102,15 +101,18 @@ const withAccess = <A, E>(
   body: (home: string) => Effect.Effect<A, E, JiraAccess | FileSystem.FileSystem | Path.Path>
 ) =>
   Effect.scoped(Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const home = yield* fs.makeTempDirectoryScoped({ prefix: "jcf-access-" })
-    const access = jiraAccessLayer.pipe(
-      Layer.provide(Layer.succeed(JiraAuth, options.oauth ?? loggedOut)),
-      Layer.provide(Layer.succeed(HomeDirectory, { path: home })),
-      Layer.provide(Layer.succeed(HttpClient.HttpClient, siteClient(options.site ?? site)))
-    )
-    return yield* body(home).pipe(Effect.provide(access))
-  })).pipe(Effect.provide(NodeServices.layer))
+    const services = yield* Layer.build(NodeServices.layer)
+    return yield* Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const home = yield* fs.makeTempDirectoryScoped({ prefix: "jcf-access-" })
+      const access = yield* Layer.build(jiraAccessLayer.pipe(
+        Layer.provide(Layer.succeed(JiraAuth, options.oauth ?? loggedOut)),
+        Layer.provide(Layer.succeed(HomeDirectory, { path: home })),
+        Layer.provide(Layer.succeed(HttpClient.HttpClient, siteClient(options.site ?? site)))
+      ))
+      return yield* body(home).pipe(Effect.provideContext(access))
+    }).pipe(Effect.provideContext(services))
+  }))
 
 const connect = (input: { readonly site: string; readonly token: string }) =>
   JiraAccess.use((access) =>
