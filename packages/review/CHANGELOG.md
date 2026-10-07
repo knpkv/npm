@@ -1,5 +1,17 @@
 # @knpkv/review
 
+## 0.4.0
+
+### Minor Changes
+
+- [#538](https://github.com/knpkv/npm/pull/538) [`702d855`](https://github.com/knpkv/npm/commit/702d8559efbd781f4f89131ddbe462137a85ba4d) Thanks [@konopkov](https://github.com/konopkov)! - The exported change guide stays inside a phone screen. Long identifiers in the title and chapter names now wrap, and on a phone the reading controls come first, then the guide, then the chapter list. Callouts are flat notes with an even border, named in sentence case. Diagrams sit in a framed, fixed-height panel with a caption bar, so drawing them no longer shifts the page. Their edge labels are readable in the dark theme. Scrolling code blocks can be reached from the keyboard. The Execution disclosure has its own control. Labels use commas and words instead of middots, and sizes come from rly type tokens.
+
+### Patch Changes
+
+- [#546](https://github.com/knpkv/npm/pull/546) [`6940d1b`](https://github.com/knpkv/npm/commit/6940d1b6c88c3b95a3d70ad84a13f011c6fa4017) Thanks [@konopkov](https://github.com/konopkov)! - On a phone, keyboard focus follows the page again: the guide comes first in the markup, then the chapter list, then the reading controls, so Tab from the top no longer jumps to the bottom of the page. On wide screens the chapter list is still the left column.
+- Updated dependencies [[`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/rly@0.10.0
+
 ## 0.3.3
 
 ### Patch Changes

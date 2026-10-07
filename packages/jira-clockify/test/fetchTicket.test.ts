@@ -1,13 +1,18 @@
 import { describe, expect, it } from "@effect/vitest"
 import { JiraApiClient, make } from "@knpkv/jira-api-client"
-import { JiraAuth, type JiraAuthService } from "@knpkv/jira-cli/JiraAuth"
 import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
-import { systemError } from "effect/PlatformError"
+import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import { fetchTicketByKey } from "../src/cli/fetchTicket.js"
+import {
+  JiraAccess,
+  type JiraAccessContract,
+  JiraAccessUnreadable,
+  type JiraConnection
+} from "../src/services/JiraAccess.js"
 
 // A test case is its own entry point: it composes exactly the layers that case needs and
 // provides them there. Both provide diagnostics are about production wiring, where a Layer
@@ -48,41 +53,29 @@ const makeJiraLayer = (
   )
 }
 
-const makeAuthService = (isLoggedIn: JiraAuthService["isLoggedIn"]): JiraAuthService => ({
-  configure: () => Effect.die("unused JiraAuth mock method"),
-  isConfigured: () => Effect.die("unused JiraAuth mock method"),
-  login: () => Effect.die("unused JiraAuth mock method"),
-  logout: () => Effect.die("unused JiraAuth mock method"),
-  getAccessToken: () => Effect.die("unused JiraAuth mock method"),
-  getCloudId: () => Effect.die("unused JiraAuth mock method"),
-  getSiteUrl: () => Effect.die("unused JiraAuth mock method"),
-  getCurrentUser: () => Effect.die("unused JiraAuth mock method"),
-  getActiveProfile: () => Effect.die("unused JiraAuth mock method"),
-  listProfiles: () => Effect.die("unused JiraAuth mock method"),
-  switchProfile: () => Effect.die("unused JiraAuth mock method"),
-  removeProfile: () => Effect.die("unused JiraAuth mock method"),
-  isLoggedIn
+const accessService = (connection: JiraAccessContract["connection"]): JiraAccessContract => ({
+  connection,
+  verifyToken: () => Effect.die("unused JiraAccess mock method"),
+  saveToken: () => Effect.die("unused JiraAccess mock method"),
+  removeToken: Effect.die("unused JiraAccess mock method")
 })
 
-// JiraAuth mock — only `isLoggedIn` matters for fetchTicketByKey.
-const makeAuthLayer = (loggedIn: boolean) => Layer.succeed(JiraAuth, makeAuthService(() => Effect.succeed(loggedIn)))
+const connected: JiraConnection = {
+  method: "api-token",
+  credential: { type: "basic", email: "test@example.com", apiToken: Redacted.make("token") },
+  cloudId: "cloud-1",
+  siteUrl: "https://test.atlassian.net",
+  accountId: "account-1",
+  displayName: "Test"
+}
 
-// JiraAuth whose isLoggedIn fails with a platform error (e.g. unreadable token file).
-const makeAuthFailLayer = (message: string) =>
-  Layer.succeed(
-    JiraAuth,
-    makeAuthService(() =>
-      Effect.fail(
-        systemError({
-          _tag: "PermissionDenied",
-          module: "FileSystem",
-          method: "readFileString",
-          description: message,
-          pathOrDescriptor: "~/.jira/token"
-        })
-      )
-    )
-  )
+// JiraAccess mock — only whether Jira is connected matters for fetchTicketByKey.
+const makeAuthLayer = (loggedIn: boolean) =>
+  Layer.succeed(JiraAccess, accessService(Effect.succeed(loggedIn ? Option.some(connected) : Option.none())))
+
+// JiraAccess whose credential cannot be read (e.g. an unreadable token file).
+const makeAuthFailLayer = (path: string) =>
+  Layer.succeed(JiraAccess, accessService(Effect.fail(new JiraAccessUnreadable({ path }))))
 
 const LoggedIn = makeAuthLayer(true)
 

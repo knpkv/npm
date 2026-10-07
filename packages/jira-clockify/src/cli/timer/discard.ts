@@ -6,6 +6,7 @@
 import { Console, Effect, SubscriptionRef } from "effect"
 import { Command, Prompt } from "effect/cli"
 import { TimerService } from "../../services/TimerService.js"
+import { toCommandFailed } from "../CommandFailed.js"
 
 export const discard = Command.make(
   "discard",
@@ -37,9 +38,7 @@ export const discard = Command.make(
         return
       }
 
-      yield* timer.discard.pipe(
-        Effect.catch((e: { readonly message: string }) => Console.log(`Error: ${e.message}`))
-      )
+      yield* timer.discard.pipe(Effect.mapError(toCommandFailed))
 
       yield* Console.log("Timer discarded. Clockify entry deleted.")
     })

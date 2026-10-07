@@ -3,138 +3,82 @@
  *
  * @module
  */
-import { make as makeClockifyApi } from "@knpkv/clockify-api-client"
-import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Console, Effect, Predicate, Redacted, Schema } from "effect"
+import { Console, Effect, Option, Predicate } from "effect"
 import { Prompt } from "effect/cli"
-import * as HttpClient from "effect/http/HttpClient"
 import * as Path from "effect/Path"
 import * as ChildProcess from "effect/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
+import { JiraAccess } from "../services/JiraAccess.js"
+import { CONNECT_JIRA_COMMAND } from "../utils/hints.js"
+import { connectClockify, connectJiraWithToken } from "./auth.js"
+import { CommandFailed, requireTerminal } from "./CommandFailed.js"
 
 declare const Bun: unknown
-
-const ClockifySetupUser = Schema.Struct({
-  id: Schema.NonEmptyString,
-  name: Schema.NonEmptyString,
-  email: Schema.NonEmptyString
-})
-
-const ClockifySetupWorkspace = Schema.Struct({
-  id: Schema.NonEmptyString,
-  name: Schema.NonEmptyString
-})
-
-type ClockifySetupWorkspace = typeof ClockifySetupWorkspace.Type
-
-const decodeClockifySetupUser = Schema.decodeUnknownEffect(ClockifySetupUser)
-const decodeClockifySetupWorkspaces = Schema.decodeUnknownEffect(Schema.Array(ClockifySetupWorkspace))
 
 // ---------------------------------------------------------------------------
 // First-run setup
 // ---------------------------------------------------------------------------
 
+/** Runs one system's setup; a failure is printed and the wizard moves on, so the other can still connect. */
+const attempt = <R>(setup: Effect.Effect<unknown, CommandFailed, R>) =>
+  setup.pipe(
+    Effect.as(true),
+    Effect.catch((error) => Console.log(`${error.message}\n`).pipe(Effect.as(false)))
+  )
+
+/**
+ * Before the TUI: when neither system is connected, offer to connect each, either skippable. With one
+ * connected it goes straight on; the TUI and `jcf auth status` say what the other needs. Without a
+ * terminal to ask in, it prints the two commands and fails.
+ */
 export const checkAuthOrSetup = Effect.gen(function*() {
   const clockifyAuth = yield* ClockifyAuth
-  const jira = yield* JiraAuth
-
+  const access = yield* JiraAccess
+  const jiraOk = Option.isSome(yield* access.connection.pipe(Effect.orElseSucceed(() => Option.none())))
   const clockifyOk = yield* clockifyAuth.isConfigured
-  const jiraOk = yield* jira.isLoggedIn()
+  if (jiraOk || clockifyOk) return true
 
-  if (clockifyOk && jiraOk) return true
+  yield* requireTerminal(`Connect Jira with ${CONNECT_JIRA_COMMAND}, or Clockify with jcf auth clockify setup.`)
+  yield* Console.log(
+    "jcf records your time in Jira and Clockify. Connect either or both; you can add the other later.\n"
+  )
 
-  yield* Console.log("Welcome to jcf! Let's set up your accounts.\n")
+  yield* Console.log("Jira")
+  const jira = yield* Prompt.Select({
+    message: "How should jcf reach Jira?",
+    choices: [
+      { title: "Connect with an API token (recommended)", value: "token" },
+      { title: "Use my own Atlassian OAuth app (advanced)", value: "oauth" },
+      { title: "Skip Jira for now", value: "skip" }
+    ]
+  })
+  const jiraConnected = jira === "token"
+    ? yield* attempt(connectJiraWithToken({ site: Option.none(), email: Option.none() }))
+    : false
+  if (jira === "oauth") yield* Console.log("Run jcf auth jira create; it walks you through the Atlassian console.\n")
 
-  if (!jiraOk) {
-    yield* Console.log("─── Jira ───")
-    const jiraConfigured = yield* jira.isConfigured()
-    if (!jiraConfigured) {
-      yield* Console.log("Jira OAuth not configured.")
-      yield* Console.log("1. Create an OAuth app: https://developer.atlassian.com/console/myapps/create-3lo-app/")
-      yield* Console.log("   Permissions: read:jira-work, write:jira-work, read:jira-user, read:me")
-      yield* Console.log("   Callback URL: http://localhost:8585/callback")
-      yield* Console.log("")
+  yield* Console.log("Clockify")
+  const clockify = yield* Prompt.Select({
+    message: "Connect Clockify?",
+    choices: [
+      { title: "Connect with an API key", value: "key" },
+      { title: "Skip Clockify for now", value: "skip" }
+    ]
+  })
+  const clockifyConnected = clockify === "key" ? yield* attempt(connectClockify(Option.none())) : false
 
-      const id = yield* Prompt.String({ message: "Enter OAuth client ID:" })
-      const secret = yield* Prompt.String({ message: "Enter OAuth client secret:" })
-      yield* jira.configure({ clientId: id, clientSecret: secret })
-      yield* Console.log("OAuth configured.")
-    }
-
-    yield* Console.log("Starting Jira login...")
-    yield* jira.login().pipe(
-      Effect.catch((e) =>
-        Console.log(`Jira login failed: ${Predicate.hasProperty(e, "message") ? String(e.message) : String(e)}`)
-      )
-    )
-    const user = yield* jira.getCurrentUser().pipe(Effect.catch(() => Effect.succeed(null)))
-    if (user) {
-      yield* Console.log(`✓ Logged in as ${user.name} (${user.email})\n`)
-    } else {
-      yield* Console.log("✗ Jira login incomplete. You can retry with: jcf auth jira login\n")
-    }
-  }
-
-  if (!clockifyOk) {
-    yield* Console.log("─── Clockify ───")
-    yield* Console.log("Get your API key from: https://app.clockify.me/manage-api-keys\n")
-
-    const apiKey = yield* Prompt.String({ message: "Enter Clockify API key:" })
-    if (!apiKey) {
-      yield* Console.log("Skipped. Run: jcf auth clockify setup\n")
-      return false
-    }
-
-    const httpClient = yield* HttpClient.HttpClient
-    const client = makeClockifyApi(httpClient, {
-      apiKey: Redacted.make(apiKey),
-      baseUrl: "https://api.clockify.me/api"
+  if (!jiraConnected && !clockifyConnected) {
+    return yield* new CommandFailed({
+      message: `Nothing is connected yet. Run ${CONNECT_JIRA_COMMAND} or jcf auth clockify setup.`
     })
-
-    const user = yield* client.getLoggedUser(undefined).pipe(
-      Effect.flatMap(decodeClockifySetupUser),
-      Effect.catch(() => Effect.succeed(null))
-    )
-    if (!user) {
-      yield* Console.log("✗ Invalid API key. Run: jcf auth clockify setup\n")
-      return false
-    }
-    yield* Console.log(`Authenticated as: ${user.name} (${user.email})`)
-
-    const workspaces = yield* client.getWorkspacesOfUser(undefined).pipe(
-      Effect.flatMap(decodeClockifySetupWorkspaces),
-      Effect.catch(() => Effect.succeed<ReadonlyArray<ClockifySetupWorkspace>>([]))
-    )
-    let workspaceId = ""
-    let workspaceName = ""
-    if (workspaces.length === 1) {
-      const workspace = workspaces[0]
-      if (workspace !== undefined) {
-        workspaceId = workspace.id
-        workspaceName = workspace.name
-      }
-    } else if (workspaces.length > 1) {
-      workspaceId = yield* Prompt.Select({
-        message: "Select workspace:",
-        choices: workspaces.map((workspace) => ({ title: workspace.name, value: workspace.id }))
-      })
-      workspaceName = workspaces.find((workspace) => workspace.id === workspaceId)?.name ?? ""
-    }
-
-    if (workspaceId) {
-      yield* clockifyAuth.save({
-        apiKey,
-        workspaceId,
-        userId: user.id,
-        baseUrl: "https://api.clockify.me/api"
-      })
-      yield* Console.log(`✓ Clockify configured (workspace: ${workspaceName})\n`)
-    }
   }
-
-  yield* Console.log("─── Setup complete! ───\n")
   return true
-})
+}).pipe(
+  Effect.catchTag(
+    "QuitError",
+    () => Effect.fail(new CommandFailed({ message: "Setup stopped; nothing more was connected." }))
+  )
+)
 
 // ---------------------------------------------------------------------------
 // TUI launcher
@@ -181,10 +125,6 @@ export const launchTui = (args: ReadonlyArray<string>) =>
 
 export const launchTuiOrSetup = (args: ReadonlyArray<string>) =>
   Effect.gen(function*() {
-    const ready = yield* checkAuthOrSetup.pipe(Effect.catch(() => Effect.succeed(false)))
-    if (!ready) {
-      yield* Console.log("Setup incomplete. Run 'jcf auth status' to check.")
-      return
-    }
+    yield* checkAuthOrSetup
     yield* launchTui(args)
   })
