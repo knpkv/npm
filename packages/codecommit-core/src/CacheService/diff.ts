@@ -37,6 +37,8 @@ export interface DiffablePR {
   readonly accountRegion?: string
   readonly status: string
   readonly isApproved: boolean | number
+  /** Set (non-null) when the approval evaluation failed: `isApproved` is then only the last known value. */
+  readonly approvalUnknownReason?: string | null | undefined
   readonly isMergeable: boolean | number
   readonly commentCount?: number | null | undefined
 }
@@ -71,7 +73,13 @@ export const diffPR = (
   const freshMergeable = isEnabled(fresh.isMergeable)
   const cachedMergeable = isEnabled(cached.isMergeable)
 
-  if (freshApproved !== cachedApproved) {
+  // Only a change between two known evaluations is announced. An unknown fresh approval is no
+  // transition, and neither is recovery: a pull request first seen while its evaluation fails is cached
+  // as not approved, a placeholder indistinguishable from a last known value.
+  if (
+    fresh.approvalUnknownReason == null && cached.approvalUnknownReason == null &&
+    freshApproved !== cachedApproved
+  ) {
     notifications.push({
       ...base,
       type: "approval_changed",
@@ -230,3 +238,16 @@ export const diffComments = (
 
   return notifications
 }
+
+/** Notification types about a pull request's approval, written with its approval group. */
+const approvalNotificationTypes: ReadonlySet<string> = new Set(["approval_changed", "approval_requested"])
+
+/**
+ * The notifications a write actually backs: approval ones when its approval group was written, the
+ * rest when its row was. A group not written was older than the cache, so what it saw isn't current.
+ */
+export const notificationsFor = (
+  notifications: ReadonlyArray<NewNotification>,
+  written: { readonly row: boolean; readonly approval: boolean }
+): ReadonlyArray<NewNotification> =>
+  notifications.filter((n) => approvalNotificationTypes.has(n.type) ? written.approval : written.row)

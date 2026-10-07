@@ -1,0 +1,24 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-direct-pull-request-row-write
+language: tsx
+severity: error
+message: "Write pull_requests rows through PullRequestRepo/rowWrites: every per-row write is a compare-and-set on the row's version."
+
+rule:
+  kind: template_string
+  regex: "(?i)(UPDATE\\s+pull_requests\\b|INSERT\\s+(OR\\s+\\w+\\s+)?INTO\\s+pull_requests\\b|DELETE\\s+FROM\\s+pull_requests\\b)"
+
+files:
+  - "packages/*/src/**/*.ts"
+
+ignores:
+  # The one writer: compare-and-set on last_modified_date, plus two documented set-based writes.
+  - "packages/codecommit-core/src/CacheService/repos/PullRequestRepo/rowWrites.ts"
+  # Schema migrations rewrite the table itself.
+  - "packages/codecommit-core/src/CacheService/migrations/**"
+
+note: |
+  A write observed at an older version than the row's must be a no-op, or a slower reader (the
+  history sync, enrichment) overwrites a newer revision. Add a primitive to rowWrites.ts, or pass the
+  observed version to `compareAndSet`, instead of writing the row directly.

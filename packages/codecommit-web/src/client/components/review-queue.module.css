@@ -10,12 +10,6 @@
   gap: 1.25rem;
 }
 
-.eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
 .title {
   max-inline-size: 12ch;
 }
@@ -205,8 +199,9 @@
   cursor: pointer;
 }
 
+/* text-2: text-3 measured 4.31:1 on the chip's surface-2 in light, below AA. */
 .filterChip span:first-child {
-  color: var(--rly-color-text-3);
+  color: var(--rly-color-text-2);
 }
 
 .filterChip:hover {
@@ -429,10 +424,6 @@
   gap: 0.45rem;
 }
 
-.metaSeparator {
-  color: var(--rly-color-text-3);
-}
-
 .commentCount {
   display: inline-flex;
   align-items: center;
@@ -462,11 +453,9 @@
 }
 
 .prFact dt {
-  color: var(--rly-color-text-3);
+  color: var(--rly-color-text-2);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .prFact dd {

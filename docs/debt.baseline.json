@@ -1096,13 +1096,6 @@
     {
       "package": "codecommit-core",
       "kind": "ast-grep",
-      "file": "packages/codecommit-core/src/PRService/refreshEnrich.ts",
-      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "ast-grep",
       "file": "packages/codecommit-core/src/PRService/refreshFetch.ts",
       "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
@@ -1139,20 +1132,6 @@
       "package": "codecommit-core",
       "kind": "ast-grep",
       "file": "packages/codecommit-core/src/PRService/refreshFetch.ts",
-      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "ast-grep",
-      "file": "packages/codecommit-core/src/PRService/refreshFetch.ts",
-      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "ast-grep",
-      "file": "packages/codecommit-core/src/PRService/refreshHistory.ts",
       "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
     },
@@ -1223,6 +1202,13 @@
       "package": "codecommit-core",
       "kind": "ast-grep",
       "file": "packages/codecommit-core/src/PRService/refreshScore.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
       "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
     },
@@ -1453,27 +1439,6 @@
     {
       "package": "codecommit-core",
       "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
       "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
       "reasoned": true
@@ -1596,13 +1561,6 @@
       "file": "packages/codecommit-core/test/SandboxService.security.test.ts",
       "text": "@effect-diagnostics strictEffectProvide:skip-file",
       "reasoned": false
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/SandboxService.security.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": true
     },
     {
       "package": "codecommit-core",
@@ -3672,6 +3630,13 @@
     {
       "package": "jira-clockify",
       "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/reconcile.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
       "file": "packages/jira-clockify/src/cli/setup.ts",
       "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
@@ -3869,6 +3834,13 @@
       "package": "jira-clockify",
       "kind": "ast-grep",
       "file": "packages/jira-clockify/src/services/ClockifyAuth.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/ConfigService.ts",
       "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
     },

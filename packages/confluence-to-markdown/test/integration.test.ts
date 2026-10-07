@@ -9,7 +9,7 @@
  * - CONFLUENCE_API_KEY + CONFLUENCE_EMAIL env vars for raw ADF verification
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { Config, Effect, Option, Schedule } from "effect"
+import { Config, Data, Effect, Option, Schedule } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
@@ -402,8 +402,8 @@ const adfEvidence = <UnparsedInput>(adf: UnparsedInput): RawAdfEvidence => {
   }
   const selectedMarkTypes = new Set<string>(RAW_ROUND_TRIP_MARK_TYPES)
   const selectedNodeTypes = new Set<string>(RAW_ROUND_TRIP_NODE_TYPES)
-  const normalizeAttrs = <UnparsedInput>(value: UnparsedInput) => {
-    if (Array.isArray(value)) return value.map(normalizeAttrs)
+  const normalizeAttrs = (value: Schema.Json): Schema.Json => {
+    if (Array.isArray(value)) return value.map((item: Schema.Json) => normalizeAttrs(item))
     if (isRecord(value)) {
       const normalized: Record<string, Schema.Json> = {}
       for (const [key, rawValue] of Object.entries(value)) {
@@ -503,6 +503,9 @@ const adfEvidence = <UnparsedInput>(adf: UnparsedInput): RawAdfEvidence => {
   return evidence
 }
 
+/** A live Confluence request in this suite failed; `cause` is what fetch or the response check threw. */
+class RemoteRequestFailed extends Data.TaggedError("RemoteRequestFailed")<{ readonly cause: unknown }> {}
+
 const getRemoteAdfSnapshot = (pageId: string) =>
   Effect.tryPromise({
     try: async () => {
@@ -523,7 +526,7 @@ const getRemoteAdfSnapshot = (pageId: string) =>
       const adf: unknown = JSON.parse(value)
       return { value, evidence: adfEvidence(adf) }
     },
-    catch: (cause) => cause
+    catch: (cause) => new RemoteRequestFailed({ cause })
   }).pipe(Effect.retry(integrationHttpRetry))
 
 const deleteRemotePageIfPresent = (pageId: string) =>
@@ -539,7 +542,7 @@ const deleteRemotePageIfPresent = (pageId: string) =>
         throw new Error(`Confluence returned ${response.status} while cleaning up page ${pageId}`)
       }
     },
-    catch: (cause) => cause
+    catch: (cause) => new RemoteRequestFailed({ cause })
   }).pipe(Effect.retry(integrationHttpRetry))
 
 const expectNativePanelsIfPresent = (pageId: string, markdown: string) =>

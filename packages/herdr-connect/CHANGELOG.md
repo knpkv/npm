@@ -1,5 +1,17 @@
 # @knpkv/herdr-connect
 
+## 0.6.0
+
+### Minor Changes
+
+- [#557](https://github.com/knpkv/npm/pull/557) [`d215ab8`](https://github.com/knpkv/npm/commit/d215ab87781bd00f9199f3c04b0c3a901075efbb) Thanks [@konopkov](https://github.com/konopkov)! - The Connect tab leads with one sentence ("19 agents live, 1 needs attention; GAMMA offline") under a plain page title, instead of a display headline, an eyebrow and a count chip. Host and status filters are words with the current one underlined, each a full-height target. Rows show the agent's state as a word (ink only when it needs attention) without presence dots or status chips, name a parent agent by its name instead of its full id, keep host and work names whole, and wrap long lines instead of cutting them off; the selected row is filled and outlined rather than marked by a side bar. A directory that fails to load or refresh says why in one line and keeps the last list with its age, never a stack trace.
+
+### Patch Changes
+
+- Updated dependencies [[`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5)]:
+  - @knpkv/rly@0.11.0
+  - @knpkv/herdr-work@0.7.1
+
 ## 0.5.0
 
 ### Minor Changes

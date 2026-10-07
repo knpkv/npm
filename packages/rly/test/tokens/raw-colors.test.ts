@@ -64,4 +64,39 @@ describe("component color policy", () => {
     `
     )).toEqual([])
   })
+
+  it("requires an inset focus ring to negate the ring width, not the offset", () => {
+    expect(rules(
+      "src/patterns/Row.module.css",
+      `
+      .a:focus-visible { outline-offset: calc(-1 * var(--rly-focus-ring-offset)); }
+      .b:focus-visible { outline-offset: calc(var(--rly-focus-ring-offset) * -1); }
+    `
+    )).toEqual(["inset-focus-offset", "inset-focus-offset"])
+    expect(rules(
+      "src/patterns/Row.module.css",
+      `
+      .a:focus-visible { outline-offset: calc(var(--rly-focus-ring-width) * -1); }
+      .b:focus-visible { outline-offset: var(--rly-focus-ring-offset); }
+    `
+    )).toEqual([])
+  })
+
+  it("requires focus outlines to take their width from the focus-ring token", () => {
+    expect(rules(
+      "src/patterns/Row.module.css",
+      `
+      .a:focus-visible { outline: 3px solid var(--rly-color-focus); }
+      .b:focus-visible { outline: var(--rly-space-2) solid var(--rly-color-focus); outline-offset: 2px; }
+    `
+    )).toEqual(["raw-focus-ring", "raw-focus-ring"])
+    expect(rules(
+      "src/patterns/Row.module.css",
+      `
+      .a:focus-visible { outline: var(--rly-focus-ring-width) solid var(--rly-color-focus); }
+      .b { outline: none; }
+      .c { outline: 1px solid var(--rly-color-border-1); }
+    `
+    )).toEqual([])
+  })
 })

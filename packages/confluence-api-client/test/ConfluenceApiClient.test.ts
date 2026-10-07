@@ -66,7 +66,7 @@ describe("ConfluenceApiClient", () => {
       const client = yield* ConfluenceApiClient
       const user = yield* client.v1.getUser({ params: { accountId: "account-1" } })
 
-      expect(user.accountId).toBe("account-1")
+      expect(user?.accountId).toBe("account-1")
       expect(requests[0]?.url).toBe(
         "https://api.atlassian.com/ex/confluence/cloud-1/wiki/rest/api/user"
       )

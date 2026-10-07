@@ -4,6 +4,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 
+import type { AppState } from "../src/client/atoms/app.js"
 import { SandboxViewContent } from "../src/client/components/sandbox-view.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -34,7 +35,7 @@ const sandbox = (status: "running" | "stopped") => ({
 })
 
 const renderView = async (status: "running" | "stopped") => {
-  const state = {
+  const state: AppState = {
     accounts: [],
     pullRequests: [],
     sandboxes: [sandbox(status)],

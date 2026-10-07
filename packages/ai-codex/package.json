@@ -31,7 +31,7 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force && node scripts/validate-dist.mjs",
-    "check": "tsc --noEmit && tsc -p tsconfig.dtslint.json",
+    "check": "tsc --noEmit && tsc -p tsconfig.dtslint.json && tsc -p test/tsconfig.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test,dtslint}/**/*.ts\"",
     "test": "vitest run",

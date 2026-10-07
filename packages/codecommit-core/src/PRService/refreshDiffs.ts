@@ -12,7 +12,7 @@
 import { Effect, Ref, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo/index.js"
-import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
+import { PullRequestRepo, versionsOf } from "../CacheService/repos/PullRequestRepo/index.js"
 import { AwsProfileName, AwsRegion } from "../Domain.js"
 import type { PRState } from "./internal.js"
 
@@ -40,6 +40,8 @@ const enrichSingleDiff = Effect.fn("enrichSingleDiff")(
       id: row.id,
       repositoryName: row.repositoryName,
       accountRegion: row.accountRegion,
+      // Both groups' versions when the row was read: any write since makes these stats stale.
+      observed: versionsOf(row),
       ...stats
     }
   },
@@ -83,10 +85,11 @@ export const enrichDiffs = Effect.fn("enrichDiffs")(
       results,
       (r) => {
         if (r === undefined) return Effect.void
-        return prRepo.updateDiffStats(r.awsAccountId, r.id, r.filesAdded, r.filesModified, r.filesDeleted, {
-          repositoryName: r.repositoryName,
-          accountRegion: r.accountRegion
-        }).pipe(
+        return prRepo.writeDerived(r.awsAccountId, r.id, r.observed, {
+          filesAdded: r.filesAdded,
+          filesModified: r.filesModified,
+          filesDeleted: r.filesDeleted
+        }, { repositoryName: r.repositoryName, accountRegion: r.accountRegion }).pipe(
           // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           Effect.catchIf(() => true, () => Effect.void)
         )
