@@ -10,7 +10,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
 
-import { AwsProfileName, AwsRegion } from "../src/Domain.js"
+import { AwsProfileName, AwsRegion, RepositoryName } from "../src/Domain.js"
 import { AwsApiError } from "../src/Errors.js"
 import {
   CodeCommitBlobTooLargeError,
@@ -107,7 +107,10 @@ describe("CodeCommitReadClient", () => {
       Effect.gen(function*() {
         const client = yield* CodeCommitReadClient
         const page = yield* client.listRepositoriesPage({ account, nextToken: null })
-        assert.deepStrictEqual(page.repositoryNames, ["payments-api", "risk-engine"])
+        assert.deepStrictEqual(page.repositoryNames, [
+          RepositoryName.make("payments-api"),
+          RepositoryName.make("risk-engine")
+        ])
         assert.strictEqual(page.nextToken, "repositories-page-2")
       })
     ))

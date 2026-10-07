@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/codecommit-web",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "description": "Web server and frontend for CodeCommit PR browser",
   "type": "module",
   "main": "src/index.ts",
@@ -21,7 +21,7 @@
     "prebuild": "pnpm --filter @knpkv/browser-pairing build",
     "precheck": "pnpm --filter @knpkv/browser-pairing build",
     "build": "tsc -b && vite build",
-    "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit && tsc -p test/tsconfig.json --noEmit",
     "pretest": "pnpm --filter @knpkv/browser-pairing build",
     "test": "vitest",
     "test:relay-smoke:real": "vitest run --config vitest.real-smoke.config.ts",

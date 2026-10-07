@@ -118,7 +118,6 @@ const failingLaunchers = (launched: Deferred.Deferred<string>, attempts: Ref.Ref
           isRunning: Effect.succeed(false),
           kill: () => Effect.void,
           pid: ChildProcessSpawner.ProcessId(1),
-          reref: Effect.void,
           stderr: Stream.empty,
           stdin: Sink.drain,
           stdout: Stream.empty,
