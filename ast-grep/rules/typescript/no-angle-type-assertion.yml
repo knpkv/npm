@@ -5,10 +5,14 @@ language: tsx
 severity: error
 message: "Do not use TypeScript angle-bracket type assertions; model the value, narrow it, decode it, or use `satisfies` instead."
 
+# sgconfig parses .ts as tsx, where `<T>value` reads as a JSX element. A .ts file cannot contain JSX,
+# so any JSX element node in one is a misparsed angle-bracket assertion. Matching nodes, not the
+# program text, keeps comments and strings (`<fixture url>`) out of it; generic arrow functions
+# (`<T>(x: T) => x`) parse as arrow_function and are not matched.
 rule:
-  all:
-    - kind: program
-    - regex: '(=|return|\(|,|\[|:)\s*<[A-Za-z_$][A-Za-z0-9_$.<> ,]*>\s*[A-Za-z_$]'
+  any:
+    - kind: jsx_opening_element
+    - kind: jsx_self_closing_element
 
 files:
   - "packages/**/*.ts"

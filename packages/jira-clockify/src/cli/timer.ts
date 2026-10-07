@@ -22,6 +22,13 @@ export const timer: Command.Command<
   {},
   () => Console.log("Usage: jcf timer <start|stop|discard|status|log|edit>")
 ).pipe(
-  Command.withDescription("Timer commands for Jira-backed Clockify work"),
-  Command.withSubcommands([start, stop, discard, statusCmd, log, edit])
+  Command.withDescription("Track time on a Jira issue"),
+  Command.withSubcommands([
+    start.pipe(Command.withDescription("Start a timer on a Jira issue, in Clockify")),
+    stop.pipe(Command.withDescription("Stop the timer and save the time to Clockify and a Jira worklog")),
+    discard.pipe(Command.withDescription("Discard the running timer and delete its Clockify entry")),
+    statusCmd.pipe(Command.withDescription("Show the running timer")),
+    log.pipe(Command.withDescription("Log time you already spent on a Jira issue")),
+    edit.pipe(Command.withDescription("Change the running timer's start time or issue"))
+  ])
 )

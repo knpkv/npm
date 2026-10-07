@@ -40,7 +40,7 @@ const authorizationHeader = (auth: JiraApiCredential): string =>
     : `Bearer ${Redacted.value(auth.accessToken)}`
 
 const apiBaseUrl = (baseUrl: string, auth: JiraApiCredential): string =>
-  auth.type === "oauth2" ? `https://api.atlassian.com/ex/jira/${auth.cloudId}` : baseUrl
+  auth.type === "oauth2" ? `https://api.atlassian.com/ex/jira/${auth.cloudId}` : auth.siteUrl ?? baseUrl
 
 /**
  * Where the credential is turned into a header.

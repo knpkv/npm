@@ -1,5 +1,23 @@
 # @knpkv/codecommit
 
+## 0.14.1
+
+### Patch Changes
+
+- [#535](https://github.com/knpkv/npm/pull/535) [`dd6fdb4`](https://github.com/knpkv/npm/commit/dd6fdb4c6c24f3cf6364f68a2d4351cd7a3e3a3e) Thanks [@konopkov](https://github.com/konopkov)! - The CLI's first run says what to do next:
+
+  - `codecommit pr list` without AWS credentials names the profile and region, and suggests `aws sso login --profile …` or `--profile` with a listed profile, instead of logging a stack trace.
+  - `--filter` presets with no enabled accounts exit 1 and point to `codecommit web` (Settings, Accounts) or `codecommit tui`.
+  - `pr list --all` with nothing to show says "No pull requests found."
+  - Bare `codecommit` without an interactive terminal exits 1 with one line instead of drawing the terminal UI into a pipe.
+  - `tui`, `web` and the web flags have help descriptions, and the terminal UI's header names the product "CodeCommit".
+  - `pr list` without `--region` reads the profile's region from `~/.aws/config` instead of us-east-1, and says which profile and region it read; warnings logged while listing go to stderr, so stdout and `--json` stay clean.
+
+- [#533](https://github.com/knpkv/npm/pull/533) [`df61da3`](https://github.com/knpkv/npm/commit/df61da3e1caf872125306e7912b5cb0cfc7d8de6) Thanks [@konopkov](https://github.com/konopkov)! - The `codecommit` executable starts with Node: `--help`, the `pr` commands and `codecommit web` no longer need Bun. Before, the executable's shebang was `#!/usr/bin/env bun`, so a Node-only install failed with `exec: bun: not found`. The terminal UI still runs on Bun, because OpenTUI does. With Bun on `PATH`, `codecommit` under Node hands the terminal UI to it. Without Bun, it exits with one line saying so and suggesting `codecommit web`. The web server now uses Node's HTTP server, which also runs under Bun.
+- Updated dependencies [[`44b633d`](https://github.com/knpkv/npm/commit/44b633d87c8b98ddb3fd03225124fa996e563473), [`c01672d`](https://github.com/knpkv/npm/commit/c01672d8d55cd93580c06958e8cc202f5cde90c6), [`da4b5eb`](https://github.com/knpkv/npm/commit/da4b5eb15e627c0dae13aa92a3ec0c848ab6225b), [`df61da3`](https://github.com/knpkv/npm/commit/df61da3e1caf872125306e7912b5cb0cfc7d8de6), [`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/codecommit-core@0.19.0
+  - @knpkv/codecommit-web@0.22.0
+
 ## 0.14.0
 
 ### Minor Changes

@@ -20,7 +20,6 @@
  */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { make as makeJiraApi } from "@knpkv/jira-api-client"
-import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
@@ -39,6 +38,7 @@ import * as WriterGuard from "../cli/writerGuard.js"
 import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
 import { postJiraWorklog as postWithClient } from "./internal/JiraWorklogPost.js"
+import { JiraAccess } from "./JiraAccess.js"
 import { StateWriter, type TimerStateFile } from "./StateWriter.js"
 import type { JiraTicket } from "./TicketService.js"
 
@@ -72,7 +72,7 @@ export interface WorklogParams {
 /**
  * Outcome of a single Jira worklog post. Distinguishing these lets callers decide whether a
  * retry is worthwhile and show the user *why* it failed:
- * - `NotLoggedIn` — no usable token; retrying is pointless until `jcf auth jira login`.
+ * - `NotLoggedIn` — no usable token; retrying is pointless until Jira is connected (`jcf auth jira token`).
  * - `Failed` — Jira rejected the request or the network errored; carries the reason and is retryable.
  */
 export type JiraWorklogOutcome =
@@ -175,7 +175,7 @@ export const layer = Layer.effect(
   TimerService,
   Effect.gen(function*() {
     const clockify = yield* ClockifyApiClient
-    const jiraAuth = yield* JiraAuth
+    const jiraAccess = yield* JiraAccess
     const httpClient = yield* HttpClient.HttpClient
     const clockifyAuth = yield* ClockifyAuth
     const config = yield* ConfigService
@@ -271,25 +271,12 @@ export const layer = Layer.effect(
       comment?: string
     ): Effect.Effect<JiraWorklogOutcome> =>
       Effect.gen(function*() {
-        const loggedIn = yield* jiraAuth.isLoggedIn().pipe(Effect.orElseSucceed(() => false))
-        if (!loggedIn) {
-          yield* Effect.logDebug("Jira worklog skipped: missing access token or cloudId")
+        const connection = yield* jiraAccess.connection.pipe(Effect.orElseSucceed(() => Option.none()))
+        if (Option.isNone(connection)) {
+          yield* Effect.logDebug("Jira worklog skipped: Jira is not connected")
           return { _tag: "NotLoggedIn" }
         }
-        const auth = yield* Effect.option(
-          Effect.all({
-            accessToken: jiraAuth.getAccessToken(),
-            cloudId: jiraAuth.getCloudId()
-          })
-        )
-        if (Option.isNone(auth)) {
-          yield* Effect.logDebug("Jira worklog skipped: missing access token or cloudId")
-          return { _tag: "NotLoggedIn" }
-        }
-        const jira = makeJiraApi(httpClient, {
-          baseUrl: "",
-          auth: { type: "oauth2", ...auth.value }
-        })
+        const jira = makeJiraApi(httpClient, { baseUrl: "", auth: connection.value.credential })
         return yield* postWithClient(jira, { ticketKey, startedAt, durationSeconds, comment })
       })
 
