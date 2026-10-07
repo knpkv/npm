@@ -1,5 +1,13 @@
 # @knpkv/confluence-to-markdown
 
+## 2.5.1
+
+### Patch Changes
+
+- [#579](https://github.com/knpkv/npm/pull/579) [`61c930e`](https://github.com/knpkv/npm/commit/61c930e88f4a9d735522d6c7b052b72d13450a6f) Thanks [@konopkov](https://github.com/konopkov)! - Tests typecheck as part of `check`. `externalizeAdfMetadata` returns the sidecar type `hydrateAdfMetadata` takes.
+- Updated dependencies [[`61c930e`](https://github.com/knpkv/npm/commit/61c930e88f4a9d735522d6c7b052b72d13450a6f)]:
+  - @knpkv/atlassian-common@1.9.1
+
 ## 2.5.0
 
 ### Minor Changes

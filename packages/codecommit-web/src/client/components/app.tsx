@@ -11,6 +11,7 @@ import { useFullWidthRoute, useWideRoute } from "../router.js"
 import { queuePullRequests } from "../utils/queuePullRequests.js"
 import { CommandPalette } from "./command-palette.js"
 import { Header } from "./header.js"
+import { PermissionBar } from "./permission-bar.js"
 import { PermissionModal } from "./permission-modal.js"
 import styles from "./app.module.css"
 import { useTheme } from "./theme-provider.js"
@@ -36,12 +37,16 @@ export function AppLayout() {
         <main
           className={isFullWidth ? styles.fullWidthMain : isWide ? `${styles.main} ${styles.wideMain}` : styles.main}
         >
+          {/* Read prompts wait inline so the page stays usable; writes still ask in a modal, per call. */}
+          {state.permissionPrompt?.category === "read" ? <PermissionBar prompt={state.permissionPrompt} /> : null}
           <Outlet />
         </main>
         <ScrollRestoration storageKey="codecommit-web-scroll-positions" />
         <CommandPalette />
         <Toaster theme={theme} />
-        {state.permissionPrompt && <PermissionModal prompt={state.permissionPrompt} />}
+        {state.permissionPrompt !== undefined && state.permissionPrompt.category !== "read" ? (
+          <PermissionModal prompt={state.permissionPrompt} />
+        ) : null}
       </div>
     </CodeCommitRelayDock>
   )

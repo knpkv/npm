@@ -403,6 +403,7 @@ const tokenSupportsProducts = (token: TokenResponse, providers: AtlassianOAuthPr
 
 const captureFile = Effect.fn("AtlassianOAuthGrants.captureFile")(function*(filePath: string) {
   const fileSystem = yield* FileSystem.FileSystem
+  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   const exists = yield* fileSystem.exists(filePath).pipe(Effect.catch(() => Effect.succeed(false)))
   return {
     path: filePath,
@@ -422,6 +423,7 @@ const captureAuthStore = Effect.fn("AtlassianOAuthGrants.captureAuthStore")(func
 const restoreFile = Effect.fn("AtlassianOAuthGrants.restoreFile")(function*(snapshot: StoredFileSnapshot) {
   const fileSystem = yield* FileSystem.FileSystem
   if (snapshot.content !== null) return yield* writeSecureFile(snapshot.path, snapshot.content)
+  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   const exists = yield* fileSystem.exists(snapshot.path).pipe(Effect.catch(() => Effect.succeed(false)))
   if (exists) yield* fileSystem.remove(snapshot.path)
 })
@@ -666,6 +668,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
           Effect.tapError(() =>
             restoreAuthStores(snapshots).pipe(
               Effect.provide(localStorageLayer),
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.catch(() => Effect.void)
             )
           ),

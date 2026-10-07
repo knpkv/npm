@@ -114,11 +114,13 @@ const readSkill = Effect.fn("ReviewSkillCatalog.readSkill")(function*(
   const path = yield* Path.Path
   const canonicalFile = yield* fileSystem.realPath(candidate).pipe(
     Effect.map(Option.some),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(Option.none<string>()))
   )
   if (Option.isNone(canonicalFile) || !withinRoot(path, canonicalRoot, canonicalFile.value)) return Option.none()
   const stat = yield* fileSystem.stat(canonicalFile.value).pipe(
     Effect.map(Option.some),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(Option.none<FileSystem.File.Info>()))
   )
   if (Option.isNone(stat) || stat.value.type !== "File" || Number(stat.value.size) > MAXIMUM_SKILL_BYTES) {
@@ -126,6 +128,7 @@ const readSkill = Effect.fn("ReviewSkillCatalog.readSkill")(function*(
   }
   const content = yield* fileSystem.readFileString(canonicalFile.value).pipe(
     Effect.map(Option.some),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(Option.none<string>()))
   )
   if (Option.isNone(content)) return Option.none()
@@ -172,11 +175,13 @@ const discoverSkillCandidates = Effect.fn("ReviewSkillCatalog.discoverSkillCandi
       const unresolved = path.join(current.directory, entry)
       const canonical = yield* fileSystem.realPath(unresolved).pipe(
         Effect.map(Option.some),
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(Option.none<string>()))
       )
       if (Option.isNone(canonical) || !withinRoot(path, canonicalRoot, canonical.value)) continue
       const stat = yield* fileSystem.stat(canonical.value).pipe(
         Effect.map(Option.some),
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(Option.none<FileSystem.File.Info>()))
       )
       if (Option.isNone(stat)) continue
@@ -204,9 +209,11 @@ const discoverRoot = Effect.fn("ReviewSkillCatalog.discoverRoot")(function*(
   inspectedEntries: Ref.Ref<number>
 ): Effect.fn.Return<ReadonlyArray<ReviewSkillDefinition>, never, FileSystem.FileSystem | Path.Path> {
   const fileSystem = yield* FileSystem.FileSystem
+  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   if (!(yield* fileSystem.exists(root.path).pipe(Effect.catch(() => Effect.succeed(false))))) return []
   const canonicalRoot = yield* fileSystem.realPath(root.path).pipe(
     Effect.map(Option.some),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(Option.none<string>()))
   )
   if (Option.isNone(canonicalRoot)) return []

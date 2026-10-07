@@ -9,7 +9,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
-import { IconButton } from "@knpkv/rly/primitives"
+import { Button, IconButton } from "@knpkv/rly/primitives"
 import {
   BarChart3Icon,
   BellIcon,
@@ -36,6 +36,7 @@ import { useTheme } from "./theme-provider.js"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.js"
 import { SsoSignOutDialog } from "./sso-sign-out-dialog.js"
 import { Kbd } from "./ui/kbd.js"
+import { connectionDetail, connectionLabel, streamConnectionAtom, streamRetryAtom } from "../connection.js"
 
 interface NavigationItem {
   readonly active: (pathname: string) => boolean
@@ -94,6 +95,8 @@ export function SyncStatus({ detail, label, state }: SyncStatusProps) {
 export function Header() {
   const headerRef = usePublishedBlockSize<HTMLElement>("--app-header-block-size")
   const state = useAtomValue(appStateAtom)
+  const connection = useAtomValue(streamConnectionAtom)
+  const requestReconnect = useAtomSet(streamRetryAtom)
   const refresh = useAtomSet(refreshAtom)
   const [signOutOpen, setSignOutOpen] = useState(false)
   const setCommandPaletteOpen = useAtomSet(commandPaletteAtom)
@@ -114,11 +117,32 @@ export function Header() {
   const updatedLabel = state.lastUpdated
     ? DateUtils.formatRelativeTime(state.lastUpdated, new Date())
     : "No completed sync yet"
-  const status = hasError ? "error" : isLoading ? "loading" : state.lastUpdated ? "live" : "connecting"
-  const statusLabel = hasError ? "Sync issue" : isLoading ? "Syncing" : state.lastUpdated ? "Live" : "Connecting"
-  const statusDetail = hasError
-    ? (state.error ?? "Unable to refresh pull requests")
-    : (state.statusDetail ?? updatedLabel)
+  // The stream comes first: a page without a live stream says why, whatever the last snapshot said.
+  const linkDetail = connectionDetail(connection)
+  const status: SyncState =
+    linkDetail !== null
+      ? "error"
+      : connection._tag === "Connecting"
+        ? "connecting"
+        : hasError
+          ? "error"
+          : isLoading
+            ? "loading"
+            : state.lastUpdated !== undefined
+              ? "live"
+              : "connecting"
+  const statusLabel =
+    connection._tag !== "Live"
+      ? connectionLabel(connection)
+      : hasError
+        ? "Sync issue"
+        : isLoading
+          ? "Syncing"
+          : state.lastUpdated !== undefined
+            ? "Live"
+            : "Connecting"
+  const statusDetail =
+    linkDetail ?? (hasError ? (state.error ?? "Unable to refresh pull requests") : (state.statusDetail ?? updatedLabel))
   const nextTheme = theme === "dark" ? "light" : theme === "light" ? "system" : "dark"
   const ThemeIcon = theme === "dark" ? MoonIcon : theme === "light" ? SunIcon : MonitorIcon
 
@@ -157,6 +181,12 @@ export function Header() {
 
       <div className={styles.utilities}>
         <SyncStatus detail={statusDetail} label={statusLabel} state={status} />
+        {/* Once automatic retries stop, every page offers the way back, not only an empty queue. */}
+        {connection._tag === "Failed" && connection.retryAt === null ? (
+          <Button onClick={() => requestReconnect((n) => n + 1)} size="compact" variant="secondary">
+            Reconnect
+          </Button>
+        ) : null}
 
         <IconButton
           className={styles.commandButton}

@@ -63,6 +63,16 @@ describe("workTriage", () => {
     expect(rows).toEqual([["shipped", "done"], ["edge", "done"], ["old", "earlier"]])
   })
 
+  it("lists planned goals as not started, after moving work, and never counts them as moving", () => {
+    const triage = workTriage({ asOf: AS_OF, goals: [goal("idea", { state: "planned" }), goal("active")] })
+    expect(triage.rows.map(({ goal: { id }, group }) => [id, group])).toEqual([["active", "moving"], [
+      "idea",
+      "planned"
+    ]])
+    expect(triage.summary).toMatchObject({ _tag: "Clear", moving: 1 })
+    expect(workTriageGroupTitle.planned).toBe("Not started")
+  })
+
   it("treats an abandoned goal as finished", () => {
     const rows = groupsOf([
       goal("dropped", { state: "abandoned", updatedAt: AS_OF - 60_000 }),
@@ -114,8 +124,8 @@ describe("workTriage summary", () => {
     expect(workTriageSentence({ _tag: "Empty" })).toBe("No goals yet")
   })
 
-  it("labels the done group honestly as the last 24 hours", () => {
-    expect(workTriageGroupTitle.done).toBe("Done in the last 24 hours")
+  it("labels the finished group honestly as the last 24 hours, not as done", () => {
+    expect(workTriageGroupTitle.done).toBe("Finished in the last 24 hours")
   })
 
   it("speaks of a historical window in the past tense", () => {
