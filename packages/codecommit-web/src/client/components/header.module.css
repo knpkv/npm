@@ -103,6 +103,20 @@
   color: var(--rly-color-action-foreground);
 }
 
+/* Forced colours drop the surface fill that marks the current page; system colours mark it instead. */
+@media (forced-colors: active) {
+  .navLink[aria-current="page"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .navLink[aria-current="page"] .navCount {
+    background: HighlightText;
+    color: Highlight;
+  }
+}
+
 .utilities {
   display: flex;
   min-inline-size: 0;
