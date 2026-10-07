@@ -25,6 +25,7 @@ const withRules: UpsertInput = {
   destinationBranch: "main",
   isMergeable: 1,
   isApproved: 0,
+  approvalUnknownReason: null,
   commentCount: 0,
   link: "https://example.invalid/pr/44",
   approvedBy: [],
@@ -57,14 +58,25 @@ const storesPlainRules = Effect.gen(function*() {
   const context = yield* Layer.build(services)
   yield* Effect.gen(function*() {
     const repo = yield* PullRequestRepo
-    yield* repo.upsert(withRules)
-    const stored = yield* repo.findByCoordinates(
-      "123456789012",
-      "44",
-      "control-center-live-fixture",
-      "eu-central-1"
-    )
-    expect(Option.map(stored, (row) => row.approvalRules.map((rule) => [rule.ruleName, rule.poolMembers])))
-      .toEqual(Option.some([["Required Approvers", ["reviewer"]]]))
+    const storedRules = repo.findByCoordinates("123456789012", "44", "control-center-live-fixture", "eu-central-1")
+      .pipe(Effect.map(Option.map((row) => row.approvalRules.map((rule) => [rule.ruleName, rule.poolMembers]))))
+    yield* repo.upsert(withRules, yield* repo.observe())
+    expect(yield* storedRules).toEqual(Option.some([["Required Approvers", ["reviewer"]]]))
+    // The single-PR refresh writes through upsertRead, with the detail read's plain rules.
+    yield* repo.upsertRead(withRules, {
+      title: withRules.title,
+      author: withRules.author,
+      status: "OPEN",
+      creationDate: new Date(withRules.creationDate),
+      lastActivityDate: new Date(withRules.lastModifiedDate),
+      sourceBranch: withRules.sourceBranch,
+      destinationBranch: withRules.destinationBranch,
+      isMergeable: true,
+      approvedBy: [],
+      approvedByArns: [],
+      isApproved: false,
+      approvalRules: [{ ...withRules.approvalRules[0]!, poolMembers: ["reviewer", "second"] }]
+    }, yield* repo.observe())
+    expect(yield* storedRules).toEqual(Option.some([["Required Approvers", ["reviewer", "second"]]]))
   }).pipe(Effect.provideContext(context))
 })

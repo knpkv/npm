@@ -84,10 +84,6 @@
     "path": "packages/herdr-approvals/src/styles.css"
   },
   {
-    "declaration": "border-inline-start: 2px solid var(--rly-color-agent)",
-    "path": "packages/herdr-approvals/src/styles.css"
-  },
-  {
     "declaration": "border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink)",
     "path": "packages/herdr-approvals/src/styles.css"
   },
@@ -102,18 +98,6 @@
   {
     "declaration": "overflow-wrap: anywhere",
     "path": "packages/herdr-approvals/src/styles.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/herdr-approvals/src/styles.css"
-  },
-  {
-    "declaration": "box-shadow: inset 3px 0 0 var(--rly-color-agent)",
-    "path": "packages/herdr-connect/src/styles.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/herdr-connect/src/styles.css"
   },
   {
     "declaration": "overflow-wrap: anywhere",

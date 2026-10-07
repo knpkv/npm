@@ -1,0 +1,4 @@
+{
+  "compilerOptions": { "composite": true, "noEmit": true },
+  "include": ["."]
+}
