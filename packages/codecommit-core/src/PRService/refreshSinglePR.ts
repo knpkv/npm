@@ -318,7 +318,8 @@ export const makeRefreshSinglePR = (
       )
       : []
 
-    const written = yield* prRepo.upsert(freshUpsert, observation).pipe(
+    // Both groups from the read itself, so a merged or closed read keeps its merger and closing time.
+    const written = yield* prRepo.upsertRead(freshUpsert, detail, observation).pipe(
       Effect.mapError((cause) => new RefreshError({ failedAccounts: [durableAccountId], cause }))
     )
     // Everything below acts on what this read saw, so only for the groups the cache took: a group not

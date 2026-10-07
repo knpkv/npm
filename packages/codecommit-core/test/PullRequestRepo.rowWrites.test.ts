@@ -436,4 +436,39 @@ describe("pull-request row writes", () => {
       expect(yield* repo.deleteOne(account, "60", yield* repo.observe(), coordinates)).toBe(true)
       expect(Option.isNone(yield* snapshot)).toBe(true)
     })))
+
+  // Rule 3: a later not-found read advances the tombstone even when the row is already gone, so a
+  // listing that began between the two deletions can't bring the pull request back.
+  it.effect("advances a tombstone from a repeated not-found read, and never lowers it", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      yield* seed(repo)
+      yield* repo.deleteOne(account, "60", yield* repo.observe(), coordinates)
+      const between = yield* repo.observe()
+      const later = yield* repo.observe()
+      yield* repo.deleteOne(account, "60", later, coordinates)
+      // An older repeated not-found read must not lower it again.
+      yield* repo.deleteOne(account, "60", between - 1, coordinates)
+      yield* repo.upsert(listed(t0, "older"), between)
+      expect(Option.isNone(yield* snapshot)).toBe(true)
+      yield* repo.upsert(listed(t0, "newest"), yield* repo.observe())
+      expect(Option.isSome(yield* snapshot)).toBe(true)
+    })))
+
+  // Rule 1: a group's values come from the read. A refresh of a merged pull request writes the merger
+  // and closing time it read; it never clears what it didn't read.
+  it.effect("keeps a merged pull request's merger and closing time through a re-read of it", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      yield* seed(repo)
+      const merged = {
+        ...reread(older, "newer", { status: "CLOSED" }),
+        status: "MERGED",
+        mergedBy: "merger"
+      }
+      yield* repo.writeRead(account, "60", merged, yield* repo.observe(), coordinates)
+      yield* repo.upsertRead(listed(older, "newer"), merged, yield* repo.observe())
+      const row = Option.getOrThrow(yield* snapshot)
+      expect([row.status, row.mergedBy, row.closedAt]).toEqual(["MERGED", "merger", older.toISOString()])
+    })))
 })

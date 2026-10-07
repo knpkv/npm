@@ -152,7 +152,10 @@ export const versionsOf = (row: {
   approval: { lastActivity: row.approvalVersion, observation: row.approvalObservationSeq }
 })
 
-/** A listed pull request's row group, complete. */
+/**
+ * A listed pull request's row group, complete. The listing reads open pull requests, so no merger and
+ * no closing time are authoritative values, not gaps.
+ */
 export const rowGroupOfListing = (input: UpsertInput): RowGroup => ({
   title: input.title,
   description: input.description,

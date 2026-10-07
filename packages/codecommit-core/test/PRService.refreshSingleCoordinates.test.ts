@@ -169,7 +169,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest]),
-            upsert: () => Effect.succeed({ row: true, approval: true })
+            upsertRead: () => Effect.succeed({ row: true, approval: true })
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -244,7 +244,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
               findByAccountAndId: () => Effect.succeed(Option.none()),
               findByCoordinates: () => Effect.succeed(Option.some(approvedCache)),
               findAll: () => Effect.succeed([approvedCache]),
-              upsert: (input) =>
+              upsertRead: (input) =>
                 Ref.update(upserted, (all) => [...all, [input.isApproved, input.approvalUnknownReason]]).pipe(
                   Effect.andThen(Ref.update(stored, (all) => [...all, input.lastModifiedDate])),
                   Effect.as({ row: true, approval: true, versions: undefined })
@@ -316,7 +316,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
               findByAccountAndId: () => Effect.succeed(Option.none()),
               findByCoordinates: () => Effect.succeed(Option.some(approvedCache)),
               findAll: () => Effect.succeed([approvedCache]),
-              upsert: () =>
+              upsertRead: () =>
                 Effect.succeed({
                   row: applied,
                   approval: applied,
@@ -430,7 +430,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([foreignCachedPullRequest, cachedPullRequest]),
-            upsert: () => Effect.succeed({ row: true, approval: true })
+            upsertRead: () => Effect.succeed({ row: true, approval: true })
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -520,7 +520,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest]),
-            upsert: () => Effect.succeed({ row: true, approval: true })
+            upsertRead: () => Effect.succeed({ row: true, approval: true })
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -574,7 +574,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
             observe: () => Effect.succeed(1),
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([]),
-            upsert: () => Effect.succeed({ row: true, approval: true })
+            upsertRead: () => Effect.succeed({ row: true, approval: true })
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -709,7 +709,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
             observe: () => Effect.succeed(1),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest]),
-            upsert: (input) => Ref.set(upserted, input.awsAccountId).pipe(Effect.as({ row: true, approval: true }))
+            upsertRead: (input) => Ref.set(upserted, input.awsAccountId).pipe(Effect.as({ row: true, approval: true }))
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -761,7 +761,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
             observe: () => Effect.succeed(1),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([]),
-            upsert: (input) => Ref.set(upserted, input.awsAccountId).pipe(Effect.as({ row: true, approval: true }))
+            upsertRead: (input) => Ref.set(upserted, input.awsAccountId).pipe(Effect.as({ row: true, approval: true }))
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),

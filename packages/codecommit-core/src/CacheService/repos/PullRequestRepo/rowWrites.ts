@@ -265,6 +265,14 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
             sql<{ readonly applied: number }>`DELETE FROM pull_requests WHERE ${where} AND ${unwritten}
               RETURNING 1 AS applied`
           ),
+          // A row already gone: a later not-found read still advances its tombstone (never lowers it),
+          // so a read that began between the two deletions can't bring it back.
+          Effect.tap(() =>
+            sql`UPDATE pull_request_tombstones
+              SET observation_seq = ${observation}, deleted_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+              WHERE ${where} AND observation_seq < ${observation}
+                AND NOT EXISTS (SELECT 1 FROM pull_requests WHERE ${where})`
+          ),
           Effect.map((rows) => rows.length > 0)
         )
       )

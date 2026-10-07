@@ -95,6 +95,21 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         cacheError("upsert")
       ),
 
+    /**
+     * Write a pull request read in full (a single-PR refresh): like `upsert`, but both groups come
+     * from `read`, so a merged or closed read carries its merger and closing time.
+     */
+    upsertRead: (
+      input: UpsertInput,
+      read: Parameters<typeof rowGroupOfRead>[0] & ApprovalRead,
+      observation: number
+    ) =>
+      encodeUpsert(input).pipe(
+        Effect.flatMap((req) => writes.upsert(req, rowGroupOfRead(read), approvalGroupOfRead(read), observation)),
+        Effect.tap((written) => publishIfApplied(written.row || written.approval)),
+        cacheError("upsertRead")
+      ),
+
     upsertMany: (prs: ReadonlyArray<UpsertInput>, observation: number) =>
       sql.withTransaction(Effect.forEach(prs, (pr) => upsert_(pr, observation), { discard: true })).pipe(
         Effect.tap(() => publish),
