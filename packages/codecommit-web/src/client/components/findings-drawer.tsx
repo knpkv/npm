@@ -71,9 +71,9 @@ export function FindingsDrawer({
     const element = dialog.current
     if (!open || element === null) return
     const observer = new MutationObserver(() => {
-      const other = [...document.querySelectorAll<HTMLElement>("[role='dialog'], [role='alertdialog'], [data-needs-answer]")].find(
-        (candidate) => !element.contains(candidate)
-      )
+      const other = [
+        ...document.querySelectorAll<HTMLElement>("[role='dialog'], [role='alertdialog'], [data-needs-answer]")
+      ].find((candidate) => !element.contains(candidate))
       if (other === undefined || !element.open) return
       element.close()
       // That dialog tried to take focus while the modal still made it inert; give it focus now.
