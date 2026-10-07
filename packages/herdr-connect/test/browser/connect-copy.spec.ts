@@ -19,6 +19,7 @@ const open = async (
     readonly chase?: number
     readonly delay?: number
     readonly rtt?: number
+    readonly clampSilent?: boolean
   }
 ) => {
   // Opened links land on a stub page instead of a DNS failure, so the popup keeps its URL.
@@ -36,6 +37,7 @@ const open = async (
       delay: String(scrollState.delay ?? 0)
     })
     if (scrollState.rtt !== undefined) query.set("rtt", String(scrollState.rtt))
+    if (scrollState.clampSilent === true) query.set("clampSilent", "1")
     await page.request.post(`/__test/scroll-state?${query.toString()}`)
   }
   await page.goto("/")
@@ -469,6 +471,38 @@ test.describe("scroll position from the hub", () => {
     // It does not starve the next one: a reading that covers the scroll lands.
     await page.request.post("/__test/reading?offset=7")
     await expect(olderOutput(page)).toHaveAccessibleName("Older output, 7 lines back")
+  })
+
+  test("a Page Up clamped at the top, which herdr draws no frame for, leaves the screen unshifted", async ({ page }) => {
+    // The fixture clamps a start past the oldest line to the top, so Page Up has nowhere to go.
+    await open(page, { mode: "known", start: 10_000, clampSilent: true })
+    const point = await cellPoint(page, "00", 2)
+    await page.mouse.click(point.x, point.y)
+    await page.keyboard.press("PageUp")
+    await expect.poll(async () => (await commands(page)).some((command) => command.direction === "up")).toBe(true)
+    // No frame comes; the matching reading settles the scroll and the canvas returns.
+    await expect(page.locator(".ghostty-terminal canvas")).toHaveCSS("transform", "none", { timeout: 5_000 })
+  })
+
+  test("when Latest's final reading never comes, the rail says the position is not confirmed", async ({ page }) => {
+    await open(page, { mode: "known", start: 50 })
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back")
+    // Readings stop (dropped), and 10 lines arrive while the pane is still behind.
+    await page.request.post("/__test/scroll-state/mute?on=1")
+    await page.request.post("/__test/grow?lines=10")
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    await expect.poll(() => downs(page)).toEqual([50])
+    const unconfirmed = page.getByRole("status", { name: "Position not confirmed" })
+    await expect(unconfirmed).toBeVisible({ timeout: 8_000 })
+    await expect(rail(page).getByRole("button", { name: "Jump to latest output" })).toHaveAttribute(
+      "data-behind",
+      "true"
+    )
+    // The next reading clears it and shows where the pane really is.
+    await page.request.post("/__test/scroll-state/mute?on=0")
+    await page.request.post("/__test/reading?offset=10")
+    await expect(unconfirmed).toHaveCount(0)
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 10 lines back")
   })
 
   test("an unreadable position falls back to the local estimate and the page-by-page jump", async ({ page }) => {

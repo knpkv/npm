@@ -5,7 +5,8 @@
  * stream only says that the position changed, not where it is. The connector therefore asks
  * `herdr pane get` — a process per read — so reads are coalesced and capped twice: per session,
  * and across every session on the host so many phones scrolling at once cannot fork-storm it.
- * Reads past the host cap are dropped, not queued; the last known position stands.
+ * A read past the host cap is not queued: the session retries once when the host window frees, a
+ * newer request replacing it, so the last read after scrolling still lands.
  *
  * @module
  */
@@ -142,6 +143,12 @@ export interface PaneScrollReporter {
  * rendered a frame since the last one (or `unseenScrollMs` passed), and a reading is discarded if a
  * scroll was forwarded while it ran. So every reported offset already includes every scroll this
  * session forwarded, without matching readings to individual scrolls.
+ *
+ * Known limit: herdr does not acknowledge scrolls, so a frame stands in as the evidence that the
+ * forwarded ones applied, and an undrawn scroll counts as applied after `unseenScrollMs`. A scroll
+ * herdr takes longer than that to apply, or one overtaken by an unrelated output frame, can be
+ * certified early; the next reading corrects it. Closing this needs herdr to report the offset
+ * with its frames (an upstream ask).
  */
 export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporter")(function*(
   read: Effect.Effect<number, PaneScrollReadError>,
@@ -156,6 +163,8 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
   let forwardedAtLastReport = 0
   let lastForwardAt = Number.NEGATIVE_INFINITY
   let lastReadAt = Number.NEGATIVE_INFINITY
+  // A frame inside the refresh interval: read once the interval ends, even if no frame follows.
+  let refreshDue = false
   let scrollUnseen = false
   let failureLogged = false
   const request = Queue.offer(requests, undefined).pipe(Effect.asVoid)
@@ -181,9 +190,15 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
       if (window > 0) yield* Effect.sleep(Duration.millis(window))
       const at = yield* Clock.currentTimeMillis
       if (untilQuiet(at) > 0) return yield* request
-      if (!hostWindow.tryTake(at)) return
+      if (!hostWindow.tryTake(at)) {
+        // Not dropped for good: one retry when the host window frees (the sliding request slot
+        // keeps it to one per session).
+        yield* Effect.sleep(Duration.millis(Math.max(1, hostWindow.nextFreeAt(at) - at)))
+        return yield* request
+      }
       sessionWindow.tryTake(at)
       lastReadAt = at
+      refreshDue = false
       const forwardedBefore = forwardedScrolls
       const offset = yield* read.pipe(
         Effect.catch((error) =>
@@ -210,6 +225,13 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
       })
     }))
   )
+  yield* Effect.forkScoped(
+    Effect.forever(
+      Effect.sleep(Duration.millis(refreshMs)).pipe(
+        Effect.andThen(Effect.suspend(() => refreshDue ? request : Effect.void))
+      )
+    )
+  )
   return {
     request,
     scrollForwarded: Effect.flatMap(Clock.currentTimeMillis, (now) => {
@@ -219,7 +241,10 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
       return request
     }),
     frameSeen: Effect.flatMap(Clock.currentTimeMillis, (now) => {
-      if (!scrollUnseen && !scrolledBack() && now - lastReadAt < refreshMs) return Effect.void
+      if (!scrollUnseen && !scrolledBack() && now - lastReadAt < refreshMs) {
+        refreshDue = true
+        return Effect.void
+      }
       scrollUnseen = false
       return request
     }),

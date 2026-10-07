@@ -79,15 +79,20 @@ describe("pane scroll reporter", () => {
       expect(seen).toEqual([3, 7, 9])
     })))
 
-  it.effect("drops reads past the host cap and keeps the last known position", () =>
+  it.effect("does not queue reads past the host cap, but retries once when the host window frees", () =>
     Effect.scoped(Effect.gen(function*() {
       const { calls, reporter, seen } = yield* reporterWith([4, 8], 1)
       yield* reporter.request
       yield* TestClock.adjust("200 millis")
       yield* reporter.request
       yield* TestClock.adjust("200 millis")
+      // Past the host cap: nothing read now, the last known position stands meanwhile.
       expect(calls()).toBe(1)
       expect(seen).toEqual([4])
+      // The final read after scrolling still lands once the window frees.
+      yield* TestClock.adjust("1 second")
+      expect(calls()).toBe(2)
+      expect(seen).toEqual([4, 8])
     })))
 
   it.effect("reports a failed read as unknown, never as the bottom, and repeats nothing unchanged", () =>
@@ -175,20 +180,22 @@ describe("quiet pane readings", () => {
       expect(calls()).toBe(1)
     })))
 
-  it.effect("at the bottom, frames re-read only every two seconds, so another viewer's scroll still shows", () =>
+  it.effect("at the bottom, a frame re-reads within two seconds even if no other frame follows", () =>
     Effect.scoped(Effect.gen(function*() {
       const { calls, reporter, seen } = yield* reporterWith([0, 40])
       yield* reporter.request
       yield* TestClock.adjust("1 second")
+      // Another viewer scrolled the pane back; its one frame lands inside the refresh interval.
       yield* reporter.frameSeen
       yield* TestClock.adjust("500 millis")
       expect(calls()).toBe(1)
-      // Someone scrolled the pane back elsewhere; the next frame after the refresh interval reads it.
-      yield* TestClock.adjust("1 second")
-      yield* reporter.frameSeen
-      yield* TestClock.adjust("1 second")
+      // No further frame: the pending refresh still reads it once the interval ends.
+      yield* TestClock.adjust("2 seconds")
       expect(calls()).toBe(2)
       expect(seen).toEqual([0, 40])
+      // Nothing pending any more: a quiet pane is not polled.
+      yield* TestClock.adjust("6 seconds")
+      expect(calls()).toBe(2)
     })))
 
   it.effect("after a failed read, a later frame tries again", () =>

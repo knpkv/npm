@@ -19,7 +19,8 @@
  * position as the hub does — off by default, which is how a hub without that signal behaves; `lines=N`
  * gives them N lines of history instead of 300, `chase=N` streams 5 lines behind each of the first N
  * down-scrolls (output arriving while Latest runs), `delay=ms` delivers readings that late, and
- * `rtt=ms` holds each scroll that long before it renders. `POST /__test/scroll-state/mute?on=1` holds readings
+ * `rtt=ms` holds each scroll that long before it renders, and `clampSilent=1` draws no frame for a
+ * scroll clamped at an end (its reading still comes). `POST /__test/scroll-state/mute?on=1` holds readings
  * back, as a slow or rate-limited hub would; `POST /__test/grow?lines=N` streams N lines into the
  * latest session without a reading, and `POST /__test/reading?offset=N&scrolls=M` sends it a
  * reading right away, stamped as taken after M forwarded scrolls (default: all received so far) — a
@@ -130,6 +131,8 @@ interface ScrollStateMode {
   readonly readingDelayMs: number
   // Overrides the server's scroll round trip for new sessions, to hold a page in flight.
   readonly rttMs: number | null
+  // A scroll clamped at an end changes nothing, so herdr draws no frame for it.
+  readonly clampSilent: boolean
 }
 const defaultScrollStateMode: ScrollStateMode = {
   report: "off",
@@ -137,7 +140,8 @@ const defaultScrollStateMode: ScrollStateMode = {
   historyLines: 300,
   chaseScrolls: 0,
   readingDelayMs: 0,
-  rttMs: null
+  rttMs: null,
+  clampSilent: false
 }
 let scrollStateMode = defaultScrollStateMode
 let readingsMuted = false
@@ -251,8 +255,11 @@ const session = (
             if (offset > 0) offset += 1
           }
         }
+        const before = offset
         offset += command.direction === "up" ? command.lines : -command.lines
-        render()
+        screenRows()
+        if (scrollStateMode.clampSilent && offset === before) reportScroll()
+        else render()
       }, scrollRttMs)
     }
     if (command.type === "terminal.resize") {
@@ -296,7 +303,8 @@ const handle = (agentsBody: string) => (request: IncomingMessage, response: Serv
       historyLines: Number(url.searchParams.get("lines") ?? "300"),
       chaseScrolls: Number(url.searchParams.get("chase") ?? "0"),
       readingDelayMs: Number(url.searchParams.get("delay") ?? "0"),
-      rttMs: url.searchParams.has("rtt") ? Number(url.searchParams.get("rtt")) : null
+      rttMs: url.searchParams.has("rtt") ? Number(url.searchParams.get("rtt")) : null,
+      clampSilent: url.searchParams.get("clampSilent") === "1"
     }
     json(response, JSON.stringify(scrollStateMode))
   } else if (url.pathname === "/__test/scroll-state/mute" && request.method === "POST") {

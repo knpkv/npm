@@ -55,6 +55,11 @@ export interface ScrollTrack {
   readonly linesBack: () => number
   /** Forget the scroll position; the caller brings the server back to the latest output. */
   readonly reset: () => void
+  /**
+   * The server confirmed every sent scroll applied — including one clamped at an end, which herdr
+   * draws no frame for — so nothing is in flight any more.
+   */
+  readonly acknowledgeAll: () => void
 }
 
 /**
@@ -102,6 +107,11 @@ export const makeScrollTrack = (cellHeight: () => number, floorLines: () => numb
       travel = 0
       requested = 0
       applied = 0
+      inFlight = []
+    },
+    acknowledgeAll: () => {
+      applied = requested
+      travel = requested * cell()
       inFlight = []
     }
   }

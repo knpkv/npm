@@ -29,6 +29,11 @@ type TerminalScrollCommand = Extract<TerminalClientCommand, { readonly type: "te
 export interface TerminalInteractionView {
   /** Lines above the latest output; 0 when following it. */
   readonly onLinesBack: (lines: number) => void
+  /**
+   * Latest sent its pages but no reading confirmed where the pane ended up, so the client must not
+   * claim it is current. Cleared by the next reading or Latest.
+   */
+  readonly onPositionUnconfirmed: (unconfirmed: boolean) => void
   /** Show the screen as selectable text after a long-press: one entry per line, wraps joined. */
   readonly onSelectText: (lines: ReadonlyArray<string>) => void
   readonly openUrl: (url: string) => void
@@ -325,9 +330,20 @@ export const bindTerminalInteraction = (
     jump = null
   }
   // Each step restarts the silence timer: a jump that hears nothing for a while ends.
-  const silence = (ms: number): Timer => {
+  const silence = (ms: number, expired: () => void = endJump): Timer => {
     if (jump !== null) clearTimeout(jump.timer)
-    return setTimeout(endJump, ms)
+    return setTimeout(expired, ms)
+  }
+  let unconfirmed = false
+  const setUnconfirmed = (next: boolean): void => {
+    if (next === unconfirmed) return
+    unconfirmed = next
+    view.onPositionUnconfirmed(next)
+  }
+  // A known jump whose confirming reading never came: say so instead of claiming the bottom.
+  const knownJumpExpired = (): void => {
+    if (jump?._tag === "Known" && jump.remaining === 0) setUnconfirmed(true)
+    endJump()
   }
   const frameStep = (previous: string | null, sent: number): void => {
     jump = { _tag: "Frames", previous, sent: sent + 1, timer: silence(jumpSilenceMs) }
@@ -335,7 +351,7 @@ export const bindTerminalInteraction = (
   }
   const knownStep = (remaining: number): void => {
     const lines = Math.min(maximumLinesPerCommand, remaining)
-    const timer = silence(knownJumpSilenceMs)
+    const timer = silence(knownJumpSilenceMs, knownJumpExpired)
     sendLines({ direction: "down", lines })
     jump = { _tag: "Known", remaining: remaining - lines, timer }
   }
@@ -395,6 +411,7 @@ export const bindTerminalInteraction = (
     },
     selectText: showText,
     jumpToLatest: () => {
+      setUnconfirmed(false)
       velocity = 0
       track.reset()
       endJump()
@@ -407,6 +424,8 @@ export const bindTerminalInteraction = (
     },
     serverScrollState: (offsetFromBottom, scrollsForwarded) => {
       if (scrollsForwarded !== scrollsSent) return
+      track.acknowledgeAll()
+      setUnconfirmed(false)
       serverPosition = offsetFromBottom === null
         ? { _tag: "Unknown", estimate: believedBack() }
         : { _tag: "Known", offset: offsetFromBottom }

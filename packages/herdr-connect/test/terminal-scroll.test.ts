@@ -57,6 +57,17 @@ describe("scroll track", () => {
     expect(partial.take()).toEqual({ direction: "down", lines: 1 })
   })
 
+  it("a confirmed position settles scrolls herdr drew no frame for", () => {
+    // Page Up at the top: herdr clamps it and draws nothing, so no frame acknowledges it.
+    const track = makeScrollTrack(() => cell)
+    track.pan(45)
+    expect(track.take()).toEqual({ direction: "up", lines: 3 })
+    expect(track.translate()).toBe(45)
+    track.acknowledgeAll()
+    expect(track.translate()).toBe(0)
+    expect(track.take()).toBeNull()
+  })
+
   it("stops following a server that has not answered for three lines", () => {
     const track = makeScrollTrack(() => cell)
     track.pan(200)
