@@ -1,5 +1,15 @@
 # @knpkv/herdr-work
 
+## 0.8.1
+
+### Patch Changes
+
+- [#590](https://github.com/knpkv/npm/pull/590) [`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26) Thanks [@konopkov](https://github.com/konopkov)! - Work activity for an approved reassignment or abandonment reads as a sentence: "Reassigned from host-coordinator to claude-coordinator: <reason>" and "Abandoned: <reason>". Owner ids and the approval's job id and hash no longer appear in the text; they stay structured on the reassignment and abandonment records. `workReassignActivitySummary` and `workAbandonActivitySummary` now take only the payload. Events already recorded keep their earlier text.
+
+- [#600](https://github.com/knpkv/npm/pull/600) [`bfba87c`](https://github.com/knpkv/npm/commit/bfba87c566ca21d267c0626da60b431757dc5e32) Thanks [@konopkov](https://github.com/konopkov)! - A decided request drops its Approve/Reject bar once the snapshot proves the outcome: it reads as its title and state word, a refusal keeps its explanation, and the outcome is announced. While a bar is shown, the request is named once, by the bar.
+- Updated dependencies [[`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26)]:
+  - @knpkv/herdr-fleet@0.7.0
+
 ## 0.8.0
 
 ### Minor Changes

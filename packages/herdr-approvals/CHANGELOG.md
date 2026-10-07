@@ -1,5 +1,19 @@
 # @knpkv/herdr-approvals
 
+## 0.11.0
+
+### Minor Changes
+
+- [#602](https://github.com/knpkv/npm/pull/602) [`58aca11`](https://github.com/knpkv/npm/commit/58aca112c21203ee8955b130d5d891dabe2976a2) Thanks [@konopkov](https://github.com/konopkov)! - The Work tab decides a goal's approval request in place: its bar approves or rejects through the same call as the Approvals tab, shows the decision waiting for the hub, and says how the hub answered (taken, refused, or not yet known). Its clock reads hub time, like the Approvals countdown, and both tabs use the same clock words. An answer belongs to the request it decided, so a new request on the same job starts with a ready bar.
+
+### Patch Changes
+
+- Updated dependencies [[`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26), [`bfba87c`](https://github.com/knpkv/npm/commit/bfba87c566ca21d267c0626da60b431757dc5e32)]:
+  - @knpkv/herdr-fleet@0.7.0
+  - @knpkv/herdr-work@0.8.1
+  - @knpkv/herdr-connect@0.7.2
+  - @knpkv/herdr-coordinator@0.3.5
+
 ## 0.10.0
 
 ### Minor Changes
