@@ -4,7 +4,7 @@
  */
 
 import { Cause, Clock, DateTime, Effect, SubscriptionRef } from "effect"
-import { type CachedPullRequest, PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
+import { type CachedPullRequest, PullRequestRepo, versionsOf } from "../CacheService/repos/PullRequestRepo/index.js"
 import { scoreTotalOr } from "../HealthScore.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
 
@@ -26,7 +26,9 @@ export const calculateHealthScores = (
     (row) => {
       const pr = decodeCachedPR(row)
       const score = scoreTotalOr(pr, scoreNow, 0)
-      return prRepo.updateHealthScore(row.awsAccountId, row.id, score, {
+      // Computed from both groups, so written only to the row as it was read: any write since (the
+      // approval included) makes the score stale.
+      return prRepo.writeDerived(row.awsAccountId, row.id, versionsOf(row), { healthScore: score }, {
         repositoryName: row.repositoryName,
         accountRegion: row.accountRegion
       }).pipe(

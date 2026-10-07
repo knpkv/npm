@@ -1,0 +1,28 @@
+id: no-angle-type-assertion
+snapshots:
+  ? |
+    export const call = (value: unknown) => consume(<Options>value, 1)
+  : labels:
+      - source: <Options>
+        style: primary
+        start: 48
+        end: 57
+  ? |
+    export const first = (values: unknown) => {
+      return <ReadonlyArray<string>>values
+    }
+  : labels:
+      - source: <ReadonlyArray<string>>
+        style: primary
+        start: 53
+        end: 76
+  ? |
+    export const read = (value: unknown) => {
+      const text = <string>value
+      return text
+    }
+  : labels:
+      - source: <string>
+        style: primary
+        start: 57
+        end: 65

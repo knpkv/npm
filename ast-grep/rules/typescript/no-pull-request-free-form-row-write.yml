@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-pull-request-free-form-row-write
+language: tsx
+severity: error
+message: "A pull-request row write takes a whole column group (RowGroup, ApprovalGroup) or DerivedColumns, not a free-form SQL `set` fragment."
+
+rule:
+  kind: required_parameter
+  all:
+    - has:
+        field: pattern
+        regex: "^set$"
+    - has:
+        field: type
+        regex: "Fragment"
+
+files:
+  - "packages/codecommit-core/src/CacheService/repos/PullRequestRepo/**/*.ts"
+
+note: |
+  A free-form `set` lets one write cover part of a column group and still move that group's version,
+  so a later, fuller read of the same revision is rejected and its fresh columns are lost. Provider
+  reads write whole groups (`upsert`, `writeRead`); recomputed values go through `writeDerived`, which
+  moves no version. Add a column to the group type instead of writing it on its own.

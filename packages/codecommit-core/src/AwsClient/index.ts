@@ -19,7 +19,6 @@ import { AwsClientConfig } from "../AwsClientConfig.js"
 import type { PRCommentLocation, PullRequest } from "../Domain.js"
 import type { AwsApiError, AwsCredentialError, AwsThrottleError } from "../Errors.js"
 import type { CallerIdentity } from "./getCallerIdentity.js"
-import type { PullRequestRefreshItem } from "./getPullRequests.js"
 import type {
   AccountParams,
   CreateApprovalRuleParams,
@@ -41,7 +40,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export type { CallerIdentity } from "./getCallerIdentity.js"
-export type { ApprovalEvaluationError, PullRequestRefreshItem } from "./getPullRequests.js"
+export type { ApprovalEvaluationError } from "./getPullRequests.js"
 export type { DiffStats, GetDifferencesParams } from "./internal.js"
 
 // ---------------------------------------------------------------------------
@@ -68,14 +67,6 @@ export declare namespace AwsClient {
       account: AccountParams,
       options?: { status?: "OPEN" | "CLOSED"; repositoryName?: string }
     ) => Stream.Stream<PullRequest, AwsClientError>
-    /**
-     * The same pull requests as `getPullRequests`, but a pull request whose approval rules cannot be
-     * evaluated arrives as `EvaluationFailed` instead of failing the stream, so a refresh keeps the rest.
-     */
-    readonly getPullRequestRefresh: (
-      account: AccountParams,
-      options?: { status?: "OPEN" | "CLOSED"; repositoryName?: string }
-    ) => Stream.Stream<PullRequestRefreshItem, AwsClientError>
     readonly getCallerIdentity: (account: AccountParams) => Effect.Effect<CallerIdentity, AwsClientError>
     readonly createPullRequest: (params: CreatePullRequestParams) => Effect.Effect<string, AwsClientError>
     readonly listBranches: (params: ListBranchesParams) => Effect.Effect<Array<string>, AwsClientError>
@@ -125,11 +116,6 @@ export const AwsClientLive = Layer.effect(
         Stream.unwrap(
           Effect.map(Effect.promise(() => import("./getPullRequests.js")), ({ getPullRequests }) =>
             provideStream(getPullRequests(account, options)))
-        ),
-      getPullRequestRefresh: (account, options) =>
-        Stream.unwrap(
-          Effect.map(Effect.promise(() => import("./getPullRequests.js")), ({ getPullRequestRefresh }) =>
-            provideStream(getPullRequestRefresh(account, options)))
         ),
       getCallerIdentity: (account) =>
         Effect.flatMap(

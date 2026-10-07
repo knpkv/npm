@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-raw-pull-request-approval-read
+language: tsx
+severity: error
+message: "Read pull-request approval through Domain.approvalOf; `isApproved` is only the last known value while approval is unknown."
+
+rule:
+  pattern: $PR.isApproved
+
+files:
+  - "packages/codecommit-core/src/**/*.ts"
+  - "packages/codecommit/src/**/*.ts"
+  - "packages/codecommit/src/**/*.tsx"
+  - "packages/codecommit-web/src/**/*.ts"
+  - "packages/codecommit-web/src/**/*.tsx"
+
+ignores:
+  # approvalOf itself.
+  - "packages/codecommit-core/src/Domain.ts"
+  # The provider adapter produces the value; the cache stores and diffs the last known value.
+  - "packages/codecommit-core/src/AwsClient/**"
+  - "packages/codecommit-core/src/CacheService/**"
+  # Row <-> domain mappers copy the field unchanged.
+  - "packages/codecommit-core/src/PRService/internal.ts"
+
+note: |
+  A pull request whose approval rules failed to evaluate keeps its last known `isApproved` and sets
+  `approvalUnknown`. Reading `isApproved` directly shows that stale value as approved or pending.
+  `approvalOf(pr)` returns Approved, Pending or Unknown(reason); Unknown wins. Show it with
+  `approvalUnknownLabel` and `approvalUnknownReasonText` so every surface uses the same words.

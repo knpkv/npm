@@ -7,6 +7,7 @@ const makePR = (overrides: Partial<{
   creationDate: Date
   lastModifiedDate: Date
   isApproved: boolean
+  approvalUnknown: { readonly _tag: "NotPermitted" }
   isMergeable: boolean
   commentCount: number
   title: string
@@ -27,6 +28,7 @@ const makePR = (overrides: Partial<{
     destinationBranch: "main",
     isMergeable: overrides.isMergeable ?? true,
     isApproved: overrides.isApproved ?? false,
+    ...(overrides.approvalUnknown !== undefined && { approvalUnknown: overrides.approvalUnknown }),
     commentCount: overrides.commentCount,
     approvedBy: [],
     commentedBy: []
@@ -63,6 +65,19 @@ describe("HealthScore", () => {
       const pr = makePR({ creationDate: now, lastModifiedDate: now, commentCount: 3 })
       // 10 + 3 = 13, capped at 10
       expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(10)
+    })
+
+    it("no approval bonus while approval is unknown, even with a last known approval", () => {
+      const now = new Date("2024-01-01")
+      const score = Option.getOrThrow(
+        calculateHealthScore(makePR({ isApproved: true, approvalUnknown: { _tag: "NotPermitted" } }), now)
+      )
+      expect(score.breakdown.find((b) => b.label === "Approval")?.value).toBe(0)
+      expect(score.categories.find((c) => c.label === "Approval")).toMatchObject({
+        status: "neutral",
+        statusLabel: "UNKNOWN",
+        description: expect.stringContaining("Approval unknown")
+      })
     })
 
     it("approval bonus: +2 when approved", () => {
