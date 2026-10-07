@@ -20,10 +20,8 @@ import {
   verifyCredentialDigest
 } from "../src/index.js"
 
-const pairingCrypto = Crypto.Crypto.of({
-  randomBytes: (size) => Effect.succeed(new Uint8Array(size).fill(0xab)),
-  randomUUIDv4: Effect.succeed("00000000-0000-4000-8000-000000000000"),
-  randomUUIDv7: Effect.succeed("01900000-0000-7000-8000-000000000000"),
+const pairingCrypto = Crypto.make({
+  randomBytes: (size) => new Uint8Array(size).fill(0xab),
   digest: (_algorithm, bytes) => Effect.succeed(new Uint8Array(32).fill(bytes[0] ?? 0))
 })
 

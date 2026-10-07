@@ -45,7 +45,7 @@
     "test:watch": "vitest",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "check": "tsc --noEmit && tsc -p scripts/tsconfig.json",
+    "check": "tsc --noEmit && tsc -p scripts/tsconfig.json && tsc -p test/tsconfig.json --noEmit",
     "regenerate": "tsx scripts/regenerate.ts",
     "regenerate:check": "tsx scripts/regenerate.ts --check"
   },
