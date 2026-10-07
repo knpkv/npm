@@ -641,27 +641,6 @@
     {
       "package": "codecommit-core",
       "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
       "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
       "reasoned": true

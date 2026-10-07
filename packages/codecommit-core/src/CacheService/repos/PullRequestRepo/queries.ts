@@ -20,8 +20,7 @@ export class PullRequestAmbiguityError extends Data.TaggedError("PullRequestAmbi
   readonly matches: number
 }> {}
 
-/** A cached open pull request old enough to re-read: its coordinates and the versions it was read at. */
-export const StaleOpenRow = Schema.Struct({
+const StaleOpenRow = Schema.Struct({
   id: Schema.String,
   awsAccountId: Schema.String,
   repositoryName: Schema.String,
@@ -33,7 +32,6 @@ export const StaleOpenRow = Schema.Struct({
   approvalVersion: Schema.DateFromString,
   approvalObservationSeq: Schema.Number
 })
-export type StaleOpenRow = typeof StaleOpenRow.Type
 
 export const findAll = (sql: SqlClient.SqlClient) => {
   const run = SqlSchema.findAll({

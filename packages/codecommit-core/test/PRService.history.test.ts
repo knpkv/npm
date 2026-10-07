@@ -3,10 +3,14 @@ import { Effect, Layer, Logger, Ref, Schema, Stream, SubscriptionRef } from "eff
 import { AwsClient } from "../src/AwsClient/index.js"
 import { PullRequestDetail } from "../src/AwsClient/internal.js"
 import { CacheError } from "../src/CacheService/CacheError.js"
-import { CachedPullRequest, PullRequestRepo, StaleOpenRow } from "../src/CacheService/repos/PullRequestRepo/index.js"
+import {
+  CachedPullRequest,
+  PullRequestRepo,
+  type PullRequestRepoContract
+} from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { ConfigService } from "../src/ConfigService/index.js"
 import { TuiConfig } from "../src/ConfigService/internal.js"
-import type { AppState } from "../src/Domain.js"
+import { type AppState, AwsProfileName, AwsRegion } from "../src/Domain.js"
 import { syncWeek } from "../src/PRService/refreshHistory.js"
 
 const cachedRow = (profile: string, id: string) =>
@@ -81,7 +85,18 @@ const historyCases: ReadonlyArray<readonly [string, { readonly _tag: "NotPermitt
 ]
 
 // The stale-open read of a cached row: its coordinates and versions.
-const staleOpen = (row: CachedPullRequest) => Schema.decodeSync(StaleOpenRow)(Schema.encodeSync(CachedPullRequest)(row))
+const staleOpen = (row: CachedPullRequest): StaleOpen => ({
+  id: row.id,
+  awsAccountId: row.awsAccountId,
+  repositoryName: row.repositoryName,
+  accountProfile: AwsProfileName.make(row.accountProfile),
+  accountRegion: AwsRegion.make(row.accountRegion),
+  lastModifiedDate: row.lastModifiedDate,
+  observationSeq: row.observationSeq,
+  approvalVersion: row.approvalVersion,
+  approvalObservationSeq: row.approvalObservationSeq
+})
+type StaleOpen = Effect.Success<ReturnType<PullRequestRepoContract["findStaleOpen"]>>[number]
 
 describe("history sync approval evaluation", () => {
   // The history sync re-reads every cached open PR; that read's evaluation must reach the cache like

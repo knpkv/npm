@@ -152,9 +152,11 @@ describe("CodeCommit web security boundary", () => {
   it.effect("keeps a committed config mutation successful when its refresh fails", () =>
     Effect.gen(function*() {
       const originalReview = ConfigService.defaultReviewConfig
+      const [baseProfile] = ConfigService.defaultReviewProfiles
+      if (baseProfile === undefined) return yield* Effect.die("the default review profiles are empty")
       const updatedReview = {
         defaultProfileId: "quick",
-        profiles: [{ ...ConfigService.defaultReviewProfiles[0]!, id: "quick", name: "Quick review", skillIds: [] }]
+        profiles: [{ ...baseProfile, id: "quick", name: "Quick review", skillIds: [] }]
       } satisfies ConfigService.ReviewConfig
       const persisted = yield* Ref.make(originalReview)
       const refreshCalls = yield* Ref.make(0)

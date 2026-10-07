@@ -12,13 +12,15 @@ import {
   type ApprovalRead,
   CachedPullRequest,
   PullRequestRepo,
-  StaleOpenRow
+  type PullRequestRepoContract
 } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { AccountConfig } from "../src/ConfigService/internal.js"
 import {
   approvalUnknownReasonText,
   type AppState,
+  AwsProfileName,
+  AwsRegion,
   type CallerIdentityState,
   type CallerIdentityUnresolvedReason,
   PullRequest
@@ -60,7 +62,18 @@ const seeded = (identities: Readonly<Record<string, CallerIdentityState>>): AppS
 }
 
 // The stale-open read of a cached row: its coordinates and versions.
-const staleOpen = (row: CachedPullRequest) => Schema.decodeSync(StaleOpenRow)(Schema.encodeSync(CachedPullRequest)(row))
+const staleOpen = (row: CachedPullRequest): StaleOpen => ({
+  id: row.id,
+  awsAccountId: row.awsAccountId,
+  repositoryName: row.repositoryName,
+  accountProfile: AwsProfileName.make(row.accountProfile),
+  accountRegion: AwsRegion.make(row.accountRegion),
+  lastModifiedDate: row.lastModifiedDate,
+  observationSeq: row.observationSeq,
+  approvalVersion: row.approvalVersion,
+  approvalObservationSeq: row.approvalObservationSeq
+})
+type StaleOpen = Effect.Success<ReturnType<PullRequestRepoContract["findStaleOpen"]>>[number]
 
 describe("fetchAndUpsertPRs", () => {
   it.effect("keeps an identity's earlier lookup failure when its refresh then fails authentication", () =>

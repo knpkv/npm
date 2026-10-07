@@ -1,4 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -40,12 +41,15 @@ const mergeOperations = (
   ...overrides
 })
 
+// A provider failure the merge path does not recognise.
+class ProviderUnavailable extends Data.TaggedError("ProviderUnavailable")<{ readonly operation: string }> {}
+
 describe("CodeCommitReviewProvider", () => {
   it.effect("keeps an unknown repository preflight failure outside merge outcome recovery", () =>
     Effect.gen(function*() {
       let mergeDispatches = 0
       const operations = mergeOperations({
-        getRepository: () => Effect.fail(new Error("repository unavailable")),
+        getRepository: () => Effect.fail(new ProviderUnavailable({ operation: "getRepository" })),
         mergeSquash: () =>
           Effect.sync(() => {
             mergeDispatches += 1
@@ -72,7 +76,7 @@ describe("CodeCommitReviewProvider", () => {
           Effect.succeed({
             repositoryMetadata: { accountId: "123456789012", repositoryName: "payments-api" }
           }),
-        getCallerIdentity: () => Effect.fail(new Error("identity unavailable")),
+        getCallerIdentity: () => Effect.fail(new ProviderUnavailable({ operation: "getCallerIdentity" })),
         mergeSquash: () =>
           Effect.sync(() => {
             mergeDispatches += 1
@@ -107,7 +111,7 @@ describe("CodeCommitReviewProvider", () => {
         mergeSquash: () =>
           Effect.sync(() => {
             mergeDispatches += 1
-          }).pipe(Effect.andThen(Effect.fail(new Error("merge outcome unavailable"))))
+          }).pipe(Effect.andThen(Effect.fail(new ProviderUnavailable({ operation: "mergeOutcome" }))))
       })
 
       const result = yield* Effect.result(authorizeAndMerge(mergeAction, () => Effect.void, operations))
