@@ -8,11 +8,12 @@ import { RegistryProvider } from "@effect/atom-react"
 import { createRoot } from "react-dom/client"
 import { ConnectSurface, makeConnectAtoms } from "../../src/client.js"
 
+// `?embedded` mounts Connect the way the hub's Connect tab does: page title, summary, directory.
 const root = document.querySelector<HTMLElement>("#fleet-connect-root")
 if (root !== null) {
   createRoot(root).render(
     <RegistryProvider>
-      <ConnectSurface atoms={makeConnectAtoms()} />
+      <ConnectSurface atoms={makeConnectAtoms()} embedded={new URLSearchParams(location.search).has("embedded")} />
     </RegistryProvider>
   )
 }

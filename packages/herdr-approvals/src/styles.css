@@ -766,7 +766,7 @@
     min-block-size: 2rem;
   }
 
-  .notification-status-action .notice {
+  .notification-status .notice {
     background: transparent;
     color: var(--rly-color-text-2);
     margin-block: 0;
@@ -774,13 +774,19 @@
     padding: 0;
   }
 
+  /* A flex item that wraps its own text: the open guidance never runs past the panel edge. */
   .notification-help {
     color: var(--rly-color-text-3);
     font-size: var(--rly-type-meta-size);
+    max-inline-size: 100%;
+    min-inline-size: 0;
   }
 
   .notification-help summary {
+    align-items: center;
     cursor: pointer;
+    display: flex;
+    min-block-size: var(--rly-space-32);
   }
 
   .notification-help[open] {
@@ -789,6 +795,11 @@
     border-radius: var(--rly-radius-control);
     flex-basis: 100%;
     padding: var(--rly-space-12);
+  }
+
+  .install-guidance li,
+  .notification-url {
+    overflow-wrap: break-word;
   }
 
   .install-guidance {
@@ -824,8 +835,24 @@
 
   .chat-turn p {
     margin: 0;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     white-space: pre-wrap;
+  }
+
+  /* A turn's state as a word; only a failure takes ink. */
+  .chat-turn-state {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+  }
+
+  .chat-turn-state[data-state="failed"] {
+    color: var(--rly-color-blocked-ink);
+  }
+
+  .chat-history:focus-visible {
+    outline: 2px solid var(--rly-color-focus);
+    outline-offset: 2px;
   }
 
   .chat-turn-heading {

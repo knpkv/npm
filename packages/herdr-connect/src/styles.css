@@ -67,20 +67,29 @@
     padding: var(--rly-space-12) var(--rly-space-20);
   }
 
+  /* The page title, then the one-sentence summary, on the directory's own column edge. */
   .connect-embedded-intro {
-    align-items: end;
-    border-block-end: 1px solid var(--rly-color-border-1);
-    display: flex;
-    gap: var(--rly-space-24);
-    justify-content: space-between;
-    margin-inline: auto;
-    max-inline-size: 76rem;
-    padding: var(--rly-space-24) var(--rly-space-20) var(--rly-space-20);
+    display: grid;
+    gap: var(--rly-space-16);
+    inline-size: min(100%, 76rem);
+    justify-self: center;
+    padding: var(--rly-space-20) var(--rly-space-20) var(--rly-space-8);
   }
 
-  .connect-embedded-intro > div {
-    display: grid;
-    gap: var(--rly-space-8);
+  .connect-embedded-intro h1 {
+    margin: var(--rly-space-0);
+  }
+
+  /* On a narrow screen the summary takes up to three lines once the fleet loads; reserve them so the list does not jump. */
+  @media (max-width: 700px) {
+    .connect-embedded-intro [data-rly-hero] > p:first-child {
+      min-block-size: 3lh;
+    }
+
+    /* Phones keep the sentence and drop its caption, as the directory needs the room. */
+    .connect-embedded-intro [data-rly-hero] > p:last-child:not(:first-child) {
+      display: none;
+    }
   }
 
   .connect-agents {
@@ -143,41 +152,39 @@
     padding-inline: var(--rly-space-4);
   }
 
+  /* Filters are words; the chosen one is underlined, every option a full-height target. */
   .connect-group-filter,
   .connect-status-filter {
-    background: var(--rly-color-surface-2);
-    border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-control);
     display: flex;
     flex-wrap: wrap;
-    gap: 2px;
+    gap: var(--rly-space-4);
     max-inline-size: 100%;
     min-inline-size: 0;
-    padding: 2px;
   }
 
   .connect-group-filter button,
   .connect-status-filter button {
-    background: transparent;
+    background: none;
     border: 0;
-    border-radius: calc(var(--rly-radius-control) - 2px);
-    color: var(--rly-color-text-3);
+    border-radius: var(--rly-radius-field);
+    color: var(--rly-color-text-2);
     cursor: pointer;
-    font: inherit;
-    font-size: var(--rly-type-meta-size);
     flex: 0 0 auto;
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
     max-inline-size: 100%;
+    min-block-size: calc(var(--rly-space-32) + var(--rly-space-8));
     min-inline-size: 0;
-    overflow-wrap: anywhere;
-    padding: var(--rly-space-6) var(--rly-space-8);
-    white-space: normal;
+    overflow-wrap: break-word;
+    padding-inline: var(--rly-space-12);
   }
 
   .connect-group-filter button[aria-pressed="true"],
   .connect-status-filter button[aria-pressed="true"] {
-    background: var(--rly-color-surface-3);
-    box-shadow: 0 0 0 1px var(--rly-color-border-2);
     color: var(--rly-color-text-1);
+    text-decoration: underline;
+    text-decoration-thickness: var(--rly-space-2);
+    text-underline-offset: var(--rly-space-6);
   }
 
   .connect-group-filter button:focus-visible,
@@ -225,16 +232,6 @@
     position: relative;
   }
 
-  .connect-agent-list::before {
-    background: var(--rly-color-border-1);
-    content: "";
-    inset-block: var(--rly-space-12);
-    inset-inline-start: calc(var(--rly-space-12) + 4.25rem + var(--rly-space-12) + 0.25rem);
-    inline-size: 1px;
-    pointer-events: none;
-    position: absolute;
-  }
-
   .connect-agent {
     align-items: center;
     background: transparent;
@@ -245,7 +242,7 @@
     cursor: pointer;
     display: grid;
     font: inherit;
-    grid-template-columns: 4.25rem 0.5rem minmax(0, 1fr) auto;
+    grid-template-columns: 4.25rem minmax(0, 1fr) auto;
     gap: var(--rly-space-12);
     min-inline-size: 0;
     padding: var(--rly-space-12);
@@ -267,9 +264,11 @@
     outline-offset: -1px;
   }
 
+  /* Selected: a filled row with a full outline, never a one-sided bar. */
   .connect-agent[data-selected="true"] {
     background: color-mix(in srgb, var(--rly-color-agent) 12%, var(--rly-color-surface-2));
-    box-shadow: inset 3px 0 0 var(--rly-color-agent);
+    outline: 1px solid var(--rly-color-border-2);
+    outline-offset: -1px;
   }
 
   .connect-agent time {
@@ -279,37 +278,34 @@
     font-variant-numeric: tabular-nums;
   }
 
-  .connect-agent .agent-presence {
-    box-shadow: 0 0 0 4px var(--rly-color-surface-1);
-    position: relative;
-    z-index: 1;
-  }
-
-  .connect-agent:hover .agent-presence,
-  .connect-agent:focus-visible .agent-presence,
-  .connect-agent[data-selected="true"] .agent-presence {
-    box-shadow: 0 0 0 4px var(--rly-color-surface-2);
-  }
-
   .connect-agent-copy {
     display: grid;
     flex: 1;
     min-inline-size: 0;
   }
 
+  /* Names and their host, relationship and work read in full; long ones wrap. */
   .connect-agent-copy small,
   .connect-agent-copy strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
   }
 
-  .connect-agent .agent-presence[data-activity="working"] {
-    background: var(--rly-color-agent);
+  /* An identifier (host, work) moves to the next line whole; it breaks only if it is longer than the line. */
+  .connect-token {
+    display: inline-block;
+    max-inline-size: 100%;
+    overflow-wrap: break-word;
   }
 
-  .connect-agent .agent-presence[data-activity="finished"] {
-    background: var(--rly-color-text-3);
+  /* The state as a word; only an agent that needs attention takes ink. */
+  .connect-agent-state {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+  }
+
+  .connect-agent-state[data-activity="attention"] {
+    color: var(--rly-color-held-ink);
   }
 
   .connect-failures {
@@ -619,8 +615,8 @@
       display: none;
     }
 
-    .connect-header h1,
-    .connect-embedded-intro h1 {
+    /* The standalone page keeps a one-row header on phones; the embedded tab's title is already card-sized. */
+    .connect-header h1 {
       font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
         var(--rly-type-card-title-font);
       letter-spacing: var(--rly-type-card-title-tracking);
@@ -636,19 +632,8 @@
     }
 
     .connect-embedded-intro {
-      align-items: center;
-      gap: var(--rly-space-8);
-      padding: var(--rly-space-8);
-    }
-
-    .connect-embedded-intro > div {
-      display: block;
-      min-inline-size: 0;
-    }
-
-    .connect-embedded-intro > div > :first-child,
-    .connect-embedded-intro > div > :last-child {
-      display: none;
+      gap: var(--rly-space-12);
+      padding: var(--rly-space-12) var(--rly-space-8) var(--rly-space-4);
     }
 
     .connect-agents {
@@ -678,6 +663,18 @@
       margin-block-end: var(--rly-space-8);
     }
 
+    /* Each filter's name sits beside its options, so 40px targets still fit a phone's first screen. */
+    .connect-filter-set {
+      align-items: start;
+      gap: var(--rly-space-8);
+      grid-template-columns: 3.25rem minmax(0, 1fr);
+    }
+
+    .connect-filter-label {
+      align-self: center;
+      padding-inline: var(--rly-space-0);
+    }
+
     .connect-group-filter,
     .connect-status-filter {
       inline-size: 100%;
@@ -687,6 +684,7 @@
     .connect-status-filter button {
       line-height: var(--rly-type-meta-line-height);
       padding-block: var(--rly-space-4);
+      padding-inline: var(--rly-space-8);
     }
 
     .connect-agent-tree {
@@ -715,13 +713,9 @@
       white-space: nowrap;
     }
 
-    .connect-agent-list::before {
-      inset-inline-start: calc(var(--rly-space-8) + 3.5rem + var(--rly-space-8) + 0.25rem);
-    }
-
     .connect-agent {
       gap: var(--rly-space-8);
-      grid-template-columns: 3.5rem 0.5rem minmax(0, 1fr) auto;
+      grid-template-columns: 3.5rem minmax(0, 1fr) auto;
       padding: var(--rly-space-8);
     }
 
