@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Schema from "effect/Schema"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { parseDocument } from "yaml"
 
 const runtime = ManagedRuntime.make(NodeServices.layer)
@@ -83,4 +84,33 @@ test("the Control Center benchmark steps stay on the control-center leg", () => 
   const benchmarkSteps = suiteJob.steps.filter((step) => step.name?.includes("Control Center"))
   assert.equal(benchmarkSteps.length, 3)
   for (const step of benchmarkSteps) assert.match(step.if, /matrix\.package == 'control-center'/u)
+})
+
+// Runs the aggregate's real gate script, as written in check.yml, for every result GitHub can report for the
+// matrix job. GitHub reports `failure` for a matrix job when any one leg fails, so this is the failing-leg case.
+const runBrowserGate = (command, env) =>
+  ChildProcessSpawner.ChildProcessSpawner.pipe(
+    Effect.flatMap((spawner) =>
+      spawner.exitCode(
+        ChildProcess.make("/bin/bash", ["-e", "-o", "pipefail", "-c", command], {
+          env,
+          extendEnv: false,
+          stdout: "ignore",
+          stderr: "ignore"
+        })
+      )
+    )
+  )
+
+test("the Browser gate script fails for every matrix result except success", async () => {
+  const command = requiredJob.steps[0].run
+  for (const result of ["success", "failure", "cancelled", "skipped", "", undefined]) {
+    const env = result === undefined ? {} : { BROWSER_SUITE_RESULT: result }
+    const exitCode = await runtime.runPromise(runBrowserGate(command, env))
+    assert.equal(
+      exitCode === ChildProcessSpawner.ExitCode(0),
+      result === "success",
+      `matrix result ${JSON.stringify(result)}`
+    )
+  }
 })
