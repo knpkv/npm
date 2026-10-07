@@ -45,6 +45,37 @@ test("counts only tsc commands that gate the script", () => {
   ])
 })
 
+test("credits no coverage when any recovery path can mask a failing tsc", () => {
+  assert.deepEqual(checkedProjects("tsc -p test/tsconfig.json && echo checked || true"), [])
+  assert.deepEqual(checkedProjects("tsc -p test/tsconfig.json --noEmit & wait"), [])
+  assert.deepEqual(checkedProjects("tsc -p test/tsconfig.json --noEmit && echo checked"), [
+    { project: "test/tsconfig.json", build: false }
+  ])
+})
+
+test("credits only tsc invocations that typecheck, in command position", () => {
+  for (const script of [
+    "tsc -p test/tsconfig.json --noEmit --noCheck",
+    "tsc -p test/tsconfig.json --showConfig",
+    "tsc -p test/tsconfig.json --listFilesOnly",
+    "tsc -b tsconfig.json --clean",
+    "tsc -b tsconfig.json --dry",
+    "echo tsc -p test/tsconfig.json"
+  ]) {
+    assert.deepEqual(checkedProjects(script), [], script)
+  }
+  assert.deepEqual(checkedProjects("pnpm exec tsc -p test/tsconfig.json --noEmit"), [
+    { project: "test/tsconfig.json", build: false }
+  ])
+})
+
+test("a project that inherits noCheck typechecks nothing", () => {
+  const fixture = (name) => fileURLToPath(new URL(`./fixtures/test-typecheck-coverage/${name}`, import.meta.url))
+  const isFixtureTest = (file) => file.endsWith("/fixtures/test-typecheck-coverage/test/example.test.ts")
+  assert.equal(projectFiles(fixture("test/tsconfig.json"), false).some(isFixtureTest), true)
+  assert.equal(projectFiles(fixture("tsconfig.nocheck.json"), false).some(isFixtureTest), false)
+})
+
 test("follows project references only in build mode, as tsc does", () => {
   const fixture = fileURLToPath(new URL("./fixtures/test-typecheck-coverage/tsconfig.json", import.meta.url))
   const isFixtureTest = (file) => file.endsWith("/fixtures/test-typecheck-coverage/test/example.test.ts")

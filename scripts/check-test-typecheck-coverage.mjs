@@ -24,6 +24,9 @@ const fail = (reason) => new TestTypecheckCoverageError({ reason })
 
 const allowlistPath = "scripts/test-typecheck-allowlist.json"
 
+// tsc modes that succeed without typechecking: they never establish coverage.
+const nonCheckingFlags = /(?:^|\s)--(?:noCheck|showConfig|listFilesOnly|clean|dry|help|version|init)(?:\s|=|$)/u
+
 const sourceFile = /\.(?:[cm]?ts|tsx)$/u
 const declarationFile = /\.d\.[cm]?ts$/u
 const testDirectory = /(?:^|\/)(?:test|e2e|dtslint)\//u
@@ -45,17 +48,24 @@ export const isTestSource = (relativePath) =>
  * references. Only commands that gate the script count: segments joined by `&&`. A segment that
  * contains `||`, `;`, a pipe or `&` can succeed while tsc fails, so it is not counted (fail closed).
  */
-export const checkedProjects = (checkScript) =>
-  (checkScript ?? "").split("&&").flatMap((segment) => {
-    const command = segment.match(/(?:^|\s)(?:tsc|tspc|tsgo)(?:\s+(.*))?$/u)
-    if (command === null || /\|\||;|\||&/u.test(segment)) return []
+export const checkedProjects = (checkScript) => {
+  const script = checkScript ?? ""
+  // Any recovery or sequencing path (`||`, `;`, a pipe, a background `&`) anywhere in the script can let it
+  // succeed while tsc fails, so such a script credits no coverage at all (fail closed).
+  if (/\|\||;|(?<![&|])[&|](?![&|])/u.test(script)) return []
+  return script.split("&&").flatMap((segment) => {
+    // tsc must be the command itself, optionally behind `pnpm exec`/`npm exec`/`npx`; `echo tsc …` is not a check.
+    const command = segment.trim().match(/^(?:(?:pnpm|npm)\s+exec\s+|npx\s+)?(?:tsc|tspc|tsgo)(?:\s+(.*))?$/u)
+    if (command === null) return []
     const args = command[1] ?? ""
+    if (nonCheckingFlags.test(args)) return []
     const build = /(?:^|\s)(?:-b|--build)(?:\s|$)/u.test(args)
     const project =
       args.match(/(?:^|\s)(?:-p|--project)\s+(\S+)/u)?.[1] ?? args.match(/(?:^|\s)(?:-b|--build)\s+([^\s-]\S*)/u)?.[1]
     const name = (project ?? "tsconfig.json").replaceAll(/["']/gu, "").replace(/^\.\//u, "")
     return [{ project: name.endsWith(".json") ? name : `${name === "." ? "" : `${name}/`}tsconfig.json`, build }]
   })
+}
 
 /** The directory that contains a config file, for POSIX and Windows paths alike. */
 export const configDirectory = (configPath) => ts.getDirectoryPath(ts.normalizePath(configPath))
@@ -125,6 +135,8 @@ export const projectFiles = (configPath, build, seen = new Set()) => {
   const read = ts.readConfigFile(normalized, ts.sys.readFile)
   if (read.error !== undefined) return []
   const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, configDirectory(normalized))
+  // A project that turns checking off (directly or through `extends`) typechecks nothing.
+  if (parsed.options.noCheck === true) return []
   const references = build
     ? (parsed.projectReferences ?? []).flatMap((reference) =>
         projectFiles(ts.resolveProjectReferencePath(reference), build, seen)
