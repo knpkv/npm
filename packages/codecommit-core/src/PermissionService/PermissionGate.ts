@@ -27,11 +27,23 @@ export class PermissionPrompt extends Schema.Class<PermissionPrompt>("Permission
 
 export type PermissionResponse = "allow_once" | "always_allow" | "deny"
 
+/**
+ * `standing` re-reads the saved permission once the prompt is registered. A call that checked its
+ * permission just before a standing grant (or refusal) was saved, and registered just after the grant
+ * released the waiting prompts, answers itself from it instead of waiting for nobody.
+ */
+export interface PermissionRequestOptions {
+  readonly standing?: Effect.Effect<PermissionResponse | undefined>
+}
+
 // Blocks the calling fiber until user responds or 30s timeout.
 // Returns the response, or fails with PermissionDeniedError.
 export class PermissionGate extends Context.Service<
   PermissionGate,
   {
-    readonly request: (prompt: PermissionPrompt) => Effect.Effect<PermissionResponse, PermissionDeniedError>
+    readonly request: (
+      prompt: PermissionPrompt,
+      options?: PermissionRequestOptions
+    ) => Effect.Effect<PermissionResponse, PermissionDeniedError>
   }
 >()("@knpkv/codecommit-core/PermissionGate") {}

@@ -40,10 +40,13 @@ export function PermissionModal({ prompt }: { prompt: NonNullable<AppState["perm
           <Button variant="outline" onClick={() => handleRespond("deny")}>
             Deny
           </Button>
-          <Button variant="secondary" onClick={() => handleRespond("allow_once")}>
-            Allow Once
+          {/* Zero-trust: the default and primary answer covers this one call; a standing grant is the deliberate choice. */}
+          <Button variant="secondary" onClick={() => handleRespond("always_allow")}>
+            Always allow
           </Button>
-          <Button onClick={() => handleRespond("always_allow")}>Always Allow</Button>
+          <Button autoFocus onClick={() => handleRespond("allow_once")}>
+            Allow once
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

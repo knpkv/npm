@@ -752,3 +752,10 @@
     animation: none;
   }
 }
+
+.removeFailure {
+  color: var(--rly-color-blocked-ink);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  margin: 0;
+}

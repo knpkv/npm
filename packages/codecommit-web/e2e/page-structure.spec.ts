@@ -96,7 +96,7 @@ test("stats keeps its h1 and main when the stats read fails", async ({ page }) =
   await page.route("**/api/stats*", (route) => route.fulfill({ status: 502, body: "Bad gateway" }))
   await page.goto("/stats")
   await expect(page.getByRole("main").getByRole("heading", { level: 1, name: "Statistics" })).toBeVisible()
-  await expect(page.getByText("Statistics unavailable")).toBeVisible()
+  await expect(page.getByText("Couldn't load stats for this week")).toBeVisible()
   await expect(page.getByText("Unexpected Application Error")).toHaveCount(0)
 })
 

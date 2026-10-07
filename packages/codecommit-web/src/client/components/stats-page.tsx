@@ -18,7 +18,6 @@ import { useNavigate, useSearchParams } from "react-router"
 import { appStateAtom, statsSyncAtom } from "../atoms/app.js"
 import { codeCommitPullRequestHref } from "../codecommit-route.js"
 import { useWeeklyStats } from "../hooks/useWeeklyStats.js"
-import { LoadFailed } from "./load-failed.js"
 import {
   formatMs,
   HealthCard,
@@ -28,6 +27,9 @@ import {
   SizeDistributionChart,
   StalePRs
 } from "./stats-charts.js"
+import { Button as RlyButton, StatePanel } from "@knpkv/rly/primitives"
+import * as Cause from "effect/Cause"
+import * as Predicate from "effect/Predicate"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Card, CardContent } from "./ui/card.js"
@@ -483,13 +485,27 @@ export function StatsPage() {
             <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
           </div>
         ))
-        .onFailure(() => (
-          <LoadFailed
-            description="The CodeCommit server did not return this week's statistics. Try again, or Sync to read the week from CodeCommit."
-            onRetry={retryStats}
-            title="Statistics unavailable"
-          />
-        ))
+        .onFailure((cause) => {
+          // A failed read stays inside this region with its cause and a retry; the page keeps working.
+          const error = Cause.squash(cause)
+          const reason =
+            Predicate.isError(error) && error.message.length > 0
+              ? `${error.message.replace(/\.$/, "")}.`
+              : "The server didn't answer."
+          return (
+            <StatePanel
+              action={
+                <RlyButton onClick={retryStats} size="compact">
+                  Retry
+                </RlyButton>
+              }
+              announce="polite"
+              description={`${reason} Your pull requests and settings still work.`}
+              title="Couldn't load stats for this week"
+              tone="critical"
+            />
+          )
+        })
         .onSuccess((data) => (
           <StatsContent data={data} navigate={navigate} goToPR={goToPR} handleSync={handleSync} syncing={syncing} />
         ))
