@@ -258,6 +258,24 @@ export const StackedBars = ({
   const [pendingTap, setPendingTap] = useState<number | null>(null)
   // Only a touch tap may extend by tapping again; a mouse extends with Shift.
   const pointerType = useRef("mouse")
+  // The selection this chart last asked for. A different one arriving means its owner replaced it,
+  // so the keyboard cursor and any half-made touch span belong to a gesture that no longer exists.
+  const emitted = useRef<RlyChartSelection | null>(selection)
+  const emit = (next: RlyChartSelection | null): void => {
+    emitted.current = next
+    onSelectionChange(next)
+  }
+  const selectedFrom = selection?.from
+  const selectedTo = selection?.to
+  useEffect(() => {
+    const own = emitted.current
+    const replaced = own === null ? selectedFrom !== undefined : own.from !== selectedFrom || own.to !== selectedTo
+    if (replaced) {
+      setCursor(null)
+      setPendingTap(null)
+    }
+    emitted.current = selectedFrom === undefined || selectedTo === undefined ? null : { from: selectedFrom, to: selectedTo }
+  }, [selectedFrom, selectedTo])
   const [announcement, setAnnouncement] = useState("")
   // The words, not the formatter's identity, decide when to announce, so parent renders don't postpone it.
   const description = describeSelection(selection)
@@ -278,7 +296,7 @@ export const StackedBars = ({
       event.preventDefault()
       setCursor(null)
       setPendingTap(null)
-      onSelectionChange(null)
+      emit(null)
       return
     }
     // An empty chart has nothing to move to, so the browser keeps Home, End and the arrows.
@@ -290,7 +308,7 @@ export const StackedBars = ({
     setCursor(bins[next]?.first ?? null)
     // The keyboard now owns the anchor, so a later tap starts a new touch span.
     setPendingTap(null)
-    onSelectionChange(selectBin(selection, bins, next, event.shiftKey))
+    emit(selectBin(selection, bins, next, event.shiftKey))
   }
 
   const from = columns[0]?.start ?? 0
@@ -314,6 +332,8 @@ export const StackedBars = ({
       {bands.map((band) => (
         <Band band={band} from={from} key={band.id} to={to} window={window} />
       ))}
+      {/* Above the plot, in flow: an overlay caption was overdrawn by tall bars in a short plot. */}
+      <span className={style("scale")}>{formatScale(max, binSize)}</span>
       <div
         aria-describedby={instructionsId}
         aria-label={requireText(label, "StackedBars label")}
@@ -325,7 +345,6 @@ export const StackedBars = ({
         style={{ blockSize: `${Math.max(MIN_TARGET, height)}px` }}
         tabIndex={0}
       >
-        <span className={style("scale")}>{formatScale(max, binSize)}</span>
         <svg aria-hidden="true" className={style("bars")} preserveAspectRatio="none" viewBox="0 0 1000 100">
           {shaded === null || shaded.width <= 0 ? null : (
             <rect className={style("window")} data-part="window" height={100} width={shaded.width} x={shaded.x} />
@@ -359,7 +378,7 @@ export const StackedBars = ({
                       pendingTap >= selection.from &&
                       pendingTap <= selection.to &&
                       (pendingTap < bin.first || pendingTap > bin.last))
-                  onSelectionChange(selectBin(selection, bins, index, extend))
+                  emit(selectBin(selection, bins, index, extend))
                   setCursor(bin.first)
                   setPendingTap(touch && !extend ? bin.first : null)
                 }}

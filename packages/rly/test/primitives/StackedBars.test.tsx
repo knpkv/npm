@@ -542,6 +542,28 @@ describe("StackedBars", () => {
     expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 2, to: 2 })
   })
 
+  it("moves the keyboard from the owner's replacement selection, not the last click", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const onSelectionChange = vi.fn()
+    const container = document.createElement("div")
+    document.body.append(container)
+    const root = createRoot(container)
+    roots.push(root)
+    const view = (selection: RlyChartSelection | null) => (
+      <StackedBars {...props} onSelectionChange={onSelectionChange} selection={selection} />
+    )
+    await act(async () => root.render(view(null)))
+    act(() => void container.querySelectorAll("svg:not([class*='band']) g")[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    await act(async () => root.render(view({ from: 4, to: 4 })))
+    act(
+      () =>
+        void container
+          .querySelector('[role="group"]')
+          ?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "ArrowRight" }))
+    )
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 5, to: 5 })
+  })
+
   it("draws band levels as finite percentages and rejects a non-finite near mark", () => {
     const band = (near: number, level: number) => ({
       id: "5h",

@@ -298,12 +298,10 @@ export const Week: Story = {
       1 + bands.reduce((sum, band) => sum + band.segments.length, 0)
     )
     await expect(within(levels).getByText("No reading")).toBeVisible()
-    // The scale caption lets a click through to the bar under it.
+    // The scale caption sits above the plot, so no bar can draw over it.
     const caption = canvasElement.querySelector<HTMLElement>("[class*='scale']")
     if (caption !== null) {
-      const box = caption.getBoundingClientRect()
-      const hit = canvasElement.ownerDocument.elementFromPoint(box.left + 4, box.top + box.height / 2)
-      await expect(caption.contains(hit)).toBe(false)
+      await expect(caption.getBoundingClientRect().bottom).toBeLessThanOrEqual(plot.getBoundingClientRect().top + 1)
     }
     // Both tables scroll inside their own boxes, so the page never scrolls sideways.
     await expect(canvasElement.ownerDocument.documentElement.scrollWidth).toBeLessThanOrEqual(
