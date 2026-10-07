@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/capability",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Typed capability contracts: Effect Schema input, output and failure, defined once and projected to every surface",
   "license": "MIT",
   "repository": {

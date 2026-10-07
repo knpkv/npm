@@ -11,6 +11,7 @@ import { ConfigService } from "../../services/ConfigService.js"
 import { TicketService } from "../../services/TicketService.js"
 import { TimerService } from "../../services/TimerService.js"
 import { formatElapsed, parseDuration, parseStartTime } from "../../utils/time.js"
+import { CommandFailed, requireJira, toCommandFailed } from "../CommandFailed.js"
 import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "../fetchTicket.js"
 import { fuzzySelect } from "../fuzzySelect.js"
 
@@ -110,6 +111,7 @@ export const start = Command.make(
       }
 
       // Refresh tickets for selection
+      yield* requireJira
       yield* ticketService.refresh
       yield* Effect.sleep("600 millis")
       const { tickets: allTickets } = yield* SubscriptionRef.get(ticketService.state)
@@ -118,7 +120,7 @@ export const start = Command.make(
 
       if (key._tag === "None") {
         if (allTickets.length === 0) {
-          yield* Console.log("No tickets found. Usage: jcf timer start PROJ-123")
+          yield* Console.log("No open Jira issues are assigned to you. Start one by key: jcf timer start PROJ-123")
           return
         }
 
@@ -137,10 +139,7 @@ export const start = Command.make(
       } else {
         // Key provided — fetch from Jira to validate and get title
         const fetched = yield* fetchTicketByKey(key.value)
-        if (fetched._tag === "NotLoggedIn") {
-          yield* Console.log(NOT_LOGGED_IN_HINT)
-          return
-        }
+        if (fetched._tag === "NotLoggedIn") return yield* new CommandFailed({ message: NOT_LOGGED_IN_HINT })
         if (fetched._tag === "NotFound") {
           yield* Console.log(`Ticket ${key.value} not found in Jira.`)
           return
@@ -206,11 +205,7 @@ export const start = Command.make(
         yield* Console.log("Defaults saved to ~/.jcf/config.json")
       }
 
-      const started = yield* timer.start(ticket, { projectId, billable: billableVal, startedAt }).pipe(
-        Effect.as(true),
-        Effect.catch((e) => Console.log(`Error: ${e.message}`).pipe(Effect.as(false)))
-      )
-      if (!started) return
+      yield* timer.start(ticket, { projectId, billable: billableVal, startedAt }).pipe(Effect.mapError(toCommandFailed))
 
       const startedSuffix = startedAt
         ? ` (started ${formatElapsed(Math.floor((nowMs - startedAt.getTime()) / 1000))} ago)`

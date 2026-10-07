@@ -6,7 +6,7 @@
  * - **Discriminated auth union**: The `auth` field is `{ type: "basic", ... } | { type: "oauth2", ... }`.
  *   Basic auth uses email + Redacted API token; OAuth2 uses Redacted access token + cloud ID.
  * - **Base URL routing**: For OAuth2, the base URL is derived from cloud ID (`api.atlassian.com/ex/jira/{cloudId}`);
- *   for basic auth, `baseUrl` is used directly.
+ *   for basic auth, the credential's `siteUrl` when set, otherwise `baseUrl`.
  * - **`auth` is a snapshot; `resolveAuth` is a subscription.** A credential that can expire needs the
  *   second one — see its own note.
  *
@@ -18,7 +18,16 @@ import type * as Redacted from "effect/Redacted"
 
 /** How a request proves who is asking. */
 export type JiraApiCredential =
-  | { readonly type: "basic"; readonly email: string; readonly apiToken: Redacted.Redacted<string> }
+  | {
+    readonly type: "basic"
+    readonly email: string
+    readonly apiToken: Redacted.Redacted<string>
+    /**
+     * The site this token belongs to, such as `https://your-team.atlassian.net`. When set it is the
+     * request host instead of `baseUrl`, so a credential re-read through `resolveAuth` keeps its site.
+     */
+    readonly siteUrl?: string | undefined
+  }
   | { readonly type: "oauth2"; readonly accessToken: Redacted.Redacted<string>; readonly cloudId: string }
 
 /**
