@@ -62,19 +62,19 @@ const jobSummary = (record: Pick<SanitizedJobRecord, "payload">): string => {
     case "nix.apply":
       return "Nix configuration request"
     case "agent.delegate":
-      return `${record.payload.mode} · [redacted internal prompt]`
+      return `${record.payload.mode}: [redacted internal prompt]`
     case "agent.message":
-      return `${record.payload.session} · [redacted internal message]`
+      return `${record.payload.session}: [redacted internal message]`
     case "work.reconcile":
-      return `${record.payload.repository}#${record.payload.pullRequest} · existing owner`
+      return `${record.payload.repository}#${record.payload.pullRequest}: existing owner`
     case "work.admit":
-      return `${record.payload.repository}#${record.payload.pullRequest} · prospective owner admission`
+      return `${record.payload.repository}#${record.payload.pullRequest}: prospective owner admission`
     case "work.recover":
-      return `${record.payload.repository}#${record.payload.pullRequest} · existing goal recovery`
+      return `${record.payload.repository}#${record.payload.pullRequest}: existing goal recovery`
     case "work.reassign":
-      return `${record.payload.goalId} · ${record.payload.from.name} → ${record.payload.to.name}`
+      return `${record.payload.goalId}: ${record.payload.from.name} → ${record.payload.to.name}`
     case "work.abandon":
-      return `${record.payload.goalId} · abandon`
+      return `${record.payload.goalId}: abandon`
   }
 }
 
@@ -350,7 +350,7 @@ export const AgentActivity = ({ snapshot }: { readonly snapshot: DashboardSnapsh
                 {agent.name}
               </Text>
               <Text as="small" variant="meta" tone="secondary">
-                {agent.kind} · {agent.work}
+                {agent.kind}, {agent.work}
               </Text>
             </div>
             <StateLabel label={agent.status} tone="progress" size="compact" />

@@ -1506,7 +1506,7 @@ esac
     expect(title).not.toContain("<script")
     expect(title).not.toContain(host)
     expect(title).toBe(
-      "Host activity · SER8&lt;/title&gt;&lt;script data-xss=&quot;true&quot;&gt;alert(1)&lt;/script&gt;"
+      "Host activity on SER8&lt;/title&gt;&lt;script data-xss=&quot;true&quot;&gt;alert(1)&lt;/script&gt;"
     )
   })
 
