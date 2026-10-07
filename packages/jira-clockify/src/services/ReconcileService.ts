@@ -1139,6 +1139,7 @@ export const layer = Layer.effect(
               ? clockifyTally(period, options?.clockifySnapshot)
               : Effect.succeed({ tally: [], unlinked: [] }),
             options?.tolerateUnavailableJira === true
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               ? jiraSideRead.pipe(Effect.catch(() => Effect.succeed([])))
               : jiraSideRead
           ],
