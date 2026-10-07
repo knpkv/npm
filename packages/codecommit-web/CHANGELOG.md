@@ -1,5 +1,13 @@
 # @knpkv/codecommit-web
 
+## 0.26.1
+
+### Patch Changes
+
+- [#607](https://github.com/knpkv/npm/pull/607) [`a840102`](https://github.com/knpkv/npm/commit/a840102bb71e6777c996b20050074881503d9850) Thanks [@konopkov](https://github.com/konopkov)! - A failing live update no longer pushes its message over the header's navigation or cuts it to an ellipsis: the header shows the status word ("Reconnecting") with its full reason as the status's hover text and accessible name, and spells the reason out inline only on screens wide enough for it.
+
+- [#592](https://github.com/knpkv/npm/pull/592) [`8f8ca48`](https://github.com/knpkv/npm/commit/8f8ca48df183417ba93e927713731abb9cd9c616) Thanks [@konopkov](https://github.com/konopkov)! - A failed statistics or settings read is stated on the page with its cause and a Try again button, instead of replacing the app with an error screen. Each settings tab and Statistics has one level-one heading. Links inside a sentence carry an underline with at least 3:1 contrast. The current page in the navigation stays marked in forced colours.
+
 ## 0.26.0
 
 ### Minor Changes

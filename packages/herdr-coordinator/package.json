@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-coordinator",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "description": "Persistent coordinator chat contracts for Herdr fleet jobs",
   "license": "MIT",
   "author": "knpkv",
@@ -35,7 +35,7 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force",
-    "check": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",

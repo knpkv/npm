@@ -297,7 +297,7 @@ describe("LAN Work pairing boundary", () => {
       const setCookie = paired.headers.get("set-cookie")
       expect(setCookie).toContain("herdr_lan_work=")
       if (setCookie === null) return
-      const cookie = setCookie.split(";", 1)[0]
+      const cookie = setCookie.split(";", 1).join("")
 
       const work = yield* Effect.promise(() => fetch(`${lanUrl}/v1/work`, { headers: { cookie, origin } }))
       expect(work.status).toBe(200)

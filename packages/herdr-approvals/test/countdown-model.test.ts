@@ -21,18 +21,14 @@ const record = (id: string, overrides: Partial<JobRecord> = {}): JobRecord => ({
   actor: "submitter@example.com",
   approvalAvailable: true,
   approvalExpiresAt: 600_000,
-  approvalNonce: "nonce",
   approvedAt: null,
   approvedBy: null,
   createdAt: 1_000,
-  error: null,
   expiredAt: null,
-  hash: "hash",
   id,
   payload: { kind: "nix.apply", ref: "main" },
   rejectedAt: null,
   rejectedBy: null,
-  result: null,
   status: "pending_approval",
   updatedAt: 1_000,
   ...overrides
@@ -98,7 +94,7 @@ describe("countdown model", () => {
               approvalExpiresAt: 120_000,
               createdAt: 1_000,
               id: "soon",
-              payload: { kind: "nix.check", ref: "main" },
+              payload: { kind: "nix.check" },
               status: "pending_approval"
             },
             approvalUrl: "https://beta.example.test/approve/soon",
@@ -153,9 +149,11 @@ describe("countdown model", () => {
     expect(answerSettles(answerForStatus(409))).toBe(true)
     expect(answerText(DecisionAnswer.Unreadable())).toContain("couldn't be read")
     expect(answerSettles(DecisionAnswer.Unreadable())).toBe(false)
-    expect(answerText(DecisionAnswer.Accepted({ decision: "approve", record: record("x", { status: "queued" }) })))
-      .toBe("The hub recorded your approval; the job is queued.")
-    expect(answerText(DecisionAnswer.Accepted({ decision: "reject", record: record("x", { status: "rejected" }) })))
-      .toContain("Nothing will run")
+    expect(
+      answerText(DecisionAnswer.Accepted({ decision: "approve", record: record("x", { status: "queued" }) }))
+    ).toBe("The hub recorded your approval; the job is queued.")
+    expect(
+      answerText(DecisionAnswer.Accepted({ decision: "reject", record: record("x", { status: "rejected" }) }))
+    ).toContain("Nothing will run")
   })
 })
