@@ -28,7 +28,9 @@ import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
+import { HttpClientError, HttpClientRequest } from "effect/http"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as PlatformError from "effect/PlatformError"
 import * as Redacted from "effect/Redacted"
 import { TestClock } from "effect/testing"
@@ -440,5 +442,41 @@ describe("jcf timer status", () => {
       if (exit._tag === "Failure") {
         expect(exit.cause.reasons.map((reason) => reason._tag)).toEqual(["Fail"])
       }
+    }))
+
+  // Showing the project and tags is enrichment: status still succeeds, and says why they are missing.
+  it.effect("warns when the running entry cannot be read, and still shows the timer", () =>
+    Effect.gen(function*() {
+      const capture = makeCapture()
+      const messages: Array<unknown> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        messages.push(entry.message)
+      })
+      const failing = new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({
+          request: HttpClientRequest.get("https://clockify.test/time-entry"),
+          description: "boom"
+        })
+      })
+      const exit = yield* run(
+        {
+          ...baseClient,
+          getRunningTimer: () => Effect.succeed(runningEntry),
+          getTimeEntry: () => Effect.fail(failing)
+        },
+        capture,
+        [],
+        {
+          stateWriter: {
+            ...stateWriterFor(capture),
+            read: Effect.succeed({ ...activeState, clockifyEntryId: "entry-1" })
+          }
+        }
+      ).pipe(Effect.withLogger(logger))
+
+      expect(exit._tag).toBe("Success")
+      expect(messages.map(String).join("\n")).toContain(
+        "Could not read the running Clockify entry; project and tags are not shown"
+      )
     }))
 })

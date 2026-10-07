@@ -486,8 +486,11 @@ const runAgentMode = (options: {
     const jiraConnected = options.sides.jira
       ? yield* JiraAccess.use((access) => access.connection).pipe(
         Effect.map(Option.isSome),
-        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        Effect.orElseSucceed(() => false)
+        Effect.catch((error) =>
+          Effect.logWarning("Could not read the Jira connection; Jira is treated as not connected", error).pipe(
+            Effect.as(false)
+          )
+        )
       )
       : false
     const clockifyConnected = options.sides.clockify ? yield* ClockifyAuth.use((auth) => auth.isConfigured) : false

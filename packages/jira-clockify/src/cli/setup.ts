@@ -34,8 +34,15 @@ const attempt = <R>(setup: Effect.Effect<unknown, CommandFailed, R>) =>
 export const checkAuthOrSetup = Effect.gen(function*() {
   const clockifyAuth = yield* ClockifyAuth
   const access = yield* JiraAccess
-  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-  const jiraOk = Option.isSome(yield* access.connection.pipe(Effect.orElseSucceed(() => Option.none())))
+  const jiraOk = Option.isSome(
+    yield* access.connection.pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("Could not read the Jira connection; treating Jira as not connected", error).pipe(
+          Effect.as(Option.none())
+        )
+      )
+    )
+  )
   const clockifyOk = yield* clockifyAuth.isConfigured
   if (jiraOk || clockifyOk) return true
 
@@ -88,8 +95,10 @@ export const checkAuthOrSetup = Effect.gen(function*() {
 export const launchTui = (args: ReadonlyArray<string>) =>
   Effect.gen(function*() {
     // @opentui/react requires Bun (react-reconciler import without .js extension)
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    const isBun = yield* Effect.try(() => !Predicate.isUndefined(Bun)).pipe(Effect.orElseSucceed(() => false))
+    // Outside Bun the global does not exist, and reading it throws.
+    const isBun = yield* Effect.try(() => !Predicate.isUndefined(Bun)).pipe(
+      Effect.catch((error) => Effect.logDebug("Not running under Bun", error).pipe(Effect.as(false)))
+    )
     if (isBun) {
       yield* Effect.promise(() => import("../main.js")).pipe(Effect.flatMap((mod) => mod.default))
     } else {
@@ -99,8 +108,7 @@ export const launchTui = (args: ReadonlyArray<string>) =>
 
       const hasBun = yield* exitCode(ChildProcess.make("bun", ["--version"])).pipe(
         Effect.map((code) => code === 0),
-        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        Effect.catch(() => Effect.succeed(false))
+        Effect.catch((error) => Effect.logDebug("bun is not on PATH", error).pipe(Effect.as(false)))
       )
       if (!hasBun) {
         yield* Console.log("TUI requires Bun runtime (@opentui/react dependency).")
@@ -121,8 +129,9 @@ export const launchTui = (args: ReadonlyArray<string>) =>
         stdout: "inherit",
         stderr: "inherit"
       })).pipe(
-        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        Effect.catch(() => Effect.void)
+        Effect.mapError(() =>
+          new CommandFailed({ message: `Could not start the terminal UI with bun. Run it directly: bun ${scriptPath}` })
+        )
       )
     }
   })

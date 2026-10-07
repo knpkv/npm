@@ -50,13 +50,17 @@ export const resolveStopProject = (params: {
 
     const clockifyAuth = yield* ClockifyAuth
     const clockifyClient = yield* ClockifyApiClient
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
+    const auth = yield* clockifyAuth.getConfig.pipe(
+      Effect.catchTag("ClockifyAuthMissingError", () => Effect.succeed(null))
+    )
     if (!auth) return undefined
 
     const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.catch(() => Effect.succeed([]))
+      Effect.catch((error) =>
+        Effect.logWarning("Clockify projects could not be listed; the project is left as it is", error).pipe(
+          Effect.as([])
+        )
+      )
     )
     if (projects.length === 0) return undefined
 

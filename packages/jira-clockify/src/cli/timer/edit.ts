@@ -47,8 +47,9 @@ export const edit = Command.make(
 
       const clockifyAuth = yield* ClockifyAuth
       const clockifyClient = yield* ClockifyApiClient
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
+      const auth = yield* clockifyAuth.getConfig.pipe(
+        Effect.catchTag("ClockifyAuthMissingError", () => Effect.succeed(null))
+      )
       if (auth === null || current.clockifyEntryId === null) {
         yield* Console.log("Cannot edit: missing Clockify auth or entry ID.")
         return
@@ -74,8 +75,9 @@ export const edit = Command.make(
 
       if (what === "project") {
         const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-          Effect.catch(() => Effect.succeed(emptyProjects()))
+          Effect.catch((error) =>
+            Effect.logWarning("Clockify projects could not be listed", error).pipe(Effect.as(emptyProjects()))
+          )
         )
         const selected = yield* Prompt.Select({
           message: "Select project:",
@@ -137,12 +139,16 @@ export const edit = Command.make(
 
       if (what === "tags") {
         const allTags = yield* clockifyClient.getTags(auth.workspaceId).pipe(
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-          Effect.catch(() => Effect.succeed(emptyTags()))
+          Effect.catch((error) =>
+            Effect.logWarning("Clockify tags could not be listed", error).pipe(Effect.as(emptyTags()))
+          )
         )
         const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, clockifyEntryId).pipe(
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-          Effect.catch(() => Effect.succeed(null))
+          Effect.catch((error) =>
+            Effect.logWarning("Could not read the entry's current tags; none are pre-selected", error).pipe(
+              Effect.as(null)
+            )
+          )
         )
         const currentTagIds = new Set(entry?.tagIds ?? [])
 
