@@ -973,7 +973,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
             Layer.mock(AwsClient, {}),
             Layer.mock(PullRequestRepo, {
               findByCoordinates: () => Effect.succeed(Option.none()),
-              findAll: () => Effect.succeed(cached)
+              findAll: () => Effect.succeed([...cached])
             }),
             Layer.mock(CommentRepo, {}),
             Layer.mock(NotificationRepo, {}),
