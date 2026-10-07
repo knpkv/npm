@@ -387,7 +387,10 @@ describe("sandbox security boundary", () => {
       expect(stdin).toBeTypeOf("object")
       // stdin is either the input itself or a config carrying it; the env file is a piped stream.
       const input = stdin === undefined || Predicate.isString(stdin) || Stream.isStream(stdin) ? stdin : stdin.stream
-      if (input === undefined || Predicate.isString(input)) return
+      // The secrets must arrive as a piped stream; anything else fails the test rather than skipping it.
+      if (input === undefined || Predicate.isString(input)) {
+        return yield* Effect.die("the container environment was not piped through stdin")
+      }
       const chunks = yield* Stream.runCollect(input)
       const bytes = Uint8Array.from(chunks.flatMap((chunk) => Array.from(chunk)))
       const environment = new TextDecoder().decode(bytes)
