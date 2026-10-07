@@ -10,6 +10,7 @@
  *
  * @category CacheService
  */
+import type { Option } from "effect"
 import { Effect, Schema } from "effect"
 import type * as SqlClient from "effect/sql/SqlClient"
 import * as SqlSchema from "effect/sql/SqlSchema"
@@ -18,13 +19,26 @@ import {
   approvalGroupOfListing,
   approvalGroupOfRead,
   type ApprovalRead,
+  CachedPullRequest,
   cacheError,
   rowGroupOfListing,
   rowGroupOfRead,
   UpsertInput
 } from "./internal.js"
 import { PullRequestAmbiguityError } from "./queries.js"
-import { type DerivedColumns, type RowVersions, rowWrites } from "./rowWrites.js"
+import {
+  type ApprovalGroup,
+  type DerivedColumns,
+  type GroupsWritten,
+  type RowGroup,
+  type RowVersions,
+  rowWrites
+} from "./rowWrites.js"
+
+/** What an upsert wrote, and the row it replaced (none for a pull request seen for the first time). */
+export interface UpsertResult extends GroupsWritten {
+  readonly replaced: Option.Option<CachedPullRequest>
+}
 
 export interface PullRequestCoordinates {
   readonly repositoryName: string
@@ -63,10 +77,26 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         AND repository_name = ${coordinates.repositoryName}
         AND account_region = ${coordinates.accountRegion}`
   const encodeUpsert = Schema.encodeEffect(UpsertInput)
+  const findReplaced = SqlSchema.findOneOption({
+    Result: CachedPullRequest,
+    Request: UpsertInput,
+    execute: (req) =>
+      sql`SELECT * FROM pull_requests WHERE aws_account_id = ${req.awsAccountId} AND id = ${req.id}
+        AND repository_name = ${req.repositoryName} AND account_region = ${req.accountRegion}`
+  })
+  /**
+   * Read the row and write it in one transaction, so the result carries the row this write replaced:
+   * what a notification diffs against, not a snapshot another write may have changed since.
+   */
+  const upsertWith = (input: UpsertInput, row: RowGroup, approval: ApprovalGroup, observation: number) =>
+    sql.withTransaction(
+      Effect.all({
+        replaced: findReplaced(input),
+        written: encodeUpsert(input).pipe(Effect.flatMap((req) => writes.upsert(req, row, approval, observation)))
+      })
+    ).pipe(Effect.map(({ replaced, written }): UpsertResult => ({ ...written, replaced })))
   const upsert_ = (input: UpsertInput, observation: number) =>
-    encodeUpsert(input).pipe(
-      Effect.flatMap((req) => writes.upsert(req, rowGroupOfListing(input), approvalGroupOfListing(input), observation))
-    )
+    upsertWith(input, rowGroupOfListing(input), approvalGroupOfListing(input), observation)
   /** Publish a change only when a write applied. */
   const publishIfApplied = (applied: boolean) => applied ? publish : Effect.void
 
@@ -104,8 +134,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       read: Parameters<typeof rowGroupOfRead>[0] & ApprovalRead,
       observation: number
     ) =>
-      encodeUpsert(input).pipe(
-        Effect.flatMap((req) => writes.upsert(req, rowGroupOfRead(read), approvalGroupOfRead(read), observation)),
+      upsertWith(input, rowGroupOfRead(read), approvalGroupOfRead(read), observation).pipe(
         Effect.tap((written) => publishIfApplied(written.row || written.approval)),
         cacheError("upsertRead")
       ),
