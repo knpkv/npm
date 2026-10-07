@@ -1,3 +1,4 @@
+import { PortalProvider } from "@knpkv/rly/foundations"
 import { Button, Dialog, StatePanel, Tabs, Text, type RlyTabItem } from "@knpkv/rly/primitives"
 import { Cause, Option, Predicate } from "effect"
 import type * as AsyncResult from "effect/reactivity/AsyncResult"
@@ -343,42 +344,45 @@ export const FleetShell = ({
     }
   ]
   return (
-    <div className="fleet-shell" ref={shellRef}>
-      <header className="fleet-shell-masthead">
-        <div className="fleet-shell-brand">
-          <span aria-hidden="true" className="fleet-shell-mark">
-            H
-          </span>
-          {/* One line: the name, then what it is. */}
-          <Text as="strong" variant="label">
-            Herdr
-          </Text>
-          <Text tone="secondary" variant="meta">
-            Fleet control
-          </Text>
-        </div>
-        <div className="fleet-shell-meta">
-          {/* Configured, not reachable: the shell doesn't know which hosts answer, so it doesn't say. */}
-          <Text tone="secondary" variant="meta">
-            {hostCount === 1 ? "1 host" : `${String(hostCount)} hosts`}
-          </Text>
-          <Button onClick={() => setShortcutsOpen(true)} size="compact" title="Or press ?" variant="quiet">
-            Keyboard shortcuts
-          </Button>
-        </div>
-      </header>
-      <main className="fleet-shell-main">
-        <Tabs
-          aria-label="Fleet applications"
-          data-mobile-layout="single-row"
-          items={items}
-          onValueChange={selectTab}
-          ref={tabsRef}
-          size="large"
-          value={tab}
-        />
-      </main>
-      <ShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
-    </div>
+    // rly overlays (the shortcuts dialog) render into a portal target; without a provider they don't mount.
+    <PortalProvider>
+      <div className="fleet-shell" ref={shellRef}>
+        <header className="fleet-shell-masthead">
+          <div className="fleet-shell-brand">
+            <span aria-hidden="true" className="fleet-shell-mark">
+              H
+            </span>
+            {/* One line: the name, then what it is. */}
+            <Text as="strong" variant="label">
+              Herdr
+            </Text>
+            <Text tone="secondary" variant="meta">
+              Fleet control
+            </Text>
+          </div>
+          <div className="fleet-shell-meta">
+            {/* Configured, not reachable: the shell doesn't know which hosts answer, so it doesn't say. */}
+            <Text tone="secondary" variant="meta">
+              {hostCount === 1 ? "1 host" : `${String(hostCount)} hosts`}
+            </Text>
+            <Button onClick={() => setShortcutsOpen(true)} size="compact" title="Or press ?" variant="quiet">
+              Keyboard shortcuts
+            </Button>
+          </div>
+        </header>
+        <main className="fleet-shell-main">
+          <Tabs
+            aria-label="Fleet applications"
+            data-mobile-layout="single-row"
+            items={items}
+            onValueChange={selectTab}
+            ref={tabsRef}
+            size="large"
+            value={tab}
+          />
+        </main>
+        <ShortcutsDialog onOpenChange={setShortcutsOpen} open={shortcutsOpen} />
+      </div>
+    </PortalProvider>
   )
 }

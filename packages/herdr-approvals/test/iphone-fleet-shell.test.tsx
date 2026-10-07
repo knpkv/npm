@@ -31,6 +31,31 @@ const render = async (element: React.ReactNode): Promise<void> => {
 }
 
 describe("iPhone fleet shell regressions", () => {
+  const shell = (
+    <FleetShell
+      approvals={<section>Approvals</section>}
+      connect={<section>Terminal</section>}
+      hostCount={1}
+      work={<section>Work board</section>}
+    />
+  )
+
+  // rly's dialog renders into a portal target: without the shell's provider it would never mount.
+  it("opens the shortcut list from the masthead button", async () => {
+    await render(shell)
+    const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (candidate) => candidate.textContent === "Keyboard shortcuts"
+    )
+    await act(async () => button?.click())
+    expect(document.querySelector("[role='dialog']")?.textContent).toContain("Go to Connect")
+  })
+
+  it("opens the shortcut list with ?", async () => {
+    await render(shell)
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "?" })))
+    expect(document.querySelector("[role='dialog']")?.textContent).toContain("Search agents")
+  })
+
   it("moves focus to the selected tab before hiding a focused panel", async () => {
     window.history.replaceState(null, "", "/?tab=connect")
     await render(
