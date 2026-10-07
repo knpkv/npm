@@ -63,7 +63,7 @@ try:
     call("fill", uid=uid("textbox", "Board"), value="invalid/board")
     assert evaluate("() => !document.getElementById('board').checkValidity()")
     login()
-    call("wait_for", text=["No published data"], timeout=15000)
+    call("wait_for", text=["Waiting"], timeout=15000)
     assert evaluate("() => !document.getElementById('lock').hidden && document.activeElement.id === 'lock'")
     now = int(time.time() * 1000)
     snapshot = {"version": 1, "boardId": "main", "sequence": now, "sourceAt": now, "title": "Synthetic acceptance", "agents": [{"id": "builder", "name": "<img src=x onerror=alert(1)>", "task": "Read-only status board", "state": "blocked", "status": "Published text only", "blocker": "Awaiting review", "jiraKey": "DEMO-42", "branch": "feat/example", "pullRequest": "Example #42", "clockify": {"source": "clockify", "seconds": 1800, "observedAt": now}, "elapsedSeconds": 2400}]}
@@ -73,7 +73,7 @@ try:
         subprocess.run(["node", str(package / "dist/cli.js"), "publish", str(path)], env={**os.environ, "MONITOR_ORIGIN": args.url, "MONITOR_PUBLISH_TOKEN": "publish_" + "p" * 43}, check=True, capture_output=True)
     panel("RUNNING: explicit publication, text safety, Clockify vs elapsed")
     call("wait_for", text=["Synthetic acceptance"], timeout=15000)
-    assert evaluate("() => document.querySelectorAll('#agents img, #agents a').length === 0 && document.getElementById('agents').textContent.includes('<img src=x onerror=alert(1)>') && document.getElementById('agents').textContent.includes('0h 30m') && document.getElementById('agents').textContent.includes('0h 40m')")
+    assert evaluate("() => document.querySelectorAll('#agents img, #agents a').length === 0 && document.getElementById('agents').textContent.includes('<img src=x onerror=alert(1)>') && document.getElementById('agents').textContent.includes('30m') && document.getElementById('agents').textContent.includes('40m') && !document.getElementById('agents').textContent.includes('0h ')")
     for width, height in [(820, 1180), (390, 844), (1180, 820)]:
         call("emulate", viewport=f"{width}x{height}x1,touch")
         panel(f"RUNNING: responsive {width}×{height}, keyboard focus and contrast")

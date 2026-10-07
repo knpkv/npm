@@ -1,5 +1,6 @@
 import { PortalProvider } from "@knpkv/rly/foundations"
 import { describe, expect, it } from "@effect/vitest"
+import { beforeAll } from "vitest"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
@@ -41,7 +42,6 @@ interface RenderedDock {
 }
 
 const renderDock = async (element: ReactElement): Promise<RenderedDock> => {
-  await import("@knpkv/rly/patterns")
   const container = document.createElement("div")
   const portal = document.createElement("div")
   document.body.append(container, portal)
@@ -91,6 +91,12 @@ const RegisteredThread = ({ registration }: { readonly registration: RelayPullRe
 }
 
 describe("RelayProductDock", () => {
+  // The lazy dock's module is transformed once here, with its own budget: under a loaded gate the
+  // first transform of the rly patterns barrel outlasted a single test's 5s timeout.
+  beforeAll(async () => {
+    await import("@knpkv/rly/patterns")
+  }, 60_000)
+
   it("contains a rejected lazy dock without unmounting routed content", async () => {
     const rendered = await renderDock(
       <>

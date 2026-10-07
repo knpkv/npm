@@ -26,6 +26,7 @@ import {
 import { formatDuration, localDay, nextLocalMidnight } from "../utils/time.js"
 import { applyProposal, clip, entryDescription, keepGoing, proposalTargets, writeOutcomeLines } from "./agentWrite.js"
 import { type CalendarRow, earliestStart, formatSpanBounds, formatSpanRanges, renderDayCalendar } from "./calendar.js"
+import { CommandFailed } from "./CommandFailed.js"
 import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "./fetchTicket.js"
 import * as WatchLease from "./watchLease.js"
 import * as WriterGuard from "./writerGuard.js"
@@ -798,18 +799,16 @@ export const reconcile = Command.make(
 
       const dir = Option.isSome(direction) ? direction.value : "clockify-to-jira"
       if (dir !== "clockify-to-jira" && dir !== "jira-to-clockify") {
-        yield* Console.log(
-          "Usage: jcf sync reconcile [clockify-to-jira|jira-to-clockify] [--day|--week|--since|--until]"
-        )
-        return
+        return yield* new CommandFailed({
+          message: "Usage: jcf sync reconcile [clockify-to-jira|jira-to-clockify] [--day|--week|--since|--until]"
+        })
       }
       const directionTag: ReconcileDirection = dir
 
       const svc = yield* ReconcileService
       const rows = yield* svc.compare(period).pipe(
-        Effect.catch((e) => Console.log(`Reconcile failed: ${e.message}`).pipe(Effect.as(null)))
+        Effect.mapError((e) => new CommandFailed({ message: `Reconcile failed: ${e.message}` }))
       )
-      if (rows === null) return
 
       const fromDay = localDay(period.from)
       const toDay = localDay(new Date(period.to.getTime() - 1))
@@ -892,9 +891,8 @@ export const reconcile = Command.make(
             // Confirmation can take arbitrarily long. Admit the whole approved batch first, then
             // re-read under the guard so another writer cannot fill a gap between tally and write.
             const comparison = yield* svc.compareDirection(period).pipe(
-              Effect.catch((e) => Console.log(`Reconcile failed: ${e.message}`).pipe(Effect.as(null)))
+              Effect.mapError((e) => new CommandFailed({ message: `Reconcile failed: ${e.message}` }))
             )
-            if (comparison === null) return
 
             for (const selection of approved) {
               const row = comparison.rows.find((candidate) =>
@@ -969,6 +967,10 @@ export const reconcile = Command.make(
 )
 
 export const sync = Command.make("sync", {}, () => Console.log("Usage: jcf sync reconcile")).pipe(
-  Command.withDescription("Sync workflow commands"),
-  Command.withSubcommands([reconcile])
+  Command.withDescription("Compare Clockify and Jira and fill in what one is missing"),
+  Command.withSubcommands([
+    reconcile.pipe(
+      Command.withDescription("Compare a day or week of Clockify entries with Jira worklogs, and copy what is missing")
+    )
+  ])
 )
