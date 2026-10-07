@@ -19,7 +19,7 @@ import {
   UpsertInput,
   versionsOf
 } from "../src/CacheService/repos/PullRequestRepo/index.js"
-import { decodeCachedPR } from "../src/PRService/internal.js"
+import { decodeCachedPR, PullRequestToUpsertInput } from "../src/PRService/internal.js"
 
 const account = "123456789012"
 const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
@@ -509,6 +509,15 @@ describe("pull-request row writes", () => {
       approvedBy: [...names],
       approvedByArns: names.map((name) => `arn:aws:iam::123456789012:user/${name}`),
       ...(unknown && { approversUnknown: true })
+    })
+
+    it("keeps the unknown marker through the pull request codec, both ways", () => {
+      const toDomain = (input: UpsertInput) =>
+        Schema.decodeSync(PullRequestToUpsertInput)(Schema.encodeSync(UpsertInput)(input))
+      expect(toDomain(withApprovers(t0, ["alice"], true)).approversUnknown).toBe(true)
+      expect(toDomain(withApprovers(t0, ["alice"])).approversUnknown).toBeUndefined()
+      expect(Schema.encodeSync(PullRequestToUpsertInput)(toDomain(withApprovers(t0, [], true))).approversUnknown)
+        .toBe(true)
     })
 
     it.effect("clears an approval revoked down to no approvers", () =>

@@ -144,6 +144,7 @@ export const PullRequestToUpsertInput = UpsertInput.pipe(
       fetchedAt: undefined,
       approvedBy: row.approvedBy,
       approvedByArns: row.approvedByArns,
+      ...(row.approversUnknown === true && { approversUnknown: true }),
       approvalRules: row.approvalRules ?? [],
       commentedBy: [],
       filesChanged: undefined

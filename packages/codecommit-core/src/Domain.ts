@@ -296,6 +296,24 @@ export const approvalNotRequiredLabel = "No approval required"
 export const approvalUnknownLabel = "Approval unknown"
 
 /**
+ * The label every surface shows while `approversUnknown` is set, instead of a count or names.
+ *
+ * @category Domain
+ */
+export const approversUnknownLabel = "Approvers unknown"
+
+/**
+ * Who approved, as far as is known now: none while the last approver read failed, because the
+ * last known list may name an approval since revoked. Surfaces that mark people as approved read
+ * this, not `approvedBy`.
+ *
+ * @category Domain
+ */
+export const currentApprovers = (
+  pr: { readonly approvedBy: ReadonlyArray<string>; readonly approversUnknown?: true | undefined }
+): ReadonlyArray<string> => pr.approversUnknown === true ? [] : pr.approvedBy
+
+/**
  * The sentence every surface shows to explain an unknown approval.
  *
  * @category Domain

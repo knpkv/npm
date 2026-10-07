@@ -116,6 +116,11 @@ describe("pull request coordinate migration", () => {
         yield* sql<{ repository: string; known: number }>`
           SELECT repository_name AS repository, approval_baseline_known AS known FROM pull_requests ORDER BY 1`
       ).toEqual([{ repository: "billing", known: 1 }, { repository: "payments", known: 0 }])
+      // Before 0025 a revoked approver was never cleared, so every existing approver list is only last known.
+      expect(
+        yield* sql<{ repository: string; unknown: number }>`
+          SELECT repository_name AS repository, approvers_unknown AS unknown FROM pull_requests ORDER BY 1`
+      ).toEqual([{ repository: "billing", unknown: 1 }, { repository: "payments", unknown: 1 }])
       yield* sql`DELETE FROM pull_requests WHERE repository_name = 'billing'`
       yield* sql`UPDATE pull_requests SET approval_unknown_reason = NULL, approval_baseline_known = 1`
       yield* insertPullRequest(sql, "orders", "us-east-1")
@@ -135,6 +140,12 @@ describe("pull request coordinate migration", () => {
         WHERE aws_account_id = '123456789012' AND id = '43'
           AND repository_name = 'orders' AND account_region = 'us-east-1'`
       expect(propagated).toEqual([{ repoAccountId: "repository-account" }])
+      // A known approver read clears the migrated marker; a new row is written known.
+      expect(
+        yield* sql<{ repository: string; unknown: number }>`
+          SELECT repository_name AS repository, approvers_unknown AS unknown FROM pull_requests
+          WHERE id = '42' ORDER BY 1`
+      ).toEqual([{ repository: "orders", unknown: 0 }, { repository: "payments", unknown: 0 }])
 
       const rows = yield* sql<
         { readonly repositoryName: string; readonly accountRegion: string; readonly title: string }

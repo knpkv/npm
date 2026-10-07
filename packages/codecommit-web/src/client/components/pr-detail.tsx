@@ -31,7 +31,9 @@ import {
   approvalOf,
   approvalUnknownLabel,
   approvalUnknownReasonText,
+  approversUnknownLabel,
   AwsRegion,
+  currentApprovers,
   identityMatches,
   PullRequestId
 } from "@knpkv/codecommit-core/Domain.js"
@@ -217,10 +219,10 @@ const focusedElement = (target: EventTarget | null): Pick<Element, "tagName"> | 
 /**
  * Whether someone other than the author signed off, as review evidence for time to first review. Any
  * sign-off counts: one of two required, or a voluntary one where no rules apply. An unknown approval
- * holds only a last known one, so it doesn't.
+ * holds only a last known one, so it doesn't; nor do approvers that couldn't be read.
  */
 export const signedOffByOthers = (pr: Domain.PullRequest): boolean =>
-  approvalOf(pr)._tag !== "Unknown" && pr.approvedBy.some((approver) => !identityMatches(approver, pr.author))
+  approvalOf(pr)._tag !== "Unknown" && currentApprovers(pr).some((approver) => !identityMatches(approver, pr.author))
 
 /**
  * True when Enter on the focused element already does something (follow a link, press a button),
@@ -656,7 +658,10 @@ interface ApproversCardProps {
     readonly satisfied: boolean
     readonly fromTemplate?: string | undefined
   }>
+  /** Who approved as far as is known now ({@link currentApprovers}): marked with a check. */
   readonly approvedBy: ReadonlyArray<string>
+  /** The last approver read failed, so nobody is marked approved and the card says so. */
+  readonly approversUnknown: boolean
   /** The last evaluation failed, so each rule's `satisfied` is only its last known value. */
   readonly approvalUnknown: boolean
   readonly knownUserArns: ReadonlyMap<string, string>
@@ -671,6 +676,7 @@ function ApproversCard({
   approvalRules,
   approvalUnknown,
   approvedBy,
+  approversUnknown,
   currentUser,
   knownUserArns,
   onRefresh,
@@ -751,6 +757,7 @@ function ApproversCard({
             ) : (
               <StateLabel label="Pending" size="compact" tone="caution" />
             ))}
+          {approversUnknown && <StateLabel label={approversUnknownLabel} size="compact" tone="neutral" />}
         </div>
         <Button
           aria-expanded={showPicker}
@@ -1667,7 +1674,8 @@ export function PRDetail() {
               <ApproversCard
                 approvalRules={pr.approvalRules}
                 approvalUnknown={approvalOf(pr)._tag === "Unknown"}
-                approvedBy={pr.approvedBy}
+                approvedBy={currentApprovers(pr)}
+                approversUnknown={pr.approversUnknown === true}
                 currentUser={state.currentUser}
                 key={card.ruleName}
                 knownUserArns={knownUserArns}

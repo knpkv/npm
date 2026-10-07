@@ -65,6 +65,43 @@ describe("workbenchQueue", () => {
     expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["1", "pool"]])
   })
 
+  // The last known list may hold the user's since-revoked approval, so it can't take them out.
+  it("keeps an unknown-approvers PR in the pool when the last known list names the user", () => {
+    const revoked = make({
+      approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], false)],
+      approvedBy: ["andrey"],
+      approvedByArns: ["arn:aws:iam::123456789012:user/andrey"],
+      approversUnknown: true,
+      id: "1"
+    })
+    const byArn: Caller = {
+      identities: {
+        "platform-prod": { _tag: "Resolved", arn: "arn:aws:iam::123456789012:user/andrey", username: "andrey" }
+      },
+      username: "andrey"
+    }
+    for (const caller of [byName("andrey"), byArn]) {
+      expect(workbenchQueue([revoked], caller, NOW).rows.map((row) => [row.group, row.rule])).toEqual([
+        ["pool", undefined]
+      ])
+    }
+  })
+
+  // Approval itself is known, so satisfied rules are settled; only who signed is in doubt.
+  it("leaves an unknown-approvers PR out of the pool when every rule is satisfied", () => {
+    const queue = workbenchQueue(
+      [make({
+        approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], true)],
+        approversUnknown: true,
+        id: "1",
+        isApproved: true
+      })],
+      byName("andrey"),
+      NOW
+    )
+    expect(queue.rows).toEqual([])
+  })
+
   it("puts a PR in Needs your review when the user is in an unsatisfied pool and has not approved", () => {
     const queue = workbenchQueue(
       [make({ approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], false)], id: "1" })],

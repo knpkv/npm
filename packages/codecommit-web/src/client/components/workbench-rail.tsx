@@ -7,7 +7,7 @@
  *
  * @module
  */
-import { approvalOf } from "@knpkv/codecommit-core/Domain.js"
+import { approvalOf, approversUnknownLabel } from "@knpkv/codecommit-core/Domain.js"
 import { useAtomValue } from "@effect/atom-react"
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router"
@@ -66,7 +66,9 @@ const RowCaption = ({ currentUser, row }: { readonly row: WorkbenchRow; readonly
     row.stuck !== undefined
       ? stuckText(row)
       : row.rule === undefined
-        ? undefined
+        ? pullRequest.approversUnknown === true
+          ? approversUnknownLabel.toLocaleLowerCase()
+          : undefined
         : `${row.rule.approved}/${row.rule.required} ${row.rule.name}`
   const activity =
     row.stuck === "quiet"

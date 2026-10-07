@@ -3,9 +3,13 @@ import * as SqlClient from "effect/sql/SqlClient"
 
 /**
  * Whether the last approver read failed (1): `approved_by` then holds only the last known approvers.
- * Every existing row was written before approver reads could fail visibly, so it starts known.
+ * Before this column a revoked approver was never cleared and a failed read kept the old list, so
+ * every existing row starts unknown until a successful read; every new write states it.
  */
 export default Effect.flatMap(
   SqlClient.SqlClient,
-  (sql) => sql`ALTER TABLE pull_requests ADD COLUMN approvers_unknown INTEGER NOT NULL DEFAULT 0`
+  (sql) =>
+    sql`ALTER TABLE pull_requests ADD COLUMN approvers_unknown INTEGER NOT NULL DEFAULT 0`.pipe(
+      Effect.andThen(sql`UPDATE pull_requests SET approvers_unknown = 1`)
+    )
 )

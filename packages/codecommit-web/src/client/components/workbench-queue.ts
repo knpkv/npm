@@ -277,20 +277,23 @@ const approvedToward = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRu
 /**
  * Yours first; then, for the unsatisfied rules the caller hasn't approved toward, `review` when one
  * certainly counts their approval (named member, or no pool at all) and `pool` when one only might.
- * While approval is unknown, which rules are satisfied is only last known: any rule the caller could
- * count toward makes it `pool`, never the certain `review`.
+ * While approval is unknown, which rules are satisfied is only last known; while approvers are
+ * unknown, whether the caller already approved is. Either way any rule the caller could count toward
+ * makes it `pool`, never the certain `review`, and a last known approval never takes them out.
  */
 const groupOf = (pullRequest: Domain.PullRequest, viewer: Viewer): WorkbenchGroup | undefined => {
   if (identityMatches(viewer.name, pullRequest.author)) return "yours"
-  // Unknown approval or unknown approvers: the user may count, or may already have approved.
-  if (approvalOf(pullRequest)._tag === "Unknown" || pullRequest.approversUnknown === true) {
+  const approvalUnknown = approvalOf(pullRequest)._tag === "Unknown"
+  const approversUnknown = pullRequest.approversUnknown === true
+  const approved = (rule: Domain.ApprovalRule) => !approversUnknown && approvedToward(pullRequest, rule, viewer)
+  if (approvalUnknown || approversUnknown) {
     const couldCount = pullRequest.approvalRules
-      .filter((rule) => !approvedToward(pullRequest, rule, viewer))
+      .filter((rule) => (approvalUnknown || !rule.satisfied) && !approved(rule))
       .some((rule) => poolStanding(rule, viewer) !== "out")
     if (couldCount) return "pool"
   }
   const standings = pullRequest.approvalRules
-    .filter((rule) => !rule.satisfied && !approvedToward(pullRequest, rule, viewer))
+    .filter((rule) => !rule.satisfied && !approved(rule))
     .map((rule) => poolStanding(rule, viewer))
   if (standings.some((standing) => standing === "member" || standing === "open")) return "review"
   if (standings.includes("maybe")) return "pool"
@@ -346,8 +349,10 @@ export const workbenchQueue = (
           openMs: Math.max(0, now.getTime() - pullRequest.creationDate.getTime()),
           pullRequest,
           quietMs,
-          // While approval is unknown, rule progress is only last known, so the row says unknown instead.
-          rule: approvalOf(pullRequest)._tag === "Unknown" ? undefined : ruleProgress(pullRequest),
+          // While approval or approvers are unknown, rule progress is only last known, so the row says unknown instead.
+          rule: approvalOf(pullRequest)._tag === "Unknown" || pullRequest.approversUnknown === true
+            ? undefined
+            : ruleProgress(pullRequest),
           stuck: group === "yours"
             ? stuckReason(pullRequest, quietMs)
             : approvalOf(pullRequest)._tag === "Unknown"

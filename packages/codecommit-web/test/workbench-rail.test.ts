@@ -100,6 +100,17 @@ describe("WorkbenchRailView", () => {
     expect(ruled.textContent).toContain("approved, not merged")
   })
 
+  // A last known count could be a since-revoked approval: the caption says unknown, never 1/2.
+  it("says approvers are unknown instead of last known rule progress", async () => {
+    const twoNeeded = [{ poolMembers: ["andrey", "jonas"], requiredApprovals: 2, ruleName: "Two", satisfied: false }]
+    const host = await render(
+      [make("7", { approvalRules: twoNeeded, approvedBy: ["jonas"], approversUnknown: true })],
+      "andrey"
+    )
+    expect(host.textContent).toContain("approvers unknown")
+    expect(host.textContent).not.toContain("1/2")
+  })
+
   it("uses the singular for one waiting pull request", async () => {
     const host = await render([make("1")], "andrey")
     expect(host.textContent).toContain("1 pull request waits on your review.")
