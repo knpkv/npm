@@ -1,5 +1,8 @@
+import { NodeHttpServer } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Exit, Ref } from "effect"
+import { Effect, Exit, Layer, Predicate, Ref } from "effect"
+import { HttpRouter, HttpServerResponse } from "effect/http"
+import { createServer, type Server } from "node:http"
 import { updatePortOnConflict } from "../src/server/internal/PortRetry.js"
 
 const portTaken = new Error("listen EADDRINUSE: address already in use, port 3000")
@@ -35,5 +38,37 @@ describe("updatePortOnConflict", () => {
       )
       expect(Exit.hasDies(exit)).toBe(true)
       expect(yield* Ref.get(port)).toBe(3000)
+    }))
+
+  // Review finding: under Node a taken port fails the bind with a typed ServeError, not a defect,
+  // and bypassed the retry. A real occupied loopback port must move to the next one.
+  it.effect("moves past a loopback port another server holds", () =>
+    Effect.gen(function*() {
+      const holder = yield* Effect.acquireRelease(
+        Effect.callback<Server>((resume) => {
+          const server = createServer()
+          server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)))
+        }),
+        (server) => Effect.callback<void>((resume) => server.close(() => resume(Effect.void)))
+      )
+      const address = holder.address()
+      if (address === null || Predicate.isString(address)) return yield* Effect.die("holder has no port")
+      const port = yield* Ref.make(address.port)
+      const retries = yield* Ref.make(10)
+      const listening = yield* Ref.make(false)
+      const bind = Effect.suspend(() => Ref.get(port)).pipe(
+        Effect.flatMap((p) =>
+          Layer.build(
+            HttpRouter.serve(HttpRouter.add("GET", "/", HttpServerResponse.text("ok"))).pipe(
+              Layer.provide(NodeHttpServer.layer(createServer, { host: "127.0.0.1", port: p }))
+            )
+          )
+        ),
+        Effect.tap(() => Ref.set(listening, true)),
+        Effect.scoped
+      )
+      yield* bind.pipe(updatePortOnConflict(port, retries, listening))
+      expect(yield* Ref.get(port)).toBe(address.port + 1)
+      expect(yield* Ref.get(listening)).toBe(false)
     }))
 })
