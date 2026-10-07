@@ -1003,8 +1003,9 @@ export type WorkReconcileOutcome = typeof WorkReconcileOutcome.Type
 /**
  * One step `reconcile` would take now, from `planReconcile`. `would_apply`
  * passed every check `reconcile` makes before writing, inside the same kind of
- * transaction, and names the fact and goal head it was planned from; a race
- * between the plan and a later `reconcile` is still caught when it writes.
+ * transaction, and names the fact and the goal's latest event it was planned
+ * from; a race between the plan and a later `reconcile` is still caught when it
+ * writes.
  */
 export const WorkReconcilePlanStep = Schema.TaggedUnion({
   would_apply: {

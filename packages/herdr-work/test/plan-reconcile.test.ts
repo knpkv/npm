@@ -11,6 +11,7 @@ import {
   type WorkObservationEnvelope,
   type WorkObserveReport,
   type WorkPullRequestObservation,
+  type WorkReconcileOptions,
   WorkStore
 } from "../src/index.js"
 
@@ -128,7 +129,7 @@ it.layer(NodeServices.layer)("planReconcile", (it) => {
     ([scenario]) =>
       Effect.scoped(Effect.gen(function*() {
         const { store, work } = yield* openStore
-        const confirmed: Array<{ readonly subject: string; readonly observationId: string }> = []
+        const confirmed: Array<WorkReconcileOptions["confirmed"][number]> = []
         for (const [index, item] of scenario.entries()) {
           const number = index + 1
           yield* work.record({
