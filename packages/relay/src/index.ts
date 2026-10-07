@@ -5,17 +5,29 @@
  */
 export { claudeCodeBackend, codexCliBackend } from "./backends.js"
 export type { CliBackendOptions } from "./backends.js"
-export { layer, make, RelayDecisionNotPending, RelayHarness, RelayStoreFailed, RelayStoreLocked } from "./harness.js"
+export {
+  layer,
+  make,
+  RelayBackendNotConfigured,
+  RelayBackendUnavailable,
+  RelayDecisionNotPending,
+  RelayHarness,
+  RelayRunNotActive,
+  RelayStoreFailed,
+  RelayStoreLocked
+} from "./harness.js"
 export type { RelayBackend, RelayHarnessOptions, RelayHarnessService } from "./harness.js"
 export {
   BackendStatus,
   BackendUnavailableCause,
   CapabilityAccess,
+  DecisionState,
   ObjectRef,
   objectRefKey,
   RelayBackendId,
   RelayEvent,
   RelayProduct,
+  SessionInfo,
   SessionTool
 } from "./model.js"
 export { register } from "./registry.js"

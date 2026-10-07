@@ -96,7 +96,7 @@ const main = Effect.gen(function*() {
     storePath,
     instructions: "You are Relay.",
     capabilities: [register(postCommentTo(markerPath))],
-    backends: [{ id: "claude-code", name: "Claude Code", model }]
+    backends: [{ id: "claude-code", name: "Claude Code", model, probe: Effect.succeed("test"), signInFix: "Sign in." }]
   })
   const context = yield* Layer.build(harness)
   return yield* Effect.provide(program(phase), context)

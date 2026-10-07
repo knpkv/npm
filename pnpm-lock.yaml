@@ -1499,6 +1499,9 @@ importers:
       '@knpkv/ai-codex':
         specifier: workspace:^
         version: link:../ai-codex
+      '@knpkv/ai-runtime':
+        specifier: workspace:^
+        version: link:../ai-runtime
       '@knpkv/capability':
         specifier: workspace:^
         version: link:../capability
@@ -1512,9 +1515,6 @@ importers:
       '@effect/vitest':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(vitest@5.0.3)
-      '@knpkv/ai-runtime':
-        specifier: workspace:^
-        version: link:../ai-runtime
       effect:
         specifier: 4.0.0
         version: 4.0.0

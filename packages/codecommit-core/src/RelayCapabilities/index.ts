@@ -9,8 +9,8 @@
  *   refresh as the fix; Relay never widens its reach beyond the configured accounts.
  * - **Listing is a queue.** It hides accounts the person switched off, like every queue surface.
  *   Addressing one pull request by its coordinates does not, like the detail route.
- * - **Approval is not here yet.** The cache's approval flag can't tell "not approved" from "unknown";
- *   approval state arrives with `approvalOf`, as its own capability.
+ * - **Approval reads like the queue shows it.** Through `approvalOf`: `Unknown` whenever the last
+ *   evaluation failed, with the same explanation the queue gives, never the stale last-known flag.
  * - **Posting re-reads the provider.** The comment is pinned to the revision CodeCommit reports at the
  *   moment of posting, through the review client's preflight, never to a cached revision.
  * - **Posting goes through the host's gate.** `post_comment` needs a {@link PullRequestCommentPoster}, not
@@ -24,7 +24,14 @@ import { Context, Effect, Layer, Option, Schema } from "effect"
 import * as Crypto from "effect/Crypto"
 import { PullRequestRepo } from "../CacheService/index.js"
 import type { CachedPullRequest } from "../CacheService/index.js"
-import { PullRequestStatus } from "../Domain.js"
+import {
+  type Approval,
+  approvalOf,
+  approvalUnknownReasonText,
+  ApprovalUnknownTag,
+  PullRequestStatus
+} from "../Domain.js"
+import { CachedPRToPullRequest } from "../PRService/internal.js"
 import { enabledProfiles } from "../PRService/visibility.js"
 import { CodeCommitReadAccount, CodeCommitReadClient } from "../ReadClient/index.js"
 import type { CodeCommitReadError } from "../ReadClient/index.js"
@@ -116,7 +123,20 @@ const coordinatesOf = (row: CachedPullRequest): PullRequestCoordinates => ({
   pullRequestId: row.id
 })
 
-/** What Relay says about one pull request. Approval is deliberately absent; see the module notes. */
+/** A pull request's approval as the queue shows it; `explanation` is the queue's own sentence. */
+export const PullRequestApproval = Schema.TaggedUnion({
+  Approved: {},
+  Pending: {},
+  Unknown: { reason: ApprovalUnknownTag, explanation: Schema.String }
+})
+export type PullRequestApproval = typeof PullRequestApproval.Type
+
+const approvalView = (approval: Approval): PullRequestApproval =>
+  approval._tag === "Unknown"
+    ? { _tag: "Unknown", reason: approval.reason._tag, explanation: approvalUnknownReasonText(approval.reason) }
+    : approval
+
+/** What Relay says about one pull request. */
 export const PullRequestSummary = Schema.Struct({
   pullRequest: PullRequestCoordinates,
   title: Schema.String,
@@ -126,6 +146,7 @@ export const PullRequestSummary = Schema.Struct({
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
   mergeable: Schema.Boolean,
+  approval: PullRequestApproval,
   comments: Schema.NullOr(Schema.Number),
   filesChanged: Schema.NullOr(Schema.Struct({ added: Schema.Number, modified: Schema.Number, deleted: Schema.Number })),
   created: Schema.String,
@@ -134,7 +155,9 @@ export const PullRequestSummary = Schema.Struct({
 })
 export type PullRequestSummary = typeof PullRequestSummary.Type
 
-const summaryOf = (row: CachedPullRequest): PullRequestSummary => ({
+const decodePullRequest = Schema.decodeEffect(CachedPRToPullRequest)
+
+const summaryOf = (row: CachedPullRequest, approval: PullRequestApproval): PullRequestSummary => ({
   pullRequest: coordinatesOf(row),
   title: row.title,
   description: row.description,
@@ -143,6 +166,7 @@ const summaryOf = (row: CachedPullRequest): PullRequestSummary => ({
   sourceBranch: row.sourceBranch,
   destinationBranch: row.destinationBranch,
   mergeable: row.isMergeable,
+  approval,
   comments: row.commentCount,
   filesChanged: row.filesAdded === null || row.filesModified === null || row.filesDeleted === null
     ? null
@@ -151,6 +175,13 @@ const summaryOf = (row: CachedPullRequest): PullRequestSummary => ({
   lastModified: row.lastModifiedDate.toISOString(),
   link: row.link
 })
+
+// Approval goes through the domain mapper and `approvalOf`, the one read path every surface shares.
+const summarize = (row: CachedPullRequest) =>
+  decodePullRequest(row).pipe(
+    Effect.mapError(cacheUnavailable),
+    Effect.map((pullRequest) => summaryOf(row, approvalView(approvalOf(pullRequest))))
+  )
 
 const findCached = Effect.fn("RelayCapabilities.findCached")(function*(coordinates: PullRequestCoordinates) {
   const repo = yield* PullRequestRepo
@@ -176,8 +207,9 @@ const findCached = Effect.fn("RelayCapabilities.findCached")(function*(coordinat
 /** Read one pull request. */
 export const getPullRequest = defineContract({
   name: "get_pull_request",
-  description: "Title, description, author, status, branches, mergeability, comment count and changed-file counts " +
-    "of one CodeCommit pull request, from the local cache. Approval state is not included.",
+  description: "Title, description, author, status, branches, mergeability, approval, comment count and " +
+    "changed-file counts of one CodeCommit pull request, from the local cache. Approval is Approved, Pending, " +
+    "or Unknown with the reason it could not be evaluated.",
   access: "read",
   input: Schema.Struct({ pullRequest: PullRequestCoordinates }),
   output: PullRequestSummary,
@@ -246,7 +278,7 @@ const commentToken = (revisionId: string, content: string) =>
 
 /** Every CodeCommit capability, bound to its handler, by contract. */
 export const capabilities = {
-  getPullRequest: implement(getPullRequest, (input) => Effect.map(findCached(input.pullRequest), summaryOf)),
+  getPullRequest: implement(getPullRequest, (input) => Effect.flatMap(findCached(input.pullRequest), summarize)),
   listPullRequests: implement(listPullRequests, (input) =>
     Effect.gen(function*() {
       const repo = yield* PullRequestRepo
@@ -267,7 +299,8 @@ export const capabilities = {
         (author === undefined || row.author.toLowerCase().includes(author)) &&
         (input.repositoryName === undefined || row.repositoryName === input.repositoryName)
       )
-      return { pullRequests: matches.slice(0, input.limit).map(summaryOf), total: matches.length }
+      const pullRequests = yield* Effect.forEach(matches.slice(0, input.limit), summarize)
+      return { pullRequests, total: matches.length }
     })),
   postComment: implement(postComment, (input) =>
     Effect.gen(function*() {

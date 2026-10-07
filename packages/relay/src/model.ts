@@ -49,12 +49,32 @@ export type BackendUnavailableCause = typeof BackendUnavailableCause.Type
 export const RelayBackendId = Schema.Literals(["claude-code", "codex-cli"])
 export type RelayBackendId = typeof RelayBackendId.Type
 
-/** What setup shows for one backend. */
+const backendFields = { backend: RelayBackendId, label: Schema.String }
+
+/**
+ * What setup shows for one backend. `Unverified` (installed, version known, never answered yet) until a turn
+ * answers (`Ready`) or is refused for sign-in (`Unavailable` with `SignedOut`). Not persisted: every start is
+ * `Unverified` or `Unavailable` again. `fix` is one line the person can act on.
+ */
 export const BackendStatus = Schema.TaggedUnion({
-  Ready: { backend: RelayBackendId },
-  Unavailable: { backend: RelayBackendId, cause: BackendUnavailableCause, fix: Schema.String }
+  Unverified: { ...backendFields, version: Schema.String },
+  Ready: { ...backendFields, version: Schema.String },
+  Unavailable: {
+    ...backendFields,
+    version: Schema.optionalKey(Schema.String),
+    cause: BackendUnavailableCause,
+    fix: Schema.String
+  }
 })
 export type BackendStatus = typeof BackendStatus.Type
+
+/** Why a confirmation can't be answered: answered already, withdrawn with its run, or never asked. */
+export const DecisionState = Schema.TaggedUnion({
+  Decided: { allow: Schema.Boolean },
+  Expired: {},
+  Unknown: {}
+})
+export type DecisionState = typeof DecisionState.Type
 
 /** One tool as the dock lists it for a session. */
 export const SessionTool = Schema.Struct({
@@ -65,23 +85,32 @@ export const SessionTool = Schema.Struct({
 })
 export interface SessionTool extends Schema.Schema.Type<typeof SessionTool> {}
 
+/** What the dock shows for a session: its tools, and the backend its next turn runs on. */
+export const SessionInfo = Schema.Struct({ tools: Schema.Array(SessionTool), backend: RelayBackendId })
+export interface SessionInfo extends Schema.Schema.Type<typeof SessionInfo> {}
+
 const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
 const eventFields = { session: Name, seq: Seq }
+
+/** The `requestId`s of the messages a run answers: one run can take several queued messages. */
+const RunIds = Schema.Array(Name)
 
 /** Everything the dock renders. `seq` counts up within one subscription; a reconnect starts from a `Snapshot`. */
 export const RelayEvent = Schema.TaggedUnion({
   Snapshot: {
     ...eventFields,
-    messages: Schema.Array(Schema.Struct({ role: Schema.Literals(["user", "relay"]), text: Schema.String }))
+    messages: Schema.Array(Schema.Struct({ role: Schema.Literals(["user", "relay"]), text: Schema.String })),
+    /** The run in flight, empty when idle. */
+    runIds: RunIds
   },
   TextDelta: { ...eventFields, text: Schema.String },
   ToolStarted: { ...eventFields, call: Name, capability: Name, input: Schema.Json },
   ToolFinished: { ...eventFields, call: Name, ok: Schema.Boolean, cites: Schema.Array(Capability.ObjectRef) },
   ConfirmationRequired: { ...eventFields, call: Name, action: Capability.PendingAction, reversible: Schema.Boolean },
   ApprovalPending: { ...eventFields, call: Name, approvalId: Name },
-  Cancelled: { ...eventFields },
-  RunFinished: { ...eventFields },
-  RunFailed: { ...eventFields, cause: Schema.String, fix: Schema.String }
+  Cancelled: { ...eventFields, runIds: RunIds },
+  RunFinished: { ...eventFields, runIds: RunIds },
+  RunFailed: { ...eventFields, runIds: RunIds, cause: Schema.String, fix: Schema.String }
 })
 export type RelayEvent = typeof RelayEvent.Type

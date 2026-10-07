@@ -44,9 +44,21 @@ const RelayLive = Layer.unwrap(
 )
 ```
 
-`RelayHarness` then offers `send(ref, text, requestId)`, `events(ref)` (a `Snapshot` first, then
-`TextDelta`, `ToolStarted`/`ToolFinished` with citations, `ConfirmationRequired`, `RunFinished`/`RunFailed`),
-`decide(callId, allow)`, `cancel(ref)` and `tools`.
+`RelayHarness` then offers:
+
+- `send(ref, text, requestId, backend?)`: `requestId` makes a retried send land once and names the run that
+  answers it; `backend` switches the session from its next turn on (`RelayBackendNotConfigured` otherwise).
+- `events(ref)`: a `Snapshot` first (with the `runIds` of a run in flight), then `TextDelta`,
+  `ToolStarted`/`ToolFinished` with citations, `ConfirmationRequired`, and `RunFinished`/`RunFailed`/`Cancelled`
+  with the `runIds` the run answered.
+- `decide(callId, allow)`: `RelayDecisionNotPending` says why an answer can't apply: `Decided`, `Expired` (the run
+  ended first) or `Unknown`. Kept for the process's lifetime.
+- `cancel(ref, runId)`: withdraws a queued message alone, or stops the run in flight; `RelayRunNotActive` when no
+  run answers `runId`.
+- `session(ref)`: the session's tools and the backend its next turn runs on.
+- `backends`: `Unverified` (the CLI answered `--version`), `Ready` (a turn answered), or `Unavailable` with
+  `NotInstalled`, `SignedOut`, `Misconfigured` or `NoCapability` and a one-line fix. Observed, never persisted.
+  `SignedOut` comes from an `AuthenticationError` turn failure.
 
 ## Security boundaries
 

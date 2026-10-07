@@ -63,7 +63,8 @@ const row = (profile: string, id: string, overrides: Partial<Record<string, stri
 const rows = [
   row("work", "42"),
   row("work", "41", { status: "MERGED", author: "Grace" }),
-  row("switched-off", "40")
+  row("switched-off", "40"),
+  row("work", "39", { isApproved: 1, approvalUnknownReason: "NotPermitted" })
 ]
 
 const config = Schema.decodeSync(TuiConfig)({
@@ -122,19 +123,31 @@ const services = (options: {
   )
 
 layer(services())("CodeCommit Relay capabilities", (it) => {
-  it.effect("reads one pull request from the cache and cites it, without approval state", () =>
+  it.effect("reads one pull request from the cache and cites it", () =>
     Effect.gen(function*() {
       const result = yield* invoke(getPullRequestCapability, { pullRequest: pr42 })
       expect(result.output).toMatchObject({
         title: "PR 42",
         author: "Ada",
         mergeable: true,
+        approval: { _tag: "Pending" },
         filesChanged: { added: 1, modified: 2, deleted: 0 }
       })
-      expect(JSON.stringify(result.output)).not.toMatch(/approv/iu)
       expect(result.cites).toEqual([
         { product: "codecommit", kind: "pull-request", id: "123456789012/us-east-1/payments/42" }
       ])
+    }))
+
+  it.effect("reads approval as unknown over a stale approved flag, with the queue's explanation", () =>
+    Effect.gen(function*() {
+      const result = yield* invoke(getPullRequestCapability, { pullRequest: { ...pr42, pullRequestId: "39" } })
+      expect(result.output).toMatchObject({
+        approval: {
+          _tag: "Unknown",
+          reason: "NotPermitted",
+          explanation: "Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules)."
+        }
+      })
     }))
 
   it.effect("names the refresh when a pull request isn't cached", () =>
@@ -149,7 +162,7 @@ layer(services())("CodeCommit Relay capabilities", (it) => {
   it.effect("lists like the queue: switched-off accounts hidden, filters applied, total before the limit", () =>
     Effect.gen(function*() {
       const all = yield* invoke(listPullRequestsCapability, { limit: 1 })
-      expect(all.output).toMatchObject({ total: 2, pullRequests: [{ pullRequest: { pullRequestId: "42" } }] })
+      expect(all.output).toMatchObject({ total: 3, pullRequests: [{ pullRequest: { pullRequestId: "42" } }] })
       const merged = yield* invoke(listPullRequestsCapability, { status: "MERGED", author: "grace", limit: 10 })
       expect(merged.output).toMatchObject({ total: 1, pullRequests: [{ pullRequest: { pullRequestId: "41" } }] })
       expect(merged.cites).toHaveLength(1)
