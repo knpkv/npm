@@ -174,7 +174,14 @@ export const syncWeek = Effect.fn("syncWeek")(
                 }
                 return recordEvaluation
               }),
-              Effect.catchIf(() => true, () => Effect.void)
+              // One pull request's failure doesn't stop the sync, but it is logged: a lost approval write
+              // leaves the cached approval republished as known.
+              Effect.catch((error) =>
+                Effect.logWarning(
+                  `syncWeek ${week}: status check of #${pr.id} (${pr.repositoryName}, ${pr.accountProfile} ${pr.accountRegion}) failed; the cached row is kept`,
+                  error
+                )
+              )
             ),
         { concurrency: 5, discard: true }
       )

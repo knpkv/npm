@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Ref, Schema, Stream, SubscriptionRef } from "effect"
+import { Effect, Layer, Logger, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
 import { PullRequestDetail } from "../src/AwsClient/internal.js"
+import { CacheError } from "../src/CacheService/CacheError.js"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { ConfigService } from "../src/ConfigService/index.js"
 import { TuiConfig } from "../src/ConfigService/internal.js"
@@ -98,5 +99,43 @@ describe("history sync approval evaluation", () => {
         Effect.provide(dependencies)
       )
       expect(yield* Ref.get(recorded)).toEqual([expected])
+    }))
+
+  // The sync moves on past one pull request's failure, but says so: a lost approval write would
+  // otherwise leave the cached approval republished as known, with nothing in the log.
+  it.effect("logs a pull request whose approval evaluation could not be recorded, and continues", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "idle" })
+      const warnings: Array<string> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        if (entry.logLevel === "Warn") warnings.push(String(entry.message))
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "123456789012", arn: "arn:x" }),
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () => Effect.succeed(detail({ _tag: "NotPermitted" }))
+        }),
+        Layer.mock(PullRequestRepo, {
+          findAll: () => Effect.succeed([cachedRow("kept-profile", "11")]),
+          findStaleOpen: () => Effect.succeed([cachedRow("kept-profile", "11")]),
+          recordApprovalEvaluation: () =>
+            Effect.fail(new CacheError({ operation: "recordApprovalEvaluation", cause: "disk full" })),
+          refreshCommentedBy: () => Effect.void
+        }),
+        Layer.mock(ConfigService, {
+          load: Effect.succeed(
+            Schema.decodeSync(TuiConfig)({
+              accounts: [{ profile: "kept-profile", regions: ["us-east-1"], enabled: true }]
+            })
+          )
+        })
+      )
+      yield* syncWeek(state, "2026-W31").pipe(
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(dependencies),
+        Effect.withLogger(logger)
+      )
+      expect(warnings.some((message) => message.includes("#11"))).toBe(true)
     }))
 })
