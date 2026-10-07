@@ -81,8 +81,15 @@ describe("observed facts", () => {
     Effect.scoped(Effect.gen(function*() {
       const { work } = yield* fixture
       const first = yield* work.observe([at(100, agent("gone"))])
-      expect(first.outcomes).toEqual([{ _tag: "stored", subject: "herdr:ser8/agent-owner" }])
-      expect((yield* work.observe([at(200, agent("gone"))])).outcomes[0]?._tag).toBe("unchanged")
+      expect(first.outcomes).toMatchObject([{ _tag: "stored", subject: "herdr:ser8/agent-owner" }])
+      // Stored and unchanged outcomes name the fact, so a caller can confirm exactly what it read.
+      const again = (yield* work.observe([at(200, agent("gone"))])).outcomes[0]
+      expect(again?._tag).toBe("unchanged")
+      expect(
+        again?._tag === "unchanged" && first.outcomes[0]?._tag === "stored"
+          ? again.observationId === first.outcomes[0].observationId
+          : false
+      ).toBe(true)
       expect((yield* work.observe([at(50, agent("working"))])).outcomes[0]?._tag).toBe("stale")
       expect((yield* work.observe([at(300, agent("working"))])).outcomes[0]?._tag).toBe("stored")
       const reopened = yield* work.observe([at(400, agent("gone"))])
@@ -181,6 +188,20 @@ describe("observed facts", () => {
       expect((yield* reopened.snapshots(10_000)).now.observed?.[0]?.displayState).toBe("completed")
     })))
 
+  it.effect("upgrading a store without an eviction watermark drops its reads and makes every one of them stale", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { open, path, work } = yield* fixture
+      const read = pullRequest({ closedAt: 4_900, state: "merged" })
+      yield* work.observe([at(5_000, read)])
+      // A store from before the watermark: it may have kept a fact whose dispute it evicted.
+      const database = new DatabaseSync(path)
+      database.exec("DROP TABLE work_observed_eviction")
+      database.close()
+      const upgraded = yield* makeWorkService(yield* open.pipe(provideNodeServices))
+      expect((yield* upgraded.observe([at(5_000, read)])).outcomes[0]?._tag).toBe("stale")
+      expect((yield* upgraded.observe([at(5_001, read)])).outcomes[0]?._tag).toBe("stored")
+    })))
+
   it.effect("evicts the oldest facts once the overlay is over its row bound", () =>
     Effect.scoped(Effect.gen(function*() {
       const { work } = yield* fixture
@@ -192,7 +213,10 @@ describe("observed facts", () => {
       )
       const report = yield* work.observe([at(100_000, agent("idle", "agent-newest"))])
       expect(report.evicted).toBe(1)
-      expect((yield* work.observe([at(1, agent("idle", "agent-0"))])).outcomes[0]?._tag).toBe("stored")
+      // The evicted subject can be stored again; an older read of it would be
+      // evicted again in the same call, and is reported stale.
+      expect((yield* work.observe([at(200_000, agent("idle", "agent-0"))])).outcomes[0]?._tag).toBe("stored")
+      expect((yield* work.observe([at(1, agent("idle", "agent-1"))])).outcomes[0]?._tag).toBe("stale")
     })))
 
   it.effect("keeps the latest failure's reason and the earliest failure's start, whatever order they arrive in", () =>

@@ -1,5 +1,16 @@
 # @knpkv/jcf-web
 
+## 0.6.0
+
+### Minor Changes
+
+- [#526](https://github.com/knpkv/npm/pull/526) [`6f39f65`](https://github.com/knpkv/npm/commit/6f39f658230a1fa069ea763fb05780fdab530ed8) Thanks [@konopkov](https://github.com/konopkov)! - The week page reads as one tool. The header names the product, says when the week was last read and offers the rly theme menu. Toolbar controls stay in groups that wrap together, so no button sits alone on a row or breaks its label. The week, its totals and its layer toggles share one bordered region. Saved time is named in words, with no coloured side stripes. The side column says what to do when nothing is open. A failed read or write appears inside the open editor instead of covering the page header. Dates and hours meet 4.5:1 contrast. The quick-approve control is 32px. Labels use commas instead of middots.
+
+### Patch Changes
+
+- Updated dependencies [[`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/rly@0.10.0
+
 ## 0.5.0
 
 ### Minor Changes

@@ -18,9 +18,9 @@
  * @module
  */
 import { JiraApiClient } from "@knpkv/jira-api-client"
-import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
-import { Effect } from "effect"
+import { Effect, Option } from "effect"
 import * as Predicate from "effect/Predicate"
+import { JiraAccess } from "../services/JiraAccess.js"
 import { type JiraTicket, mapIssueToTicket } from "../services/TicketService.js"
 
 /** Shared user hint for the {@link FetchTicketResult} `NotLoggedIn` case. */
@@ -47,30 +47,32 @@ export type FetchTicketResult =
 export const ticketSummaryReader: Effect.Effect<
   (ticketKey: string) => Effect.Effect<string | null>,
   never,
-  JiraApiClient | JiraAuth
+  JiraApiClient | JiraAccess
 > = Effect.gen(function*() {
   const jira = yield* JiraApiClient
-  const auth = yield* JiraAuth
+  const access = yield* JiraAccess
   return (ticketKey: string) =>
     fetchTicketByKey(ticketKey).pipe(
       Effect.map((result) => (result._tag === "Found" ? result.ticket.summary : null)),
       Effect.provideService(JiraApiClient, jira),
-      Effect.provideService(JiraAuth, auth)
+      Effect.provideService(JiraAccess, access)
     )
 })
 
 export const fetchTicketByKey = (
   key: string
-): Effect.Effect<FetchTicketResult, never, JiraApiClient | JiraAuth> =>
+): Effect.Effect<FetchTicketResult, never, JiraApiClient | JiraAccess> =>
   Effect.gen(function*() {
     // Without a Jira login the request would 404 on a malformed URL; surface
-    // the real cause so callers can point the user at `jcf auth jira login`.
+    // the real cause so callers can point the user at `jcf auth jira token`.
     // A *clean* absent token resolves to `false` (→ NotLoggedIn); a genuine
     // platform error (unreadable token file, unresolvable HOME) is a fetch
     // failure, not a benign logged-out state, so it routes to FetchError.
-    const auth = yield* JiraAuth
-    const loginCheck: FetchTicketResult | null = yield* auth.isLoggedIn().pipe(
-      Effect.map((loggedIn): FetchTicketResult | null => (loggedIn ? null : { _tag: "NotLoggedIn" })),
+    const access = yield* JiraAccess
+    const loginCheck: FetchTicketResult | null = yield* access.connection.pipe(
+      Effect.map((
+        connection
+      ): FetchTicketResult | null => (Option.isSome(connection) ? null : { _tag: "NotLoggedIn" })),
       Effect.catch((e) => Effect.succeed<FetchTicketResult>({ _tag: "FetchError", message: e.message }))
     )
     if (loginCheck !== null) return loginCheck

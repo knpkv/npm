@@ -6,14 +6,15 @@
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
 import { JiraApiClient, JiraApiConfig, type JiraApiCredential } from "@knpkv/jira-api-client"
-import { JiraAuth, layer as JiraAuthLayer } from "@knpkv/jira-cli/JiraAuth"
-import { Effect, Layer, Redacted } from "effect"
+import { layer as JiraAuthLayer } from "@knpkv/jira-cli/JiraAuth"
+import { Effect, Layer, Option, Redacted } from "effect"
 import * as Logger from "effect/Logger"
 import { layer as AgentSessionReaderLayer } from "../services/AgentSessionReader.js"
 import { ClockifyAuth, layer as ClockifyAuthLayer } from "../services/ClockifyAuth.js"
 import { layer as ConfigLayer } from "../services/ConfigService.js"
 import { layer as HomeDirectoryLayer } from "../services/HomeDirectory.js"
 import { layer as IssueFactsLayer } from "../services/IssueFacts.js"
+import { JiraAccess, layer as JiraAccessLayer } from "../services/JiraAccess.js"
 import { layer as ReconcileServiceLayer } from "../services/ReconcileService.js"
 import { layer as SavedEntriesLayer } from "../services/SavedEntries.js"
 import { layer as SessionAttributorLayer } from "../services/SessionAttributor.js"
@@ -51,6 +52,11 @@ export const ConfigLive = ConfigLayer.pipe(Layer.provide(HomeDirectoryLive), Lay
 export const StateWriterLive = StateWriterLayer.pipe(Layer.provide(HomeDirectoryLive), Layer.provide(PlatformLayer))
 export const SourceLedgerLive = SourceLedgerLayer.pipe(Layer.provide(ConfigLive), Layer.provide(PlatformLayer))
 export const JiraAuthLive = JiraAuthLayer.pipe(Layer.provide(PlatformLayer))
+export const JiraAccessLive = JiraAccessLayer.pipe(
+  Layer.provide(JiraAuthLive),
+  Layer.provide(HomeDirectoryLive),
+  Layer.provide(PlatformLayer)
+)
 
 // ---------------------------------------------------------------------------
 // API config layers
@@ -103,16 +109,16 @@ export const ClockifyApiLive = ClockifyApiClient.layer.pipe(
 export const JiraApiConfigLive = Layer.effect(
   JiraApiConfig,
   Effect.gen(function*() {
-    const auth = yield* JiraAuth
+    const access = yield* JiraAccess
     // Infallible by construction, because request preprocessing has nowhere to put an error. An
-    // empty token yields the same 401 as never having logged in, which is what the caller reports.
-    const resolveAuth: Effect.Effect<JiraApiCredential> = Effect.gen(function*() {
-      const accessToken = yield* auth.getAccessToken().pipe(
-        Effect.orElseSucceed(() => Redacted.make(""))
-      )
-      const cloudId = yield* auth.getCloudId().pipe(Effect.orElseSucceed(() => ""))
-      return { type: "oauth2", accessToken, cloudId }
-    })
+    // empty token yields the same 401 as never having connected, which is what the caller reports.
+    const resolveAuth: Effect.Effect<JiraApiCredential> = access.connection.pipe(
+      Effect.map(Option.match({
+        onNone: (): JiraApiCredential => ({ type: "oauth2", accessToken: Redacted.make(""), cloudId: "" }),
+        onSome: (connection) => connection.credential
+      })),
+      Effect.orElseSucceed((): JiraApiCredential => ({ type: "oauth2", accessToken: Redacted.make(""), cloudId: "" }))
+    )
     return {
       baseUrl: "",
       // Read once for the snapshot every non-refreshing consumer still reads, and again per request.
@@ -120,7 +126,7 @@ export const JiraApiConfigLive = Layer.effect(
       resolveAuth
     }
   })
-).pipe(Layer.provide(JiraAuthLive))
+).pipe(Layer.provide(JiraAccessLive))
 
 export const JiraApiLive = JiraApiClient.layer.pipe(
   Layer.provide(JiraApiConfigLive),
@@ -134,7 +140,7 @@ export const JiraApiLive = JiraApiClient.layer.pipe(
 export const IssueFactsLive = IssueFactsLayer.pipe(
   Layer.provide(HomeDirectoryLive),
   Layer.provide(JiraApiLive),
-  Layer.provide(JiraAuthLive),
+  Layer.provide(JiraAccessLive),
   Layer.provide(PlatformLayer)
 )
 
@@ -146,7 +152,7 @@ export const TicketServiceLive = TicketServiceLayer.pipe(
 export const TimerServiceLive = TimerServiceLayer.pipe(
   Layer.provide(ClockifyApiLive),
   Layer.provide(JiraApiLive),
-  Layer.provide(JiraAuthLive),
+  Layer.provide(JiraAccessLive),
   Layer.provide(ClockifyAuthLive),
   Layer.provide(ConfigLive),
   Layer.provide(StateWriterLive),
@@ -171,7 +177,7 @@ export const SavedEntriesLive = SavedEntriesLayer.pipe(
   Layer.provide(ClockifyApiLive),
   Layer.provide(ClockifyAuthLive),
   Layer.provide(JiraApiLive),
-  Layer.provide(JiraAuthLive),
+  Layer.provide(JiraAccessLive),
   Layer.provide(ConfigLive),
   Layer.provide(SourceLedgerLive),
   Layer.provide(PlatformLayer)
@@ -182,7 +188,7 @@ export const ReconcileServiceLive = ReconcileServiceLayer.pipe(
   Layer.provide(ClockifyApiLive),
   Layer.provide(ClockifyAuthLive),
   Layer.provide(JiraApiLive),
-  Layer.provide(JiraAuthLive),
+  Layer.provide(JiraAccessLive),
   Layer.provide(ConfigLive),
   Layer.provide(TimerServiceLive),
   Layer.provide(AgentSessionReaderLive),
@@ -209,6 +215,7 @@ const FoundationLayer = Layer.mergeAll(
   ClockifyAuthLive,
   ClockifyApiLive,
   JiraAuthLive,
+  JiraAccessLive,
   JiraApiLive,
   AgentSessionReaderLive,
   SessionAttributorLive,

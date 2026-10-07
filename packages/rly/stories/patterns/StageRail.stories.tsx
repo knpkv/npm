@@ -80,7 +80,11 @@ export const States: Story = {
     const sixMarkers = six.querySelectorAll("[data-rly-stage-marker]")
     await expect(sixStageItems).toHaveLength(6)
     await expect(sixConnectors).toHaveLength(5)
-    for (const connector of sixConnectors) await expect(connector.getBoundingClientRect().height).toBe(1)
+    // A 1px rule on its cross axis: horizontal in a row, vertical when the rail stacks on a phone.
+    for (const connector of sixConnectors) {
+      const box = connector.getBoundingClientRect()
+      await expect(Math.min(box.width, box.height)).toBe(1)
+    }
     for (const marker of sixMarkers) await expect(marker.getBoundingClientRect().width).toBe(24)
     await expect(twenty.querySelectorAll("[data-rly-stage-id]")).toHaveLength(20)
     await expect(canvas.getByText("Avery Diaz")).toBeVisible()
