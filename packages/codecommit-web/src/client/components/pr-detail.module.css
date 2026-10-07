@@ -67,7 +67,7 @@
 }
 
 .title {
-  max-inline-size: 40ch;
+  max-inline-size: 27.4em;
   overflow-wrap: break-word;
   text-wrap: balance;
 }
@@ -290,7 +290,7 @@
 .description,
 .markdown {
   color: var(--rly-color-text-1);
-  max-inline-size: 68ch;
+  max-inline-size: 45.3em;
   overflow-wrap: break-word;
 }
 
