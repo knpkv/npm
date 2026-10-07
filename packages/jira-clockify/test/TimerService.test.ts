@@ -953,5 +953,34 @@ describe("TimerService", () => {
               : Effect.succeed({ id: `tag-${name}`, name, workspaceId: WORKSPACE_ID, archived: false })
         })
       )))
+
+    it.effect("stops without the tags it could not read, and says which entry to fix", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        const messages: Array<unknown> = []
+        const logger = Logger.make<unknown, void>((entry) => {
+          messages.push(entry.message)
+        })
+        const svc = yield* TimerService
+        yield* svc.start(makeTicket())
+        yield* svc.stop().pipe(Effect.withLogger(logger))
+        expect((yield* SubscriptionRef.get(svc.state)).active).toBe(false)
+        expect(messages.map(String).join("\n")).toContain(
+          "Could not read Clockify entry entry-1 (PROJ-123); it is stopped without its tags. Re-add them on that entry in Clockify."
+        )
+      }).pipe(Effect.provide(
+        makeTestLayer({
+          ...mockClockify,
+          getTimeEntry: () =>
+            Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({
+                  request: HttpClientRequest.get("https://clockify.test/time-entry"),
+                  description: "boom"
+                })
+              })
+            )
+        })
+      )))
   })
 })

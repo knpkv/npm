@@ -429,8 +429,12 @@ export const layer = Layer.effect(
           // Stopping must not wait on this read; without it the stopped entry loses its tags, which the user is told.
           const existing = yield* clockify.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
             Effect.catch((error) =>
-              Effect.logWarning("Could not read the running Clockify entry; the stopped entry loses its tags", error)
-                .pipe(Effect.as(null))
+              Effect.logWarning(
+                `Could not read Clockify entry ${current.clockifyEntryId}${
+                  current.ticketKey === null ? "" : ` (${current.ticketKey})`
+                }; it is stopped without its tags. Re-add them on that entry in Clockify.`,
+                error
+              ).pipe(Effect.as(null))
             )
           )
           const tagIds = existing?.tagIds ?? []
