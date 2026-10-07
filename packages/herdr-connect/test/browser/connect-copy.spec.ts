@@ -12,7 +12,15 @@ const Command = Schema.Struct({
 
 const open = async (
   page: Page,
-  scrollState?: { readonly mode: "known" | "unknown"; readonly start?: number; readonly lines?: number }
+  scrollState?: {
+    readonly mode: "known" | "unknown"
+    readonly start?: number
+    readonly lines?: number
+    readonly chase?: number
+    readonly delay?: number
+    // No reading at all until a test sends one, as before a hub's first read lands.
+    readonly muted?: boolean
+  }
 ) => {
   // Opened links land on a stub page instead of a DNS failure, so the popup keeps its URL.
   await page.context().route(
@@ -21,11 +29,15 @@ const open = async (
   )
   await page.request.post("/__test/reset")
   if (scrollState !== undefined) {
-    await page.request.post(
-      `/__test/scroll-state?mode=${scrollState.mode}&start=${String(scrollState.start ?? 0)}&lines=${
-        String(scrollState.lines ?? 300)
-      }`
-    )
+    const query = new URLSearchParams({
+      mode: scrollState.mode,
+      start: String(scrollState.start ?? 0),
+      lines: String(scrollState.lines ?? 300),
+      chase: String(scrollState.chase ?? 0),
+      delay: String(scrollState.delay ?? 0)
+    })
+    await page.request.post(`/__test/scroll-state?${query.toString()}`)
+    if (scrollState.muted === true) await page.request.post("/__test/scroll-state/mute?on=1")
   }
   await page.goto("/")
   await page.getByRole("button", { name: /fixture-pane/ }).click()
@@ -379,6 +391,49 @@ test.describe("scroll position from the hub", () => {
     )
     // herdr was sampled at the bottom before the Page Up reached it.
     await page.request.post("/__test/reading?offset=0&commands=0")
+    await expect(olderOutput(page)).toHaveAccessibleName(`Older output, ${String(ups[0] ?? 0)} lines back`)
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    await expect.poll(() => downs(page)).toEqual(ups)
+  })
+
+  test("Latest keeps going while output keeps arriving behind it, until a reading says 0", async ({ page }) => {
+    await open(page, { mode: "known", start: 50, chase: 10 })
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    // 50, then the 5 lines that arrived during each of the ten pages after it.
+    await expect.poll(() => downs(page), { timeout: 15_000 }).toEqual([50, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5])
+    await expect(olderOutput(page)).toHaveCount(0)
+  })
+
+  test("Latest waits for a slow reading before it decides the pane is at the bottom", async ({ page }) => {
+    // The reading after the first page takes 2.5 s, and 5 lines arrived while that page was sent.
+    await open(page, { mode: "known", start: 50, chase: 1, delay: 2_500 })
+    // The opening reading is just as slow.
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back", { timeout: 10_000 })
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    await expect.poll(() => downs(page), { timeout: 15_000 }).toEqual([50, 5])
+    await expect(olderOutput(page)).toHaveCount(0, { timeout: 10_000 })
+  })
+
+  test("a failed read keeps the last known position instead of showing the bottom", async ({ page }) => {
+    await open(page, { mode: "known", start: 50 })
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back")
+    await page.request.post("/__test/reading?offset=null&commands=0")
+    await page.waitForTimeout(300)
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back")
+  })
+
+  test("a first reading taken before a scroll does not undo it", async ({ page }) => {
+    await open(page, { mode: "known", start: 0, muted: true })
+    const point = await cellPoint(page, "295 ", 2)
+    await page.mouse.click(point.x, point.y)
+    await page.keyboard.press("PageUp")
+    await expect.poll(async () => (await commands(page)).some((command) => command.direction === "up")).toBe(true)
+    const ups = (await commands(page)).filter((command) => command.direction === "up").map((command) =>
+      command.lines ?? 0
+    )
+    // The hub's first read sampled the pane at the bottom, before the Page Up reached herdr.
+    await page.request.post("/__test/reading?offset=0&commands=0")
+    await page.waitForTimeout(300)
     await expect(olderOutput(page)).toHaveAccessibleName(`Older output, ${String(ups[0] ?? 0)} lines back`)
     await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
     await expect.poll(() => downs(page)).toEqual(ups)

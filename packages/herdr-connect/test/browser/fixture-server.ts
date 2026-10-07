@@ -15,10 +15,12 @@
  * session's rows and size, so tests can aim at text and measurements can read the top line.
  * `POST /__test/scroll-state?mode=known|unknown&start=N` makes the next sessions report their scroll
  * position as the hub does — off by default, which is how a hub without that signal behaves; `lines=N`
- * gives them N lines of history instead of 300. `POST /__test/scroll-state/mute?on=1` holds readings
+ * gives them N lines of history instead of 300, `chase=N` streams 5 lines behind each of the first N
+ * down-scrolls (output arriving while Latest runs), and `delay=ms` delivers readings that late. `POST /__test/scroll-state/mute?on=1` holds readings
  * back, as a slow or rate-limited hub would; `POST /__test/grow?lines=N` streams N lines into the
  * latest session without a reading, and `POST /__test/reading?offset=N&commands=M` sends it a
- * reading taken before its last scrolls, as a slow `herdr pane get` would. Readings only go to
+ * reading taken before its last scrolls, as a slow `herdr pane get` would (`offset=null` for a
+ * read that failed). Readings only go to
  * sessions whose URL opted in with `scrollState=1`, like the real hosts. `GET /__test/in-flight`
  * returns the most scroll commands that were ever waiting to render at once.
  */
@@ -118,14 +120,22 @@ interface ScrollStateMode {
   readonly report: "off" | "known" | "unknown"
   readonly startOffset: number
   readonly historyLines: number
+  readonly chaseScrolls: number
+  readonly readingDelayMs: number
 }
-const defaultScrollStateMode: ScrollStateMode = { report: "off", startOffset: 0, historyLines: 300 }
+const defaultScrollStateMode: ScrollStateMode = {
+  report: "off",
+  startOffset: 0,
+  historyLines: 300,
+  chaseScrolls: 0,
+  readingDelayMs: 0
+}
 let scrollStateMode = defaultScrollStateMode
 let readingsMuted = false
 let scrollsInFlight = 0
 let mostScrollsInFlight = 0
 let growLatest: (lines: number) => void = () => {}
-let readingToLatest: (offsetFromBottom: number, scrollCommands: number) => void = () => {}
+let readingToLatest: (offsetFromBottom: number | null, scrollCommands: number) => void = () => {}
 
 /** One session: a screen of `rows` lines ending `offset` lines above the newest. */
 const session = (
@@ -140,6 +150,7 @@ const session = (
   let width = cols
   let height = rows
   let appliedScrolls = 0
+  let chaseLeft = scrollStateMode.chaseScrolls
   // Soft-wraps long lines to the terminal width, as the pane would before herdr renders it.
   const screenRows = (): Array<string> => {
     const wrapped = history.flatMap((line) => {
@@ -156,7 +167,13 @@ const session = (
     if (scrollStateMode.report === "off" || readingsMuted || !optedIn) return
     screenRows()
     const offsetFromBottom = scrollStateMode.report === "known" ? offset : null
-    socket.send(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom, scrollCommands: appliedScrolls }))
+    const reading = JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom, scrollCommands: appliedScrolls })
+    if (scrollStateMode.readingDelayMs === 0) socket.send(reading)
+    else {
+      setTimeout(() => {
+        if (socket.readyState === socket.OPEN) socket.send(reading)
+      }, scrollStateMode.readingDelayMs)
+    }
   }
   const render = (report = true): void => {
     if (socket.readyState !== socket.OPEN) return
@@ -193,6 +210,14 @@ const session = (
       setTimeout(() => {
         scrollsInFlight -= 1
         appliedScrolls += 1
+        // Output that lands while the pane is still behind, just before herdr applies this page.
+        if (command.direction === "down" && chaseLeft > 0) {
+          chaseLeft -= 1
+          for (let line = 0; line < 5; line += 1) {
+            history.push(`${String(history.length + 1).padStart(3, "0")} streamed output`)
+            if (offset > 0) offset += 1
+          }
+        }
         offset += command.direction === "up" ? command.lines : -command.lines
         render()
       }, rttMs)
@@ -235,7 +260,9 @@ const handle = (request: IncomingMessage, response: ServerResponse): void => {
     scrollStateMode = {
       report: mode === "known" || mode === "unknown" ? mode : "off",
       startOffset: Number(url.searchParams.get("start") ?? "0"),
-      historyLines: Number(url.searchParams.get("lines") ?? "300")
+      historyLines: Number(url.searchParams.get("lines") ?? "300"),
+      chaseScrolls: Number(url.searchParams.get("chase") ?? "0"),
+      readingDelayMs: Number(url.searchParams.get("delay") ?? "0")
     }
     json(response, JSON.stringify(scrollStateMode))
   } else if (url.pathname === "/__test/scroll-state/mute" && request.method === "POST") {
@@ -245,7 +272,8 @@ const handle = (request: IncomingMessage, response: ServerResponse): void => {
     growLatest(Number(url.searchParams.get("lines") ?? "1"))
     json(response, JSON.stringify({ ok: true }))
   } else if (url.pathname === "/__test/reading" && request.method === "POST") {
-    readingToLatest(Number(url.searchParams.get("offset") ?? "0"), Number(url.searchParams.get("commands") ?? "0"))
+    const offset = url.searchParams.get("offset") ?? "0"
+    readingToLatest(offset === "null" ? null : Number(offset), Number(url.searchParams.get("commands") ?? "0"))
     json(response, JSON.stringify({ ok: true }))
   } else if (url.pathname === "/__test/in-flight") {
     json(response, JSON.stringify({ most: mostScrollsInFlight }))

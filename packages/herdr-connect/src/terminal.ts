@@ -123,12 +123,10 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
       )
       .pipe(Effect.mapError(transportError("herdr.terminal.spawn")))
 
-    let forwardedScrolls = 0
     const scroll = selection.scrollState === true
       ? yield* makePaneScrollReporter(
         readPaneScrollOffset(spawner, config.herdrCommand, config.repository, agent.paneId),
-        scrollReads,
-        () => forwardedScrolls
+        scrollReads
       )
       : silentScrollReporter
     yield* scroll.request
@@ -139,10 +137,7 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
         Stream.run(handle.stdin),
         Effect.mapError(transportError("herdr.terminal.write"))
       )
-      if (command.type === "terminal.scroll") {
-        forwardedScrolls += 1
-        yield* scroll.request
-      }
+      if (command.type === "terminal.scroll") yield* scroll.scrollForwarded
     })
 
     yield* Effect.addFinalizer(() =>
@@ -175,8 +170,7 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
           )
         )
       ),
-      // While the reader is scrolled back, herdr moves the position as output arrives.
-      Stream.tap((event) => event.type === "terminal.frame" && scroll.scrolledBack() ? scroll.request : Effect.void),
+      Stream.tap((event) => event.type === "terminal.frame" ? scroll.frameSeen : Effect.void),
       Stream.mapError((cause) =>
         Predicate.isTagged(cause, "TerminalProtocolError")
           ? cause

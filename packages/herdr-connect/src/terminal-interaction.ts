@@ -78,13 +78,20 @@ const frameKey = (data: Uint8Array): string => {
 const maximumJumpCommands = 300
 /** Jump-to-latest gives up only after this long without a screen, so a slow host still gets there. */
 const jumpSilenceMs = 2_000
-/** A known jump re-reads at most this many times when output keeps arriving behind it. */
-const maximumSettleRounds = 8
+/**
+ * A known jump waits this long for the reading that confirms its last page: the server debounces,
+ * may wait up to a second for its read window, and gives `herdr pane get` two seconds.
+ */
+const knownJumpSilenceMs = 5_000
+/** Scrolls remembered for re-applying to a late reading; a hub that never reads keeps only these. */
+const maximumUncoveredScrolls = 256
 
 /** What the server has said about herdr's scroll position. */
 type ServerPosition =
   | { readonly _tag: "NoSignal" }
-  | { readonly _tag: "Unknown" }
+  // A read failed. Never shown as the bottom: the client's own estimate, carried on from the last
+  // known position and moved by the scrolls it sends, stands in.
+  | { readonly _tag: "Unknown"; readonly estimate: number }
   | { readonly _tag: "Known"; readonly offset: number }
 
 type Timer = ReturnType<typeof setTimeout>
@@ -95,11 +102,11 @@ type Jump =
   | { readonly _tag: "Frames"; readonly previous: string | null; readonly sent: number; readonly timer: Timer }
   // Position known: the exact lines left, a page per frame, then a reading that covers the last
   // page decides — output that arrived meanwhile is sent too, and only a reading of 0 ends it.
+  // Each round covers only the output of the round before, so it converges.
   | {
     readonly _tag: "Known"
     readonly remaining: number
     readonly lastCommand: number
-    readonly rounds: number
     readonly timer: Timer
   }
 
@@ -125,7 +132,7 @@ export const bindTerminalInteraction = (
   // With a known position the client may scroll toward the bottom as far as the server says.
   const track = makeScrollTrack(
     cellHeight,
-    () => serverPosition._tag === "Known" ? track.linesBack() - serverPosition.offset : 0
+    () => track.linesBack() - believedBack()
   )
   const gesture = makeTouchGesture()
   let velocity = 0
@@ -138,6 +145,14 @@ export const bindTerminalInteraction = (
   // Scrolls sent since the last reading that covered them, as signed lines (up positive). A reading
   // taken before a scroll reached herdr must not undo it, so the uncovered ones are re-applied.
   let sentScrolls = 0
+  // How far back the client believes the pane is: the server's reading, its estimate after a
+  // failed read, or — with no signal at all — what this client scrolled itself.
+  const believedBack = (): number =>
+    serverPosition._tag === "Known"
+      ? serverPosition.offset
+      : serverPosition._tag === "Unknown"
+      ? serverPosition.estimate
+      : track.linesBack()
   let uncovered: ReadonlyArray<{ readonly command: number; readonly lines: number }> = []
   let holdTimer: ReturnType<typeof setTimeout> | null = null
   let wheelTimer: ReturnType<typeof setTimeout> | null = null
@@ -175,9 +190,11 @@ export const bindTerminalInteraction = (
   const sendLines = (scroll: LineScroll): void => {
     const lines = scroll.direction === "up" ? scroll.lines : -scroll.lines
     sentScrolls += 1
-    if (serverPosition._tag !== "NoSignal") uncovered = [...uncovered, { command: sentScrolls, lines }]
+    uncovered = [...uncovered, { command: sentScrolls, lines }].slice(-maximumUncoveredScrolls)
     if (serverPosition._tag === "Known") {
       serverPosition = { _tag: "Known", offset: Math.max(0, serverPosition.offset + lines) }
+    } else if (serverPosition._tag === "Unknown") {
+      serverPosition = { _tag: "Unknown", estimate: Math.max(0, serverPosition.estimate + lines) }
     }
     send({ type: "terminal.scroll", direction: scroll.direction, lines: scroll.lines, source: "wheel", modifiers: 0 })
   }
@@ -187,7 +204,7 @@ export const bindTerminalInteraction = (
       const offset = track.translate()
       target.style.transform = offset === 0 ? "" : `translate3d(0, ${offset}px, 0)`
     }
-    const back = serverPosition._tag === "Known" ? serverPosition.offset : track.linesBack()
+    const back = believedBack()
     if (back !== reportedBack) {
       reportedBack = back
       view.onLinesBack(back)
@@ -306,19 +323,19 @@ export const bindTerminalInteraction = (
     jump = null
   }
   // Each step restarts the silence timer: a jump that hears nothing for a while ends.
-  const silence = (): Timer => {
+  const silence = (ms: number): Timer => {
     if (jump !== null) clearTimeout(jump.timer)
-    return setTimeout(endJump, jumpSilenceMs)
+    return setTimeout(endJump, ms)
   }
   const frameStep = (previous: string | null, sent: number): void => {
-    jump = { _tag: "Frames", previous, sent: sent + 1, timer: silence() }
+    jump = { _tag: "Frames", previous, sent: sent + 1, timer: silence(jumpSilenceMs) }
     sendLines({ direction: "down", lines: maximumLinesPerCommand })
   }
-  const knownStep = (remaining: number, rounds: number): void => {
+  const knownStep = (remaining: number): void => {
     const lines = Math.min(maximumLinesPerCommand, remaining)
-    const timer = silence()
+    const timer = silence(knownJumpSilenceMs)
     sendLines({ direction: "down", lines })
-    jump = { _tag: "Known", remaining: remaining - lines, lastCommand: sentScrolls, rounds, timer }
+    jump = { _tag: "Known", remaining: remaining - lines, lastCommand: sentScrolls, timer }
   }
 
   const copySelection = (): string | null => {
@@ -372,7 +389,7 @@ export const bindTerminalInteraction = (
         const key = frameKey(data)
         if (key === jump.previous || jump.sent >= maximumJumpCommands) endJump()
         else frameStep(key, jump.sent)
-      } else if (jump.remaining > 0) knownStep(jump.remaining, jump.rounds)
+      } else if (jump.remaining > 0) knownStep(jump.remaining)
     },
     selectText: showText,
     jumpToLatest: () => {
@@ -380,21 +397,21 @@ export const bindTerminalInteraction = (
       track.reset()
       endJump()
       if (serverPosition._tag !== "Known") frameStep(null, 0)
-      else if (serverPosition.offset > 0) knownStep(serverPosition.offset, 0)
+      else if (serverPosition.offset > 0) knownStep(serverPosition.offset)
       draw()
     },
     serverScrollState: (offsetFromBottom, scrollCommands) => {
       uncovered = uncovered.filter((scroll) => scroll.command > scrollCommands)
       const pending = uncovered.reduce((total, scroll) => total + scroll.lines, 0)
       serverPosition = offsetFromBottom === null
-        ? { _tag: "Unknown" }
+        ? { _tag: "Unknown", estimate: believedBack() }
         : { _tag: "Known", offset: Math.max(0, offsetFromBottom + pending) }
       if (jump?._tag === "Known") {
         // A reading that fails mid-jump hands the rest to the page-per-frame jump.
         if (serverPosition._tag === "Unknown") frameStep(null, 0)
         else if (jump.remaining === 0 && scrollCommands >= jump.lastCommand) {
-          if (serverPosition.offset === 0 || jump.rounds >= maximumSettleRounds) endJump()
-          else knownStep(serverPosition.offset, jump.rounds + 1)
+          if (serverPosition.offset === 0) endJump()
+          else knownStep(serverPosition.offset)
         }
       }
       draw()

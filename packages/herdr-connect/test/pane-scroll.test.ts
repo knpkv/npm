@@ -29,7 +29,6 @@ describe("read window", () => {
 const reporterWith = (outcomes: ReadonlyArray<number | "fail">, hostLimit = 10) =>
   Effect.gen(function*() {
     let calls = 0
-    let forwarded = 0
     const read = Effect.suspend(() => {
       const outcome = outcomes[Math.min(calls, outcomes.length - 1)]
       calls += 1
@@ -37,7 +36,7 @@ const reporterWith = (outcomes: ReadonlyArray<number | "fail">, hostLimit = 10) 
         ? Effect.fail(new PaneScrollReadError({ cause: "scripted", detail: "scripted failure" }))
         : Effect.succeed(outcome)
     })
-    const reporter = yield* makePaneScrollReporter(read, makeReadWindow(hostLimit), () => forwarded)
+    const reporter = yield* makePaneScrollReporter(read, makeReadWindow(hostLimit))
     const seen: Array<number | null> = []
     const commands: Array<number> = []
     yield* Effect.forkScoped(
@@ -51,10 +50,7 @@ const reporterWith = (outcomes: ReadonlyArray<number | "fail">, hostLimit = 10) 
       reporter,
       seen,
       commands,
-      calls: () => calls,
-      forward: () => {
-        forwarded += 1
-      }
+      calls: () => calls
     }
   })
 
@@ -66,7 +62,10 @@ describe("pane scroll reporter", () => {
       yield* TestClock.adjust("200 millis")
       expect(calls()).toBe(1)
       expect(seen).toEqual([12])
-      expect(reporter.scrolledBack()).toBe(true)
+      // Scrolled back, so output moves the position: a frame asks for another read.
+      yield* reporter.frameSeen
+      yield* TestClock.adjust("1 second")
+      expect(calls()).toBe(2)
     })))
 
   it.effect("waits for the session window rather than dropping the read that ends a burst", () =>
@@ -104,7 +103,6 @@ describe("pane scroll reporter", () => {
         yield* TestClock.adjust("1 second")
       }
       expect(seen).toEqual([null, 5])
-      expect(reporter.scrolledBack()).toBe(true)
     })))
 })
 
@@ -112,16 +110,39 @@ describe("pane scroll reporter coverage", () => {
   it.effect("stamps each reading with the scrolls forwarded before it and reports the same offset again once more are covered", () =>
     Effect.scoped(Effect.gen(function*() {
       // A scroll clamped at the top leaves the offset unchanged, but the client already assumed it moved.
-      const { commands, forward, reporter, seen } = yield* reporterWith([40, 40, 40])
+      const { commands, reporter, seen } = yield* reporterWith([40, 40, 40])
       yield* reporter.request
       yield* TestClock.adjust("1 second")
-      forward()
-      yield* reporter.request
+      yield* reporter.scrollForwarded
       yield* TestClock.adjust("1 second")
       yield* reporter.request
       yield* TestClock.adjust("1 second")
       expect(seen).toEqual([40, 40])
       expect(commands).toEqual([0, 1])
+    })))
+
+  it.effect("reads again on the first frame after a forwarded scroll, since herdr may not have applied it yet", () =>
+    Effect.scoped(Effect.gen(function*() {
+      // The read stamped as covering the scroll saw the pane before herdr moved it.
+      const { calls, reporter, seen } = yield* reporterWith([0, 0, 12])
+      yield* reporter.request
+      yield* TestClock.adjust("1 second")
+      yield* reporter.scrollForwarded
+      yield* TestClock.adjust("1 second")
+      expect(calls()).toBe(2)
+      // herdr renders the scroll: that frame asks for one more read, which sees the real position.
+      yield* reporter.frameSeen
+      yield* TestClock.adjust("1 second")
+      expect(seen).toEqual([0, 0, 12])
+      // At the bottom with nothing forwarded since, frames ask for nothing.
+      const before = calls()
+      const quiet = yield* reporterWith([0])
+      yield* quiet.reporter.request
+      yield* TestClock.adjust("1 second")
+      yield* quiet.reporter.frameSeen
+      yield* TestClock.adjust("1 second")
+      expect(quiet.calls()).toBe(1)
+      expect(calls()).toBe(before)
     })))
 })
 
