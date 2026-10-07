@@ -62,7 +62,8 @@ pnpm install
 # Build all packages
 pnpm build
 
-# Run tests
+# Run tests: vitest runs from source; then test:pack checks the built packages and executables,
+# so build first
 pnpm test
 
 # Type check
@@ -164,7 +165,7 @@ Packages are published to npm under the [@knpkv scope](https://www.npmjs.com/org
 # Package management
 pnpm install             # Install dependencies
 pnpm build               # Build all packages
-pnpm test                # Run all tests
+pnpm test                # Run all tests (vitest from source, then test:pack, which needs pnpm build)
 pnpm check               # TypeScript type checking
 pnpm lint                # Lint code
 pnpm lint:fix            # Fix linting issues
