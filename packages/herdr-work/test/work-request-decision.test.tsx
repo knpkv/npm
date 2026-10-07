@@ -107,7 +107,7 @@ const button = (host: HTMLElement, name: string): HTMLButtonElement | undefined 
   )
 
 /** The decision bar's off reason and status text, as the reader sees them. */
-const reasonAndStatus = (host: HTMLElement): { readonly reason: string; readonly status: string } => ({
+const reasonAndStatus = (host: HTMLElement) => ({
   reason: host.querySelector("[id^='rly-decision-bar-reason-']")?.textContent ?? "",
   status: host.querySelector("[id^='rly-decision-bar-status-']")?.textContent ?? ""
 })
