@@ -53,8 +53,8 @@ const observation = (overrides: Partial<PullRequestAtomicObservation> = {}): Pul
   ...overrides
 })
 
-const withSource = <A, E>(
-  observe: () => Effect.Effect<PullRequestAtomicObservation, E>,
+const withSource = <A>(
+  observe: () => Effect.Effect<PullRequestAtomicObservation>,
   effect: Effect.Effect<A, unknown, PullRequestEvidenceProvider>
 ) =>
   effect.pipe(
@@ -69,7 +69,6 @@ const withSource = <A, E>(
 
 describe("atomic pull request evidence", () => {
   it.effect("binds one bounded source observation to the exact expected head", () =>
-    // @effect-diagnostics-next-line missingEffectContext:off
     Effect.gen(function*() {
       yield* TestClock.setTime(1_000)
       const calls = yield* Ref.make(0)
@@ -95,7 +94,6 @@ describe("atomic pull request evidence", () => {
     }))
 
   it.effect("fails stale when the head changes during the atomic observation", () =>
-    // @effect-diagnostics-next-line missingEffectContext:off
     Effect.gen(function*() {
       yield* TestClock.setTime(1_000)
       const result = yield* withSource(
@@ -111,7 +109,6 @@ describe("atomic pull request evidence", () => {
     }))
 
   it.effect("rejects missing and duplicate required-check evidence", () =>
-    // @effect-diagnostics-next-line missingEffectContext:off
     Effect.gen(function*() {
       yield* TestClock.setTime(1_000)
       const missing = yield* withSource(
@@ -169,7 +166,6 @@ describe("atomic pull request evidence", () => {
     }))
 
   it.effect("rejects source-sensitive evidence observed for another head", () =>
-    // @effect-diagnostics-next-line missingEffectContext:off
     Effect.gen(function*() {
       yield* TestClock.setTime(1_000)
       const staleEvidence = yield* withSource(

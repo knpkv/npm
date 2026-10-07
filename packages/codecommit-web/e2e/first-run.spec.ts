@@ -54,10 +54,29 @@ test("names an unreachable server and retries on request", async ({ page }) => {
 
   await page.goto("/")
   await expect(page.getByText("Can't reach the CodeCommit server", { exact: true })).toBeVisible()
-  await expect(page.getByText("The CodeCommit server answered 503.", { exact: false }).first()).toBeVisible()
+  // The queue's panel names the cause; the header keeps it on its status (inline only on wide screens).
+  await expect(page.getByRole("main").getByText("The CodeCommit server answered 503.", { exact: false }).first())
+    .toBeVisible()
   const before = streamCalls
   await page.getByRole("button", { name: "Retry now" }).click()
   await expect.poll(() => streamCalls).toBeGreaterThan(before)
+})
+
+test("keeps a failing stream's status clear of the navigation", async ({ page }) => {
+  await routeCommon(page)
+  await page.route("**/api/events/", (route) => route.fulfill({ status: 503 }))
+  await page.route("**/api/config", (route) => route.fulfill({ status: 503 }))
+  for (const width of [1280, 1440]) {
+    await page.setViewportSize({ height: 900, width })
+    await page.goto("/")
+    const status = page.getByRole("status").filter({ hasText: "Reconnecting" })
+    await expect(status).toBeVisible()
+    // The full detail stays reachable on the status itself.
+    await expect(status).toHaveAttribute("title", "The CodeCommit server answered 503.")
+    const nav = await page.getByRole("navigation", { name: "Primary" }).boundingBox()
+    const box = await status.boundingBox()
+    expect((nav?.x ?? 0) + (nav?.width ?? 0)).toBeLessThanOrEqual(box?.x ?? 0)
+  }
 })
 
 test("sends a first run with no AWS profiles to setup, which shows where it looked", async ({ page }) => {

@@ -42,6 +42,8 @@ const openWithBridge = (path: string) =>
   )
 
 const drivers = { bridge: openWithBridge, store: openWithStore }
+/** Either way of opening a Work database: the WorkStore itself or the SQL bridge herdr-approvals uses. */
+type Driver = (typeof drivers)[keyof typeof drivers]
 
 /** Runs `effect` while a WorkStore connection holds `path` open, as herdr-approvals does in production. */
 const whileStoreHolds = <A, E, R>(path: string, effect: Effect.Effect<A, E, R>) =>
@@ -498,7 +500,7 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
             new DatabaseSync(path),
             "PRAGMA index_info(work_decision_handoffs_session)"
           ).map(({ name }) => name)
-        const openers: ReadonlyArray<readonly [string, (path: string) => ReturnType<typeof drivers.store>]> = [
+        const openers: ReadonlyArray<readonly [string, Driver]> = [
           ["store", drivers.store],
           ["bridge", drivers.bridge]
         ]
@@ -560,7 +562,7 @@ describe("Work schema parity between WorkStore and the SQL bridge", () => {
           "bridge then store": [drivers.bridge, drivers.store],
           "store then bridge": [drivers.store, drivers.bridge],
           "store then store": [drivers.store, drivers.store]
-        }
+        } satisfies Record<string, readonly [Driver, Driver]>
         for (const [name, [first, second]] of Object.entries(orders)) {
           const path = join(root, `${name.replaceAll(" ", "-")}.sqlite`)
           copyFileSync(legacy, path)

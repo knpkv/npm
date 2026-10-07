@@ -6,36 +6,60 @@ import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "../src/
 
 type JobRecord = DashboardSnapshot["pendingApprovals"]["local"][number]
 
+const admit: JobRecord["payload"] = {
+  kind: "work.admit",
+  repository: "knpkv/npm",
+  pullRequest: 433,
+  reviewUrl: "https://github.com/knpkv/npm/pull/433",
+  goalId: "goal-433",
+  laneId: "lane-433",
+  operationId: "admit-433",
+  expectedAbsenceToken: "a".repeat(64),
+  head: "b".repeat(40),
+  baseHead: "c".repeat(40),
+  owner: { id: "owner-1", name: "Owner" },
+  sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+  expectedWork: "feat/guided-review-rly",
+  worker: { host: "SER8", agentId: "agent-433", name: "Owner", paneId: "w1:p3" },
+  worktree: "/worktrees/npm/feat/guided-review-rly",
+  branch: "feat/guided-review-rly",
+  title: "Review PR 433",
+  summary: "Guided review",
+  detail: "Admit the running owner"
+}
+
 const record = (id: string, overrides: Partial<JobRecord> = {}): JobRecord => ({
   actor: "submitter@example.com",
   approvalAvailable: true,
   approvalExpiresAt: 600_000,
-  approvalNonce: "nonce",
   approvedAt: null,
   approvedBy: null,
   createdAt: 1_000,
-  error: null,
   expiredAt: null,
-  hash: "hash",
   id,
-  payload: { kind: "work.admit", ref: "main" },
+  payload: admit,
   rejectedAt: null,
   rejectedBy: null,
-  result: null,
   status: "pending_approval",
   updatedAt: 1_000,
   ...overrides
 })
 
 const snapshot = (local: ReadonlyArray<JobRecord>, approvalsEnabled = true): DashboardSnapshot => ({
-  approvalApp: { canonical: true, canonicalUrl: "https://hub.example.test/", chatEnabled: false, pushEnabled: false },
+  approvalApp: {
+    canonical: true,
+    canonicalUrl: "https://hub.example.test/",
+    chatEnabled: false,
+    pushEnabled: false,
+    workEnabled: false
+  },
   approvalsEnabled,
   chat: null,
   directory: null,
   historyNextCursor: null,
   host: "ALPHA",
   observedAt: 0,
-  pendingApprovals: { failures: [], local: [...local], remote: [] },
+  pendingApprovals: { failures: [], local: [...local], nextCursors: [], remote: [] },
   records: [],
   status: {
     applyConfigured: true,

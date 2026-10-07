@@ -3,7 +3,7 @@
   "compilerOptions": {
     "noEmit": true,
     "composite": false,
-    "rootDir": "..",
+    "rootDir": "../../..",
     "outDir": null,
     "tsBuildInfoFile": null,
     "lib": ["DOM", "DOM.Iterable", "ES2024"]

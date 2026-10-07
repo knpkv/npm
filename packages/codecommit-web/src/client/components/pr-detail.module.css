@@ -67,7 +67,7 @@
 }
 
 .title {
-  max-inline-size: 40ch;
+  max-inline-size: 27.4em;
   overflow-wrap: break-word;
   text-wrap: balance;
 }
@@ -79,10 +79,14 @@
   gap: var(--rly-space-8);
 }
 
+/* The underline, not the colour, sets a link apart from the sentence around it. Stated in full here
+   because Tailwind's preflight resets `a` to `text-decoration: inherit`. */
 .textLink,
 .codeLink {
   color: var(--rly-color-text-1);
-  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-decoration-line: underline;
+  /* 60% keeps the line at 3:1 or more against the canvas in both themes (35% was 2.19:1 in light). */
+  text-decoration-color: color-mix(in srgb, currentColor 60%, transparent);
   text-decoration-thickness: 1px;
   text-underline-offset: var(--rly-space-4);
 }
@@ -286,7 +290,7 @@
 .description,
 .markdown {
   color: var(--rly-color-text-1);
-  max-inline-size: 68ch;
+  max-inline-size: 45.3em;
   overflow-wrap: break-word;
 }
 

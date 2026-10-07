@@ -143,7 +143,7 @@
   font-size: var(--rly-type-card-title-size);
   font-variant-numeric: tabular-nums;
   font-weight: var(--rly-type-card-title-weight);
-  min-inline-size: 3.5ch;
+  min-inline-size: 2.4em;
   text-align: end;
 }
 
@@ -252,7 +252,7 @@
 
 .usage-column-target:focus-visible {
   stroke: var(--rly-color-focus);
-  stroke-width: 2;
+  stroke-width: var(--rly-focus-ring-width);
 }
 
 g[data-active="true"] .usage-segment {
