@@ -57,3 +57,7 @@ export const root: Command.Command<
   ),
   Command.withSubcommands([tui, AuthCommand.auth, timer, issue, sync, watch, config, skills])
 )
+
+/** The names `jcf` accepts as its first argument, read from the commands themselves so they cannot drift. */
+export const commandNames: ReadonlyArray<string> = [tui, AuthCommand.auth, timer, issue, sync, watch, config, skills]
+  .map((command) => command.name)

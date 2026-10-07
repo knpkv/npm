@@ -12,17 +12,21 @@ import { Console, Data, Effect, Option, Runtime } from "effect"
 import { Argument as Args, Command, Flag as Options, Prompt } from "effect/cli"
 import * as Terminal from "effect/Terminal"
 import type { AttributionSignal, CreditedSpan, SessionProposal } from "../agent/sessions.js"
+import { ClockifyAuth } from "../services/ClockifyAuth.js"
 import { ConfigService } from "../services/ConfigService.js"
 import { isOwnedByMe, type IssueFact, IssueFacts } from "../services/IssueFacts.js"
+import { JiraAccess } from "../services/JiraAccess.js"
 import {
   type AttributionOutcome,
   type ReconcileDirection,
   type ReconcilePeriod,
   type ReconcileRow,
   ReconcileService,
+  type ReconcileSides,
   type SessionProposalProgress,
   type SessionProposalReport
 } from "../services/ReconcileService.js"
+import { CONNECT_JIRA_COMMAND } from "../utils/hints.js"
 import { formatDuration, localDay, nextLocalMidnight } from "../utils/time.js"
 import { applyProposal, clip, entryDescription, keepGoing, proposalTargets, writeOutcomeLines } from "./agentWrite.js"
 import { type CalendarRow, earliestStart, formatSpanBounds, formatSpanRanges, renderDayCalendar } from "./calendar.js"
@@ -108,7 +112,8 @@ export type AgentModeResolution =
 /** Flags that only mean something in agent mode, so passing one without `--agent` is an error. */
 const AGENT_ONLY_FLAGS: ReadonlyArray<{ readonly flag: string; readonly read: (o: AgentModeInput) => boolean }> = [
   { flag: "--json", read: (o) => o.json },
-  { flag: "--calendar", read: (o) => o.calendar }
+  { flag: "--calendar", read: (o) => o.calendar },
+  { flag: "--only", read: (o) => o.only !== undefined }
 ]
 
 export interface AgentModeInput {
@@ -116,6 +121,8 @@ export interface AgentModeInput {
   readonly direction: string | undefined
   readonly json: boolean
   readonly calendar: boolean
+  /** With --agent: the one system to read and write. */
+  readonly only?: "clockify" | "jira" | undefined
 }
 
 export const resolveAgentMode = (options: AgentModeInput): AgentModeResolution => {
@@ -451,6 +458,8 @@ const runAgentMode = (options: {
   readonly period: ReconcilePeriod
   readonly json: boolean
   readonly calendar: boolean
+  /** Which systems are read and written; `--only` narrows it to one. */
+  readonly sides: ReconcileSides
 }) =>
   Effect.gen(function*() {
     const svc = yield* ReconcileService
@@ -461,7 +470,26 @@ const runAgentMode = (options: {
 
     // Progress goes to stderr in both modes: it is not part of the JSON value, and reading
     // transcripts then waking a Coding Agent takes long enough that silence reads as a hang.
+    // A side that is not connected cannot be read, and an unread side is indistinguishable from an
+    // empty one. Stop before planning, naming both ways forward, rather than half-writing a plan.
+    const jiraConnected = yield* JiraAccess.use((access) => access.connection).pipe(
+      Effect.map(Option.isSome),
+      Effect.orElseSucceed(() => false)
+    )
+    const clockifyConnected = yield* ClockifyAuth.use((auth) => auth.isConfigured)
+    if (options.sides.jira && !jiraConnected) {
+      return yield* new CommandFailed({
+        message:
+          `Jira is not connected. Run ${CONNECT_JIRA_COMMAND}, or pass --only clockify to reconcile Clockify alone.`
+      })
+    }
+    if (options.sides.clockify && !clockifyConnected) {
+      return yield* new CommandFailed({
+        message: "Clockify is not connected. Run jcf auth clockify setup, or pass --only jira to reconcile Jira alone."
+      })
+    }
     const report = yield* svc.proposeFromSessions(options.period, {
+      sides: options.sides,
       onProgress: (progress) => reportProgress(options.agent, progress)
     }).pipe(
       Effect.catch((error) => Console.error(`Agent reconcile failed: ${error.message}`).pipe(Effect.as(null)))
@@ -717,7 +745,7 @@ const runAgentMode = (options: {
                 clockify: null,
                 jira: null
               },
-              undefined,
+              options.sides,
               refreshed.jiraAvailability
             )
             yield* Effect.forEach(writeOutcomeLines(written), (line) => say(`    ${line}`))
@@ -763,15 +791,20 @@ export const reconcile = Command.make(
     calendar: Options.Boolean("calendar").pipe(
       Options.withDescription("With --agent: draw an hour-by-hour grid of when the time was credited"),
       Options.withDefault(false)
+    ),
+    only: Options.Literals("only", ["clockify", "jira"]).pipe(
+      Options.withDescription("With --agent: read and write only this system, e.g. while Jira is not connected"),
+      Options.optional
     )
   },
-  ({ agent, calendar, direction, json, since, until, week }) =>
+  ({ agent, calendar, direction, json, only, since, until, week }) =>
     Effect.gen(function*() {
       const mode = resolveAgentMode({
         agent: Option.isSome(agent) ? agent.value : undefined,
         direction: Option.isSome(direction) ? direction.value : undefined,
         json,
-        calendar
+        calendar,
+        only: Option.getOrUndefined(only)
       })
       if (mode._tag === "UsageError") {
         // Printed here rather than left to the runtime: a usage mistake should read as advice, not
@@ -794,7 +827,13 @@ export const reconcile = Command.make(
       }
 
       if (mode._tag === "Agent") {
-        return yield* runAgentMode({ agent: mode.agent, period, json, calendar })
+        return yield* runAgentMode({
+          agent: mode.agent,
+          period,
+          json,
+          calendar,
+          sides: { clockify: Option.getOrUndefined(only) !== "jira", jira: Option.getOrUndefined(only) !== "clockify" }
+        })
       }
 
       const dir = Option.isSome(direction) ? direction.value : "clockify-to-jira"

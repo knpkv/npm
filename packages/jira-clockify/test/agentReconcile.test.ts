@@ -1675,9 +1675,11 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.jiraWorklogs).toEqual([])
     }))
 
-  it.effect("stops the run at the first Jira sign-in failure", () =>
+  // Jira's recorded time cannot be read signed out, so no proposal can be trusted: nothing is written,
+  // not even the Clockify half that used to land before the Jira half failed.
+  it.effect("writes nothing, even to Clockify, when Jira is not connected", () =>
     Effect.gen(function*() {
-      const { world } = yield* run(
+      const { exit, world } = yield* run(
         agent(),
         baseOptions({
           transcripts: {
@@ -1693,10 +1695,9 @@ describe("jcf sync reconcile --agent: proposals", () => {
           keep: [true, true]
         })
       )
-      // The first row's Clockify half still landed; the run then stopped rather than asking again.
-      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(exit._tag).toBe("Failure")
+      expect(world.createdClockifyEntries).toEqual([])
       expect(world.jiraWorklogs).toEqual([])
-      expect(output(world.stdout)).toContain("jcf auth jira token")
     }))
 
   it.effect("stops with a refresh remedy when Jira is logged in but cannot be verified", () =>
@@ -2273,6 +2274,46 @@ describe("jcf sync reconcile --agent: unreadable recorded state", () => {
       expect(world.createdClockifyEntries).toEqual([])
       expect(world.jiraWorklogs).toEqual([])
       expect(output(world.stderr)).toContain("Clockify returned an incomplete entry")
+    }))
+
+  // QA-J5: with Jira not connected there was no way to reconcile Clockify from the CLI.
+  const clockifyOnlyWorld = baseOptions({
+    jiraLoggedIn: false,
+    transcripts: {
+      "work-repo/s1.jsonl": transcript({
+        sessionId: "s1",
+        cwd: `${WORK_ROOT}/repo`,
+        gitBranch: "feat/PROJ-5662-review",
+        events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+      })
+    },
+    keep: [true]
+  })
+
+  it.effect("--only clockify reconciles Clockify alone while Jira is not connected", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(agent(["--only", "clockify"]), clockifyOnlyWorld)
+      expect(exit._tag).toBe("Success")
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.jiraWorklogs).toEqual([])
+    }))
+
+  // Before, it planned "+35m to both", wrote Clockify, then failed Jira: Jira's recorded time had
+  // never been read, so the plan could not be trusted. Now it stops first and names both ways forward.
+  it.effect("without --only, a missing Jira connection stops before planning and names both ways forward", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(agent(), clockifyOnlyWorld)
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(exit._tag === "Failure" ? Cause.prettyErrors(exit.cause)[0]?.message : "succeeded").toBe(
+        "Jira is not connected. Run jcf auth jira token, or pass --only clockify to reconcile Clockify alone."
+      )
+    }))
+
+  it.effect("--only applies to --agent runs only", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(["sync", "reconcile", "--only", "clockify", ...SINCE], baseOptions())
+      expect(exit._tag).toBe("Failure")
+      expect(output(world.stderr)).toContain("--only applies to `--agent` runs only")
     }))
 
   it.effect("fails closed when the Jira account identity is unavailable", () =>
