@@ -12,7 +12,7 @@ import {
   appStateAtom,
   configPathQueryAtom,
   configQueryAtom,
-  configSaveAtom,
+  accountsConfigSaveAtom,
   notificationsSsoLoginAtom
 } from "../atoms/app.js"
 import { Button, ButtonGroup } from "./ui/button.js"
@@ -50,14 +50,14 @@ type Registry = ContextType<typeof RegistryContext>
  * Settings right after a change can't dispose the request mid-flight. `onSettled` gets whether it saved.
  */
 const saveDetached = (registry: Registry, payload: SavePayload, onSettled?: (saved: boolean) => void): void => {
-  const release = registry.mount(configSaveAtom)
-  const unsubscribe = registry.subscribe(configSaveAtom, (result) => {
+  const release = registry.mount(accountsConfigSaveAtom)
+  const unsubscribe = registry.subscribe(accountsConfigSaveAtom, (result) => {
     if (result.waiting || AsyncResult.isInitial(result)) return
     unsubscribe()
     release()
     onSettled?.(AsyncResult.isSuccess(result))
   })
-  registry.set(configSaveAtom, { payload })
+  registry.set(accountsConfigSaveAtom, { payload })
 }
 
 /**
@@ -92,6 +92,8 @@ const drainSaves = (registry: Registry): void => {
   saveQueue.next = null
   saveQueue.running = true
   saveDetached(registry, job.payload, (saved) => {
+    // Other settings tabs build their payload from the config query; re-read it so they see this save.
+    if (saved) registry.refresh(configQueryAtom)
     for (const waiter of job.waiters) waiter(saved)
     drainSaves(registry)
   })

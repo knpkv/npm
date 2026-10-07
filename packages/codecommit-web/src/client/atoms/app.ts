@@ -164,6 +164,12 @@ export const configValidateQueryAtom = ApiClient.query("config", "validate", {
 export const configSaveAtom = ApiClient.mutation("config", "save")
 
 /**
+ * The Accounts page's own config save. A separate mutation, so another settings tab writing
+ * `configSaveAtom` can't interrupt an account save that outlives the page, or be mistaken for it.
+ */
+export const accountsConfigSaveAtom = ApiClient.mutation("config", "save")
+
+/**
  * Reset config mutation
  */
 export const configResetAtom = ApiClient.mutation("config", "reset")
