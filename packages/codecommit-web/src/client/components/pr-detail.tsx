@@ -53,6 +53,7 @@ import {
   type RlyStateTone
 } from "@knpkv/rly/primitives"
 import { Exit, Option } from "effect"
+import * as Cause from "effect/Cause"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { ArrowRightIcon, CheckIcon, ChevronDownIcon, CodeIcon, LoaderIcon, PlusIcon, TrashIcon } from "lucide-react"
@@ -630,8 +631,11 @@ interface ApproversCardProps {
   readonly currentUser: string | undefined
   readonly repoAccountId: string
   readonly onSetApprovers: (arns: ReadonlyArray<string>) => void
-  /** Deletes this card's own rule (never a template rule). */
-  readonly onRemoveRule: () => void
+  /**
+   * Deletes this card's own rule (never a template rule) and refreshes the pull request on success.
+   * Resolves to the failure reason, or `null` once the provider deleted it.
+   */
+  readonly onRemoveRule: () => Promise<string | null>
   readonly onRefresh: () => void
   readonly permissionPrompt: boolean
 }
@@ -661,6 +665,11 @@ function ApproversCard({
     onRefresh
   })
   const { pendingAdd, pendingRemove } = optimistic
+  // Removing stays on until the refreshed rules drop the rule (the button goes with it), so it can't be
+  // clicked again against a rule that is already gone.
+  const [removal, setRemoval] = useState<
+    { readonly _tag: "Idle" } | { readonly _tag: "Removing" } | { readonly _tag: "Failed"; readonly reason: string }
+  >({ _tag: "Idle" })
 
   // Pool members for THIS card: template rules + this card's managed rule (not other managed rules)
   const allPoolMembers = useMemo(() => {
@@ -677,6 +686,16 @@ function ApproversCard({
   const managedRule = approvalRules.find((r) => r.ruleName === ruleName && r.fromTemplate === undefined)
   const managedArns = managedRule?.poolMemberArns ?? []
   const managedMembers = managedRule?.poolMembers ?? []
+  const hasManagedRule = managedRule !== undefined
+  useEffect(() => {
+    if (!hasManagedRule) setRemoval({ _tag: "Idle" })
+  }, [hasManagedRule])
+  const removeRule = () => {
+    setRemoval({ _tag: "Removing" })
+    void onRemoveRule().then((reason) => {
+      if (reason !== null) setRemoval({ _tag: "Failed", reason })
+    })
+  }
 
   // Users available to add (have known ARN + not already in pool)
   const addable = useMemo(
@@ -734,11 +753,16 @@ function ApproversCard({
         </Button>
         {managedRule === undefined ? null : (
           // Only the rule this page created can be removed; template rules belong to the repository.
-          <RlyButton onClick={onRemoveRule} size="compact" variant="quiet">
+          <RlyButton loading={removal._tag === "Removing"} onClick={removeRule} size="compact" variant="quiet">
             Remove rule
           </RlyButton>
         )}
       </header>
+      {removal._tag === "Failed" ? (
+        <p className={styles.removeFailure} role="alert">
+          Couldn't remove the rule: {removal.reason}
+        </p>
+      ) : null}
       <div className={styles.approverBody}>
         {showPicker && (
           <div className={styles.approverPicker}>
@@ -934,7 +958,7 @@ export function PRDetail() {
   const shareRefresh = useMemo(() => makeInFlight<Awaited<ReturnType<typeof refreshSingleWithResult>>>(), [refreshKey])
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
-  const deleteRule = useAtomSet(deleteApprovalRuleAtom)
+  const deleteRule = useAtomSet(deleteApprovalRuleAtom, { mode: "promiseExit" })
   const fetchedRef = useRef<string | null>(null)
   const routeSelection = useMemo(() => {
     const route = pullRequestRouteCoordinates(accountId, prId, searchParams)
@@ -1669,11 +1693,17 @@ export function PRDetail() {
                     })
                   }
                 }}
-                onRemoveRule={() => {
+                onRemoveRule={() =>
                   deleteRule({
                     payload: { account: pr.account, approvalRuleName: card.ruleName, pullRequestId: pr.id }
-                  })
-                }}
+                  }).then((exit) => {
+                    if (Exit.isSuccess(exit)) {
+                      refreshAfterApprovalMutation()
+                      return null
+                    }
+                    const error = Cause.squash(exit.cause)
+                    return Predicate.isError(error) ? error.message : "the server didn't answer."
+                  })}
                 permissionPrompt={state.permissionPrompt !== undefined}
                 repoAccountId={currentAcct}
                 required={card.required}

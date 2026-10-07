@@ -19,8 +19,11 @@ export type StreamConnection =
   | { readonly _tag: "Live" }
   /** No owner session: the page was opened without (or after losing) the sign-in link. */
   | { readonly _tag: "Unauthenticated"; readonly detail: string | null }
-  /** The stream broke for another reason; `retryAt` is when the next try starts, `null` once retries stop. */
-  | { readonly _tag: "Failed"; readonly cause: string; readonly retryAt: number | null }
+  /**
+   * The stream broke for another reason; `retryAt` is when the next try starts, `null` once retries stop.
+   * `serverUp` is true when the server still answered (the stream alone closed), so a reconnect is expected.
+   */
+  | { readonly _tag: "Failed"; readonly cause: string; readonly retryAt: number | null; readonly serverUp: boolean }
 
 /** What the probe after a stream error learned. */
 export type StreamProbe = { readonly _tag: "Status"; readonly status: number } | { readonly _tag: "Unreachable" }
@@ -28,11 +31,13 @@ export type StreamProbe = { readonly _tag: "Status"; readonly status: number } |
 /** The state after a stream error, given the probe and when the next try would start. */
 export const connectionAfterProbe = (probe: StreamProbe, retryAt: number | null): StreamConnection => {
   if (probe._tag === "Unreachable") {
-    return { _tag: "Failed", cause: "The CodeCommit server isn't reachable.", retryAt }
+    return { _tag: "Failed", cause: "The CodeCommit server isn't reachable.", retryAt, serverUp: false }
   }
   if (probe.status === 401 || probe.status === 403) return { _tag: "Unauthenticated", detail: null }
-  if (probe.status >= 500) return { _tag: "Failed", cause: `The CodeCommit server answered ${probe.status}.`, retryAt }
-  return { _tag: "Failed", cause: "The live update stream closed.", retryAt }
+  if (probe.status >= 500) {
+    return { _tag: "Failed", cause: `The CodeCommit server answered ${probe.status}.`, retryAt, serverUp: false }
+  }
+  return { _tag: "Failed", cause: "The live update stream closed.", retryAt, serverUp: true }
 }
 
 /** Backoff before try `attempt` (0-based): 1s, 2s, 4s … capped at 30s. */
@@ -89,10 +94,11 @@ export type EmptyQueueCause =
   | { readonly _tag: "NothingOpen"; readonly accounts: number }
 
 /**
- * The cause behind an empty queue. A lost or refused stream wins whatever the last snapshot said: its
- * rows are stale, so an empty result from it must not read as a real one. Before any snapshot only the
- * connection is known; after one on a live stream, the snapshot says whether accounts exist and whether
- * filters hide rows.
+ * The cause behind an empty queue. A refused session, a server that is down or erroring, and a stream
+ * whose retries stopped all win over whatever the last snapshot said: its rows are stale, so an empty
+ * result from it must not read as a real one. A stream that merely closed on a server that still answers
+ * is reconnecting, and the snapshot keeps explaining the queue meanwhile. Before any snapshot only the
+ * connection is known.
  */
 export const emptyQueueCause = (input: {
   readonly connection: StreamConnection
@@ -105,7 +111,10 @@ export const emptyQueueCause = (input: {
     case "Unauthenticated":
       return { _tag: "Unauthenticated", detail: connectionDetail(input.connection) ?? "" }
     case "Failed":
-      return { _tag: "Failed", cause: input.connection.cause, retrying: input.connection.retryAt !== null }
+      if (!input.snapshotSeen || !input.connection.serverUp || input.connection.retryAt === null) {
+        return { _tag: "Failed", cause: input.connection.cause, retrying: input.connection.retryAt !== null }
+      }
+      break
     case "Connecting":
     case "Live":
       if (!input.snapshotSeen) return { _tag: "Connecting" }

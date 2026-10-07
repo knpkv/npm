@@ -25,11 +25,9 @@ export function PermissionBar({ prompt }: { readonly prompt: NonNullable<AppStat
   const allowEveryRead = () => {
     setFailure(null)
     void grantCategory({ payload: { category: "read", state: "always_allow" } }).then((exit) => {
-      // The standing grant is saved; this call goes ahead under it. A failed save says so and leaves the call waiting.
-      if (Exit.isSuccess(exit)) {
-        respond({ payload: { id: prompt.id, response: "allow_once" } })
-        return
-      }
+      // Saving the grant releases this call and every other read already waiting on the server. A failed
+      // save says so and leaves the calls waiting.
+      if (Exit.isSuccess(exit)) return
       const error = Cause.squash(exit.cause)
       const reason = Predicate.isError(error) ? error.message : "the server didn't answer"
       setFailure(`Couldn't save the grant: ${reason}. This call still waits.`)

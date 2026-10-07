@@ -1,4 +1,4 @@
-import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
+import { RegistryContext, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { AwsProfileName } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 import * as Cause from "effect/Cause"
@@ -7,7 +7,7 @@ import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { LogInIcon, LogOutIcon, SearchIcon, UserIcon } from "lucide-react"
 import { StatePanel } from "@knpkv/rly/primitives"
 import switchStyles from "./settings-accounts.module.css"
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type ContextType, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import {
   appStateAtom,
   configPathQueryAtom,
@@ -43,15 +43,34 @@ interface SavePayload {
   readonly refreshIntervalSeconds: number
 }
 
+type Registry = ContextType<typeof RegistryContext>
+
+/**
+ * Sends a config save that outlives this page: the mutation stays mounted until it settles, so leaving
+ * Settings right after a change can't dispose the request mid-flight. `onSettled` gets whether it saved.
+ */
+const saveDetached = (registry: Registry, payload: SavePayload, onSettled?: (saved: boolean) => void): void => {
+  const release = registry.mount(configSaveAtom)
+  const unsubscribe = registry.subscribe(configSaveAtom, (result) => {
+    if (result.waiting || AsyncResult.isInitial(result)) return
+    unsubscribe()
+    release()
+    onSettled?.(AsyncResult.isSuccess(result))
+  })
+  registry.set(configSaveAtom, { payload })
+}
+
 export function SettingsAccounts() {
   const config = useAtomValue(configQueryAtom)
   const appState = useAtomValue(appStateAtom)
-  const saveConfig = useAtomSet(configSaveAtom)
+  const registry = useContext(RegistryContext)
   const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
   const [signOutOpen, setSignOutOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
+  // The auto-detect choice made on this page; the config query isn't refetched after a save.
+  const [autoDetectChoice, setAutoDetectChoice] = useState<boolean | null>(null)
   const debounceRef = useRef<NodeJS.Timeout | null>(null)
   // The change waiting out the debounce. Leaving the page sends it rather than dropping it: switching an
   // account on and going straight back to the queue must still switch it on.
@@ -60,9 +79,9 @@ export function SettingsAccounts() {
   useEffect(
     () => () => {
       if (debounceRef.current !== null) clearTimeout(debounceRef.current)
-      if (pendingRef.current !== null) saveConfig({ payload: pendingRef.current })
+      if (pendingRef.current !== null) saveDetached(registry, pendingRef.current)
     },
-    [saveConfig]
+    [registry]
   )
 
   const saveWithDebounce = useCallback(
@@ -71,10 +90,10 @@ export function SettingsAccounts() {
       pendingRef.current = payload
       debounceRef.current = setTimeout(() => {
         pendingRef.current = null
-        saveConfig({ payload })
+        saveDetached(registry, payload)
       }, 500)
     },
-    [saveConfig]
+    [registry]
   )
 
   const toggleAccount = useCallback(
@@ -89,16 +108,17 @@ export function SettingsAccounts() {
           regions: [...a.regions],
           enabled: a.profile === profile ? next : (nextOverrides[a.profile] ?? a.enabled)
         })),
-        autoDetect: data.autoDetect,
+        autoDetect: autoDetectChoice ?? data.autoDetect,
         autoRefresh: data.autoRefresh,
         refreshIntervalSeconds: data.refreshIntervalSeconds
       })
     },
-    [saveWithDebounce, overrides]
+    [saveWithDebounce, overrides, autoDetectChoice]
   )
 
   const setAutoDetect = useCallback(
     (autoDetect: boolean, data: ConfigData) => {
+      setAutoDetectChoice(autoDetect)
       saveWithDebounce({
         accounts: data.accounts.map((a) => ({
           profile: a.profile,
@@ -137,6 +157,7 @@ export function SettingsAccounts() {
         .onSuccess((data) => (
           <AccountsList
             currentUser={appState.currentUser}
+            autoDetect={autoDetectChoice ?? data.autoDetect}
             data={data}
             overrides={overrides}
             search={search}
@@ -145,6 +166,26 @@ export function SettingsAccounts() {
             setStatusFilter={setStatusFilter}
             toggleAccount={toggleAccount}
             setAutoDetect={setAutoDetect}
+            turnOnAutoDetect={(data) => {
+              // An explicit "detect" with auto-detect off: save the switch now, then read the config again.
+              setAutoDetectChoice(true)
+              return new Promise<boolean>((resolve) =>
+                saveDetached(
+                  registry,
+                  {
+                    accounts: data.accounts.map((a) => ({
+                      profile: a.profile,
+                      regions: [...a.regions],
+                      enabled: overrides[a.profile] ?? a.enabled
+                    })),
+                    autoDetect: true,
+                    autoRefresh: data.autoRefresh,
+                    refreshIntervalSeconds: data.refreshIntervalSeconds
+                  },
+                  resolve
+                )
+              )
+            }}
             onSsoLogin={(profile) => {
               try {
                 ssoLogin({ payload: { profile: Schema.decodeSync(AwsProfileName)(profile) } })
@@ -162,26 +203,65 @@ export function SettingsAccounts() {
 }
 
 /**
- * First run: no AWS profile was detected. Names where detection looked, the two commands that create a
- * profile (this page never edits AWS files itself), and re-runs detection on request, saying what it found.
+ * Where a Detect again request is: sent (holding the result it started from, since a fast re-read can
+ * finish without ever showing as running), seen running, finished with no profiles, or failed.
  */
-function NoProfiles() {
+type DetectPhase<A> =
+  | { readonly _tag: "Idle" }
+  | { readonly _tag: "Requested"; readonly from: A }
+  | { readonly _tag: "Running" }
+  | { readonly _tag: "NoneFound"; readonly at: Date }
+  | { readonly _tag: "Failed"; readonly reason: string }
+
+/**
+ * First run: no AWS profile was detected. Names where detection looked, the two commands that create a
+ * profile (this page never edits AWS files itself), and re-runs detection on request. The result line
+ * appears only once the re-read has finished; a profile it finds replaces this panel with the list.
+ * With auto-detect off, a plain re-read finds nothing, so the action turns auto-detect on first.
+ */
+function NoProfiles({
+  autoDetect,
+  turnOnAutoDetect
+}: {
+  readonly autoDetect: boolean
+  readonly turnOnAutoDetect: () => Promise<boolean>
+}) {
   const paths = useAtomValue(configPathQueryAtom)
+  const config = useAtomValue(configQueryAtom)
   const detectAgain = useAtomRefresh(configQueryAtom)
-  const [checkedAt, setCheckedAt] = useState<Date | null>(null)
+  const [phase, setPhase] = useState<DetectPhase<typeof config>>({ _tag: "Idle" })
   const sources = AsyncResult.isSuccess(paths) ? paths.value.awsProfileSources : undefined
+
+  useEffect(() => {
+    if (phase._tag === "Requested" && config.waiting) setPhase({ _tag: "Running" })
+    const finished = phase._tag === "Running" || (phase._tag === "Requested" && config !== phase.from)
+    if (finished && !config.waiting) {
+      setPhase(
+        AsyncResult.isSuccess(config)
+          ? { _tag: "NoneFound", at: new Date() }
+          : { _tag: "Failed", reason: "the settings couldn't be read" }
+      )
+    }
+  }, [config, phase])
+
+  const detect = () => {
+    setPhase({ _tag: "Requested", from: config })
+    if (autoDetect) {
+      detectAgain()
+      return
+    }
+    void turnOnAutoDetect().then((saved) => {
+      if (saved) detectAgain()
+      else setPhase({ _tag: "Failed", reason: "auto-detect couldn't be switched on" })
+    })
+  }
+
+  const busy = phase._tag === "Requested" || phase._tag === "Running"
   return (
     <StatePanel
       action={
-        <Button
-          onClick={() => {
-            detectAgain()
-            setCheckedAt(new Date())
-          }}
-          size="sm"
-          variant="outline"
-        >
-          Detect again
+        <Button disabled={busy} onClick={detect} size="sm" variant="outline">
+          {busy ? "Detecting…" : autoDetect ? "Detect again" : "Turn on auto-detect and detect"}
         </Button>
       }
       description={
@@ -199,9 +279,11 @@ function NoProfiles() {
           <pre className="rounded-md border bg-muted px-3 py-2 text-sm">
             <code>aws configure sso{"\n"}aws configure --profile NAME</code>
           </pre>
-          {checkedAt === null ? null : (
-            <p role="status">Checked again at {checkedAt.toLocaleTimeString()}: still no profiles.</p>
-          )}
+          {phase._tag === "NoneFound" ? (
+            <p role="status">Checked again at {phase.at.toLocaleTimeString()}: still no profiles.</p>
+          ) : phase._tag === "Failed" ? (
+            <p role="alert">Couldn't detect profiles: {phase.reason}.</p>
+          ) : null}
         </div>
       }
       title="No AWS profiles found"
@@ -210,6 +292,7 @@ function NoProfiles() {
 }
 
 function AccountsList({
+  autoDetect,
   currentUser,
   data,
   onSsoLogin,
@@ -220,8 +303,10 @@ function AccountsList({
   setSearch,
   setStatusFilter,
   statusFilter,
-  toggleAccount
+  toggleAccount,
+  turnOnAutoDetect
 }: {
+  readonly autoDetect: boolean
   readonly currentUser: string | undefined
   readonly data: ConfigData
   readonly overrides: Record<string, boolean>
@@ -231,6 +316,7 @@ function AccountsList({
   readonly setStatusFilter: (f: StatusFilter) => void
   readonly toggleAccount: (profile: string, data: ConfigData) => void
   readonly setAutoDetect: (autoDetect: boolean, data: ConfigData) => void
+  readonly turnOnAutoDetect: (data: ConfigData) => Promise<boolean>
   readonly onSsoLogin: (profile: string) => void
   readonly onSsoLogout: () => void
 }) {
@@ -296,7 +382,7 @@ function AccountsList({
         )}
       </div>
       {accounts.length === 0 ? (
-        <NoProfiles />
+        <NoProfiles autoDetect={autoDetect} turnOnAutoDetect={() => turnOnAutoDetect(data)} />
       ) : (
         <>
           <div className="flex items-center gap-2">
@@ -357,9 +443,9 @@ function AccountsList({
       )}
       <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm">
         <input
-          checked={data.autoDetect}
+          checked={autoDetect}
           className="size-5 shrink-0 cursor-pointer"
-          onChange={() => setAutoDetect(!data.autoDetect, data)}
+          onChange={() => setAutoDetect(!autoDetect, data)}
           type="checkbox"
         />
         Add new profiles from your AWS configuration automatically

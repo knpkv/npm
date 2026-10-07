@@ -20,17 +20,20 @@ describe("stream connection", () => {
     expect(connectionAfterProbe({ _tag: "Unreachable" }, 5_000)).toEqual({
       _tag: "Failed",
       cause: "The CodeCommit server isn't reachable.",
-      retryAt: 5_000
+      retryAt: 5_000,
+      serverUp: false
     })
     expect(connectionAfterProbe({ _tag: "Status", status: 503 }, 5_000)).toEqual({
       _tag: "Failed",
       cause: "The CodeCommit server answered 503.",
-      retryAt: 5_000
+      retryAt: 5_000,
+      serverUp: false
     })
     expect(connectionAfterProbe({ _tag: "Status", status: 200 }, null)).toEqual({
       _tag: "Failed",
       cause: "The live update stream closed.",
-      retryAt: null
+      retryAt: null,
+      serverUp: true
     })
   })
 
@@ -43,9 +46,11 @@ describe("stream connection", () => {
     expect(connectionDetail({ _tag: "Unauthenticated", detail: null })).toBe(
       "Run codecommit web again and open the link it prints; each link works once, within 60 seconds."
     )
-    expect(connectionLabel({ _tag: "Failed", cause: "x", retryAt: 1 })).toBe("Reconnecting")
-    expect(connectionLabel({ _tag: "Failed", cause: "x", retryAt: null })).toBe("Disconnected")
-    expect(connectionDetail({ _tag: "Failed", cause: "Down.", retryAt: null })).toBe("Down. Retries stopped.")
+    expect(connectionLabel({ _tag: "Failed", cause: "x", retryAt: 1, serverUp: false })).toBe("Reconnecting")
+    expect(connectionLabel({ _tag: "Failed", cause: "x", retryAt: null, serverUp: false })).toBe("Disconnected")
+    expect(connectionDetail({ _tag: "Failed", cause: "Down.", retryAt: null, serverUp: false })).toBe(
+      "Down. Retries stopped."
+    )
     expect(connectionDetail({ _tag: "Live" })).toBeNull()
   })
 })
@@ -70,16 +75,20 @@ describe("empty queue cause", () => {
   })
 
   it("keeps a lost or refused stream in front of the last snapshot's empty result", () => {
-    expect(cause({ connection: { _tag: "Failed", cause: "Down.", retryAt: 1 }, enabledAccounts: 2 })).toEqual({
-      _tag: "Failed",
-      cause: "Down.",
-      retrying: true
-    })
+    expect(cause({ connection: { _tag: "Failed", cause: "Down.", retryAt: 1, serverUp: false }, enabledAccounts: 2 }))
+      .toEqual({ _tag: "Failed", cause: "Down.", retrying: true })
+    expect(
+      cause({ connection: { _tag: "Failed", cause: "Closed.", retryAt: null, serverUp: true }, enabledAccounts: 2 })
+        ._tag
+    ).toBe("Failed")
     expect(cause({ cachedPullRequests: 3, connection: { _tag: "Unauthenticated", detail: null } })._tag).toBe(
       "Unauthenticated"
     )
-    // Reconnecting after a snapshot keeps explaining what that snapshot showed.
+    // Reconnecting to a server that still answers keeps explaining what the snapshot showed.
     expect(cause({ connection: { _tag: "Connecting" }, enabledAccounts: 2 })._tag).toBe("NothingOpen")
+    expect(cause({ connection: { _tag: "Failed", cause: "Closed.", retryAt: 1, serverUp: true } })._tag).toBe(
+      "NoAccounts"
+    )
   })
 
   it("tells no profiles apart from profiles that are all switched off", () => {

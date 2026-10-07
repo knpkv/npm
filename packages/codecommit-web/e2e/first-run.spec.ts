@@ -122,7 +122,7 @@ test("with auto-detect off, detecting switches it on before reading again", asyn
   })
   await page.route("**/api/config/save", (route) => {
     saves.push(route.request().postData() ?? "")
-    return route.fulfill({ json: "ok" })
+    return route.fulfill({ json: "saved" })
   })
 
   await page.goto("/settings/accounts")
@@ -147,7 +147,7 @@ test("keeps the auto-detect choice, and an account switched next saves it too", 
   const saves: Array<{ readonly autoDetect: boolean }> = []
   await page.route("**/api/config/save", (route) => {
     saves.push(JSON.parse(route.request().postData() ?? "{}"))
-    return route.fulfill({ json: "ok" })
+    return route.fulfill({ json: "saved" })
   })
 
   await page.goto("/settings/accounts")
@@ -181,7 +181,7 @@ test("finishes a switched-on account's save after leaving Settings", async ({ pa
   })
   await page.route("**/api/config/save", async (route) => {
     await held.promise
-    await route.fulfill({ json: "ok" }).then(() => saved.push(route.request().postData() ?? ""), () => {})
+    await route.fulfill({ json: "saved" }).then(() => saved.push(route.request().postData() ?? ""), () => {})
   })
 
   await page.goto("/settings/accounts")
