@@ -40,7 +40,7 @@ function worklogLines(outcome: JiraWorklogOutcome | null): Array<{ text: string;
     case "NotLoggedIn":
       return [
         { text: "Jira worklog: not logged in ✗", color: "#FF6666" },
-        { text: "Run: jcf auth jira login", color: "#FFCC00" }
+        { text: "Run: jcf auth jira token", color: "#FFCC00" }
       ]
     case "Failed":
       return [
