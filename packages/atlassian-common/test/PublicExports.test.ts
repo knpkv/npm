@@ -1,3 +1,4 @@
+import { describe, expect, it } from "@effect/vitest"
 import { JIRA_PROPOSAL_SCOPES, JIRA_SCOPES } from "../src/auth/index.js"
 import { JIRA_PROPOSAL_REQUIRED_SCOPES, JIRA_REQUIRED_SCOPES } from "../src/config/index.js"
 

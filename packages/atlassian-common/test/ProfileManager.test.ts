@@ -6,10 +6,11 @@ import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import * as Path from "effect/Path"
-import { SystemError } from "effect/PlatformError"
+import { PlatformError, SystemError } from "effect/PlatformError"
 import {
   type AtlassianToolDefinition,
   HomeDirectoryLive,
+  type HomeDirectoryTag,
   inspectAllToolProfiles,
   migrateLegacyProfiles,
   MissingOAuthConfigError,
@@ -39,7 +40,11 @@ const sharedStoreTools: ReadonlyArray<AtlassianToolDefinition> = [
 ]
 
 const fsError = (method: string) =>
-  Effect.fail(new SystemError({ _tag: "NotFound", module: "FileSystem", method, description: "mock not found" }))
+  Effect.fail(
+    new PlatformError(
+      new SystemError({ _tag: "NotFound", module: "FileSystem", method, description: "mock not found" })
+    )
+  )
 
 const makeToken = (n: number, scope = "read:me offline_access", expiresAt = Date.now() + 60_000): OAuthToken => ({
   access_token: `access-${n}`,
@@ -69,13 +74,13 @@ const makeMockFS = () => {
   }
   return {
     store,
-    layer: Layer.succeed(FileSystem.FileSystem, FileSystem.FileSystem.of(partial))
+    layer: FileSystem.layerNoop(partial)
   }
 }
 
 const ConfigProviderLive = ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: TEST_HOME } }))
 
-const run = async <A>(effect: Effect.Effect<A, unknown, FileSystem.FileSystem | Path.Path>) => {
+const run = async <A>(effect: Effect.Effect<A, unknown, FileSystem.FileSystem | Path.Path | HomeDirectoryTag>) => {
   const mock = makeMockFS()
   const layer = Layer.mergeAll(mock.layer, Path.layer, HomeDirectoryLive, ConfigProviderLive)
   const result = await Effect.runPromise(effect.pipe(Effect.provide(layer)))
@@ -242,7 +247,10 @@ describe("ProfileManager", () => {
         Effect.gen(function*() {
           yield* saveProfileToken("tool-a", makeToken(1, "read:me offline_access", Date.now() - 1_000))
           return yield* refreshActiveProfiles([tools[0]!])
-        })
+        }).pipe(
+          // The refresh fails on configuration before any request; a request would be a regression.
+          Effect.provideService(HttpClient.HttpClient, HttpClient.make(() => Effect.die("no request expected")))
+        )
       )
     ).rejects.toBeInstanceOf(MissingOAuthConfigError)
   })
