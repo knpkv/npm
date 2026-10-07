@@ -41,8 +41,16 @@ const program = Effect.scoped(
     const child = yield* Effect.acquireRelease(
       spawner.spawn(ChildProcess.make("pnpm", ["start"], {
         cwd: packageRoot,
-        // The caller's environment, as a person running `pnpm start` has it, with only home and port isolated.
-        env: { HOME: home, XDG_CONFIG_HOME: home, PORT: String(port) },
+        // The caller's environment, as a person running `pnpm start` has it, with home, every XDG base
+        // directory (a shell profile may export them, and they outrank HOME) and the port isolated.
+        env: {
+          HOME: home,
+          XDG_CONFIG_HOME: path.join(home, ".config"),
+          XDG_STATE_HOME: path.join(home, ".local/state"),
+          XDG_CACHE_HOME: path.join(home, ".cache"),
+          XDG_DATA_HOME: path.join(home, ".local/share"),
+          PORT: String(port)
+        },
         extendEnv: true,
         stdout: "pipe",
         stderr: "pipe"
