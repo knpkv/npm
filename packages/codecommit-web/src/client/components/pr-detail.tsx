@@ -207,6 +207,18 @@ export const refreshFailureDescription = (cause: unknown): string => {
   return message.length > 0 ? message : "Try the refresh again."
 }
 
+/** Why the first read of a pull request that is not cached failed, and whether Settings → Accounts fixes it. */
+export interface PullRequestLoadFailure {
+  readonly message: string
+  readonly fixInSettings: boolean
+}
+
+export const pullRequestLoadFailure = (cause: unknown): PullRequestLoadFailure => ({
+  message: refreshFailureDescription(cause),
+  fixInSettings: Predicate.isTagged(cause, "AccountSwitchedOffApiError") ||
+    Predicate.isTagged(cause, "AccountUnknownApiError")
+})
+
 const isTextInputTarget = (target: EventTarget | null): boolean => {
   const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
   return tagName === "INPUT" || tagName === "TEXTAREA"
@@ -1019,6 +1031,7 @@ export function PRDetail() {
   const updateRule = useAtomSet(updateApprovalRuleAtom)
   const deleteRule = useAtomSet(deleteApprovalRuleAtom, { mode: "promiseExit" })
   const fetchedRef = useRef<string | null>(null)
+  const [loadFailure, setLoadFailure] = useState<PullRequestLoadFailure | null>(null)
   const routeSelection = useMemo(() => {
     const route = pullRequestRouteCoordinates(accountId, prId, searchParams)
     return route === undefined
@@ -1086,8 +1099,24 @@ export function PRDetail() {
     const key = `${refreshAccountId}:${prId}:${refreshRepositoryName ?? ""}:${refreshRegion ?? ""}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    void requestRefresh(refreshAccountId, prId).catch(() => {})
+    setLoadFailure(null)
+    // A failed first read replaces the loading panel with its reason; it must never spin on.
+    void requestRefresh(refreshAccountId, prId).then(
+      () => setLoadFailure(null),
+      (cause: unknown) => setLoadFailure(pullRequestLoadFailure(cause))
+    )
   }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, requestRefresh, routeAmbiguous])
+
+  const retryLoad = useCallback(() => {
+    if (refreshAccountId === undefined || refreshAccountId.length === 0 || prId === undefined || prId.length === 0) {
+      return
+    }
+    setLoadFailure(null)
+    void requestRefresh(refreshAccountId, prId, "fresh").then(
+      () => setLoadFailure(null),
+      (cause: unknown) => setLoadFailure(pullRequestLoadFailure(cause))
+    )
+  }, [prId, refreshAccountId, requestRefresh])
 
   const score: HealthScore | undefined = useMemo(
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
@@ -1428,6 +1457,31 @@ export function PRDetail() {
           announce="assertive"
           description="Choose both repository and region to identify this pull request."
           title="Pull request coordinates are ambiguous"
+          tone="critical"
+        />
+      </section>
+    )
+  }
+
+  if (pr === null && loadFailure !== null) {
+    return (
+      <section className={styles.loadingState}>
+        <StatePanel
+          action={
+            <>
+              {loadFailure.fixInSettings
+                ? (
+                  <RlyButton onClick={() => navigate("/settings/accounts")} size="compact" variant="primary">
+                    Open Settings → Accounts
+                  </RlyButton>
+                )
+                : null}
+              <RlyButton onClick={retryLoad} size="compact">Try again</RlyButton>
+            </>
+          }
+          announce="assertive"
+          description={loadFailure.message}
+          title="Can't read this pull request"
           tone="critical"
         />
       </section>
