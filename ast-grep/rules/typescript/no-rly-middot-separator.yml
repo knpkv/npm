@@ -3,7 +3,7 @@
 id: no-rly-middot-separator
 language: tsx
 severity: error
-message: "rly copy must not join facts with a middot; use a comma or separate elements"
+message: "UI copy must not join facts with a middot; use a comma, a phrase, or separate elements"
 
 rule:
   any:
@@ -15,8 +15,10 @@ rule:
 files:
   - "packages/rly/src/**/*.tsx"
   - "packages/rly/src/**/*.ts"
+  - "packages/herdr-connect/src/**/*.tsx"
+  - "packages/herdr-connect/src/**/*.ts"
 
 note: |
   "A · B · C" is template chrome (Andrey's visual bar, item 3). Write the facts as a
   phrase ("Agent finding, not an approval"), or lay them out as separate elements.
-  Stories and other packages are covered by the family pass, not this rule.
+  Stories and packages not listed are covered by the family pass, not this rule.
