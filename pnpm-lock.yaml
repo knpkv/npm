@@ -494,9 +494,6 @@ importers:
       react:
         specifier: ^19.3.0
         version: 19.3.0
-      tslib:
-        specifier: ^2.8.1
-        version: 2.8.1
     devDependencies:
       '@effect/vitest':
         specifier: 4.0.0
@@ -578,24 +575,12 @@ importers:
 
   packages/codecommit-web:
     dependencies:
-      '@effect/atom-react':
-        specifier: 4.0.0
-        version: 4.0.0(effect@4.0.0)(react@19.3.0)(scheduler@0.27.0)
       '@effect/platform-bun':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
       '@effect/platform-node':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
-      '@fontsource-variable/geist':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@fontsource-variable/geist-mono':
-        specifier: ^5.3.0
-        version: 5.3.0
-      '@formkit/auto-animate':
-        specifier: ^0.10.0
-        version: 0.10.0
       '@knpkv/ai-claude':
         specifier: workspace:^
         version: link:../ai-claude
@@ -608,6 +593,28 @@ importers:
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core
+      diff:
+        specifier: 9.0.0
+        version: 9.0.0
+      effect:
+        specifier: 4.0.0
+        version: 4.0.0
+    devDependencies:
+      '@effect/atom-react':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)(react@19.3.0)(scheduler@0.27.0)
+      '@effect/vitest':
+        specifier: 4.0.0
+        version: 4.0.0(effect@4.0.0)(vitest@5.0.3)
+      '@fontsource-variable/geist':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@fontsource-variable/geist-mono':
+        specifier: ^5.3.0
+        version: 5.3.0
+      '@formkit/auto-animate':
+        specifier: ^0.10.0
+        version: 0.10.0
       '@knpkv/relay-product':
         specifier: workspace:^
         version: link:../relay-product
@@ -617,12 +624,24 @@ importers:
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
+      '@playwright/test':
+        specifier: 1.63.0
+        version: 1.63.0
       '@tailwindcss/typography':
         specifier: ^0.5.20
         version: 0.5.20(tailwindcss@4.3.3)
       '@tailwindcss/vite':
         specifier: ^4.3.3
         version: 4.3.3(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1))
+      '@types/react':
+        specifier: ^19.3.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.3.0
+        version: 19.3.0(@types/react@19.3.0)
+      '@vitejs/plugin-react':
+        specifier: ^6.1.1
+        version: 6.1.1(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1))
       class-variance-authority:
         specifier: ^0.7.1
         version: 0.7.1
@@ -632,12 +651,6 @@ importers:
       cmdk:
         specifier: ^1.1.1
         version: 1.1.1(@types/react-dom@19.3.0(@types/react@19.3.0))(@types/react@19.3.0)(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      diff:
-        specifier: 9.0.0
-        version: 9.0.0
-      effect:
-        specifier: 4.0.0
-        version: 4.0.0
       lucide-react:
         specifier: ^1.50.0
         version: 1.50.0(@types/react@19.3.0)(react@19.3.0)
@@ -677,22 +690,6 @@ importers:
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
-    devDependencies:
-      '@effect/vitest':
-        specifier: 4.0.0
-        version: 4.0.0(effect@4.0.0)(vitest@5.0.3)
-      '@playwright/test':
-        specifier: 1.63.0
-        version: 1.63.0
-      '@types/react':
-        specifier: ^19.3.0
-        version: 19.3.0
-      '@types/react-dom':
-        specifier: ^19.3.0
-        version: 19.3.0(@types/react@19.3.0)
-      '@vitejs/plugin-react':
-        specifier: ^6.1.1
-        version: 6.1.1(vite@8.3.2(@types/node@26.6.4)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.15)(yaml@2.9.1))
       typescript:
         specifier: npm:@typescript/typescript6@^6.0.2
         version: '@typescript/typescript6@6.0.2'

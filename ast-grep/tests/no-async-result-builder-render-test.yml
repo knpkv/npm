@@ -1,0 +1,8 @@
+id: no-async-result-builder-render
+valid:
+  - "AsyncResult.builder(result).onSuccess((value) => value).orNull()"
+  - "AsyncResult.builder(result).onInitialOrWaiting(() => null).onFailure(() => null).onSuccess((value) => value).exhaustive()"
+  - "renderer.render()"
+invalid:
+  - "AsyncResult.builder(result).onSuccess((value) => value).render()"
+  - "AsyncResult.builder(result).onInitialOrWaiting(() => null).onError(() => null).onDefect(() => null).onSuccess((value) => value).render()"

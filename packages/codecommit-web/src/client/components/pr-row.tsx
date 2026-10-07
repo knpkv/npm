@@ -18,7 +18,7 @@ import { ServiceMark } from "@knpkv/rly/patterns"
 import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { Option } from "effect"
 import { ArrowRightIcon, MessageSquareIcon } from "lucide-react"
-import { useMemo } from "react"
+import { useId, useMemo } from "react"
 import { Link } from "react-router"
 import {
   pullRequestRowDecision,
@@ -56,16 +56,24 @@ export function PRRow({ caller, pr, showUpdated, to }: PRRowProps) {
   const status = pullRequestRowStatus(pr)
   const decision = pullRequestRowDecision(pr)
   const description = pr.description?.split("\n").slice(0, 2).join(" ")
+  const reasonId = useId()
 
   return (
-    <Link className={styles.prRow} to={to}>
+    // An unknown approval's reason is the row's description, so a screen reader hears why after the title.
+    <Link aria-describedby={status.reason === undefined ? undefined : reasonId} className={styles.prRow} to={to}>
       <div className={styles.prMain}>
         <div className={styles.prKicker}>
           <ServiceMark service="codecommit" size="compact" />
           <Text className={styles.prNumber} tone="inherit" variant="code">
             PR #{pr.id}
           </Text>
-          <StateLabel label={status.label} size="compact" tone={status.tone} />
+          <StateLabel label={status.label} size="compact" title={status.reason} tone={status.tone} />
+          {status.reason === undefined ? null : (
+            // Hidden: it describes the link without also joining the link's name.
+            <span hidden id={reasonId}>
+              {status.reason}
+            </span>
+          )}
           {reviewRequested ? <StateLabel label="Needs your review" size="compact" tone="caution" /> : null}
         </div>
         <Text as="h3" className={styles.prTitle} variant="card-title">

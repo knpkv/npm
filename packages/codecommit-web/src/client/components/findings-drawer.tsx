@@ -64,15 +64,16 @@ export function FindingsDrawer({
     if (!open && element.open) element.close()
   }, [open])
   // A native modal sits above every portal-based dialog, which it would leave inert behind it (the
-  // command palette, a permission prompt). So the drawer steps aside for any other dialog: it closes
-  // as soon as one appears, and hands it the focus it could not take while the modal was open.
+  // command palette, a permission prompt). So the drawer steps aside for any other dialog, and for an
+  // inline prompt marked `data-needs-answer` (the read permission bar): it closes as soon as one
+  // appears, and hands it the focus it could not take while the modal was open.
   useEffect(() => {
     const element = dialog.current
     if (!open || element === null) return
     const observer = new MutationObserver(() => {
-      const other = [...document.querySelectorAll<HTMLElement>("[role='dialog'], [role='alertdialog']")].find(
-        (candidate) => !element.contains(candidate)
-      )
+      const other = [
+        ...document.querySelectorAll<HTMLElement>("[role='dialog'], [role='alertdialog'], [data-needs-answer]")
+      ].find((candidate) => !element.contains(candidate))
       if (other === undefined || !element.open) return
       element.close()
       // That dialog tried to take focus while the modal still made it inert; give it focus now.

@@ -1,0 +1,65 @@
+id: no-tailwind-side-stripe
+snapshots:
+  ? |
+    const bar = <div className="border-l-[3px] border-l-primary" />
+  : labels:
+      - source: '"border-l-[3px] border-l-primary"'
+        style: primary
+        start: 27
+        end: 60
+  ? |
+    const callout = <aside className="border-s-4 border-amber-500 pl-3" />
+  : labels:
+      - source: '"border-s-4 border-amber-500 pl-3"'
+        style: primary
+        start: 33
+        end: 67
+  ? |
+    const fractional = <div className="border-l-[1.5px]" />
+  : labels:
+      - source: '"border-l-[1.5px]"'
+        style: primary
+        start: 34
+        end: 52
+  ? |
+    const hairline = <div className="border-l border-l-blue-500" />
+  : labels:
+      - source: '"border-l border-l-blue-500"'
+        style: primary
+        start: 32
+        end: 60
+  ? |
+    const hex = <div className="border-l border-l-[#f00]" />
+  : labels:
+      - source: '"border-l border-l-[#f00]"'
+        style: primary
+        start: 27
+        end: 53
+  ? |
+    const rem = <div className="border-s-[0.125rem]" />
+  : labels:
+      - source: '"border-s-[0.125rem]"'
+        style: primary
+        start: 27
+        end: 48
+  ? |
+    const row = <div className={`flex ${unread ? "border-l-2 border-l-blue-500" : ""}`} />
+  : labels:
+      - source: '"border-l-2 border-l-blue-500"'
+        style: primary
+        start: 45
+        end: 75
+  ? |
+    const thick = <div className="border-l-[10px]" />
+  : labels:
+      - source: '"border-l-[10px]"'
+        style: primary
+        start: 29
+        end: 46
+  ? |
+    const wide = <div className="border-r-12" />
+  : labels:
+      - source: '"border-r-12"'
+        style: primary
+        start: 28
+        end: 41

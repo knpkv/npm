@@ -7,7 +7,7 @@
  *
  * @module
  */
-import { approvalOf, approversUnknownLabel } from "@knpkv/codecommit-core/Domain.js"
+import { approvalOf, approvalUnknownReasonText, approversUnknownLabel } from "@knpkv/codecommit-core/Domain.js"
 import { useAtomValue } from "@effect/atom-react"
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react"
 import { Link } from "react-router"
@@ -18,6 +18,7 @@ import { selectCodeCommitPullRequest } from "./pr-detail.js"
 import { prListHref, prListKey } from "./pr-list.js"
 import styles from "./workbench-rail.module.css"
 import {
+  type ApprovalUnknownSummary,
   callerOf,
   formatSpan,
   QUIET_AFTER_MS,
@@ -62,6 +63,9 @@ const RowCaption = ({ currentUser, row }: { readonly row: WorkbenchRow; readonly
   const pullRequest = row.pullRequest
   const who = currentUser !== undefined && row.group === "yours" ? "you" : pullRequest.author
   const blocking = row.stuck === "conflicts" || row.stuck === "quiet"
+  const approval = approvalOf(pullRequest)
+  // Hovering "approval state unknown" says why; the PR page says it in full.
+  const unknownReason = approval._tag === "Unknown" ? approvalUnknownReasonText(approval.reason) : undefined
   const status =
     row.stuck !== undefined
       ? stuckText(row)
@@ -82,7 +86,9 @@ const RowCaption = ({ currentUser, row }: { readonly row: WorkbenchRow; readonly
       {status === undefined ? null : (
         <>
           {", "}
-          <span className={blocking ? styles.blocking : undefined}>{status}</span>
+          <span className={blocking ? styles.blocking : undefined} title={unknownReason}>
+            {status}
+          </span>
         </>
       )}
       {row.stuck === undefined && !pullRequest.isMergeable ? (
@@ -95,6 +101,18 @@ const RowCaption = ({ currentUser, row }: { readonly row: WorkbenchRow; readonly
     </span>
   )
 }
+
+/**
+ * The sentence beside the hero for pull requests whose approval is unknown: never counted as waiting
+ * on the user, never shown at 0, and naming the reason when they all share one.
+ */
+const ApprovalUnknownLine = ({ unknown }: { readonly unknown: ApprovalUnknownSummary }) =>
+  unknown.count === 0 ? null : (
+    <p className={styles.summary}>
+      {unknown.count === 1 ? "1 pull request" : `${unknown.count} pull requests`} with approval unknown
+      {unknown.reason === undefined ? "; open one to see why." : `: ${approvalUnknownReasonText(unknown.reason)}`}
+    </p>
+  )
 
 const Summary = ({ summary }: { readonly summary: WorkbenchSummary }) =>
   WorkbenchSummary.$match(summary, {
@@ -191,6 +209,7 @@ export function WorkbenchRailView({
       </header>
       <div className={styles.body}>
         <Summary summary={queue.summary} />
+        <ApprovalUnknownLine unknown={queue.approvalUnknown} />
         <div className={styles.groups} onKeyDown={onKeyDown} ref={list}>
           {groups.map(({ group, rows }) => (
             <section aria-labelledby={`workbench-group-${group}`} className={styles.group} key={group}>
