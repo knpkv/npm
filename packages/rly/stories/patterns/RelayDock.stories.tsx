@@ -343,10 +343,19 @@ export const Loading: Story = {
   render: () => <RelayDockFixture initiallyOpen state={loadingState} />
 }
 
+/** The sheet on a phone. It pins mobile1; at a wider forced viewport the dock is a rail, which the play accepts. */
 export const MobileSheet: Story = {
   globals: { viewport: { isRotated: false, value: "mobile1" } },
-  play: async ({ canvas }) => {
-    await expect(canvas.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  play: async ({ canvas, canvasElement }) => {
+    const compact =
+      canvasElement.ownerDocument.defaultView?.matchMedia("(max-width: 40rem), (max-height: 40rem) and (pointer: coarse)")
+        .matches ?? false
+    const name = /^Relay(?: \(.+\))?$/
+    await expect(
+      compact
+        ? within(canvasElement.ownerDocument.body).getByRole("dialog", { name })
+        : canvas.getByRole("complementary", { name })
+    ).toBeVisible()
     await expect(canvas.getAllByRole("combobox")).toHaveLength(2)
   },
   render: () => <RelayDockFixture initiallyOpen presentation="rail" />

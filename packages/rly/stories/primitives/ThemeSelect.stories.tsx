@@ -81,11 +81,20 @@ export const PicksTheme: Story = {
 /** The forwarded Select sizes: dense by default beside header controls, compact and default for forms. */
 export const Sizes: Story = {
   args: { onValueChange: () => undefined, value: "system" },
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
     const [dense, compact, standard] = canvas.getAllByRole("combobox", { name: "Appearance" })
     const height = (element: HTMLElement | undefined): number => element?.getBoundingClientRect().height ?? 0
-    await expect(height(dense)).toBeLessThan(height(compact))
-    await expect(height(compact)).toBeLessThan(height(standard))
+    // A coarse pointer floors every size at 44px, so dense and compact meet there; on a fine
+    // pointer each size is strictly taller than the last.
+    const coarse = canvasElement.ownerDocument.defaultView?.matchMedia("(pointer: coarse)").matches ?? false
+    if (coarse) {
+      await expect(height(dense)).toBeGreaterThanOrEqual(44)
+      await expect(height(dense)).toBeLessThanOrEqual(height(compact))
+      await expect(height(compact)).toBeLessThanOrEqual(height(standard))
+    } else {
+      await expect(height(dense)).toBeLessThan(height(compact))
+      await expect(height(compact)).toBeLessThan(height(standard))
+    }
   },
   render: () => (
     <PortalProvider>
