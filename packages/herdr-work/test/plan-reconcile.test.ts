@@ -8,10 +8,13 @@ import { join } from "node:path"
 import {
   makeWorkService,
   type WorkGoal,
+  type WorkGoalCheckpoint,
+  workHistoryMaxEvents,
   type WorkObservationEnvelope,
   type WorkObserveReport,
   type WorkPullRequestObservation,
   type WorkReconcileOptions,
+  workReconcilerHeadroom,
   WorkStore
 } from "../src/index.js"
 
@@ -182,5 +185,91 @@ it.layer(NodeServices.layer)("planReconcile", (it) => {
       })),
     // Each sample opens its own store: a few dozen cover the scenario space.
     { timeout: 60_000, arbitrary: { runs: 30 } }
+  )
+
+  it.effect("is advisory: reconcile decides again, against a goal event its owner wrote after the plan", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* openStore
+      yield* work.record({ eventId: "goal-pr7.1", goal: goal(7), occurredAt: 1_000, version: "herdr.work.event.v1" })
+      const report = yield* work.observe([{ observation: pullRequest(7, "merged"), observedAt: 6_000 }])
+      const confirmed = confirmedIn(report)
+      const [planned] = yield* work.planReconcile({ confirmed })
+      yield* work.record({
+        eventId: "goal-pr7.2",
+        goal: { ...goal(7), updatedAt: 2_000 },
+        occurredAt: 2_000,
+        version: "herdr.work.event.v1"
+      })
+      expect(planned).toMatchObject({ _tag: "would_apply", goalEventId: "goal-pr7.1" })
+      // Not a conflict: reconcile replans and closes the goal from its new head.
+      expect(yield* work.reconcile({ confirmed })).toEqual([
+        expect.objectContaining({ _tag: "applied", goalId: "goal-pr7" })
+      ])
+      // Closed now, so nothing is left to plan.
+      expect(yield* work.planReconcile({ confirmed })).toEqual([])
+    })))
+
+  /** Two merged goals in a store left with `slots` checkpoints before the reconciler's reserve. */
+  const nearCapacity = (slots: number) =>
+    Effect.gen(function*() {
+      const { store, work } = yield* openStore
+      for (const number of [7, 8]) {
+        yield* work.record({
+          eventId: `goal-pr${String(number)}.1`,
+          goal: goal(number),
+          occurredAt: 1_000,
+          version: "herdr.work.event.v1"
+        })
+      }
+      const filler = workHistoryMaxEvents - workReconcilerHeadroom - slots - 2
+      const first = goal(9)
+      yield* store.appendMany(
+        "fill",
+        Array.from({ length: filler }, (_, index): WorkGoalCheckpoint => ({
+          eventId: `fill.${String(index)}`,
+          goal: { ...first, id: "goal-fill", review: null, updatedAt: 1_000 + index },
+          occurredAt: 1_000 + index,
+          version: "herdr.work.event.v1"
+        }))
+      )
+      const report = yield* work.observe([
+        { observation: pullRequest(7, "merged"), observedAt: 6_000 },
+        { observation: pullRequest(8, "merged"), observedAt: 6_000 }
+      ])
+      return { store, work, confirmed: confirmedIn(report) }
+    })
+
+  it.effect(
+    "plans against the checkpoints it would already have written, so it fails where reconcile would",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { confirmed, store, work } = yield* nearCapacity(1)
+        const history = yield* store.list()
+        expect(yield* Effect.flip(work.planReconcile({ confirmed }))).toMatchObject({
+          _tag: "WorkProjectionError",
+          reason: "capacity_exceeded"
+        })
+        expect(yield* store.list()).toEqual(history)
+        expect(yield* Effect.flip(work.reconcile({ confirmed }))).toMatchObject({
+          _tag: "WorkProjectionError",
+          reason: "capacity_exceeded"
+        })
+      })),
+    { timeout: 60_000 }
+  )
+
+  it.effect(
+    "plans every goal while room remains, writing no checkpoint or reconciler stamp",
+    () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { confirmed, store, work } = yield* nearCapacity(2)
+        const history = yield* store.list()
+        const plan = yield* work.planReconcile({ confirmed })
+        expect(plan.map(({ _tag }) => _tag)).toEqual(["would_apply", "would_apply"])
+        expect(yield* store.list()).toEqual(history)
+        // No stamp was kept either: reconcile still applies both, rather than reporting them recorded.
+        expect((yield* work.reconcile({ confirmed })).map(({ _tag }) => _tag)).toEqual(["applied", "applied"])
+      })),
+    { timeout: 60_000 }
   )
 })
