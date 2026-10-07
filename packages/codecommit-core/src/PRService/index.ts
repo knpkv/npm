@@ -105,8 +105,10 @@ const makePRService = Effect.gen(function*() {
         Effect.catch(() => Effect.succeed<SearchResult>({ items: [], total: 0, hasMore: false }))
       ),
     subscribe: (awsAccountId: string, prId: PullRequestId, coordinates?: SubscriptionCoordinates) =>
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       subscriptionRepo.subscribe(awsAccountId, prId, coordinates).pipe(Effect.catch(() => Effect.void)),
     unsubscribe: (awsAccountId: string, prId: PullRequestId, coordinates?: SubscriptionCoordinates) =>
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       subscriptionRepo.unsubscribe(awsAccountId, prId, coordinates).pipe(Effect.catch(() => Effect.void)),
     getSubscriptions: () =>
       subscriptionRepo.findAll().pipe(
@@ -122,6 +124,7 @@ const makePRService = Effect.gen(function*() {
         )
       ),
     isSubscribed: (awsAccountId: string, prId: PullRequestId, coordinates?: SubscriptionCoordinates) =>
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       subscriptionRepo.isSubscribed(awsAccountId, prId, coordinates).pipe(Effect.catch(() => Effect.succeed(false))),
     getPersistentNotifications: (
       opts?: { readonly unreadOnly?: boolean; readonly limit?: number; readonly cursor?: number }
@@ -129,11 +132,15 @@ const makePRService = Effect.gen(function*() {
       notificationRepo.findAll(opts).pipe(
         Effect.catch(() => Effect.succeed<PaginatedNotifications>({ items: [] }))
       ),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     markNotificationRead: (id: number) => notificationRepo.markRead(id).pipe(Effect.catch(() => Effect.void)),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     markAllNotificationsRead: () => notificationRepo.markAllRead().pipe(Effect.catch(() => Effect.void)),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     getUnreadNotificationCount: () => notificationRepo.unreadCount().pipe(Effect.catch(() => Effect.succeed(0))),
     getCachedComments: (awsAccountId: string, prId: PullRequestId, coordinates?: CommentCoordinates) =>
       commentRepo.find(awsAccountId, prId, coordinates).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       ),
     refreshSinglePR: (

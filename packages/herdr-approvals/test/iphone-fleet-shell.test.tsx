@@ -46,7 +46,10 @@ describe("iPhone fleet shell regressions", () => {
     nestedPanel.setAttribute("data-state", "active")
     nestedPanel.setAttribute("role", "tabpanel")
     inactivePanel?.append(nestedPanel)
-    const terminalControl = document.querySelector<HTMLButtonElement>("button:not([role=tab])")
+    // Approvals stays mounted (hidden) behind other tabs, so pick the Connect control by name.
+    const terminalControl = [...document.querySelectorAll<HTMLButtonElement>("button:not([role=tab])")].find(
+      (button) => button.textContent === "Focused terminal control"
+    )
     await act(async () => terminalControl?.focus())
     expect(document.activeElement).toBe(terminalControl)
 

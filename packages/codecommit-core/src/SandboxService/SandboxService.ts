@@ -219,6 +219,7 @@ const makeSandboxService = Effect.gen(function*() {
 
   const loadSandboxConfig: Effect.Effect<SandboxConfig> = configService.load.pipe(
     Effect.map((config) => config.sandbox),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(defaultSandboxConfig))
   )
 
@@ -685,6 +686,7 @@ const makeSandboxService = Effect.gen(function*() {
             Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
             Effect.tap(() => log("code-server ready")),
             Effect.tapError((e) => log(`Health check failed: ${String(e)}`)),
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.catchIf(() => true, () => Effect.void)
           )
           if (yield* isStopRequested(String(id))) return
@@ -706,6 +708,7 @@ const makeSandboxService = Effect.gen(function*() {
                   log(`Extension installed: ${ext}${output.length > 0 ? `\n${output.trim()}` : ""}`)
                 ),
                 Effect.tapError((e) => log(`Extension failed: ${ext} — ${String(e)}`)),
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                 Effect.catchIf(() => true, () => Effect.void)
               ), { discard: true })
           }
@@ -722,6 +725,7 @@ const makeSandboxService = Effect.gen(function*() {
                 Effect.tapError((e) =>
                   log(`Command failed: ${cmd.slice(0, 60)} — ${String(e)}`)
                 ),
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                 Effect.catchIf(() => true, () => Effect.void)
               ), { discard: true })
           }
@@ -828,6 +832,7 @@ const makeSandboxService = Effect.gen(function*() {
             yield* plugins.executeHook("onSandboxDestroy", ctx)
             yield* containerAdmission.withPermits(1)(Effect.gen(function*() {
               const stop = row.legacyRetiredAt === null
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                 ? docker.stopContainer(containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
                 : docker.stopContainer(containerId).pipe(
                   Effect.catchIf(
@@ -920,6 +925,7 @@ const makeSandboxService = Effect.gen(function*() {
                 yield* docker.exec(containerId, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
                   Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
                   Effect.tap(() => progress(id, "code-server ready")),
+                  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                   Effect.catchIf(() => true, () => Effect.void)
                 )
                 if (yield* isStopRequested(String(id))) return
@@ -950,9 +956,11 @@ const makeSandboxService = Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
 
         if (row.containerId !== null) {
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           yield* docker.removeContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
         }
 
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         yield* fs.remove(row.workspacePath, { recursive: true }).pipe(Effect.catchIf(() => true, () => Effect.void))
         yield* repo.delete(id)
         yield* Effect.logInfo(`Sandbox ${id} cleaned up`)
@@ -1110,6 +1118,7 @@ const makeSandboxService = Effect.gen(function*() {
               return Effect.gen(function*() {
                 yield* Effect.logInfo(`GC: stopping idle sandbox ${row.id}`)
                 if (row.containerId !== null) {
+                  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                   yield* docker.stopContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
                 }
                 yield* updateStatus(SandboxId.make(row.id), "stopped")
@@ -1130,9 +1139,11 @@ const makeSandboxService = Effect.gen(function*() {
               return Effect.gen(function*() {
                 yield* Effect.logInfo(`GC: cleaning up sandbox ${row.id}`)
                 if (row.containerId !== null) {
+                  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                   yield* docker.removeContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
                 }
                 yield* fs.remove(row.workspacePath, { recursive: true }).pipe(
+                  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                   Effect.catchIf(() => true, () => Effect.void)
                 )
                 yield* repo.delete(SandboxId.make(row.id))

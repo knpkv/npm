@@ -44,8 +44,7 @@
     "@opentui/react": "0.5.14",
     "diff": "9.0.0",
     "effect": "4.0.0",
-    "react": "^19.3.0",
-    "tslib": "^2.8.1"
+    "react": "^19.3.0"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0",

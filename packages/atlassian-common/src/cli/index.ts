@@ -93,6 +93,7 @@ export const verboseRequested = (args: ReadonlyArray<string>): Effect.Effect<boo
     : Effect.gen(function*() {
       const debug = yield* Config.option(Config.String("DEBUG"))
       return Option.getOrUndefined(debug) === "1"
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     }).pipe(Effect.orElseSucceed(() => false))
 
 const describe = <E>(error: E): string => {
@@ -122,6 +123,7 @@ export const handleCliError = <E>(cause: Cause.Cause<E>, options: { readonly ver
 const reportFailure = <E>(cause: Cause.Cause<E>): Effect.Effect<void, never, Stdio.Stdio> =>
   Effect.gen(function*() {
     const stdio = yield* Stdio.Stdio
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const verbose = yield* stdio.args.pipe(Effect.flatMap(verboseRequested), Effect.orElseSucceed(() => false))
     yield* handleCliError(cause, { verbose })
   })

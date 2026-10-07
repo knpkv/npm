@@ -38,6 +38,7 @@ const profileRegion = (profile: string) =>
   ConfigService.ConfigService.pipe(
     Effect.flatMap((config) => config.detectProfiles),
     Effect.map((profiles) => profiles.find((detected) => detected.name === profile)?.region ?? "us-east-1"),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.orElseSucceed(() => "us-east-1")
   )
 

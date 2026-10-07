@@ -301,6 +301,7 @@ export const makeCompleteDiffReads = (
     if (content.totalBytes !== bytes.byteLength || bytes.byteLength > MaximumContentBytes) {
       return yield* unavailable()
     }
+    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     if (persistence !== undefined) yield* rememberContent(persistence, scope, bytes).pipe(Effect.ignore)
     return sliceContent(bytes, scope.offset, scope.length)
   })

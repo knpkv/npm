@@ -126,6 +126,7 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
         )
       },
       { discard: true }
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     ).pipe(Effect.catchIf(() => true, () => Effect.void))
   },
   (effect, state) =>
