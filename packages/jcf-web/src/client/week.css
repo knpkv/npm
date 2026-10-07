@@ -1352,3 +1352,9 @@ body,
     inset-block-end: var(--rly-space-8);
   }
 }
+
+.jcf-agent-ended {
+  color: var(--rly-color-text-2);
+  margin: 0;
+  padding: var(--rly-space-16);
+}

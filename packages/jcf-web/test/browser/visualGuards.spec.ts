@@ -95,8 +95,8 @@ const contrasts = (page: Page, selector: string) =>
         background = rgb(getComputedStyle(behind).backgroundColor)
         behind = behind.parentElement
       }
-      const [light, dark] = [luminance(rgb(getComputedStyle(element).color)), luminance(background)].sort((a, b) =>
-        b - a
+      const [light, dark] = [luminance(rgb(getComputedStyle(element).color)), luminance(background)].sort(
+        (a, b) => b - a
       )
       return (light! + 0.05) / (dark! + 0.05)
     })
@@ -148,11 +148,15 @@ for (const width of [1024, 1280, 1920]) {
   // B2 (#526 review): ticket keys and time ranges wrapped inside event blocks ("09:00–|10:00").
   test(`event block keys and times stay on one line at ${width}px`, async ({ page }) => {
     await open(page, width)
-    const lines = await page.locator(".jcf-block .jcf-block-key, .jcf-block .jcf-block-clock").evaluateAll((spans) =>
-      spans.filter((span) => span.getClientRects().length > 0).map((span) =>
-        Math.round(span.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(span).lineHeight))
+    const lines = await page
+      .locator(".jcf-block .jcf-block-key, .jcf-block .jcf-block-clock")
+      .evaluateAll((spans) =>
+        spans
+          .filter((span) => span.getClientRects().length > 0)
+          .map((span) =>
+            Math.round(span.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(span).lineHeight))
+          )
       )
-    )
     expect(lines.length).toBeGreaterThan(0)
     expect(lines.every((count) => count === 1)).toBe(true)
   })
@@ -162,9 +166,9 @@ for (const width of [768, 1024, 1280]) {
   // B3 (#526 review): eleven toolbar controls wrapped into ragged rows with Log time alone on one.
   test(`the toolbar fits one row and Log time never sits alone at ${width}px`, async ({ page }) => {
     await open(page, width)
-    const tops = await page.locator(".jcf-bar button").evaluateAll((buttons) =>
-      buttons.map((button) => Math.round(button.getBoundingClientRect().top))
-    )
+    const tops = await page
+      .locator(".jcf-bar button")
+      .evaluateAll((buttons) => buttons.map((button) => Math.round(button.getBoundingClientRect().top)))
     const logTime = await page.getByRole("button", { name: "Log time", exact: true }).first().boundingBox()
     expect(logTime).not.toBeNull()
     const rowOfLogTime = tops.filter((top) => Math.abs(top - Math.round(logTime?.y ?? 0)) <= 2)
@@ -188,6 +192,8 @@ test("a failed read says what is shown and marks the totals as old", async ({ pa
   await expect(page.getByRole("group", { name: "Week totals" })).toContainText("Totals from")
   await expect(page.getByRole("group", { name: "Week totals" })).not.toContainText("failed")
   await expect(page.locator(".jcf-read-at")).toHaveText("Last read failed")
+  // ui-b (#545): the agent card says the read stopped once, not in both its status and its body.
+  await expect(page.getByText(/the read failed/u)).toHaveCount(await page.locator(".jcf-agent-ended").count())
 })
 
 // #526 review: at 768 the editor floated over the agenda with nothing behind it. Below 1100px it is
@@ -208,7 +214,10 @@ test("below 1100px the editor opens as a sheet over an inert page", async ({ pag
 /** The part of a layout-shift entry the sum needs: when it happened and how much moved. */
 const Shifts = Schema.Array(Schema.Struct({ startTime: Schema.Number, value: Schema.Number }))
 
-const sheetSizes: ReadonlyArray<readonly [number, number]> = [[768, 1000], [640, 450]]
+const sheetSizes: ReadonlyArray<readonly [number, number]> = [
+  [768, 1000],
+  [640, 450]
+]
 
 // QA-63b: the agent sheet grew and shrank as the agent streamed (CLS 0.16 at 768), and at 200% zoom
 // the masthead re-wrapped as its status changed (CLS 1.25) and the sheet cut the conversation off.
@@ -228,15 +237,16 @@ for (const [width, height] of sheetSizes) {
     await request.get("/__test/finish")
     await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
     const entries = Schema.decodeUnknownSync(Shifts)(
-      await page.evaluate(() =>
-        new Promise((resolve) => {
-          // A page that never shifted has no entries, and the observer never calls back.
-          window.setTimeout(() => resolve([]), 500)
-          new PerformanceObserver((list) => resolve(list.getEntries().map((entry) => entry.toJSON()))).observe({
-            type: "layout-shift",
-            buffered: true
+      await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            // A page that never shifted has no entries, and the observer never calls back.
+            window.setTimeout(() => resolve([]), 500)
+            new PerformanceObserver((list) => resolve(list.getEntries().map((entry) => entry.toJSON()))).observe({
+              type: "layout-shift",
+              buffered: true
+            })
           })
-        })
       )
     )
     const shifted = entries.filter((entry) => entry.startTime > clickedAt).reduce((sum, entry) => sum + entry.value, 0)
@@ -256,6 +266,9 @@ test("the editor chooses layers with the same buttons as the calendar and has no
   await expect(editor.locator("input[type=\"checkbox\"]")).toHaveCount(0)
   const layers = editor.getByRole("group", { name: "Write to selected layers" })
   await expect(layers.getByRole("button", { name: "Jira" })).toHaveAttribute("aria-pressed", "true")
-  const resize = await editor.locator("textarea").first().evaluate((element) => getComputedStyle(element).resize)
+  const resize = await editor
+    .locator("textarea")
+    .first()
+    .evaluate((element) => getComputedStyle(element).resize)
   expect(resize).toBe("none")
 })
