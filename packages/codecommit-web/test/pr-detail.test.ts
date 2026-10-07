@@ -10,7 +10,8 @@ import {
   reviewApiAccountId,
   sandboxAccountIdForPullRequest,
   sandboxMatchesPullRequest,
-  selectCodeCommitPullRequest
+  selectCodeCommitPullRequest,
+  signedOffByOthers
 } from "../src/client/components/pr-detail.js"
 
 const pullRequest = new Domain.PullRequest({
@@ -217,5 +218,28 @@ describe("PR page Enter shortcut", () => {
     ])
     expect(ownsEnterKey({ tagName: "BODY" })).toBe(false)
     expect(ownsEnterKey(null)).toBe(false)
+  })
+})
+
+describe("review evidence from sign-offs", () => {
+  // No rules means approval isn't required, not that nobody reviewed: a colleague's sign-off still
+  // counts toward time to first review. An unknown approval only has a last known one, so it doesn't.
+  it("counts another person's sign-off whether rules required it or not, never while approval is unknown", () => {
+    const signed = (fields: Partial<Domain.PullRequest>) =>
+      signedOffByOthers(new Domain.PullRequest({ ...pullRequest, ...fields }))
+    const satisfied = new Domain.ApprovalRule({
+      ruleName: "r",
+      requiredApprovals: 1,
+      poolMembers: [],
+      poolMemberArns: [],
+      satisfied: true
+    })
+    expect([
+      signed({ isApproved: true, approvedBy: ["alice"] }),
+      signed({ isApproved: true, approvedBy: ["alice"], approvalRules: [satisfied] }),
+      signed({ isApproved: true, approvedBy: [] }),
+      signed({ isApproved: true, approvedBy: ["reviewer"] }),
+      signed({ isApproved: true, approvedBy: ["alice"], approvalUnknown: { _tag: "NotPermitted" } })
+    ]).toEqual([true, true, false, false, false])
   })
 })

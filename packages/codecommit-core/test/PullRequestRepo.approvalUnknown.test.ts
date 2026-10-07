@@ -154,6 +154,21 @@ describe("PullRequestRepo approval unknown", () => {
       expect(health.approved).toBe(1)
     })))
 
+  // CodeCommit evaluates a pull request with no rules as approved; nobody signed off, so the approval
+  // rate does not count it, as the queue reads it "No approval required".
+  it.effect("does not count a pull request without approval rules as approved in health stats", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      const stats = yield* StatsRepo
+      yield* repo.upsert(upsertInput("48", { isApproved: 1, satisfied: true, unknown: null }), yield* repo.observe())
+      yield* repo.upsert(
+        { ...upsertInput("49", { isApproved: 1, satisfied: true, unknown: null }), approvalRules: [] },
+        yield* repo.observe()
+      )
+      const health = yield* stats.healthIndicators("2026-10-01T00:00:00.000Z", "2026-10-08T00:00:00.000Z", {})
+      expect([health.total, health.approved]).toEqual([2, 1])
+    })))
+
   it.effect("records a re-read's evaluation: unknown keeps the last known approval, evaluated replaces it", () =>
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo

@@ -84,7 +84,8 @@ const RawToPullRequestDetail = RawGetPullRequestResponse.pipe(
         sourceBranch: target?.sourceReference?.replace(/^refs\/heads\//, "") ?? "",
         destinationBranch: target?.destinationReference?.replace(/^refs\/heads\//, "") ?? "",
         creationDate: pr?.creationDate ?? EpochFallback,
-        lastActivityDate: pr?.lastActivityDate ?? pr?.creationDate ?? EpochFallback,
+        // A missing date stays missing, as on the list read: health reads Unknown rather than a guess.
+        lastActivityDate: pr?.lastActivityDate ?? EpochFallback,
         approvedBy: [],
         mergedBy: mergedByArn ? normalizeAuthor(mergedByArn) : undefined
       }

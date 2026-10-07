@@ -210,6 +210,16 @@ const isTextInputTarget = (target: EventTarget | null): boolean => {
 }
 
 /**
+ * Whether someone other than the author signed off, as review evidence for time to first review. No
+ * rules means approval isn't required, not that nobody reviewed, so a voluntary sign-off counts; an
+ * unknown approval holds only a last known one, so it doesn't.
+ */
+export const signedOffByOthers = (pr: Domain.PullRequest): boolean => {
+  const approval = approvalOf(pr)._tag
+  return (approval === "Approved" || approval === "NotRequired") && pr.approvedBy.some((a) => a !== pr.author)
+}
+
+/**
  * True when Enter on the focused element already does something (follow a link, press a button),
  * so the page-wide Enter shortcut must not also fire. Used by the PR page's keydown handler.
  */
@@ -529,7 +539,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     const firstComment = allComments.find((c) => c.author !== pr.author)
     const commentMs = firstComment !== undefined ? firstComment.date.getTime() - pr.creationDate.getTime() : null
     // Approval as review fallback: use lastModifiedDate as proxy for approval time
-    const hasNonAuthorApproval = approvalOf(pr)._tag === "Approved" && pr.approvedBy.some((a) => a !== pr.author)
+    const hasNonAuthorApproval = signedOffByOthers(pr)
     const approvalMs = hasNonAuthorApproval ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
     const ttfr = commentMs != null && approvalMs != null ? Math.min(commentMs, approvalMs) : (commentMs ?? approvalMs)
 

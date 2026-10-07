@@ -43,8 +43,18 @@ const pullRequest = {
  * `"broken"`: one pull request whose evaluation fails with a provider error that is neither.
  * `"expired"`: one pull request whose evaluation fails because the session expired.
  * `"empty"`: GetPullRequest answers without a pull request, and evaluation fails.
+ * `"undated"`: one approved pull request that CodeCommit returns without a last-activity date.
  */
-type Evaluation = "approved" | "denied" | "8-denied" | "three-approved" | "throttled" | "broken" | "expired" | "empty"
+type Evaluation =
+  | "undated"
+  | "approved"
+  | "denied"
+  | "8-denied"
+  | "three-approved"
+  | "throttled"
+  | "broken"
+  | "expired"
+  | "empty"
 
 const threePullRequests = (evaluation: Evaluation) => evaluation === "8-denied" || evaluation === "three-approved"
 
@@ -102,6 +112,8 @@ const answer = (
     case "GetPullRequest":
       return evaluation === "empty"
         ? json({})
+        : evaluation === "undated"
+        ? json({ pullRequest: { ...pullRequest, lastActivityDate: undefined, pullRequestId: "7" } })
         : json({ pullRequest: { ...pullRequest, pullRequestId: requestedPullRequestId(request.body) } })
     case "GetRepository":
       return json({ repositoryMetadata: { accountId: "111111111111" } })
@@ -116,7 +128,7 @@ const answer = (
         ? awsError("InvalidRevisionIdException", "revision is not valid")
         : evaluation === "expired"
         ? awsError("ExpiredTokenException", "The security token included in the request is expired")
-        : evaluation === "approved" || evaluation === "three-approved" ||
+        : evaluation === "approved" || evaluation === "undated" || evaluation === "three-approved" ||
             (evaluation === "8-denied" && requestedPullRequestId(request.body) !== "8")
         ? json({ evaluation: { approved: true, approvalRulesSatisfied: ["two-reviewers"] } })
         : awsError("AccessDeniedException")
@@ -131,6 +143,17 @@ const credentialFailure = (error: AwsClientError): boolean =>
   Predicate.hasProperty(error.cause, "cause") && isCredentialInvalidCause(error.cause.cause)
 
 describe("approval evaluation", () => {
+  // A missing last-activity date stays missing on both reads, so health reads Unknown either way
+  // instead of the detail read inventing one from the creation date.
+  it.layer(codeCommit("undated"))((it) => {
+    it.effect("leaves a missing last-activity date missing on the list and the detail read alike", () =>
+      Effect.gen(function*() {
+        const [listed] = yield* Stream.runCollect(getPullRequests(account))
+        const detail = yield* getPullRequest({ account, pullRequestId: "7" })
+        expect([listed?.lastModifiedDate.getTime(), detail.lastActivityDate.getTime()]).toEqual([0, 0])
+      }))
+  })
+
   it.layer(codeCommit("approved"))((it) => {
     it.effect("maps an evaluation into approval and satisfied rules", () =>
       Effect.gen(function*() {
