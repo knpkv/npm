@@ -12,14 +12,14 @@ describe("revertPlaceholders", () => {
       docOf([para(`Some <span class="adf-status" data-color="blue">TESTING</span> here`)])
     )
 
-    const cellContent = out.content[0]!.content
+    const cellContent = out.content?.[0]?.content
     expect(cellContent).toHaveLength(3)
-    expect(cellContent[0]).toMatchObject({ type: "text", text: "Some " })
-    expect(cellContent[1]).toMatchObject({
+    expect(cellContent?.[0]).toMatchObject({ type: "text", text: "Some " })
+    expect(cellContent?.[1]).toMatchObject({
       type: "status",
       attrs: { text: "TESTING", color: "blue" }
     })
-    expect(cellContent[2]).toMatchObject({ type: "text", text: " here" })
+    expect(cellContent?.[2]).toMatchObject({ type: "text", text: " here" })
   })
 
   it("replaces a single-comment paragraph with a block extension node", () => {
@@ -27,7 +27,7 @@ describe("revertPlaceholders", () => {
       docOf([para(`<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core -->`)])
     )
 
-    expect(out.content[0]).toMatchObject({
+    expect(out.content?.[0]).toMatchObject({
       type: "extension",
       attrs: { extensionKey: "toc", extensionType: "com.atlassian.confluence.macro.core" }
     })
@@ -36,7 +36,7 @@ describe("revertPlaceholders", () => {
   it("rewrites native TOC syntax into a Confluence core extension node", () => {
     const out = revertPlaceholders(docOf([para("[[toc]]")]))
 
-    expect(out.content[0]).toEqual({
+    expect(out.content?.[0]).toEqual({
       type: "extension",
       attrs: {
         extensionKey: "toc",
@@ -48,7 +48,7 @@ describe("revertPlaceholders", () => {
   it("rewrites native TOC syntax with levels into macro parameters", () => {
     const out = revertPlaceholders(docOf([para("[[toc:min=2,max=4]]")]))
 
-    expect(out.content[0]).toEqual({
+    expect(out.content?.[0]).toEqual({
       type: "extension",
       attrs: {
         extensionKey: "toc",
@@ -70,8 +70,8 @@ describe("revertPlaceholders", () => {
       content: [{ type: "text", text: "[[toc]]", marks: [{ type: "code" }] }]
     }]))
 
-    expect(invalid.content[0]!.type).toBe("paragraph")
-    expect(quoted.content[0]!.type).toBe("paragraph")
+    expect(invalid.content?.[0]!.type).toBe("paragraph")
+    expect(quoted.content?.[0]!.type).toBe("paragraph")
   })
 
   it("rewrites status and extension placeholders inside table cells", () => {
@@ -94,14 +94,14 @@ describe("revertPlaceholders", () => {
       }])
     )
 
-    const cells = out.content[0]!.content[0]!.content
+    const cells = out.content?.[0]?.content?.[0]?.content
     // First cell: paragraph wrapping a status node
-    expect(cells[0]!.content[0]).toMatchObject({
+    expect(cells?.[0]?.content?.[0]).toMatchObject({
       type: "paragraph",
       content: [{ type: "status", attrs: { text: "OK", color: "green" } }]
     })
     // Second cell: extension replaces the paragraph entirely
-    expect(cells[1]!.content[0]).toMatchObject({
+    expect(cells?.[1]?.content?.[0]).toMatchObject({
       type: "extension",
       attrs: { extensionKey: "toc", extensionType: "t" }
     })
@@ -112,9 +112,9 @@ describe("revertPlaceholders", () => {
       docOf([para(`before <!-- adf:inlineExtension key=jira type=t --> after`)])
     )
 
-    const inlineContent = out.content[0]!.content
+    const inlineContent = out.content?.[0]?.content
     expect(inlineContent).toHaveLength(3)
-    expect(inlineContent[1]).toMatchObject({
+    expect(inlineContent?.[1]).toMatchObject({
       type: "inlineExtension",
       attrs: { extensionKey: "jira", extensionType: "t" }
     })
@@ -129,7 +129,7 @@ describe("revertPlaceholders", () => {
       )])
     )
 
-    const inlineContent = out.content[0]!.content
+    const inlineContent = out.content?.[0]?.content
     expect(inlineContent).toContainEqual({
       type: "text",
       text: "underline",
@@ -163,7 +163,7 @@ describe("revertPlaceholders", () => {
       docOf([para(`Inline smart link: <!-- adf:inlineCard attrs=${b64(attrs)} -->.`)])
     )
 
-    expect(out.content[0]!.content[1]).toEqual({ type: "inlineCard", attrs })
+    expect(out.content?.[0]?.content?.[1]).toEqual({ type: "inlineCard", attrs })
   })
 
   it("rewrites encoded date and emoji placeholders into native inline nodes", () => {
@@ -173,8 +173,8 @@ describe("revertPlaceholders", () => {
       docOf([para(`Example <!-- adf:date node=${b64(date)} --> <!-- adf:emoji node=${b64(emoji)} -->`)])
     )
 
-    expect(out.content[0]!.content).toContainEqual(date)
-    expect(out.content[0]!.content).toContainEqual(emoji)
+    expect(out.content?.[0]?.content).toContainEqual(date)
+    expect(out.content?.[0]?.content).toContainEqual(emoji)
   })
 
   it("restores the full attrs (parameters included) from an attrs blob", () => {
@@ -190,7 +190,7 @@ describe("revertPlaceholders", () => {
       docOf([para(`<!-- adf:extension key=toc type=com.atlassian.confluence.macro.core attrs=${blob} -->`)])
     )
 
-    expect(out.content[0]).toEqual({ type: "extension", attrs })
+    expect(out.content?.[0]).toEqual({ type: "extension", attrs })
   })
 
   it("falls back to key/type when the attrs blob does not decode to JSON", () => {
@@ -199,7 +199,7 @@ describe("revertPlaceholders", () => {
       docOf([para(`<!-- adf:extension key=toc type=t attrs=aGVsbG8= -->`)])
     )
 
-    expect(out.content[0]).toEqual({
+    expect(out.content?.[0]).toEqual({
       type: "extension",
       attrs: { extensionKey: "toc", extensionType: "t" }
     })
@@ -219,12 +219,12 @@ describe("revertPlaceholders", () => {
     )
 
     expect(out.content).toHaveLength(2)
-    expect(out.content[0]).toEqual({
+    expect(out.content?.[0]).toEqual({
       type: "bodiedExtension",
       attrs,
       content: [para("first body paragraph"), para("second body paragraph")]
     })
-    expect(out.content[1]).toEqual(para("after"))
+    expect(out.content?.[1]).toEqual(para("after"))
   })
 
   it("re-attaches the blocks between panel markers as a panel body", () => {
@@ -240,12 +240,12 @@ describe("revertPlaceholders", () => {
     )
 
     expect(out.content).toHaveLength(2)
-    expect(out.content[0]).toEqual({
+    expect(out.content?.[0]).toEqual({
       type: "panel",
       attrs,
       content: [para("panel body")]
     })
-    expect(out.content[1]).toEqual(para("after"))
+    expect(out.content?.[1]).toEqual(para("after"))
   })
 
   it("rebuilds mediaSingle captions from the editable marker body", () => {
@@ -416,7 +416,7 @@ describe("revertPlaceholders", () => {
       ])
     )
 
-    expect(out.content[0]).toEqual({
+    expect(out.content?.[0]).toEqual({
       type: "bodiedExtension",
       attrs: { extensionKey: "outer", extensionType: "com.example" },
       content: [{ type: "extension", attrs: { extensionKey: "inner", extensionType: "com.example" } }]
@@ -431,11 +431,11 @@ describe("revertPlaceholders", () => {
       ])
     )
 
-    expect(out.content[0]).toEqual({
+    expect(out.content?.[0]).toEqual({
       type: "extension",
       attrs: { extensionKey: "details", extensionType: "com.example" }
     })
-    expect(out.content[1]).toEqual(para("just a paragraph, no end marker"))
+    expect(out.content?.[1]).toEqual(para("just a paragraph, no end marker"))
   })
 
   it("keeps the bodied kind for an empty-body open/end pair via a stub paragraph", () => {
@@ -446,7 +446,7 @@ describe("revertPlaceholders", () => {
       ])
     )
 
-    expect(out.content[0]).toEqual({
+    expect(out.content?.[0]).toEqual({
       type: "bodiedExtension",
       attrs: { extensionKey: "excerpt", extensionType: "com.example" },
       content: [{ type: "paragraph", content: [] }]
@@ -489,7 +489,7 @@ describe("revertPlaceholders", () => {
       }])
     )
 
-    expect(out.content[0]!.content).toEqual([
+    expect(out.content?.[0]?.content).toEqual([
       { type: "extension", attrs: { extensionKey: "k", extensionType: "t" } },
       para("body text")
     ])
@@ -547,7 +547,7 @@ describe("revertPlaceholders", () => {
       }])
     )
 
-    expect(out.content[0]!.content[0]).toMatchObject({
+    expect(out.content?.[0]?.content?.[0]).toMatchObject({
       type: "mention",
       attrs: { id: "557057:abc-123", text: "@Andrey Konopkov" }
     })

@@ -109,10 +109,14 @@ const externalizeLine = (
   return line
 }
 
-export const externalizeAdfMetadata = (
-  markdown: string,
-  sidecarHref: string
-) => {
+/** Markdown with its ADF metadata moved out to a sidecar, which `hydrateAdfMetadata` takes back. */
+export interface ExternalizedAdfMetadata {
+  readonly markdown: string
+  /** `null` when the markdown carried no metadata. */
+  readonly sidecar: AdfMetadataSidecar | null
+}
+
+export const externalizeAdfMetadata = (markdown: string, sidecarHref: string): ExternalizedAdfMetadata => {
   const entries: Record<string, AdfMetadataEntry> = {}
   let counter = 0
   const nextId = (type: string): string => `${type}-${++counter}`

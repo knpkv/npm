@@ -45,9 +45,11 @@ const PackageManifest = Schema.Struct({
 
 // Public generated subpaths or generated export targets declare the contract;
 // package names and consumer dependencies do not.
+const isJsonArray = Schema.is(Schema.Array(Schema.Json))
+
 const exposesGeneratedContract = (exports: Schema.Json): boolean => {
   if (Predicate.isString(exports)) return /(?:^|\/)generated(?:\/|$)/u.test(exports)
-  if (Array.isArray(exports)) return exports.some(exposesGeneratedContract)
+  if (isJsonArray(exports)) return exports.some(exposesGeneratedContract)
   if (!isRecord(exports)) return false
   return Object.entries(exports).some(([name, target]) =>
     /^\.\/generated(?:\/|$)/u.test(name) || exposesGeneratedContract(target)
@@ -178,7 +180,7 @@ const inspectApiUpdateWorkflows = Effect.fn("ApiUpdateWorkflows.inspectApiUpdate
   }
   const workflowRoot = path.join(root, ".github/workflows")
   const diagnostics: Array<string> = []
-  for (const name of (yield* fileSystem.readDirectory(workflowRoot)).toSorted()) {
+  for (const name of [...(yield* fileSystem.readDirectory(workflowRoot))].sort()) {
     if (!/-api-update\.ya?ml$/u.test(name)) continue
     const source = yield* fileSystem.readFileString(path.join(workflowRoot, name))
     for (const diagnostic of patchGuidanceDiagnostics(source, generatedClientNames)) {
