@@ -900,8 +900,9 @@ export function PRDetail() {
   )
   const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom(refreshKey), { mode: "promise" })
   // One refresh per pull request at a time: overlapping triggers share it instead of cancelling it.
-  // Scoped to the route: leaving a pull request abandons its refresh, which then never settles, so a
-  // later visit must start from a fresh map rather than wait on it.
+  // Scoped to the route: leaving a pull request releases its refresh atom, which can interrupt a
+  // pending call whose promise then never settles, so a later visit starts from a fresh map rather
+  // than wait on it.
   const shareRefresh = useMemo(() => makeInFlight<Awaited<ReturnType<typeof refreshSingleWithResult>>>(), [refreshKey])
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
