@@ -1,3 +1,4 @@
+import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Command } from "effect/cli"
 import * as Effect from "effect/Effect"
@@ -95,7 +96,7 @@ const sampleRelatedWork: RelatedWork = {
 const CaptureTerminalLayer = (stdout: Ref.Ref<string>) =>
   Layer.succeed(
     Terminal.Terminal,
-    Terminal.Terminal.of({
+    Terminal.make({
       columns: Effect.succeed(100),
       rows: Effect.succeed(24),
       readInput: Effect.die("readInput should not be called"),
@@ -174,6 +175,15 @@ const CommandServicesLayer = (calls: Ref.Ref<CommandCalls>) =>
     )
   )
 
+/** Run `effect` with `layer`'s services, built in the effect's own scope. */
+const runWithLayer = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>): Effect.Effect<A, E> =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const context = yield* Layer.build(layer)
+      return yield* effect.pipe(Effect.provideContext(context))
+    })
+  )
+
 const runJiraCommand = (
   args: ReadonlyArray<string>,
   calls: Ref.Ref<CommandCalls>,
@@ -184,10 +194,11 @@ const runJiraCommand = (
     Command.withSubcommands([issueCommand, versionCommand])
   )
   const cli = Command.runWith(command, { version: "0.0.0-test" })
-  return cli(args).pipe(
-    Effect.provide(Layer.merge(CommandServicesLayer(calls), CaptureTerminalLayer(stdout))),
-    Effect.exit
-  )
+  return runWithLayer(
+    cli(args),
+    // The platform services the CLI runner requires; these commands never touch them.
+    Layer.mergeAll(NodeServices.layer, CommandServicesLayer(calls), CaptureTerminalLayer(stdout))
+  ).pipe(Effect.exit)
 }
 
 describe("Jira command tree", () => {
