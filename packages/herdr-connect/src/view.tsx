@@ -360,7 +360,7 @@ export const AgentDirectory = ({
                     {agent.name}
                   </Text>
                   <Text as="small" variant="meta" tone="secondary">
-                    {agent.host} · {relationLabel(agent, issue)} · {workSummary(agent)}
+                    {agent.host}, {relationLabel(agent, issue)}, {workSummary(agent)}
                   </Text>
                 </span>
                 <StateLabel label={agent.state} tone={agentTone(agent.state)} size="compact" />
