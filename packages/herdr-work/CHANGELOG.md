@@ -1,5 +1,16 @@
 # @knpkv/herdr-work
 
+## 0.9.0
+
+### Minor Changes
+
+- [#591](https://github.com/knpkv/npm/pull/591) [`0d6cc4d`](https://github.com/knpkv/npm/commit/0d6cc4df23eca64c5d29725bf50899776cc52435) Thanks [@konopkov](https://github.com/konopkov)! - `WorkService.planReconcile({ confirmed })` answers what `reconcile` would do now, writing nothing. It shares `reconcile`'s planning: capacity, confirmation, failure and already-stamped checks, and each checkpoint's validation, each check in its own transaction rolled back at once, with later steps checked against the checkpoints earlier ones planned. A plan is advisory; `reconcile` decides again from the store as it then is. Steps are `would_apply` (with the fact behind it and the goal's latest event id and `updatedAt` it was planned from), `recorded` or `conflict`. A shadow run in observe mode measures the real decisions this way.
+
+### Patch Changes
+
+- Updated dependencies [[`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/rly@0.13.0
+
 ## 0.8.1
 
 ### Patch Changes
