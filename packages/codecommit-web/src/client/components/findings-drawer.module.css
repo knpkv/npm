@@ -74,6 +74,8 @@
   block-size: auto;
   border: 0;
   flex: 1;
+  /* The page's narrow-layout cap would stop the pane's ground part-way down the drawer. */
+  max-block-size: none;
   min-block-size: 0;
 }
 

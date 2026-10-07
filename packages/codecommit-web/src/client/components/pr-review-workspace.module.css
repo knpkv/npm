@@ -482,6 +482,19 @@
   gap: var(--rly-space-6);
 }
 
+.noProfile {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  margin: 0;
+}
+
+.noProfile a {
+  color: var(--rly-color-text-1);
+  text-decoration: underline;
+  text-decoration-color: var(--rly-color-action-background);
+}
+
 .profileChoice select {
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-1);
@@ -753,8 +766,10 @@
     flex-direction: column;
   }
 
+  /* Four choices on a phone read as a 2 x 2 grid rather than 3 + 1 with one left alone. */
   .focusChoices {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
   }
 
   .relayControls {

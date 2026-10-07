@@ -27,7 +27,7 @@ import {
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useInlineSize } from "../hooks/useInlineSize.js"
 import { FindingsDrawer, findingsPlacement } from "./findings-drawer.js"
-import { useNavigate } from "react-router"
+import { Link, useNavigate } from "react-router"
 
 import {
   type PullRequestDiffResponse,
@@ -1532,12 +1532,15 @@ const ReadyReviewWorkspace = ({
     >
       <header>
         <div className={styles.agentTitle}>
-          <span>
-            <BotIcon aria-hidden="true" />
-            <Text as="h2" variant="card-title">
-              Relay
-            </Text>
-          </span>
+          {/* In the drawer the dialog's own title names the pane; a second "Relay" would stack under it. */}
+          {placement === "drawer" ? null : (
+            <span>
+              <BotIcon aria-hidden="true" />
+              <Text as="h2" variant="card-title">
+                Relay
+              </Text>
+            </span>
+          )}
           <small>
             {isReviewing
               ? "Reviewing the exact revision"
@@ -1555,29 +1558,35 @@ const ReadyReviewWorkspace = ({
         )}
       </header>
       <section aria-label="Relay controls" className={styles.relayControls}>
-        <label className={styles.profileChoice}>
-          <span>Profile</span>
-          <select
-            disabled={isReviewing || !AsyncResult.isSuccess(config)}
-            onChange={(event) => {
-              const profile = profiles.find(({ id }) => id === event.target.value)
-              setSelectedProfileId(event.target.value)
-              if (profile !== undefined) setKind(profile.kind)
-            }}
-            value={selectedProfile?.id ?? ""}
-          >
-            {AsyncResult.isSuccess(config) && selectedProfile === undefined && selectedProfileId !== null ? (
-              <option value="">Selected profile unavailable</option>
-            ) : AsyncResult.isSuccess(config) ? null : (
-              <option value="">{AsyncResult.isFailure(config) ? "Profiles unavailable" : "Loading profiles…"}</option>
-            )}
-            {profiles.map((profile) => (
-              <option key={profile.id} value={profile.id}>
-                {profile.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        {AsyncResult.isSuccess(config) && profiles.length === 0 ? (
+          <p className={styles.noProfile}>
+            No Relay profile yet. <Link to="/settings/relay">Add one in Settings</Link> to run a review.
+          </p>
+        ) : (
+          <label className={styles.profileChoice}>
+            <span>Profile</span>
+            <select
+              disabled={isReviewing || !AsyncResult.isSuccess(config)}
+              onChange={(event) => {
+                const profile = profiles.find(({ id }) => id === event.target.value)
+                setSelectedProfileId(event.target.value)
+                if (profile !== undefined) setKind(profile.kind)
+              }}
+              value={selectedProfile?.id ?? ""}
+            >
+              {AsyncResult.isSuccess(config) && selectedProfile === undefined && selectedProfileId !== null ? (
+                <option value="">Selected profile unavailable</option>
+              ) : AsyncResult.isSuccess(config) ? null : (
+                <option value="">{AsyncResult.isFailure(config) ? "Profiles unavailable" : "Loading profiles…"}</option>
+              )}
+              {profiles.map((profile) => (
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         <Button
           disabled={isReviewing || diff.files.length === 0 || selectedProfile === undefined}
           loading={isReviewing}

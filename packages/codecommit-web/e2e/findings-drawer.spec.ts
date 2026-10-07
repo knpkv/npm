@@ -134,6 +134,31 @@ test("opens Relay in a drawer beside the rail and returns focus on Escape", asyn
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(1280)
 })
 
+// The drawer titles the pane once, its ground runs to the bottom edge, and with no Relay profile the
+// controls say so and point at Settings instead of showing an empty select beside a disabled button.
+test("titles the drawer once, fills it, and names the missing profile", async ({ page }) => {
+  await page.setViewportSize({ height: 1024, width: 768 })
+  await serve(page)
+  await page.goto(detail)
+
+  await page.getByRole("button", { name: "Relay", exact: true }).click()
+  const drawer = page.getByRole("dialog", { name: "Relay" })
+  await expect(drawer).toBeVisible()
+  await expect(drawer.getByRole("heading", { exact: true, name: "Relay" })).toHaveCount(1)
+
+  await expect(drawer.getByText("No Relay profile yet.")).toBeVisible()
+  await expect(drawer.getByRole("link", { name: "Add one in Settings" })).toHaveAttribute("href", "/settings/relay")
+  await expect(drawer.getByLabel("Profile")).toHaveCount(0)
+  await expect(drawer.getByRole("button", { name: "Run Relay" })).toBeDisabled()
+
+  const gap = await drawer.evaluate((dialog) => {
+    const pane = dialog.querySelector("aside")
+    if (pane === null) return Number.POSITIVE_INFINITY
+    return dialog.getBoundingClientRect().bottom - pane.getBoundingClientRect().bottom
+  })
+  expect(gap).toBeLessThanOrEqual(2)
+})
+
 test("keeps Relay in the grid on a wide screen and on a phone", async ({ page }) => {
   for (const viewport of [{ height: 1080, width: 1920 }, { height: 844, width: 390 }]) {
     await page.setViewportSize(viewport)
