@@ -184,7 +184,9 @@ test("a failed read says what is shown and marks the totals as old", async ({ pa
   const alert = page.getByRole("alert").filter({ hasText: "Could not load the week" })
   await expect(alert).toContainText("Jira is temporarily unavailable. The week below is from the read at")
   await expect(alert.getByRole("button", { name: "Try again", exact: true })).toBeVisible()
-  await expect(page.getByRole("group", { name: "Week totals" })).toContainText("Last read failed: totals are from")
+  // QA-63c: the alert states the failure once; the totals are only marked old.
+  await expect(page.getByRole("group", { name: "Week totals" })).toContainText("Totals from")
+  await expect(page.getByRole("group", { name: "Week totals" })).not.toContainText("failed")
   await expect(page.locator(".jcf-read-at")).toHaveText("Last read failed")
 })
 
@@ -201,4 +203,59 @@ test("below 1100px the editor opens as a sheet over an inert page", async ({ pag
   expect(await page.evaluate(() => document.activeElement?.closest(".jcf-editor") !== null)).toBe(true)
   await page.locator(".jcf-scrim").click({ position: { x: 10, y: 10 } })
   await expect(editor).toHaveCount(0)
+})
+
+/** The part of a layout-shift entry the sum needs: when it happened and how much moved. */
+const Shifts = Schema.Array(Schema.Struct({ startTime: Schema.Number, value: Schema.Number }))
+
+const sheetSizes: ReadonlyArray<readonly [number, number]> = [[768, 1000], [640, 450]]
+
+// QA-63b: the agent sheet grew and shrank as the agent streamed (CLS 0.16 at 768), and at 200% zoom
+// the masthead re-wrapped as its status changed (CLS 1.25) and the sheet cut the conversation off.
+for (const [width, height] of sheetSizes) {
+  test(`the agent sheet streams without moving the page at ${width}x${height}`, async ({ page, request }) => {
+    await page.setViewportSize({ width, height })
+    const response = await page.request.post("/__test/reset")
+    const { url } = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(await response.json())
+    await page.goto(url)
+    await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
+    const clickedAt = await page.evaluate(() => performance.now())
+    await request.get("/__test/hold-start")
+    await page.getByRole("button", { name: "Rescan sessions", exact: true }).click()
+    await expect(page.getByRole("region", { name: "Agent request", exact: true }).locator("pre")).toContainText(
+      "supplied evidence"
+    )
+    await request.get("/__test/finish")
+    await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
+    const entries = Schema.decodeUnknownSync(Shifts)(
+      await page.evaluate(() =>
+        new Promise((resolve) => {
+          // A page that never shifted has no entries, and the observer never calls back.
+          window.setTimeout(() => resolve([]), 500)
+          new PerformanceObserver((list) => resolve(list.getEntries().map((entry) => entry.toJSON()))).observe({
+            type: "layout-shift",
+            buffered: true
+          })
+        })
+      )
+    )
+    const shifted = entries.filter((entry) => entry.startTime > clickedAt).reduce((sum, entry) => sum + entry.value, 0)
+    expect(shifted).toBeLessThan(0.05)
+    // The whole conversation can be read inside the sheet.
+    const answer = page.getByRole("region", { name: "Agent response", exact: true })
+    await answer.scrollIntoViewIfNeeded()
+    await expect(answer).toBeInViewport()
+  })
+}
+
+// QA-56: the editor drew browser-default 20x20 checkboxes in a default fieldset, and a resize grip.
+test("the editor chooses layers with the same buttons as the calendar and has no resize grip", async ({ page }) => {
+  await open(page, 1280)
+  await page.getByRole("button", { name: /^PROJ-123, 11:00–12:00/u }).click()
+  const editor = page.getByRole("complementary", { name: "Time entry editor" })
+  await expect(editor.locator("input[type=\"checkbox\"]")).toHaveCount(0)
+  const layers = editor.getByRole("group", { name: "Write to selected layers" })
+  await expect(layers.getByRole("button", { name: "Jira" })).toHaveAttribute("aria-pressed", "true")
+  const resize = await editor.locator("textarea").first().evaluate((element) => getComputedStyle(element).resize)
+  expect(resize).toBe("none")
 })

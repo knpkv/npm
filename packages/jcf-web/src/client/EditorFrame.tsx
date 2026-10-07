@@ -9,6 +9,11 @@ import { useEffect, useRef, type ReactNode } from "react"
 export const EditorFrame = (props: {
   readonly children: ReactNode
   readonly notice?: ReactNode
+  /**
+   * Where the notice sits. `end` puts it after the fields, so read progress that disappears when a read
+   * ends does not move what is above it.
+   */
+  readonly noticeAt?: "start" | "end" | undefined
   readonly identity: string
   readonly busy: boolean
   readonly label: string
@@ -46,10 +51,17 @@ export const EditorFrame = (props: {
         }
       }}
     >
-      {props.notice === undefined ? null : <div className="jcf-editor-notice">{props.notice}</div>}
+      {props.notice === undefined || props.noticeAt === "end" ? null : (
+        <div className="jcf-editor-notice">{props.notice}</div>
+      )}
       <fieldset className="jcf-editor-fields" disabled={props.busy}>
         {props.children}
       </fieldset>
+      {props.notice === undefined || props.noticeAt !== "end" ? null : (
+        <div className="jcf-editor-notice" data-at="end">
+          {props.notice}
+        </div>
+      )}
     </aside>
   )
 }

@@ -3,8 +3,18 @@ import { useMemo, useState } from "react"
 import type { AgentActivity } from "./useWeek.js"
 import { formatAgentText } from "./agentText.js"
 
-/** A read-only conversation per batch. Request precedes the live or completed response. */
-export const AgentTerminal = (props: { readonly activity: ReadonlyArray<AgentActivity> }) => {
+/** What a response says when the read stopped before the agent answered. */
+const endedText = { failed: "No output: the read failed.", cancelled: "No output: the read was cancelled." }
+
+/**
+ * A read-only conversation per batch. Request precedes the live or completed response. `ended` says
+ * the read stopped, so a missing response is explained rather than shown as still awaited.
+ */
+export const AgentTerminal = (props: {
+  readonly activity: ReadonlyArray<AgentActivity>
+  readonly ended: "failed" | "cancelled" | null
+}) => {
+  const waiting = props.ended === null ? "Waiting for agent output" : endedText[props.ended]
   const [selected, setSelected] = useState<number | null>(null)
   const entry = props.activity.find((item) => item.batch === selected) ?? props.activity.at(-1)
 
@@ -40,10 +50,10 @@ export const AgentTerminal = (props: { readonly activity: ReadonlyArray<AgentAct
         <section className="jcf-agent-message" data-speaker="response" aria-label="Agent response">
           <header>
             <h3>Response</h3>
-            <span className="jcf-terminal-status">{entry?.status ?? "Waiting for agent output"}</span>
+            <span className="jcf-terminal-status">{entry?.status ?? waiting}</span>
           </header>
           <pre data-kind={response.kind} tabIndex={0}>
-            {response.text || "Waiting for agent output"}
+            {response.text || waiting}
           </pre>
         </section>
       </div>
