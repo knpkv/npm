@@ -124,17 +124,19 @@ export const relayExtension = <Requirements>(
       }
       const memoKey = `relay.decision.${call.id}`
       const remembered = await api.memo<boolean>(memoKey, context)
-      const decision = remembered ?? await (async () => {
-        const action = await runEffect(gate.describe(call.arguments), context.abortSignal)
-        if (action._tag === "Failure") return false
-        const allowed = await broker.ask({
-          conversationId: String(api.conversationId),
-          callId: call.id,
-          action: action.value,
-          reversible: gate.reversible
-        }, context.abortSignal)
-        return api.memo(memoKey, allowed, context)
-      })()
+      if (remembered !== undefined) return remembered ? undefined : { block: declined(call.name) }
+      // Arguments the confirmation can't show are refused with their reason, never asked about or read as a decline.
+      const action = await runEffect(gate.describe(call.arguments), context.abortSignal)
+      if (action._tag === "Failure") {
+        return { block: modelVisibleFailure(call.name, Cause.findErrorOption(action.cause)) }
+      }
+      const allowed = await broker.ask({
+        conversationId: String(api.conversationId),
+        callId: call.id,
+        action: action.value,
+        reversible: gate.reversible
+      }, context.abortSignal)
+      const decision = await api.memo(memoKey, allowed, context)
       return decision ? undefined : { block: declined(call.name) }
     }
   })

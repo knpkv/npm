@@ -28,7 +28,9 @@ import type * as JsonSchema from "effect/JsonSchema"
 export interface Gate {
   readonly access: "write" | "host"
   readonly reversible: boolean
-  readonly describe: (args: Schema.Json) => Effect.Effect<PendingAction, CapabilityInputInvalid>
+  readonly describe: (
+    args: Schema.Json
+  ) => Effect.Effect<PendingAction, CapabilityInputInvalid | CapabilityEncodingFailed>
 }
 
 /** One registered capability, its types erased behind closures. */

@@ -141,6 +141,48 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         expect(commentCalls).toEqual([])
       }).pipe(Effect.scoped))
 
+    it.effect("refuses a write with arguments it can't describe without asking or calling it declined", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        // A rule JSON Schema can't carry, so Pi's own argument check passes and the capability's decode refuses.
+        const NotFriday = Schema.String.check(Schema.makeFilter((body: string) => body !== "ship it on Friday"))
+        let posted = 0
+        const strict = implement(
+          defineContract({
+            name: "post_comment",
+            description: "Post a comment on a pull request",
+            access: "write",
+            reversible: false,
+            describe: (input: { readonly pr: string; readonly body: string }) => ({
+              verb: "post comment",
+              target: pr,
+              args: { body: input.body }
+            }),
+            input: Schema.Struct({ pr: Schema.String, body: NotFriday }),
+            output: Schema.Struct({ posted: Schema.Boolean }),
+            failure: Schema.Never
+          }),
+          () =>
+            Effect.sync(() => {
+              posted += 1
+              return { posted: true }
+            })
+        )
+        const model = toolThenAnswer("post_comment", { pr: "42", body: "ship it on Friday" })
+        const relay = yield* relayIn(layer({
+          storePath: store,
+          instructions: "You are Relay.",
+          capabilities: [register(strict)],
+          backends: [{ id: "claude-code", name: "Claude Code", model: model.layer }]
+        }))
+        const events = yield* sendAndCollect(relay.events(pr), relay.send(pr, "Ship it", "req-bad-args"))
+        expect(events.some((event) => event._tag === "ConfirmationRequired")).toBe(false)
+        expect(posted).toBe(0)
+        const lastPrompt = JSON.stringify(model.requests.at(-1)?.prompt.content)
+        expect(lastPrompt).toContain("post_comment got invalid arguments")
+        expect(lastPrompt).not.toContain("The user declined")
+      }).pipe(Effect.scoped))
+
     it.effect("shows a pending confirmation again to a dock that reconnects", () =>
       Effect.gen(function*() {
         commentCalls.length = 0
