@@ -75,7 +75,7 @@ export const CoordinatorChatPanel = ({
     <Surface as="section" padding="spacious" className="chat-panel">
       <div className="section-heading">
         <div>
-          <Text as="h2" variant="section-title">
+          <Text as="h2" variant="card-title">
             Coordinator chat
           </Text>
           <Text tone="secondary" variant="meta">

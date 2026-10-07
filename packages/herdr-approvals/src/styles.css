@@ -766,7 +766,10 @@
     min-block-size: 2rem;
   }
 
+  /* The explanation reads as a paragraph: its own full line, aligned to the start. */
   .notification-status .notice {
+    flex-basis: 100%;
+    text-align: start;
     background: transparent;
     color: var(--rly-color-text-2);
     margin-block: 0;

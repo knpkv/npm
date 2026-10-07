@@ -835,7 +835,7 @@
 
     .connect-group-filter button,
     .connect-status-filter button {
-      padding-inline: var(--rly-space-6);
+      padding-inline: var(--rly-space-4);
     }
   }
 }
