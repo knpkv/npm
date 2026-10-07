@@ -55,9 +55,20 @@ export interface ScrollTrack {
   readonly linesBack: () => number
   /** Forget the scroll position; the caller brings the server back to the latest output. */
   readonly reset: () => void
+  /**
+   * The server confirmed every sent scroll applied — including one clamped at an end, which herdr
+   * draws no frame for — so nothing is in flight any more.
+   */
+  readonly acknowledgeAll: () => void
 }
 
-export const makeScrollTrack = (cellHeight: () => number): ScrollTrack => {
+/**
+ * `floorLines` is how far toward the newest output the track may go, in lines relative to where it
+ * was last reset: 0 when the client only knows it started at the bottom, negative when the server
+ * says the pane is that many lines back, positive when scrolls it sent up were clamped (the server
+ * says the pane is nearer the bottom than those scrolls would put it).
+ */
+export const makeScrollTrack = (cellHeight: () => number, floorLines: () => number = () => 0): ScrollTrack => {
   let travel = 0
   let requested = 0
   let applied = 0
@@ -66,10 +77,11 @@ export const makeScrollTrack = (cellHeight: () => number): ScrollTrack => {
   const cell = (): number => Math.max(1, cellHeight())
   return {
     pan: (dy) => {
-      travel = Math.max(0, travel + dy)
+      travel = Math.max(floorLines() * cell(), travel + dy)
     },
     take: () => {
-      const wanted = Math.floor(travel / cell())
+      // Whole lines travelled, toward zero, so a part-line in either direction is never sent.
+      const wanted = Math.trunc(travel / cell())
       const difference = wanted - requested
       if (difference === 0) return null
       const lines = Math.min(maximumLinesPerCommand, Math.abs(difference))
@@ -96,6 +108,12 @@ export const makeScrollTrack = (cellHeight: () => number): ScrollTrack => {
       travel = 0
       requested = 0
       applied = 0
+      inFlight = []
+    },
+    // Only what was sent: travel not yet taken (a part-line under the finger, a page waiting for
+    // the next frame) stays to be sent and drawn.
+    acknowledgeAll: () => {
+      applied = requested
       inFlight = []
     }
   }
