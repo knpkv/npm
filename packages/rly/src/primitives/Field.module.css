@@ -26,7 +26,7 @@
       var(--rly-type-meta-font);
     letter-spacing: var(--rly-type-meta-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .required,
@@ -62,13 +62,19 @@
     resize: vertical;
   }
 
+  .dense .control {
+    border-radius: var(--rly-radius-tag);
+    min-block-size: var(--rly-control-height-dense);
+    padding-block: var(--rly-space-2);
+  }
+
   .compact .control {
-    min-block-size: var(--rly-space-40);
+    min-block-size: var(--rly-control-height-compact);
     padding-block: var(--rly-space-6);
   }
 
   .defaultSize .control {
-    min-block-size: var(--rly-space-48);
+    min-block-size: var(--rly-control-height-default);
   }
 
   .control:disabled,

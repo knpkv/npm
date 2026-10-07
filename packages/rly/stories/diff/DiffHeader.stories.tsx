@@ -11,7 +11,7 @@ const ControlledHeader = ({ indexedCount = 500 }: { readonly indexedCount?: numb
   return (
     <DiffHeader
       findingFilter={findingFilter}
-      heading="PR-184 · Payments idempotency"
+      heading="PR-184: Payments idempotency"
       indexedCount={indexedCount}
       isWrapped={isWrapped}
       layout={layout}
@@ -29,7 +29,7 @@ const narrowStyle = { inlineSize: "100%", maxInlineSize: "320px" }
 const meta = {
   args: {
     findingFilter: "all",
-    heading: "PR-184 · Payments idempotency",
+    heading: "PR-184: Payments idempotency",
     indexedCount: 500,
     isWrapped: false,
     layout: "split",
@@ -69,8 +69,8 @@ export const ControlledPreferences: Story = {
 
 export const Indexing: Story = {
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvas.getByText("384")).toBeVisible()
-    await expect(canvas.getByText("of 500 files indexed")).toBeVisible()
+    await expect(canvas.getByText("384 of 500 files indexed")).toBeVisible()
+    await expect(canvas.getByText(/of 500 files indexed$/)).toBeVisible()
     await expect(canvas.getByRole("progressbar")).toHaveAttribute("value", "384")
     canvasElement.dataset.diffHeaderIndexingPlayComplete = "true"
   },
@@ -90,8 +90,11 @@ export const CompactForcedColors: Story = {
     canvasElement.dataset.diffHeaderCompactPlayComplete = "true"
   },
   render: () => (
-    <main data-diff-header-compact="" style={{ ...pageStyle, ...narrowStyle }}>
-      <ControlledHeader indexedCount={384} />
+    <main style={pageStyle}>
+      {/* The 320px slot sits inside the page padding, so the canary is 320px at every viewport. */}
+      <div data-diff-header-compact="" style={{ display: "grid", gap: "var(--rly-space-24)", ...narrowStyle }}>
+        <ControlledHeader indexedCount={384} />
+      </div>
     </main>
   )
 }

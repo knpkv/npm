@@ -127,7 +127,7 @@ export const SavedEntryPanel = (props: {
       }}
     >
       <h2>
-        {entry.ticketKey ?? "No ticket"} · {provider}
+        {entry.ticketKey ?? "No ticket"} in {provider}
       </h2>
       <p className="jcf-muted">Editing the saved {provider} entry. Changes apply only to this entry.</p>
       <div className="jcf-fields">
@@ -215,9 +215,10 @@ export const SavedEntryPanel = (props: {
             type="button"
             variant="quiet"
             disabled={props.unavailable || props.busy || !props.targetVisible}
+            className="jcf-delete"
             onClick={() => setConfirmingDelete(true)}
           >
-            Delete entry
+            {`Delete ${entry.ticketKey ?? "this"} entry`}
           </Button>
         )}
       </div>

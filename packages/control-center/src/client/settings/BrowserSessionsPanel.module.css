@@ -41,11 +41,11 @@
 .permission > select {
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-2);
-  border-radius: var(--rly-radius-control);
+  border-radius: var(--rly-radius-tag);
   color: var(--rly-color-text-1);
   font: inherit;
-  min-height: 2.5rem;
-  padding: 0 var(--rly-space-24);
+  min-block-size: var(--rly-control-height-dense);
+  padding: 0 var(--rly-space-12);
 }
 
 .codeCard {
@@ -60,7 +60,8 @@
 .code {
   align-self: center;
   font-size: var(--rly-type-meta-size);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .sessions {

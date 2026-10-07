@@ -86,7 +86,8 @@
 .branchPair strong {
   font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
     var(--rly-type-body-large-font);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .direction {
@@ -133,7 +134,8 @@
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
   margin: var(--rly-space-0);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .section {
@@ -150,7 +152,8 @@
   font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
     var(--rly-type-body-large-font);
   max-inline-size: 58ch;
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .description > :first-child {
@@ -190,10 +193,6 @@
   border-radius: var(--rly-radius-control);
   gap: var(--rly-space-12);
   padding: var(--rly-space-20);
-}
-
-.reviewLanes > div:first-child {
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codecommit);
 }
 
 .reviewLanes strong {
@@ -320,7 +319,8 @@
 
 .reviewLaunchFacts dd {
   margin: var(--rly-space-0);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .reviewLaunchFacts code {
@@ -355,7 +355,6 @@
 .suggestionCard {
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-1);
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-text-3);
   border-radius: var(--rly-radius-field);
   gap: var(--rly-space-16);
   padding: var(--rly-space-16);
@@ -363,11 +362,11 @@
 
 .suggestionCard[data-severity="P1"],
 .suggestionCard[data-severity="P2"] {
-  border-inline-start-color: var(--rly-color-blocked-ink);
+  border-color: var(--rly-color-blocked-ink);
 }
 
 .suggestionCard[data-severity="P3"] {
-  border-inline-start-color: var(--rly-color-held-ink);
+  border-color: var(--rly-color-held-ink);
 }
 
 .suggestionCard code,
@@ -375,7 +374,8 @@
   color: var(--rly-color-text-2);
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .suggestionHeading {
@@ -695,7 +695,8 @@
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
   margin: var(--rly-space-0);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .publicationEditor,
@@ -722,13 +723,15 @@
 
 .publicationFooter {
   background: color-mix(in srgb, var(--rly-color-service-codecommit) 8%, var(--rly-color-surface-2));
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codecommit);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
   padding: var(--rly-space-12);
 }
 
 .publicationFooter code,
 .publishedComment code {
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .publicationActions {
@@ -803,7 +806,7 @@
 }
 
 .reviewThreadEvents li {
-  border-inline-start: 2px solid var(--rly-color-border-1);
+  border-inline-start: 1px solid var(--rly-color-border-2);
   padding-inline-start: var(--rly-space-12);
 }
 
@@ -832,7 +835,8 @@
 
 .reviewUsage dd {
   margin: 0;
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .reviewOrientation,

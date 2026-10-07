@@ -8,7 +8,7 @@
  * @internal
  */
 import { CodePipelineClient, GetPipelineStateCommand } from "@aws-sdk/client-codepipeline"
-import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
+import { fromNodeProviderChain, fromSSO } from "@aws-sdk/credential-providers"
 import * as cloudwatchLogs from "@distilled.cloud/aws/cloudwatch-logs"
 import * as codepipeline from "@distilled.cloud/aws/codepipeline"
 import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
@@ -16,6 +16,7 @@ import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import * as s3 from "@distilled.cloud/aws/s3"
 import * as sts from "@distilled.cloud/aws/sts"
 import { collectBounded } from "@knpkv/bounded-io"
+import { makeProfileCredentialProvider } from "@knpkv/codecommit-core/AwsProfileCredentials.js"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -396,12 +397,13 @@ export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.map
   return yield* new PluginOutageFailure({ operation })
 })
 
-/** Use the standard AWS provider chain for `default`; select named shared profiles explicitly. @internal */
-export const codePipelineCredentialProviderOptions = (
-  profile: string
-): { readonly profile?: string } => profile === "default" ? {} : { profile }
+/**
+ * Resolve a profile SSO-first, like the CodeCommit adapter, so a leftover static section in
+ * `~/.aws/credentials` cannot shadow a fresh `aws sso login`.
+ */
+const resolveProfileCredentials = makeProfileCredentialProvider({ sso: fromSSO, fallback: fromNodeProviderChain })
 
-/** Live AWS profile-chain credential acquisition. @internal */
+/** Live AWS profile credential acquisition. @internal */
 export const CodePipelineCredentialResolverLive = Layer.succeed(
   CodePipelineCredentialResolver,
   {
@@ -410,7 +412,7 @@ export const CodePipelineCredentialResolverLive = Layer.succeed(
       account: CodePipelineAwsAccount
     ) {
       const raw = yield* Effect.tryPromise({
-        try: () => fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))(),
+        try: () => resolveProfileCredentials(account.profile),
         catch: () => new PluginAuthenticationFailure({ operation })
       }).pipe(
         Effect.timeoutOrElse({

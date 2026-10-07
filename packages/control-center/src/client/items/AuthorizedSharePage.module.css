@@ -46,7 +46,8 @@
 
 .facts dd {
   margin: 0;
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .item a {

@@ -120,7 +120,7 @@ export const AgentJob = ({
         </span>
         <span className={style("titleBlock")}>
           <span className={style("eyebrow")}>
-            {visibleProvider} · {visibleCapability}
+            {visibleProvider}, {visibleCapability}
           </span>
           <h2>{visibleHeading}</h2>
         </span>
@@ -179,7 +179,7 @@ export const AgentJob = ({
       )}
       {cancellable && onCancel !== undefined ? (
         <footer className={style("footer")}>
-          <Button onClick={onCancel} size="compact" variant="quiet">
+          <Button onClick={onCancel} variant="quiet">
             {visibleCancelLabel}
           </Button>
         </footer>

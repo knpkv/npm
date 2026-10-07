@@ -10,8 +10,8 @@
  * @category Command
  * @module
  */
-import { AwsClient, type Domain } from "@knpkv/codecommit-core"
-import { Console, Context, Effect, Layer, Option, Predicate, Schema, Stream } from "effect"
+import { AwsClient, ConfigService, type Domain } from "@knpkv/codecommit-core"
+import { Console, Context, Effect, Layer, Logger, Option, Predicate, Schema, Stream } from "effect"
 import { Command, Flag as Options } from "effect/cli"
 import { makeAccount } from "./CliAccount.js"
 import { reportFailure } from "./CliFailure.js"
@@ -27,6 +27,19 @@ export interface PresetListing {
   readonly prs: ReadonlyArray<Domain.PullRequest>
   readonly unresolvedProfiles: ReadonlyArray<string>
 }
+
+/** One line for missing or expired AWS credentials: which profile, and the two ways forward. */
+export const credentialFailure = (profile: string, region: string): string =>
+  `No AWS credentials for profile "${profile}" in ${region}. Sign in with \`aws sso login --profile ${profile}\`, ` +
+  "or pass --profile with one of the profiles `aws configure list-profiles` shows."
+
+/** The region `~/.aws/config` gives the profile, or us-east-1 when it names none. */
+const profileRegion = (profile: string) =>
+  ConfigService.ConfigService.pipe(
+    Effect.flatMap((config) => config.detectProfiles),
+    Effect.map((profiles) => profiles.find((detected) => detected.name === profile)?.region ?? "us-east-1"),
+    Effect.orElseSucceed(() => "us-east-1")
+  )
 
 export class PrListConfigUnreadable extends Schema.TaggedError<PrListConfigUnreadable>()(
   "PrListConfigUnreadable",
@@ -149,8 +162,10 @@ export const prListCommand = Command.make("list", {
   ),
   region: Options.String("region").pipe(
     Options.withAlias("r"),
-    Options.withDescription("AWS region (ignored when --filter is set — presets fan out across all enabled accounts)"),
-    Options.withDefault("us-east-1")
+    Options.withDescription(
+      "AWS region; defaults to the profile's region in ~/.aws/config (ignored when --filter is set — presets fan out across all enabled accounts)"
+    ),
+    Options.optional
   ),
   status: Options.Literals("status", ["OPEN", "CLOSED"]).pipe(
     Options.withAlias("s"),
@@ -183,7 +198,7 @@ export const prListCommand = Command.make("list", {
     Options.withDescription("Output as JSON"),
     Options.withDefault(false)
   )
-}, ({ all, author, filter, json, profile, region, repo, status }) =>
+}, ({ all, author, filter, json, profile, region: regionFlag, repo, status }) =>
   Effect.gen(function*() {
     const service = yield* PrListService
 
@@ -192,10 +207,11 @@ export const prListCommand = Command.make("list", {
       const preset = filter.value
       const targets = yield* service.resolveTargets
 
+      // Nothing to scan is a setup gap, not an empty result: say where to fix it and exit 1.
       if (targets.length === 0) {
-        if (json) yield* Console.log("[]")
-        else yield* Console.log("No enabled accounts in ~/.codecommit/config.json. Enable some with `codecommit tui`.")
-        return
+        return yield* reportFailure(
+          "No CodeCommit accounts are enabled. Enable one in `codecommit web` (Settings, Accounts) or `codecommit tui`, then run this again."
+        )
       }
 
       // Progress/status text goes to stderr so `--json` emits only the JSON document on stdout.
@@ -240,21 +256,24 @@ export const prListCommand = Command.make("list", {
     }
 
     // ── Single-account path (original behaviour) ─────────────────────────────
-    const statusLabel = all ? "all" : status.toLowerCase()
-    if (!json) yield* Console.log(`Fetching ${statusLabel} PRs...`)
+    // Without --region, read where the profile points; a silent default region read the wrong account.
+    const region = Option.isSome(regionFlag) ? regionFlag.value : yield* profileRegion(profile)
+    // "open pull requests", or plain "pull requests" with --all.
+    const noun = all ? "pull requests" : `${status.toLowerCase()} pull requests`
+    if (!json) yield* Console.log(`Fetching ${noun} for ${profile} in ${region}...`)
 
     const prs = yield* service.listAccount({ all, author, profile, region, repo, status })
 
     if (prs.length === 0) {
       if (json) yield* Console.log("[]")
-      else yield* Console.log(`No ${statusLabel} PRs found.`)
+      else yield* Console.log(`No ${noun} for ${profile} in ${region}. Pass --region to read another region.`)
       return
     }
 
     if (json) {
       yield* Console.log(JSON.stringify(prs, null, 2))
     } else {
-      yield* Console.log(`\nFound ${prs.length} ${statusLabel} PR(s):\n`)
+      yield* Console.log(`\nFound ${prs.length} ${noun}:\n`)
       for (const pr of prs) {
         for (const line of renderPullRequestEntry(pr, { prefix: statusPrefix(pr, all) })) {
           yield* Console.log(line)
@@ -262,7 +281,10 @@ export const prListCommand = Command.make("list", {
       }
     }
   }).pipe(
+    // Logged warnings (an unreadable approval rule, a slow account) go to stderr: stdout is the list.
+    Effect.provideService(Logger.LogToStderr, true),
     Effect.catchTag("PrListConfigUnreadable", (error) => reportFailure(error.message)),
+    Effect.catchTag("AwsCredentialError", (error) => reportFailure(credentialFailure(error.profile, error.region))),
     // The command owns its service layer. The executable supplies the selected
     // AWS transport and configuration services.
     // @effect-diagnostics-next-line strictEffectProvide:off

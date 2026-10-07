@@ -21,7 +21,16 @@ const EvidenceCardinalities = (): ReactElement => (
     <Text tone="secondary">Zero missing evidence references</Text>
     <Text>One primary source · PR #184 at 8fa21c7</Text>
     <details>
-      <summary>20 supporting records</summary>
+      <summary
+        style={{
+          alignItems: "center",
+          cursor: "pointer",
+          display: "flex",
+          minBlockSize: "var(--rly-control-height-dense)"
+        }}
+      >
+        20 supporting records
+      </summary>
       <ol style={listStyle}>
         {Array.from({ length: 20 }, (_, index) => (
           <li key={index}>Evidence record {index + 1}</li>
@@ -84,9 +93,7 @@ const DrawerInteraction = ({ initiallyOpen = false }: { readonly initiallyOpen?:
             <div style={stackStyle}>
               <Text>Agent: The release has current build and review evidence.</Text>
               <Text>Live updates {updates}</Text>
-              <Button onClick={() => setUpdates((count) => count + 1)} size="compact">
-                Add live update
-              </Button>
+              <Button onClick={() => setUpdates((count) => count + 1)}>Add live update</Button>
             </div>
           }
           title="Release agent"

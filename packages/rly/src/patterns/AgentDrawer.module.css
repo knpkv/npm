@@ -74,7 +74,7 @@
       var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
     letter-spacing: var(--rly-type-section-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .slotTitle {
@@ -82,7 +82,7 @@
   }
 
   .slotContent {
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   @media (max-width: 30rem) {

@@ -1,4 +1,4 @@
-import { Button, Dialog, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import { Button, Dialog, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as Schema from "effect/Schema"
 import { type ChangeEvent, type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { useParams } from "react-router"
@@ -735,24 +735,29 @@ export const WorkspaceSettingsPage = ({
         </div>
         <div className={styles.save}>
           <span aria-live="polite">
-            {status === "saving"
-              ? "Saving…"
-              : status === "failed"
-                ? "Save failed — retry when ready"
-                : status === "dirty"
-                  ? "Unsaved changes"
-                  : "Saved"}
+            {status === "saving" ? (
+              "Saving…"
+            ) : status === "failed" ? (
+              "Save failed. Retry when ready."
+            ) : status === "dirty" ? (
+              "Unsaved changes"
+            ) : (
+              <StateLabel label="Saved" tone="positive" />
+            )}
           </span>
-          <Button
-            disabled={
-              !canEdit || (status !== "dirty" && status !== "failed") || !draftIsValid || localProfileUnavailable
-            }
-            loading={status === "saving"}
-            onClick={() => (requiresGovernedConfirmation ? setGovernedDialogOpen(true) : controller.save())}
-            variant="primary"
-          >
-            Save settings
-          </Button>
+          {/* Nothing to save: the state alone, never a greyed-out primary button beside it. */}
+          {status === "saved" ? null : (
+            <Button
+              disabled={
+                !canEdit || (status !== "dirty" && status !== "failed") || !draftIsValid || localProfileUnavailable
+              }
+              loading={status === "saving"}
+              onClick={() => (requiresGovernedConfirmation ? setGovernedDialogOpen(true) : controller.save())}
+              variant="primary"
+            >
+              Save settings
+            </Button>
+          )}
         </div>
       </header>
       {!canEdit ? (

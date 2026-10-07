@@ -32,10 +32,7 @@ export const atlassianOAuthSetupPath = (
 }
 
 /** Post-callback destination that applies a new local OAuth profile to one existing connection. */
-export const atlassianOAuthRecoveryPath = (
-  pluginConnectionId: PluginConnectionIdType,
-  profileId: string
-): string => {
+export const atlassianOAuthRecoveryPath = (pluginConnectionId: PluginConnectionIdType, profileId: string): string => {
   const searchParams = new URLSearchParams({
     atlassianRecoveryConnection: pluginConnectionId,
     atlassianRecoveryProfile: profileId
@@ -44,9 +41,7 @@ export const atlassianOAuthRecoveryPath = (
 }
 
 /** Existing connection selected for an exact OAuth recovery handoff. */
-export const selectedAtlassianRecoveryConnectionId = (
-  searchParams: URLSearchParams
-): PluginConnectionIdType | null => {
+export const selectedAtlassianRecoveryConnectionId = (searchParams: URLSearchParams): PluginConnectionIdType | null => {
   const values = searchParams.getAll("atlassianRecoveryConnection")
   if (values.length !== 1) return null
   const decoded = Schema.decodeUnknownResult(PluginConnectionId)(values[0])
@@ -58,9 +53,7 @@ export const selectedAtlassianRecoveryProfileId = (searchParams: URLSearchParams
   const values = searchParams.getAll("atlassianRecoveryProfile")
   if (values.length !== 1) return null
   const [value] = values
-  return value !== undefined && value.length > 0 && value.length <= 500 && value.trim() === value
-    ? value
-    : null
+  return value !== undefined && value.length > 0 && value.length <= 500 && value.trim() === value ? value : null
 }
 
 /** Atlassian site pinned by a bounded, untrusted browser query parameter. */
@@ -82,9 +75,7 @@ export const selectedAtlassianOAuthProfileId = (searchParams: URLSearchParams): 
 }
 
 /** Atlassian product intent selected by repeated, untrusted browser query parameters. */
-export const selectedAtlassianOAuthProviders = (
-  searchParams: URLSearchParams
-): AtlassianOAuthProviderIntent | null => {
+export const selectedAtlassianOAuthProviders = (searchParams: URLSearchParams): AtlassianOAuthProviderIntent | null => {
   const providers = searchParams.getAll("atlassianProvider")
   if (providers.length === 1 && providers[0] === "jira") return ["jira"]
   if (providers.length === 1 && providers[0] === "confluence") return ["confluence"]

@@ -1,4 +1,4 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 /**
  * The `codecommit` executable: command composition, runtime layers, teardown.
  *
@@ -8,8 +8,7 @@
  *
  * @module
  */
-import { BunRuntime, BunServices } from "@effect/platform-bun"
-import { NodeHttpClient } from "@effect/platform-node"
+import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
 import { AwsClient, AwsClientConfig, CacheService, ChildEnv, ConfigService } from "@knpkv/codecommit-core"
 import {
@@ -18,32 +17,79 @@ import {
   withCodeCommitMock
 } from "@knpkv/codecommit-core/MockTransport.js"
 import { requireLoopbackHostname, serveCodeCommit } from "@knpkv/codecommit-web"
-import { Console, Effect, Layer } from "effect"
+import { Console, Data, Effect, Layer } from "effect"
 import { Command, Flag as Options } from "effect/cli"
 import * as HttpClient from "effect/http/HttpClient"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
-import pkg from "../package.json"
+import { fileURLToPath } from "node:url"
+import pkg from "../package.json" with { type: "json" }
+import { reportFailure } from "./CliFailure.js"
 import { prCreateCommand } from "./PrCreate.js"
 import { prExportCommand } from "./PrExport.js"
 import { prListCommand } from "./PrList.js"
 import { prOpenCommand } from "./PrOpen.js"
 import { prUpdateCommand } from "./PrUpdate.js"
 
-// TUI Command
+/**
+ * The terminal UI runs on OpenTUI, which needs Bun; everything else runs on Node or Bun. Without Bun
+ * the process prints one line and exits 1, with no error report.
+ */
+class TuiNeedsBun extends Data.TaggedError("TuiNeedsBun") {
+  override readonly [Runtime.errorReported] = false
+  override readonly [Runtime.errorExitCode] = 1
+}
+
+/** The Bun-hosted TUI ended with a failure code; this process exits with the same code. */
+class TuiExited extends Data.TaggedError("TuiExited")<{ readonly code: number }> {
+  override readonly [Runtime.errorReported] = false
+  override get [Runtime.errorExitCode](): number {
+    return this.code
+  }
+}
+
+const tuiNeedsBunMessage =
+  "codecommit: the terminal UI needs Bun. Install it from https://bun.sh and run codecommit again, " +
+  "or run `codecommit web` for the browser UI."
+
+/**
+ * Under Bun the TUI starts in this process. Under Node it re-runs this executable with Bun on the
+ * same terminal, so `codecommit` works from either runtime when Bun is installed.
+ */
 const launchTui = Effect.gen(function*() {
-  const { default: program } = yield* Effect.promise(() => import("./main.js"))
-  yield* program
+  if (process.versions.bun !== undefined) {
+    // A pipe or a script gets one line instead of a full-screen UI it cannot show.
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      return yield* reportFailure(
+        "codecommit: the terminal UI needs an interactive terminal. Run `codecommit --help` for the commands that work in scripts."
+      )
+    }
+    const { default: program } = yield* Effect.promise(() => import("./main.js"))
+    return yield* program
+  }
+  const code = yield* Effect.scoped(
+    ChildProcess.make("bun", [fileURLToPath(import.meta.url), "tui"], {
+      stdin: "inherit",
+      stdout: "inherit",
+      stderr: "inherit"
+    }).pipe(Effect.flatMap((handle) => handle.exitCode))
+  ).pipe(Effect.mapError(() => new TuiNeedsBun()))
+  if (code !== 0) return yield* new TuiExited({ code })
 })
 
-const tui = Command.make("tui", {}, () => launchTui)
+const tui = Command.make("tui", {}, () => launchTui).pipe(
+  Command.withDescription("Open the terminal UI (needs Bun and an interactive terminal)")
+)
 
 // Web Command
 const web = Command.make("web", {
-  port: Options.Int("port").pipe(Options.withDefault(3000)),
-  hostname: Options.String("hostname").pipe(Options.withDefault("127.0.0.1"))
+  port: Options.Int("port").pipe(Options.withDescription("Port to listen on"), Options.withDefault(3000)),
+  hostname: Options.String("hostname").pipe(
+    Options.withDescription("Loopback address to listen on, such as 127.0.0.1 or ::1"),
+    Options.withDefault("127.0.0.1")
+  )
 }, ({ hostname, port }) =>
   Effect.gen(function*() {
     yield* requireLoopbackHostname(hostname)
@@ -54,7 +100,7 @@ const web = Command.make("web", {
       onReady: (url) => openBrowser(url).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
       port
     })
-  }))
+  })).pipe(Command.withDescription("Serve the browser UI on this machine and open it"))
 
 /** Best effort: the URL is already printed, so a missing browser leaves nothing unfinished. */
 const openBrowser = (url: string) => {
@@ -132,7 +178,7 @@ const AppRuntimeLayer = Layer.mergeAll(
   ConfigServiceLayer,
   HostEnvironmentLayer
 )
-const RuntimeLayer = AppRuntimeLayer.pipe(Layer.provideMerge(BunServices.layer))
+const RuntimeLayer = AppRuntimeLayer.pipe(Layer.provideMerge(NodeServices.layer))
 
 const program = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
@@ -148,7 +194,12 @@ const program = Effect.gen(function*() {
 // open handles after the UI has already torn down. Always terminate explicitly.
 const forceExitTeardown: Runtime.Teardown = (exit) => Runtime.defaultTeardown(exit, (code) => process.exit(code))
 
+// A missing Bun is a setup step, not a crash: one line naming it and the fix, exit 1.
+const main = program.pipe(
+  Effect.tapErrorTag("TuiNeedsBun", () => Console.error(tuiNeedsBunMessage))
+)
+
 // @effect-diagnostics-next-line strictEffectProvide:off
-BunRuntime.runMain(Effect.provide(program, RuntimeLayer), {
+NodeRuntime.runMain(Effect.provide(main, RuntimeLayer), {
   teardown: forceExitTeardown
 })

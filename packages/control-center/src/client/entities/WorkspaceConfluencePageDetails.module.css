@@ -34,7 +34,6 @@
 .folio {
   background: color-mix(in srgb, var(--rly-color-service-confluence) 8%, var(--rly-color-surface-2));
   border: 1px solid color-mix(in srgb, var(--rly-color-service-confluence) 48%, var(--rly-color-border-1));
-  border-inline-start: var(--rly-space-8) solid var(--rly-color-service-confluence);
   border-radius: var(--rly-radius-control);
   gap: var(--rly-space-32);
   grid-template-columns: minmax(10rem, 0.42fr) minmax(var(--rly-space-0), 1fr);
@@ -59,7 +58,8 @@
   color: var(--rly-color-service-confluence);
   font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / var(--rly-type-page-title-line-height)
     var(--rly-type-page-title-font);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .folioMeta {
@@ -81,7 +81,8 @@
 
 .folioMeta dd {
   margin: var(--rly-space-0);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .section {
@@ -98,7 +99,8 @@
   font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
     var(--rly-type-body-large-font);
   max-inline-size: 62ch;
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .richText > :first-child {
@@ -121,14 +123,15 @@
 }
 
 .richText blockquote {
-  border-inline-start: 2px solid var(--rly-color-service-confluence);
+  border-inline-start: 1px solid var(--rly-color-border-2);
   margin-inline: var(--rly-space-0);
   padding-inline-start: var(--rly-space-16);
 }
 
 .contentState {
   background: var(--rly-color-surface-2);
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-confluence);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
   gap: var(--rly-space-8);
   padding: var(--rly-space-20);
 }
