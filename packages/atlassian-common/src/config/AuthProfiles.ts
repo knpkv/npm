@@ -157,8 +157,7 @@ const readProfilesFile = (
     const profilesPath = yield* getProfilesPath(toolName)
 
     const exists = yield* fs.exists(profilesPath).pipe(
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.catch(() => Effect.succeed(false))
+      Effect.mapError((cause) => new FileSystemError({ operation: "check", path: profilesPath, cause }))
     )
     if (!exists) return null
 
