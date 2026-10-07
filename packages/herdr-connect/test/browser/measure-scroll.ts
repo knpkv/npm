@@ -10,9 +10,7 @@ import { chromium, devices } from "@playwright/test"
 import { Config, Console, Effect, Schema } from "effect"
 import { TerminalClientCommand } from "../../src/model.js"
 
-const url = await Effect.runPromise(Effect.gen(function*() {
-  return yield* Config.String("CONNECT_FIXTURE_URL")
-}))
+const url = await Effect.runPromise(Config.String("CONNECT_FIXTURE_URL"))
 const Screen = Schema.Struct({ cols: Schema.Number, rows: Schema.Array(Schema.String) })
 const Received = Schema.Array(Schema.Struct({ at: Schema.Number, command: TerminalClientCommand }))
 
