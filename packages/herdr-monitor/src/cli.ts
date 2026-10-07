@@ -54,6 +54,8 @@ const fileProblem = (error: PlatformError.PlatformError): string => {
       return "permission denied"
     case "BadResource":
       return "not a readable file"
+    case "AlreadyExists":
+      return "it already exists"
     default:
       return "it could not be read"
   }
@@ -101,7 +103,13 @@ const serve = Command.make(
           maxHeaderSize: 8192,
           connectionsCheckingInterval: 1000
         }), { host: hostname, port })),
-      Effect.mapError((error) => new ListenFailed({ address: `${hostname}:${port}`, reason: error.message }))
+      // The system's error code only ("EADDRINUSE"); its message repeats the bind address.
+      Effect.mapError((error) =>
+        new ListenFailed({
+          address: `${hostname}:${port}`,
+          reason: /\bE[A-Z]{3,}\b/u.exec(error.message)?.[0] ?? "the listener failed"
+        })
+      )
     )
   })
 ).pipe(Command.withDescription("Serve the board on MONITOR_BIND:MONITOR_PORT (default 127.0.0.1:4319)"))
@@ -208,8 +216,8 @@ const init = Command.make(
       )
     )
     const file = Option.getOrElse(envFile, () => path.join(configHome, "herdr-monitor", "monitor.env"))
-    const notWritten = (error: { readonly message: string }) =>
-      new KeysNotWritten({ path: file, reason: error.message })
+    const notWritten = (error: PlatformError.PlatformError) =>
+      new KeysNotWritten({ path: file, reason: fileProblem(error) })
     if (yield* fs.exists(file).pipe(Effect.mapError(notWritten))) return yield* new KeysExist({ path: file })
     const keys = {
       publish: yield* key("publish_").pipe(Effect.mapError(notWritten)),

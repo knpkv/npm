@@ -1,6 +1,8 @@
 /**
- * The CLI's failures and the one line each prints. Every line names the input to fix and never
- * carries a key: errors hold setting names, paths, origins and statuses, not values.
+ * The CLI's failures and the one line each prints. Every line names the setting or argument to fix
+ * and never prints a key, an input path, the monitor origin or a bind host, any of which can name
+ * something private; `scripts/packed.mjs` asserts this against the packed CLI. The one value echoed
+ * is a malformed port. The key file `init` writes is named, since loading it needs the path.
  *
  *   yield* program.pipe(Effect.tapError((error) => Console.error(describeFailure(error))))
  *
@@ -107,15 +109,15 @@ export const describeFailure = (error: CliFailure | CliError.CliError): string |
     case "MissingSetting":
       return `${error.name} is not set. Run: herdr-monitor init, then load the file it writes.`
     case "InvalidSetting": {
-      const setting = error.value === undefined ? error.name : `${error.name}=${error.value}`
+      // Only a port is echoed: other settings can name private hosts.
       return error.name === "MONITOR_PORT"
-        ? `${setting} is not a port number (1–65535).`
-        : `${setting} is not a value herdr-monitor can use.`
+        ? `${error.value === undefined ? error.name : `${error.name}=${error.value}`} is not a port number (1–65535).`
+        : `${error.name} is not a value herdr-monitor can use.`
     }
     case "MonitorConfigurationError":
       return `${settingVariable[error.setting]} ${settingRule[error.setting]}`
     case "InvalidOrigin":
-      return `MONITOR_ORIGIN ${settingRule.origin} It is ${error.origin}.`
+      return `MONITOR_ORIGIN ${settingRule.origin}`
     case "InvalidPublishToken":
       return `MONITOR_PUBLISH_TOKEN ${settingRule.publishToken}`
     case "InvalidSnapshot":
@@ -123,24 +125,24 @@ export const describeFailure = (error: CliFailure | CliError.CliError): string |
     case "SnapshotTooLarge":
       return `The snapshot is ${error.bytes} bytes; the limit is ${MAX_BYTES}.`
     case "MonitorUnreachable":
-      return `Cannot reach the monitor at ${error.origin}. Is herdr-monitor serve running there?`
+      return "Cannot reach the monitor at MONITOR_ORIGIN. Is herdr-monitor serve running there?"
     case "PublishTimedOut":
-      return `The monitor at ${error.origin} did not answer within 5 seconds.`
+      return "The monitor at MONITOR_ORIGIN did not answer within 5 seconds."
     case "PublishRejected":
-      return `The monitor at ${error.origin} refused the snapshot (HTTP ${error.status}): ${rejection(error.status)}.`
+      return `The monitor refused the snapshot (HTTP ${error.status}): ${rejection(error.status)}.`
     case "SnapshotFileUnreadable":
-      return `Cannot read ${error.file}: ${error.reason}.`
+      return `Cannot read the snapshot file: ${error.reason}.`
     case "SnapshotFileTooLarge":
-      return `${error.file} is ${error.bytes} bytes; a snapshot is at most ${MAX_BYTES}.`
+      return `The snapshot file is ${error.bytes} bytes; a snapshot is at most ${MAX_BYTES}.`
     case "SnapshotFileInvalid":
-      return `${error.file} is not a valid snapshot: ${oneLine(error.reason)}`
+      return `The snapshot file is not a valid snapshot: ${oneLine(error.reason)}`
     case "ListenFailed":
-      return `Cannot listen on ${error.address}: ${error.reason}. Set MONITOR_BIND or MONITOR_PORT.`
+      return `Cannot listen on MONITOR_BIND:MONITOR_PORT (${error.reason}). Set another MONITOR_PORT, or stop what holds it.`
     case "AssetsMissing":
-      return `The board's web files are missing (${error.reason}). Rebuild: pnpm --filter @knpkv/herdr-monitor build`
+      return "The board's web files are missing from this install. Rebuild: pnpm --filter @knpkv/herdr-monitor build"
     case "KeysExist":
       return `${error.path} already holds monitor keys; init never replaces them. Delete it first to make new ones.`
     case "KeysNotWritten":
-      return `Cannot write ${error.path}: ${error.reason}`
+      return `Cannot write ${error.path}: ${error.reason}.`
   }
 }
