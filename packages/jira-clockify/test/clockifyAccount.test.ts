@@ -1,4 +1,3 @@
-/** @effect-diagnostics strictEffectProvide:skip-file — each setup case is its own entry point over fakes. */
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { make as makeClockifyApi } from "@knpkv/clockify-api-client"
@@ -60,10 +59,8 @@ describe("loadClockifyAccount", () => {
 /** `auth clockify setup --api-key …` in a script: no terminal, Clockify answering with `workspacesBody`. */
 const setupWithoutTerminal = (workspacesBody: Schema.Json, workspace?: string) => {
   const saved: Array<{ readonly workspaceId: string }> = []
-  return connectClockify(Option.some("test-key"), Option.fromUndefinedOr(workspace)).pipe(
-    Effect.result,
-    Effect.map((result) => ({ result, saved })),
-    Effect.provide(Layer.mergeAll(
+  return Effect.gen(function*() {
+    const world = yield* Layer.build(Layer.mergeAll(
       Layer.succeed(ClockifyAuth, {
         getConfig: Effect.die("unused"),
         save: (auth) => Effect.sync(() => void saved.push(auth)),
@@ -73,7 +70,12 @@ const setupWithoutTerminal = (workspacesBody: Schema.Json, workspace?: string) =
       Stdio.layerTest({}),
       NodeServices.layer
     ))
-  )
+    const result = yield* connectClockify(Option.some("test-key"), Option.fromUndefinedOr(workspace)).pipe(
+      Effect.result,
+      Effect.provideContext(world)
+    )
+    return { result, saved }
+  })
 }
 
 const twoWorkspaces = [...workspaces, { ...workspaces[0], id: "64f0c0ffee0000000000aa02", name: "Second Workspace" }]
