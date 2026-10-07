@@ -13,6 +13,12 @@ export type FleetShortcut =
 /** A `g` waiting for its second key, and when it was pressed; `null` when none is. */
 export type FleetShortcutPrefix = { readonly at: number } | null
 
+/** What one key press does, and the `g` prefix it leaves for the next. */
+export interface FleetShortcutStep {
+  readonly shortcut: FleetShortcut | null
+  readonly prefix: FleetShortcutPrefix
+}
+
 /** How long a `g` waits for the key that completes it. */
 export const FLEET_SEQUENCE_MS = 1500
 
@@ -124,7 +130,11 @@ export const FleetWorkPanel = ({ state }: { readonly state: FleetWorkState }): R
   }
 }
 
-const sequenceTabs: Readonly<Record<string, FleetShellTab>> = { a: "approvals", c: "connect", w: "work" }
+const sequenceTabs: ReadonlyMap<string, FleetShellTab> = new Map([
+  ["a", "approvals"],
+  ["c", "connect"],
+  ["w", "work"]
+])
 
 /**
  * The shortcut for one key press, and the `g` prefix it leaves. No single bare key acts on its own:
@@ -147,11 +157,11 @@ export const fleetShortcutFor = ({
   readonly key: string
   readonly now: number
   readonly prefix: FleetShortcutPrefix
-}): { readonly shortcut: FleetShortcut | null; readonly prefix: FleetShortcutPrefix } => {
+}): FleetShortcutStep => {
   if (control && !alt && key.toLowerCase() === "k") return { prefix: null, shortcut: { _tag: "focus_agent_search" } }
   if (control || alt || editable) return { prefix: null, shortcut: null }
   if (key === "?") return { prefix: null, shortcut: { _tag: "open_shortcuts" } }
-  const tab = sequenceTabs[key]
+  const tab = sequenceTabs.get(key)
   if (prefix !== null && now - prefix.at <= FLEET_SEQUENCE_MS && tab !== undefined) {
     return { prefix: null, shortcut: { _tag: "select_tab", tab } }
   }
