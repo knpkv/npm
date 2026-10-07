@@ -119,6 +119,29 @@ test("skips a tracked file deleted from the working tree and still fails on othe
   await assert.rejects(Effect.runPromise(scanSources(["packages/demo/src/a.ts"], failing)), /permission denied/u)
 })
 
+test("counts ast-grep suppressions in CSS comments and nothing else there", () => {
+  const css = (text) => scanDirectives("packages/demo/src/styles.css", text)
+  assert.deepEqual(
+    css("/* ast-grep-ignore: no-rly-dir-pseudo-class -- RTL fixture */\n:dir(rtl) {}").map(({ kind }) => kind),
+    ["ast-grep"]
+  )
+  assert.deepEqual(css(".a { color: red; }\n/* layout */"), [])
+  assert.deepEqual(css('.a::after { content: "/* ast-grep-ignore */"; }'), [])
+  assert.deepEqual(css("/* eslint-disable */"), [])
+  assert.equal(isLedgerSource("packages/demo/src/styles.css"), true)
+})
+
+test("does not read JSX text as a comment", () => {
+  const tsx = (text) => scanDirectives("packages/demo/src/Example.tsx", text)
+  assert.deepEqual(tsx("export const A = () => <div>// eslint-disable-next-line no-undef\n</div>"), [])
+  assert.deepEqual(
+    tsx("// eslint-disable-next-line no-undef -- fixture\nexport const A = () => <div>text</div>").map(
+      ({ kind }) => kind
+    ),
+    ["eslint"]
+  )
+})
+
 test("counts an Effect directive wherever the language service reads it, strings included, in TypeScript files", () => {
   const marker = 'export const marker = "@effect-diagnostics floatingEffect:off"'
   assert.deepEqual(

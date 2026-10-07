@@ -61,7 +61,8 @@ const lineEndFrom = (text, index) => {
   return found === -1 ? text.length : index + found
 }
 
-const scannedFile = /\.(?:[cm]?[jt]sx?)$/u
+const scannedFile = /\.(?:[cm]?[jt]sx?|css)$/u
+const cssFile = /\.css$/u
 const typeScriptFile = /\.(?:[cm]?ts|tsx)$/u
 
 /** Whether a tracked path belongs in the ledger: source and tests, never vendored, generated or built output. */
@@ -105,16 +106,25 @@ const scriptKindOf = (file) =>
 const commentRanges = (file, text) => {
   const sourceFile = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true, scriptKindOf(file))
   const ranges = new Map()
+  // JSX text is rendered content, not trivia: the comment helpers have no JSX context and would read
+  // `<div>// eslint-disable</div>` as a comment, so ranges inside JSX text are dropped.
+  const jsxText = []
   const collect = (found) => {
     for (const range of found ?? []) ranges.set(range.pos, range)
   }
   const visit = (node) => {
+    if (node.kind === ts.SyntaxKind.JsxText) {
+      jsxText.push([node.pos, node.end])
+      return
+    }
     collect(ts.getLeadingCommentRanges(text, node.pos))
     collect(ts.getTrailingCommentRanges(text, node.end))
     for (const child of node.getChildren(sourceFile)) visit(child)
   }
   visit(sourceFile)
-  return [...ranges.values()].sort((left, right) => left.pos - right.pos)
+  return [...ranges.values()]
+    .filter((range) => !jsxText.some(([start, end]) => range.pos >= start && range.pos < end))
+    .sort((left, right) => left.pos - right.pos)
 }
 
 const lintKindOf = (body) => lintKinds.find(([, pattern]) => pattern.test(body))?.[0]
@@ -203,7 +213,41 @@ const effectDirectives = (file, text) =>
  * throwaway source file (jcf-web's packed-consumer `verify.ts`) compiles it outside this repository's
  * checks, so its suppressions are fixture data rather than escapes from them.
  */
-export const scanDirectives = (file, text) => [
+// CSS block comments, skipping quoted strings. ast-grep's CSS rules honour `ast-grep-ignore` here;
+// no other tool in the ledger reads CSS comments, so only that kind is counted.
+const cssComments = (text) => {
+  const comments = []
+  let index = 0
+  while (index < text.length) {
+    const char = text[index]
+    if (char === '"' || char === "'") {
+      index += 1
+      while (index < text.length && text[index] !== char) index += text[index] === "\\" ? 2 : 1
+      index += 1
+    } else if (char === "/" && text[index + 1] === "*") {
+      const close = text.indexOf("*/", index + 2)
+      const end = close === -1 ? text.length : close + 2
+      comments.push({ pos: index, end })
+      index = end
+    } else {
+      index += 1
+    }
+  }
+  return comments
+}
+
+const cssDirectives = (file, text) =>
+  cssComments(text).flatMap((range) => {
+    const body = commentBody(text.slice(range.pos, range.end))
+    return lintKindOf(body) === "ast-grep"
+      ? [directive(file, "ast-grep", body, hasDashReason(body) || hasReasonAbove(text, range.pos))]
+      : []
+  })
+
+export const scanDirectives = (file, text) =>
+  cssFile.test(file) ? cssDirectives(file, text) : scriptDirectives(file, text)
+
+const scriptDirectives = (file, text) => [
   ...commentRanges(file, text).flatMap((range) => commentDirective(file, text, range)),
   ...noCheckDirectives(file, text),
   ...(typeScriptFile.test(file) ? effectDirectives(file, text) : [])
