@@ -288,6 +288,17 @@
     justify-content: space-between;
   }
 
+  /* Read out when a request's outcome replaces its bar; the state word already shows it. */
+  .work-request-announcement {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    margin: var(--rly-space-0);
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+  }
+
   .work-activity {
     display: grid;
     list-style: none;
