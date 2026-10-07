@@ -30,8 +30,8 @@ export interface TerminalInteractionView {
   /** Lines above the latest output; 0 when following it. */
   readonly onLinesBack: (lines: number) => void
   /**
-   * Latest sent its pages but no reading confirmed where the pane ended up, so the client must not
-   * claim it is current. Cleared by the next reading or Latest.
+   * The client must not claim the pane is current: Latest sent its pages but no reading confirmed
+   * where it ended up, or the last read failed. Cleared by a reading that knows, or by Latest.
    */
   readonly onPositionUnconfirmed: (unconfirmed: boolean) => void
   /** Show the screen as selectable text after a long-press: one entry per line, wraps joined. */
@@ -411,6 +411,8 @@ export const bindTerminalInteraction = (
     },
     selectText: showText,
     jumpToLatest: () => {
+      // After an unconfirmed jump the known offset is only an optimistic 0, so probe instead.
+      const retrying = unconfirmed
       setUnconfirmed(false)
       velocity = 0
       track.reset()
@@ -418,17 +420,19 @@ export const bindTerminalInteraction = (
       // Known limit: pressed before the first reading arrives (about half a second after opening),
       // this probes a page per frame, capped at maximumJumpCommands; a reading arriving meanwhile is
       // never quiet, so it cannot take over. Pressing Latest again finishes a deeper pane.
-      if (serverPosition._tag !== "Known") frameStep(null, 0)
+      if (serverPosition._tag !== "Known" || retrying) frameStep(null, 0)
       else if (serverPosition.offset > 0) knownStep(serverPosition.offset)
       draw()
     },
     serverScrollState: (offsetFromBottom, scrollsForwarded) => {
       if (scrollsForwarded !== scrollsSent) return
       track.acknowledgeAll()
-      setUnconfirmed(false)
       serverPosition = offsetFromBottom === null
         ? { _tag: "Unknown", estimate: believedBack() }
         : { _tag: "Known", offset: offsetFromBottom }
+      // A failed read is never shown as the bottom: with nothing else to show, the rail says the
+      // position is not confirmed.
+      setUnconfirmed(serverPosition._tag === "Unknown")
       if (jump?._tag === "Known" && jump.remaining === 0) {
         // The reading covers every page sent, so the last one has landed: a failed read hands over
         // to probing, 0 ends the jump, anything else is output that arrived meanwhile.

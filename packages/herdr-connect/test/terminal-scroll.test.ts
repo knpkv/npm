@@ -68,6 +68,22 @@ describe("scroll track", () => {
     expect(track.take()).toBeNull()
   })
 
+  it("a confirmation keeps travel that was not sent yet", () => {
+    // Part of a line under the finger stays drawn, and still becomes a line once it is covered.
+    const finger = makeScrollTrack(() => cell)
+    finger.pan(25)
+    expect(finger.take()).toEqual({ direction: "up", lines: 1 })
+    finger.acknowledgeAll()
+    expect(finger.translate()).toBe(10)
+    finger.pan(10)
+    expect(finger.take()).toEqual({ direction: "up", lines: 1 })
+    // A page panned but not yet taken (it goes out on the next frame) is still sent.
+    const page = makeScrollTrack(() => cell)
+    page.pan(60)
+    page.acknowledgeAll()
+    expect(page.take()).toEqual({ direction: "up", lines: 4 })
+  })
+
   it("stops following a server that has not answered for three lines", () => {
     const track = makeScrollTrack(() => cell)
     track.pan(200)

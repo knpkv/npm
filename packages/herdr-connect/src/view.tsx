@@ -524,7 +524,7 @@ type TerminalKeyRailProps = {
   readonly onJumpToLatest?: () => void
   /** Lines this client knows it scrolled back; above 0 the rail says so beside Latest. */
   readonly linesBack?: number
-  /** Latest could not confirm the pane reached the newest output; the rail says so instead of nothing. */
+  /** The position is not confirmed (Latest's last reading never came, or a read failed); the rail says so instead of nothing. */
   readonly positionUnconfirmed?: boolean
 }
 

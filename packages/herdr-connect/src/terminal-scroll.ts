@@ -109,9 +109,10 @@ export const makeScrollTrack = (cellHeight: () => number, floorLines: () => numb
       applied = 0
       inFlight = []
     },
+    // Only what was sent: travel not yet taken (a part-line under the finger, a page waiting for
+    // the next frame) stays to be sent and drawn.
     acknowledgeAll: () => {
       applied = requested
-      travel = requested * cell()
       inFlight = []
     }
   }

@@ -498,16 +498,18 @@ test.describe("scroll position from the hub", () => {
       "data-behind",
       "true"
     )
-    // The next reading clears it and shows where the pane really is.
-    await page.request.post("/__test/scroll-state/mute?on=0")
-    await page.request.post("/__test/reading?offset=10")
+    // Pressing Latest again does not trust the optimistic 0: it probes down to the newest line.
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
     await expect(unconfirmed).toHaveCount(0)
-    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 10 lines back")
+    await expect.poll(() => downs(page)).toEqual(expect.arrayContaining([50, 400]))
+    await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith("310 "))).toBe(true)
   })
 
   test("an unreadable position falls back to the local estimate and the page-by-page jump", async ({ page }) => {
     await open(page, { mode: "unknown", start: 30 })
     await expect(olderOutput(page)).toHaveCount(0)
+    // Never shown as the bottom: with no estimate, the rail says the position is not confirmed.
+    await expect(page.getByRole("status", { name: "Position not confirmed" })).toBeVisible()
     await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
     await expect.poll(() => downs(page)).toContain(400)
   })
