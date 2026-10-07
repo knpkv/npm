@@ -9,7 +9,7 @@ Use the `jcf` binary to manage Jira-backed Clockify timers.
 
 ## Preconditions
 
-- Configure both services before timer operations: Jira OAuth and Clockify API key.
+- Connect the services a command needs: Jira with `jcf auth jira token` (an API token; OAuth is the advanced alternative) and Clockify with `jcf auth clockify setup`. A command that needs a missing one fails with that command and a non-zero exit.
 - Use `jcf auth status` to check readiness.
 - `jcf` uses the shared Jira CLI auth profile store; for multi-site Jira accounts, use `jira auth profiles` and `jira auth use <profile>` before timer operations when the `jira` binary is available. When the `atlassian` binary is available, prefer `atlassian profiles doctor` to confirm that Jira Clockify is using the intended `jira-cli` auth store and `atlassian auth refresh` for expired Jira tokens.
 - Timer operations write to Clockify and may write Jira worklogs; confirm ambiguous ticket keys, durations, dates, and comments before running them.
@@ -19,9 +19,7 @@ Use the `jcf` binary to manage Jira-backed Clockify timers.
 
 ```bash
 jcf auth status
-jcf auth jira create
-jcf auth jira configure
-jcf auth jira login
+jcf auth jira token
 jcf auth clockify setup
 
 atlassian profiles doctor
@@ -173,7 +171,7 @@ jcf watch claude --interval 60
 - Only one watch writes at a time, per machine. Starting a second one prints who holds the lease and
   exits; do not start one to "check" on a running watch. After an ungraceful process death, verify no
   watch remains before manually removing `~/.jcf/watch.lease`; the file is never auto-taken-over.
-- It stops itself if Jira rejects the login. Re-authenticate with `jcf auth jira login` and restart.
+- It stops itself if Jira rejects the login. Reconnect with `jcf auth jira token` and restart.
 
 ## Agent Workflow
 

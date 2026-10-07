@@ -286,6 +286,7 @@ const storeOnly = [
   "table work_goal_reassignments",
   "table work_goal_transaction_totals",
   "table work_goal_transactions",
+  "table work_observed_eviction",
   "table work_observed_facts",
   "table work_observed_failures",
   "table work_reconciler_events",

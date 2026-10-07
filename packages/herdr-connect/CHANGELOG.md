@@ -1,5 +1,19 @@
 # @knpkv/herdr-connect
 
+## 0.5.0
+
+### Minor Changes
+
+- [#537](https://github.com/knpkv/npm/pull/537) [`d183858`](https://github.com/knpkv/npm/commit/d1838583e51cd683e167d6cb735ebbfe552bdb7f) Thanks [@konopkov](https://github.com/konopkov)! - Connect terminal: copy text, open links, and scroll like a native list on touch. Selecting with the mouse no longer writes the clipboard on its own: Cmd/Ctrl+C copies the selection and only sends ^C when nothing is selected, and triple-click selects a whole line. Cmd/Ctrl+click (or a tap on touch) opens http and https links in a new tab, and other schemes are never opened. On touch, the terminal follows the finger 1:1 and keeps moving after a flick, scrolling no longer brings up the keyboard, a long-press or the Select key shows the screen as selectable text with Copy buttons, and a Latest key always returns to the newest output, with an "Older output" note while you are known to be scrolled back.
+
+### Patch Changes
+
+- [#549](https://github.com/knpkv/npm/pull/549) [`21ab62a`](https://github.com/knpkv/npm/commit/21ab62a25400f61f27a5230553e4d4780034b899) Thanks [@konopkov](https://github.com/konopkov)! - Connect writes its status lines as phrases instead of joining facts with middots: "codex on SER8", "Work goal: …", "No Work goal linked", "Terminal focus transition failed: …". The middot ast-grep rule now covers Connect too.
+- Updated dependencies [[`b791563`](https://github.com/knpkv/npm/commit/b791563a328c0118c2716bda59294f7c606225c8), [`d266e4c`](https://github.com/knpkv/npm/commit/d266e4cccb601e0d8006ce50e48743b8f347f21e), [`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/herdr-fleet@0.6.1
+  - @knpkv/herdr-work@0.7.0
+  - @knpkv/rly@0.10.0
+
 ## 0.4.5
 
 ### Patch Changes

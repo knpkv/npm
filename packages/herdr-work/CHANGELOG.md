@@ -1,5 +1,17 @@
 # @knpkv/herdr-work
 
+## 0.7.0
+
+### Minor Changes
+
+- [#539](https://github.com/knpkv/npm/pull/539) [`d266e4c`](https://github.com/knpkv/npm/commit/d266e4cccb601e0d8006ce50e48743b8f347f21e) Thanks [@konopkov](https://github.com/konopkov)! - `WorkService.reconcile` now takes `{ confirmed }`: the `subject` and `observationId` of each fact the caller has just read and the store accepted. `observe` reports the `observationId` (the stored fact's SHA-256 id) on its `stored` and `unchanged` outcomes. A goal is closed only from a pull request fact on that list. A read refused as stale, or one that failed, confirms nothing, so an earlier fact (the pull request may since have reopened) is never acted on, including for superseded goals, which the snapshot hides, and whatever failure records were evicted. A confirmation that is no longer the subject's stored fact fails with `WorkStoreError` (`reconcile.confirmed`), and a malformed one with `reconcile.options`. A failed read newer than a fact's confirmation is also checked, inside the write's transaction too. Callers of the former argument-less `reconcile()` pass the ids from their `observe` report. An identical read older than the stored confirmation is reported `stale`, Evicting a failed read that disputes a fact evicts that fact too, and the store keeps the newest time of anything it has evicted: a fact read no newer than that, for a subject with no stored row, is reported `stale`, so neither an old confirmation nor a replay of it can close a goal. `observe` reports its outcomes after every write and eviction in the call, so a `stored` or `unchanged` fact replaced later in the same batch, or evicted, is reported `stale`. `WorkObservationId` is now a branded type: the lowercase-hex SHA-256 of the fact's stored record (the encoded observation's JSON with its repository or host ASCII-lowercased, `observedAt` excluded). On upgrade, a store that predates the eviction watermark drops its observed facts and failures (a cache of provider reads) and sets the watermark to the newest of them, so none of its older reads can confirm anything; the next pass reads them again.
+
+### Patch Changes
+
+- Updated dependencies [[`b791563`](https://github.com/knpkv/npm/commit/b791563a328c0118c2716bda59294f7c606225c8), [`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/herdr-fleet@0.6.1
+  - @knpkv/rly@0.10.0
+
 ## 0.6.0
 
 ### Minor Changes
