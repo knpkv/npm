@@ -46,9 +46,11 @@ const { lastActivityDate: _lastActivityDate, ...withoutActivity } = pullRequest
  * `"broken"`: one pull request whose evaluation fails with a provider error that is neither.
  * `"expired"`: one pull request whose evaluation fails because the session expired.
  * `"empty"`: GetPullRequest answers without a pull request, and evaluation fails.
+ * `"approvers-failed"`: one approved pull request whose approval states can't be read.
  * `"undated"`: one approved pull request that CodeCommit returns without a last-activity date.
  */
 type Evaluation =
+  | "approvers-failed"
   | "undated"
   | "approved"
   | "denied"
@@ -121,7 +123,9 @@ const answer = (
     case "GetRepository":
       return json({ repositoryMetadata: { accountId: "111111111111" } })
     case "GetPullRequestApprovalStates":
-      return json({ approvals: [] })
+      return evaluation === "approvers-failed"
+        ? awsError("InvalidRevisionIdException", "revision is not valid")
+        : json({ approvals: [] })
     case "GetMergeConflicts":
       return json({ mergeable: true })
     case "EvaluatePullRequestApprovalRules":
@@ -131,7 +135,8 @@ const answer = (
         ? awsError("InvalidRevisionIdException", "revision is not valid")
         : evaluation === "expired"
         ? awsError("ExpiredTokenException", "The security token included in the request is expired")
-        : evaluation === "approved" || evaluation === "undated" || evaluation === "three-approved" ||
+        : evaluation === "approved" || evaluation === "undated" || evaluation === "approvers-failed" ||
+            evaluation === "three-approved" ||
             (evaluation === "8-denied" && requestedPullRequestId(request.body) !== "8")
         ? json({ evaluation: { approved: true, approvalRulesSatisfied: ["two-reviewers"] } })
         : awsError("AccessDeniedException")
@@ -146,6 +151,25 @@ const credentialFailure = (error: AwsClientError): boolean =>
   Predicate.hasProperty(error.cause, "cause") && isCredentialInvalidCause(error.cause.cause)
 
 describe("approval evaluation", () => {
+  // A read that couldn't fetch its approvers says so; one that fetched none says none.
+  it.layer(codeCommit("approvers-failed"))((it) => {
+    it.effect("marks the approvers unknown on the list and the detail read when their read fails", () =>
+      Effect.gen(function*() {
+        const [listed] = yield* Stream.runCollect(getPullRequests(account))
+        const detail = yield* getPullRequest({ account, pullRequestId: "7" })
+        expect([listed?.approversUnknown, detail.approversUnknown]).toEqual([true, true])
+      }))
+  })
+  it.layer(codeCommit("approved"))((it) => {
+    it.effect("reads no approvers as none, not unknown", () =>
+      Effect.gen(function*() {
+        const [listed] = yield* Stream.runCollect(getPullRequests(account))
+        const detail = yield* getPullRequest({ account, pullRequestId: "7" })
+        expect([listed?.approversUnknown, listed?.approvedBy, detail.approversUnknown, detail.approvedBy])
+          .toEqual([undefined, [], undefined, []])
+      }))
+  })
+
   // A missing last-activity date falls back to the creation date on both reads: activity is never
   // earlier than creation, so it is a safe floor, and the row's version stays comparable across reads.
   it.layer(codeCommit("undated"))((it) => {

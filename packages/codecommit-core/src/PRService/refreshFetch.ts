@@ -254,6 +254,10 @@ export const fetchAndUpsertPRs = (params: {
               }])
               yield* Ref.update(partialScopes, (scopes) => new Set(scopes).add(accountRegionKey(profile, region)))
             }
+            // Approvers that couldn't be read kept their cached value: the refresh is partial, not clean.
+            if (written.approval && pr.approversUnknown === true) {
+              yield* Ref.update(partialScopes, (scopes) => new Set(scopes).add(accountRegionKey(profile, region)))
+            }
             const pending = subscribed ? Option.match(written.replaced, { onNone: () => [], onSome: transitions }) : []
             yield* Effect.forEach(notificationsFor(pending, written), (n) => notificationRepo.add(n), {
               discard: true

@@ -268,6 +268,7 @@ export const makeRefreshSinglePR = (
         codecommitConsoleUrl(account.region, coordinates?.repositoryName ?? detail.repositoryName, prId),
       approvedBy: detail.approvedBy,
       approvedByArns: detail.approvedByArns,
+      approversUnknown: detail.approversUnknown === true,
       approvalRules: detail.approvalRules
     }
 

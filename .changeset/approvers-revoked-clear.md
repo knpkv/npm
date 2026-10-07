@@ -1,0 +1,10 @@
+---
+"@knpkv/codecommit-core": minor
+---
+
+An approval revoked down to no approvers is now cleared. Approvers are who approved the pull request now, from the same read as the approval: a read with none clears them, and only a read that couldn't fetch them keeps the last known list. Before, a failed approver read and a real "no approvers" were the same empty list, and the cache kept the old approvers in both cases, so a revoked approval never cleared.
+
+- `fetchApprovers` returns `Option`: none when the read fails (logged as a warning), never an empty list standing in for a failure.
+- `PullRequest` and `PullRequestDetail` gain `approversUnknown` (set when the approver read failed; `approvedBy` is then only the last known list), and `UpsertInput` carries it.
+- Approvers now move with the approval group's version, so a read whose approval is older than the cached one doesn't overwrite them.
+- A bulk refresh with a pull request whose approvers couldn't be read counts that account as partial, not clean.

@@ -1316,6 +1316,46 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([])
     }))
 
+  // A read that couldn't fetch its approvers keeps the cached ones; its refresh is partial, not clean.
+  it.effect("upserts a pull request whose approvers couldn't be read as unknown, and reports the account as partial", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const upserted = yield* Ref.make<ReadonlyArray<readonly [string, boolean | undefined]>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const approversUnread = new PullRequest({ ...openPR("39"), approversUnknown: true })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, { getPullRequests: () => Stream.make(openPR("38"), approversUnread) }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          upsert: (input) =>
+            Ref.update(
+              upserted,
+              (rows) => [...rows, [input.id, input.approversUnknown] satisfies (typeof rows)[number]]
+            )
+              .pipe(Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })),
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+      expect(yield* Ref.get(upserted)).toEqual([["38", false], ["39", true]])
+      expect(successfulScopes).toEqual([])
+    }))
+
   it.effect("lists a pull request whose approval is unknown, and reports the account as partial", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })

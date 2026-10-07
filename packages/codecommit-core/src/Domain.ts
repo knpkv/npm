@@ -236,6 +236,8 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   fetchedAt: Schema.optional(Schema.Date),
   approvedBy: Schema.Array(Schema.String),
   approvedByArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
+  /** Set when the last approver read failed: `approvedBy` is then only the last known list. */
+  approversUnknown: Schema.optionalKey(Schema.Literal(true)),
   commentedBy: Schema.Array(Schema.String),
   filesChanged: Schema.optional(Schema.Number),
   approvalRules: Schema.Array(ApprovalRule).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([])))

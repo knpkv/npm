@@ -11,7 +11,7 @@
  *
  * @category CacheService
  */
-import { Effect, Schema, SchemaGetter } from "effect"
+import { Effect, Option, Schema, SchemaGetter } from "effect"
 import {
   ApprovalRule,
   type ApprovalUnknownReason,
@@ -128,6 +128,8 @@ export const UpsertInput = Schema.Struct({
   link: Schema.String,
   approvedBy: Schema.Array(Schema.String),
   approvedByArns: Schema.Array(Schema.String),
+  /** Set when the read couldn't fetch its approvers: `approvedBy` is then a placeholder, not "none". */
+  approversUnknown: Schema.optional(Schema.Boolean),
   // The rule's plain shape, not the class: callers pass the provider's rules as plain objects, and the
   // cache stores them as JSON either way.
   approvalRules: Schema.Array(Schema.Struct(ApprovalRule.fields)).pipe(
@@ -145,7 +147,18 @@ export interface ApprovalRead {
   readonly isApproved: boolean
   readonly approvalRules: UpsertInput["approvalRules"]
   readonly approvalUnknown?: ApprovalUnknownReason | undefined
+  readonly approvedBy: ReadonlyArray<string>
+  readonly approvedByArns: ReadonlyArray<string>
+  readonly approversUnknown?: boolean | undefined
 }
+
+/** A read's approvers: who approved now, or none when the read couldn't fetch them. */
+const approversOf = (read: {
+  readonly approvedBy: ReadonlyArray<string>
+  readonly approvedByArns: ReadonlyArray<string>
+  readonly approversUnknown?: boolean | undefined
+}): ApprovalGroup["approvers"] =>
+  read.approversUnknown === true ? Option.none() : Option.some({ names: read.approvedBy, arns: read.approvedByArns })
 
 /** Both groups' versions as a read of the row saw them: what a recomputed write must still find. */
 export const versionsOf = (row: {
@@ -171,8 +184,6 @@ export const rowGroupOfListing = (input: UpsertInput): RowGroup => ({
   sourceBranch: input.sourceBranch,
   destinationBranch: input.destinationBranch,
   isMergeable: input.isMergeable === 1,
-  approvedBy: input.approvedBy,
-  approvedByArns: input.approvedByArns,
   mergedBy: null,
   closedAt: null
 })
@@ -181,7 +192,8 @@ export const rowGroupOfListing = (input: UpsertInput): RowGroup => ({
 export const approvalGroupOfListing = (input: UpsertInput): ApprovalGroup => ({
   isApproved: input.isApproved === 1,
   approvalRules: input.approvalRules,
-  unknownReason: input.approvalUnknownReason
+  unknownReason: input.approvalUnknownReason,
+  approvers: approversOf(input)
 })
 
 /** A provider re-read's row group, complete: a closed or merged read also carries when and by whom. */
@@ -195,8 +207,6 @@ export const rowGroupOfRead = (read: {
   readonly sourceBranch: string
   readonly destinationBranch: string
   readonly isMergeable: boolean
-  readonly approvedBy: ReadonlyArray<string>
-  readonly approvedByArns: ReadonlyArray<string>
   readonly mergedBy?: string | undefined
 }): RowGroup => ({
   title: read.title,
@@ -207,8 +217,6 @@ export const rowGroupOfRead = (read: {
   sourceBranch: read.sourceBranch,
   destinationBranch: read.destinationBranch,
   isMergeable: read.isMergeable,
-  approvedBy: read.approvedBy,
-  approvedByArns: read.approvedByArns,
   mergedBy: read.mergedBy ?? null,
   closedAt: read.status === "OPEN" ? null : read.lastActivityDate.toISOString()
 })
@@ -217,7 +225,8 @@ export const rowGroupOfRead = (read: {
 export const approvalGroupOfRead = (read: ApprovalRead): ApprovalGroup => ({
   isApproved: read.isApproved,
   approvalRules: read.approvalRules,
-  unknownReason: read.approvalUnknown?._tag ?? null
+  unknownReason: read.approvalUnknown?._tag ?? null,
+  approvers: approversOf(read)
 })
 
 /**

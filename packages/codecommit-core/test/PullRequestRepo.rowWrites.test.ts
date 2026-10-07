@@ -491,4 +491,48 @@ describe("pull-request row writes", () => {
       const second = yield* repo.upsert(listed(older, "older"), yield* repo.observe())
       expect(Option.map(second.replaced, (row) => [row.title, row.isApproved])).toEqual(Option.some(["PR seed", true]))
     })))
+
+  // Approvers are who approved now, not who ever approved: a read with none clears them, and only a
+  // read that couldn't fetch them keeps the last known list.
+  describe("approvers", () => {
+    const approvers = Effect.flatMap(
+      PullRequestRepo,
+      (repo) => repo.findByCoordinates(account, "60", coordinates.repositoryName, coordinates.accountRegion)
+    ).pipe(Effect.map(Option.map((row) => [row.approvedBy, row.approvedByArns])))
+    const withApprovers = (lastActivity: Date, names: ReadonlyArray<string>, unknown = false) => ({
+      ...listed(lastActivity, "seed"),
+      approvedBy: [...names],
+      approvedByArns: names.map((name) => `arn:aws:iam::123456789012:user/${name}`),
+      ...(unknown && { approversUnknown: true })
+    })
+
+    it.effect("clears an approval revoked down to no approvers", () =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        yield* repo.upsert(withApprovers(t0, ["alice"]), yield* repo.observe())
+        yield* repo.upsert(withApprovers(older, []), yield* repo.observe())
+        expect(yield* approvers).toEqual(Option.some([[], []]))
+      })))
+
+    it.effect("keeps the last known approvers when a read couldn't fetch them", () =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        yield* repo.upsert(withApprovers(t0, ["alice"]), yield* repo.observe())
+        yield* repo.upsert(withApprovers(older, [], true), yield* repo.observe())
+        expect(yield* approvers).toEqual(Option.some([["alice"], ["arn:aws:iam::123456789012:user/alice"]]))
+      })))
+
+    // Approvers move with approval's version: a read whose approval is older than the stored one writes
+    // its row group but not its approvers.
+    it.effect("writes approvers only when the read's approval group applies", () =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        const sql = yield* SqlClient.SqlClient
+        yield* repo.upsert(withApprovers(t0, ["alice"]), yield* repo.observe())
+        yield* sql`UPDATE pull_requests SET approval_version = ${newer.toISOString()}`
+        yield* repo.upsert({ ...withApprovers(older, ["bob"]), title: "Row moved" }, yield* repo.observe())
+        const row = yield* repo.findByCoordinates(account, "60", coordinates.repositoryName, coordinates.accountRegion)
+        expect(Option.map(row, (r) => [r.title, r.approvedBy])).toEqual(Option.some(["Row moved", ["alice"]]))
+      })))
+  })
 })

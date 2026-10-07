@@ -168,6 +168,7 @@ export const PullRequestToUpsertInput = UpsertInput.pipe(
       link: pr.link,
       approvedBy: pr.approvedBy,
       approvedByArns: pr.approvedByArns ?? [],
+      approversUnknown: pr.approversUnknown === true,
       approvalRules: (pr.approvalRules ?? []).map((rule) => decodeApprovalRule(rule))
     }))
   })

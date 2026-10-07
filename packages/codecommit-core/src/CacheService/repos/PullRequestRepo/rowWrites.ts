@@ -29,7 +29,7 @@
  *
  * @category CacheService
  */
-import { Data, Effect } from "effect"
+import { Data, Effect, Option } from "effect"
 import type * as SqlClient from "effect/sql/SqlClient"
 import type * as Statement from "effect/sql/Statement"
 import { joinApprovedBy, type UpsertInput } from "./internal.js"
@@ -52,10 +52,7 @@ export interface RowVersions {
   readonly approval: RowVersion
 }
 
-/**
- * The row group, complete: a provider read has every column of it. `approvedBy` null keeps the
- * approvers already stored (they accumulate across reads).
- */
+/** The row group, complete: a provider read has every column of it. */
 export interface RowGroup {
   readonly title: string
   readonly description: string | null
@@ -65,8 +62,6 @@ export interface RowGroup {
   readonly sourceBranch: string
   readonly destinationBranch: string
   readonly isMergeable: boolean
-  readonly approvedBy: ReadonlyArray<string>
-  readonly approvedByArns: ReadonlyArray<string>
   readonly mergedBy: string | null
   readonly closedAt: string | null
 }
@@ -79,6 +74,8 @@ export interface ApprovalGroup {
   readonly isApproved: boolean
   readonly approvalRules: UpsertInput["approvalRules"]
   readonly unknownReason: string | null
+  /** Who approved now, from the same read; none when the read couldn't fetch them (the stored ones stay). */
+  readonly approvers: Option.Option<{ readonly names: ReadonlyArray<string>; readonly arns: ReadonlyArray<string> }>
 }
 
 /** Recomputed columns: any subset, written without a version. */
@@ -156,17 +153,28 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
       rowSet("source_branch", row.sourceBranch),
       rowSet("destination_branch", row.destinationBranch),
       rowSet("is_mergeable", row.isMergeable ? 1 : 0),
-      rowSet("approved_by", sql`COALESCE(${joinApprovedBy([...row.approvedBy])}, pull_requests.approved_by)`),
-      rowSet(
-        "approved_by_arns",
-        sql`COALESCE(${joinApprovedBy([...row.approvedByArns])}, pull_requests.approved_by_arns)`
-      ),
+
       rowSet("merged_by", row.mergedBy),
       rowSet("closed_at", row.closedAt),
       // An unknown evaluation keeps the last known approval and rules; a successful one replaces both.
       approvalSet("is_approved", known ? (approval.isApproved ? 1 : 0) : keep("is_approved")),
       approvalSet("approval_rules", known ? rulesJson(approval.approvalRules) : keep("approval_rules")),
       approvalSet("approval_unknown_reason", approval.unknownReason),
+      // Approvers are who approved now: a read with none clears them; one that couldn't fetch keeps them.
+      approvalSet(
+        "approved_by",
+        Option.match(approval.approvers, {
+          onNone: () => keep("approved_by"),
+          onSome: ({ names }) => joinApprovedBy(names)
+        })
+      ),
+      approvalSet(
+        "approved_by_arns",
+        Option.match(approval.approvers, {
+          onNone: () => keep("approved_by_arns"),
+          onSome: ({ arns }) => joinApprovedBy(arns)
+        })
+      ),
       // A successful evaluation makes the baseline known; an unknown one keeps whatever it was.
       approvalSet("approval_baseline_known", known ? 1 : keep("approval_baseline_known")),
       // SQLite evaluates every SET expression on the row as it was, so each guard sees the old versions.
@@ -196,6 +204,11 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
      */
     upsert: (req: typeof UpsertInput.Encoded, row: RowGroup, approval: ApprovalGroup, observation: number) => {
       const version = { lastActivity: new Date(req.lastModifiedDate), observation }
+      // A first read that couldn't fetch its approvers stores none; its refresh is reported partial.
+      const insertedApprovers = Option.match(approval.approvers, {
+        onNone: () => ({ names: null, arns: null }),
+        onSome: ({ arns, names }) => ({ names: joinApprovedBy(names), arns: joinApprovedBy(arns) })
+      })
       return sql<StoredVersions>`INSERT INTO pull_requests
           (id, aws_account_id, repo_account_id, account_profile, account_region, title, description,
            author, repository_name, creation_date, last_modified_date, status,
@@ -207,10 +220,8 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
             ${row.creationDate}, ${req.lastModifiedDate}, ${row.status},
             ${row.sourceBranch}, ${row.destinationBranch}, ${row.isMergeable ? 1 : 0},
             ${approval.isApproved ? 1 : 0}, ${approval.unknownReason},
-            ${approval.unknownReason === null ? 1 : 0}, ${req.commentCount}, ${req.link}, ${
-        joinApprovedBy([...row.approvedBy])
-      },
-            ${joinApprovedBy([...row.approvedByArns])}, ${rulesJson(approval.approvalRules)},
+            ${approval.unknownReason === null ? 1 : 0}, ${req.commentCount}, ${req.link}, ${insertedApprovers.names},
+            ${insertedApprovers.arns}, ${rulesJson(approval.approvalRules)},
             ${row.mergedBy}, ${row.closedAt}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
             ${observation}, ${req.lastModifiedDate}, ${observation}
           WHERE NOT EXISTS (
