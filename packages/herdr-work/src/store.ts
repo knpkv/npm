@@ -89,6 +89,7 @@ import {
 } from "./internal/session-index.js"
 import {
   goalActivityLimit,
+  type TerminalCandidate,
   terminalCandidates,
   terminalCheckpoint,
   withoutBlockers
@@ -153,6 +154,7 @@ import type {
   WorkPullRequestLink as WorkPullRequestLinkType,
   WorkPullRequestObservation as WorkPullRequestObservationType,
   WorkReconcileOutcome,
+  WorkReconcilePlanStep,
   WorkRecoveryPreflight as WorkRecoveryPreflightType,
   WorkRecoveryTarget as WorkRecoveryTargetType
 } from "./model.js"
@@ -1317,8 +1319,20 @@ interface ReconcilerGuard {
 
 const ObservationIdRow = Schema.Struct({ observationId: Schema.String, confirmedAt: Schema.Number })
 const FailureLastAtRow = Schema.Struct({ lastAt: Schema.Number })
+type ReconcileStep =
+  | {
+    readonly _tag: "applied"
+    readonly goalId: string
+    readonly eventId: string
+    readonly state: "completed" | "abandoned"
+    readonly candidate: TerminalCandidate
+  }
+  | { readonly _tag: "recorded"; readonly goalId: string; readonly eventId: string }
+  | { readonly _tag: "conflict"; readonly goalId: string; readonly reason: "checkpoint" | "revision" }
+
 type AppendDecision =
   | { readonly _tag: "inserted"; readonly changes: bigint | number }
+  | { readonly _tag: "checked" }
   | { readonly _tag: "replayed"; readonly event: WorkGoalCheckpointType }
   | { readonly _tag: "rejected"; readonly error: AppendRejection }
 
@@ -2008,6 +2022,11 @@ export interface WorkStoreService {
    */
   readonly reconcile: (options: WorkReconcileOptions) => Effect.Effect<
     ReadonlyArray<WorkReconcileOutcome>,
+    WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+  >
+  /** What `reconcile` would do now, running its checks and writing nothing. */
+  readonly planReconcile: (options: WorkReconcileOptions) => Effect.Effect<
+    ReadonlyArray<WorkReconcilePlanStep>,
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
   /** Atomically reads projection history, observed facts, and the coordinator-owned logical-time boundary. */
@@ -3963,10 +3982,19 @@ export class WorkStore implements WorkStoreService {
    * succeeds), so a writer that planned from the head cannot bury a newer
    * owner checkpoint.
    */
+  /**
+   * Appends one checkpoint. With `mode` `check`, every check runs in the same
+   * transaction and it is rolled back instead of written: the checkpoint is
+   * returned when it would have been appended.
+   */
   private readonly appendAt = Effect.fn("WorkStore.append")(function*(
     this: WorkStore,
     event: WorkGoalCheckpointType,
-    guard: ReconcilerGuard | null
+    guard: ReconcilerGuard | null,
+    mode: "write" | "check" = "write",
+    // In a check, the checkpoints earlier steps of the same plan would have
+    // written: limits are checked as if they were already stored.
+    planned: ReadonlyArray<WorkGoalCheckpointType> = []
   ) {
     const decoded = yield* Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
       Effect.mapError(storeError("append.decode"))
@@ -3984,11 +4012,12 @@ export class WorkStore implements WorkStoreService {
     const decision = yield* Effect.try({
       try: () => {
         let transaction = false
+        const abort = () => this.#database.exec("ROLLBACK")
         try {
           this.#database.exec("BEGIN IMMEDIATE")
           transaction = true
           const reject = (error: AppendRejection): AppendDecision => {
-            this.#database.exec("ROLLBACK")
+            abort()
             transaction = false
             return { _tag: "rejected", error }
           }
@@ -4001,7 +4030,7 @@ export class WorkStore implements WorkStoreService {
               .all(decoded.eventId, decoded.goal.id, decoded.occurredAt)
           ).map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
           if (collisions.length > 0 && collisions.every((existing) => Equal.equals(existing, decoded))) {
-            this.#database.exec("ROLLBACK")
+            abort()
             transaction = false
             return { _tag: "replayed", event: decoded } satisfies AppendDecision
           }
@@ -4043,7 +4072,7 @@ export class WorkStore implements WorkStoreService {
             const count = Schema.decodeUnknownSync(CountRow)(
               this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_events").get()
             ).count
-            if (count + 1 > workHistoryMaxEvents - guard.reserve) {
+            if (count + planned.length + 1 > workHistoryMaxEvents - guard.reserve) {
               return reject(
                 new WorkProjectionError({
                   cause: count,
@@ -4065,7 +4094,7 @@ export class WorkStore implements WorkStoreService {
           const eventCount = Schema.decodeUnknownSync(CountRow)(
             this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_events").get()
           ).count
-          if (eventCount >= workHistoryMaxEvents) {
+          if (eventCount + planned.length >= workHistoryMaxEvents) {
             return reject(
               new WorkProjectionError({
                 cause: decoded,
@@ -4077,6 +4106,7 @@ export class WorkStore implements WorkStoreService {
           const history = Schema.decodeUnknownSync(StoredEventRows)(
             this.#database.prepare("SELECT record FROM work_goal_events").all()
           ).map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
+            .concat(planned)
           const familyError = validateGoalFamilyHistory([...history, decoded])
           if (familyError !== undefined) return reject(familyError)
           if (maximumSnapshotBytes(history, decoded) > fleetResponseBodyMaxBytes) {
@@ -4127,6 +4157,11 @@ export class WorkStore implements WorkStoreService {
               )
             }
           }
+          if (mode === "check") {
+            abort()
+            transaction = false
+            return { _tag: "checked" } satisfies AppendDecision
+          }
           const result = this.#database.prepare(
             "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
           ).run(decoded.eventId, decoded.goal.id, decoded.occurredAt, JSON.stringify(decoded))
@@ -4142,7 +4177,7 @@ export class WorkStore implements WorkStoreService {
           transaction = false
           return { _tag: "inserted", changes: result.changes } satisfies AppendDecision
         } catch (error) {
-          if (transaction) this.#database.exec("ROLLBACK")
+          if (transaction) abort()
           throw error
         }
       },
@@ -4150,6 +4185,7 @@ export class WorkStore implements WorkStoreService {
     })
     if (decision._tag === "rejected") return yield* decision.error
     if (decision._tag === "replayed") return decision.event
+    if (decision._tag === "checked") return decoded
     if (decision.changes !== 1 && decision.changes !== 1n) {
       return yield* storeError("append.insert.count")(decision.changes)
     }
@@ -5432,7 +5468,15 @@ export class WorkStore implements WorkStoreService {
     }
   })
 
-  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore, request: WorkReconcileOptions) {
+  /**
+   * The steps `reconcile` takes, shared by `reconcile` (`write`) and
+   * `planReconcile` (`check`, which runs every check and writes nothing).
+   */
+  private readonly reconcileSteps = Effect.fn("WorkStore.reconcileSteps")(function*(
+    this: WorkStore,
+    request: WorkReconcileOptions,
+    mode: "write" | "check"
+  ) {
     const options = yield* Schema.decodeUnknownEffect(WorkReconcileOptions)(request).pipe(
       Effect.mapError(storeError("reconcile.options"))
     )
@@ -5456,7 +5500,17 @@ export class WorkStore implements WorkStoreService {
     const stamped = new Map(source.reconcilerEvents.map(({ eventId, goalId }) => [goalId, eventId]))
     const cryptoService = this.#cryptoService
     const now = yield* Clock.currentTimeMillis
-    const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) => this.appendAt(checkpoint, guard)
+    // A plan holds no transaction between steps: each check rolls back at once,
+    // and later steps are checked against the checkpoints earlier ones planned.
+    const planned: Array<WorkGoalCheckpointType> = []
+    const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) =>
+      this.appendAt(checkpoint, guard, mode, planned).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            if (mode === "check") planned.push(checkpoint)
+          })
+        )
+      )
     return yield* Effect.forEach(
       terminalCandidates(
         source.events,
@@ -5465,7 +5519,7 @@ export class WorkStore implements WorkStoreService {
         new Set(options.confirmed.map(({ observationId, subject }) => `${subject}\u0000${observationId}`))
       ),
       Effect.fnUntraced(function*(candidate): Effect.fn.Return<
-        WorkReconcileOutcome,
+        ReconcileStep,
         WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
       > {
         const goalId = candidate.head.goal.id
@@ -5480,24 +5534,63 @@ export class WorkStore implements WorkStoreService {
         // A goal that cannot take its terminal checkpoint (an activity already
         // holds the reconciler's id, a timestamp past the bound) is left for
         // its owner: reported as a conflict, never failing the other goals.
-        if (Result.isFailure(checkpoint)) return { _tag: "conflict", goalId }
+        if (Result.isFailure(checkpoint)) return { _tag: "conflict", goalId, reason: "checkpoint" }
         return yield* appendAt(checkpoint.success, {
           fact: { observationId: candidate.fact.observationId, subject: candidate.fact.subject },
           head: candidate.head,
           reserve: workReconcilerHeadroom
         }).pipe(
-          Effect.as<WorkReconcileOutcome>({
+          Effect.as<ReconcileStep>({
             _tag: "applied",
             eventId,
             goalId,
-            state: candidate.pullRequest.state === "merged" ? "completed" : "abandoned"
+            state: candidate.pullRequest.state === "merged" ? "completed" : "abandoned",
+            candidate
           }),
           Effect.catchTag(
             "WorkGoalRevisionConflictError",
-            () => Effect.succeed<WorkReconcileOutcome>({ _tag: "conflict", goalId })
+            () => Effect.succeed<ReconcileStep>({ _tag: "conflict", goalId, reason: "revision" })
           )
         )
       })
+    )
+  })
+
+  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore, request: WorkReconcileOptions) {
+    const steps = yield* this.reconcileSteps(request, "write")
+    return steps.map((step): WorkReconcileOutcome =>
+      step._tag === "applied"
+        ? { _tag: "applied", eventId: step.eventId, goalId: step.goalId, state: step.state }
+        : step._tag === "recorded"
+        ? step
+        : { _tag: "conflict", goalId: step.goalId }
+    )
+  })
+
+  /**
+   * What `reconcile` would do now with the same confirmations, writing
+   * nothing: every check it makes before writing runs, each in a transaction
+   * that is rolled back at once, with each step checked against the
+   * checkpoints earlier steps planned.
+   */
+  readonly planReconcile = Effect.fn("WorkStore.planReconcile")(function*(
+    this: WorkStore,
+    request: WorkReconcileOptions
+  ) {
+    const steps = yield* this.reconcileSteps(request, "check")
+    return steps.map((step): WorkReconcilePlanStep =>
+      step._tag === "applied"
+        ? {
+          _tag: "would_apply",
+          eventId: step.eventId,
+          goalId: step.goalId,
+          state: step.state,
+          subject: step.candidate.fact.subject,
+          observationId: step.candidate.fact.observationId,
+          goalEventId: step.candidate.head.eventId,
+          goalUpdatedAt: step.candidate.head.goal.updatedAt
+        }
+        : step
     )
   })
 

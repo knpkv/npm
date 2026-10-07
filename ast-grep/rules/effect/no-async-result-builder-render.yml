@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-async-result-builder-render
+language: tsx
+severity: error
+message: "AsyncResult.builder(...).render() rethrows any failure it was not given a handler for; end the chain with exhaustive() or orNull()"
+
+rule:
+  all:
+    - pattern: $CHAIN.render()
+    - has:
+        pattern: AsyncResult.builder($$$)
+        stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+
+ignores:
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  `render()` throws the squashed cause of an unhandled failure, which in React unmounts the route and
+  shows the router's error page instead of the app. `exhaustive()` only typechecks once every case,
+  failures included, has a handler (`onFailure`, or `onError` plus `onDefect` and `onInterrupt`);
+  `orNull()` states that a failure renders nothing, for a part of the screen whose failure is reported
+  elsewhere.

@@ -484,15 +484,7 @@ function CommentsSection({
         tone="progress"
       />
     ))
-    .onError(() => (
-      <StatePanel
-        announce="polite"
-        description="Refresh the pull request to try reading the conversation again."
-        title="Comments unavailable"
-        tone="critical"
-      />
-    ))
-    .onDefect(() => (
+    .onFailure(() => (
       <StatePanel
         announce="polite"
         description="Refresh the pull request to try reading the conversation again."
@@ -542,7 +534,7 @@ function CommentsSection({
         </div>
       )
     })
-    .render()
+    .exhaustive()
 }
 
 function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
