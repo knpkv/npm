@@ -1486,6 +1486,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   // A ledger rather than a constant: `set` is how the config commands do their whole job, so a
   // fake that discards it can only ever assert what was printed, not what was stored.
   let config: JcfConfig = { ...defaultConfig, ...options.config }
+  // Supplying settings stands for a config file on disk; the first `set` writes one.
+  let configFileExists = options.config !== undefined
   const ConfigLayer = Layer.succeed(ConfigService, {
     get: Effect.gen(function*() {
       const snapshot = config
@@ -1495,8 +1497,10 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     set: (patch) =>
       Effect.sync(() => {
         config = { ...config, ...patch }
+        configFileExists = true
       }),
-    configDir: Effect.succeed(`${FAKE_HOME}/.jcf`)
+    configDir: Effect.succeed(`${FAKE_HOME}/.jcf`),
+    fileExists: Effect.sync(() => configFileExists)
   })
   const ClockifyAuthLayer = Layer.succeed(ClockifyAuth, {
     getConfig: Effect.sync(() => ({

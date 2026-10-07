@@ -60,7 +60,11 @@ describe("pull request coordinate migration", () => {
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-pr-coordinates-" })
-      const context = yield* Layer.build(LibsqlClient.layer({ url: `file:${root}/cache.db` }))
+      // The production client's camelCase column transform: the repository's row reads rely on it.
+      const context = yield* Layer.build(LibsqlClient.layer({
+        url: `file:${root}/cache.db`,
+        transformResultNames: (name: string) => name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+      }))
       const sql = Context.get(context, SqlClient.SqlClient)
 
       yield* sql`CREATE TABLE pull_requests (
@@ -107,6 +111,9 @@ describe("pull request coordinate migration", () => {
         .toEqual([{ known: 0 }])
       yield* sql`UPDATE pull_requests SET approval_unknown_reason = NULL, approval_baseline_known = 1`
       yield* insertPullRequest(sql, "orders", "us-east-1")
+      // A raw insert after migration 0023 leaves the approval version at its empty default; the
+      // repository's own writes always set it.
+      yield* sql`UPDATE pull_requests SET approval_version = last_modified_date WHERE approval_version = ''`
       const repo = mutations(sql, Effect.void)
       yield* repo.upsert(upsertInput("orders", "us-east-1", "Orders updated"), 1)
       yield* repo.upsert(upsertInput("payments", "eu-west-1", "Payments updated"), 2)

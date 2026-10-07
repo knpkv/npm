@@ -280,25 +280,6 @@ export const makeRefreshSinglePR = (
       Effect.catch(() => Effect.succeed(false))
     )
 
-    // Sent only once the upsert applies: a read older than the cached row changes nothing.
-    const pending = isSubscribed && Option.isSome(cachedPR)
-      ? [
-        ...diffPR(cachedPR.value, freshUpsert, durableAccountId),
-        // The cache keeps its last known rules while approval is unknown; compare once it recovers.
-        ...(detail.approvalUnknown !== undefined ? [] : diffApprovalPools(
-          cachedPR.value.approvalRules ?? [],
-          freshUpsert.approvalRules,
-          currentState.currentUser,
-          prId,
-          durableAccountId,
-          detail.title,
-          account.profile,
-          identity.repositoryName,
-          identity.accountRegion
-        ))
-      ]
-      : []
-
     // Diff comments against the cache before it is written, for the same subscribed pull requests.
     const commentNotifications: ReadonlyArray<NewNotification> = isSubscribed && Option.isSome(cachedPR)
       ? yield* commentRepo.find(durableAccountId, prId, identity).pipe(
@@ -322,8 +303,29 @@ export const makeRefreshSinglePR = (
     const written = yield* prRepo.upsertRead(freshUpsert, detail, observation).pipe(
       Effect.mapError((cause) => new RefreshError({ failedAccounts: [durableAccountId], cause }))
     )
-    // Everything below acts on what this read saw, so only for the groups the cache took: a group not
+    // Announced from the row this write replaced, read in the same transaction: an earlier snapshot
+    // could be one another write has changed since. Only for the groups the cache took; a group not
     // written was older than the cache.
+    const pending = isSubscribed
+      ? Option.match(written.replaced, {
+        onNone: () => [],
+        onSome: (replaced) => [
+          ...diffPR(replaced, freshUpsert, durableAccountId),
+          // The cache keeps its last known rules while approval is unknown; compare once it recovers.
+          ...(detail.approvalUnknown !== undefined ? [] : diffApprovalPools(
+            replaced.approvalRules ?? [],
+            freshUpsert.approvalRules,
+            currentState.currentUser,
+            prId,
+            durableAccountId,
+            detail.title,
+            account.profile,
+            identity.repositoryName,
+            identity.accountRegion
+          ))
+        ]
+      })
+      : []
     yield* Effect.forEach(notificationsFor(pending, written), (n) => notificationRepo.add(n), { discard: true }).pipe(
       Effect.catch(() => Effect.void)
     )

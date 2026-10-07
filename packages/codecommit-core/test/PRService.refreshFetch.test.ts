@@ -246,7 +246,7 @@ describe("fetchAndUpsertPRs", () => {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void,
-          upsert: () => Effect.succeed({ row: true, approval: true }),
+          upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.none() }),
           writeRead: () => Effect.succeed({ row: true, approval: true, versions: undefined })
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -1029,7 +1029,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findByCoordinates: () => Effect.succeed(Option.some(cachedRow)),
-          upsert: () => Effect.succeed({ row: true, approval: true }),
+          upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.some(cachedRow) }),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1075,7 +1075,7 @@ describe("fetchAndUpsertPRs", () => {
         }),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
-          upsert: () => Effect.succeed({ row: true, approval: true }),
+          upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.none() }),
           // PR 35 closed at the provider; PR 36 was just listed, so it is not stale.
           findStaleOpen: () => Effect.succeed([staleOpenPR]),
           // A closed or merged re-read now arrives as a whole-row write.
@@ -1348,7 +1348,7 @@ describe("fetchAndUpsertPRs", () => {
         }),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
-          upsert: () => Effect.succeed({ row: false, approval: false }),
+          upsert: () => Effect.succeed({ row: false, approval: false, replaced: Option.none() }),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1387,7 +1387,7 @@ describe("fetchAndUpsertPRs", () => {
         }),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
-          upsert: () => Effect.succeed({ row: true, approval: true }),
+          upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.none() }),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1474,7 +1474,7 @@ describe("fetchAndUpsertPRs", () => {
           findByAccountAndId: () => Effect.succeed(Option.some(staleOpenPR)),
           findByCoordinates: () => Effect.succeed(Option.some(staleOpenPR)),
           findStaleOpen: () => Effect.succeed([]),
-          upsert: () => Effect.succeed({ row: true, approval: true }),
+          upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.some(staleOpenPR) }),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {
@@ -1538,7 +1538,7 @@ describe("fetchAndUpsertPRs", () => {
             findByAccountAndId: () => Effect.succeed(Option.some(cachedPending)),
             findByCoordinates: () => Effect.succeed(Option.some(cachedPending)),
             findStaleOpen: () => Effect.succeed([]),
-            upsert: () => Effect.succeed({ row: applied, approval: applied }),
+            upsert: () => Effect.succeed({ row: applied, approval: applied, replaced: Option.some(cachedPending) }),
             propagateRepoAccountId: () => Effect.void
           }),
           Layer.mock(NotificationRepo, {
@@ -1560,4 +1560,62 @@ describe("fetchAndUpsertPRs", () => {
         expect((yield* Ref.get(added)).filter((type) => type === "approval_changed")).toHaveLength(expected)
       })
   )
+
+  // A write that landed between an earlier snapshot and this write changed the row: the transition
+  // this read announces is from the value it actually replaced, not from the snapshot.
+  it.effect("announces the transition from the row its write replaced, not from an earlier snapshot", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set([subscriptionKey("123456789012", "35")]))
+      const added = yield* Ref.make<ReadonlyArray<string>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const rules = (satisfied: boolean) => [
+        { ruleName: "r", requiredApprovals: 1, poolMembers: [], poolMemberArns: [], satisfied }
+      ]
+      const cachedRow = (isApproved: 0 | 1) =>
+        Schema.decodeSync(CachedPullRequest)({
+          ...Schema.encodeSync(CachedPullRequest)(staleOpenPR),
+          isApproved,
+          approvalRules: JSON.stringify(rules(isApproved === 1))
+        })
+      const listedPending = Schema.decodeSync(PullRequest)({
+        ...Schema.encodeSync(PullRequest)(providerOpenPR),
+        isApproved: false,
+        approvalRules: rules(false)
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, { getPullRequests: () => Stream.make(listedPending) }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          // The earlier snapshot: pending, as this read also sees it.
+          findByAccountAndId: () => Effect.succeed(Option.some(cachedRow(0))),
+          findByCoordinates: () => Effect.succeed(Option.some(cachedRow(0))),
+          findStaleOpen: () => Effect.succeed([]),
+          // Meanwhile another read stored it approved; this write replaced that.
+          upsert: () =>
+            Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.some(cachedRow(1)) }),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { add: (n) => Ref.update(added, (all) => [...all, n.message]) }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect((yield* Ref.get(added)).filter((message) => message.startsWith("Approval"))).toEqual([
+        expect.stringMatching(/^Approval revoked on #35/)
+      ])
+    }))
 })
