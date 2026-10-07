@@ -16,15 +16,8 @@
 import * as Effect from "effect/Effect"
 import type * as JsonSchema from "effect/JsonSchema"
 import * as Schema from "effect/Schema"
-import type {
-  Capability,
-  FailureSchema,
-  GatedContract,
-  InputSchema,
-  ObjectRef,
-  PendingAction,
-  PlainSchema
-} from "./Contract.js"
+import { ObjectRef, PendingAction } from "./Contract.js"
+import type { Capability, FailureSchema, GatedContract, InputSchema, PlainSchema } from "./Contract.js"
 
 /** The caller passed arguments the contract's input schema rejects. */
 export class CapabilityInputInvalid extends Schema.TaggedError<CapabilityInputInvalid>()("CapabilityInputInvalid", {
@@ -87,6 +80,13 @@ const encodeAs = <S extends PlainSchema>(contract: { readonly name: string }, sc
     Effect.mapError((issue) => new CapabilityEncodingFailed({ capability: contract.name, issue: String(issue) }))
   )
 
+// What a contract's own callbacks (`cites`, `describe`) return is checked against the shared schemas, so a
+// type-correct callback cannot hand a surface an empty reference, an empty verb or a non-JSON argument.
+const validated = <S extends PlainSchema>(contract: { readonly name: string }, schema: S, value: S["Type"]) =>
+  Schema.decodeUnknownEffect(schema)(value).pipe(
+    Effect.mapError((issue) => new CapabilityEncodingFailed({ capability: contract.name, issue: String(issue) }))
+  )
+
 /**
  * Call a capability with untrusted JSON arguments. Gating is the surface's job: call this only after a
  * gated contract's action has been agreed to.
@@ -110,19 +110,26 @@ export const invoke = <
     const input = yield* decodeInput(contract, args)
     const output = yield* capability.handler(input).pipe(
       Effect.catch((failure: Failure["Type"]) =>
-        Effect.flatMap(encodeAs(contract, contract.failure, failure), (encoded) =>
-          Effect.fail(
-            new CapabilityFailed({
-              capability: contract.name,
-              tag: failure._tag,
-              reason: failure.message,
-              fix: failure.fix,
-              failure: encoded
-            })
-          ))
+        // A failure outside the declared union (possible from untyped JavaScript) is an implementation
+        // bug: keep it a defect with its original value rather than a recoverable invocation error.
+        !Schema.is(contract.failure)(failure) ?
+          Effect.die(failure) :
+          Effect.flatMap(encodeAs(contract, contract.failure, failure), (encoded) =>
+            Effect.fail(
+              new CapabilityFailed({
+                capability: contract.name,
+                tag: failure._tag,
+                reason: failure.message,
+                fix: failure.fix,
+                failure: encoded
+              })
+            ))
       )
     )
-    return { output: yield* encodeAs(contract, contract.output, output), cites: contract.cites(output) }
+    return {
+      output: yield* encodeAs(contract, contract.output, output),
+      cites: yield* validated(contract, Schema.Array(ObjectRef), contract.cites(output))
+    }
   })
 
 /** The action a gated contract would take for these arguments, decoded at the boundary. */
@@ -134,5 +141,5 @@ export const describeCall = <
 >(
   contract: GatedContract<Name, Input, Output, Failure>,
   args: Schema.Json
-): Effect.Effect<PendingAction, CapabilityInputInvalid> =>
-  Effect.map(decodeInput(contract, args), (input) => contract.describe(input))
+): Effect.Effect<PendingAction, CapabilityInputInvalid | CapabilityEncodingFailed> =>
+  Effect.flatMap(decodeInput(contract, args), (input) => validated(contract, PendingAction, contract.describe(input)))

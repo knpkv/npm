@@ -123,6 +123,67 @@ describe("invoke", () => {
     }))
 })
 
+describe("invoke boundaries", () => {
+  it.effect("keeps a failure outside the declared union a defect with its original value", () =>
+    Effect.gen(function*() {
+      // The declared failure requires a non-empty fix; its TypeScript type is just string, so a handler
+      // can fail with a value the union rejects, as anything from untyped JavaScript could.
+      const Busy = Schema.TaggedStruct("Busy", {
+        message: Schema.String,
+        fix: Schema.String.check(Schema.isNonEmpty())
+      })
+      const original: typeof Busy.Type = { _tag: "Busy", message: "Busy", fix: "" }
+      const busy = implement(
+        defineContract({
+          name: "busy",
+          description: "Fails with a value outside its declared failure.",
+          access: "read",
+          input: Schema.Struct({}),
+          output: Schema.String,
+          failure: Busy
+        }),
+        () => Effect.fail(original)
+      )
+      const exit = yield* invoke(busy, {}).pipe(Effect.exit)
+      expect(Exit.isFailure(exit) && Cause.hasFails(exit.cause)).toBe(false)
+      expect(Exit.isFailure(exit) && Cause.squash(exit.cause)).toBe(original)
+    }))
+
+  it.effect("rejects citations that break the ObjectRef schema", () =>
+    Effect.gen(function*() {
+      const badCites = implement(
+        defineContract({
+          name: "bad_cites",
+          description: "Cites an empty reference.",
+          access: "read",
+          input: Schema.Struct({}),
+          output: Schema.String,
+          failure: Schema.Never,
+          cites: () => [{ product: "", kind: "pull-request", id: "7" }]
+        }),
+        () => Effect.succeed("ok")
+      )
+      const error = yield* invoke(badCites, {}).pipe(Effect.flip)
+      expect(error._tag).toBe("CapabilityEncodingFailed")
+    }))
+
+  it.effect("rejects a pending action that breaks the PendingAction schema", () =>
+    Effect.gen(function*() {
+      const badAction = defineContract({
+        name: "bad_action",
+        description: "Describes an action with no verb.",
+        access: "write",
+        reversible: true,
+        input: Schema.Struct({ id: Schema.String }),
+        output: Schema.String,
+        failure: Schema.Never,
+        describe: ({ id }) => ({ verb: "", target: ref(id), args: { n: Number.NaN } })
+      })
+      const error = yield* describeCall(badAction, { id: "7" }).pipe(Effect.flip)
+      expect(error._tag).toBe("CapabilityEncodingFailed")
+    }))
+})
+
 describe("describeCall", () => {
   it.effect("shows the exact pending action for decoded arguments", () =>
     Effect.gen(function*() {
