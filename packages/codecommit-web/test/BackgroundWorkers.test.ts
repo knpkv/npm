@@ -1,14 +1,14 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigService, PRService, SandboxService } from "@knpkv/codecommit-core"
+import { ConfigService, type Domain, PRService, SandboxService } from "@knpkv/codecommit-core"
 import type { Duration } from "effect"
-import { Deferred, Effect, Fiber, Layer, Ref } from "effect"
+import { Deferred, Effect, Fiber, Layer, Ref, Schema, SubscriptionRef } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import { autoRefreshLayer, sandboxStartupLayer } from "../src/server/internal/BackgroundWorkers.js"
 
 const advanceClockUntil = (
   signal: Deferred.Deferred<void>,
-  step: Duration.DurationInput,
+  step: Duration.Input,
   maximumSteps: number
 ) =>
   Effect.gen(function*() {
@@ -24,6 +24,13 @@ const advanceClockUntil = (
       )
     }
   })
+
+// Only the refresh settings matter to the worker; the rest take their decoding defaults.
+const refreshConfig = (refreshIntervalSeconds: number) =>
+  Schema.decodeSync(ConfigService.TuiConfig)({ accounts: [], autoRefresh: true, refreshIntervalSeconds })
+
+// The worker never reads the published state, but the service carries one.
+const idleState = SubscriptionRef.make<Domain.AppState>({ accounts: [], pullRequests: [], status: "idle" })
 
 describe("background workers", () => {
   it.effect("supervises the actual auto-refresh worker and interrupts it with the layer", () =>
@@ -45,13 +52,9 @@ describe("background workers", () => {
         )
       )
       const dependencies = Layer.mergeAll(
-        Layer.mock(PRService.PRService, { refresh }),
+        Layer.mock(PRService.PRService, { state: yield* idleState, refresh }),
         Layer.mock(ConfigService.ConfigService, {
-          load: Effect.succeed({
-            autoRefresh: true,
-            refreshIntervalSeconds: 1,
-            review: ConfigService.defaultReviewConfig
-          })
+          load: Effect.succeed(refreshConfig(1))
         })
       )
 
@@ -80,6 +83,7 @@ describe("background workers", () => {
       const refreshAttempts = yield* Ref.make(0)
       const dependencies = Layer.mergeAll(
         Layer.mock(PRService.PRService, {
+          state: yield* idleState,
           refresh: Ref.getAndUpdate(refreshAttempts, (attempt) => attempt + 1).pipe(
             Effect.flatMap((attempt) =>
               Deferred.succeed(
@@ -96,11 +100,7 @@ describe("background workers", () => {
                 ? Deferred.succeed(loaderDefected, undefined).pipe(
                   Effect.andThen(Effect.die("config loader defect"))
                 )
-                : Effect.succeed({
-                  autoRefresh: true,
-                  refreshIntervalSeconds: 1,
-                  review: ConfigService.defaultReviewConfig
-                })
+                : Effect.succeed(refreshConfig(1))
             )
           )
         })
@@ -130,6 +130,7 @@ describe("background workers", () => {
       const refreshAttempts = yield* Ref.make(0)
       const dependencies = Layer.mergeAll(
         Layer.mock(PRService.PRService, {
+          state: yield* idleState,
           refresh: Ref.getAndUpdate(refreshAttempts, (attempt) => attempt + 1).pipe(
             Effect.flatMap((attempt) =>
               Deferred.succeed(

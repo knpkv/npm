@@ -164,8 +164,6 @@ describe("resolveAccounts caller identities", () => {
           detectProfiles: Effect.succeed([])
         })
       )
-      // Test entry point: this case's own racing transport is provided once here.
-      // @effect-diagnostics-next-line strictEffectProvide:off
       const resolving = yield* resolveAccounts(state).pipe(
         Effect.provide(racing),
         Effect.forkChild({ startImmediately: true })
@@ -230,8 +228,6 @@ describe("resolveAccounts caller identities", () => {
           detectProfiles: Effect.succeed([])
         })
       )
-      // Test entry point: this case's own slow transport is provided once here.
-      // @effect-diagnostics-next-line strictEffectProvide:off
       const resolving = yield* resolveAccounts(state).pipe(
         Effect.provide(slow),
         Effect.forkChild({ startImmediately: true })
@@ -277,8 +273,6 @@ describe("resolveAccounts caller identities", () => {
           detectProfiles: Effect.succeed([])
         })
       )
-      // Test entry point: this case's own failing transport is provided once here.
-      // @effect-diagnostics-next-line strictEffectProvide:off
       const resolving = yield* resolveAccounts(state).pipe(
         Effect.provide(failing),
         Effect.forkChild({ startImmediately: true })

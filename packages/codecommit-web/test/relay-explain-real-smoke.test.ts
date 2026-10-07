@@ -29,7 +29,7 @@ it.effect("returns a contract-valid Explain result from the authenticated model"
       promptOnly: true,
       timeout: "2 minutes"
     }).pipe(
-      Stream.map(Schema.decodeUnknownOption(AgentMessage)),
+      Stream.map((event) => Schema.decodeUnknownOption(AgentMessage)(event)),
       Stream.filter(Option.isSome),
       Stream.map(({ value }) => value.item.text),
       Stream.runLast

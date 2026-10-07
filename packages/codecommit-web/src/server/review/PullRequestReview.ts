@@ -425,7 +425,16 @@ const binaryPatch = (file: ReadClient.CodeCommitChangedFile): string => {
   ].join("\n")
 }
 
-type PatchRenderer = typeof createTwoFilesPatch
+// The one call shape the patch collector uses: `createTwoFilesPatch`'s synchronous overload.
+type PatchRenderer = (
+  oldFileName: string,
+  newFileName: string,
+  oldStr: string,
+  newStr: string,
+  oldHeader: string,
+  newHeader: string,
+  options: { readonly context: number }
+) => string
 
 interface ChangedPatchLines {
   readonly beforeLines: ReadonlySet<number>
