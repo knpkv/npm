@@ -11,17 +11,12 @@
  *
  * @module
  */
-import { Data, Effect, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { type AgentFilter, type Bucket, LimitsReport, ServerStatus, UsageReport } from "../shared/contracts.js"
+import { readReply, RequestFailure } from "./reply.js"
 
-export class RequestFailure extends Data.TaggedError("RequestFailure")<{
-  readonly message: string
-  readonly status: number
-}> {}
-
-const ErrorBody = Schema.Struct({ message: Schema.String })
-const decodeErrorBody = Schema.decodeUnknownOption(ErrorBody)
+export { RequestFailure } from "./reply.js"
 
 const send = (request: HttpClientRequest.HttpClientRequest) =>
   Effect.gen(function*() {
@@ -29,16 +24,7 @@ const send = (request: HttpClientRequest.HttpClientRequest) =>
     const response = yield* client
       .execute(request)
       .pipe(Effect.mapError(() => new RequestFailure({ message: "The server could not be reached", status: 0 })))
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    const body = yield* response.json.pipe(Effect.orElseSucceed(() => null))
-    if (response.status >= 400) {
-      const parsed = decodeErrorBody(body)
-      return yield* new RequestFailure({
-        message: parsed._tag === "Some" ? parsed.value.message : `Request failed (${response.status})`,
-        status: response.status
-      })
-    }
-    return body
+    return yield* readReply(response)
   }).pipe(
     // Browser boundary: each request owns its fetch client.
     // @effect-diagnostics-next-line strictEffectProvide:off
