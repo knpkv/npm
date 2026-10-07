@@ -14,13 +14,6 @@ import {
   readPaneScrollOffset
 } from "../src/internal/pane-scroll.js"
 
-// Each test effect is an application boundary; @effect/vitest scopes its test layer.
-// @effect-diagnostics-next-line strictEffectProvide:off
-const provideTestClock = Effect.provide(TestClock.layer())
-// The reader tests spawn a real fake herdr, so they own the Node services for their lifetime.
-// @effect-diagnostics-next-line strictEffectProvide:off
-const provideNodeServices = Effect.provide(NodeServices.layer)
-
 describe("read window", () => {
   it("grants at most the limit within a second and frees as reads age out", () => {
     const window = makeReadWindow(2)
@@ -74,7 +67,7 @@ describe("pane scroll reporter", () => {
       expect(calls()).toBe(1)
       expect(seen).toEqual([12])
       expect(reporter.scrolledBack()).toBe(true)
-    })).pipe(provideTestClock))
+    })))
 
   it.effect("waits for the session window rather than dropping the read that ends a burst", () =>
     Effect.scoped(Effect.gen(function*() {
@@ -90,7 +83,7 @@ describe("pane scroll reporter", () => {
       yield* TestClock.adjust("1 second")
       expect(calls()).toBe(3)
       expect(seen).toEqual([3, 7, 9])
-    })).pipe(provideTestClock))
+    })))
 
   it.effect("drops reads past the host cap and keeps the last known position", () =>
     Effect.scoped(Effect.gen(function*() {
@@ -101,7 +94,7 @@ describe("pane scroll reporter", () => {
       yield* TestClock.adjust("200 millis")
       expect(calls()).toBe(1)
       expect(seen).toEqual([4])
-    })).pipe(provideTestClock))
+    })))
 
   it.effect("reports a failed read as unknown, never as the bottom, and repeats nothing unchanged", () =>
     Effect.scoped(Effect.gen(function*() {
@@ -112,7 +105,7 @@ describe("pane scroll reporter", () => {
       }
       expect(seen).toEqual([null, 5])
       expect(reporter.scrolledBack()).toBe(true)
-    })).pipe(provideTestClock))
+    })))
 })
 
 describe("pane scroll reporter coverage", () => {
@@ -129,9 +122,10 @@ describe("pane scroll reporter coverage", () => {
       yield* TestClock.adjust("1 second")
       expect(seen).toEqual([40, 40])
       expect(commands).toEqual([0, 1])
-    })).pipe(provideTestClock))
+    })))
 })
 
+// it.effect runs on a TestClock already, so the reporter tests need no clock of their own.
 describe("readPaneScrollOffset", () => {
   const fakeHerdr = (body: string) => {
     const root = mkdtempSync(join(tmpdir(), "herdr-pane-scroll-"))
@@ -144,29 +138,32 @@ describe("readPaneScrollOffset", () => {
     Effect.gen(function*() {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       return yield* Effect.result(readPaneScrollOffset(spawner, command, root, "w1:p9"))
-    }).pipe(provideNodeServices)
+    })
 
-  it.effect("reads offset_from_bottom from herdr pane get", () => {
-    const { command, root } = fakeHerdr(
-      `[ "$1 $2 $3" = "pane get w1:p9" ] || exit 3
+  // Real processes and real timeouts, so these run on the live clock.
+  it.layer(NodeServices.layer, { excludeTestServices: true })((it) => {
+    it.effect("reads offset_from_bottom from herdr pane get", () => {
+      const { command, root } = fakeHerdr(
+        `[ "$1 $2 $3" = "pane get w1:p9" ] || exit 3
 printf '%s\\n' '{"result":{"pane":{"pane_id":"w1:p9","scroll":{"offset_from_bottom":8176,"viewport_rows":40}}}}'`
-    )
-    return read(command, root).pipe(Effect.map((result) => expect(result).toMatchObject({ success: 8176 })))
-  })
+      )
+      return read(command, root).pipe(Effect.map((result) => expect(result).toMatchObject({ success: 8176 })))
+    })
 
-  it.live("gives up on a herdr that never answers and ignores SIGTERM", () => {
-    const stuck = fakeHerdr("trap '' TERM\nwhile :; do sleep 60; done")
-    return read(stuck.command, stuck.root).pipe(
-      Effect.map((result) => expect(result).toMatchObject({ failure: { detail: "herdr pane get timed out" } }))
-    )
-  }, 10_000)
+    it.effect("gives up on a herdr that never answers and ignores SIGTERM", () => {
+      const stuck = fakeHerdr("trap '' TERM\nwhile :; do sleep 60; done")
+      return read(stuck.command, stuck.root).pipe(
+        Effect.map((result) => expect(result).toMatchObject({ failure: { detail: "herdr pane get timed out" } }))
+      )
+    }, 10_000)
 
-  it.effect("fails on output without a scroll position or a non-zero exit", () => {
-    const missing = fakeHerdr(`printf '%s\\n' '{"result":{"pane":{}}}'`)
-    const exits = fakeHerdr("exit 1")
-    return Effect.gen(function*() {
-      expect(yield* read(missing.command, missing.root)).toMatchObject({ failure: { _tag: "PaneScrollReadError" } })
-      expect(yield* read(exits.command, exits.root)).toMatchObject({ failure: { _tag: "PaneScrollReadError" } })
+    it.effect("fails on output without a scroll position or a non-zero exit", () => {
+      const missing = fakeHerdr(`printf '%s\\n' '{"result":{"pane":{}}}'`)
+      const exits = fakeHerdr("exit 1")
+      return Effect.gen(function*() {
+        expect(yield* read(missing.command, missing.root)).toMatchObject({ failure: { _tag: "PaneScrollReadError" } })
+        expect(yield* read(exits.command, exits.root)).toMatchObject({ failure: { _tag: "PaneScrollReadError" } })
+      })
     })
   })
 })
