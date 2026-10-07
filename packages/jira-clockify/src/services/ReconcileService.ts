@@ -24,7 +24,6 @@
 import { ClockifyApi } from "@knpkv/clockify-api-client"
 import type { make as makeJiraApi } from "@knpkv/jira-api-client"
 import { JiraApiClient } from "@knpkv/jira-api-client"
-import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
@@ -33,6 +32,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -54,12 +54,14 @@ import {
 } from "../agent/sessions.js"
 import * as SourceConsumption from "../agent/sourceConsumption.js"
 import * as WriterGuard from "../cli/writerGuard.js"
+import { CONNECT_JIRA_COMMAND, NOT_LOGGED_IN_HINT } from "../utils/hints.js"
 import { localDay, nextLocalMidnight, splitIntervalByLocalDay } from "../utils/time.js"
 import { AgentSessionReader } from "./AgentSessionReader.js"
 import { ConfigService } from "./ConfigService.js"
 import { HomeDirectory } from "./HomeDirectory.js"
 import { postJiraWorklog } from "./internal/JiraWorklogPost.js"
 import { retryTransport } from "./internal/retryTransport.js"
+import { JiraAccess } from "./JiraAccess.js"
 import { readJiraDeletionEvidence } from "./ProviderDeletion.js"
 import {
   type ClockifyWriteSnapshot,
@@ -755,7 +757,7 @@ export const layer = Layer.effect(
   ReconcileService,
   Effect.gen(function*() {
     const jira = yield* JiraApiClient
-    const jiraAuth = yield* JiraAuth
+    const jiraAccess = yield* JiraAccess
     const config = yield* ConfigService
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -950,9 +952,12 @@ export const layer = Layer.effect(
         // written because its source scope remains null, but independent providers may still proceed.
         const snapshot = pinned === undefined ? yield* jiraWriteSnapshot : pinned
         const client = snapshot?.client ?? jira
-        const cachedAccountId = (yield* jiraAuth.getCurrentUser().pipe(
-          Effect.mapError((cause) => new ReconcileError({ message: "Could not read the Jira account", cause }))
-        ))?.account_id
+        const connection = yield* jiraAccess.connection.pipe(
+          Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
+        )
+        const cachedAccountId = Option.isSome(connection) && connection.value.accountId !== ""
+          ? connection.value.accountId
+          : undefined
         if (snapshot !== null && snapshot !== undefined && cachedAccountId !== snapshot.accountId) {
           return yield* new ReconcileError({
             message: "The cached Jira account does not match the verified credential"
@@ -961,7 +966,9 @@ export const layer = Layer.effect(
         const accountId = snapshot?.accountId ?? cachedAccountId
         if (accountId === undefined || accountId === "") {
           return yield* new ReconcileError({
-            message: "Jira account identity is unavailable; recorded time cannot be tallied"
+            message: Option.isNone(connection)
+              ? NOT_LOGGED_IN_HINT
+              : `Jira did not say which account is connected. Run ${CONNECT_JIRA_COMMAND} again.`
           })
         }
 

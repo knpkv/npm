@@ -743,7 +743,7 @@ describe("jcf watch claude", () => {
       expect(world.jiraWorklogs).toEqual([])
       const printed = output(world.stdout)
       expect(printed).toContain("Stopped:")
-      expect(printed).toContain("jcf auth jira login")
+      expect(printed).toContain("jcf auth jira token")
       // The Clockify half landed and the Jira half did not, and the summary has to say exactly
       // that. For a command whose whole purpose is making sure hours are not lost, overstating what
       // was written is the wrong direction to be wrong in.
@@ -766,7 +766,7 @@ describe("jcf watch claude", () => {
       const printed = output(world.stdout)
       expect(printed).toContain("Stopped:")
       expect(printed).toContain("provider account for this session was not verified")
-      expect(printed).not.toContain("jcf auth jira login")
+      expect(printed).not.toContain("jcf auth jira token")
     }))
 
   it.effect("stops later rows when the late Jira login-state read fails", () =>
@@ -816,7 +816,7 @@ describe("jcf watch claude", () => {
       expect(world.jiraWorklogs).toEqual([])
       expect(world.jiraRequests.filter((request) => request.method === "POST")).toEqual([])
       expect(printed).toContain("provider account for this session was not verified")
-      expect(printed).not.toContain("jcf auth jira login")
+      expect(printed).not.toContain("jcf auth jira token")
     }))
 
   // The Jira half landed and the Clockify half did not. Both numbers have to say so independently:
