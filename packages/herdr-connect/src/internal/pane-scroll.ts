@@ -146,8 +146,9 @@ export interface PaneScrollReporter {
  *
  * Known limit: herdr does not acknowledge scrolls, so a frame stands in as the evidence that the
  * forwarded ones applied, and an undrawn scroll counts as applied after `unseenScrollMs`. A scroll
- * herdr takes longer than that to apply, or one overtaken by an unrelated output frame, can be
- * certified early; the next reading corrects it. Closing this needs herdr to report the offset
+ * herdr takes longer than that to apply, one overtaken by an unrelated output frame, or several
+ * queued scrolls the first of which drew a frame, can be certified early; the next reading
+ * corrects it. Closing this needs herdr to report the offset
  * with its frames (an upstream ask).
  */
 export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporter")(function*(

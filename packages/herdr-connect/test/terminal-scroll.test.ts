@@ -68,6 +68,15 @@ describe("scroll track", () => {
     expect(track.take()).toBeNull()
   })
 
+  it("a positive floor stops scrolling down past a bottom the server confirmed", () => {
+    // Page Up on a pane with no scrollback: herdr clamps it, and the server says the pane is at 0.
+    const track = makeScrollTrack(() => cell, () => 3)
+    track.pan(45)
+    expect(track.take()).toEqual({ direction: "up", lines: 3 })
+    track.pan(-200)
+    expect(track.take()).toBeNull()
+  })
+
   it("a confirmation keeps travel that was not sent yet", () => {
     // Part of a line under the finger stays drawn, and still becomes a line once it is covered.
     const finger = makeScrollTrack(() => cell)

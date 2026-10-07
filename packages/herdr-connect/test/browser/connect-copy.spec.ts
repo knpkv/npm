@@ -505,6 +505,17 @@ test.describe("scroll position from the hub", () => {
     await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith("310 "))).toBe(true)
   })
 
+  test("pressing Latest again while it waits for its reading does not cut it short", async ({ page }) => {
+    // 5 lines arrive while the first page is on its way, so the reading after it says 5.
+    await open(page, { mode: "known", start: 50, chase: 1 })
+    const latest = rail(page).getByRole("button", { name: "Jump to latest output" })
+    await latest.click()
+    await expect.poll(() => downs(page)).toEqual([50])
+    await latest.click()
+    await expect.poll(() => downs(page), { timeout: 10_000 }).toEqual([50, 5])
+    await expect(olderOutput(page)).toHaveCount(0)
+  })
+
   test("an unreadable position falls back to the local estimate and the page-by-page jump", async ({ page }) => {
     await open(page, { mode: "unknown", start: 30 })
     await expect(olderOutput(page)).toHaveCount(0)

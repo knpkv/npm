@@ -63,7 +63,7 @@ import {
   startHttpServer
 } from "../src/http.js"
 import { dashboardDocumentTitle } from "../src/internal/html.js"
-import { remoteTerminalUrl, terminalSelectionInput } from "../src/internal/terminal-selection.js"
+import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "../src/internal/terminal-selection.js"
 import {
   isRelayedScrollState,
   makeLatestSignalSender,
@@ -2524,6 +2524,15 @@ esac
     expect(decode(terminalSelectionInput(remote))).toEqual(current)
   })
 
+  it("relays scroll states only to a client that opted in, whatever produced them", () => {
+    const relayed: Array<string> = []
+    const base = { host: "SER9", agentId: "agent-1", cols: 100, rows: 30 }
+    relayScrollState(base, "legacy", (payload) => relayed.push(payload))
+    relayScrollState({ ...base, scrollState: false }, "declined", (payload) => relayed.push(payload))
+    relayScrollState({ ...base, scrollState: true }, "opted in", (payload) => relayed.push(payload))
+    expect(relayed).toEqual(["opted in"])
+  })
+
   it("tells a remote host's scroll states from its frames and other signals", () => {
     const text = (value: string) => Buffer.from(value)
     expect(
@@ -4199,10 +4208,13 @@ esac
 
             let maximumFrameBytes = 0
             const signals: Array<string> = []
+            // This client opted in to scroll states; a legacy one would get none.
+            const optedIn = new URL(url)
+            optedIn.searchParams.set("scrollState", "1")
             const maximumFrameClose = yield* Effect.promise(
               () =>
                 new Promise<number>((resolve, reject) => {
-                  const socket = new WebSocketClient(url)
+                  const socket = new WebSocketClient(optedIn)
                   socket.once("error", reject)
                   socket.on("message", (data, isBinary) => {
                     if (isBinary) maximumFrameBytes = Buffer.byteLength(data)

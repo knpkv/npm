@@ -411,6 +411,9 @@ export const bindTerminalInteraction = (
     },
     selectText: showText,
     jumpToLatest: () => {
+      // A known jump already under way keeps going: pressing again must not drop the reading it
+      // waits for, which may still find output that arrived meanwhile.
+      if (jump?._tag === "Known") return
       // After an unconfirmed jump the known offset is only an optimistic 0, so probe instead.
       const retrying = unconfirmed
       setUnconfirmed(false)

@@ -116,7 +116,7 @@ import { DashboardView } from "./dashboard-view.js"
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { dashboardDocumentTitle } from "./internal/html.js"
-import { remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
+import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
 import {
   isRelayedScrollState,
   makeLatestSignalSender,
@@ -2167,7 +2167,11 @@ export const startHttpServer = async (
           } else if (event.type === "terminal.scroll_state") {
             // The pane's scroll position as the connector read it. Under backpressure the newest one
             // waits for the buffer to drain; the connector reports only changes, so none may be lost.
-            scrollSignals.offer(JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event)))
+            relayScrollState(
+              selection,
+              JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event)),
+              scrollSignals.offer
+            )
           } else {
             const payload = JSON.stringify(
               Schema.decodeUnknownSync(TerminalServerSignal)({
@@ -2256,7 +2260,7 @@ export const startHttpServer = async (
       socket.once("close", scrollSignals.dispose)
       remote.on("message", (data, isBinary) => {
         if (isRelayedScrollState(data, isBinary)) {
-          scrollSignals.offer(rawText(data))
+          relayScrollState(selection, rawText(data), scrollSignals.offer)
           return
         }
         if (socket.readyState === WebSocketClient.OPEN) {

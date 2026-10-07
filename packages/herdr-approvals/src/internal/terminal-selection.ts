@@ -32,3 +32,15 @@ export const remoteTerminalUrl = (terminalUrl: string, selection: TerminalSelect
   if (selection.scrollState === true) url.searchParams.set("scrollState", "1")
   return url
 }
+
+/**
+ * Relays a scroll state only to a client that asked for them: an older client closes the terminal
+ * on a signal it cannot decode, whatever connector or remote host produced it.
+ */
+export const relayScrollState = (
+  selection: TerminalSelection,
+  payload: string,
+  offer: (payload: string) => void
+): void => {
+  if (selection.scrollState === true) offer(payload)
+}
