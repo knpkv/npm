@@ -2526,15 +2526,28 @@ esac
 
   it("tells a remote host's scroll states from its frames and other signals", () => {
     const text = (value: string) => Buffer.from(value)
-    expect(isRelayedScrollState(text(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 3 })), false))
+    expect(
+      isRelayedScrollState(
+        text(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 3, scrollsForwarded: 0 })),
+        false
+      )
+    )
       .toBe(true)
     // The same bytes as a binary frame, other signals, and junk keep the close-on-backpressure rule.
-    expect(isRelayedScrollState(text(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 3 })), true))
+    expect(
+      isRelayedScrollState(
+        text(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 3, scrollsForwarded: 0 })),
+        true
+      )
+    )
       .toBe(false)
     expect(isRelayedScrollState(text(JSON.stringify({ type: "terminal.ready" })), false)).toBe(false)
     expect(isRelayedScrollState(text("not json"), false)).toBe(false)
     expect(
-      isRelayedScrollState([text("{\"type\":\"terminal.scroll_state\","), text("\"offsetFromBottom\":null}")], false)
+      isRelayedScrollState([
+        text("{\"type\":\"terminal.scroll_state\","),
+        text("\"offsetFromBottom\":null,\"scrollsForwarded\":2}")
+      ], false)
     )
       .toBe(true)
   })
@@ -4048,7 +4061,7 @@ esac
             events: attempt === 2
               ? Stream.empty
               : attempt === 4
-              ? Stream.make({ type: "terminal.scroll_state", offsetFromBottom: 42 }, {
+              ? Stream.make({ type: "terminal.scroll_state", offsetFromBottom: 42, scrollsForwarded: 0 }, {
                 bytes: Buffer.alloc((terminalFrameMaxEncodedBytes / 4) * 3).toString("base64"),
                 encoding: "ansi",
                 full: true,
@@ -4202,7 +4215,7 @@ esac
             expect(maximumFrameBytes).toBe((terminalFrameMaxEncodedBytes / 4) * 3)
             // The scroll position is relayed as a signal and does not end the session.
             expect(signals).toContain(
-              JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 42 })
+              JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 42, scrollsForwarded: 0 })
             )
 
             const held = yield* Effect.promise(

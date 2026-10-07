@@ -113,6 +113,11 @@ export const readPaneScrollOffset = Effect.fn("HerdrTerminal.readPaneScroll")(fu
 export const quietMs = 300
 /** A scroll herdr never renders (clamped at an end) stops blocking reads after this long. */
 export const unseenScrollMs = 1_000
+/**
+ * Frames ask for a read at least this often even at the bottom or after a failed read: another
+ * viewer may have scrolled the pane, or the last read may have failed or been dropped.
+ */
+export const refreshMs = 2_000
 
 export interface PaneScrollReporter {
   /** Ask for a fresh read; bursts collapse into one. */
@@ -121,7 +126,8 @@ export interface PaneScrollReporter {
   readonly scrollForwarded: Effect.Effect<void>
   /**
    * herdr sent a frame: the evidence a forwarded scroll applied, and — while the pane is scrolled
-   * back — a sign that output moved the position. Either way it asks for a read.
+   * back — a sign that output moved the position. Either way it asks for a read; otherwise it asks
+   * at most every `refreshMs`.
    */
   readonly frameSeen: Effect.Effect<void>
   readonly states: Stream.Stream<TerminalScrollState>
@@ -149,6 +155,7 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
   let forwardedScrolls = 0
   let forwardedAtLastReport = 0
   let lastForwardAt = Number.NEGATIVE_INFINITY
+  let lastReadAt = Number.NEGATIVE_INFINITY
   let scrollUnseen = false
   let failureLogged = false
   const request = Queue.offer(requests, undefined).pipe(Effect.asVoid)
@@ -176,6 +183,7 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
       if (untilQuiet(at) > 0) return yield* request
       if (!hostWindow.tryTake(at)) return
       sessionWindow.tryTake(at)
+      lastReadAt = at
       const forwardedBefore = forwardedScrolls
       const offset = yield* read.pipe(
         Effect.catch((error) =>
@@ -195,7 +203,11 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
       if (offset === lastOffset && forwardedScrolls === forwardedAtLastReport) return
       lastOffset = offset
       forwardedAtLastReport = forwardedScrolls
-      yield* Queue.offer(states, { type: "terminal.scroll_state", offsetFromBottom: offset })
+      yield* Queue.offer(states, {
+        type: "terminal.scroll_state",
+        offsetFromBottom: offset,
+        scrollsForwarded: forwardedBefore
+      })
     }))
   )
   return {
@@ -206,8 +218,8 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
       scrollUnseen = true
       return request
     }),
-    frameSeen: Effect.suspend(() => {
-      if (!scrollUnseen && !scrolledBack()) return Effect.void
+    frameSeen: Effect.flatMap(Clock.currentTimeMillis, (now) => {
+      if (!scrollUnseen && !scrolledBack() && now - lastReadAt < refreshMs) return Effect.void
       scrollUnseen = false
       return request
     }),

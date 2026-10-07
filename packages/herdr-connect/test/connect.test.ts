@@ -1633,7 +1633,7 @@ done
               return Option.getOrNull(yield* Fiber.join(first))
             })
           )
-          expect(state).toEqual({ type: "terminal.scroll_state", offsetFromBottom: 0 })
+          expect(state).toEqual({ type: "terminal.scroll_state", offsetFromBottom: 0, scrollsForwarded: 1 })
           expect(readFileSync(paneReadsPath, "utf8")).toContain("pane get w1:p1")
 
           if (platform() !== "win32") {

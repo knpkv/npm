@@ -21,8 +21,9 @@
  * down-scrolls (output arriving while Latest runs), `delay=ms` delivers readings that late, and
  * `rtt=ms` holds each scroll that long before it renders. `POST /__test/scroll-state/mute?on=1` holds readings
  * back, as a slow or rate-limited hub would; `POST /__test/grow?lines=N` streams N lines into the
- * latest session without a reading, and `POST /__test/reading?offset=N` sends it a reading right
- * away, whatever is in flight — a stale one, as a broken hub would (`offset=null` for a read that
+ * latest session without a reading, and `POST /__test/reading?offset=N&scrolls=M` sends it a
+ * reading right away, stamped as taken after M forwarded scrolls (default: all received so far) — a
+ * stale one when M is lower, as a late `herdr pane get` would be (`offset=null` for a read that
  * failed). Ordinary readings are quiet: sent once no scroll has been in flight for 350 ms. Readings only go to
  * sessions whose URL opted in with `scrollState=1`, like the real hosts. `GET /__test/in-flight`
  * returns the most scroll commands that were ever waiting to render at once, and
@@ -143,7 +144,7 @@ let readingsMuted = false
 let scrollsInFlight = 0
 let mostScrollsInFlight = 0
 let growLatest: (lines: number) => void = () => {}
-let readingToLatest: (offsetFromBottom: number | null) => void = () => {}
+let readingToLatest: (offsetFromBottom: number | null, scrollsForwarded: number | null) => void = () => {}
 /** Like the hub, readings wait until no scroll has been in flight for this long. */
 const quietReadingMs = 350
 let readingsSent = 0
@@ -175,6 +176,8 @@ const session = (
     return wrapped.slice(Math.max(0, end - height), end)
   }
   let pendingScrolls = 0
+  // Scroll commands received, as the hub counts those it forwarded; readings carry it.
+  let receivedScrolls = 0
   let readingTimer: ReturnType<typeof setTimeout> | undefined
   // A quiet reading, as the hub takes it: once no scroll has been in flight for a while, sampled
   // then and delivered `delay` later.
@@ -187,7 +190,8 @@ const session = (
       screenRows()
       const reading = JSON.stringify({
         type: "terminal.scroll_state",
-        offsetFromBottom: scrollStateMode.report === "known" ? offset : null
+        offsetFromBottom: scrollStateMode.report === "known" ? offset : null,
+        scrollsForwarded: receivedScrolls
       })
       setTimeout(() => {
         if (socket.readyState !== socket.OPEN) return
@@ -215,8 +219,14 @@ const session = (
     render(report)
   }
   growLatest = (lines) => stream(lines, false)
-  readingToLatest = (offsetFromBottom) =>
-    socket.send(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom }))
+  readingToLatest = (offsetFromBottom, scrollsForwarded) =>
+    socket.send(
+      JSON.stringify({
+        type: "terminal.scroll_state",
+        offsetFromBottom,
+        scrollsForwarded: scrollsForwarded ?? receivedScrolls
+      })
+    )
   socket.send(JSON.stringify({ type: "terminal.ready" }))
   render()
   const ticker = tickMs > 0 ? setInterval(() => stream(1, true), tickMs) : undefined
@@ -228,6 +238,7 @@ const session = (
     if (command.type === "terminal.scroll") {
       scrollsInFlight += 1
       pendingScrolls += 1
+      receivedScrolls += 1
       mostScrollsInFlight = Math.max(mostScrollsInFlight, scrollsInFlight)
       setTimeout(() => {
         scrollsInFlight -= 1
@@ -296,7 +307,8 @@ const handle = (agentsBody: string) => (request: IncomingMessage, response: Serv
     json(response, JSON.stringify({ ok: true }))
   } else if (url.pathname === "/__test/reading" && request.method === "POST") {
     const offset = url.searchParams.get("offset") ?? "0"
-    readingToLatest(offset === "null" ? null : Number(offset))
+    const scrolls = url.searchParams.get("scrolls")
+    readingToLatest(offset === "null" ? null : Number(offset), scrolls === null ? null : Number(scrolls))
     json(response, JSON.stringify({ ok: true }))
   } else if (url.pathname === "/__test/readings") {
     json(response, JSON.stringify({ sent: readingsSent }))

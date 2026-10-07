@@ -419,9 +419,7 @@ const terminalWorker = (
       const interaction = bindTerminalInteraction(
         terminal.terminal,
         container,
-        (command) => {
-          if (ready) send(command)
-        },
+        (command) => ready && send(command),
         keyboard.interactionView
       )
       const releaseInteraction = keyboard.setInteraction(interaction)
@@ -495,7 +493,7 @@ const terminalWorker = (
             return
           }
           if (decoded.success.type === "terminal.scroll_state") {
-            interaction.serverScrollState(decoded.success.offsetFromBottom)
+            interaction.serverScrollState(decoded.success.offsetFromBottom, decoded.success.scrollsForwarded)
             return
           }
           if (decoded.success.type === "terminal.ready") {

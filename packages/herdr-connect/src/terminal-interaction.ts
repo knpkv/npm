@@ -46,7 +46,7 @@ export interface TerminalInteraction {
   readonly frameArrived: (data: Uint8Array) => void
   readonly jumpToLatest: () => void
   /** The pane's real scroll position from the server; `null` when the server could not read it. */
-  readonly serverScrollState: (offsetFromBottom: number | null) => void
+  readonly serverScrollState: (offsetFromBottom: number | null, scrollsForwarded: number) => void
   /** Ask the view to show the screen as selectable text, as a long-press does. */
   readonly selectText: () => void
   readonly dispose: () => void
@@ -83,10 +83,6 @@ const jumpSilenceMs = 2_000
  * may wait up to a second for its read window, and gives `herdr pane get` two seconds.
  */
 const knownJumpSilenceMs = 5_000
-/** Scrolling counts as quiet this long after this client's last scroll, as on the server. */
-const quietMs = 300
-/** A scroll that never draws a frame (clamped at an end) stops counting as in flight after this. */
-const unseenScrollMs = 1_000
 
 /** What the server has said about herdr's scroll position. */
 type ServerPosition =
@@ -120,7 +116,8 @@ const wheelPixels = (event: WheelEvent, cell: number, rows: number): number =>
 export const bindTerminalInteraction = (
   terminal: Terminal,
   container: HTMLElement,
-  send: (command: TerminalScrollCommand) => void,
+  /** Sends a scroll; false when it could not go out (no open, ready socket). */
+  send: (command: TerminalScrollCommand) => boolean,
   view: TerminalInteractionView
 ): TerminalInteraction => {
   disableCopyOnSelect(terminal)
@@ -141,13 +138,10 @@ export const bindTerminalInteraction = (
   let serverPosition: ServerPosition = { _tag: "NoSignal" }
   // A reading is used only when no scroll was in flight on either side when it was taken, so the
   // offset already includes every scroll this client sent. The server reads only once scrolling is
-  // quiet; here, a reading that arrives while this client's scrolls are unlanded or recent is dropped.
-  let lastSentAt = Number.NEGATIVE_INFINITY
-  let unlanded = 0
-  const scrollsQuiet = (): boolean => {
-    const since = performance.now() - lastSentAt
-    return since >= quietMs && (unlanded === 0 || since >= unseenScrollMs)
-  }
+  // quiet and stamps the reading with the scrolls it had forwarded; here it is used only if that
+  // equals the scrolls this session actually wrote to its socket. A late reading — however late —
+  // that predates a scroll therefore never lands, and the next quiet reading does.
+  let scrollsSent = 0
   // How far back the client believes the pane is: the server's reading, its estimate after a
   // failed read, or — with no signal at all — what this client scrolled itself.
   const believedBack = (): number =>
@@ -191,14 +185,20 @@ export const bindTerminalInteraction = (
   // between readings; the next reading corrects any clamping at either end.
   const sendLines = (scroll: LineScroll): void => {
     const lines = scroll.direction === "up" ? scroll.lines : -scroll.lines
-    lastSentAt = performance.now()
-    unlanded += 1
+    const sent = send({
+      type: "terminal.scroll",
+      direction: scroll.direction,
+      lines: scroll.lines,
+      source: "wheel",
+      modifiers: 0
+    })
+    if (!sent) return
+    scrollsSent += 1
     if (serverPosition._tag === "Known") {
       serverPosition = { _tag: "Known", offset: Math.max(0, serverPosition.offset + lines) }
     } else if (serverPosition._tag === "Unknown") {
       serverPosition = { _tag: "Unknown", estimate: Math.max(0, serverPosition.estimate + lines) }
     }
-    send({ type: "terminal.scroll", direction: scroll.direction, lines: scroll.lines, source: "wheel", modifiers: 0 })
   }
   const draw = (): void => {
     const target = canvas()
@@ -385,7 +385,6 @@ export const bindTerminalInteraction = (
     },
     frameArrived: (data) => {
       track.frameArrived()
-      unlanded = Math.max(0, unlanded - 1)
       draw()
       if (jump === null) return
       if (jump._tag === "Frames") {
@@ -399,18 +398,21 @@ export const bindTerminalInteraction = (
       velocity = 0
       track.reset()
       endJump()
+      // Known limit: pressed before the first reading arrives (about half a second after opening),
+      // this probes a page per frame, capped at maximumJumpCommands; a reading arriving meanwhile is
+      // never quiet, so it cannot take over. Pressing Latest again finishes a deeper pane.
       if (serverPosition._tag !== "Known") frameStep(null, 0)
       else if (serverPosition.offset > 0) knownStep(serverPosition.offset)
       draw()
     },
-    serverScrollState: (offsetFromBottom) => {
-      if (!scrollsQuiet()) return
+    serverScrollState: (offsetFromBottom, scrollsForwarded) => {
+      if (scrollsForwarded !== scrollsSent) return
       serverPosition = offsetFromBottom === null
         ? { _tag: "Unknown", estimate: believedBack() }
         : { _tag: "Known", offset: offsetFromBottom }
       if (jump?._tag === "Known" && jump.remaining === 0) {
-        // Quiet, so the last page has landed: a failed read hands over to probing, 0 ends the jump,
-        // anything else is output that arrived meanwhile.
+        // The reading covers every page sent, so the last one has landed: a failed read hands over
+        // to probing, 0 ends the jump, anything else is output that arrived meanwhile.
         if (serverPosition._tag === "Unknown") frameStep(null, 0)
         else if (serverPosition.offset === 0) endJump()
         else knownStep(serverPosition.offset)

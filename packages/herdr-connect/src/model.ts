@@ -168,7 +168,10 @@ export type HerdrTerminalEvent = typeof HerdrTerminalEvent.Type
 export const TerminalScrollState = Schema.Struct({
   type: Schema.Literal("terminal.scroll_state"),
   // Taken only while scrolling was quiet, so it includes every scroll the session forwarded.
-  offsetFromBottom: Schema.NullOr(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)))
+  offsetFromBottom: Schema.NullOr(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+  // How many `terminal.scroll` commands this session had forwarded when the read started. The
+  // client uses the reading only if it equals the scrolls it sent, so none was in flight.
+  scrollsForwarded: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 })
 export type TerminalScrollState = typeof TerminalScrollState.Type
 

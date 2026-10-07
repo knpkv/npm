@@ -38,10 +38,15 @@ const reporterWith = (outcomes: ReadonlyArray<number | "fail">, hostLimit = 10) 
     })
     const reporter = yield* makePaneScrollReporter(read, makeReadWindow(hostLimit))
     const seen: Array<number | null> = []
+    const stamps: Array<number> = []
     yield* Effect.forkScoped(
-      Stream.runForEach(reporter.states, (state) => Effect.sync(() => seen.push(state.offsetFromBottom)))
+      Stream.runForEach(reporter.states, (state) =>
+        Effect.sync(() => {
+          seen.push(state.offsetFromBottom)
+          stamps.push(state.scrollsForwarded)
+        }))
     )
-    return { reporter, seen, calls: () => calls }
+    return { reporter, seen, stamps, calls: () => calls }
   })
 
 describe("pane scroll reporter", () => {
@@ -101,7 +106,7 @@ describe("pane scroll reporter", () => {
 describe("quiet pane readings", () => {
   it.effect("never reads while a forwarded scroll is unlanded or recent", () =>
     Effect.scoped(Effect.gen(function*() {
-      const { calls, reporter, seen } = yield* reporterWith([7])
+      const { calls, reporter, seen, stamps } = yield* reporterWith([7])
       yield* reporter.scrollForwarded
       yield* TestClock.adjust("800 millis")
       // herdr has not shown the scroll applied yet, so no read.
@@ -113,6 +118,8 @@ describe("quiet pane readings", () => {
       yield* TestClock.adjust("1 second")
       expect(calls()).toBe(1)
       expect(seen).toEqual([7])
+      // Stamped with the scrolls forwarded before it, for the client to compare with its own count.
+      expect(stamps).toEqual([1])
     })))
 
   it.effect("drops a reading when a scroll was forwarded while it ran, and reads again", () =>
@@ -168,14 +175,30 @@ describe("quiet pane readings", () => {
       expect(calls()).toBe(1)
     })))
 
-  it.effect("at the bottom with nothing forwarded, frames ask for nothing", () =>
+  it.effect("at the bottom, frames re-read only every two seconds, so another viewer's scroll still shows", () =>
     Effect.scoped(Effect.gen(function*() {
-      const { calls, reporter } = yield* reporterWith([0])
+      const { calls, reporter, seen } = yield* reporterWith([0, 40])
       yield* reporter.request
       yield* TestClock.adjust("1 second")
       yield* reporter.frameSeen
-      yield* TestClock.adjust("1 second")
+      yield* TestClock.adjust("500 millis")
       expect(calls()).toBe(1)
+      // Someone scrolled the pane back elsewhere; the next frame after the refresh interval reads it.
+      yield* TestClock.adjust("1 second")
+      yield* reporter.frameSeen
+      yield* TestClock.adjust("1 second")
+      expect(calls()).toBe(2)
+      expect(seen).toEqual([0, 40])
+    })))
+
+  it.effect("after a failed read, a later frame tries again", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { reporter, seen } = yield* reporterWith(["fail", 9])
+      yield* reporter.request
+      yield* TestClock.adjust("2500 millis")
+      yield* reporter.frameSeen
+      yield* TestClock.adjust("1 second")
+      expect(seen).toEqual([null, 9])
     })))
 })
 
