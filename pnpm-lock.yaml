@@ -1496,6 +1496,9 @@ importers:
       '@knpkv/ai-codex':
         specifier: workspace:^
         version: link:../ai-codex
+      '@knpkv/capability':
+        specifier: workspace:^
+        version: link:../capability
       '@libsql/client':
         specifier: ^0.18.0
         version: 0.18.0
