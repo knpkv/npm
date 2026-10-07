@@ -73,7 +73,8 @@
 .fullTitle h1 {
   max-inline-size: 12ch;
   outline: none;
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
   text-wrap: balance;
 }
 

@@ -54,7 +54,7 @@
   .markLine {
     background: currentcolor;
     block-size: 100%;
-    inline-size: var(--rly-space-2);
+    inline-size: var(--rly-space-2); /* stripe-ok: a stroke inside the 32px Relay mark glyph */
     inset-inline-start: var(--rly-space-6);
     opacity: 0.42;
     position: absolute;

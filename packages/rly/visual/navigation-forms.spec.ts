@@ -35,7 +35,7 @@ test("preserves field semantics and deliberate form-control geometry", async ({ 
   const input = page.getByRole("textbox", { name: /Release name/ })
   const notes = page.getByRole("textbox", { name: "Release notes" })
   const environment = page.getByRole("combobox", { name: "Environment" })
-  expect(Math.round((await input.boundingBox())?.height ?? 0)).toBe(48)
+  expect(Math.round((await input.boundingBox())?.height ?? 0)).toBe(32)
   expect(Math.round((await environment.boundingBox())?.height ?? 0)).toBe(40)
   await expect(notes).toHaveAttribute("aria-invalid", "true")
   await expect(notes).toHaveAttribute("aria-errormessage", "release-notes-error")

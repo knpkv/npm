@@ -19,7 +19,8 @@ test("keeps all service and freshness identities explicit in forced colors", asy
     await expect(page.getByRole("img", { name: provider })).toBeVisible()
   }
   for (const state of ["Current", "Cached", "Stale", "Missing", "Unavailable"]) {
-    await expect(page.getByText(state, { exact: true })).toBeVisible()
+    // A stamp with a time reads "Current, 10:18", so the word may carry its comma.
+    await expect(page.getByText(new RegExp(`^${state},?$`)).first()).toBeVisible()
   }
   await expect(page.locator("[data-rly-evidence-source]")).toHaveCount(5)
   await expect(page.locator("[data-rly-evidence-freshness]")).toHaveCount(5)
@@ -201,6 +202,101 @@ test(
     }
   }
 )
+
+test("sizes verdict headlines to their column, so no word splits across lines", async ({ page }) => {
+  for (const id of ["patterns-verdict--states", "patterns-entityshell--services"]) {
+    for (const width of [1024, 1280, 1440, 390]) {
+      await page.setViewportSize({ height: 900, width })
+      await page.goto(story(id))
+      await expect(page.locator("#storybook-root :is(h1, h2)").first()).toBeVisible()
+      const split = await page.evaluate(() =>
+        [...document.querySelectorAll("[class*='verdict'] h2, h2[class*='verdict'], [class*='verdict']")].flatMap(
+          (element) => {
+            const words: Array<string> = []
+            const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+            for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+              for (const match of (node.textContent ?? "").matchAll(/\S+/g)) {
+                const range = document.createRange()
+                range.setStart(node, match.index)
+                range.setEnd(node, match.index + match[0].length)
+                if (new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size > 1) {
+                  words.push(match[0])
+                }
+              }
+            }
+            return words
+          }
+        )
+      )
+      expect(split, `${id} at ${width}px`).toEqual([])
+    }
+  }
+})
+
+test("keeps revision hashes inside their fact cells at phone widths and in compact stories", async ({ page }) => {
+  const stories = [
+    "patterns-agentproposal--states",
+    "patterns-agentproposal--compact-forced-colors",
+    "patterns-governedactionreview--confirmation",
+    "patterns-governedactionreview--terminal-states"
+  ]
+  for (const id of stories) {
+    for (const width of [320, 390, 1280]) {
+      await page.setViewportSize({ height: 900, width })
+      await page.goto(story(id))
+      await expect(page.locator("dd").first()).toBeVisible()
+      const overflowing = await page.evaluate(() =>
+        [...document.querySelectorAll("dd")]
+          .filter((element) => element.scrollWidth > element.clientWidth + 1)
+          .map((element) => (element.textContent ?? "").slice(0, 24))
+      )
+      expect(overflowing, `${id} at ${width}px`).toEqual([])
+    }
+  }
+})
+
+test("keeps each relation phrase on one line in the chain and the table", async ({ page }) => {
+  for (const id of ["patterns-relationshipchain--cardinalities", "patterns-relationshiptable--equivalence"]) {
+    for (const width of [1280, 1024]) {
+      await page.setViewportSize({ height: 900, width })
+      await page.goto(story(id))
+      await expect(page.locator("[data-rly-relationship-detail]").first()).toBeVisible()
+      const wrapped = await page.evaluate(() =>
+        // The direction phrase ("Implemented by") is the first span of the relation cell's first group.
+        [...document.querySelectorAll("[data-rly-relationship-detail] > span:first-child > span:first-child")]
+          .filter((element) => {
+            const range = document.createRange()
+            range.selectNodeContents(element)
+            return new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size > 1
+          })
+          .map((element) => element.textContent)
+      )
+      expect(wrapped, `${id} at ${width}px`).toEqual([])
+    }
+  }
+})
+
+test("never splits a provider name inside a service mark, at any width", async ({ page }) => {
+  for (const id of ["patterns-servicemark--gallery", "patterns-evidencestamp--compact-forced-colors"]) {
+    for (const width of [320, 390, 768, 1024, 1261, 1440]) {
+      await page.setViewportSize({ height: 900, width })
+      await page.goto(story(id))
+      await expect(page.locator("#storybook-root [data-rly-service]").first()).toBeVisible()
+      const split = await page.evaluate(() =>
+        // The name span is the mark's last child; the glyph may sit on its own line in a stacked size.
+        [...document.querySelectorAll("#storybook-root [data-rly-service] > span:last-child")].flatMap((name) => {
+          const range = document.createRange()
+          range.selectNodeContents(name)
+          const lines = new Set(
+            [...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => Math.round(rect.top))
+          )
+          return lines.size > 1 ? [name.textContent ?? ""] : []
+        })
+      )
+      expect(split, `${id} at ${width}px`).toEqual([])
+    }
+  }
+})
 
 test("keeps a region with an unbreakable title and body token inside 320 pixels", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 1_000, width: 320 })

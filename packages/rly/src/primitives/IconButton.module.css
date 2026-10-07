@@ -28,17 +28,22 @@
     border-color: var(--rly-color-surface-2);
     color: var(--rly-color-text-1);
   }
+  .dense {
+    block-size: var(--rly-control-height-dense);
+    border-radius: var(--rly-radius-tag);
+    inline-size: var(--rly-control-height-dense);
+  }
   .compact {
-    block-size: calc(var(--rly-space-40) + var(--rly-space-4));
-    inline-size: calc(var(--rly-space-40) + var(--rly-space-4));
+    block-size: var(--rly-control-height-compact);
+    inline-size: var(--rly-control-height-compact);
   }
   .defaultSize {
-    block-size: var(--rly-space-48);
-    inline-size: var(--rly-space-48);
+    block-size: var(--rly-control-height-default);
+    inline-size: var(--rly-control-height-default);
   }
   .principal {
-    block-size: calc(var(--rly-space-48) + var(--rly-space-8));
-    inline-size: calc(var(--rly-space-48) + var(--rly-space-8));
+    block-size: var(--rly-control-height-principal);
+    inline-size: var(--rly-control-height-principal);
   }
 
   @media (hover: hover) {
@@ -48,5 +53,25 @@
     .primary:not(:disabled):hover {
       background: var(--rly-color-text-2);
     }
+  }
+
+  /*
+   * Forced colours: a primary icon button is the system's selected pair, and opts out of
+   * adjustment, because Chromium paints a Canvas backplate behind adjusted text and icons.
+   */
+  @media (forced-colors: active) {
+    .primary {
+      background: Highlight;
+      border-color: Highlight;
+      color: HighlightText;
+      forced-color-adjust: none;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .primary {
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
   }
 }

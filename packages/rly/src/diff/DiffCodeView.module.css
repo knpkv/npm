@@ -34,7 +34,8 @@
 
   .annotation {
     background: var(--rly-color-held-tint);
-    border-inline-start: var(--rly-space-2) solid var(--rly-color-held-ink);
+    border: 1px solid color-mix(in oklab, var(--rly-color-held-ink) 35%, transparent);
+    border-radius: var(--rly-radius-tag);
     color: var(--rly-color-text-1);
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);

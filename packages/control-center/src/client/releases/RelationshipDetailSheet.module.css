@@ -84,7 +84,8 @@
 }
 
 .facts dd {
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .history,
