@@ -237,14 +237,10 @@ const decisionBarFor = (request: WorkRequest, decisions: WorkRequestDecisions | 
           : pending
             ? { _tag: "ready" }
             : { _tag: "off", reason: outcome }
-  // An uncertain answer stands only until the snapshot proves what happened; the proof is then the
-  // off reason, so the status says nothing more.
+  // The status adds only what the off reason doesn't say. Once the snapshot proves the outcome, the
+  // reason says it, so an accepted or uncertain answer has nothing to add; a refusal still explains itself.
   const status =
-    answer === null || (answer.outcome === "uncertain" && proven && !pending)
-      ? undefined
-      : answer.outcome !== "uncertain" || pending
-        ? answer.text
-        : `${outcome} ${answer.text}`
+    answer === null || (proven && !pending && answer.outcome !== "refused") ? undefined : answer.text
   const decide = (decision: "approve" | "reject") => () => {
     if (state._tag === "ready") decisions.onDecision({ decision, jobId })
   }

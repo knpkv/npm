@@ -106,6 +106,12 @@ const button = (host: HTMLElement, name: string): HTMLButtonElement | undefined 
     (candidate) => candidate.getAttribute("aria-label") === name
   )
 
+/** The decision bar's off reason and status text, as the reader sees them. */
+const reasonAndStatus = (host: HTMLElement): { readonly reason: string; readonly status: string } => ({
+  reason: host.querySelector("[id^='rly-decision-bar-reason-']")?.textContent ?? "",
+  status: host.querySelector("[id^='rly-decision-bar-status-']")?.textContent ?? ""
+})
+
 describe("workRequestClockText", () => {
   it("keeps seconds under five minutes and reads expiring at zero, never negative", () => {
     expect(workRequestClockText(NOW + 52_000, NOW)).toBe("52s")
@@ -160,8 +166,8 @@ describe("Work requests decided in place", () => {
       { answer: { jobId: "job-1", outcome: "accepted", text: "The hub recorded your approval." } }
     )
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
-    const status = [...host.querySelectorAll("[role='status']")].map(({ textContent }) => textContent)
-    expect(status).toContain("The hub recorded your approval.")
+    // The proven outcome is the off reason; the accepted answer has nothing to add to it.
+    expect(reasonAndStatus(host)).toEqual({ reason: "Approved.", status: "" })
     const approve = button(host, "Approve: Apply r1")
     expect(approve?.getAttribute("aria-disabled")).toBe("true")
     await act(async () => approve?.click())
@@ -209,6 +215,32 @@ describe("Work requests decided in place", () => {
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1")]) })
     const status = [...host.querySelectorAll("[role='status']")].map(({ textContent }) => textContent)
     expect(status).toContain(uncertain)
+  })
+
+  it("never says the same thing twice in the off reason and the status", async () => {
+    const outcomes = ["accepted", "refused", "uncertain"] as const
+    // Pending implies the request is still open, so a proven outcome is never pending.
+    const cases = [
+      { pending: true, state: "open" },
+      { pending: false, state: "open" },
+      { pending: false, state: "approved" },
+      { pending: false, state: "rejected" }
+    ] as const
+    for (const outcome of outcomes) {
+      for (const { pending, state } of cases) {
+        const text = outcome === "uncertain" ? "Couldn't reach the hub." : `The hub ${outcome} your decision.`
+        const { decisions } = decisionsOf(pending ? { "job-1": NOW + 60_000 } : {}, {
+          answer: { jobId: "job-1", outcome, text }
+        })
+        const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", state)]) })
+        const { reason, status } = reasonAndStatus(host)
+        const label = `${outcome}, ${pending ? "pending" : "not pending"}, ${state}`
+        if (reason !== "" && status !== "") {
+          expect(status.includes(reason) || reason.includes(status), label).toBe(false)
+        }
+        expect(`${reason}${status}`, label).not.toBe("")
+      }
+    }
   })
 
   it("never offers a decision on the read-only view", async () => {
