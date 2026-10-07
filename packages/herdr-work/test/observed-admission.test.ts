@@ -73,6 +73,17 @@ const absenceToken = (work: Effect.Success<typeof fixture>["work"]) =>
     return preflight.absenceToken
   })
 
+/** Confirms every stored fact, as a pass that has just re-read them all would, then reconciles. */
+const reconcileConfirmed = (
+  store: { readonly snapshotInput: WorkStore["snapshotInput"] },
+  work: { readonly reconcile: WorkStore["reconcile"] }
+) =>
+  store.snapshotInput().pipe(
+    Effect.flatMap(({ facts }) =>
+      work.reconcile({ confirmed: facts.map(({ observationId, subject }) => ({ observationId, subject })) })
+    )
+  )
+
 describe("observed admission", () => {
   it.effect("admits an observed worker, credited to the reconciler and its observation", () =>
     Effect.scoped(Effect.gen(function*() {
@@ -153,7 +164,7 @@ describe("observed admission", () => {
 
   it.effect("still lets the reconciler close an observed goal when its pull request merges", () =>
     Effect.scoped(Effect.gen(function*() {
-      const { work } = yield* fixture
+      const { store, work } = yield* fixture
       yield* work.admitObserved(observedRequest(yield* absenceToken(work)))
       yield* work.observe([{
         observation: {
@@ -170,7 +181,7 @@ describe("observed admission", () => {
         observedAt: 2_000
       }])
       yield* TestClock.setTime(3_000)
-      expect((yield* work.reconcile())[0]?._tag).toBe("applied")
+      expect((yield* reconcileConfirmed(store, work))[0]?._tag).toBe("applied")
       const goal = (yield* work.snapshots()).now.goals.find(({ id }) => id === target.goalId)
       expect(goal?.state).toBe("completed")
     })))
