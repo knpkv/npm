@@ -482,7 +482,7 @@ const terminalWorker = (
             return
           }
           if (decoded.success.type === "terminal.scroll_state") {
-            interaction.serverScrollState(decoded.success.offsetFromBottom, decoded.success.scrollCommands)
+            interaction.serverScrollState(decoded.success.offsetFromBottom)
             return
           }
           if (decoded.success.type === "terminal.ready") {

@@ -1614,8 +1614,8 @@ done
           // The session above did not opt in, so it never read the pane.
           expect(existsSync(paneReadsPath)).toBe(false)
 
-          // An opted-in session reports the pane's position. The fake herdr sends no frame after the
-          // scroll, so nothing shows it applied and the reading does not claim it.
+          // An opted-in session reports the pane's position. The fake herdr never renders the scroll,
+          // so the read waits out the unseen-scroll second before it is taken.
           const state = yield* Effect.scoped(
             Effect.gen(function*() {
               const session = yield* connector.open({
@@ -1629,11 +1629,11 @@ done
               const first = yield* Stream.runHead(
                 Stream.filter(session.events, (event) => event.type === "terminal.scroll_state")
               ).pipe(Effect.forkChild({ startImmediately: true }))
-              yield* TestClock.adjust("1 second")
+              yield* TestClock.adjust("2 seconds")
               return Option.getOrNull(yield* Fiber.join(first))
             })
           )
-          expect(state).toEqual({ type: "terminal.scroll_state", offsetFromBottom: 0, scrollCommands: 0 })
+          expect(state).toEqual({ type: "terminal.scroll_state", offsetFromBottom: 0 })
           expect(readFileSync(paneReadsPath, "utf8")).toContain("pane get w1:p1")
 
           if (platform() !== "win32") {

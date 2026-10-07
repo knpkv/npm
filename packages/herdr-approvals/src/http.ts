@@ -117,7 +117,13 @@ import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { dashboardDocumentTitle } from "./internal/html.js"
 import { remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
-import { makeLatestSignalSender, relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
+import {
+  isRelayedScrollState,
+  makeLatestSignalSender,
+  rawText,
+  relayTerminalCloseCode,
+  terminalBufferCanAccept
+} from "./internal/websocket.js"
 import { LanWorkPage, LanWorkPairPage } from "./lan-work-view.js"
 import {
   decodeLanWorkPairRequest,
@@ -2241,7 +2247,18 @@ export const startHttpServer = async (
           }
         })
       })
+      // Scroll states hold the newest value under backpressure, as on a local terminal.
+      const scrollSignals = makeLatestSignalSender({
+        bufferedAmount: () => socket.bufferedAmount,
+        isOpen: () => socket.readyState === WebSocketClient.OPEN,
+        send: (payload) => socket.send(payload)
+      }, 100)
+      socket.once("close", scrollSignals.dispose)
       remote.on("message", (data, isBinary) => {
+        if (isRelayedScrollState(data, isBinary)) {
+          scrollSignals.offer(rawText(data))
+          return
+        }
         if (socket.readyState === WebSocketClient.OPEN) {
           const payloadBytes = Array.isArray(data)
             ? data.reduce((bytes, part) => bytes + part.byteLength, 0)

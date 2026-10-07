@@ -109,15 +109,19 @@ export const readPaneScrollOffset = Effect.fn("HerdrTerminal.readPaneScroll")(fu
   return decoded.result.pane.scroll.offset_from_bottom
 })
 
+/** Scrolling counts as quiet this long after the last forwarded scroll. */
+export const quietMs = 300
+/** A scroll herdr never renders (clamped at an end) stops blocking reads after this long. */
+export const unseenScrollMs = 1_000
+
 export interface PaneScrollReporter {
   /** Ask for a fresh read; bursts collapse into one. */
   readonly request: Effect.Effect<void>
-  /** A `terminal.scroll` was forwarded to herdr: counts it and asks for a read. */
+  /** A `terminal.scroll` was forwarded to herdr: reads wait until scrolling is quiet again. */
   readonly scrollForwarded: Effect.Effect<void>
   /**
-   * herdr sent a frame. A read is asked for when the pane is scrolled back, since output then moves
-   * the position, and on the first frame after a forwarded scroll: forwarding only queues the scroll,
-   * so a read stamped as covering it may have been taken before herdr applied it.
+   * herdr sent a frame: the evidence a forwarded scroll applied, and — while the pane is scrolled
+   * back — a sign that output moved the position. Either way it asks for a read.
    */
   readonly frameSeen: Effect.Effect<void>
   readonly states: Stream.Stream<TerminalScrollState>
@@ -127,6 +131,11 @@ export interface PaneScrollReporter {
  * One session's reporter. Requests collapse into a single pending read; the read waits for the
  * session's window (so a burst still ends with a fresh position) but is dropped if the host window
  * is full. A failed read reports the position as unknown and is logged once for the session.
+ *
+ * Readings are quiet: a read starts only once no scroll was forwarded for `quietMs` and herdr has
+ * rendered a frame since the last one (or `unseenScrollMs` passed), and a reading is discarded if a
+ * scroll was forwarded while it ran. So every reported offset already includes every scroll this
+ * session forwarded, without matching readings to individual scrolls.
  */
 export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporter")(function*(
   read: Effect.Effect<number, PaneScrollReadError>,
@@ -137,27 +146,37 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
   const sessionWindow = makeReadWindow(sessionReadsPerSecond)
   // undefined until the first report, so a first read that fails is still reported as unknown.
   let lastOffset: number | null | undefined = undefined
-  let lastCommands = 0
   let forwardedScrolls = 0
-  // Forwarding only queues a scroll; the frame herdr sends after it is the evidence it applied.
-  // Readings are stamped with the scrolls seen applied, so none claims one it may predate.
-  let appliedScrolls = 0
+  let forwardedAtLastReport = 0
+  let lastForwardAt = Number.NEGATIVE_INFINITY
   let scrollUnseen = false
   let failureLogged = false
-  const report = (offsetFromBottom: number | null, scrollCommands: number) =>
-    Queue.offer(states, { type: "terminal.scroll_state", offsetFromBottom, scrollCommands })
+  const request = Queue.offer(requests, undefined).pipe(Effect.asVoid)
+  const scrolledBack = () => lastOffset !== undefined && lastOffset !== null && lastOffset > 0
+  // How long until scrolling is quiet, or 0 if it is.
+  const untilQuiet = (now: number): number => {
+    const since = now - lastForwardAt
+    const settled = !scrollUnseen || since >= unseenScrollMs
+    if (since >= quietMs && settled) return 0
+    return settled ? quietMs - since : Math.max(quietMs, unseenScrollMs) - since
+  }
   yield* Effect.forkScoped(
     Effect.forever(Effect.gen(function*() {
       yield* Queue.take(requests)
       yield* Effect.sleep(Duration.millis(readDebounceMs))
       yield* Queue.clear(requests)
+      for (let wait = untilQuiet(yield* Clock.currentTimeMillis); wait > 0;) {
+        yield* Effect.sleep(Duration.millis(wait))
+        wait = untilQuiet(yield* Clock.currentTimeMillis)
+      }
       const now = yield* Clock.currentTimeMillis
-      const wait = sessionWindow.nextFreeAt(now) - now
-      if (wait > 0) yield* Effect.sleep(Duration.millis(wait))
+      const window = sessionWindow.nextFreeAt(now) - now
+      if (window > 0) yield* Effect.sleep(Duration.millis(window))
       const at = yield* Clock.currentTimeMillis
+      if (untilQuiet(at) > 0) return yield* request
       if (!hostWindow.tryTake(at)) return
       sessionWindow.tryTake(at)
-      const scrollCommands = appliedScrolls
+      const forwardedBefore = forwardedScrolls
       const offset = yield* read.pipe(
         Effect.catch((error) =>
           Effect.gen(function*() {
@@ -169,27 +188,27 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
           })
         )
       )
-      // A reading that covers more scrolls is news even at the same offset: the client may have
-      // assumed those scrolls moved the pane.
-      if (offset === lastOffset && scrollCommands === lastCommands) return
+      // A scroll forwarded while herdr was being read may or may not be in this offset: read again.
+      if (forwardedScrolls !== forwardedBefore) return yield* request
+      // The same offset is news after scrolls: the client assumed they moved the pane, and herdr
+      // may have clamped them.
+      if (offset === lastOffset && forwardedScrolls === forwardedAtLastReport) return
       lastOffset = offset
-      lastCommands = scrollCommands
-      yield* report(offset, scrollCommands)
+      forwardedAtLastReport = forwardedScrolls
+      yield* Queue.offer(states, { type: "terminal.scroll_state", offsetFromBottom: offset })
     }))
   )
-  const request = Queue.offer(requests, undefined).pipe(Effect.asVoid)
-  const scrolledBack = () => lastOffset !== undefined && lastOffset !== null && lastOffset > 0
   return {
     request,
-    scrollForwarded: Effect.suspend(() => {
+    scrollForwarded: Effect.flatMap(Clock.currentTimeMillis, (now) => {
       forwardedScrolls += 1
+      lastForwardAt = now
       scrollUnseen = true
       return request
     }),
     frameSeen: Effect.suspend(() => {
       if (!scrollUnseen && !scrolledBack()) return Effect.void
       scrollUnseen = false
-      appliedScrolls = forwardedScrolls
       return request
     }),
     states: Stream.fromQueue(states)

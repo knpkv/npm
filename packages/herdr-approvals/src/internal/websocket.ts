@@ -1,3 +1,24 @@
+import { TerminalScrollState } from "@knpkv/herdr-connect"
+import { Option, Schema } from "effect"
+import type { RawData } from "ws"
+
+const decodeScrollState = Schema.decodeUnknownOption(Schema.fromJsonString(TerminalScrollState))
+
+/**
+ * Whether a message relayed from a remote host is a scroll state. Those carry only the newest
+ * value, so under browser backpressure they wait instead of closing the terminal like a frame would.
+ */
+export const isRelayedScrollState = (data: RawData, isBinary: boolean): boolean =>
+  !isBinary && Option.isSome(decodeScrollState(rawText(data)))
+
+/** The text of a WebSocket message, however `ws` delivered it. */
+export const rawText = (data: RawData): string =>
+  Array.isArray(data)
+    ? Buffer.concat(data).toString()
+    : Buffer.isBuffer(data)
+    ? data.toString()
+    : Buffer.from(data).toString()
+
 export const relayTerminalCloseCode = (code: number): number =>
   (code >= 1_000 &&
       code <= 1_014 &&

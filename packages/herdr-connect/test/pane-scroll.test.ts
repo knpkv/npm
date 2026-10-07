@@ -1,7 +1,7 @@
 /** Scroll-position reads spawn a process each, so the caps and the unknown state are the contract. */
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Stream } from "effect"
+import { Deferred, Effect, Stream } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs"
@@ -38,20 +38,10 @@ const reporterWith = (outcomes: ReadonlyArray<number | "fail">, hostLimit = 10) 
     })
     const reporter = yield* makePaneScrollReporter(read, makeReadWindow(hostLimit))
     const seen: Array<number | null> = []
-    const commands: Array<number> = []
     yield* Effect.forkScoped(
-      Stream.runForEach(reporter.states, (state) =>
-        Effect.sync(() => {
-          seen.push(state.offsetFromBottom)
-          commands.push(state.scrollCommands)
-        }))
+      Stream.runForEach(reporter.states, (state) => Effect.sync(() => seen.push(state.offsetFromBottom)))
     )
-    return {
-      reporter,
-      seen,
-      commands,
-      calls: () => calls
-    }
+    return { reporter, seen, calls: () => calls }
   })
 
 describe("pane scroll reporter", () => {
@@ -106,48 +96,86 @@ describe("pane scroll reporter", () => {
     })))
 })
 
-describe("pane scroll reporter coverage", () => {
-  it.effect("stamps readings only with scrolls a frame showed applied, and reports the same offset again once more are", () =>
+// The guarantee: every reported offset was read while no scroll was in flight, so it already
+// includes every scroll the session forwarded.
+describe("quiet pane readings", () => {
+  it.effect("never reads while a forwarded scroll is unlanded or recent", () =>
     Effect.scoped(Effect.gen(function*() {
-      // A scroll clamped at the top leaves the offset unchanged, but the client already assumed it moved.
-      const { calls, commands, reporter, seen } = yield* reporterWith([40, 40, 40])
-      yield* reporter.request
-      yield* TestClock.adjust("1 second")
-      // Forwarded but not yet shown applied: this read may predate it, so it must not claim it.
+      const { calls, reporter, seen } = yield* reporterWith([7])
       yield* reporter.scrollForwarded
-      yield* TestClock.adjust("1 second")
-      expect(calls()).toBe(2)
-      expect(commands).toEqual([0])
-      // herdr's frame shows the scroll landed; the read after it covers it.
+      yield* TestClock.adjust("800 millis")
+      // herdr has not shown the scroll applied yet, so no read.
+      expect(calls()).toBe(0)
       yield* reporter.frameSeen
+      yield* TestClock.adjust("100 millis")
+      expect(calls()).toBe(0)
+      // Landed and quiet: now it reads.
       yield* TestClock.adjust("1 second")
-      expect(seen).toEqual([40, 40])
-      expect(commands).toEqual([0, 1])
+      expect(calls()).toBe(1)
+      expect(seen).toEqual([7])
     })))
 
-  it.effect("reads again on the first frame after a forwarded scroll, since herdr may not have applied it yet", () =>
+  it.effect("drops a reading when a scroll was forwarded while it ran, and reads again", () =>
     Effect.scoped(Effect.gen(function*() {
-      // The read stamped as covering the scroll saw the pane before herdr moved it.
-      const { calls, reporter, seen } = yield* reporterWith([0, 0, 12])
+      const gate = yield* Deferred.make<void>()
+      let calls = 0
+      const read = Effect.gen(function*() {
+        calls += 1
+        if (calls === 1) {
+          yield* Deferred.await(gate)
+          // Sampled before the scroll below reached herdr.
+          return 5
+        }
+        return 8
+      })
+      const reporter = yield* makePaneScrollReporter(read, makeReadWindow(10))
+      const seen: Array<number | null> = []
+      yield* Effect.forkScoped(
+        Stream.runForEach(reporter.states, (state) => Effect.sync(() => seen.push(state.offsetFromBottom)))
+      )
+      yield* reporter.request
+      yield* TestClock.adjust("200 millis")
+      expect(calls).toBe(1)
+      yield* reporter.scrollForwarded
+      yield* reporter.frameSeen
+      yield* Deferred.succeed(gate, undefined)
+      yield* TestClock.adjust("2 seconds")
+      expect(calls).toBe(2)
+      expect(seen).toEqual([8])
+    })))
+
+  it.effect("reports the same offset again after scrolls, which herdr may have clamped", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { reporter, seen } = yield* reporterWith([40, 40, 40])
       yield* reporter.request
       yield* TestClock.adjust("1 second")
       yield* reporter.scrollForwarded
-      yield* TestClock.adjust("1 second")
-      expect(calls()).toBe(2)
-      // herdr renders the scroll: that frame asks for one more read, which sees the real position.
       yield* reporter.frameSeen
       yield* TestClock.adjust("1 second")
-      // The read before the frame repeats the opening one exactly, stamp included, so only the read after it is news.
-      expect(seen).toEqual([0, 12])
-      // At the bottom with nothing forwarded since, frames ask for nothing.
-      const before = calls()
-      const quiet = yield* reporterWith([0])
-      yield* quiet.reporter.request
+      // A plain re-read with nothing forwarded since is not news.
+      yield* reporter.request
       yield* TestClock.adjust("1 second")
-      yield* quiet.reporter.frameSeen
+      expect(seen).toEqual([40, 40])
+    })))
+
+  it.effect("a scroll herdr never renders blocks reads only for a second", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { calls, reporter } = yield* reporterWith([0])
+      yield* reporter.scrollForwarded
+      yield* TestClock.adjust("900 millis")
+      expect(calls()).toBe(0)
+      yield* TestClock.adjust("500 millis")
+      expect(calls()).toBe(1)
+    })))
+
+  it.effect("at the bottom with nothing forwarded, frames ask for nothing", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { calls, reporter } = yield* reporterWith([0])
+      yield* reporter.request
       yield* TestClock.adjust("1 second")
-      expect(quiet.calls()).toBe(1)
-      expect(calls()).toBe(before)
+      yield* reporter.frameSeen
+      yield* TestClock.adjust("1 second")
+      expect(calls()).toBe(1)
     })))
 })
 

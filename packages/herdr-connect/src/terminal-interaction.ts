@@ -46,7 +46,7 @@ export interface TerminalInteraction {
   readonly frameArrived: (data: Uint8Array) => void
   readonly jumpToLatest: () => void
   /** The pane's real scroll position from the server; `null` when the server could not read it. */
-  readonly serverScrollState: (offsetFromBottom: number | null, scrollCommands: number) => void
+  readonly serverScrollState: (offsetFromBottom: number | null) => void
   /** Ask the view to show the screen as selectable text, as a long-press does. */
   readonly selectText: () => void
   readonly dispose: () => void
@@ -83,8 +83,10 @@ const jumpSilenceMs = 2_000
  * may wait up to a second for its read window, and gives `herdr pane get` two seconds.
  */
 const knownJumpSilenceMs = 5_000
-/** Scrolls remembered for re-applying to a late reading; a hub that never reads keeps only these. */
-const maximumUncoveredScrolls = 256
+/** Scrolling counts as quiet this long after this client's last scroll, as on the server. */
+const quietMs = 300
+/** A scroll that never draws a frame (clamped at an end) stops counting as in flight after this. */
+const unseenScrollMs = 1_000
 
 /** What the server has said about herdr's scroll position. */
 type ServerPosition =
@@ -100,17 +102,10 @@ type Timer = ReturnType<typeof setTimeout>
 type Jump =
   // Position unknown: a page per frame until a frame comes back unchanged.
   | { readonly _tag: "Frames"; readonly previous: string | null; readonly sent: number; readonly timer: Timer }
-  // Position known: the exact lines left, a page per frame, then a reading that covers the last
-  // page decides — output that arrived meanwhile is sent too, and only a reading of 0 ends it.
-  // Each round covers only the output of the round before, so it converges.
-  | {
-    readonly _tag: "Known"
-    readonly remaining: number
-    readonly lastCommand: number
-    // The frame for the last page arrived, so nothing is in flight.
-    readonly landed: boolean
-    readonly timer: Timer
-  }
+  // Position known: the exact lines left, a page per frame, then the next quiet reading decides —
+  // output that arrived meanwhile is sent too, and only a reading of 0 ends it. Each round covers
+  // only the output of the round before, so it converges.
+  | { readonly _tag: "Known"; readonly remaining: number; readonly timer: Timer }
 
 const isCopyKey = (event: KeyboardEvent): boolean =>
   (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c"
@@ -144,9 +139,15 @@ export const bindTerminalInteraction = (
   // The server's reading of herdr's position. Without a known one — an older hub, or a read that
   // failed — the local estimate and the frame-by-frame jump stand in.
   let serverPosition: ServerPosition = { _tag: "NoSignal" }
-  // Scrolls sent since the last reading that covered them, as signed lines (up positive). A reading
-  // taken before a scroll reached herdr must not undo it, so the uncovered ones are re-applied.
-  let sentScrolls = 0
+  // A reading is used only when no scroll was in flight on either side when it was taken, so the
+  // offset already includes every scroll this client sent. The server reads only once scrolling is
+  // quiet; here, a reading that arrives while this client's scrolls are unlanded or recent is dropped.
+  let lastSentAt = Number.NEGATIVE_INFINITY
+  let unlanded = 0
+  const scrollsQuiet = (): boolean => {
+    const since = performance.now() - lastSentAt
+    return since >= quietMs && (unlanded === 0 || since >= unseenScrollMs)
+  }
   // How far back the client believes the pane is: the server's reading, its estimate after a
   // failed read, or — with no signal at all — what this client scrolled itself.
   const believedBack = (): number =>
@@ -155,7 +156,6 @@ export const bindTerminalInteraction = (
       : serverPosition._tag === "Unknown"
       ? serverPosition.estimate
       : track.linesBack()
-  let uncovered: ReadonlyArray<{ readonly command: number; readonly lines: number }> = []
   let holdTimer: ReturnType<typeof setTimeout> | null = null
   let wheelTimer: ReturnType<typeof setTimeout> | null = null
   let jump: Jump | null = null
@@ -191,8 +191,8 @@ export const bindTerminalInteraction = (
   // between readings; the next reading corrects any clamping at either end.
   const sendLines = (scroll: LineScroll): void => {
     const lines = scroll.direction === "up" ? scroll.lines : -scroll.lines
-    sentScrolls += 1
-    uncovered = [...uncovered, { command: sentScrolls, lines }].slice(-maximumUncoveredScrolls)
+    lastSentAt = performance.now()
+    unlanded += 1
     if (serverPosition._tag === "Known") {
       serverPosition = { _tag: "Known", offset: Math.max(0, serverPosition.offset + lines) }
     } else if (serverPosition._tag === "Unknown") {
@@ -337,7 +337,7 @@ export const bindTerminalInteraction = (
     const lines = Math.min(maximumLinesPerCommand, remaining)
     const timer = silence(knownJumpSilenceMs)
     sendLines({ direction: "down", lines })
-    jump = { _tag: "Known", remaining: remaining - lines, lastCommand: sentScrolls, landed: false, timer }
+    jump = { _tag: "Known", remaining: remaining - lines, timer }
   }
 
   const copySelection = (): string | null => {
@@ -385,6 +385,7 @@ export const bindTerminalInteraction = (
     },
     frameArrived: (data) => {
       track.frameArrived()
+      unlanded = Math.max(0, unlanded - 1)
       draw()
       if (jump === null) return
       if (jump._tag === "Frames") {
@@ -392,7 +393,6 @@ export const bindTerminalInteraction = (
         if (key === jump.previous || jump.sent >= maximumJumpCommands) endJump()
         else frameStep(key, jump.sent)
       } else if (jump.remaining > 0) knownStep(jump.remaining)
-      else jump = { ...jump, landed: true }
     },
     selectText: showText,
     jumpToLatest: () => {
@@ -403,33 +403,17 @@ export const bindTerminalInteraction = (
       else if (serverPosition.offset > 0) knownStep(serverPosition.offset)
       draw()
     },
-    serverScrollState: (offsetFromBottom, scrollCommands) => {
-      uncovered = uncovered.filter((scroll) => scroll.command > scrollCommands)
-      const pending = uncovered.reduce((total, scroll) => total + scroll.lines, 0)
+    serverScrollState: (offsetFromBottom) => {
+      if (!scrollsQuiet()) return
       serverPosition = offsetFromBottom === null
         ? { _tag: "Unknown", estimate: believedBack() }
-        : { _tag: "Known", offset: Math.max(0, offsetFromBottom + pending) }
-      if (jump?._tag === "Frames" && serverPosition._tag === "Known") {
-        // The position became known mid-jump (a late first reading): send the exact rest instead,
-        // once the probe in flight lands.
-        if (serverPosition.offset === 0) endJump()
-        else {jump = {
-            _tag: "Known",
-            remaining: serverPosition.offset,
-            lastCommand: sentScrolls,
-            landed: false,
-            timer: jump.timer
-          }}
-      } else if (jump?._tag === "Known") {
-        // A reading that fails mid-jump hands the rest to the page-per-frame jump, never with two
-        // pages in flight: it starts now only if the last page already landed.
-        if (serverPosition._tag === "Unknown") {
-          if (jump.landed) frameStep(null, 0)
-          else jump = { _tag: "Frames", previous: null, sent: 0, timer: jump.timer }
-        } else if (jump.remaining === 0 && scrollCommands >= jump.lastCommand) {
-          if (serverPosition.offset === 0) endJump()
-          else knownStep(serverPosition.offset)
-        }
+        : { _tag: "Known", offset: offsetFromBottom }
+      if (jump?._tag === "Known" && jump.remaining === 0) {
+        // Quiet, so the last page has landed: a failed read hands over to probing, 0 ends the jump,
+        // anything else is output that arrived meanwhile.
+        if (serverPosition._tag === "Unknown") frameStep(null, 0)
+        else if (serverPosition.offset === 0) endJump()
+        else knownStep(serverPosition.offset)
       }
       draw()
     },
