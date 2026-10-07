@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as SubscriptionRef from "effect/SubscriptionRef"
@@ -920,5 +921,37 @@ describe("TimerService", () => {
         const state = yield* SubscriptionRef.get(svc.state)
         expect(state.startedAt?.toISOString()).toBe(startedAt.toISOString())
       }).pipe(Effect.provide(TestLayer)))
+  })
+
+  // A failed enrichment never blocks the timer, and is never silent: the warning names what was dropped.
+  describe("failed enrichment", () => {
+    const transportFailure = (url: string) =>
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.TransportError({ request: HttpClientRequest.get(url), description: "boom" })
+      })
+
+    it.effect("starts without a tag Clockify would not give, and warns naming it", () =>
+      Effect.gen(function*() {
+        resetCaptures()
+        const messages: Array<unknown> = []
+        const logger = Logger.make<unknown, void>((entry) => {
+          messages.push(entry.message)
+        })
+        const svc = yield* TimerService
+        yield* svc.start(makeTicket({ type: "Bug", labels: ["backend"] })).pipe(Effect.withLogger(logger))
+        expect((yield* SubscriptionRef.get(svc.state)).active).toBe(true)
+        expect(paramsRecord(createdEntries[0]?.params)["tagIds"]).toEqual(["tag-backend"])
+        expect(messages.map(String).join("\n")).toContain(
+          `Clockify tag "Bug" could not be found or created; the entry starts without it`
+        )
+      }).pipe(Effect.provide(
+        makeTestLayer({
+          ...mockClockify,
+          findOrCreateTag: (_ws, name) =>
+            name === "Bug"
+              ? Effect.fail(transportFailure("https://clockify.test/tags"))
+              : Effect.succeed({ id: `tag-${name}`, name, workspaceId: WORKSPACE_ID, archived: false })
+        })
+      )))
   })
 })

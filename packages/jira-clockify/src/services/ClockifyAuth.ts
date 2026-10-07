@@ -35,9 +35,17 @@ const StoredAuth = Schema.Struct({
 })
 interface StoredAuth extends Schema.Schema.Type<typeof StoredAuth> {}
 
+/** The Clockify key could not be written, or could not be made readable by its owner only. */
+export class ClockifyKeyNotSaved extends Data.TaggedError("ClockifyKeyNotSaved")<{ readonly path: string }> {
+  override get message() {
+    return `Could not save the Clockify key to ${this.path}. Check that the folder is writable.`
+  }
+}
+
 export interface ClockifyAuthContract {
   readonly getConfig: Effect.Effect<ClockifyApiConfigContract, ClockifyAuthMissingError>
-  readonly save: (auth: StoredAuth) => Effect.Effect<void>
+  /** Save the key, readable by the owner only. Fails when it cannot be written or locked down. */
+  readonly save: (auth: StoredAuth) => Effect.Effect<void, ClockifyKeyNotSaved>
   readonly isConfigured: Effect.Effect<boolean>
 }
 
@@ -98,14 +106,15 @@ export const layer = Layer.effect(
       save: (auth) =>
         Effect.gen(function*() {
           yield* ensureDir
-          yield* fs.writeFileString(filePath, JSON.stringify(auth, null, 2))
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-          yield* fs.chmod(filePath, 0o600).pipe(Effect.catch(() => Effect.void))
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        }).pipe(Effect.catch(() => Effect.void)),
+          yield* fs.writeFileString(filePath, JSON.stringify(auth, null, 2), { mode: 0o600 })
+          yield* fs.chmod(filePath, 0o600)
+        }).pipe(Effect.mapError(() => new ClockifyKeyNotSaved({ path: filePath }))),
 
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      isConfigured: fs.exists(filePath).pipe(Effect.catch(() => Effect.succeed(false)))
+      isConfigured: fs.exists(filePath).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning(`Could not check for the Clockify key at ${filePath}`, error).pipe(Effect.as(false))
+        )
+      )
     }
   })
 )
