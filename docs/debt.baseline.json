@@ -1,0 +1,2721 @@
+{
+  "version": 1,
+  "directives": [
+    {
+      "package": "agent-usage",
+      "kind": "ast-grep",
+      "file": "packages/agent-usage/test/login.test.ts",
+      "text": "ast-grep-ignore: no-released-ephemeral-test-port -- the spawned server takes PORT from its environment; follow-up: let it bind 0 and report its port.",
+      "reasoned": true
+    },
+    {
+      "package": "agent-usage",
+      "kind": "effect-diagnostics",
+      "file": "packages/agent-usage/src/client/api.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "agent-usage",
+      "kind": "effect-diagnostics",
+      "file": "packages/agent-usage/src/main.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "agent-usage",
+      "kind": "effect-diagnostics",
+      "file": "packages/agent-usage/test/browser/server.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "ai-claude",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-claude/test/model.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "ai-claude",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-claude/test/model.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "ai-claude",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-claude/test/relay-boundary.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "ai-codex",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-codex/test/events.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "ai-codex",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-codex/test/events.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "ai-codex",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-codex/test/events.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "ai-codex",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-codex/test/model.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "ai-codex",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-codex/test/model.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "ai-codex",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-codex/test/real-smoke.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "ai-codex",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-codex/test/real-smoke.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "ai-codex",
+      "kind": "typescript",
+      "file": "packages/ai-codex/dtslint/event-requirements.ts",
+      "text": "@ts-expect-error ordinary streams must not acquire a FileSystem requirement",
+      "reasoned": true
+    },
+    {
+      "package": "ai-runtime",
+      "kind": "effect-diagnostics",
+      "file": "packages/ai-runtime/test/runtime.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "ai-runtime",
+      "kind": "eslint",
+      "file": "packages/ai-runtime/src/runtime.ts",
+      "text": "eslint-disable-next-line local-rules/require-exact-cause-rethrow -- This adapter boundary deliberately normalizes defects; runtime.test.ts covers defect normalization and interruption.",
+      "reasoned": true
+    },
+    {
+      "package": "ai-runtime",
+      "kind": "typescript",
+      "file": "packages/ai-runtime/dtslint/public-contract.ts",
+      "text": "@ts-expect-error adapters cannot spoof validator-owned protocol failures",
+      "reasoned": true
+    },
+    {
+      "package": "ai-runtime",
+      "kind": "typescript",
+      "file": "packages/ai-runtime/dtslint/public-contract.ts",
+      "text": "@ts-expect-error opaque session references cannot be used as durable run identities",
+      "reasoned": true
+    },
+    {
+      "package": "ai-runtime",
+      "kind": "typescript",
+      "file": "packages/ai-runtime/dtslint/public-contract.ts",
+      "text": "@ts-expect-error provider identities cannot be used as durable run identities",
+      "reasoned": true
+    },
+    {
+      "package": "ai-runtime",
+      "kind": "typescript",
+      "file": "packages/ai-runtime/dtslint/valid-contract.ts",
+      "text": "@ts-expect-error opaque session references cannot be used as durable run identities",
+      "reasoned": true
+    },
+    {
+      "package": "ai-runtime",
+      "kind": "typescript",
+      "file": "packages/ai-runtime/dtslint/valid-contract.ts",
+      "text": "@ts-expect-error provider identities cannot be used as durable run identities",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "effect-diagnostics",
+      "file": "packages/atlassian-common/test/cli.errorHandling.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "effect-diagnostics",
+      "file": "packages/atlassian-common/test/cliAuth.authCommand.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "effect-diagnostics",
+      "file": "packages/atlassian-common/test/cliAuth.guardrails.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "effect-diagnostics",
+      "file": "packages/atlassian-common/test/cliAuth.login.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "effect-diagnostics",
+      "file": "packages/atlassian-common/test/cliAuth.oauthServer.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "effect-diagnostics",
+      "file": "packages/atlassian-common/test/cliAuth.openBrowser.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "effect-diagnostics",
+      "file": "packages/atlassian-common/test/cliAuth.refresh.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "bounded-io",
+      "kind": "effect-diagnostics",
+      "file": "packages/bounded-io/test/childProcess.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/index.test.ts",
+      "text": "@ts-expect-error Exercise the JavaScript runtime boundary with an untyped credential value.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/index.test.ts",
+      "text": "@ts-expect-error Exercise the runtime boundary with a malformed cookie name.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/index.test.ts",
+      "text": "@ts-expect-error Exercise the runtime boundary with a malformed cookie path.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/index.test.ts",
+      "text": "@ts-expect-error Exercise the runtime boundary with a non-boolean HttpOnly flag.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/index.test.ts",
+      "text": "@ts-expect-error Exercise the runtime boundary with a non-boolean secure flag.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/index.test.ts",
+      "text": "@ts-expect-error Exercise the runtime boundary with a secure cookie missing its source origin.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/index.test.ts",
+      "text": "@ts-expect-error Exercise the runtime boundary with an untyped SameSite value.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/roles.ts",
+      "text": "@ts-expect-error A bootstrap URL carries only the pairing role, never the session.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/roles.ts",
+      "text": "@ts-expect-error A minted code is a pairing credential, not a session token.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/roles.ts",
+      "text": "@ts-expect-error Bootstrap URL credentials must not become session-cookie credentials.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/roles.ts",
+      "text": "@ts-expect-error Role brands must not be interchangeable.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/roles.ts",
+      "text": "@ts-expect-error Role brands must not be interchangeable.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/roles.ts",
+      "text": "@ts-expect-error Role brands must not be interchangeable.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/roles.ts",
+      "text": "@ts-expect-error Secure cookies must carry the origin used to establish trust.",
+      "reasoned": true
+    },
+    {
+      "package": "browser-pairing",
+      "kind": "typescript",
+      "file": "packages/browser-pairing/test/roles.ts",
+      "text": "@ts-expect-error The CSRF proof must not stand in for the pairing role.",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/src/bin.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/src/PrCreate.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/src/PrExport.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/src/PrList.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/src/PrOpen.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/src/PrUpdate.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/DetailsWorkspace.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/DetailsWorkspace.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/FilterService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/FilterService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/FilterService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/FilterService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/FilterService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/FilterService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/FilterService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/FilterService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/GitContextService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/GitContextService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/GitContextService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/GitContextService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/GitContextService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/PrList.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/PrList.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/PrList.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/PrOpen.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/PrOpen.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/PrOpen.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/PrOpen.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/PrUpdate.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit/test/RelayReview.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/scripts/test-packed-package.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/approvalEvaluation.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/approvalEvaluation.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/AwsClientGated.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/ChildEnv.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/ConfigService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/ConfigService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/ConfigService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/ConfigService.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/NotificationRepo.dedup.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.refreshFetch.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.visibility.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.visibility.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.visibility.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.visibility.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PRService.visibility.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/PullRequestCoordinates.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/ReadClient.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/SandboxRepo.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/SandboxService.security.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/SandboxService.security.test.ts",
+      "text": "@effect-diagnostics-next-line missingEffectContext:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/SandboxWorkerScope.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/StatsCoordinates.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/StatsService.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-core/test/SubscriptionRepo.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-mock",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-mock/src/cli.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-mock",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-mock/test/GitFixture.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-mock",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-mock/test/GitFixture.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-mock",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-mock/test/GitFixture.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-mock",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-mock/test/GitFixture.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-mock",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-mock/test/GitFixture.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/src/main.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/src/server/review/PullRequestReview.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/BackgroundWorkers.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/BackgroundWorkers.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/BackgroundWorkers.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/BackgroundWorkers.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/BackgroundWorkers.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/BackgroundWorkers.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/BackgroundWorkers.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/BackgroundWorkers.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/pull-request-review.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/pull-request-review.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/pull-request-review.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/pull-request-review.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/pull-request-review.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/pull-request-review.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/pull-request-review.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/relay-explain-real-smoke.test.ts",
+      "text": "@effect-diagnostics missingEffectContext:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/relay-explain-real-smoke.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/review-skill-catalog.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/review-skill-catalog.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/review-skill-catalog.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/review-skill-catalog.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/review-skill-catalog.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/codecommit-web/test/review-skill-catalog.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "eslint",
+      "file": "packages/codecommit-web/src/client/hooks/useSSE.ts",
+      "text": "eslint-disable-next-line no-console",
+      "reasoned": false
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "effect-diagnostics",
+      "file": "packages/confluence-to-markdown/test/authCommand.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "effect-diagnostics",
+      "file": "packages/confluence-to-markdown/test/ConfluenceAuth.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "ast-grep",
+      "file": "packages/control-center/e2e/realRuntimeFixture.ts",
+      "text": "ast-grep-ignore: no-released-ephemeral-test-port -- the spawned runtime takes its port as an argument; follow-up: let it bind 0 and report its port.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "ast-grep",
+      "file": "packages/control-center/src/server/runtime/ServerLifecycle.ts",
+      "text": "ast-grep-ignore: no-unowned-detached-fiber",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "ast-grep",
+      "file": "packages/control-center/test/integration/liveServerPort.ts",
+      "text": "ast-grep-ignore: no-released-ephemeral-test-port -- the live server takes its port as an argument; follow-up: let it bind 0 and report its port.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "ast-grep",
+      "file": "packages/control-center/test/runtime/offline-backup.test.ts",
+      "text": "ast-grep-ignore: no-released-ephemeral-test-port -- the built CLI takes its port as an argument; follow-up: let it bind 0 and report its port.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "ast-grep",
+      "file": "packages/control-center/test/runtime/server-smoke.test.ts",
+      "text": "ast-grep-ignore: no-released-ephemeral-test-port -- the built CLI takes its port as an argument; follow-up: let it bind 0 and report its port.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/src/client/entities/WorkspacePullRequestDiff.tsx",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/src/client/entities/WorkspacePullRequestDiff.tsx",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/src/client/openPullRequest/openPullRequest.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/src/server/agent/internal/PrReviewTaskExecutor.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/src/server/cli.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/src/server/plugins/internal/FirstPartyPluginRuntimeRegistry.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/agent-job-worker.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-sandbox-session.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-source-workspace.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-task-executor.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-task-executor.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-task-executor.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-task-executor.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-task-executor.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-task-executor.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-task-executor.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-task-executor.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/agent/pr-review-task-executor.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/application/adapters.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/application/pull-request-reviews.test.ts",
+      "text": "@effect-diagnostics-next-line effectSucceedWithVoid:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/application/pull-request-reviews.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/application/pull-request-reviews.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/application/pull-request-reviews.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/application/pull-request-reviews.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/application/pull-request-reviews.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/application/pull-request-reviews.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/application/pull-request-reviews.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/auth/auth.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/governance/governedActionExecutionEngine.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/governance/governedActionExecutionEngine.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/persistence/agent-job-review-results.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/persistence/agent-job-review-results.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/persistence/agent-job-review-results.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/persistence/agent-job-review-results.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/persistence/delivery-graph-repository.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/persistence/delivery-graph-repository.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/persistence/delivery-graph-repository.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/plugins/codecommit-plugin.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/plugins/codecommit-plugin.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/runtime/cli.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/runtime/server-smoke.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/runtime/server-smoke.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/runtime/server-smoke.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/runtime/server-smoke.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/runtime/server-smoke.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/runtime/server-smoke.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/runtime/server-smoke.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/security/request-security.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/security/request-security.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/security/request-security.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/unit/javascriptArtifactBudget.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/unit/package-contract.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/unit/productionRouteInventory.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center/test/unit/rlyCssTokenValidation.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "eslint",
+      "file": "packages/control-center/src/server/api/RequestBoundary.ts",
+      "text": "eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The HTTP boundary translates only identified schema defects; request-boundary.test.ts covers translation and unrelated-cause preservation.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "eslint",
+      "file": "packages/control-center/src/server/application/liveEvents.ts",
+      "text": "eslint-disable-next-line local-rules/require-exact-cause-rethrow -- This terminal stream boundary logs and closes on non-interrupt failure; live-events.test.ts covers termination and cancellation.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "eslint",
+      "file": "packages/control-center/src/server/persistence/backup/BackupArchive.ts",
+      "text": "eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The backup adapter classifies SDK defects; backup-archive.test.ts covers classification and interruption.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "eslint",
+      "file": "packages/control-center/src/server/persistence/Database.ts",
+      "text": "eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The database adapter redacts connection defects while retaining cancellation; database.test.ts covers both paths.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "eslint",
+      "file": "packages/control-center/src/server/persistence/Database.ts",
+      "text": "eslint-disable-next-line local-rules/require-exact-cause-rethrow -- The schema barrier intentionally redacts defects; database.test.ts covers redaction and interruption.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "eslint",
+      "file": "packages/control-center/src/server/runtime/internal/superviseAgentJobWorker.ts",
+      "text": "eslint-disable-next-line local-rules/require-exact-cause-rethrow -- This lifecycle supervisor logs defects and continues; agent-job-worker.test.ts covers retry and scoped interruption.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "eslint",
+      "file": "packages/control-center/src/server/runtime/RetentionStartup.ts",
+      "text": "eslint-disable-next-line local-rules/require-exact-cause-rethrow -- This lifecycle supervisor logs defects and continues; retention-startup.test.ts covers retry and scoped interruption.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "eslint",
+      "file": "packages/control-center/src/server/runtime/ServerLifecycle.ts",
+      "text": "eslint-disable-line local-rules/no-unowned-detached-fiber",
+      "reasoned": false
+    },
+    {
+      "package": "control-center",
+      "kind": "eslint",
+      "file": "packages/control-center/src/server/runtime/ServerLifecycle.ts",
+      "text": "eslint-disable-next-line local-rules/require-exact-cause-rethrow -- This lifecycle boundary redacts hook defects; server-lifecycle.test.ts covers HooksFailed and interruption.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "typescript",
+      "file": "packages/control-center/test/security/auth-credential-roles.ts",
+      "text": "@ts-expect-error Only session credentials may enter the cookie serializer.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "typescript",
+      "file": "packages/control-center/test/security/auth-credential-roles.ts",
+      "text": "@ts-expect-error Pairing codes must not become CSRF proofs.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center",
+      "kind": "typescript",
+      "file": "packages/control-center/test/security/auth-credential-roles.ts",
+      "text": "@ts-expect-error Pairing codes must not enter session-token operations.",
+      "reasoned": true
+    },
+    {
+      "package": "control-center-sql",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center-sql/scripts/test-packed-package.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "control-center-sql",
+      "kind": "effect-diagnostics",
+      "file": "packages/control-center-sql/scripts/vendor-effect-qb.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "ast-grep",
+      "file": "packages/herdr-approvals/test/http.test.ts",
+      "text": "ast-grep-ignore: no-released-ephemeral-test-port -- one test must probe a port before hostd binds it (see its use).",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/scripts/test-packed-packages.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/src/bin.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/src/fleetctl.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/test/config-path.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/test/hostd-runtime.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/test/hostd-runtime.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/test/hostd-runtime.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/test/http.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/test/lan-work.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/test/operations.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/test/outstanding-work-job.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/test/push-worker.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-approvals",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-approvals/test/state-files.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-connect",
+      "kind": "ast-grep",
+      "file": "packages/herdr-connect/src/internal/terminal-release.ts",
+      "text": "ast-grep-ignore: no-unowned-detached-fiber",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-connect",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-connect/test/connect.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-connect",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-connect/test/connect.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-connect",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-connect/test/connect.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-connect",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-connect/test/terminal-release-kill.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-connect",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-connect/test/terminal-release-kill.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-connect",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-connect/test/terminal-stderr.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-connect",
+      "kind": "eslint",
+      "file": "packages/herdr-connect/src/internal/terminal-release.ts",
+      "text": "eslint-disable-line local-rules/no-unowned-detached-fiber",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/coordinator.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/orchestrator.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/orchestrator.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/orchestrator.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
+      "text": "@effect-diagnostics-next-line missingEffectContext:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
+      "text": "@effect-diagnostics-next-line missingEffectContext:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
+      "text": "@effect-diagnostics-next-line missingEffectContext:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
+      "text": "@effect-diagnostics-next-line missingEffectContext:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/work-schema-parity.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/work-schema-parity.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-fleet",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-fleet/test/fleet.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-fleet",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-fleet/test/sqlite.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-monitor",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-monitor/src/cli.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-monitor",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-monitor/src/cli.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-monitor",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-monitor/src/client/read-board.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-monitor",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-monitor/src/publisher.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-monitor",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-monitor/test/http.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-tailscale",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-tailscale/test/tailscale.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-work",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-work/test/existing-goal-recovery.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-work",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-work/test/goal-abandon.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-work",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-work/test/goal-reassignment.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-work",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-work/test/observation-store.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-work",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-work/test/observed-admission.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-work",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-work/test/prospective-admission.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-work",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-work/test/terminal-reconcile.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "herdr-work",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-work/test/work.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-work",
+      "kind": "eslint",
+      "file": "packages/herdr-work/test/work.test.ts",
+      "text": "eslint-disable-next-line local-rules/require-immediate-work-store-cleanup",
+      "reasoned": true
+    },
+    {
+      "package": "jcf-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/jcf-web/src/client/transport.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jcf-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/jcf-web/src/main.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jcf-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/jcf-web/test/browser/server.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jcf-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/jcf-web/test/confirm.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jcf-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/jcf-web/test/confirmDst.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jcf-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/jcf-web/test/describeRoute.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jcf-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/jcf-web/test/readRoute.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jcf-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/jcf-web/test/recordedWeek.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jcf-web",
+      "kind": "effect-diagnostics",
+      "file": "packages/jcf-web/test/savedEntryRoutes.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-cli",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-cli/src/bin.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-cli",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-cli/test/authCommand.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "jira-cli",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-cli/test/JiraAuth.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:skip-file",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/src/bin.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/src/services/SessionAttributor.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/src/services/SessionAttributor.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/agentReconcile.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/agentReconcile.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/AgentSessionReader.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/AgentSessionReader.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/agentWatch.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/agentWatch.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/calendarZones.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/commandSurface.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/commandSurface.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/config.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/config.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/fetchTicket.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/fetchTicket.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/issueFacts.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/SavedEntries.retarget-ledger.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/SavedEntries.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/SavedEntries.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/SessionAttributor.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/SessionAttributor.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/statusCmd.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/statusCmd.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/statusCmd.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/statusCmd.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/statusCmd.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/statusCmd.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/statusCmd.test.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/stopPrompts.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/stopPrompts.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/timerEdit.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/TimerService.test.ts",
+      "text": "@effect-diagnostics multipleEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/TimerService.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "effect-diagnostics",
+      "file": "packages/jira-clockify/test/writerGuard.test.ts",
+      "text": "@effect-diagnostics strictEffectProvide:off",
+      "reasoned": false
+    },
+    {
+      "package": "relay",
+      "kind": "ast-grep",
+      "file": "packages/relay/src/libsqlDatabase.ts",
+      "text": "ast-grep-ignore: no-type-assertion",
+      "reasoned": true
+    },
+    {
+      "package": "review",
+      "kind": "typescript",
+      "file": "packages/review/test/export-guide.test.ts",
+      "text": "@ts-expect-error Exercise the untyped JavaScript caller boundary.",
+      "reasoned": true
+    },
+    {
+      "package": "review",
+      "kind": "typescript",
+      "file": "packages/review/test/export-guide.test.ts",
+      "text": "@ts-expect-error Exercise the untyped JavaScript caller boundary.",
+      "reasoned": true
+    },
+    {
+      "package": "review",
+      "kind": "typescript",
+      "file": "packages/review/test/export-guide.test.ts",
+      "text": "@ts-expect-error Exercise the untyped JavaScript caller boundary.",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "effect-diagnostics",
+      "file": "packages/rly/scripts/build-storybook.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "effect-diagnostics",
+      "file": "packages/rly/scripts/test-packed-package.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "effect-diagnostics",
+      "file": "packages/rly/scripts/tokens/lint-stripes.ts",
+      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "eslint",
+      "file": "packages/rly/src/diff/worker-pool.tsx",
+      "text": "eslint-disable-next-line import-x/default",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/diff/DiffFinding.test.tsx",
+      "text": "@ts-expect-error Agent findings require an explicit prevention plan.",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/foundations/GlobalStyles.test.tsx",
+      "text": "@ts-expect-error asChild cannot safely type a wrapper ref against an arbitrary child element",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/foundations/Icon.test.tsx",
+      "text": "@ts-expect-error decorative icons cannot contribute a second accessible label",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/foundations/Icon.test.tsx",
+      "text": "@ts-expect-error informative icons require an accessible label",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/patterns/AgentJob.test.tsx",
+      "text": "@ts-expect-error a requested cancellation cannot be requested twice",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/patterns/AgentJob.test.tsx",
+      "text": "@ts-expect-error terminal jobs cannot expose a cancellation callback",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/patterns/AgentJob.test.tsx",
+      "text": "@ts-expect-error terminal jobs require a truthful outcome",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Avatar.test.tsx",
+      "text": "@ts-expect-error decorative avatars cannot expose a competing label",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Avatar.test.tsx",
+      "text": "@ts-expect-error meaningful avatars require an accessible label",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Button.test.tsx",
+      "text": "@ts-expect-error Button intentionally accepts plain visible text only.",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Button.test.tsx",
+      "text": "@ts-expect-error Button intentionally rejects empty arrays.",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Button.test.tsx",
+      "text": "@ts-expect-error Button intentionally rejects empty element trees.",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Divider.test.tsx",
+      "text": "@ts-expect-error a semantic divider requires a label",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Divider.test.tsx",
+      "text": "@ts-expect-error decorative dividers cannot expose a label",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/IconButton.test.tsx",
+      "text": "@ts-expect-error icon-only actions require an accessible label",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/IconButton.test.tsx",
+      "text": "@ts-expect-error visible children would violate icon-only action semantics",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Skeleton.test.tsx",
+      "text": "@ts-expect-error informative placeholders require a label",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Surface.test.tsx",
+      "text": "@ts-expect-error an aside host cannot forward a list-item ref",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Tabs.test.tsx",
+      "text": "@ts-expect-error controlled and default selection cannot be combined",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Tabs.test.tsx",
+      "text": "@ts-expect-error controlled Tabs require an owner callback",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Tabs.test.tsx",
+      "text": "@ts-expect-error tab labels must be visible strings",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Text.test.tsx",
+      "text": "@ts-expect-error a span host cannot forward a list-item ref",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Text.test.tsx",
+      "text": "@ts-expect-error variant-dependent implicit hosts deliberately do not accept refs",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/Text.test.tsx",
+      "text": "@ts-expect-error visual heading variants require explicit document semantics",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/ToggleGroup.test.tsx",
+      "text": "@ts-expect-error a toggle group is always controlled",
+      "reasoned": true
+    },
+    {
+      "package": "rly",
+      "kind": "typescript",
+      "file": "packages/rly/test/primitives/ToggleGroup.test.tsx",
+      "text": "@ts-expect-error option labels must be visible strings",
+      "reasoned": true
+    }
+  ]
+}
