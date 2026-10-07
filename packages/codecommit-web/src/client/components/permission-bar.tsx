@@ -35,31 +35,34 @@ export function PermissionBar({ prompt }: { readonly prompt: NonNullable<AppStat
   }
 
   return (
-    <Notice
-      action={
-        <div className={styles.actions}>
-          <Button onClick={() => respond({ payload: { id: prompt.id, response: "allow_once" } })} size="compact">
-            Allow once
-          </Button>
-          <Button onClick={allowEveryRead} size="compact" variant="secondary">
-            Allow every read
-          </Button>
-          <Button
-            onClick={() => respond({ payload: { id: prompt.id, response: "deny" } })}
-            size="compact"
-            variant="quiet"
-          >
-            Deny
-          </Button>
-        </div>
-      }
-      announce="polite"
-      className={styles.bar}
-      tone="caution"
-    >
-      CodeCommit asks before reading from AWS: {prompt.context}. Allowing every read covers pull requests, approval
-      status and identity for all profiles; changes still ask each time.
-      {failure === null ? null : <span className={styles.failure}> {failure}</span>}
-    </Notice>
+    // Marked so a modal drawer steps aside for it: the page behind a modal is inert.
+    <div data-needs-answer="">
+      <Notice
+        action={
+          <div className={styles.actions}>
+            <Button onClick={() => respond({ payload: { id: prompt.id, response: "allow_once" } })} size="compact">
+              Allow once
+            </Button>
+            <Button onClick={allowEveryRead} size="compact" variant="secondary">
+              Allow every read
+            </Button>
+            <Button
+              onClick={() => respond({ payload: { id: prompt.id, response: "deny" } })}
+              size="compact"
+              variant="quiet"
+            >
+              Deny
+            </Button>
+          </div>
+        }
+        announce="polite"
+        className={styles.bar}
+        tone="caution"
+      >
+        CodeCommit asks before reading from AWS: {prompt.context}. Allowing every read covers pull requests, approval
+        status and identity for all profiles; changes still ask each time.
+        {failure === null ? null : <span className={styles.failure}> {failure}</span>}
+      </Notice>
+    </div>
   )
 }
