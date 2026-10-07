@@ -6,6 +6,7 @@ import { BoxIcon, CheckIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { configQueryAtom, configSaveAtom } from "../atoms/app.js"
 import { COMMAND_PRESETS, MOUNT_PRESETS, type SandboxVolumeMount } from "../sandbox-presets.js"
+import { ConfigUnavailable } from "./load-failed.js"
 import { Button } from "./ui/button.js"
 import { Input } from "./ui/input.js"
 import { Separator } from "./ui/separator.js"
@@ -142,7 +143,7 @@ export function SettingsSandboxView({ config, saveConfig }: SettingsSandboxViewP
       <Separator />
       {AsyncResult.builder(config)
         .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)
-        .onFailure(() => <p className="text-sm text-destructive">Failed to load config</p>)
+        .onFailure(() => <ConfigUnavailable />)
         .onSuccess(() => local && <SandboxForm settings={local} onChange={update} />)
         .exhaustive()}
     </div>

@@ -18,6 +18,7 @@ import { useNavigate, useSearchParams } from "react-router"
 import { appStateAtom, statsSyncAtom } from "../atoms/app.js"
 import { codeCommitPullRequestHref } from "../codecommit-route.js"
 import { useWeeklyStats } from "../hooks/useWeeklyStats.js"
+import { LoadFailed } from "./load-failed.js"
 import {
   formatMs,
   HealthCard,
@@ -338,7 +339,7 @@ export function StatsPage() {
   const author = searchParams.get("author") || undefined
   const account = searchParams.get("account") || undefined
 
-  const statsResult = useWeeklyStats(week, { repo, author, account })
+  const { result: statsResult, retry: retryStats } = useWeeklyStats(week, { repo, author, account })
 
   const appState = useAtomValue(appStateAtom)
   const syncing = appState.status === "loading"
@@ -482,7 +483,13 @@ export function StatsPage() {
             <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
           </div>
         ))
-        .onFailure(() => <div className="text-sm text-destructive py-4">Failed to load stats</div>)
+        .onFailure(() => (
+          <LoadFailed
+            description="The CodeCommit server did not return this week's statistics. Try again, or Sync to read the week from CodeCommit."
+            onRetry={retryStats}
+            title="Statistics unavailable"
+          />
+        ))
         .onSuccess((data) => (
           <StatsContent data={data} navigate={navigate} goToPR={goToPR} handleSync={handleSync} syncing={syncing} />
         ))

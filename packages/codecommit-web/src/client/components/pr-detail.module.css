@@ -85,7 +85,8 @@
 .codeLink {
   color: var(--rly-color-text-1);
   text-decoration-line: underline;
-  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  /* 60% keeps the line at 3:1 or more against the canvas in both themes (35% was 2.19:1 in light). */
+  text-decoration-color: color-mix(in srgb, currentColor 60%, transparent);
   text-decoration-thickness: 1px;
   text-underline-offset: var(--rly-space-4);
 }

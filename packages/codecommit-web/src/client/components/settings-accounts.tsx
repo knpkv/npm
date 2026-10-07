@@ -5,6 +5,7 @@ import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { InfoIcon, LogInIcon, LogOutIcon, SearchIcon, ServerIcon, UserIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { appStateAtom, configQueryAtom, configSaveAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
+import { ConfigUnavailable } from "./load-failed.js"
 import { Button, ButtonGroup } from "./ui/button.js"
 import { Input } from "./ui/input.js"
 import { SsoSignOutDialog } from "./sso-sign-out-dialog.js"
@@ -88,7 +89,7 @@ export function SettingsAccounts() {
       <Separator />
       {AsyncResult.builder(config)
         .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)
-        .onFailure(() => <p className="text-sm text-destructive">Failed to load config</p>)
+        .onFailure(() => <ConfigUnavailable />)
         .onSuccess((data) => (
           <AccountsList
             currentUser={appState.currentUser}
