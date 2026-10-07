@@ -8,6 +8,7 @@ import {
   activityNavigationIndex,
   filterActivityItems
 } from "../src/activity-history.js"
+import { sanitizeJobRecord, type SanitizedJobRecord } from "../src/approval-request.js"
 
 const sensitivePrompt = "Deploy revision 0123456789abcdef0123456789abcdef01234567 with nonce private-nonce"
 const sensitiveMessage = "Run internal command with approval hash private-hash"
@@ -62,11 +63,22 @@ const failedMessage: JobRecord = {
   updatedAt: 6_000
 }
 
+/** The delegated job without a connect target or worker, as a host records non-agent jobs. */
+const { connectTarget: _connectTarget, worker: _worker, ...untargeted } = delegated
+
+/** What the page receives: the redacted public projection of a job. */
+const shown = (record: JobRecord): SanitizedJobRecord => sanitizeJobRecord(record)
+
+/** A projection whose payload skipped redaction, to prove the activity view never renders payload text itself. */
+const unredacted = (record: JobRecord): SanitizedJobRecord => ({
+  ...sanitizeJobRecord(record),
+  payload: record.payload
+})
+
 describe("activity history", () => {
   it("keeps approved existing-owner reconciliation in Work and approval activity", () => {
     const reconciled: JobRecord = {
-      ...delegated,
-      connectTarget: undefined,
+      ...untargeted,
       id: "job-reconcile",
       payload: {
         kind: "work.reconcile",
@@ -86,10 +98,9 @@ describe("activity history", () => {
         worker: { agentId: "agent-433", host: "SER8", name: "Owner", paneId: "w1:p3" },
         worktree: "/worktrees/npm/feat/guided-review-rly",
         branch: "feat/guided-review-rly"
-      },
-      worker: undefined
+      }
     }
-    const items = activityItemsFor([reconciled])
+    const items = activityItemsFor([shown(reconciled)])
     expect(items[0]).toMatchObject({
       title: "Reconcile existing Work owner",
       summary: "Reconciled the existing owner for knpkv/npm#433."
@@ -100,8 +111,7 @@ describe("activity history", () => {
 
   it("keeps approved goal reassignment in Work and approval activity", () => {
     const reassigned: JobRecord = {
-      ...delegated,
-      connectTarget: undefined,
+      ...untargeted,
       id: "job-reassign",
       payload: {
         kind: "work.reassign",
@@ -121,10 +131,9 @@ describe("activity history", () => {
         reason: "Codex identities retired",
         expectedGoalEventId: "goal-event-7",
         expectedGoalUpdatedAt: 500
-      },
-      worker: undefined
+      }
     }
-    const items = activityItemsFor([reassigned])
+    const items = activityItemsFor([shown(reassigned)])
     expect(items[0]).toMatchObject({
       title: "Reassign Work goal owner",
       summary: "Reassigned goal-ser8-control-surface from Codex host coordinator to Claude coordinator."
@@ -135,8 +144,7 @@ describe("activity history", () => {
 
   it("keeps approved goal abandonment in Work and approval activity", () => {
     const abandoned: JobRecord = {
-      ...delegated,
-      connectTarget: undefined,
+      ...untargeted,
       id: "job-abandon",
       payload: {
         kind: "work.abandon",
@@ -145,10 +153,9 @@ describe("activity history", () => {
         reason: "No PR, no branch, no owner",
         expectedGoalEventId: "goal-event-7",
         expectedGoalUpdatedAt: 500
-      },
-      worker: undefined
+      }
     }
-    const items = activityItemsFor([abandoned])
+    const items = activityItemsFor([shown(abandoned)])
     expect(items[0]).toMatchObject({
       title: "Abandon Work goal",
       summary: "Abandon fix-iphone-live-ui-polish: No PR, no branch, no owner"
@@ -158,7 +165,7 @@ describe("activity history", () => {
   })
 
   it("projects one sanitized row per job", () => {
-    const items = activityItemsFor([delegated, failedMessage])
+    const items = activityItemsFor([unredacted(delegated), unredacted(failedMessage)])
     const projection = JSON.stringify(items)
     expect(items).toHaveLength(2)
     expect(projection).toContain("package-worker")
@@ -172,9 +179,8 @@ describe("activity history", () => {
 
   it("projects transition summaries distinctly from consultations and delegated work", () => {
     const items = activityItemsFor([
-      {
-        ...delegated,
-        connectTarget: undefined,
+      unredacted({
+        ...untargeted,
         id: "job-transition-summary",
         payload: {
           kind: "agent.delegate",
@@ -182,9 +188,8 @@ describe("activity history", () => {
           prompt: sensitivePrompt,
           repository: "/repo"
         },
-        status: "succeeded",
-        worker: undefined
-      }
+        status: "succeeded"
+      })
     ])
     expect(items).toMatchObject([
       {
@@ -196,7 +201,7 @@ describe("activity history", () => {
   })
 
   it("filters exceptions, human decisions, work, and search text independently", () => {
-    const items = activityItemsFor([delegated, failedMessage])
+    const items = activityItemsFor([unredacted(delegated), unredacted(failedMessage)])
     expect(filterActivityItems(items, "exceptions", "").map((item) => item.id)).toEqual(["job-message"])
     expect(filterActivityItems(items, "human", "")).toHaveLength(2)
     expect(filterActivityItems(items, "work", "package-worker").map((item) => item.id)).toEqual(["job-delegated"])
@@ -230,7 +235,7 @@ describe("activity history", () => {
       id: `job-${String(index)}`,
       updatedAt: delegated.updatedAt + index
     }))
-    const markup = renderToStaticMarkup(<ActivityHistory records={records} />)
+    const markup = renderToStaticMarkup(<ActivityHistory records={records.map(unredacted)} />)
     expect(markup).toContain('aria-label="Search activity"')
     expect(markup).toContain('id="work-activity-search"')
     expect(markup).toContain('name="activity-search"')
