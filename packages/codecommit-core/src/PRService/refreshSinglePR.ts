@@ -229,12 +229,17 @@ export const makeRefreshSinglePR = (
       return yield* new RefreshError({ failedAccounts: [awsAccountId] })
     }
 
-    // Fetch fresh comments
-    const locs = yield* awsClient.getCommentsForPullRequest({
+    // Fresh comments, or none when the fetch failed. A failure is not "no comments": the count stays
+    // not loaded and the comment cache untouched, so the next successful fetch re-announces nothing.
+    const fetched = yield* awsClient.getCommentsForPullRequest({
       account,
       pullRequestId: prId,
       repositoryName: detail.repositoryName
-    }).pipe(Effect.catch(() => Effect.succeed<Array<PRCommentLocation>>([])))
+    }).pipe(
+      Effect.map(Option.some),
+      Effect.tapError((e) => Effect.logWarning("comment fetch failed; keeping the cached comments", e)),
+      Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
+    )
 
     // Build fresh upsert — PullRequestDetail lacks some fields, fall back to cache
     const cached = Option.isSome(cachedPR) ? cachedPR.value : undefined
@@ -263,7 +268,7 @@ export const makeRefreshSinglePR = (
       isMergeable: detail.isMergeable ? 1 : 0,
       // A failed evaluation keeps the last known approval: the upsert keeps the cached value.
       ...approvalColumnsOf(detail),
-      commentCount: countAllComments(locs),
+      commentCount: Option.match(fetched, { onNone: () => null, onSome: countAllComments }),
       link: cached?.link ?? pr?.link ??
         codecommitConsoleUrl(account.region, coordinates?.repositoryName ?? detail.repositoryName, prId),
       approvedBy: detail.approvedBy,
@@ -281,7 +286,8 @@ export const makeRefreshSinglePR = (
     )
 
     // Diff comments against the cache before it is written, for the same subscribed pull requests.
-    const commentNotifications: ReadonlyArray<NewNotification> = isSubscribed && Option.isSome(cachedPR)
+    const commentNotifications: ReadonlyArray<NewNotification> = isSubscribed && Option.isSome(cachedPR) &&
+        Option.isSome(fetched)
       ? yield* commentRepo.find(durableAccountId, prId, identity).pipe(
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>())),
         Effect.map(Option.match({
@@ -289,7 +295,7 @@ export const makeRefreshSinglePR = (
           onSome: (cachedComments) =>
             diffComments(
               cachedComments,
-              locs,
+              fetched.value,
               prId,
               durableAccountId,
               identity.repositoryName,
@@ -332,12 +338,17 @@ export const makeRefreshSinglePR = (
     // The comment count is recomputed from this read, so it is written only to the row this refresh
     // just wrote; the comment cache and its notifications follow only when it was.
     const versions = written.versions
-    const commentsWritten = written.row && versions !== undefined
-      ? yield* prRepo.writeDerived(durableAccountId, prId, versions, { commentCount: countAllComments(locs) }, identity)
-        .pipe(Effect.catch(() => Effect.succeed(false)))
+    const commentsWritten = written.row && versions !== undefined && Option.isSome(fetched)
+      ? yield* prRepo.writeDerived(
+        durableAccountId,
+        prId,
+        versions,
+        { commentCount: countAllComments(fetched.value) },
+        identity
+      ).pipe(Effect.catch(() => Effect.succeed(false)))
       : false
-    if (commentsWritten) {
-      yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(locs), identity).pipe(
+    if (commentsWritten && Option.isSome(fetched)) {
+      yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(fetched.value), identity).pipe(
         Effect.catch(() => Effect.void)
       )
       yield* Effect.forEach(commentNotifications, (n) => notificationRepo.add(n), { discard: true }).pipe(

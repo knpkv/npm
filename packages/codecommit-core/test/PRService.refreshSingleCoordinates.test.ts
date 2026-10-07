@@ -3,11 +3,13 @@ import { Effect, Layer, Option, Ref, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
 import { PullRequestDetail } from "../src/AwsClient/internal.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
+import { decodeCommentLocations } from "../src/CacheService/repos/commentLocations.js"
 import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { ConfigService, defaultReviewConfig, defaultSandboxConfig } from "../src/ConfigService/index.js"
+import { AwsApiError } from "../src/Errors.js"
 import { Domain } from "../src/index.js"
 import { makeRefreshSinglePR } from "../src/PRService/refreshSinglePR.js"
 
@@ -371,6 +373,114 @@ describe("PRService.refreshSinglePR coordinates", () => {
         expect(yield* Ref.get(commentWrites)).toBe(expected)
       })
   )
+
+  // A failed comment fetch is not "no comments": it leaves the count and the comment cache as they were,
+  // so the next successful fetch diffs against the real cache and announces nothing it already did.
+  it.effect("keeps the comment cache and count through a failed comment fetch, and re-announces nothing", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<Domain.AppState>({
+        pullRequests: [pullRequest],
+        accounts: [],
+        status: "idle"
+      })
+      const comment = {
+        root: new Domain.PRComment({
+          id: Domain.CommentId.make("c1"),
+          content: "Looks good",
+          author: "alice",
+          creationDate: new Date(1_000),
+          deleted: false
+        }),
+        replies: []
+      }
+      const cachedComments: ReadonlyArray<Domain.PRCommentLocation> = [{ comments: [comment] }]
+      // The row's count agrees with its cached comments, as after an earlier successful fetch.
+      const cachedWithComment: CachedPullRequest = { ...cachedPullRequest, commentCount: 1 }
+      const stored = yield* Ref.make(cachedComments)
+      const commentCounts = yield* Ref.make<ReadonlyArray<number | null | undefined>>([])
+      const added = yield* Ref.make<ReadonlyArray<string>>([])
+      const fetches = yield* Ref.make(0)
+      const layer = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequest: () =>
+            Effect.succeed(
+              new PullRequestDetail({
+                revisionId: "revision-2",
+                sourceCommit: "b".repeat(40),
+                title: "Coordinate refresh",
+                author: "reviewer",
+                status: "OPEN",
+                repositoryName: "payments",
+                sourceBranch: "feature",
+                destinationBranch: "main",
+                creationDate: new Date(0),
+                lastActivityDate: new Date(2_000),
+                approvedBy: [],
+                approvedByArns: [],
+                isMergeable: true,
+                approvalRules: [],
+                isApproved: false
+              })
+            ),
+          // The first fetch fails; the second sees the same comment as before.
+          getCommentsForPullRequest: () =>
+            Ref.getAndUpdate(fetches, (n) => n + 1).pipe(
+              Effect.flatMap((n) =>
+                n === 0
+                  ? Effect.fail(
+                    new AwsApiError({
+                      operation: "getCommentsForPullRequest",
+                      profile: Domain.AwsProfileName.make("production"),
+                      region: Domain.AwsRegion.make("eu-west-1"),
+                      cause: "throttled"
+                    })
+                  )
+                  : Effect.succeed([...cachedComments])
+              )
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findByAccountAndId: () => Effect.succeed(Option.none()),
+          findByCoordinates: () => Effect.succeed(Option.some(cachedWithComment)),
+          findAll: () => Effect.succeed([cachedPullRequest]),
+          upsertRead: (input) =>
+            Ref.update(commentCounts, (all) => [...all, input.commentCount]).pipe(
+              Effect.as({
+                row: true,
+                approval: true,
+                versions: {
+                  row: { lastActivity: new Date(2_000), observation: 1 },
+                  approval: { lastActivity: new Date(2_000), observation: 1 }
+                },
+                replaced: Option.some(cachedWithComment)
+              })
+            ),
+          writeDerived: (_, __, ___, columns) =>
+            Ref.update(commentCounts, (all) => [...all, columns.commentCount]).pipe(Effect.as(true))
+        }),
+        Layer.mock(CommentRepo, {
+          find: () => Ref.get(stored).pipe(Effect.map(Option.some)),
+          upsert: (_, __, json) => decodeCommentLocations(json).pipe(Effect.flatMap((all) => Ref.set(stored, all)))
+        }),
+        Layer.mock(NotificationRepo, { add: (n) => Ref.update(added, (all) => [...all, n.type]) }),
+        Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(true) }),
+        Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+        Layer.mock(EventsHub, {})
+      )
+      const refresh = makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
+        region: Domain.AwsRegion.make("eu-west-1"),
+        repositoryName: Domain.RepositoryName.make("payments")
+      })
+      yield* runWithLayer(refresh, layer)
+      // Not loaded: no count written, and the cached comments are untouched.
+      expect(yield* Ref.get(commentCounts)).toEqual([null])
+      expect(yield* Ref.get(stored)).toEqual(cachedComments)
+      yield* runWithLayer(refresh, layer)
+      const commentTypes = new Set(["new_comment", "comment_edited", "comment_deleted"])
+      expect((yield* Ref.get(added)).filter((type) => commentTypes.has(type))).toEqual([])
+      expect((yield* Ref.get(commentCounts)).at(-1)).toBe(1)
+    }))
 
   it.effect("rejects a same-id refresh with a different provider region", () =>
     Effect.gen(function*() {
