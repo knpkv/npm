@@ -239,8 +239,7 @@ const decisionBarFor = (request: WorkRequest, decisions: WorkRequestDecisions | 
             : { _tag: "off", reason: outcome }
   // The status adds only what the off reason doesn't say. Once the snapshot proves the outcome, the
   // reason says it, so an accepted or uncertain answer has nothing to add; a refusal still explains itself.
-  const status =
-    answer === null || (proven && !pending && answer.outcome !== "refused") ? undefined : answer.text
+  const status = answer === null || (proven && !pending && answer.outcome !== "refused") ? undefined : answer.text
   const decide = (decision: "approve" | "reject") => () => {
     if (state._tag === "ready") decisions.onDecision({ decision, jobId })
   }

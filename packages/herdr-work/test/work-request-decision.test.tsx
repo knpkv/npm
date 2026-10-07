@@ -4,7 +4,12 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
 import type { WorkGoal, WorkRequest, WorkSnapshots } from "../src/model.js"
-import { type WorkRequestDecision, type WorkRequestDecisions, workRequestClockText } from "../src/request-decision.js"
+import {
+  type WorkRequestAnswer,
+  type WorkRequestDecision,
+  type WorkRequestDecisions,
+  workRequestClockText
+} from "../src/request-decision.js"
 import { WorkBoard } from "../src/view.js"
 
 declare global {
@@ -218,14 +223,14 @@ describe("Work requests decided in place", () => {
   })
 
   it("never says the same thing twice in the off reason and the status", async () => {
-    const outcomes = ["accepted", "refused", "uncertain"] as const
+    const outcomes: ReadonlyArray<WorkRequestAnswer["outcome"]> = ["accepted", "refused", "uncertain"]
     // Pending implies the request is still open, so a proven outcome is never pending.
-    const cases = [
+    const cases: ReadonlyArray<{ readonly pending: boolean; readonly state: WorkRequest["state"] }> = [
       { pending: true, state: "open" },
       { pending: false, state: "open" },
       { pending: false, state: "approved" },
       { pending: false, state: "rejected" }
-    ] as const
+    ]
     for (const outcome of outcomes) {
       for (const { pending, state } of cases) {
         const text = outcome === "uncertain" ? "Couldn't reach the hub." : `The hub ${outcome} your decision.`
