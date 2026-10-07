@@ -315,7 +315,7 @@ export const fetchAndUpsertPRs = (params: {
                       Effect.andThen(
                         isAuthFailure(error) ?
                           markAuthFailed(pr.accountProfile) :
-                          prRepo.deleteOne(pr.awsAccountId, pr.id, {
+                          prRepo.deleteOne(pr.awsAccountId, pr.id, pr.lastModifiedDate, {
                             repositoryName: pr.repositoryName,
                             accountRegion: pr.accountRegion
                           }).pipe(Effect.catch(() => Effect.void))

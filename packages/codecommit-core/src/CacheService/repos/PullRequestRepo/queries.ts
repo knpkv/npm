@@ -25,7 +25,9 @@ const StaleOpenRow = Schema.Struct({
   awsAccountId: Schema.String,
   repositoryName: Schema.String,
   accountProfile: AwsProfileName,
-  accountRegion: AwsRegion
+  accountRegion: AwsRegion,
+  /** The row's version when read; a write based on this read compares against it. */
+  lastModifiedDate: Schema.DateFromString
 })
 
 export const findAll = (sql: SqlClient.SqlClient) => {
@@ -156,7 +158,7 @@ export const findStaleOpen = (sql: SqlClient.SqlClient) => {
     Result: StaleOpenRow,
     Request: Schema.Struct({ olderThan: Schema.String }),
     execute: (req) =>
-      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region
+      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region, last_modified_date
           FROM pull_requests
           WHERE status = 'OPEN' AND fetched_at < ${req.olderThan}`
   })
@@ -168,7 +170,7 @@ export const findOpenInRange = (sql: SqlClient.SqlClient) => {
     Result: StaleOpenRow,
     Request: Schema.Struct({ weekStart: Schema.String, weekEnd: Schema.String }),
     execute: (req) =>
-      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region
+      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region, last_modified_date
           FROM pull_requests
           WHERE status = 'OPEN'
             AND (

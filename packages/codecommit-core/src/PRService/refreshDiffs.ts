@@ -40,6 +40,8 @@ const enrichSingleDiff = Effect.fn("enrichSingleDiff")(
       id: row.id,
       repositoryName: row.repositoryName,
       accountRegion: row.accountRegion,
+      // The row's version when it was read: a newer write since makes these stats stale.
+      version: row.lastModifiedDate,
       ...stats
     }
   },
@@ -82,7 +84,7 @@ export const enrichDiffs = Effect.fn("enrichDiffs")(
       results,
       (r) => {
         if (r === undefined) return Effect.void
-        return prRepo.updateDiffStats(r.awsAccountId, r.id, r.filesAdded, r.filesModified, r.filesDeleted, {
+        return prRepo.updateDiffStats(r.awsAccountId, r.id, r.filesAdded, r.filesModified, r.filesDeleted, r.version, {
           repositoryName: r.repositoryName,
           accountRegion: r.accountRegion
         }).pipe(

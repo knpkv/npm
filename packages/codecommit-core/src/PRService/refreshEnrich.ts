@@ -95,7 +95,9 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
         commentCount,
         id: prId,
         repositoryName: row.repositoryName,
-        accountRegion: row.accountRegion
+        accountRegion: row.accountRegion,
+        // The row's version when it was read: a newer write since makes this count stale.
+        version: row.lastModifiedDate
       })
       : Option.none()
   })
@@ -138,8 +140,8 @@ export const enrichComments = (params: {
       (r) =>
         Option.match(r, {
           onNone: () => Effect.void,
-          onSome: ({ accountRegion, awsAccountId, commentCount, id, repositoryName }) =>
-            prRepo.updateCommentCount(awsAccountId, id, commentCount, { repositoryName, accountRegion }).pipe(
+          onSome: ({ accountRegion, awsAccountId, commentCount, id, repositoryName, version }) =>
+            prRepo.updateCommentCount(awsAccountId, id, commentCount, version, { repositoryName, accountRegion }).pipe(
               Effect.catch(() => Effect.void)
             )
         }),

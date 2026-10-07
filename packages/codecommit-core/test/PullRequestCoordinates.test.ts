@@ -9,6 +9,7 @@ import migration0018 from "../src/CacheService/migrations/0018_pull_request_coor
 import migration0019 from "../src/CacheService/migrations/0019_dependent_pr_coordinates.js"
 import migration0020 from "../src/CacheService/migrations/0020_notification_coordinates.js"
 import migration0022 from "../src/CacheService/migrations/0022_pull_request_approval_unknown.js"
+import migration0023 from "../src/CacheService/migrations/0023_pull_request_tombstones.js"
 import { UpsertInput } from "../src/CacheService/repos/PullRequestRepo/internal.js"
 import { mutations } from "../src/CacheService/repos/PullRequestRepo/mutations.js"
 
@@ -97,6 +98,7 @@ describe("pull request coordinate migration", () => {
       yield* migration0018.pipe(Effect.provideService(SqlClient.SqlClient, sql))
       // The repository writes the approval column added later.
       yield* migration0022.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      yield* migration0023.pipe(Effect.provideService(SqlClient.SqlClient, sql))
       yield* insertPullRequest(sql, "orders", "us-east-1")
       const repo = mutations(sql, Effect.void)
       yield* repo.upsert(upsertInput("orders", "us-east-1", "Orders updated"))
@@ -125,7 +127,10 @@ describe("pull request coordinate migration", () => {
         { repositoryName: "payments", accountRegion: "eu-west-1", title: "Payments updated" }
       ])
 
-      const ambiguous = yield* repo.updateHealthScore("123456789012", "42", 0.5).pipe(Effect.flip)
+      const ambiguous = yield* repo.updateHealthScore("123456789012", "42", 0.5, new Date("2026-08-02T00:00:00.000Z"))
+        .pipe(
+          Effect.flip
+        )
       expect(Predicate.isTagged(ambiguous, "CacheError")).toBe(true)
       if (Predicate.isTagged(ambiguous, "CacheError")) {
         expect(Predicate.isTagged(ambiguous.cause, "PullRequestAmbiguityError")).toBe(true)
@@ -160,6 +165,8 @@ describe("pull request coordinate migration", () => {
         author TEXT NOT NULL,
         repo_account_id TEXT,
         commented_by TEXT,
+        -- The row version every write compares against.
+        last_modified_date TEXT NOT NULL DEFAULT '2026-08-02T00:00:00.000Z',
         PRIMARY KEY (aws_account_id, id, repository_name, account_region)
       )`
       yield* sql`INSERT INTO pr_comments (pull_request_id, aws_account_id, locations_json)
