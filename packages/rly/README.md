@@ -210,8 +210,16 @@ current limit window) shaded across bands and bars and named in a key under the 
 bar stays at least 24px wide, a full pointer target. The plot is one tab stop: ←/→ move and select, Shift
 extends, Home/End jump and Escape clears. Click selects, and Shift+click or a second
 tap elsewhere extends the span. The caller owns `selection` and words it through
-`describeSelection`, which is announced politely once the selection settles. Charts
+`describeSelection`. Only a selection the user makes is announced, politely, once it
+settles: the first render and a data refresh under the same selection stay quiet. Charts
 are presentation only: the application computes columns, bands and any projection.
+`columns` must be in time order without overlaps (gaps are fine), or the chart throws
+`RlyChartColumnsError`. Every bar stacks its series in one chart-wide order, the order
+each id first appears. Bins group every N columns, so hourly columns that start on the
+hour bin on clock hours. The selection is outlined above the bars, and the window is a
+neutral dashed stretch, never the focus colour. A chart on a surface other than
+`surface-1` sets `--rly-stacked-bars-gap` to that background, so the gaps between bars
+match it.
 Everything the bands draw is named in that key in the caller's words: each band's
 `near: { level, label }` mark, and `noReadingLabel`, which is required once any band has
 a stretch with `level: null`. Zero, negative and non-finite values draw nothing.

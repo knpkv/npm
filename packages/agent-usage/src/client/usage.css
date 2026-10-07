@@ -252,7 +252,7 @@
 
 .usage-column-target:focus-visible {
   stroke: var(--rly-color-focus);
-  stroke-width: 2;
+  stroke-width: var(--rly-focus-ring-width);
 }
 
 g[data-active="true"] .usage-segment {

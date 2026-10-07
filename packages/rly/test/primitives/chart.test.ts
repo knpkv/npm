@@ -6,7 +6,9 @@ import {
   chooseBinSize,
   moveFocus,
   type RlyChartColumn,
-  selectBin
+  RlyChartColumnsError,
+  selectBin,
+  validateColumns
 } from "../../src/internal/chart.js"
 
 const hour = 3_600_000
@@ -115,6 +117,27 @@ describe("chart model", () => {
       { id: "b", offset: 4, series: 1, value: 3 }
     ])
     expect(second).toMatchObject({ first: 2, last: 3, total: 2 })
+  })
+
+  // ui-b B1: sparse data stacked each bin in its own order, so colours swapped places between bars.
+  it("stacks every bin in one chart-wide order, so a series keeps its place from bar to bar", () => {
+    const bins = binColumns([column(0, { b: 1, a: 1 }), column(1, { a: 2, b: 2 }), column(2, { c: 1, a: 1 })], 1)
+    expect(bins.map((bin) => bin.segments.map(({ id }) => id))).toEqual([["b", "a"], ["b", "a"], ["a", "c"]])
+  })
+
+  // ui-b S3: bins group every N columns; they follow the clock only when the columns start on its boundary.
+  it("groups every N columns from the first, whatever hour the first column starts", () => {
+    const offset = Array.from({ length: 12 }, (_, index) => column(13 + index, { a: 1 }))
+    expect(binColumns(offset, 6).map(({ start }) => start / hour)).toEqual([13, 19])
+  })
+
+  // ui-b S6: unsorted columns made a negative span and garbage bins without an error.
+  it("rejects columns out of time order or overlapping, and accepts gaps", () => {
+    expect(() => validateColumns([column(1, { a: 1 }), column(0, { a: 1 })])).toThrow(RlyChartColumnsError)
+    expect(() => validateColumns([{ end: 2 * hour, segments: [], start: 0 }, column(1, { a: 1 })])).toThrow(
+      RlyChartColumnsError
+    )
+    expect(() => validateColumns([column(0, { a: 1 }), column(5, { a: 1 })])).not.toThrow()
   })
 
   it("folds a short trailing remainder into the bin before it, so no bar is narrower than the rest", () => {

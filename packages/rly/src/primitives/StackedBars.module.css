@@ -1,5 +1,7 @@
 @layer rly.components {
   .root {
+    /* The gap between bars and stacked segments; a chart on another surface sets its own background here. */
+    --rly-stacked-bars-gap: var(--rly-color-surface-1);
     display: grid;
     gap: var(--rly-space-8);
     min-inline-size: 0;
@@ -46,22 +48,16 @@
     outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
     outline-offset: var(--rly-focus-ring-offset);
   }
-  /* The caption overlays the bars; clicks and taps go through it to the bar underneath. */
-  .scale {
-    color: var(--rly-color-text-2);
-    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
-      var(--rly-type-meta-font);
-  }
   .bars {
     block-size: 100%;
     display: block;
     inline-size: 100%;
     overflow: visible;
   }
-  /* A 1px canvas-coloured edge separates neighbouring bars and stacked segments at any scale. */
+  /* A 2px background-coloured edge (1px each side) separates neighbouring bars and stacked segments at any scale. */
   .segment {
-    stroke: var(--rly-color-surface-1);
-    stroke-width: 1px;
+    stroke: var(--rly-stacked-bars-gap);
+    stroke-width: 2px;
     vector-effect: non-scaling-stroke;
   }
   .hit {
@@ -70,14 +66,22 @@
   }
   .selection {
     fill: var(--rly-color-surface-3);
-    stroke: var(--rly-color-text-2);
-    stroke-width: 1px;
+  }
+  /* The selection's outline, drawn over the bars, so a selected bar shows it at any height. */
+  .selectionEdge {
+    fill: none;
+    pointer-events: none;
+    stroke: var(--rly-color-text-1);
+    stroke-width: 2px;
     vector-effect: non-scaling-stroke;
   }
-  /* The window shading sits under the selection and bars; its edges mark where it starts and ends. */
+  /*
+   * The window shading sits under the selection and bars; its dashed edges mark where it starts and
+   * ends. Neutral ink, not the focus colour, so it never reads as a focus ring.
+   */
   .window {
-    fill: color-mix(in srgb, var(--rly-color-focus) 12%, transparent);
-    stroke: var(--rly-color-focus);
+    fill: color-mix(in srgb, var(--rly-color-text-3) 12%, transparent);
+    stroke: var(--rly-color-text-2);
     stroke-dasharray: 3 3;
     stroke-width: 1px;
     vector-effect: non-scaling-stroke;
@@ -85,7 +89,7 @@
   .windowEdge {
     fill: none;
     pointer-events: none;
-    stroke: var(--rly-color-focus);
+    stroke: var(--rly-color-text-2);
     stroke-dasharray: 3 3;
     stroke-width: 1px;
     vector-effect: non-scaling-stroke;
@@ -108,9 +112,9 @@
     margin: 0;
   }
   .windowSwatch {
-    background: color-mix(in srgb, var(--rly-color-focus) 12%, transparent);
+    background: color-mix(in srgb, var(--rly-color-text-3) 12%, transparent);
     block-size: var(--rly-space-12);
-    border: 1px dashed var(--rly-color-focus);
+    border: 1px dashed var(--rly-color-text-2);
     flex: none;
     inline-size: var(--rly-space-12);
   }
@@ -129,12 +133,13 @@
   }
   .focusRing {
     fill: none;
+    pointer-events: none;
     stroke: none;
     vector-effect: non-scaling-stroke;
   }
-  .plot:focus-visible [data-focused="true"] > .focusRing {
+  .plot:focus-visible .focusRing {
     stroke: var(--rly-color-focus);
-    stroke-width: 2px;
+    stroke-width: var(--rly-focus-ring-width);
   }
   .axis {
     block-size: var(--rly-type-meta-line-height);
@@ -160,9 +165,12 @@
     }
     .window,
     .windowEdge,
-    .selection {
+    .selectionEdge {
       fill: none;
       stroke: CanvasText;
+    }
+    .selection {
+      fill: none;
     }
     .windowSwatch {
       background: none;
@@ -191,9 +199,12 @@
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .window,
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .windowEdge,
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .selection {
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .selectionEdge {
     fill: none;
     stroke: CanvasText;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .selection {
+    fill: none;
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .windowSwatch {
     background: none;

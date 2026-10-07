@@ -34,7 +34,10 @@ export interface RlyChartSelection {
 /** An axis label: at a bin's start, or the one end-anchored label at the axis end. */
 export type RlyChartTick = { readonly anchor: "start"; readonly index: number } | { readonly anchor: "end" }
 
-/** Bin sizes that divide a day evenly, so bins line up with clock hours. */
+/**
+ * Bin sizes that divide a day evenly. Bins group every N columns, so for hourly columns starting on
+ * an hour boundary they line up with clock hours; an offset start, gaps or a DST day shift them.
+ */
 const BIN_SIZES: ReadonlyArray<number> = [1, 2, 3, 6, 12, 24]
 
 const DAY = 24
@@ -45,6 +48,39 @@ const groupStarts = (count: number, size: number): ReadonlyArray<number> => {
   for (let first = 0; first < count; first += size) starts.push(first)
   if (count % size > 0 && starts.length > 1) starts.pop()
   return starts
+}
+
+/** Columns arrived out of time order or overlapping, so they cannot share one time axis. */
+export class RlyChartColumnsError extends Error {
+  override readonly name = "RlyChartColumnsError"
+  /** The first column that starts before the previous one ends, or ends before it starts. */
+  readonly index: number
+  constructor(index: number) {
+    super(`StackedBars columns must be in time order without overlaps; column ${index} is not`)
+    this.index = index
+  }
+}
+
+/** Fail loudly on columns that cannot share one time axis: each must start at or after the previous end. */
+export const validateColumns = (columns: ReadonlyArray<RlyChartColumn>): void => {
+  for (const [index, column] of columns.entries()) {
+    const previous = columns[index - 1]
+    if (column.end < column.start || (previous !== undefined && column.start < previous.end)) {
+      throw new RlyChartColumnsError(index)
+    }
+  }
+}
+
+/**
+ * One stack order for the whole chart: each series id in the order it first appears across all
+ * columns. Every bin stacks in this order, so a series keeps its place from bar to bar.
+ */
+export const stackOrder = (columns: ReadonlyArray<RlyChartColumn>): ReadonlyMap<string, number> => {
+  const order = new Map<string, number>()
+  for (const column of columns) {
+    for (const segment of column.segments) if (!order.has(segment.id)) order.set(segment.id, order.size)
+  }
+  return order
 }
 
 /** The narrowest bar, in pixels, that binning `columns` by `size` draws on the shared time axis. */
@@ -64,7 +100,7 @@ const narrowestBar = (columns: ReadonlyArray<RlyChartColumn>, size: number, widt
 /**
  * The smallest bin size whose every bar, measured on the shared time axis, is at least `minBar`
  * pixels wide, so uneven or sparse periods are measured as drawn. Past a day per bar it grows in
- * whole days, so bins still line up with midnight; failing all, one bin holds everything.
+ * whole days (24 columns at a time); failing all, one bin holds everything.
  */
 export const chooseBinSize = (width: number, columns: ReadonlyArray<RlyChartColumn>, minBar = 6): number => {
   if (columns.length === 0) return 1
@@ -94,11 +130,13 @@ export const binRates = (
 }
 
 /**
- * Group columns into bins of `size`, merging segments by id in first-appearance order. A short
- * trailing remainder joins the bin before it, so the last bar is never narrower than the rest.
+ * Group columns into bins of `size`, merging segments by id and stacking every bin in the chart's
+ * one `stackOrder`. A short trailing remainder joins the bin before it, so the last bar is never
+ * narrower than the rest.
  */
 export const binColumns = (columns: ReadonlyArray<RlyChartColumn>, size: number): ReadonlyArray<RlyChartBin> => {
   const bins: Array<RlyChartBin> = []
+  const order = stackOrder(columns)
   const starts = groupStarts(columns.length, size)
   for (const [index, first] of starts.entries()) {
     const group = columns.slice(first, starts[index + 1] ?? columns.length)
@@ -106,10 +144,14 @@ export const binColumns = (columns: ReadonlyArray<RlyChartColumn>, size: number)
     for (const segment of group.flatMap((column) => column.segments)) {
       // A failed reading (NaN, ±Infinity) is no reading, so it cannot poison the totals or the scale.
       if (!Number.isFinite(segment.value) || segment.value <= 0) continue
+      // The first-seen segment keeps its fields; later ones only add their value.
       const seen = values.get(segment.id)
-      values.set(segment.id, { ...segment, value: (seen?.value ?? 0) + segment.value })
+      values.set(segment.id, seen === undefined ? segment : { ...seen, value: seen.value + segment.value })
     }
-    const segments = [...values.values()].reduce<Array<RlyChartBin["segments"][number]>>(
+    const ordered = [...values.values()].sort(
+      (left, right) => (order.get(left.id) ?? 0) - (order.get(right.id) ?? 0)
+    )
+    const segments = ordered.reduce<Array<RlyChartBin["segments"][number]>>(
       (stacked, segment) => [...stacked, { ...segment, offset: stacked.reduce((sum, { value }) => sum + value, 0) }],
       []
     )

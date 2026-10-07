@@ -4560,6 +4560,10 @@
           "name": "RlyChartColumn"
         },
         {
+          "kind": "value",
+          "name": "RlyChartColumnsError"
+        },
+        {
           "kind": "type",
           "name": "RlyChartSegment"
         },

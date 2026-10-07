@@ -1,5 +1,5 @@
 import type { ComponentPropsWithRef, KeyboardEvent, ReactElement, Ref, RefCallback } from "react"
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import * as Predicate from "../internal/predicates.js"
 import {
@@ -10,13 +10,15 @@ import {
   moveFocus,
   type RlyChartColumn,
   type RlyChartSelection,
-  selectBin
+  selectBin,
+  validateColumns
 } from "../internal/chart.js"
 import { rlySeriesColor } from "./ChartLegend.js"
 import styles from "./StackedBars.module.css"
 
 const style = (name: string): string => cssClass(styles, name)
 export type { RlyChartBin, RlyChartColumn, RlyChartSegment, RlyChartSelection } from "../internal/chart.js"
+export { RlyChartColumnsError } from "../internal/chart.js"
 
 /** A level over time above the bars, on the same axis; `level: null` is a stretch with no reading. */
 export interface RlyStepBand {
@@ -47,6 +49,11 @@ export type StackedBarsProps = StackedBarsBaseProps & {
   readonly label: string
   /** How to read and operate the chart, in the caller's words; read after the label. */
   readonly instructions: string
+  /**
+   * Periods in time order, none overlapping (gaps are fine); anything else throws
+   * `RlyChartColumnsError`. Bins group every N columns, so hourly columns starting on the hour bin
+   * on clock hours.
+   */
   readonly columns: ReadonlyArray<RlyChartColumn>
   /** Bands of limit levels drawn above the bars, sharing their time axis. */
   readonly bands?: ReadonlyArray<RlyStepBand>
@@ -59,18 +66,19 @@ export type StackedBarsProps = StackedBarsBaseProps & {
    * folded or longer bin reads true against "per N hours".
    */
   readonly formatScale: (max: number, binSize: number) => string
-  /** The axis label for a bin. */
   /** The axis label for an instant: a bin's start, or the axis end for the right-hand label. */
   readonly formatTick: (at: number, binSize: number) => string
   readonly selection: RlyChartSelection | null
   readonly onSelectionChange: (selection: RlyChartSelection | null) => void
-  /** What the selection means, announced politely once it settles. */
+  /** What the selection means, announced politely once a selection the user made settles. */
   readonly describeSelection: (selection: RlyChartSelection | null) => string
   /** Plot height in pixels, without bands and axis; never under 24, since every bar is a pointer target. */
   readonly height?: number
 }
 
+/** The room an axis label gets until the rendered labels have been measured. */
 const LABEL_WIDTH = 72
+const LABEL_GAP = 8
 const ANNOUNCE_AFTER = 500
 const MIN_TARGET = 24
 
@@ -159,13 +167,15 @@ const Band = ({
             x={x(window.from)}
           />
         )}
-        {band.segments.map((segment) => {
+        {band.segments.map((segment, index) => {
           const left = x(segment.from)
           const width = x(segment.to) - left
           if (width <= 0) return null
           const reading = segment.level === null ? null : percent(segment.level)
           if (reading === null) {
-            return <rect className={style("unknown")} height={100} key={segment.from} width={width} x={left} />
+            return (
+              <rect className={style("unknown")} height={100} key={`${index}:${segment.from}`} width={width} x={left} />
+            )
           }
           const level = reading
           return (
@@ -173,7 +183,7 @@ const Band = ({
               className={style("level")}
               data-tone={level >= 100 ? "full" : near !== undefined && level >= near ? "near" : "ok"}
               height={level}
-              key={segment.from}
+              key={`${index}:${segment.from}`}
               width={width}
               x={left}
               y={100 - level}
@@ -225,6 +235,7 @@ export const StackedBars = ({
   window,
   ...props
 }: StackedBarsProps): ReactElement => {
+  validateColumns(columns)
   const [width, ref] = useInlineSize(720, callerRef)
   const instructionsId = useId()
   // Bars are pointer targets, so each is at least 24px wide (WCAG 2.2 target size).
@@ -247,10 +258,14 @@ export const StackedBars = ({
     : undefined
   const axisStart = columns[0]?.start ?? 0
   const axisEnd = columns[columns.length - 1]?.end ?? axisStart
+  // Ticks are spaced by the widest label actually rendered, so a long format or enlarged text
+  // spreads them out instead of overlapping them.
+  const [labelWidth, setLabelWidth] = useState(LABEL_WIDTH)
+  const axisRef = useRef<HTMLDivElement>(null)
   const ticks = chartTicks(
     bins.map((bin) => axisFraction(bin.start, axisStart, axisEnd) * width),
     width,
-    LABEL_WIDTH
+    labelWidth
   )
   // The keyboard cursor is a column, so a click or a resize that rebins keeps it on the same time.
   const [cursor, setCursor] = useState<number | null>(null)
@@ -261,8 +276,11 @@ export const StackedBars = ({
   // The selection this chart last asked for. A different one arriving means its owner replaced it,
   // so the keyboard cursor and any half-made touch span belong to a gesture that no longer exists.
   const emitted = useRef<RlyChartSelection | null>(selection)
+  // Each selection the user makes asks for one announcement; mounting and data refreshes ask for none.
+  const [announceRequest, setAnnounceRequest] = useState(0)
   const emit = (next: RlyChartSelection | null): void => {
     emitted.current = next
+    setAnnounceRequest((request) => request + 1)
     onSelectionChange(next)
   }
   const selectedFrom = selection?.from
@@ -278,18 +296,26 @@ export const StackedBars = ({
       selectedFrom === undefined || selectedTo === undefined ? null : { from: selectedFrom, to: selectedTo }
   }, [selectedFrom, selectedTo])
   const [announcement, setAnnouncement] = useState("")
-  // The words, not the formatter's identity, decide when to announce, so parent renders don't postpone it.
-  const description = describeSelection(selection)
+  // Read when the announcement fires, so it names the selection the owner settled on.
+  const description = useRef("")
+  description.current = describeSelection(selection)
   const binOf = (column: number): number => Math.min(bins.length - 1, Math.floor(column / binSize))
   const focus = cursor === null ? null : binOf(cursor)
 
   useEffect(() => {
+    if (announceRequest === 0) return
     // Empty the region while the new words settle, so returning to the last announced selection is
     // announced again rather than left as an unchanged region.
     setAnnouncement("")
-    const timer = setTimeout(() => setAnnouncement(description), ANNOUNCE_AFTER)
+    const timer = setTimeout(() => setAnnouncement(description.current), ANNOUNCE_AFTER)
     return () => clearTimeout(timer)
-  }, [description])
+  }, [announceRequest])
+
+  useLayoutEffect(() => {
+    const labels = axisRef.current?.querySelectorAll<HTMLElement>("[data-anchor]") ?? []
+    const widest = Math.max(0, ...[...labels].map((label) => label.scrollWidth))
+    if (widest + LABEL_GAP > labelWidth) setLabelWidth(widest + LABEL_GAP)
+  })
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === "Escape") {
@@ -321,12 +347,14 @@ export const StackedBars = ({
     x: x(start)
   })
   const shaded = window === undefined ? null : span(window.from, window.to)
-  // The selection is drawn once from its own columns, behind the bars, so its edges stay visible
-  // where the bars cover its fill and it survives a resize that rebins the columns.
+  // The selection is drawn from its own columns, so it survives a resize that rebins them: a fill
+  // behind the bars, and its edges again above them, so a tall selected bar still shows it.
   const selectionStart = selection === null ? undefined : columns[Math.max(0, selection.from)]
   const selectionEnd = selection === null ? undefined : columns[Math.min(columns.length - 1, selection.to)]
   const selected =
     selectionStart === undefined || selectionEnd === undefined ? null : span(selectionStart.start, selectionEnd.end)
+  const focusedBin = focus === null ? undefined : bins[focus]
+  const focusSlot = focusedBin === undefined ? null : span(focusedBin.start, focusedBin.end)
 
   return (
     <div {...props} className={classNames(style("root"), className)} ref={ref}>
@@ -405,10 +433,28 @@ export const StackedBars = ({
                     />
                   )
                 })}
-                <rect className={style("focusRing")} height={100} width={slot.width} x={slot.x} />
               </g>
             )
           })}
+          {selected === null || selected.width <= 0 ? null : (
+            <rect
+              className={style("selectionEdge")}
+              data-part="selection-edge"
+              height={100}
+              width={selected.width}
+              x={selected.x}
+            />
+          )}
+          {/* One focus ring above every bar, so the next bar never paints over half of it. */}
+          {focusSlot === null ? null : (
+            <rect
+              className={style("focusRing")}
+              data-part="focus-ring"
+              height={100}
+              width={focusSlot.width}
+              x={focusSlot.x}
+            />
+          )}
           {/* The window's edges again over the bars, so a narrow window stays visible where bars cover its fill. */}
           {shaded === null || shaded.width <= 0 ? null : (
             <rect
@@ -421,7 +467,7 @@ export const StackedBars = ({
           )}
         </svg>
       </div>
-      <div aria-hidden="true" className={style("axis")}>
+      <div aria-hidden="true" className={style("axis")} ref={axisRef}>
         {ticks.map((tick) => {
           const at = tick.anchor === "end" ? axisEnd : bins[tick.index]?.start
           if (at === undefined) return null

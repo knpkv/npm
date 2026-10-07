@@ -128,6 +128,30 @@ describe("StackedBars", () => {
     expect(render().querySelector('[data-part="selection"]')).toBeNull()
   })
 
+  // ui-b B2: full-width bars covered the selection's edges, so a tall selected bar showed almost none of it.
+  it("outlines the selection again above every bar, over the same columns", () => {
+    const root = render({ selection: { from: 2, to: 3 } })
+    const edge = root.querySelector('[data-part="selection-edge"]')
+    const bars = [...root.querySelectorAll("svg:not([class*='band']) > g")]
+    expect(edge?.previousElementSibling).toBe(bars.at(-1))
+    expect(numeric(edge, "x")).toBeCloseTo(1000 / 3)
+    expect(numeric(edge, "width")).toBeCloseTo(1000 / 3)
+  })
+
+  // ui-b S2: each bin's ring was painted over by the next bar, so it showed 2px on one side and 1px on the other.
+  it("draws one focus ring above every bar, on the focused bin", async () => {
+    const root = await mount(<StackedBars {...props} />)
+    const plot = root.querySelector('[role="group"]')
+    expect(root.querySelector('[data-part="focus-ring"]')).toBeNull()
+    act(() => void plot?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Home" })))
+    const rings = root.querySelectorAll('[data-part="focus-ring"]')
+    expect(rings).toHaveLength(1)
+    const ring = rings[0]
+    expect(ring?.nextElementSibling).toBeNull()
+    expect(numeric(ring, "x")).toBe(0)
+    expect(numeric(ring, "width")).toBeCloseTo(1000 / 6)
+  })
+
   it("shades a window across the band and the bars and names it under the axis", () => {
     const root = render({
       bands: [{ id: "5h", label: "5-hour window", segments: [{ from: 0, level: 40, to: 6 * hour }] }],
@@ -490,29 +514,76 @@ describe("StackedBars", () => {
     expect(root.querySelector("ul")?.getAttribute("role")).toBe("list")
   })
 
+  /** The chart under an owner that keeps the selection, with the polite region and a key press. */
+  const announcing = async (columnsFor: (tick: number) => ReadonlyArray<RlyChartColumn> = () => columns) => {
+    let rerender: (tick: number) => void = () => undefined
+    const Owner = (): ReactElement => {
+      const [selection, setSelection] = useState<RlyChartSelection | null>({ from: 2, to: 2 })
+      const [tick, setTick] = useState(0)
+      rerender = setTick
+      return (
+        <StackedBars
+          {...props}
+          columns={columnsFor(tick)}
+          data-tick={tick}
+          // A fresh formatter on every render, as an inline callback would be.
+          describeSelection={(next) => (next === null ? "None" : `Columns ${next.from}–${next.to}`)}
+          onSelectionChange={setSelection}
+          selection={selection}
+        />
+      )
+    }
+    const root = await mount(<Owner />)
+    const plot = root.querySelector('[role="group"]')
+    return {
+      press: (key: string) =>
+        act(() => void plot?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key }))),
+      region: () => root.querySelector('[aria-live="polite"]')?.textContent,
+      rerender: (tick: number) => act(() => rerender(tick))
+    }
+  }
+
   it("announces a return to the last announced selection again", async () => {
     vi.stubGlobal("ResizeObserver", TestResizeObserver)
     vi.useFakeTimers()
     try {
-      const container = document.createElement("div")
-      document.body.append(container)
-      const root = createRoot(container)
-      roots.push(root)
-      const describe = (selection: RlyChartSelection | null): string =>
-        selection === null ? "None" : `Columns ${selection.from}–${selection.to}`
-      const view = (from: number) => (
-        <StackedBars {...props} describeSelection={describe} selection={{ from, to: from }} />
-      )
-      const region = () => container.querySelector('[aria-live="polite"]')?.textContent
-      await act(async () => root.render(view(2)))
+      const chart = await announcing()
+      chart.press("ArrowRight")
       await act(async () => vi.advanceTimersByTime(600))
-      expect(region()).toBe("Columns 2–2")
-      await act(async () => root.render(view(3)))
+      expect(chart.region()).toBe("Columns 3–3")
+      chart.press("ArrowLeft")
       // Moving away empties the region, so the same words coming back are a change it announces.
-      expect(region()).toBe("")
-      await act(async () => root.render(view(2)))
+      expect(chart.region()).toBe("")
       await act(async () => vi.advanceTimersByTime(600))
-      expect(region()).toBe("Columns 2–2")
+      expect(chart.region()).toBe("Columns 2–2")
+      chart.press("ArrowRight")
+      await act(async () => vi.advanceTimersByTime(600))
+      expect(chart.region()).toBe("Columns 3–3")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // ui-b S4: the region announced on mount, and again on every data poll under an unchanged selection.
+  it("announces only selections the user made, not the first render or a data refresh", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    vi.useFakeTimers()
+    try {
+      // Each tick is a poll that brings new values for the same periods.
+      const chart = await announcing((tick) =>
+        columns.map((column) => ({
+          ...column,
+          segments: column.segments.map((segment) => ({ ...segment, value: segment.value + tick }))
+        }))
+      )
+      await act(async () => vi.advanceTimersByTime(600))
+      expect(chart.region()).toBe("")
+      chart.rerender(1)
+      await act(async () => vi.advanceTimersByTime(600))
+      expect(chart.region()).toBe("")
+      chart.press("ArrowRight")
+      await act(async () => vi.advanceTimersByTime(600))
+      expect(chart.region()).toBe("Columns 3–3")
     } finally {
       vi.useRealTimers()
     }
@@ -591,28 +662,14 @@ describe("StackedBars", () => {
     vi.stubGlobal("ResizeObserver", TestResizeObserver)
     vi.useFakeTimers()
     try {
-      const container = document.createElement("div")
-      document.body.append(container)
-      const root = createRoot(container)
-      roots.push(root)
-      const view = (tick: number) => (
-        <StackedBars
-          {...props}
-          data-tick={tick}
-          // A fresh formatter on every render, as an inline callback would be.
-          describeSelection={(selection) => (selection === null ? "None" : `Columns ${selection.from}–${selection.to}`)}
-          selection={{ from: 2, to: 3 }}
-        />
-      )
-      await act(async () => root.render(view(0)))
+      const chart = await announcing()
+      chart.press("ArrowRight")
       for (let tick = 1; tick <= 6; tick += 1) {
-        await act(async () => {
-          vi.advanceTimersByTime(200)
-          root.render(view(tick))
-        })
+        await act(async () => vi.advanceTimersByTime(200))
+        chart.rerender(tick)
       }
       await act(async () => vi.advanceTimersByTime(600))
-      expect(container.querySelector('[aria-live="polite"]')?.textContent).toBe("Columns 2–3")
+      expect(chart.region()).toBe("Columns 3–3")
     } finally {
       vi.useRealTimers()
     }

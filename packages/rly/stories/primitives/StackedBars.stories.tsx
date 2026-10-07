@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { type CSSProperties, useCallback, useState } from "react"
+import { type CSSProperties, type ReactNode, useCallback, useLayoutEffect, useState } from "react"
 import { expect, userEvent, within } from "storybook/test"
 import { ChartLegend, type RlySeries } from "../../src/primitives/ChartLegend.js"
 import {
@@ -322,4 +322,82 @@ export const Empty: Story = {
     await expect(canvas.queryByRole("table")).toBeNull()
   },
   render: () => <Chart columns={[]} />
+}
+
+// Twelve hours, so every width down to 320 draws one bar per hour and the busiest hour is one bin.
+const halfDay = week.slice(60, 72)
+const busiest = halfDay.reduce(
+  (best, column, index) =>
+    column.segments.reduce((sum, { value }) => sum + value, 0) >
+    (halfDay[best]?.segments.reduce((sum, { value }) => sum + value, 0) ?? 0)
+      ? index
+      : best,
+  0
+)
+
+/** The selection is outlined above the bars, so even the tallest bar shows that it is selected. */
+const tallestSelectedPlay: Story["play"] = async ({ canvasElement }) => {
+  const edge = canvasElement.querySelector<SVGRectElement>('[data-part="selection-edge"]')
+  const bars = [...canvasElement.querySelectorAll("svg:not([class*='band']) > g")]
+  await expect(edge).not.toBeNull()
+  await expect(edge?.previousElementSibling).toBe(bars.at(-1))
+  if (edge !== null) await expect(getComputedStyle(edge).stroke).not.toBe("none")
+}
+
+export const TallestSelected: Story = {
+  args: { ...fixedArgs, columns: halfDay, selection: { from: busiest, to: busiest } },
+  play: tallestSelectedPlay
+}
+
+export const TallestSelectedForcedColors: Story = {
+  args: { ...fixedArgs, columns: halfDay, selection: { from: busiest, to: busiest } },
+  globals: { forcedColors: "active" },
+  play: tallestSelectedPlay
+}
+
+/** Text-only enlargement while mounted, as a browser's 200% text setting does; restored on unmount. */
+const LargeText = ({ children }: { readonly children: ReactNode }) => {
+  useLayoutEffect(() => {
+    document.documentElement.style.fontSize = "200%"
+    return () => {
+      document.documentElement.style.fontSize = ""
+    }
+  }, [])
+  return children
+}
+
+/** Long tick labels at doubled text size are spaced by their measured width, so none overlap. */
+export const LongLabelsLargeText: Story = {
+  args: {
+    ...fixedArgs,
+    columns: halfDay,
+    formatTick: (at: number) =>
+      new Intl.DateTimeFormat("en-GB", {
+        timeZone: "UTC",
+        weekday: "long",
+        day: "numeric",
+        month: "long",
+        hour: "2-digit",
+        minute: "2-digit"
+      }).format(at)
+  },
+  decorators: [
+    (Story) => (
+      <LargeText>
+        <Story />
+      </LargeText>
+    )
+  ],
+  globals: { viewport: { isRotated: false, value: "mobile1" } },
+  play: async ({ canvasElement }) => {
+    const ticks = [...canvasElement.querySelectorAll<HTMLElement>("[data-anchor]")].map((tick) =>
+      tick.getBoundingClientRect()
+    )
+    await expect(ticks.length).toBeGreaterThan(0)
+    for (const [index, tick] of ticks.entries()) {
+      for (const other of ticks.slice(index + 1)) {
+        await expect(tick.right <= other.left || other.right <= tick.left).toBe(true)
+      }
+    }
+  }
 }
