@@ -587,7 +587,7 @@
     /* Terminal cells never join; a ligature would also draw "--" outside the text start. */
     font-variant-ligatures: none;
     overflow: auto;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     overscroll-behavior: contain;
     padding: var(--rly-space-12);
     user-select: text;
