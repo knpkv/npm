@@ -69,9 +69,10 @@ export function Header() {
         : state.accounts.length
 
   const title = VIEW_TITLES[view] || "CodeCommit"
-  const userStr = state.status === "idle" && state.currentUser !== undefined && state.currentUser !== ""
-    ? `, ${state.currentUser}`
-    : ""
+  const userStr =
+    state.status === "idle" && state.currentUser !== undefined && state.currentUser !== ""
+      ? `, ${state.currentUser}`
+      : ""
   const countLabel =
     view === "prs"
       ? `${count} PR${count === 1 ? "" : "s"}`
