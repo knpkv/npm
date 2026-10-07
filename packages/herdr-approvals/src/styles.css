@@ -1231,16 +1231,6 @@
     }
   }
 
-  .app-error {
-    color: var(--rly-color-text-1);
-  }
-
-  .app-error pre {
-    color: var(--rly-color-blocked-ink);
-    overflow-wrap: break-word;
-    white-space: pre-wrap;
-  }
-
   @media (max-width: 46rem) {
     .app {
       inline-size: min(calc(100% - var(--rly-space-16)), 68rem);
