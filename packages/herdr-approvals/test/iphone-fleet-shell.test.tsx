@@ -53,7 +53,9 @@ describe("iPhone fleet shell regressions", () => {
     await act(async () => terminalControl?.focus())
     expect(document.activeElement).toBe(terminalControl)
 
-    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "3" })))
+    // g then w: the Work tab's sequence (bare digits no longer select tabs).
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "g" })))
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "w" })))
 
     expect(document.activeElement?.getAttribute("role")).toBe("tab")
     expect(document.activeElement?.textContent).toBe("Work")
@@ -69,13 +71,16 @@ describe("iPhone fleet shell regressions", () => {
         work={<section>Work board</section>}
       />
     )
-    const approvalControl = document.querySelector<HTMLButtonElement>("button:not([role=tab])")
+    const approvalControl = [...document.querySelectorAll<HTMLButtonElement>("button:not([role=tab])")].find(
+      (button) => button.textContent === "Focused approval control"
+    )
     await act(async () => approvalControl?.focus())
     document.querySelector('[role="tab"][data-tab-value="work"]')?.remove()
 
     await expect(
       act(async () => {
-        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "3" }))
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "g" }))
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "w" }))
       })
     ).resolves.toBeUndefined()
 

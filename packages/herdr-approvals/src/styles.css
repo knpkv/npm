@@ -28,14 +28,38 @@
     max-inline-size: 100rem;
     padding: var(--rly-space-16) var(--rly-space-32);
   }
+  /* One line: mark, name, then what it is, on a shared baseline. */
   .fleet-shell-brand {
+    align-items: baseline;
+    display: flex;
+    gap: var(--rly-space-8);
+    min-inline-size: var(--rly-space-0);
+  }
+  .fleet-shell-brand > .fleet-shell-mark {
+    align-self: center;
+    margin-inline-end: var(--rly-space-4);
+  }
+  .fleet-shell-meta {
     align-items: center;
     display: flex;
     gap: var(--rly-space-12);
   }
-  .fleet-shell-brand > span:last-child {
-    display: flex;
-    flex-direction: column;
+  .fleet-shortcuts {
+    display: grid;
+    gap: var(--rly-space-8);
+    margin: var(--rly-space-0);
+  }
+  .fleet-shortcuts > div {
+    align-items: baseline;
+    display: grid;
+    gap: var(--rly-space-16);
+    grid-template-columns: minmax(8rem, max-content) 1fr;
+  }
+  .fleet-shortcuts dt {
+    color: var(--rly-color-text-2);
+  }
+  .fleet-shortcuts dd {
+    margin: var(--rly-space-0);
   }
   .fleet-shell-mark {
     align-items: center;
@@ -58,24 +82,13 @@
     max-inline-size: 100rem;
     padding: var(--rly-space-24) var(--rly-space-32) var(--rly-space-96);
   }
-  .fleet-key-rail {
-    align-items: center;
-    border-block-end: 1px solid var(--rly-color-border-1);
-    color: var(--rly-color-text-3);
-    display: flex;
-    flex-wrap: wrap;
-    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
-      var(--rly-type-meta-font);
-    gap: var(--rly-space-16);
-    padding: var(--rly-space-8) var(--rly-space-4) var(--rly-space-12);
-  }
-  .fleet-key-rail span,
+  .fleet-shortcuts dt span,
   .keyboard-hints span {
     align-items: center;
     display: inline-flex;
     gap: var(--rly-space-4);
   }
-  .fleet-key-rail kbd,
+  .fleet-shortcuts kbd,
   .keyboard-hints kbd {
     background: var(--rly-color-surface-2);
     border: 1px solid var(--rly-color-border-2);
@@ -1335,7 +1348,6 @@
       min-block-size: 44px;
     }
 
-    .fleet-key-rail,
     .keyboard-hints,
     .activity-keyboard-help {
       display: none;
