@@ -1,0 +1,183 @@
+import { NodeServices } from "@effect/platform-node"
+import { expect, it } from "@effect/vitest"
+import { Effect, Schema } from "effect"
+import { TestClock } from "effect/testing"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import {
+  makeWorkService,
+  type WorkGoal,
+  type WorkObservationEnvelope,
+  type WorkObserveReport,
+  type WorkPullRequestObservation,
+  WorkStore
+} from "../src/index.js"
+
+const openStore = Effect.gen(function*() {
+  yield* TestClock.setTime(100_000)
+  const root = mkdtempSync(join(tmpdir(), "herdr-plan-reconcile-"))
+  yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+  const store = yield* Effect.acquireRelease(
+    WorkStore.open(join(root, "work.sqlite")),
+    (opened) => Effect.sync(() => opened.close())
+  )
+  return { store, work: yield* makeWorkService(store) }
+})
+
+const goal = (number: number): WorkGoal => ({
+  blocker: null,
+  connectTarget: null,
+  createdAt: 1_000,
+  delivery: "pull_request",
+  detail: "Review checkpoint",
+  id: `goal-pr${String(number)}`,
+  owner: { id: "owner", name: "Owner" },
+  repository: { branch: `feat/${String(number)}`, repository: "knpkv/npm" },
+  review: {
+    state: "requested",
+    summary: null,
+    updatedAt: 1_000,
+    url: `https://github.com/knpkv/npm/pull/${String(number)}`
+  },
+  spend: null,
+  state: "review",
+  summary: "Ship",
+  title: "Ship",
+  updatedAt: 1_000
+})
+
+const pullRequest = (
+  number: number,
+  state: WorkPullRequestObservation["state"]
+): WorkPullRequestObservation => ({
+  _tag: "pull_request",
+  branch: `feat/${String(number)}`,
+  checks: "passing",
+  closedAt: state === "open" ? null : 5_000,
+  head: "a".repeat(40),
+  pullRequest: number,
+  repository: "knpkv/npm",
+  review: "approved",
+  state
+})
+
+const confirmedIn = (report: WorkObserveReport) =>
+  report.outcomes.flatMap((outcome) =>
+    outcome._tag === "stored" || outcome._tag === "unchanged"
+      ? [{ observationId: outcome.observationId, subject: outcome.subject }]
+      : []
+  )
+
+/** One goal's situation: its PR's state, whether this pass confirms it, and what happened since. */
+const Scenario = Schema.Array(
+  Schema.Struct({
+    state: Schema.Literals(["open", "merged", "closed"]),
+    confirmed: Schema.Boolean,
+    failedSince: Schema.Boolean,
+    alreadyReconciled: Schema.Boolean,
+    reopenedByOwner: Schema.Boolean
+  })
+).check(Schema.isMinLength(1), Schema.isMaxLength(5))
+
+it.layer(NodeServices.layer)("planReconcile", (it) => {
+  it.effect("plans a merged pull request's goal as would-complete, from the fact and head it read, writing nothing", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* openStore
+      yield* work.record({ eventId: "goal-pr7.1", goal: goal(7), occurredAt: 1_000, version: "herdr.work.event.v1" })
+      const report = yield* work.observe([{ observation: pullRequest(7, "merged"), observedAt: 6_000 }])
+      const confirmed = confirmedIn(report)
+      const history = yield* store.list()
+      const plan = yield* work.planReconcile({ confirmed })
+      expect(plan).toEqual([
+        expect.objectContaining({
+          _tag: "would_apply",
+          goalEventId: "goal-pr7.1",
+          goalId: "goal-pr7",
+          goalUpdatedAt: 1_000,
+          observationId: confirmed[0]?.observationId,
+          state: "completed",
+          subject: confirmed[0]?.subject
+        })
+      ])
+      expect(yield* store.list()).toEqual(history)
+      // The step it planned is the one reconcile then takes.
+      const [applied] = yield* work.reconcile({ confirmed })
+      expect(applied).toMatchObject({
+        _tag: "applied",
+        eventId: plan[0]?._tag === "would_apply" ? plan[0].eventId : "",
+        goalId: "goal-pr7"
+      })
+    })))
+
+  it.effect("fails as reconcile does on a confirmation that's no longer the stored fact", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* openStore
+      yield* work.record({ eventId: "goal-pr7.1", goal: goal(7), occurredAt: 1_000, version: "herdr.work.event.v1" })
+      const closed = yield* work.observe([{ observation: pullRequest(7, "closed"), observedAt: 6_000 }])
+      yield* work.observe([{ observation: pullRequest(7, "open"), observedAt: 7_000 }])
+      expect(yield* Effect.flip(work.planReconcile({ confirmed: confirmedIn(closed) }))).toMatchObject({
+        _tag: "WorkStoreError",
+        operation: "reconcile.confirmed"
+      })
+    })))
+
+  it.effect.prop(
+    "takes exactly the steps it planned when nothing changes in between",
+    [Scenario],
+    ([scenario]) =>
+      Effect.scoped(Effect.gen(function*() {
+        const { store, work } = yield* openStore
+        const confirmed: Array<{ readonly subject: string; readonly observationId: string }> = []
+        for (const [index, item] of scenario.entries()) {
+          const number = index + 1
+          yield* work.record({
+            eventId: `goal-pr${String(number)}.1`,
+            goal: goal(number),
+            occurredAt: 1_000,
+            version: "herdr.work.event.v1"
+          })
+          const report = yield* work.observe([{ observation: pullRequest(number, item.state), observedAt: 6_000 }])
+          if (item.alreadyReconciled) {
+            yield* work.reconcile({ confirmed: confirmedIn(report) })
+            // An owner who reopens a goal the reconciler closed keeps it: the
+            // reconciler has stamped it already and only reports that.
+            if (item.reopenedByOwner) {
+              yield* work.record({
+                eventId: `goal-pr${String(number)}.reopened`,
+                goal: { ...goal(number), updatedAt: 50_000 },
+                occurredAt: 50_000,
+                version: "herdr.work.event.v1"
+              })
+            }
+          }
+          if (item.failedSince) {
+            const failed: WorkObservationEnvelope = {
+              observation: {
+                _tag: "unknown",
+                reason: "GitHub returned 502",
+                source: "github",
+                subject: `github:knpkv/npm#${String(number)}`
+              },
+              observedAt: 7_000
+            }
+            yield* work.observe([failed])
+          }
+          if (item.confirmed) { for (const entry of confirmedIn(report)) confirmed.push(entry) }
+        }
+        const history = yield* store.list()
+        const plan = yield* work.planReconcile({ confirmed })
+        expect(yield* store.list()).toEqual(history)
+        const applied = yield* work.reconcile({ confirmed })
+        expect(applied).toEqual(
+          plan.map((step) =>
+            step._tag === "would_apply"
+              ? { _tag: "applied", eventId: step.eventId, goalId: step.goalId, state: step.state }
+              : step._tag === "conflict"
+              ? { _tag: "conflict", goalId: step.goalId }
+              : step
+          )
+        )
+      }))
+  )
+})

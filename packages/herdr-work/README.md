@@ -61,7 +61,7 @@ goal's latest checkpoint and the pull request's fact are still the ones it was
 planned from (otherwise that goal is reported as a conflict), and 256
 checkpoints of history stay free. A goal is stamped at most once, by the
 reconciler's own record of what it wrote, so a goal its owner reopens stays
-reopened. `reconcile({ confirmed })` acts only on facts the caller has just
+reopened. `planReconcile({ confirmed })` answers what `reconcile` would do now with the same confirmations, writing nothing: it runs every check `reconcile` makes before writing, in the same kind of transaction, then rolls it back. Each step is `would_apply` (with the subject, `observationId`, and the goal event and `updatedAt` it was planned from), `recorded` (the reconciler already stamped that goal), or `conflict` (`checkpoint` or `revision`). It fails where `reconcile` fails. A race between the plan and a later `reconcile` is still caught when `reconcile` writes. `reconcile({ confirmed })` acts only on facts the caller has just
 read and the store accepted: `confirmed` lists the `subject` and
 `observationId` of each `stored` or `unchanged` outcome from that `observe`. A
 read refused as stale, or one that failed, confirms nothing, so a fact stored

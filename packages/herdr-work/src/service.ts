@@ -46,6 +46,7 @@ import type {
   WorkProspectiveAdmission,
   WorkReconcileOptions,
   WorkReconcileOutcome,
+  WorkReconcilePlanStep,
   WorkRecoveryContext,
   WorkRecoveryPreflight,
   WorkRecoveryTarget,
@@ -147,6 +148,16 @@ export interface WorkService {
    */
   readonly reconcile: (options: WorkReconcileOptions) => Effect.Effect<
     ReadonlyArray<WorkReconcileOutcome>,
+    WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+  >
+  /**
+   * What `reconcile` would do now with the same confirmations, writing
+   * nothing. Every check `reconcile` makes before writing runs, in the same
+   * kind of transaction, which is rolled back; a `would_apply` step can still
+   * meet a race when `reconcile` later writes, and is then a conflict.
+   */
+  readonly planReconcile: (options: WorkReconcileOptions) => Effect.Effect<
+    ReadonlyArray<WorkReconcilePlanStep>,
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
   /**
@@ -356,6 +367,9 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
     store.observe(envelopes)
   )
   const reconcile = Effect.fn("HerdrWork.reconcile")((options: WorkReconcileOptions) => store.reconcile(options))
+  const planReconcile = Effect.fn("HerdrWork.planReconcile")((options: WorkReconcileOptions) =>
+    store.planReconcile(options)
+  )
   const recordMany = Effect.fn("HerdrWork.recordMany")((
     transactionId: string,
     events: ReadonlyArray<WorkGoalCheckpoint>
@@ -390,6 +404,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       handoff,
       observe,
       reconcile,
+      planReconcile,
       record,
       recordMany,
       snapshots

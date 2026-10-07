@@ -1000,6 +1000,27 @@ export const WorkReconcileOutcome = Schema.TaggedUnion({
 })
 export type WorkReconcileOutcome = typeof WorkReconcileOutcome.Type
 
+/**
+ * One step `reconcile` would take now, from `planReconcile`. `would_apply`
+ * passed every check `reconcile` makes before writing, inside the same kind of
+ * transaction, and names the fact and goal head it was planned from; a race
+ * between the plan and a later `reconcile` is still caught when it writes.
+ */
+export const WorkReconcilePlanStep = Schema.TaggedUnion({
+  would_apply: {
+    goalId: WorkGoalId,
+    eventId: Identifier,
+    state: Schema.Literals(["completed", "abandoned"]),
+    subject: WorkObservationSubject,
+    observationId: WorkObservationId,
+    goalEventId: Identifier,
+    goalUpdatedAt: Timestamp
+  },
+  recorded: { goalId: WorkGoalId, eventId: Identifier },
+  conflict: { goalId: WorkGoalId, reason: Schema.Literals(["checkpoint", "revision"]) }
+})
+export type WorkReconcilePlanStep = typeof WorkReconcilePlanStep.Type
+
 /** What the Work tab shows for a goal: its recorded state, or a newer observed one. */
 export const WorkDisplayState = WorkState
 export type WorkDisplayState = typeof WorkDisplayState.Type
