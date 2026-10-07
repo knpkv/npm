@@ -5,6 +5,8 @@
     border-radius: var(--rly-radius-group);
     container-type: inline-size;
     display: grid;
+    /* One bounded track: an implicit auto track can't shrink below its content, so it overflowed at 320. */
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
     min-inline-size: var(--rly-space-0);
     overflow: hidden;
   }
@@ -65,9 +67,15 @@
       var(--rly-type-meta-font);
   }
 
-  .state,
+  /* Severity is one word in its ink, the only colour in the finding. */
   .severity {
-    text-transform: uppercase;
+    font-weight: var(--rly-type-label-weight);
+  }
+  .severity[data-rly-diff-finding-severity="critical"] {
+    color: var(--rly-color-blocked-ink);
+  }
+  .severity[data-rly-diff-finding-severity="warning"] {
+    color: var(--rly-color-held-ink);
   }
 
   .body {
@@ -80,7 +88,7 @@
   .body h2,
   .body p {
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .prevention {
@@ -145,11 +153,9 @@
       var(--rly-type-meta-font);
   }
 
+  /* The enforcement layer is a code word, not a pill. */
   .prevention summary code {
-    border: 1px solid var(--rly-color-agent);
-    border-radius: var(--rly-radius-round);
-    color: var(--rly-color-agent);
-    padding: var(--rly-space-4) var(--rly-space-8);
+    color: var(--rly-color-text-1);
   }
 
   .prevention dl {
@@ -173,13 +179,13 @@
   }
 
   .prevention dt {
-    text-transform: uppercase;
+    color: var(--rly-color-text-2);
   }
 
   .prevention dd {
     color: var(--rly-color-text-1);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .body h2 {
@@ -207,13 +213,13 @@
   }
 
   .anchorDetails dt {
-    text-transform: uppercase;
+    color: var(--rly-color-text-2);
   }
 
   .anchorDetails dd {
     color: var(--rly-color-text-1);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .footer {
@@ -232,6 +238,7 @@
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
     gap: var(--rly-space-2);
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
     inline-size: 100%;
     min-block-size: 44px;
     padding: var(--rly-space-6) var(--rly-space-8);
@@ -250,14 +257,15 @@
   .footer button code,
   .stale code {
     color: var(--rly-color-text-2);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .stale {
-    border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink);
+    background: var(--rly-color-held-tint);
+    border-radius: var(--rly-radius-tag);
     display: grid;
     gap: var(--rly-space-2);
-    padding-inline-start: var(--rly-space-12);
+    padding: var(--rly-space-8) var(--rly-space-12);
   }
 
   .stale strong {

@@ -277,7 +277,7 @@ export const AtlassianAccountSetupForm = ({
           {discoveryMessage}
         </Text>
       </div>
-      <Field label="Account name" required size="compact">
+      <Field label="Account name" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -304,7 +304,7 @@ export const AtlassianAccountSetupForm = ({
                 Create an OAuth 2.0 integration in Atlassian Developer Console and add <code>{oauthCallbackUrl}</code>
                 as its callback URL. The credentials stay on this Control Center machine.
               </Text>
-              <Field label="OAuth client ID" required size="compact">
+              <Field label="OAuth client ID" required>
                 {(controlProps) => (
                   <input
                     {...controlProps}
@@ -315,7 +315,7 @@ export const AtlassianAccountSetupForm = ({
                   />
                 )}
               </Field>
-              <Field label="OAuth client secret" required size="compact">
+              <Field label="OAuth client secret" required>
                 {(controlProps) => (
                   <input
                     {...controlProps}
@@ -332,7 +332,7 @@ export const AtlassianAccountSetupForm = ({
               </Button>
             </div>
           )}
-          <Field label="OAuth profile" required size="compact">
+          <Field label="OAuth profile" required>
             {(controlProps) => (
               <select {...controlProps} onChange={(event) => setProfileId(event.currentTarget.value)} value={profileId}>
                 <option value="">Choose a profile already on this machine</option>
@@ -360,7 +360,7 @@ export const AtlassianAccountSetupForm = ({
         </>
       ) : (
         <div className={styles.fallback}>
-          <Field label="Atlassian email" required size="compact">
+          <Field label="Atlassian email" required>
             {(controlProps) => (
               <input
                 {...controlProps}
@@ -371,7 +371,7 @@ export const AtlassianAccountSetupForm = ({
               />
             )}
           </Field>
-          <Field label="API token" required size="compact">
+          <Field label="API token" required>
             {(controlProps) => (
               <input
                 {...controlProps}
@@ -388,7 +388,7 @@ export const AtlassianAccountSetupForm = ({
           </Button>
         </div>
       )}
-      <Field label="Atlassian site URL" required size="compact">
+      <Field label="Atlassian site URL" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -400,12 +400,7 @@ export const AtlassianAccountSetupForm = ({
           />
         )}
       </Field>
-      <Field
-        description="The stable Atlassian cloud ID; filled from OAuth when available."
-        label="Site ID"
-        required
-        size="compact"
-      >
+      <Field description="The stable Atlassian cloud ID; filled from OAuth when available." label="Site ID" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -420,7 +415,6 @@ export const AtlassianAccountSetupForm = ({
           description="The immutable Jira project ID followed by this connection."
           label="Jira project ID"
           required
-          size="compact"
         >
           {(controlProps) => (
             <input {...controlProps} onChange={(event) => setProjectId(event.currentTarget.value)} value={projectId} />
@@ -429,17 +423,12 @@ export const AtlassianAccountSetupForm = ({
       ) : null}
       {setupConfluence ? (
         <div className={styles.resources}>
-          <Field label="Confluence space ID" required size="compact">
+          <Field label="Confluence space ID" required>
             {(controlProps) => (
               <input {...controlProps} onChange={(event) => setSpaceId(event.currentTarget.value)} value={spaceId} />
             )}
           </Field>
-          <Field
-            description="A readable page used only for the connection check."
-            label="Health page ID"
-            required
-            size="compact"
-          >
+          <Field description="A readable page used only for the connection check." label="Health page ID" required>
             {(controlProps) => (
               <input
                 {...controlProps}

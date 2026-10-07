@@ -3,7 +3,7 @@
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { renderToStaticMarkup } from "react-dom/server"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { BoundedDiffCodeView } from "../../src/diff/bounded/BoundedDiffCodeView.js"
 import type { RlyDiffCodeAnnotation, RlyDiffCodeItem } from "../../src/diff/types.js"
 
@@ -77,6 +77,22 @@ describe("BoundedDiffCodeView", () => {
       expect(html).toContain("High · 96% · draft finding")
       expect(html).toContain('tabindex="0"')
     }
+  })
+
+  afterEach(() => vi.restoreAllMocks())
+
+  it("stacks a split view in a container too narrow for two code columns, and keeps it split when wide", async () => {
+    const mountAt = async (width: number) => {
+      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, width, 400))
+      const host = document.createElement("div")
+      document.body.append(host)
+      await act(async () => createRoot(host).render(<BoundedDiffCodeView initialItems={[item]} />))
+      return host.querySelector("[data-rly-diff-code-view]")?.getAttribute("data-rly-diff-mode")
+    }
+    expect(await mountAt(400)).toBe("stacked")
+    expect(await mountAt(1024)).toBe("split")
+    // Not laid out yet (no layout engine): the requested mode stands.
+    expect(await mountAt(0)).toBe("split")
   })
 
   it("returns annotation focus to its exact bounded line", async () => {

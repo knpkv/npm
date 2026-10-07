@@ -19,6 +19,11 @@ describe("StateLabel", () => {
     expect(RLY_STATE_LABEL_DEFAULT_VARIANTS).toEqual({ size: "default", tone: "neutral" })
   })
 
+  it("draws a neutral state as its word alone, unless an icon is named", () => {
+    expect(render(<StateLabel label="Installed" />)?.querySelector("svg")).toBeNull()
+    expect(render(<StateLabel icon="clock" label="Queued" />)?.querySelector("svg")).not.toBeNull()
+  })
+
   it("rejects blank visible labels", () => {
     expect(() => renderToStaticMarkup(<StateLabel label=" " />)).toThrow("visible text")
   })

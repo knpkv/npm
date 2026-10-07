@@ -214,3 +214,14 @@ test("counts the header badge from the queue, not a stale server count", async (
   )
     .toBeVisible()
 })
+
+test("keeps each state link on the pull request a full control target, not just its word", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  await page.goto(detail("12"))
+  const links = page.locator("a[href^='/?f=status:']")
+  await expect(links.first()).toBeVisible()
+  for (const link of await links.all()) {
+    expect((await link.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(32)
+  }
+})

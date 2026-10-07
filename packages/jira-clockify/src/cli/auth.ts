@@ -8,12 +8,28 @@ import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import { Console, Data, Effect, Option, Predicate, Redacted, Schema } from "effect"
 import { Command, Flag as Options, Prompt } from "effect/cli"
 import * as HttpClient from "effect/http/HttpClient"
+import type * as HttpClientError from "effect/http/HttpClientError"
 import * as ChildProcess from "effect/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 
-class InvalidClockifyApiKeyError extends Data.TaggedError("InvalidClockifyApiKeyError")<{}> {
+export class InvalidClockifyApiKeyError extends Data.TaggedError("InvalidClockifyApiKeyError")<{}> {
   override get message(): string {
     return "Invalid API key — check the value and try again"
+  }
+}
+
+/**
+ * A Clockify request failed for a reason other than the key: the network, an unexpected status, or a
+ * response this client cannot decode. Names the operation, so a decode mismatch is not mistaken for
+ * a missing workspace or a bad key.
+ */
+export class ClockifyRequestError extends Data.TaggedError("ClockifyRequestError")<{
+  readonly operation: "getLoggedUser" | "getWorkspacesOfUser"
+  readonly cause: unknown
+}> {
+  override get message(): string {
+    const reason = Predicate.hasProperty(this.cause, "message") ? String(this.cause.message) : String(this.cause)
+    return `Clockify ${this.operation} failed: ${reason}`
   }
 }
 
@@ -32,7 +48,36 @@ type ClockifyWorkspace = typeof ClockifyWorkspace.Type
 
 const decodeClockifyUser = Schema.decodeUnknownEffect(ClockifyUser)
 const decodeClockifyWorkspaces = Schema.decodeUnknownEffect(Schema.Array(ClockifyWorkspace))
-const emptyWorkspaces = (): ReadonlyArray<ClockifyWorkspace> => []
+
+/** Only Clockify's own rejection of the key means the key is wrong. */
+const isRejectedKey = (error: HttpClientError.HttpClientError | Schema.SchemaError): boolean =>
+  error._tag === "HttpClientError" && (error.response?.status === 401 || error.response?.status === 403)
+
+/**
+ * The account behind an API key: who it is and which workspaces it can use. An empty list is a real
+ * answer; any failure is typed, so setup never reports "no workspaces" for a request that failed.
+ */
+export const loadClockifyAccount = Effect.fn("ClockifyAuth.loadClockifyAccount")(
+  function*(client: ReturnType<typeof makeClockifyApi>) {
+    const user = yield* client.getLoggedUser(undefined).pipe(
+      Effect.flatMap(decodeClockifyUser),
+      Effect.mapError((cause) =>
+        isRejectedKey(cause)
+          ? new InvalidClockifyApiKeyError()
+          : new ClockifyRequestError({ operation: "getLoggedUser", cause })
+      )
+    )
+    const workspaces = yield* client.getWorkspacesOfUser(undefined).pipe(
+      Effect.flatMap(decodeClockifyWorkspaces),
+      Effect.mapError((cause) =>
+        isRejectedKey(cause)
+          ? new InvalidClockifyApiKeyError()
+          : new ClockifyRequestError({ operation: "getWorkspacesOfUser", cause })
+      )
+    )
+    return { user, workspaces }
+  }
+)
 
 // ---------------------------------------------------------------------------
 // Jira OAuth
@@ -173,16 +218,8 @@ export const clockifySetup = Command.make(
         baseUrl: "https://api.clockify.me/api"
       })
 
-      const user = yield* client.getLoggedUser(undefined).pipe(
-        Effect.flatMap(decodeClockifyUser),
-        Effect.catch(() => Effect.fail(new InvalidClockifyApiKeyError()))
-      )
+      const { user, workspaces } = yield* loadClockifyAccount(client)
       yield* Console.log(`Authenticated as: ${user.name} (${user.email})`)
-
-      const workspaces = yield* client.getWorkspacesOfUser(undefined).pipe(
-        Effect.flatMap(decodeClockifyWorkspaces),
-        Effect.catch(() => Effect.succeed(emptyWorkspaces()))
-      )
 
       if (workspaces.length === 0) {
         yield* Console.log("No workspaces found.")
@@ -216,9 +253,7 @@ export const clockifySetup = Command.make(
 
       yield* Console.log("")
       yield* Console.log("Clockify configured! Saved to ~/.jcf/clockify.json")
-    }).pipe(
-      Effect.catch((e) => Console.log(`Error: ${Predicate.hasProperty(e, "message") ? String(e.message) : String(e)}`))
-    )
+    })
 )
 
 const clockifyStatus = Command.make(

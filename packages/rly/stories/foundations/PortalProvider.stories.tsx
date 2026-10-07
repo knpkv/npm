@@ -3,11 +3,14 @@ import { Dialog } from "radix-ui"
 import { type ReactElement, useState } from "react"
 import { expect, userEvent, within } from "storybook/test"
 import { PortalBoundary, PortalProvider } from "../../src/foundations/PortalProvider.js"
+import { Button } from "../../src/primitives/Button.js"
 
 const DialogProbe = (): ReactElement => {
   return (
     <Dialog.Root>
-      <Dialog.Trigger>Open custom portal</Dialog.Trigger>
+      <Dialog.Trigger asChild>
+        <Button>Open custom portal</Button>
+      </Dialog.Trigger>
       <PortalBoundary>
         {(container) => (
           <Dialog.Portal container={container}>
@@ -15,7 +18,9 @@ const DialogProbe = (): ReactElement => {
             <Dialog.Content>
               <Dialog.Title>Portal policy</Dialog.Title>
               <Dialog.Description>Overlays stay in the target selected by the application.</Dialog.Description>
-              <Dialog.Close>Close portal</Dialog.Close>
+              <Dialog.Close asChild>
+                <Button>Close portal</Button>
+              </Dialog.Close>
             </Dialog.Content>
           </Dialog.Portal>
         )}

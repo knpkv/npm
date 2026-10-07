@@ -102,6 +102,10 @@ export const Confirmation: Story = {
   render: () => <ControlledReview />
 }
 
+/**
+ * A canary pinned to a 320px column in dark forced colours, whatever the toolbar says: every
+ * outcome must fit the narrowest phone in the hardest theme.
+ */
 export const TerminalStates: Story = {
   args: {
     confirmationLabel,
@@ -128,24 +132,26 @@ export const TerminalStates: Story = {
     canvasElement.dataset.governedActionTerminalStatesPlayComplete = "true"
   },
   render: (): ReactElement => (
-    <main data-governed-terminal-canary="" style={{ ...pageStyle, ...narrowStyle }}>
-      <Text as="h1" variant="section-title">
-        Governed action outcomes
-      </Text>
-      {terminalStates.map(([state, outcome]) => (
-        <GovernedActionReview
-          confirmationLabel={confirmationLabel}
-          isConfirmed={false}
-          key={state}
-          onAuthorize={() => undefined}
-          onConfirmationChange={() => undefined}
-          onReject={() => undefined}
-          outcome={<Text tone="secondary">{outcome}</Text>}
-          proposal={{ ...proposal, id: `proposal-${state}` }}
-          reviewer={reviewer}
-          state={state}
-        />
-      ))}
+    <main style={pageStyle}>
+      <div data-governed-terminal-canary="" style={{ display: "grid", gap: "var(--rly-space-24)", ...narrowStyle }}>
+        <Text as="h1" variant="section-title">
+          Governed action outcomes, 320px, dark forced colours
+        </Text>
+        {terminalStates.map(([state, outcome]) => (
+          <GovernedActionReview
+            confirmationLabel={confirmationLabel}
+            isConfirmed={false}
+            key={state}
+            onAuthorize={() => undefined}
+            onConfirmationChange={() => undefined}
+            onReject={() => undefined}
+            outcome={<Text tone="secondary">{outcome}</Text>}
+            proposal={{ ...proposal, id: `proposal-${state}` }}
+            reviewer={reviewer}
+            state={state}
+          />
+        ))}
+      </div>
     </main>
   )
 }

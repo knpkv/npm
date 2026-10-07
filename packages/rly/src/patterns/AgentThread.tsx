@@ -89,12 +89,13 @@ const validateActor = (actor: RlyAgentThreadActor): void => {
 const actorIdentity = (actor: RlyAgentThreadActor): ReactElement => {
   const name = actor.kind === "human" ? actor.person.name : actor.name
   const role = actor.kind === "human" ? actor.person.role : actor.kind === "agent" ? actor.role : "System event"
+  // Every actor shows initials; a system source ("CodePipeline") gets its own, never a bare dot.
   const fallback =
     actor.kind === "human"
       ? (actor.person.avatarFallback ?? initialsFor(name))
       : actor.kind === "agent"
         ? (actor.avatarFallback ?? initialsFor(name))
-        : "·"
+        : initialsFor(name)
   const src = actor.kind === "human" ? actor.person.avatarSrc : undefined
 
   return (

@@ -117,7 +117,12 @@ export const GeometryForcedColors: Story = {
     const canary = canvasElement.querySelector<HTMLElement>("[data-release-relay-canary]")
     if (canary === null) throw new Error("ReleaseRelay geometry canary did not render")
     await expect(canary.scrollWidth).toBeLessThanOrEqual(canary.clientWidth)
-    await expect(canvas.getAllByText("Identity algorithm: relay/v1")).toHaveLength(2)
+    // The label is prose and the value is code, so match the whole line across both.
+    await expect(
+      canvas.getAllByText(
+        (_, element) => element?.tagName === "SPAN" && element.textContent === "Identity algorithm: relay/v1"
+      )
+    ).toHaveLength(2)
     canvasElement.dataset.releaseRelayGeometryPlayComplete = "true"
   },
   render: () => <GeometryCanary />

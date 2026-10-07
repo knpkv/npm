@@ -69,7 +69,7 @@ describe("DiffHeader", () => {
   it("supports zero files and rejects impossible progress", () => {
     const empty = render(<DiffHeader {...commonProps} indexedCount={0} totalCount={0} />)
     expect(empty?.querySelector("progress")?.getAttribute("max")).toBe("1")
-    expect(empty?.textContent).toContain("of 0 files indexed")
+    expect(empty?.textContent).toContain("No files to index")
     expect(() => renderToStaticMarkup(<DiffHeader {...commonProps} indexedCount={501} />)).toThrow(
       "indexedCount must be between zero and totalCount"
     )

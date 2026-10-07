@@ -160,6 +160,27 @@ export class WorkGoalReassignmentConflictError extends Schema.TaggedError<WorkGo
   }
 ) {}
 
+/** An abandonment job id was already used: by a different abandonment, or by another durable Work record. */
+export class WorkGoalAbandonmentConflictError extends Schema.TaggedError<WorkGoalAbandonmentConflictError>()(
+  "WorkGoalAbandonmentConflictError",
+  {
+    approvalJobId: Schema.String,
+    reason: Schema.Literals(["payload_mismatch", "identifier_in_use"])
+  }
+) {}
+
+/** The goal still holds an active (not shipped) lane; abandoning it never releases the lane. */
+export class WorkGoalLaneActiveError extends Schema.TaggedError<WorkGoalLaneActiveError>()(
+  "WorkGoalLaneActiveError",
+  { goalId: Schema.String, laneId: Schema.String }
+) {}
+
+/** The goal is already finished (`completed`, `deployed` or `abandoned`). */
+export class WorkGoalTerminalError extends Schema.TaggedError<WorkGoalTerminalError>()(
+  "WorkGoalTerminalError",
+  { goalId: Schema.String, state: Schema.String }
+) {}
+
 /** The goal's active lane has a started-worker binding, so a reassignment must name the agent that takes it over. */
 export class WorkGoalBindingRequiresAgentError extends Schema.TaggedError<WorkGoalBindingRequiresAgentError>()(
   "WorkGoalBindingRequiresAgentError",
