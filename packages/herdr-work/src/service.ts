@@ -152,8 +152,9 @@ export interface WorkService {
   >
   /**
    * What `reconcile` would do now with the same confirmations, writing
-   * nothing. Every check `reconcile` makes before writing runs, each step
-   * against the ones before it, in one transaction that is rolled back.
+   * nothing. Every check `reconcile` makes before writing runs, each in its
+   * own transaction rolled back at once, with each step checked against the
+   * checkpoints earlier steps planned; no transaction is held between steps.
    * The plan is advisory: `reconcile` takes no plan and decides again from the
    * store as it then is, so a goal changed after planning is reconciled
    * against its new latest event; its revision conflict covers only its own

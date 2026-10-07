@@ -3991,7 +3991,10 @@ export class WorkStore implements WorkStoreService {
     this: WorkStore,
     event: WorkGoalCheckpointType,
     guard: ReconcilerGuard | null,
-    mode: "write" | "check" = "write"
+    mode: "write" | "check" = "write",
+    // In a check, the checkpoints earlier steps of the same plan would have
+    // written: limits are checked as if they were already stored.
+    planned: ReadonlyArray<WorkGoalCheckpointType> = []
   ) {
     const decoded = yield* Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
       Effect.mapError(storeError("append.decode"))
@@ -4009,20 +4012,9 @@ export class WorkStore implements WorkStoreService {
     const decision = yield* Effect.try({
       try: () => {
         let transaction = false
-        // A check runs inside the plan's own transaction, which is always
-        // rolled back: each step keeps its insert in a savepoint so the next
-        // step is checked against it, as `reconcile` checks against its commits.
-        const plan = mode === "check"
-        const begin = () => {
-          if (plan && !this.#database.isTransaction) throw new Error("a reconcile check needs the plan's transaction")
-          this.#database.exec(plan ? "SAVEPOINT reconcile_plan_step" : "BEGIN IMMEDIATE")
-        }
-        const abort = () =>
-          this.#database.exec(
-            plan ? "ROLLBACK TO reconcile_plan_step; RELEASE reconcile_plan_step" : "ROLLBACK"
-          )
+        const abort = () => this.#database.exec("ROLLBACK")
         try {
-          begin()
+          this.#database.exec("BEGIN IMMEDIATE")
           transaction = true
           const reject = (error: AppendRejection): AppendDecision => {
             abort()
@@ -4080,7 +4072,7 @@ export class WorkStore implements WorkStoreService {
             const count = Schema.decodeUnknownSync(CountRow)(
               this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_events").get()
             ).count
-            if (count + 1 > workHistoryMaxEvents - guard.reserve) {
+            if (count + planned.length + 1 > workHistoryMaxEvents - guard.reserve) {
               return reject(
                 new WorkProjectionError({
                   cause: count,
@@ -4102,7 +4094,7 @@ export class WorkStore implements WorkStoreService {
           const eventCount = Schema.decodeUnknownSync(CountRow)(
             this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_events").get()
           ).count
-          if (eventCount >= workHistoryMaxEvents) {
+          if (eventCount + planned.length >= workHistoryMaxEvents) {
             return reject(
               new WorkProjectionError({
                 cause: decoded,
@@ -4114,6 +4106,7 @@ export class WorkStore implements WorkStoreService {
           const history = Schema.decodeUnknownSync(StoredEventRows)(
             this.#database.prepare("SELECT record FROM work_goal_events").all()
           ).map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
+            .concat(planned)
           const familyError = validateGoalFamilyHistory([...history, decoded])
           if (familyError !== undefined) return reject(familyError)
           if (maximumSnapshotBytes(history, decoded) > fleetResponseBodyMaxBytes) {
@@ -4164,6 +4157,11 @@ export class WorkStore implements WorkStoreService {
               )
             }
           }
+          if (mode === "check") {
+            abort()
+            transaction = false
+            return { _tag: "checked" } satisfies AppendDecision
+          }
           const result = this.#database.prepare(
             "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
           ).run(decoded.eventId, decoded.goal.id, decoded.occurredAt, JSON.stringify(decoded))
@@ -4175,11 +4173,9 @@ export class WorkStore implements WorkStoreService {
               decoded.goal.id
             )
           }
-          this.#database.exec(plan ? "RELEASE reconcile_plan_step" : "COMMIT")
+          this.#database.exec("COMMIT")
           transaction = false
-          return plan
-            ? { _tag: "checked" } satisfies AppendDecision
-            : { _tag: "inserted", changes: result.changes } satisfies AppendDecision
+          return { _tag: "inserted", changes: result.changes } satisfies AppendDecision
         } catch (error) {
           if (transaction) abort()
           throw error
@@ -5504,9 +5500,18 @@ export class WorkStore implements WorkStoreService {
     const stamped = new Map(source.reconcilerEvents.map(({ eventId, goalId }) => [goalId, eventId]))
     const cryptoService = this.#cryptoService
     const now = yield* Clock.currentTimeMillis
+    // A plan holds no transaction between steps: each check rolls back at once,
+    // and later steps are checked against the checkpoints earlier ones planned.
+    const planned: Array<WorkGoalCheckpointType> = []
     const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) =>
-      this.appendAt(checkpoint, guard, mode)
-    const steps = Effect.forEach(
+      this.appendAt(checkpoint, guard, mode, planned).pipe(
+        Effect.tap(() =>
+          Effect.sync(() => {
+            if (mode === "check") planned.push(checkpoint)
+          })
+        )
+      )
+    return yield* Effect.forEach(
       terminalCandidates(
         source.events,
         source.facts,
@@ -5549,18 +5554,6 @@ export class WorkStore implements WorkStoreService {
         )
       })
     )
-    if (mode === "write") return yield* steps
-    // A plan runs its steps in one transaction that is always rolled back, so
-    // capacity and size are checked cumulatively, the way `reconcile` meets them.
-    const database = this.#database
-    return yield* Effect.acquireUseRelease(
-      Effect.try({ try: () => database.exec("BEGIN IMMEDIATE"), catch: storeError("reconcile.plan.begin") }),
-      () => steps,
-      () =>
-        Effect.sync(() => {
-          if (database.isTransaction) database.exec("ROLLBACK")
-        })
-    )
   })
 
   readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore, request: WorkReconcileOptions) {
@@ -5576,8 +5569,9 @@ export class WorkStore implements WorkStoreService {
 
   /**
    * What `reconcile` would do now with the same confirmations, writing
-   * nothing: every check it makes before writing runs, each step against the
-   * ones before it, in one transaction that is then rolled back.
+   * nothing: every check it makes before writing runs, each in a transaction
+   * that is rolled back at once, with each step checked against the
+   * checkpoints earlier steps planned.
    */
   readonly planReconcile = Effect.fn("WorkStore.planReconcile")(function*(
     this: WorkStore,

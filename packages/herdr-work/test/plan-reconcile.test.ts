@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
-import { Effect, Schema } from "effect"
+import { Crypto, Deferred, Effect, Fiber, Ref, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -18,16 +18,20 @@ import {
   WorkStore
 } from "../src/index.js"
 
-const openStore = Effect.gen(function*() {
-  yield* TestClock.setTime(100_000)
-  const root = mkdtempSync(join(tmpdir(), "herdr-plan-reconcile-"))
-  yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
-  const store = yield* Effect.acquireRelease(
-    WorkStore.open(join(root, "work.sqlite")),
-    (opened) => Effect.sync(() => opened.close())
-  )
-  return { store, work: yield* makeWorkService(store) }
-})
+const openStoreWith = (configureCrypto: (base: Crypto.Crypto) => Crypto.Crypto) =>
+  Effect.gen(function*() {
+    yield* TestClock.setTime(100_000)
+    const root = mkdtempSync(join(tmpdir(), "herdr-plan-reconcile-"))
+    yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+    const cryptoService = configureCrypto(yield* Crypto.Crypto)
+    const store = yield* Effect.acquireRelease(
+      WorkStore.open(join(root, "work.sqlite")).pipe(Effect.provideService(Crypto.Crypto, cryptoService)),
+      (opened) => Effect.sync(() => opened.close())
+    )
+    return { store, work: yield* makeWorkService(store) }
+  })
+
+const openStore = openStoreWith((base) => base)
 
 const goal = (number: number): WorkGoal => ({
   blocker: null,
@@ -272,4 +276,54 @@ it.layer(NodeServices.layer)("planReconcile", (it) => {
       })),
     { timeout: 60_000 }
   )
+
+  it.effect("holds no transaction while it waits, so other store calls run and never see planned checkpoints", () =>
+    Effect.scoped(Effect.gen(function*() {
+      // Once armed, the second digest (the plan's second step) waits for
+      // `release`, after its first step was checked; observing digests too.
+      const armed = yield* Ref.make(false)
+      const digests = yield* Ref.make(0)
+      const entered = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const { store, work } = yield* openStoreWith((base) => ({
+        ...base,
+        digest: (algorithm, data) =>
+          Effect.gen(function*() {
+            if ((yield* Ref.get(armed)) && (yield* Ref.updateAndGet(digests, (count) => count + 1)) === 2) {
+              yield* Deferred.succeed(entered, undefined)
+              yield* Deferred.await(release)
+            }
+            return yield* base.digest(algorithm, data)
+          })
+      }))
+      for (const number of [7, 8]) {
+        yield* work.record({
+          eventId: `goal-pr${String(number)}.1`,
+          goal: goal(number),
+          occurredAt: 1_000,
+          version: "herdr.work.event.v1"
+        })
+      }
+      const report = yield* work.observe([
+        { observation: pullRequest(7, "merged"), observedAt: 6_000 },
+        { observation: pullRequest(8, "merged"), observedAt: 6_000 }
+      ])
+      const confirmed = confirmedIn(report)
+      const before = yield* store.list()
+      yield* Ref.set(armed, true)
+      const plan = yield* Effect.forkChild(work.planReconcile({ confirmed }))
+      yield* Deferred.await(entered)
+      // Mid-plan: reads see only what is stored, and an owner can still write.
+      expect(yield* store.list()).toEqual(before)
+      yield* work.record({ eventId: "goal-pr9.1", goal: goal(9), occurredAt: 1_000, version: "herdr.work.event.v1" })
+      yield* Ref.set(armed, false)
+      yield* work.observe([{ observation: pullRequest(9, "open"), observedAt: 6_000 }])
+      yield* Deferred.succeed(release, undefined)
+      const steps = yield* Fiber.join(plan)
+      expect(steps.map(({ _tag }) => _tag)).toEqual(["would_apply", "would_apply"])
+      expect((yield* store.list()).map(({ eventId }) => eventId)).toEqual([
+        ...before.map(({ eventId }) => eventId),
+        "goal-pr9.1"
+      ])
+    })))
 })
