@@ -1,5 +1,27 @@
 # @knpkv/control-center
 
+## 0.10.0
+
+### Minor Changes
+
+- [#531](https://github.com/knpkv/npm/pull/531) [`c01672d`](https://github.com/knpkv/npm/commit/c01672d8d55cd93580c06958e8cc202f5cde90c6) Thanks [@konopkov](https://github.com/konopkov)! - AWS adapters resolve local profiles SSO-first, so old keys in `~/.aws/credentials` no longer shadow `aws sso login`. `@knpkv/codecommit-core/AwsProfileCredentials.js` exports the shared resolver. Control Center's CodePipeline adapter uses the shared resolver; AWS discovery reports sign-in failures as `authentication`, and the setup form asks users to check their profile's credentials or sign-in session instead of showing "unavailable (unavailable)". Failed connection tests and discovery failures are logged with their failure tag and available diagnostic code.
+
+### Patch Changes
+
+- [#550](https://github.com/knpkv/npm/pull/550) [`44b633d`](https://github.com/knpkv/npm/commit/44b633d87c8b98ddb3fd03225124fa996e563473) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/codecommit-core/AwsCredentialErrors.js` exports the credential-failure classifier that CodeCommit refresh already used. Control Center's CodeCommit and CodePipeline plugins and AWS discovery now use it too, so every adapter treats the same expired, unsigned or rejected sessions as a sign-in problem, including unknown provider errors carrying such a wire tag.
+
+- [#547](https://github.com/knpkv/npm/pull/547) [`22eea67`](https://github.com/knpkv/npm/commit/22eea678f8576ee80dcd62c389fa8ec4dd6fe5f8) Thanks [@konopkov](https://github.com/konopkov)! - Overview no longer says "Choose your first service" once a source is connected. With sources connected and no releases it says what is connected and that releases come from Jira release versions, and offers only the services not yet enabled.
+
+- [#509](https://github.com/knpkv/npm/pull/509) [`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc) Thanks [@konopkov](https://github.com/konopkov)! - Controls default to tool density: `Button`, `IconButton`, `Select`, and the `Field` control gain a `dense` size (32px, small radius, sized to text) and use it when no size is given (`ThemeSelect` and the `AgentJob` cancel action too), through new shared `--rly-control-height-*` tokens (`RLY_CONTROL_HEIGHT_TOKEN_NAMES`). Compact `IconButton` is 40px like the other compact controls (it was 44). `ToggleGroup` gains the same dense default, drawn as an outlined row with 1px dividers instead of a tinted track, and its `compact` and `default` sizes now follow the 40px and 48px control heights; the registry lists `dense` as the default size. Coarse pointers keep a 44px target. One-sided accent stripes are gone from rly: diff annotations, the file-tree error, stale findings, agent outcomes, thread evidence, verdict reasons, workset gaps, and the `StatePanel` rail now use an even border or a flat tint, and `lint:stripes`, now part of the repository lint gate, keeps them from coming back. The diff file tree marks the open file with an even ring and draws its guide lines in the neutral divider colour. A neutral `StatePanel` shows no icon unless `icon` names one. Control Center's header actions, Settings inputs and selects, and service setup fields move to the same dense height, so they line up with rly buttons.
+
+  `StateLabel` renders a state as its word and icon in the tone's ink, with no border, tint or padding, so it never reads as a status chip. rly text no longer uses `overflow-wrap: anywhere`: words wrap only between words, and only an unbreakable token breaks (`break-word`), so a squeezed row never splits a word. Control Center Services: the card header keeps the title whole beside its state, and resource rows and test evidence lose their one-sided stripes. Codecommit-web's pull-request state links keep the 32px control target now that the state is a plain word.
+
+- Updated dependencies [[`44b633d`](https://github.com/knpkv/npm/commit/44b633d87c8b98ddb3fd03225124fa996e563473), [`c01672d`](https://github.com/knpkv/npm/commit/c01672d8d55cd93580c06958e8cc202f5cde90c6), [`da4b5eb`](https://github.com/knpkv/npm/commit/da4b5eb15e627c0dae13aa92a3ec0c848ab6225b), [`6940d1b`](https://github.com/knpkv/npm/commit/6940d1b6c88c3b95a3d70ad84a13f011c6fa4017), [`702d855`](https://github.com/knpkv/npm/commit/702d8559efbd781f4f89131ddbe462137a85ba4d), [`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/codecommit-core@0.19.0
+  - @knpkv/review@0.4.0
+  - @knpkv/rly@0.10.0
+  - @knpkv/relay-product@0.2.4
+
 ## 0.9.5
 
 ### Patch Changes
