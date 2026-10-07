@@ -51,7 +51,7 @@ describe("Select", () => {
     expect(markup).toContain('aria-label="Environment"')
     expect(markup).toContain("Select an option")
     expect(markup).toContain(RLY_SELECT_VARIANTS.size.compact.className)
-    expect(RLY_SELECT_DEFAULT_VARIANTS).toEqual({ size: "default" })
+    expect(RLY_SELECT_DEFAULT_VARIANTS).toEqual({ size: "dense" })
   })
 
   it("shows the selected option label without an open portal, including server rendering", () => {

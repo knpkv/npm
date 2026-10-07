@@ -125,7 +125,8 @@ describe("ReleaseRelay", () => {
       <ReleaseRelay algorithm="relay/v1" codename="Copper Orbit" size="hero" symbolIndices={[6, 3, 7]} />
     )
     expect(markup).toContain("Release relay, Copper Orbit, symbols bridge, wave, beacon.")
-    expect(markup).toContain("Identity algorithm: relay/v1")
+    // The label is prose and only the value is code.
+    expect(markup).toMatch(/Identity algorithm: <code[^>]*>relay\/v1<\/code>/)
     expect(RLY_RELEASE_RELAY_DEFAULT_VARIANTS).toEqual({ size: "compact" })
     expect(Object.keys(RLY_RELEASE_RELAY_VARIANTS.size)).toEqual(["compact", "hero"])
   })

@@ -14,7 +14,7 @@
  * @module
  */
 import { CacheService, PRService } from "@knpkv/codecommit-core"
-import { AppStatus, PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { AppStatus, CallerIdentities, PullRequest, UnevaluatedPullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { PermissionGateLiveTag } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
 import { Duration, Effect, Option, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
 import { HttpServerResponse } from "effect/http"
@@ -41,6 +41,10 @@ const SsePayload = Schema.Struct({
   error: Schema.optional(Schema.String),
   lastUpdated: Schema.optional(Schema.Date),
   currentUser: Schema.optional(Schema.String),
+  // Per-account caller identity, keyed by profile. Absent until the first refresh resolves.
+  callerIdentities: Schema.optional(CallerIdentities),
+  // Pull requests the last refresh kept from cache because their approval rules failed to evaluate.
+  unevaluatedPullRequests: Schema.optional(Schema.Array(UnevaluatedPullRequest)),
   unreadNotificationCount: Schema.Number,
   notifications: Schema.Struct({
     items: Schema.Array(NotificationResponse),
@@ -134,6 +138,8 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           error: prState.error,
           lastUpdated: prState.lastUpdated,
           currentUser: prState.currentUser,
+          callerIdentities: prState.callerIdentities,
+          unevaluatedPullRequests: prState.unevaluatedPullRequests,
           unreadNotificationCount: unreadCount,
           notifications,
           sandboxes,

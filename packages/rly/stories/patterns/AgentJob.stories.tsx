@@ -6,7 +6,9 @@ import { AgentJob } from "../../src/patterns/AgentJob.js"
 import { EvidenceStamp } from "../../src/patterns/EvidenceStamp.js"
 import { gridStyle, pageStyle, stackStyle } from "../primitives/storyStyles.js"
 
-const context = <p>Release 2.8.0 · PR-191 · production · inspect only; do not mutate repository or delivery state.</p>
+const context = (
+  <p>Release 2.8.0 · PR-{"\u2060"}191 · production · inspect only; do not mutate repository or delivery state.</p>
+)
 const evidence = <EvidenceStamp freshness="current" reference="PR-191@8f6d21a" service="codecommit" />
 
 const StateGallery = (): ReactElement => {

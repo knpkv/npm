@@ -4,7 +4,8 @@ const story = (id: string, theme = "dark"): string =>
   `/iframe.html?id=${id}&viewMode=story&globals=theme:${theme};forcedColors:auto;reducedMotion:reduce;locale:en;density:comfortable`
 
 const iconButtonSizes: ReadonlyArray<readonly [name: string, size: number]> = [
-  ["Add item", 44],
+  ["Mark done", 32],
+  ["Add item", 40],
   ["Search", 48],
   ["Continue", 56]
 ]
@@ -12,11 +13,13 @@ const iconButtonSizes: ReadonlyArray<readonly [name: string, size: number]> = [
 test("preserves deliberate control geometry and the shared focus treatment", async ({ page }) => {
   await page.goto(story("primitives-button--states"))
 
+  const dense = page.locator("[data-button-size=\"dense\"]")
   const compact = page.locator("[data-button-size=\"compact\"]")
   const standard = page.locator("[data-button-size=\"default\"]")
   const principal = page.locator("[data-button-size=\"principal\"]")
   await expect(compact).toBeVisible()
 
+  expect(Math.round((await dense.boundingBox())?.height ?? 0)).toBe(32)
   expect(Math.round((await compact.boundingBox())?.height ?? 0)).toBe(40)
   expect(Math.round((await standard.boundingBox())?.height ?? 0)).toBe(48)
   expect(Math.round((await principal.boundingBox())?.height ?? 0)).toBe(56)
@@ -36,6 +39,54 @@ test("preserves deliberate control geometry and the shared focus treatment", asy
     expect(Math.round(box?.height ?? 0)).toBe(size)
     expect(Math.round(box?.width ?? 0)).toBe(size)
   }
+})
+
+test("sizes toggle groups to the shared control heights, border included", async ({ page }) => {
+  await page.goto(story("primitives-togglegroup--interaction"))
+  const groups: ReadonlyArray<readonly [name: string, size: number]> = [
+    ["Range", 32],
+    ["Range (compact)", 40],
+    ["Range (default)", 48]
+  ]
+  for (const [name, size] of groups) {
+    const group = page.getByRole("radiogroup", { exact: true, name })
+    expect(Math.round((await group.boundingBox())?.height ?? 0)).toBe(size)
+    // The options carry the full height themselves; the outline does not take it from them.
+    for (
+      const box of await group.getByRole("radio").evaluateAll((items) =>
+        items.map((item) => item.getBoundingClientRect())
+      )
+    ) {
+      expect(Math.round(box.height)).toBe(size)
+      expect(Math.round(box.width)).toBeGreaterThanOrEqual(size)
+    }
+  }
+})
+
+test("keeps a toggle group on one row that scrolls inside a narrow container", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 320 })
+  await page.goto(story("primitives-togglegroup--interaction"))
+  const group = page.getByRole("radiogroup", { exact: true, name: "Range (default)" })
+  await expect(group.getByRole("radio")).toHaveCount(4)
+  // Narrower than its four options: the row must scroll, not wrap or squeeze its labels.
+  await group.evaluate((element) => {
+    if (element.parentElement !== null) element.parentElement.style.inlineSize = "120px"
+  })
+  const layout = await group.evaluate((element) => ({
+    scrolls: element.scrollWidth > element.clientWidth,
+    tops: [...element.querySelectorAll("[role=\"radio\"]")].map((radio) =>
+      Math.round(radio.getBoundingClientRect().top)
+    ),
+    clipped: [...element.querySelectorAll("[role=\"radio\"]")].filter((radio) => radio.scrollWidth > radio.clientWidth)
+      .length
+  }))
+  expect(layout.scrolls).toBe(true)
+  expect(new Set(layout.tops).size).toBe(1)
+  expect(layout.clipped).toBe(0)
+  const overflow = await page.evaluate(() =>
+    document.documentElement.scrollWidth - document.documentElement.clientWidth
+  )
+  expect(overflow).toBeLessThanOrEqual(0)
 })
 
 test("keeps state explanations readable without horizontal overflow at 320 pixels", async ({ page }) => {
@@ -168,4 +219,52 @@ test("keeps the near mark two-toned over the empty track and over a full fill, i
       if (forcedColors === "active") expect(adjust).toBe("none")
     }
   }
+})
+
+test("keeps primary and pressed button labels readable in forced colours", async ({ page }) => {
+  await page.goto(story("primitives-button--states"))
+  // Scoped to the story: Storybook's own chrome has buttons too.
+  const primary = page.locator("#storybook-root :is([data-rly-button-variant='primary'], button[class*='primary'])")
+    .first()
+  await expect(primary).toBeVisible()
+  // A pressed secondary button, as a filter toggle would be.
+  await page.locator("#storybook-root button:not([class*='primary'])").first().evaluate((element) =>
+    element.setAttribute("aria-pressed", "true")
+  )
+  const pressed = page.locator("#storybook-root button[aria-pressed='true']").first()
+  const modes: ReadonlyArray<"none" | "active"> = ["none", "active"]
+  for (const forcedColors of modes) {
+    await page.emulateMedia({ forcedColors })
+    for (const button of [primary, pressed]) {
+      const [label, fill] = await button.evaluate((element) => [
+        getComputedStyle(element).color,
+        getComputedStyle(element).backgroundColor
+      ])
+      expect(label).not.toBe(fill)
+    }
+  }
+  // Filled variants opt out of adjustment: Chromium's Canvas backplate otherwise hides the label.
+  for (const button of [primary, pressed]) await expect(button).toHaveCSS("forced-color-adjust", "none")
+})
+
+test("keeps a primary icon button marked and readable in forced colours", async ({ page }) => {
+  await page.emulateMedia({ forcedColors: "active" })
+  await page.goto(story("primitives-iconbutton--states"))
+  const primary = page.locator("#storybook-root [data-icon-button-variant='primary']").first()
+  await expect(primary).toBeVisible()
+  const [label, fill] = await primary.evaluate((element) => [
+    getComputedStyle(element).color,
+    getComputedStyle(element).backgroundColor
+  ])
+  expect(label).not.toBe(fill)
+  await expect(primary).toHaveCSS("forced-color-adjust", "none")
+})
+
+test("keeps the selected toggle option marked in forced colours", async ({ page }) => {
+  await page.emulateMedia({ forcedColors: "active" })
+  await page.goto(story("primitives-togglegroup--interaction"))
+  const selected = page.locator("#storybook-root [role='radio'][data-state='checked']").first()
+  await expect(selected).toBeVisible()
+  await expect(selected).toHaveCSS("outline-style", "solid")
+  await expect(selected).toHaveCSS("outline-width", "2px")
 })

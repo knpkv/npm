@@ -133,7 +133,7 @@ export const CompleteFiveHundred: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect(canvasElement.querySelectorAll("[data-rly-diff-file-id]")).toHaveLength(500)
     await expect(canvasElement.querySelectorAll("pre")).toHaveLength(0)
-    await expect(canvas.getByText("500/500")).toBeVisible()
+    await expect(canvas.getByText("500 files")).toBeVisible()
     canvasElement.dataset.diffFileTreeFiveHundredPlayComplete = "true"
   },
   render: () => (
@@ -158,8 +158,11 @@ export const CompactForcedColors: Story = {
     canvasElement.dataset.diffFileTreeCompactPlayComplete = "true"
   },
   render: () => (
-    <main data-diff-file-tree-compact="" style={{ ...pageStyle, ...narrowStyle }}>
-      <ControlledInventory />
+    <main style={pageStyle}>
+      {/* The 320px slot sits inside the page padding, so the canary is 320px at every viewport. */}
+      <div data-diff-file-tree-compact="" style={{ display: "grid", gap: "var(--rly-space-24)", ...narrowStyle }}>
+        <ControlledInventory />
+      </div>
     </main>
   )
 }

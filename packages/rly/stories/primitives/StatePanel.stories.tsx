@@ -19,7 +19,7 @@ const StatePanelGallery = () => (
         tone="positive"
       />
       <StatePanel
-        action={<Button size="compact">Review details</Button>}
+        action={<Button>Review details</Button>}
         data-state-panel-tone="critical"
         description="One required check needs attention before continuing."
         title="Blocked"

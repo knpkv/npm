@@ -157,7 +157,12 @@ const program = Effect.scoped(
       ok ? Effect.void : Effect.fail(new PackedCliError({ message: `${message}\n${result.stdout}\n${result.stderr}` }))
 
     const help = yield* codecommit(["--help"])
-    yield* expect(help.code === 0 && help.stdout.includes("codecommit <subcommand> [flags]"), "--help", help)
+    yield* expect(
+      help.code === 0 && help.stdout.includes("codecommit <subcommand> [flags]") &&
+        help.stdout.includes("Serve the browser UI on this machine and open it"),
+      "--help",
+      help
+    )
     const list = yield* codecommit(["pr", "list", "--repo", "payments-api", "--json", "--region", "eu-west-1"])
     yield* expect(list.code === 0 && list.stdout.trim() === "[]", "pr list", list)
     const tui = yield* codecommit(["tui"])
