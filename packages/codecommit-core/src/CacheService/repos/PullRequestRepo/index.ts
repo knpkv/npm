@@ -24,6 +24,7 @@ export {
   versionsOf
 } from "./internal.js"
 export type { CachedPullRequest as CachedPullRequestType } from "./internal.js"
+export type { UpsertResult } from "./mutations.js"
 export { PullRequestAmbiguityError, StaleOpenRow } from "./queries.js"
 export type { ApprovalGroup, DerivedColumns, GroupsWritten, RowGroup, RowVersion, RowVersions } from "./rowWrites.js"
 

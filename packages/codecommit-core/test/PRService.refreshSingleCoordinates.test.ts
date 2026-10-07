@@ -266,13 +266,16 @@ describe("PRService.refreshSinglePR coordinates", () => {
   )
 
   // A read older than the cached row changes nothing in the cache, so it announces nothing.
-  const singleRefreshWriteCases: ReadonlyArray<readonly [string, boolean, number]> = [
-    ["accepted", true, 1],
-    ["rejected as older than the cached row", false, 0]
+  // The last case: an earlier snapshot saw it pending, but the write replaced an approval stored
+  // meanwhile, so the revocation is announced from the replaced row.
+  const singleRefreshWriteCases: ReadonlyArray<readonly [string, boolean, number, boolean]> = [
+    ["accepted", true, 1, true],
+    ["rejected as older than the cached row", false, 0, true],
+    ["accepted over an approval its snapshot didn't see", true, 1, false]
   ]
   it.effect.each(singleRefreshWriteCases)(
     "sends a subscribed single refresh's notifications only when its upsert is %s",
-    ([, applied, expected]) =>
+    ([, applied, expected, snapshotApproved]) =>
       Effect.gen(function*() {
         const initialState: Domain.AppState = { pullRequests: [pullRequest], accounts: [], status: "idle" }
         const state = yield* SubscriptionRef.make(initialState)
@@ -314,7 +317,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
             Layer.mock(PullRequestRepo, {
               observe: () => Effect.succeed(1),
               findByAccountAndId: () => Effect.succeed(Option.none()),
-              findByCoordinates: () => Effect.succeed(Option.some(approvedCache)),
+              findByCoordinates: () =>
+                Effect.succeed(Option.some(snapshotApproved ? approvedCache : { ...approvedCache, isApproved: false })),
               findAll: () => Effect.succeed([approvedCache]),
               upsertRead: () =>
                 Effect.succeed({
@@ -325,7 +329,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
                       row: { lastActivity: new Date(2_000), observation: 1 },
                       approval: { lastActivity: new Date(2_000), observation: 1 }
                     }
-                    : undefined
+                    : undefined,
+                  replaced: Option.some(approvedCache)
                 }),
               writeDerived: () => Effect.succeed(true)
             }),
