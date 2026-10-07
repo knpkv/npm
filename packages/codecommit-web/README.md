@@ -55,5 +55,18 @@ Sessions hold conversation content. They live in `~/.codecommit/relay/sessions.s
 owner-only directory (`0700`) and database (`0600`). One server process owns them. A second
 `codecommit web` on the same home keeps serving the queue, and answers 503 `RelayUnavailableError`
 with the fix on `/api/relay`. Turns run on the user's own Claude Code or Codex CLI login, with every
-CLI tool withheld. Relay's `post_comment` posts through the same permission rules, prompt and audit
-log as review findings (`postPullRequestComment`, IAM `codecommit:PostCommentForPullRequest`).
+CLI tool withheld.
+
+Relay's tools here:
+
+- `get_pull_request`, `list_pull_requests`: from the local cache.
+- `get_pull_request_diff`: the changed files at the current revision, with that revision's ids.
+- `post_comment`: a top-level comment.
+- `post_line_comment`: one line, on the before or after side, pinned to the revision it was written
+  against. It is refused with `ReviewHeadMoved` if the pull request has moved since, and with
+  `CommentLineOutsidePatch` if the line is outside the changes, so it never lands on a different line.
+
+Both comment tools post through the same permission rules, prompt and audit log as review findings
+(`postPullRequestComment`). IAM: `codecommit:PostCommentForPullRequest`. The diff and line comments also
+read `codecommit:GetPullRequest`, `codecommit:GetDifferences` and `codecommit:GetBlob`, as the review
+workbench does.

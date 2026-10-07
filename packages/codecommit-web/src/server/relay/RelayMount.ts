@@ -16,10 +16,11 @@
 import type { CacheService, ConfigService, ReadClient } from "@knpkv/codecommit-core"
 import { Domain, RelayCapabilities } from "@knpkv/codecommit-core"
 import { claudeCodeBackend, codexCliBackend, make, register } from "@knpkv/relay"
-import type { RegisteredCapability, RelayHarnessService } from "@knpkv/relay"
+import type { RegisteredCapability, RelayHarnessService, WriteReceipt } from "@knpkv/relay"
 import { Config, Context, type Crypto, Effect, FileSystem, Layer, Path } from "effect"
 import { RelayUnavailableError } from "../Api.js"
 import { RelayFindingPublisher } from "../review/RelayFindingPublisher.js"
+import { webCapabilities } from "./RelayWebCapabilities.js"
 
 /** The harness when it started, or why it could not. */
 export class RelayMount extends Context.Service<RelayMount, {
@@ -43,12 +44,28 @@ export const commentPosterLayer = Layer.effect(
   })
 )
 
+/** The receipt the dock shows once a comment lands: CodeCommit's operation id and the PR in the console. */
+const commentReceipt = (output: {
+  readonly pullRequest: RelayCapabilities.PullRequestCoordinates
+  readonly operationId: string
+  readonly summary: string
+}): WriteReceipt => ({
+  summary: output.summary,
+  providerId: output.operationId,
+  link: Domain.codecommitConsoleUrl(
+    output.pullRequest.region,
+    output.pullRequest.repositoryName,
+    output.pullRequest.pullRequestId
+  )
+})
+
 /** What CodeCommit's capabilities read and write through. */
 type CapabilityServices =
   | CacheService.PullRequestRepo
   | ConfigService.ConfigService
   | ReadClient.CodeCommitReadClient
   | RelayCapabilities.PullRequestCommentPoster
+  | RelayFindingPublisher
   | Crypto.Crypto
 
 const unavailable = (message: string, fix: string) =>
@@ -69,18 +86,9 @@ export const relayMountLayer = Layer.effect(
     const registered: ReadonlyArray<RegisteredCapability<CapabilityServices>> = [
       register(capabilities.getPullRequest),
       register(capabilities.listPullRequests),
-      // The receipt the dock shows once a comment lands: CodeCommit's operation id and the PR in the console.
-      register(capabilities.postComment, {
-        receipt: (output) => ({
-          summary: output.summary,
-          providerId: output.operationId,
-          link: Domain.codecommitConsoleUrl(
-            output.pullRequest.region,
-            output.pullRequest.repositoryName,
-            output.pullRequest.pullRequestId
-          )
-        })
-      })
+      register(webCapabilities.getPullRequestDiff),
+      register(capabilities.postComment, { receipt: commentReceipt }),
+      register(webCapabilities.postLineComment, { receipt: commentReceipt })
     ]
     const harness = yield* make({
       storePath: path.join(directory, "sessions.sqlite"),

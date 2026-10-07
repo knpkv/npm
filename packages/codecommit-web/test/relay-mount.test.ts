@@ -37,7 +37,9 @@ layer(NodeServices.layer, { excludeTestServices: true })("Relay mount", (it) => 
       expect(relay.tools.map((tool) => [tool.name, tool.access])).toEqual([
         ["get_pull_request", "read"],
         ["list_pull_requests", "read"],
-        ["post_comment", "write"]
+        ["get_pull_request_diff", "read"],
+        ["post_comment", "write"],
+        ["post_line_comment", "write"]
       ])
     }).pipe(Effect.scoped))
 

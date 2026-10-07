@@ -593,6 +593,9 @@ importers:
       '@knpkv/browser-pairing':
         specifier: workspace:^
         version: link:../browser-pairing
+      '@knpkv/capability':
+        specifier: workspace:^
+        version: link:../capability
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core

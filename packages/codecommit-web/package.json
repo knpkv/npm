@@ -36,6 +36,7 @@
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/browser-pairing": "workspace:^",
+    "@knpkv/capability": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/relay": "workspace:^",
     "diff": "9.0.0",

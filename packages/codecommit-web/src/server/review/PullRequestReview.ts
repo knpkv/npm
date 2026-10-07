@@ -63,7 +63,7 @@ interface ExactReviewScope {
   readonly revision: ReadClient.CodeCommitPullRequestRevision
 }
 
-interface ExpectedReviewRevision {
+export interface ExpectedReviewRevision {
   readonly revisionId: string
   readonly baseCommit: string
   readonly headCommit: string
@@ -586,6 +586,20 @@ export const collectRelayPatch = Effect.fn("PullRequestReview.collectRelayPatch"
 })
 
 /** Reject Relay locations that are not exact changed-line or changed-file evidence. */
+/** Whether a file or line location lies inside the exact patch: the file changed, and the line is on the given side. */
+const anchoredInPatch = (
+  location: Exclude<RelayReviewFinding["location"], { readonly scope: "general" }>,
+  evidence: RelayPatchEvidence
+): boolean =>
+  evidence.anchors.some((anchor) => {
+    if (location.scope === "file") {
+      return anchor.beforePath === location.filePath || anchor.afterPath === location.filePath
+    }
+    return location.side === "before"
+      ? anchor.beforePath === location.filePath && anchor.beforeLines.has(location.line)
+      : anchor.afterPath === location.filePath && anchor.afterLines.has(location.line)
+  })
+
 export const validateRelayReviewAnchors = (
   result: RelayReviewResult,
   evidence: RelayPatchEvidence
@@ -593,14 +607,7 @@ export const validateRelayReviewAnchors = (
   for (const finding of result.findings) {
     const location = finding.location
     if (location.scope === "general") continue
-    const valid = evidence.anchors.some((anchor) => {
-      if (location.scope === "file") {
-        return anchor.beforePath === location.filePath || anchor.afterPath === location.filePath
-      }
-      return location.side === "before"
-        ? anchor.beforePath === location.filePath && anchor.beforeLines.has(location.line)
-        : anchor.afterPath === location.filePath && anchor.afterLines.has(location.line)
-    })
+    const valid = anchoredInPatch(location, evidence)
     if (!valid) {
       return Effect.fail(
         reviewError("relay-review-anchor", `Relay finding ${finding.id} references evidence outside the exact patch`)
@@ -1226,6 +1233,75 @@ const relayFindingCanonicalIdentity = (
     finding.location.scope === "line" ? finding.location.line : -1,
     finding.location.scope === "line" ? finding.location.side : ""
   ])
+
+/** Where a line comment goes: one line of one changed file, on the base (`before`) or head (`after`) side. */
+export interface LineCommentLocation {
+  readonly filePath: string
+  readonly line: number
+  readonly side: "before" | "after"
+}
+
+/**
+ * Post a comment on one line of the patch, pinned to the revision the person saw. Fails `revision-changed`
+ * when the pull request has moved since, and `line-comment-anchor` when the line is outside the exact patch,
+ * so a comment never lands on a different line than the one shown. A retry with the same text, line and
+ * revision is the same comment (deterministic request token).
+ */
+export const postPullRequestLineComment = Effect.fn("PullRequestReview.postPullRequestLineComment")(function*(
+  client: ReadClient.CodeCommitReadClientService,
+  publisher: RelayFindingPublisherService,
+  pullRequest: Domain.PullRequest,
+  expectedRevision: ExpectedReviewRevision,
+  location: LineCommentLocation,
+  content: string
+) {
+  const scope = yield* loadExactReviewScope(client, pullRequest, expectedRevision)
+  const files = yield* loadChangedFiles(client, scope)
+  const evidence = yield* collectRelayPatchEvidence(client, scope, files)
+  if (!anchoredInPatch({ scope: "line", ...location }, evidence)) {
+    return yield* reviewError(
+      "line-comment-anchor",
+      `${location.filePath} line ${location.line} (${location.side}) is not part of this pull request's changes`
+    )
+  }
+  const cryptoService = yield* Crypto.Crypto
+  const digest = yield* cryptoService.digest(
+    "SHA-256",
+    textEncoder.encode(JSON.stringify([
+      "relay-web-line-comment-v1",
+      scope.account.region,
+      scope.revision.repositoryName,
+      scope.revision.pullRequestId,
+      scope.revision.revisionId,
+      scope.revision.destinationCommit,
+      scope.revision.sourceCommit,
+      location.filePath,
+      location.line,
+      location.side,
+      content
+    ]))
+  ).pipe(Effect.mapError((cause) => reviewError("line-comment-token", "Unable to derive the comment token", cause)))
+  const receipt = yield* publisher.post({
+    _tag: "comment",
+    target: {
+      account: scope.account,
+      repositoryName: scope.revision.repositoryName,
+      pullRequestId: scope.revision.pullRequestId,
+      revisionId: scope.revision.revisionId,
+      sourceCommit: scope.revision.sourceCommit,
+      destinationCommit: scope.revision.destinationCommit,
+      destinationReference: scope.revision.destinationReference
+    },
+    content,
+    clientRequestToken: Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),
+    location: new ReviewClient.CodeCommitReviewLocation({
+      filePath: location.filePath,
+      filePosition: location.line,
+      relativeFileVersion: location.side === "after" ? "AFTER" : "BEFORE"
+    })
+  }).pipe(Effect.mapError((cause) => reviewError("line-comment", "Unable to post the line comment", cause)))
+  return { operationId: receipt.operationId, summary: receipt.summary }
+})
 
 /** Accept and immediately post one unchanged finding through the exact-revision review client. */
 export const postPullRequestRelayFinding = Effect.fn("PullRequestReview.postPullRequestRelayFinding")(function*(
