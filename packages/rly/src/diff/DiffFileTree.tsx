@@ -1,5 +1,13 @@
 import { CircleAlert, FilePenLine, FilePlus2, FileSymlink, FileX2, LoaderCircle } from "lucide-react"
-import { type ComponentPropsWithRef, type ReactElement, useEffect, useId, useMemo, useState } from "react"
+import {
+  type ComponentPropsWithRef,
+  type ReactElement,
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useState
+} from "react"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import styles from "./DiffFileTree.module.css"
 
@@ -66,6 +74,12 @@ const visibleGitPath = (path: string): string =>
     .split("/")
     .map((segment) => (segment !== segment.trim() || /[\t\n\v\f\r]/u.test(segment) ? JSON.stringify(segment) : segment))
     .join("/")
+
+/** A path that may wrap after each `/`, so the full path stays visible instead of being ellipsised. */
+const wrappableGitPath = (path: string): ReactNode =>
+  visibleGitPath(path)
+    .split("/")
+    .flatMap((segment, index) => (index === 0 ? [segment] : ["/", <wbr key={index} />, segment]))
 
 const requireGitPath = (path: string, label: string): string => {
   if (path.length === 0) throw new Error(`${label} must not be empty`)
@@ -225,9 +239,9 @@ export const DiffFileTree = ({
             >
               <span className={style("pathBlock")} style={{ paddingInlineStart: "var(--rly-space-20)" }}>
                 {node.file.change === "renamed" ? (
-                  <span className={style("previousPath")}>{visibleGitPath(node.file.previousPath)}</span>
+                  <span className={style("previousPath")}>{wrappableGitPath(node.file.previousPath)}</span>
                 ) : null}
-                <code className={style("path")}>{visibleGitPath(node.name)}</code>
+                <code className={style("path")}>{wrappableGitPath(node.name)}</code>
               </span>
               <span className={style("statusIcons")}>
                 <span aria-hidden="true" className={style("statusIcon")} title={node.file.change}>
@@ -267,7 +281,7 @@ export const DiffFileTree = ({
             type="button"
           >
             <span aria-hidden="true" className={style("chevron")} />
-            <code className={style("directoryName")}>{visibleGitPath(node.name)}</code>
+            <code className={style("directoryName")}>{wrappableGitPath(node.name)}</code>
             <span className={style("directoryCount")}>{node.fileCount}</span>
           </button>
           {expanded ? (
@@ -288,13 +302,11 @@ export const DiffFileTree = ({
       data-rly-diff-inventory-state={data.state}
     >
       <header className={style("header")}>
-        <span>
-          <span className={style("eyebrow")}>Changed files</span>
-          <h2 id={headingId}>{visibleHeading}</h2>
+        {/* The heading and a plain count in words; no eyebrow above it, no display-size figure. */}
+        <h2 id={headingId}>{visibleHeading}</h2>
+        <span className={style("count")}>
+          {indexedCount === totalCount ? `${totalCount} files` : `${indexedCount} of ${totalCount} files indexed`}
         </span>
-        <strong aria-label={`${indexedCount} of ${totalCount} files indexed`} className={style("count")}>
-          {indexedCount}/{totalCount}
-        </strong>
       </header>
 
       {data.state === "loading" ? (

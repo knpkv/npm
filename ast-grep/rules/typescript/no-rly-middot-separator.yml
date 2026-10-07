@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-rly-middot-separator
+language: tsx
+severity: error
+message: "rly copy must not join facts with a middot; use a comma or separate elements"
+
+rule:
+  any:
+    - kind: jsx_text
+      regex: "·"
+    - kind: string_fragment
+      regex: "·"
+
+files:
+  - "packages/rly/src/**/*.tsx"
+  - "packages/rly/src/**/*.ts"
+
+note: |
+  "A · B · C" is template chrome (Andrey's visual bar, item 3). Write the facts as a
+  phrase ("Agent finding, not an approval"), or lay them out as separate elements.
+  Stories and other packages are covered by the family pass, not this rule.

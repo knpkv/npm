@@ -286,7 +286,7 @@ const CommandSearchSurface = ({
 
   return (
     <Dialog.Root onOpenChange={changeOpen} open={open}>
-      <Dialog.Trigger className={styles.trigger} size="compact" variant="quiet">
+      <Dialog.Trigger className={styles.trigger} variant="quiet">
         Search ⌘K
       </Dialog.Trigger>
       <Dialog.Content

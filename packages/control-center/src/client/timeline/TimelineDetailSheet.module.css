@@ -33,7 +33,8 @@
 
 .identity h2 {
   max-inline-size: 13ch;
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
   text-wrap: balance;
 }
 
@@ -62,7 +63,8 @@
 }
 
 .ledger dd {
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
 }

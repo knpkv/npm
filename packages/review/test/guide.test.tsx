@@ -223,7 +223,7 @@ describe("guide", () => {
           ]}
         />
       )
-      expect(html).toContain(`${displayed} · reported`)
+      expect(html).toContain(`${displayed}, reported`)
     }
   })
   it("keeps pre-existing context and open questions in separately labelled groups", async () => {
@@ -327,8 +327,8 @@ describe("guide", () => {
         ]}
       />
     )
-    expect(html).toContain("USD 0 · reported")
-    expect(html).toContain("USD 328.2407 · estimated")
+    expect(html).toContain("USD 0, reported")
+    expect(html).toContain("USD 328.2407, estimated")
     expect(html).toContain("2m 5s")
     expect(html).toContain("Not recorded")
     expect(html).toContain("Provider usage receipt")

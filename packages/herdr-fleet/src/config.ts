@@ -8,7 +8,10 @@ export const loadConfiguration = Effect.fn("FleetConfiguration.load")(
     const text = yield* fileSystem.readFileString(path).pipe(
       Effect.mapError((cause) =>
         new FleetValidationError({
-          detail: `cannot read ${path}: ${String(cause)}`
+          // A first run has no file yet: say where it is looked for and how to point elsewhere.
+          detail: cause.reason._tag === "NotFound"
+            ? `no fleet configuration at ${path}; create it, or set FLEET_CONFIG_PATH to an existing file`
+            : `cannot read ${path}: ${String(cause)}`
         })
       )
     )

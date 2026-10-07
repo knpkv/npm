@@ -252,9 +252,12 @@
   gap: var(--rly-space-8);
 }
 
+/* A state word is only as tall as its text, so the link around it keeps the control target size. */
 .stateLink {
+  align-items: center;
   border-radius: var(--rly-radius-tag);
   display: inline-flex;
+  min-block-size: var(--rly-control-height-dense);
   text-decoration: none;
 }
 

@@ -47,17 +47,17 @@ export const ReadStatus = (props: {
         value={current?.total === undefined ? undefined : current.completed}
       />
       <details>
-        <summary>Loading details{index < 0 ? "" : ` · stage ${index + 1} of ${stages.length}`}</summary>
+        <summary>Loading details{index < 0 ? "" : `, stage ${index + 1} of ${stages.length}`}</summary>
         <ol className="jcf-read-stages">
           {stages.map((step, stepIndex) => {
             const detail = props.progress.find((entry) => entry.stage === step.stage)
             return (
               <li key={step.stage} data-state={stepIndex < index ? "done" : stepIndex === index ? "active" : "waiting"}>
-                <span>{stepIndex < index ? "✓" : stepIndex === index ? "•" : "○"}</span>
-                <div>
-                  <strong>{step.label}</strong>
-                  <p>{detail?.message ?? "Waiting"}</p>
-                </div>
+                <strong>{step.label}</strong>
+                <span className="jcf-read-stage-state">
+                  {stepIndex < index ? "Done" : stepIndex === index ? "Running" : "Waiting"}
+                </span>
+                {detail === undefined ? null : <p>{detail.message}</p>}
               </li>
             )
           })}

@@ -5,13 +5,15 @@ import { AtlassianOAuthGrantId, AtlassianOAuthProviderIntent } from "../../api/p
 import { PluginConnectionId } from "../../domain/identifiers.js"
 
 const activeGrantStorageKey = "cc_atlassian_oauth_setup_intent_state"
-const StoredAtlassianOAuthSetupIntent = Schema.fromJsonString(Schema.Struct({
-  preferredSiteId: Schema.NullOr(
-    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
-  ),
-  recoveryConnectionId: Schema.optionalKey(PluginConnectionId),
-  providers: AtlassianOAuthProviderIntent
-}))
+const StoredAtlassianOAuthSetupIntent = Schema.fromJsonString(
+  Schema.Struct({
+    preferredSiteId: Schema.NullOr(
+      Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(512))
+    ),
+    recoveryConnectionId: Schema.optionalKey(PluginConnectionId),
+    providers: AtlassianOAuthProviderIntent
+  })
+)
 
 /** Bounded setup target that survives the same-tab OAuth redirect. */
 export type AtlassianOAuthSetupIntent = typeof StoredAtlassianOAuthSetupIntent.Type
@@ -59,9 +61,7 @@ export const rememberAtlassianOAuthSetupIntent = (
 }
 
 /** Read only a schema-valid setup target associated with the exact callback state. */
-export const readAtlassianOAuthSetupIntent = (
-  state: string | null
-): AtlassianOAuthSetupIntent | null => {
+export const readAtlassianOAuthSetupIntent = (state: string | null): AtlassianOAuthSetupIntent | null => {
   const grantId = decodedGrantId(state)
   if (grantId === null) return null
   try {
