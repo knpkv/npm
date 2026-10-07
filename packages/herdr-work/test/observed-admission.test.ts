@@ -75,8 +75,8 @@ const absenceToken = (work: Effect.Success<typeof fixture>["work"]) =>
 
 /** Confirms every stored fact, as a pass that has just re-read them all would, then reconciles. */
 const reconcileConfirmed = (
-  store: { readonly snapshotInput: WorkStore["snapshotInput"] },
-  work: { readonly reconcile: WorkStore["reconcile"] }
+  store: Effect.Success<typeof fixture>["store"],
+  work: Effect.Success<typeof fixture>["work"]
 ) =>
   store.snapshotInput().pipe(
     Effect.flatMap(({ facts }) =>

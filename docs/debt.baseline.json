@@ -1264,6 +1264,13 @@
     {
       "package": "codecommit-core",
       "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
       "file": "packages/codecommit-core/src/PRService/visibility.ts",
       "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
@@ -3506,6 +3513,13 @@
       "kind": "eslint",
       "file": "packages/herdr-work/test/work.test.ts",
       "text": "eslint-disable-next-line local-rules/require-immediate-work-store-cleanup",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-work",
+      "kind": "typescript",
+      "file": "packages/herdr-work/test/terminal-reconcile.test.ts",
+      "text": "@ts-expect-error -- deliberately not a digest: reconcile must reject malformed options at runtime",
       "reasoned": true
     },
     {

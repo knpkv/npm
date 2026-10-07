@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
+import { Schema } from "effect"
 import type {
   WorkAgentObservation,
   WorkGoal,
@@ -7,6 +8,7 @@ import type {
   WorkObservedFailure,
   WorkPullRequestObservation
 } from "../src/model.js"
+import { WorkObservationId } from "../src/model.js"
 import { observationSubject, observeGoal, staleOwnerAfterMillis, workSnapshotBudgetBytes } from "../src/observed.js"
 
 const hour = 60 * 60 * 1_000
@@ -58,7 +60,7 @@ const agent = (
 const fact = (observation: WorkObservedFact["observation"], observedAt: number): WorkObservedFact => ({
   confirmedAt: observedAt,
   observation,
-  observationId: "0".repeat(64),
+  observationId: Schema.decodeSync(WorkObservationId)("0".repeat(64)),
   observedAt,
   subject: observationSubject(observation)
 })
@@ -166,8 +168,7 @@ describe("observeGoal", () => {
   })
 
   it("matches agent facts through the connect target of an older goal without an agent hierarchy", () => {
-    const older = goal({
-      agentHierarchy: undefined,
+    const { agentHierarchy: _absent, ...older } = goal({
       connectTarget: { agentId: "agent-owner", host: "SER8", url: "/connect/?agent=agent-owner&host=SER8" }
     })
     expect(observeGoal(older, [fact(agent("working"), 60)], [], 100).agent?.fact.status).toBe("working")

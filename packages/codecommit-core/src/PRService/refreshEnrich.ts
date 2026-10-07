@@ -34,24 +34,29 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
     if (awsAccountId === "") return
     const coordinates = { repositoryName: row.repositoryName, accountRegion: row.accountRegion }
 
-    const locs = yield* awsClient.getCommentsForPullRequest({
+    const fetched = yield* awsClient.getCommentsForPullRequest({
       account: {
         profile: decodeAwsProfileName(row.accountProfile),
         region: decodeAwsRegion(row.accountRegion)
       },
       pullRequestId: prId,
       repositoryName: row.repositoryName
+    }).pipe(
+      Effect.map(Option.some),
+      Effect.tapError((e) => Effect.logWarning("comment fetch failed; keeping the cached comments", e)),
       // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    }).pipe(Effect.catch(() => Effect.void.pipe(Effect.as(undefined))))
+      Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
+    )
+    // A failed fetch is not "no comments": write nothing, so the count stays as it was (not loaded
+    // until a fetch succeeds) and the comment cache keeps its last known set.
+    if (Option.isNone(fetched)) return
+    const locs = fetched.value
 
     const cachedComments = yield* commentRepo.find(awsAccountId, prId, coordinates).pipe(
       // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
     )
-    // Without a fresh fetch, the count falls back to the cached comments.
-    const commentCount = locs !== undefined
-      ? countAllComments(locs)
-      : Option.match(cachedComments, { onNone: () => 0, onSome: countAllComments })
+    const commentCount = countAllComments(locs)
     const subscribed = yield* isSubscribedForCoordinates(
       prRepo,
       subscribedSnapshot,
@@ -60,7 +65,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
       row.repositoryName,
       row.accountRegion
     )
-    const notifications = locs !== undefined && subscribed && Option.isSome(cachedComments)
+    const notifications = subscribed && Option.isSome(cachedComments)
       ? diffComments(cachedComments.value, locs, prId, awsAccountId, row.repositoryName, row.accountRegion)
       : []
 
@@ -68,7 +73,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
       // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(false))
     )
-    if (!written || locs === undefined) return
+    if (!written) return
     yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs), coordinates).pipe(
       // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.void)
