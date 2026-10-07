@@ -246,8 +246,9 @@ describe("PRService.refreshSinglePR coordinates", () => {
               findAll: () => Effect.succeed([approvedCache]),
               upsert: (input) =>
                 Ref.update(upserted, (all) => [...all, [input.isApproved, input.approvalUnknownReason]]).pipe(
-                  Effect.andThen(Ref.update(stored, (all) => [...all, input.lastModifiedDate]))
-                ).pipe(Effect.as({ row: true, approval: true }))
+                  Effect.andThen(Ref.update(stored, (all) => [...all, input.lastModifiedDate])),
+                  Effect.as({ row: true, approval: true, versions: undefined })
+                )
             }),
             Layer.mock(CommentRepo, {
               find: () => Effect.succeed(Option.none()),
@@ -265,10 +266,11 @@ describe("PRService.refreshSinglePR coordinates", () => {
   )
 
   // A read older than the cached row changes nothing in the cache, so it announces nothing.
-  it.effect.each([
+  const singleRefreshWriteCases: ReadonlyArray<readonly [string, boolean, number]> = [
     ["accepted", true, 1],
     ["rejected as older than the cached row", false, 0]
-  ])(
+  ]
+  it.effect.each(singleRefreshWriteCases)(
     "sends a subscribed single refresh's notifications only when its upsert is %s",
     ([, applied, expected]) =>
       Effect.gen(function*() {

@@ -1496,11 +1496,12 @@ describe("fetchAndUpsertPRs", () => {
     }))
 
   // A listing older than the cached row changes nothing in the cache, so it must announce nothing:
-  // the diff against the cached row describes a change that didn't happen.
-  it.effect.each([
+  const notificationCases: ReadonlyArray<readonly [string, boolean, number]> = [
     ["accepted", true, 1],
     ["rejected as older than the cached row", false, 0]
-  ])(
+  ]
+  // the diff against the cached row describes a change that didn't happen.
+  it.effect.each(notificationCases)(
     "sends a subscribed pull request's notifications only when its upsert is %s",
     ([, applied, expected]) =>
       Effect.gen(function*() {

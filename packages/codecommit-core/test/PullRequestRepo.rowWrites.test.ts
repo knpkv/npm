@@ -226,6 +226,12 @@ const groupOf = <Row extends object>(row: Option.Option<Row>, group: Group) =>
 
 const seed = (repo: PullRequestRepoContract) => repo.upsert(listed(t0, "seed"), 1)
 
+/** Two completion orders, labelled: the first lands first when `true`. */
+const orders = (
+  first: string,
+  second: string
+): ReadonlyArray<readonly [string, boolean]> => [[first, true], [second, false]]
+
 /** The row's versions as a read of it now sees them. */
 const observedNow = Effect.flatMap(
   PullRequestRepo,
@@ -289,7 +295,7 @@ describe("pull-request row writes", () => {
 
   // Partial vs full, the round-13 case: a status re-read and a full listing of the same new revision.
   // Both are whole now, so whichever began later wins and the row has the final details either way.
-  it.effect.each([["the status re-read lands first", true], ["the listing lands first", false]])(
+  it.effect.each(orders("the status re-read lands first", "the listing lands first"))(
     "keeps the final details and status of a closed pull request (%s)",
     ([, statusFirst]) =>
       withCache(Effect.gen(function*() {
@@ -405,7 +411,7 @@ describe("pull-request row writes", () => {
 
   // A not-found read carries no revision: its order is its observation. A listing that began before it
   // but read a newer revision must not bring the row back, in either completion order.
-  it.effect.each([["the listing lands first", true], ["the deletion lands first", false]])(
+  it.effect.each(orders("the listing lands first", "the deletion lands first"))(
     "keeps a pull request deleted by a later not-found read when an earlier listing saw a newer revision (%s)",
     ([, listingFirst]) =>
       withCache(Effect.gen(function*() {
