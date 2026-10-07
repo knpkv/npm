@@ -184,7 +184,8 @@
   font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
     var(--rly-type-body-font);
   margin: var(--rly-space-0);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .workingCircle {

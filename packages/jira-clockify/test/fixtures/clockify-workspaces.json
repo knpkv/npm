@@ -1,0 +1,144 @@
+[
+  {
+    "id": "64f0c0ffee0000000000aa01",
+    "name": "Example Workspace",
+    "hourlyRate": {
+      "amount": 0,
+      "currency": "USD"
+    },
+    "costRate": {
+      "amount": 0,
+      "currency": "USD"
+    },
+    "memberships": [
+      {
+        "userId": "redacted",
+        "hourlyRate": null,
+        "costRate": null,
+        "targetId": "redacted",
+        "membershipType": "WORKSPACE",
+        "membershipStatus": "ACTIVE"
+      }
+    ],
+    "workspaceSettings": {
+      "timeRoundingInReports": false,
+      "onlyAdminsSeeBillableRates": true,
+      "activeBillableHours": false,
+      "onlyAdminsCanChangeBillableStatus": false,
+      "onlyAdminsCreateProject": false,
+      "onlyAdminsSeeDashboard": false,
+      "defaultBillableProjects": true,
+      "lockTimeEntries": null,
+      "lockTimeZone": null,
+      "round": {
+        "round": "redacted",
+        "minutes": "redacted"
+      },
+      "projectFavorites": true,
+      "canSeeTimeSheet": false,
+      "canSeeTracker": true,
+      "projectPickerSpecialFilter": false,
+      "forceProjects": false,
+      "forceTasks": false,
+      "forceTags": false,
+      "forceDescription": false,
+      "onlyAdminsSeeAllTimeEntries": false,
+      "onlyAdminsSeePublicProjectsEntries": false,
+      "onlyAdminsSeeProjectStatus": false,
+      "trackTimeDownToSecond": true,
+      "projectGroupingLabel": "CLIENT",
+      "adminOnlyPages": [],
+      "automaticLock": null,
+      "onlyAdminsCreateTag": false,
+      "timeApprovalEnabled": false,
+      "approvalSettings": {
+        "approvalEnabled": false,
+        "approvalPeriod": "WEEKLY",
+        "approvalRoles": ["TEAM_MANAGER", "ADMIN"]
+      },
+      "screenshotsEnabled": false,
+      "highResolutionScreenshots": false,
+      "locationsEnabled": false,
+      "onlyAdminsCreateTask": false,
+      "timeTrackingMode": "DEFAULT",
+      "taskBillableEnabled": false,
+      "taskRateEnabled": false,
+      "invoicingEnabled": false,
+      "expensesEnabled": false,
+      "schedulingEnabled": false,
+      "companyAddress": "redacted",
+      "canManagerEditUsersTime": false,
+      "timeOff": {
+        "active": false,
+        "regularUserCanSeeOtherUsersTimeOff": false,
+        "showDefaultPoliciesMessageToUsers": []
+      },
+      "auditLogSettings": null,
+      "schedulingSettings": {
+        "enabled": false,
+        "everyoneCanSeeAllAssignments": false,
+        "whoCanCreateAssignments": "ADMINS",
+        "canSeeBillableAndCostAmount": false
+      },
+      "kioskEnabled": false,
+      "kioskAuthType": null,
+      "kioskProjectsAndTasksEnabled": false,
+      "kioskAutologinEnabled": false,
+      "canManagerLaunchKiosk": false,
+      "kioskPhotoCaptureEnabled": false,
+      "multiFactorEnabled": false,
+      "numberFormat": "PERIOD_COMMA",
+      "currencyFormat": "VALUE_SPACE_CURRENCY",
+      "favoriteEntriesEnabled": false,
+      "breakSettings": {
+        "breaksEnabled": false,
+        "defaultBreakEntities": {
+          "projectId": null,
+          "taskId": null
+        }
+      },
+      "weekStart": "MONDAY",
+      "timeViewMode": "TIME_SENSITIVE_VIEW",
+      "whitelistedForAggregateView": false,
+      "workCapacity": "PT8H",
+      "overtimeCalculationPeriod": "DAILY",
+      "decimalFormat": false,
+      "durationFormat": "FULL",
+      "entityCreationPermissions": {
+        "whoCanCreateTasks": "EVERYONE",
+        "whoCanCreateProjectsAndClients": "EVERYONE",
+        "whoCanCreateTags": "EVERYONE"
+      },
+      "projectLabel": "redacted",
+      "taskLabel": "redacted",
+      "customLabels": {
+        "projectGroupingLabel": "redacted",
+        "projectLabel": "redacted",
+        "taskLabel": "redacted"
+      },
+      "workingDays": ["THURSDAY", "FRIDAY", "MONDAY", "TUESDAY", "WEDNESDAY"],
+      "isCostRateActive": false,
+      "expenseApprovalSettings": {
+        "approvalEnabled": false,
+        "approvalPeriod": "WEEKLY",
+        "approvalRoles": ["TEAM_MANAGER", "ADMIN"]
+      },
+      "isProjectPublicByDefault": true
+    },
+    "imageUrl": "redacted",
+    "featureSubscriptionType": "FREE_2026",
+    "features": ["TIME_TRACKING", "ONE_MONTH_RANGE_REPORTS"],
+    "currencies": [
+      {
+        "id": "redacted",
+        "code": "USD",
+        "isDefault": true
+      }
+    ],
+    "subdomain": {
+      "name": null,
+      "enabled": false
+    },
+    "cakeOrganizationId": "redacted"
+  }
+]

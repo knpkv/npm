@@ -22,7 +22,7 @@
       -1px 0 0 var(--rly-color-surface-1),
       1px 0 0 var(--rly-color-surface-1);
     block-size: var(--rly-space-12);
-    inline-size: 1px;
+    inline-size: 1px; /* stripe-ok: the near mark's key swatch, a 1px data tick */
   }
   .projected {
     border-block: 2px dotted var(--rly-color-held-ink);

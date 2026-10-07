@@ -160,10 +160,18 @@ keep the notice mounted and swap its children, because a status region reliably
 announces changes, not its own appearance. An `announce="assertive"` alert may
 announce as soon as it is inserted.
 
+Controls default to tool density. `Button`, `IconButton`, `Select`, and the
+`Field` control share `--rly-control-height-{dense,compact,default,principal}`
+(32/40/48/56px), so mixed controls in one toolbar line up. `dense` is the
+default and sizes a button to its text with a small radius; on coarse pointers
+the dense and compact heights rise to a 44px touch target. Pass
+`size="default"` or `"principal"` where an action needs more presence.
+
 `ToggleGroup` chooses one of a few peer options, such as a range or a measure,
 and is always controlled: exactly one option is on, pressing it again changes
 nothing, and arrow keys move to the next option and choose it. It renders a
-named `radiogroup`; use `size="compact"` beside other filters.
+named `radiogroup`. It is dense by default, an outlined row as tall as the dense
+controls beside it; `compact` and `default` follow the same control heights.
 
 `Tabs` items may set `forceMount: true` to retain inactive content, for example
 when printing both panels. It defaults to unmounting inactive content. Callers
@@ -298,8 +306,8 @@ spark, stack, and compass. Reordering or replacing that map is a breaking
 identity change rather than a cosmetic icon update.
 
 `Verdict` stays deliberately large and neutral. The caller supplies its exact
-wording, reason, and semantic tone; tone affects only the redundant icon,
-4px rail, and restrained reason context. Rly does not infer readiness from any
+wording, reason, and semantic tone; tone affects only the redundant icon and
+the reason panel's tint and even border. Rly does not infer readiness from any
 of those values.
 
 ## Delivery stages and relationships

@@ -8,5 +8,8 @@
  * @module
  */
 
-/** What to do about an expired Jira session. The one instruction that fixes every Jira refusal. */
-export const NOT_LOGGED_IN_HINT = "Not logged in to Jira. Run: jcf auth jira login"
+/** The command that connects Jira the recommended way: an API token, no developer console. */
+export const CONNECT_JIRA_COMMAND = "jcf auth jira token"
+
+/** What to do when Jira is not connected. The one instruction that fixes every Jira refusal. */
+export const NOT_LOGGED_IN_HINT = `Jira is not connected. Run ${CONNECT_JIRA_COMMAND} to connect it.`

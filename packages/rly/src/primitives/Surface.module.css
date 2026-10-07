@@ -34,4 +34,17 @@
   .paddingSpacious {
     padding: var(--rly-space-32);
   }
+
+  /* Forced colours drop the tint that sets a secondary or tertiary surface apart; an edge keeps it. */
+  @media (forced-colors: active) {
+    .toneSecondary,
+    .toneTertiary {
+      border: 1px solid CanvasText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .toneSecondary,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .toneTertiary {
+    border: 1px solid CanvasText;
+  }
 }

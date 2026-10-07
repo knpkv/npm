@@ -65,7 +65,7 @@ const agentRows = Array.from({ length: 18 }, (_, index) => {
     <button class="connect-agent" type="button">
       <time>12:${agent}</time>
       <span class="agent-presence"></span>
-      <span class="connect-agent-copy"><strong>agent-${agent}</strong><small>SER8 · Root agent · Working in npm</small></span>
+      <span class="connect-agent-copy"><strong>agent-${agent}</strong><small>SER8, Root agent, Working in npm</small></span>
       <span class="fixture-state">working</span>
     </button>`
 }).join("")
@@ -160,7 +160,7 @@ const setTerminal = (page: Page): Promise<void> =>
             <div aria-hidden="true" class="connect-directory-screen" inert></div>
             <div aria-label="Agent terminal" class="connect-terminal-screen">
               <section class="terminal-stage">
-                <div class="terminal-bar"><button class="terminal-back" type="button">Agents</button><div><strong>agent-01</strong><small>SER8 · codex</small></div><span class="fixture-state">connected</span></div>
+                <div class="terminal-bar"><button class="terminal-back" type="button">Agents</button><div><strong>agent-01</strong><small>codex on SER8</small></div><span class="fixture-state">connected</span></div>
                 ${terminalRail}
                 <div aria-label="Agent terminal" class="ghostty-terminal"><pre>echo hello</pre></div>
               </section>
@@ -187,7 +187,7 @@ const setEmbeddedTerminal = async (page: Page): Promise<void> => {
               <div aria-hidden="true" class="connect-directory-screen" inert></div>
               <div aria-label="Agent terminal" class="connect-terminal-screen">
                 <section class="terminal-stage">
-                  <div class="terminal-bar"><button class="terminal-back" type="button">Agents</button><div><strong>agent-01</strong><small>SER8 · codex</small></div><span class="fixture-state">connected</span></div>
+                  <div class="terminal-bar"><button class="terminal-back" type="button">Agents</button><div><strong>agent-01</strong><small>codex on SER8</small></div><span class="fixture-state">connected</span></div>
                   ${terminalRail}
                   <div aria-label="Agent terminal" class="ghostty-terminal"><textarea aria-label="Terminal input"></textarea></div>
                 </section>
@@ -281,9 +281,10 @@ test("390x844 keeps the terminal rail reachable with truthful button semantics",
   await expect(ctrl).toHaveAccessibleName("Ctrl")
   expect(await page.locator("[aria-keyshortcuts]").count()).toBe(0)
   await expect(page.locator("[data-terminal-key=\"tab\"]")).toBeEnabled()
-  expect(await rail.locator(".terminal-key-scroll").evaluate((element) => getComputedStyle(element).overflowX)).toBe(
-    "auto"
-  )
+  // Phones lay every key out whole in a grid; nothing hides off to the side.
+  const scroller = rail.locator(".terminal-key-scroll")
+  expect(await scroller.evaluate((element) => getComputedStyle(element).display)).toBe("grid")
+  expect(await scroller.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
   await ctrl.focus()
   expect(await ctrl.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid")
@@ -333,7 +334,9 @@ test("desktop terminal rail preserves the three-row stage and accessible key lab
     )
   ).toBe(3)
   expect(await page.locator(".terminal-key").count()).toBe(8)
-  await expect(page.locator(".terminal-key-error")).toBeVisible()
+  // The announcement line stays in the DOM for screen readers but takes no space until there is an error.
+  await expect(page.locator(".terminal-key-error")).toBeAttached()
+  await expect(page.locator(".terminal-key-error")).toBeHidden()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
 })
 
@@ -373,8 +376,8 @@ test("mobile connected identity exposes a keyboard-focusable Work goal link", as
           <div class="terminal-bar">
             <button class="terminal-back" type="button">Agents</button>
             <div class="connect-agent-identity" data-work-goal-state="available">
-              <a aria-label="Review worker · Work goal Review browser pairing" class="connect-agent-work-link" href="/?tab=work&window=now&goal=goal-review" onclick="event.preventDefault(); document.body.dataset.workGoalActivated='true'"><strong>Review worker</strong></a>
-              <small>Work goal · Review browser pairing</small>
+              <a aria-label="Review worker, Work goal Review browser pairing" class="connect-agent-work-link" href="/?tab=work&window=now&goal=goal-review" onclick="event.preventDefault(); document.body.dataset.workGoalActivated='true'"><strong>Review worker</strong></a>
+              <small>Work goal: Review browser pairing</small>
             </div>
             <span class="fixture-state">connected</span>
           </div>
@@ -383,7 +386,7 @@ test("mobile connected identity exposes a keyboard-focusable Work goal link", as
     </html>`)
   const link = page.locator(".connect-agent-work-link")
   await expect(link).toHaveAttribute("href", "/?tab=work&window=now&goal=goal-review")
-  await expect(link).toHaveAccessibleName("Review worker · Work goal Review browser pairing")
+  await expect(link).toHaveAccessibleName("Review worker, Work goal Review browser pairing")
   await link.focus()
   await expect(link).toBeFocused()
   await expect(link).toBeVisible()

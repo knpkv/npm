@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-monitor",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Explicitly published, isolated read-only agent status boards",
   "license": "MIT",
   "author": "knpkv",
@@ -45,9 +45,10 @@
   "scripts": {
     "build": "rimraf dist && tsc -b --force && vite build",
     "check": "tsc -b",
-    "lint": "eslint \"{src,test,scripts}/**/*.{ts,tsx,mjs}\"",
+    "lint": "eslint \"{src,test,scripts}/**/*.{ts,tsx,mjs}\" playwright.config.ts",
     "test": "vitest run",
-    "test:pack": "node scripts/packed.mjs"
+    "test:pack": "node scripts/packed.mjs",
+    "test:browser": "pnpm --filter '@knpkv/herdr-monitor^...' --sort run build && pnpm build && playwright test"
   },
   "dependencies": {
     "@effect/platform-node": "4.0.0",
@@ -56,6 +57,7 @@
   "devDependencies": {
     "@effect/vitest": "4.0.0",
     "@knpkv/rly": "workspace:^",
+    "@playwright/test": "1.63.0",
     "@types/node": "^26.6.4",
     "happy-dom": "20.14.5",
     "rimraf": "^6.1.3",

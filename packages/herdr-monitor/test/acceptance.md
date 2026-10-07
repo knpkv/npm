@@ -1,34 +1,38 @@
 # Acceptance evidence
 
-Final visible acceptance: PASS, 2026-09-17. Native foreground Chromium on the
-shared port 49222, through its existing MCP bridge. Only the monitor's tab 9 was
-used; other tabs were preserved. The on-page final PASS panel was retained when
-the browser slot was released to guided-review.
+Visible acceptance: PASS, 2026-10-07, after the board redesign (#543). Chromium
+through the Chrome DevTools MCP, in an isolated browser context of its own, against
+a fresh synthetic monitor on a free loopback port. Every flow below was run in
+that session: the same steps and assertions as `browser-acceptance.py`, whose
+expectations were updated to the redesigned copy (an empty board reads "Waiting",
+durations read "30m"/"40m"). The script itself was not run: it needs the shared
+browser bridge and compositor focus. The previous full pass was 2026-09-17,
+through that bridge.
 
 This validates desktop Chromium at tablet and phone viewports. No physical iPad
 or Safari acceptance has been performed.
 
-| Flow                                                                 | Result          |
-| -------------------------------------------------------------------- | --------------- |
-| Locked page exposes no published status                              | PASS            |
-| Invalid board identifier is rejected by the form                     | PASS            |
-| Keyboard login shows an empty board before publication               | PASS            |
-| Lock remains reachable on an empty board                             | PASS            |
-| Trusted CLI publication appears in the authenticated view            | PASS            |
-| Published HTML-like text remains text, with no image or link         | PASS            |
-| Clockify observation and agent elapsed duration have separate labels | PASS            |
-| 390 × 844 portrait layout has no horizontal overflow                 | PASS            |
-| 820 × 1180 portrait layout has no horizontal overflow                | PASS            |
-| 1180 × 820 landscape layout has no horizontal overflow               | PASS            |
-| Lighthouse accessibility snapshot                                    | PASS, score 100 |
-| Offline state hides status and keeps Lock reachable                  | PASS            |
-| Lock removes previous board title, ticket and card text from the DOM | PASS            |
-| Lock restores focus to the credential input                          | PASS            |
-| No application cookies, local storage or session storage             | PASS            |
-| Reconnection restores the explicitly published copy                  | PASS            |
-| Receipt-time ageing produces the stale state                         | PASS            |
-| Console contains only deliberately induced offline network errors    | PASS            |
-| No WebSocket connection                                              | PASS            |
+| Flow                                                                   | Result          |
+| ---------------------------------------------------------------------- | --------------- |
+| Locked page exposes no published status                                | PASS            |
+| Invalid board identifier is rejected by the form                       | PASS            |
+| Keyboard login shows an empty board ("Waiting") before publication     | PASS            |
+| Lock remains reachable on an empty board                               | PASS            |
+| Trusted CLI publication appears in the authenticated view              | PASS            |
+| Published HTML-like text remains text, with no image or link           | PASS            |
+| Clockify observation and agent elapsed duration have separate labels   | PASS            |
+| 390 × 844 portrait layout has no horizontal overflow                   | PASS            |
+| 820 × 1180 portrait layout has no horizontal overflow                  | PASS            |
+| 1180 × 820 landscape layout has no horizontal overflow                 | PASS            |
+| Lighthouse accessibility snapshot                                      | PASS, score 100 |
+| Offline state keeps the last snapshot, labelled with its age, and Lock | PASS            |
+| Lock removes previous board title, ticket and card text from the DOM   | PASS            |
+| Lock restores focus to the credential input                            | PASS            |
+| No application cookies, local storage or session storage               | PASS            |
+| Reconnection restores the explicitly published copy                    | PASS            |
+| Receipt-time ageing produces the stale state                           | PASS            |
+| Console contains only deliberately induced offline network errors      | PASS            |
+| No WebSocket connection                                                | PASS            |
 
 `browser-acceptance.py` repeats these flows with synthetic data and an on-page
 current-check indicator. It requires an explicitly granted browser slot, the

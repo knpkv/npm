@@ -107,6 +107,10 @@ Make every **Prevention** note implementation-ready:
 - name one invalid fixture that must fail and one nearby valid fixture that must continue to pass;
 - call out likely false positives, generated/vendor exclusions, and any cases that still require judgment.
 
+### Escape Ledger
+
+Every lint, type and Effect-diagnostics escape (`@effect-diagnostics*`, `@ts-expect-error`/`@ts-ignore`/`@ts-nocheck`, `eslint-disable*`, `oxlint-disable*`, `ast-grep-ignore`) in tracked source and tests is counted in the generated `docs/debt.md`, against `docs/debt.baseline.json`. `pnpm debt:check` (part of `pnpm lint`) fails when any package's count for a kind rises, when it falls without the baseline being tightened, or when a new directive has no reason. A reason is ` -- <reason>` on the directive, free text after `@ts-expect-error`, or a comment line directly above it. Directives that already lacked a reason when the ledger was introduced are grandfathered by exact file and text. Debt only shrinks: fix the cause rather than adding an escape. A deliberate raise is a separate, reviewed `pnpm debt:update` named in the PR body; never fold it into an unrelated change.
+
 Manual acceptance checklists must contain one explicit item for every manually named SC flow; a grouped
 row may cover several flows only when each is named, and a checklist cannot pass while any item is
 `PENDING`, failed, or unresolved. Capability-boundary decisions must stay synchronized across the
@@ -204,6 +208,7 @@ For `packages/control-center/README.md`, `packages/control-center/src/api/**`, a
 - **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.
 - **Feature Classification**: In `.changeset/*.md`, exported or user-visible functionality added under publishable `packages/*/src` or `packages/*/package.json` requires a `minor` bump. This includes additive fields in exported interfaces and schemas, even when their producer or decoder is implemented privately. A new public option or application workspace is not a patch; dependency-only stabilization may remain a patch. Private, generated, and vendor packages are excluded, while internal-only features still require judgment.
 - **Breaking Classification**: An incompatible exported type or schema change requires at least a `minor` bump, with `major` retained for packages whose stability contract requires it. A `Stream<Uint8Array>` to `Uint8Array` change in an exported service result paired with `patch` is invalid; the same change in an unexported internal result may remain a patch. Private, generated, and vendor packages are excluded, while structurally exposed types still require judgment.
+- **Dependency Pins**: `effect` and the `@effect/*` runtime packages released with it are exact pins on the version vendored in `repos/effect`. Effect tooling (`@effect/language-service`, `@effect/tsgo`, `@effect/eslint-plugin`, `@effect/build-utils`) and other development tooling use caret ranges, and published packages may use caret ranges for their other runtime dependencies so consumers can dedupe.
 - **Automated Releases**: The CI/CD pipeline automates the release process. When a version PR is merged, the packages are automatically published to `npm`.
 
 Generated source exposed through a publishable package's `exports` remains a
@@ -319,12 +324,20 @@ When writing Effect code:
   `Schedule`, and `effect/process` instead. Framework/UI boundaries
   may use host APIs only where the framework requires them.
 - In `packages/*/src/client/**/*.css`, use Rly service-color tokens only for
-  provider-owned provenance (such as a CodeCommit revision rail or provider
-  mark), never for arbitrary user-authored links or content. Use generic
+  provider-owned provenance (such as a provider mark or a revision label),
+  never for arbitrary user-authored links or content. Use generic
   action/text tokens for those links. A `.prRow:hover .prTitle` rule using a
-  service token is invalid because the title is user-authored; a revision-rail
-  rule using that provider's service token remains valid. Generated and vendor
+  service token is invalid because the title is user-authored; a provider mark
+  using that provider's service token remains valid. Generated and vendor
   styles are excluded, and ambiguous selector provenance requires judgment.
+- No one-sided accent stripes on cards, rows, notices, or panels (a thick or
+  coloured `border-left`/`border-inline-start`, or an inset `box-shadow` bar).
+  State and severity go in words, an even 1px border, or a flat tint.
+  `pnpm --filter @knpkv/rly lint:stripes` (in the root `lint:static`) enforces
+  this for rly and every `packages/*/src` stylesheet; 1px neutral column
+  dividers stay allowed. Stripes product packages already had are listed in
+  `packages/rly/scripts/tokens/stripe-baseline.json`: a new stripe fails, and
+  removing a listed one means deleting its baseline line in the same change.
 - The sole raw Node filesystem exception is
   `packages/codecommit-core/src/CacheService/internal/PrivateDatabasePathNode.ts`:
   it is an audited descriptor boundary that must retain `O_NOFOLLOW` directory

@@ -2,7 +2,9 @@
   .root {
     align-items: flex-start;
     /* Every tone keeps an edge, so the box survives forced colors, which drop backgrounds. */
-    border: 1px solid color-mix(in oklab, currentcolor 30%, transparent);
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-notice-ink, var(--rly-color-border-1));
+    color: var(--rly-color-text-1);
     border-radius: var(--rly-radius-control);
     box-sizing: border-box;
     display: flex;
@@ -16,29 +18,28 @@
     padding: var(--rly-space-12);
   }
 
+  /*
+   * The tone colours the icon and the even border; the message stays in text ink on the plain
+   * surface, so a notice never reads as a coloured sentence or a tinted pill.
+   */
   .neutral {
-    background: var(--rly-color-surface-2);
-    border-color: var(--rly-color-border-1);
-    color: var(--rly-color-text-2);
+    --rly-notice-ink: var(--rly-color-text-2);
   }
   .positive {
-    background: var(--rly-color-success-tint);
-    color: var(--rly-color-success-ink);
+    --rly-notice-ink: var(--rly-color-success-ink);
   }
   .critical {
-    background: var(--rly-color-blocked-tint);
-    color: var(--rly-color-blocked-ink);
+    --rly-notice-ink: var(--rly-color-blocked-ink);
   }
   .caution {
-    background: var(--rly-color-held-tint);
-    color: var(--rly-color-held-ink);
+    --rly-notice-ink: var(--rly-color-held-ink);
   }
   .progress {
-    background: var(--rly-color-deploying-tint);
-    color: var(--rly-color-deploying-ink);
+    --rly-notice-ink: var(--rly-color-deploying-ink);
   }
 
   .icon {
+    color: var(--rly-notice-ink, var(--rly-color-text-2));
     display: inline-flex;
     flex: none;
     /* Center the 16px glyph on the first line box. */
@@ -56,7 +57,7 @@
   .message {
     flex: 1 1 0;
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
   .message > :first-child {
     margin-block-start: var(--rly-space-0);
@@ -71,7 +72,7 @@
     flex-wrap: wrap;
     gap: var(--rly-space-8);
     /* Centre a compact control on the first text line without growing one-line notices. */
-    margin-block: calc((1lh - var(--rly-space-40)) / 2);
+    margin-block: calc((1lh - var(--rly-control-height-dense)) / 2);
     margin-inline-start: auto;
   }
 }

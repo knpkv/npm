@@ -22,8 +22,8 @@ describe("IconButton", () => {
     const button = render(<IconButton icon="menu" label="Open menu" />)
     expect(button?.getAttribute("aria-label")).toBe("Open menu")
     expect(button?.getAttribute("type")).toBe("button")
-    expect(button?.className).toContain(RLY_ICON_BUTTON_VARIANTS.size.default.className)
-    expect(RLY_ICON_BUTTON_DEFAULT_VARIANTS).toEqual({ size: "default", variant: "secondary" })
+    expect(button?.className).toContain(RLY_ICON_BUTTON_VARIANTS.size.dense.className)
+    expect(RLY_ICON_BUTTON_DEFAULT_VARIANTS).toEqual({ size: "dense", variant: "secondary" })
   })
 
   it("becomes busy and disabled without losing its name", () => {

@@ -85,6 +85,8 @@ export interface PortfolioReleasePresentation {
 }
 
 export interface PortfolioPresentation {
+  /** Providers with at least one enabled connection, in catalog order. Empty means nothing is connected. */
+  readonly connectedProviders: ReadonlyArray<PortfolioSnapshot["plugins"][number]["providerId"]>
   readonly generatedAt: string
   readonly generatedTime: string
   readonly releases: ReadonlyArray<PortfolioReleasePresentation>
@@ -448,7 +450,23 @@ const releasePresentation = (
 }
 
 /** Map one authoritative API snapshot into explicit rly component props without deriving readiness. */
+const catalogOrder: ReadonlyArray<PortfolioSnapshot["plugins"][number]["providerId"]> = [
+  "codecommit",
+  "codepipeline",
+  "jira",
+  "confluence",
+  "clockify"
+]
+
+const connectedProvidersOf = (
+  plugins: PortfolioSnapshot["plugins"]
+): PortfolioPresentation["connectedProviders"] => {
+  const enabled = new Set(plugins.filter(({ isEnabled }) => isEnabled).map(({ providerId }) => providerId))
+  return catalogOrder.filter((providerId) => enabled.has(providerId))
+}
+
 export const presentPortfolio = (snapshot: PortfolioSnapshot): PortfolioPresentation => ({
+  connectedProviders: connectedProvidersOf(snapshot.plugins),
   generatedAt: DateTime.formatIso(snapshot.generatedAt),
   generatedTime: formattedTime(snapshot.generatedAt),
   releases: snapshot.releases.map((release) => releasePresentation(release, snapshot.plugins)),

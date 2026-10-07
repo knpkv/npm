@@ -32,8 +32,9 @@
 }
 
 .notice {
-  border-left: 2px solid var(--rly-color-border-2);
-  padding-left: var(--rly-space-32);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
+  padding: var(--rly-space-12) var(--rly-space-16);
 }
 
 .governance {
@@ -82,7 +83,8 @@
 }
 
 .checkbox > span {
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .field > small {
@@ -92,13 +94,13 @@
 .control {
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-2);
-  border-radius: var(--rly-radius-control);
+  border-radius: var(--rly-radius-tag);
   color: var(--rly-color-text-1);
   font: inherit;
   inline-size: 100%;
-  min-height: 2.5rem;
+  min-block-size: var(--rly-control-height-dense);
   min-inline-size: 0;
-  padding: 0 var(--rly-space-24);
+  padding: 0 var(--rly-space-12);
 }
 
 .control:focus-visible {

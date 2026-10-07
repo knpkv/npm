@@ -6,9 +6,11 @@
  * what order services were consulted.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import { Command } from "effect/cli"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
@@ -1694,7 +1696,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       // The first row's Clockify half still landed; the run then stopped rather than asking again.
       expect(world.createdClockifyEntries).toHaveLength(1)
       expect(world.jiraWorklogs).toEqual([])
-      expect(output(world.stdout)).toContain("jcf auth jira login")
+      expect(output(world.stdout)).toContain("jcf auth jira token")
     }))
 
   it.effect("stops with a refresh remedy when Jira is logged in but cannot be verified", () =>
@@ -1719,7 +1721,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.createdClockifyEntries).toHaveLength(1)
       expect(world.jiraWorklogs).toEqual([])
       expect(printed).toContain("provider account for this session was not verified")
-      expect(printed).not.toContain("jcf auth jira login")
+      expect(printed).not.toContain("jcf auth jira token")
     }))
 
   it.effect("stops later rows when Jira verification fails after the first Clockify write", () =>
@@ -1753,7 +1755,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.jiraWorklogs).toEqual([])
       expect(world.jiraRequests.filter((request) => request.method === "POST")).toEqual([])
       expect(printed).toContain("provider account for this session was not verified")
-      expect(printed).not.toContain("jcf auth jira login")
+      expect(printed).not.toContain("jcf auth jira token")
     }))
 })
 
@@ -3821,7 +3823,7 @@ describe("jcf sync reconcile <direction>", () => {
         }))
 
         yield* TestClock.setTime(HISTORICAL_NOW)
-        yield* Command.runWith(root, { version: "0.0.0-test" })([
+        const exit = yield* Command.runWith(root, { version: "0.0.0-test" })([
           "sync",
           "reconcile",
           direction,
@@ -3830,7 +3832,10 @@ describe("jcf sync reconcile <direction>", () => {
 
         expect(fake.world.createdClockifyEntries).toEqual([])
         expect(fake.world.jiraWorklogs).toEqual([])
-        expect(output(fake.world.stdout)).toContain("Reconcile failed")
+        // QA-J5: a failed reconcile exits non-zero; the command boundary prints this one line.
+        expect(Exit.isFailure(exit) ? Cause.prettyErrors(exit.cause)[0]?.message : "succeeded").toContain(
+          "Reconcile failed"
+        )
       }))
   }
 

@@ -608,6 +608,18 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
         kind: payload.kind,
         title: "Reassign one Work goal to a new owner"
       }
+    case "work.abandon":
+      return {
+        fields: [
+          field("goalId", "Work goal", payload.goalId),
+          field("owner", "Work owner", `${payload.owner.name} (${payload.owner.id})`),
+          field("reason", "Reason", payload.reason),
+          field("expectedGoalEventId", "Expected goal event", payload.expectedGoalEventId),
+          field("expectedGoalUpdatedAt", "Expected goal update", String(payload.expectedGoalUpdatedAt))
+        ],
+        kind: payload.kind,
+        title: "Abandon one Work goal"
+      }
   }
 }
 
@@ -630,6 +642,7 @@ export const sanitizeJobPayload = (payload: JobPayloadType): JobPayloadType => {
     case "work.admit":
     case "work.recover":
     case "work.reassign":
+    case "work.abandon":
       return payload
   }
 }

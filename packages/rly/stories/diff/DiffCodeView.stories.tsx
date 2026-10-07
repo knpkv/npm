@@ -80,12 +80,15 @@ const annotationMetaStyle = {
   gap: "var(--rly-space-8)"
 } satisfies CSSProperties
 
-const annotationTagStyle = {
-  border: "1px solid var(--rly-color-border-1)",
-  borderRadius: "var(--rly-radius-round)",
-  font: "var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height) var(--rly-type-label-font)",
-  padding: "var(--rly-space-2) var(--rly-space-8)"
-} satisfies CSSProperties
+const severityInk = {
+  critical: "var(--rly-color-blocked-ink)",
+  high: "var(--rly-color-blocked-ink)",
+  low: "var(--rly-color-text-2)",
+  medium: "var(--rly-color-held-ink)",
+  note: "var(--rly-color-text-2)"
+} satisfies Record<RichAnnotationModel["severity"], string>
+
+const capitalized = (word: string): string => `${word.charAt(0).toUpperCase()}${word.slice(1)}`
 
 const RichAnnotationCard = ({
   context,
@@ -95,15 +98,19 @@ const RichAnnotationCard = ({
   readonly model: RichAnnotationModel
 }): ReactElement => (
   <article data-annotation-presentation="annotated" data-annotation-status={model.status} style={annotationCardStyle}>
-    <div style={annotationMetaStyle}>
-      <span style={annotationTagStyle}>{model.severity} severity</span>
-      <span style={annotationTagStyle}>{model.confidence} confidence</span>
-      <span style={annotationTagStyle}>{model.status}</span>
-    </div>
+    {/* One line of words, not chips: the severity in its ink, then confidence and status as plain text. */}
+    <p style={{ ...annotationMetaStyle, margin: 0 }}>
+      <Text as="span" style={{ color: severityInk[model.severity], fontWeight: 600 }} variant="label">
+        {capitalized(model.severity)}
+      </Text>
+      <Text as="span" tone="secondary" variant="label">
+        {model.confidence} confidence, {model.status}
+      </Text>
+    </p>
     <Text as="strong">{model.title}</Text>
     <Text tone="secondary">{model.evidence}</Text>
     {model.replacement === undefined ? null : <Text>Replacement: {model.replacement}</Text>}
-    <Button onClick={context.returnFocus} size="compact" variant="quiet">
+    <Button onClick={context.returnFocus} variant="quiet">
       Return to line
     </Button>
   </article>
@@ -199,7 +206,6 @@ const DiffHarness = (): ReactElement => {
               diffRef.current?.addItems([auditItem])
               setActivity("Audit evidence appended without resetting the viewer")
             }}
-            size="compact"
           >
             Add evidence file
           </Button>
@@ -208,7 +214,6 @@ const DiffHarness = (): ReactElement => {
               diffRef.current?.scrollTo({ align: "start", id: "release-gate", type: "item" })
               setActivity("Release gate brought into view")
             }}
-            size="compact"
             variant="quiet"
           >
             Jump to release gate
@@ -262,9 +267,7 @@ const StatePreservationHarness = (): ReactElement => {
   return (
     <main style={pageStyle}>
       <div style={{ ...stackStyle, inlineSize: "100%", maxInlineSize: "76rem" }}>
-        <Button onClick={() => setResolved(true)} size="compact">
-          Resolve annotation
-        </Button>
+        <Button onClick={() => setResolved(true)}>Resolve annotation</Button>
         <DiffCodeView
           annotations={annotations}
           contextLines={2}
@@ -295,12 +298,8 @@ const ThemeTransitionHarness = (): ReactElement => {
       <main data-diff-theme-type={themeType} style={pageStyle}>
         <div style={{ ...stackStyle, inlineSize: "100%", maxInlineSize: "76rem" }}>
           <div style={{ display: "flex", gap: "var(--rly-space-8)" }}>
-            <Button onClick={() => setThemeType("light")} size="compact">
-              Use light diff theme
-            </Button>
-            <Button onClick={() => setThemeType("dark")} size="compact">
-              Use dark diff theme
-            </Button>
+            <Button onClick={() => setThemeType("light")}>Use light diff theme</Button>
+            <Button onClick={() => setThemeType("dark")}>Use dark diff theme</Button>
           </div>
           <ThemeAwareDiffCodeView initialItems={[releaseItem]} />
         </div>
@@ -339,8 +338,12 @@ export const Workbench: Story = {
   args: { initialItems: [releaseItem], mode: "split", virtualization: "buffered" },
   play: async ({ canvas, canvasElement }) => {
     await waitForRenderedDiff(canvasElement)
-    await expect(canvasElement.querySelector("[data-rly-diff-code-view]")).not.toBeNull()
-    await expect(canvasElement.querySelector("[data-rly-diff-mode='split']")).not.toBeNull()
+    const view = canvasElement.querySelector<HTMLElement>("[data-rly-diff-code-view]")
+    await expect(view).not.toBeNull()
+    // Split as requested on a wide screen; a container under 720px falls back so neither side is
+    // clipped. (No mode literal for the fallback here: the registry credits literals as coverage.)
+    const wide = (view?.getBoundingClientRect().width ?? 0) >= 720
+    await expect(view?.getAttribute("data-rly-diff-mode") === "split").toBe(wide)
     await expect(canvasElement.querySelector("diffs-container")).not.toBeNull()
     await expect(canvas.getByText("All six linked pull requests are now approved.")).toBeVisible()
     await userEvent.click(canvas.getByRole("button", { name: "Add evidence file" }))

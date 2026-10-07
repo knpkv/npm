@@ -1,5 +1,48 @@
 # @knpkv/jcf-web
 
+## 0.6.0
+
+### Minor Changes
+
+- [#526](https://github.com/knpkv/npm/pull/526) [`6f39f65`](https://github.com/knpkv/npm/commit/6f39f658230a1fa069ea763fb05780fdab530ed8) Thanks [@konopkov](https://github.com/konopkov)! - The week page reads as one tool. The header names the product, says when the week was last read and offers the rly theme menu. Toolbar controls stay in groups that wrap together, so no button sits alone on a row or breaks its label. The week, its totals and its layer toggles share one bordered region. Saved time is named in words, with no coloured side stripes. The side column says what to do when nothing is open. A failed read or write appears inside the open editor instead of covering the page header. Dates and hours meet 4.5:1 contrast. The quick-approve control is 32px. Labels use commas instead of middots.
+
+### Patch Changes
+
+- Updated dependencies [[`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/rly@0.10.0
+
+## 0.5.0
+
+### Minor Changes
+
+- [#483](https://github.com/knpkv/npm/pull/483) [`da0e5ff`](https://github.com/knpkv/npm/commit/da0e5ff70ec5926beaeceff060a37b2b0f27b6f9) Thanks [@konopkov](https://github.com/konopkov)! - Discover every worked ticket from Claude Code and Codex sessions.
+
+  Presence is now a supervised turn: a typed prompt, including one queued while the agent was busy, opens a turn and the agent's work inside it counts until the turn ends, a task notification or auto-continuation takes over, or the idle cap passes. Task notifications, auto-continuations and `isMeta` lines no longer count as typed. Legacy Codex tool-call response items keep a turn alive. `decodeTranscript` now requires `idleCapMs`; `decodeSessionLines` and `SessionLine` are new.
+
+  Parallel stretches no longer drop tickets: every attributed ticket keeps a share, overlapping short tickets stay co-owners, and the web calendar shows suggestions down to Jira's one-minute minimum. When minutes are scarce, open-sprint tickets assigned to you rank first, then tickets not yet logged that day; the same facts appear as tie-breakers in the attribution prompt. Inside one unbroken stretch each ticket now gets a single block, ordered by first activity and packed with no gaps; a ticket that cannot reach a minute folds into the one ranked above it.
+
+  Ignore a ticket in every week with `jcf config set session-ignore <KEY>` or the web's Ignore button, and restore it from the Ignored tickets list. An ignored ticket is never suggested or offered to the attribution agent; a branch or path match to it falls through to the session's other candidates, and its parallel time goes to the tickets it ran alongside. Reports carry its raw time as `ignored`. In the web calendar, back-to-back short suggestions show as one card per stretch, and the page uses the full window width.
+
+  An orchestrating session nothing else places is split across the open-sprint tickets it mentions, by mention count, per active stretch (new attribution signal `split`); deterministic reads such as `jcf watch` leave it unplaced. The web lists low-confidence matches with a "Log as" action, and saved entries can be deleted or moved to another ticket; a delete releases its session claim so the time is suggested again, and a move carries the claim to the replacement. `SavedEntries` gains `remove` and an optional `ticketKey` on update.
+
+  Quick approvals are confirmed in batches of up to fifty under one provider re-read (new `/api/rows/confirm-batch`), Jira worklogs are read eight issues at a time, and idempotent Jira reads retry a dropped connection twice, so a long queue no longer waits on one full re-read per approval.
+
+  A provider window that needs manual review no longer fails a read: proposals carry a per-provider `writeBlocked` hold, the web shows the hold and disables writes to held providers, and writes keep refusing.
+
+  Ticket moves persist a replacement intent before creating provider time. Uncertain or partial moves stay held across restart and cannot create another replacement on retry; a verified pair can be resolved by explicitly deleting either entry. Ordinary replacements retain their verified ID and start so extending a reviewed window does not mistake the move for unknown earlier time. The private source ledger upgrades to version 5 while retaining existing claims and holds.
+
+  Breaking (`@knpkv/clockify-api-client`): `TimeEntryWithRatesDtoV1.costRate` and `hourlyRate` are now `RateDtoV1 | null`, matching the live API, which returns `null` when no rate applies.
+
+### Patch Changes
+
+- [#511](https://github.com/knpkv/npm/pull/511) [`02308ab`](https://github.com/knpkv/npm/commit/02308ab1fba5cda21939057ccefdbdd6875031bc) Thanks [@konopkov](https://github.com/konopkov)! - A work-description suggestion that arrives while you are already in the note field now lands selected, so your first keystroke replaces it instead of being appended to it.
+
+- [#493](https://github.com/knpkv/npm/pull/493) [`e45eba3`](https://github.com/knpkv/npm/commit/e45eba30991dc662b7a8b09506d2d85b878fec97) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/browser-pairing/owner-session` adds `serveWithBootstrapUrl(server, onReady)`. It runs a server layer, waits until it is listening, hands its bootstrap URL to `onReady`, and keeps serving. A launch that fails before it is listening fails without announcing a URL, and a failing `onReady` stops the server. `agent-usage serve`, `jcf-web` and `codecommit-web` now start their servers through it instead of three copies of that code. `@knpkv/codecommit-web` also exports `serveCodeCommit(options)` (`hostname`, `port`, `onReady`), the start sequence its own entry uses.
+- Updated dependencies [[`28c22ae`](https://github.com/knpkv/npm/commit/28c22ae49825b06472c0d35aa9d7ef92ed5748ff), [`da0e5ff`](https://github.com/knpkv/npm/commit/da0e5ff70ec5926beaeceff060a37b2b0f27b6f9), [`934843b`](https://github.com/knpkv/npm/commit/934843bbcea57cbf3266fce950c020733046cac1), [`148daa6`](https://github.com/knpkv/npm/commit/148daa6be147dca74bc642bd552b603deb760eae), [`4e8f346`](https://github.com/knpkv/npm/commit/4e8f346b926b859ea2b3be07ec7dc6cb77ca8e76), [`e57bb6d`](https://github.com/knpkv/npm/commit/e57bb6db1b393dbff8e116573cf2db23992c1cf4), [`7df3dbb`](https://github.com/knpkv/npm/commit/7df3dbb9875ab31f369351df2de898b36d40e613), [`8924289`](https://github.com/knpkv/npm/commit/89242895271072b83185d6cc02376b2c56830f6a), [`f8d2612`](https://github.com/knpkv/npm/commit/f8d2612e09b20974dd8eccc8ff197bb072c40cbf), [`e45eba3`](https://github.com/knpkv/npm/commit/e45eba30991dc662b7a8b09506d2d85b878fec97)]:
+  - @knpkv/jira-clockify@1.5.0
+  - @knpkv/rly@0.9.0
+  - @knpkv/browser-pairing@0.4.0
+
 ## 0.4.2
 
 ### Patch Changes

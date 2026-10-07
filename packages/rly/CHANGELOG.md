@@ -1,5 +1,33 @@
 # @knpkv/rly
 
+## 0.10.0
+
+### Minor Changes
+
+- [#509](https://github.com/knpkv/npm/pull/509) [`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc) Thanks [@konopkov](https://github.com/konopkov)! - Controls default to tool density: `Button`, `IconButton`, `Select`, and the `Field` control gain a `dense` size (32px, small radius, sized to text) and use it when no size is given (`ThemeSelect` and the `AgentJob` cancel action too), through new shared `--rly-control-height-*` tokens (`RLY_CONTROL_HEIGHT_TOKEN_NAMES`). Compact `IconButton` is 40px like the other compact controls (it was 44). `ToggleGroup` gains the same dense default, drawn as an outlined row with 1px dividers instead of a tinted track, and its `compact` and `default` sizes now follow the 40px and 48px control heights; the registry lists `dense` as the default size. Coarse pointers keep a 44px target. One-sided accent stripes are gone from rly: diff annotations, the file-tree error, stale findings, agent outcomes, thread evidence, verdict reasons, workset gaps, and the `StatePanel` rail now use an even border or a flat tint, and `lint:stripes`, now part of the repository lint gate, keeps them from coming back. The diff file tree marks the open file with an even ring and draws its guide lines in the neutral divider colour. A neutral `StatePanel` shows no icon unless `icon` names one. Control Center's header actions, Settings inputs and selects, and service setup fields move to the same dense height, so they line up with rly buttons.
+
+  `StateLabel` renders a state as its word and icon in the tone's ink, with no border, tint or padding, so it never reads as a status chip. rly text no longer uses `overflow-wrap: anywhere`: words wrap only between words, and only an unbreakable token breaks (`break-word`), so a squeezed row never splits a word. Control Center Services: the card header keeps the title whole beside its state, and resource rows and test evidence lose their one-sided stripes. Codecommit-web's pull-request state links keep the 32px control target now that the state is a plain word.
+
+## 0.9.0
+
+### Minor Changes
+
+- [#510](https://github.com/knpkv/npm/pull/510) [`934843b`](https://github.com/knpkv/npm/commit/934843bbcea57cbf3266fce950c020733046cac1) Thanks [@konopkov](https://github.com/konopkov)! - Add chart foundations: eight series colour tokens plus a neutral remainder (`--rly-color-series-*`), `LimitTrack` (a 0–100% limit with a near mark, a projected extension, and a stale hatch), `TrackKey` for the marks, and `ChartLegend` with `rlySeriesColor`.
+
+- [#505](https://github.com/knpkv/npm/pull/505) [`148daa6`](https://github.com/knpkv/npm/commit/148daa6be147dca74bc642bd552b603deb760eae) Thanks [@konopkov](https://github.com/konopkov)! - Add `DecisionBar`: approve or reject one named target. The target and its clock stay visible, and both actions carry the target in their accessible names. An `off` state keeps them focusable with the reason linked, and `sending` waits for the server's answer instead of assuming success. `placement="sticky"` pins the bar at thumb reach on phones.
+
+- [#504](https://github.com/knpkv/npm/pull/504) [`4e8f346`](https://github.com/knpkv/npm/commit/4e8f346b926b859ea2b3be07ec7dc6cb77ca8e76) Thanks [@konopkov](https://github.com/konopkov)! - Add `Hero` and `HeroWord`: the one fact a screen leads with, as a sentence in text ink with its figure inside, plus an optional caption. The `line` size folds it to one line beside a detail, and `display` is for boards read from across a room. `HeroWord` gives only the state word blocked or held ink.
+
+- [#500](https://github.com/knpkv/npm/pull/500) [`7df3dbb`](https://github.com/knpkv/npm/commit/7df3dbb9875ab31f369351df2de898b36d40e613) Thanks [@konopkov](https://github.com/konopkov)! - Add `Region`: one main page region as a bordered surface with a single header row (title, plain count, actions) above a rule. The section is named by its heading, the heading can take programmatic focus through `headingId`, and `tone="tray"` steps the surface down for regions that hold actionable cards.
+
+- [#498](https://github.com/knpkv/npm/pull/498) [`8924289`](https://github.com/knpkv/npm/commit/89242895271072b83185d6cc02376b2c56830f6a) Thanks [@konopkov](https://github.com/konopkov)! - Add a `words` size to `StageRail` for rows and facts. Stages read as one line ("Build succeeded, Staging failed: integration tests, Prod waiting") with no markers, chips or owners. Only critical and caution states take ink, and the heading remains for assistive technology.
+
+- [#502](https://github.com/knpkv/npm/pull/502) [`f8d2612`](https://github.com/knpkv/npm/commit/f8d2612e09b20974dd8eccc8ff197bb072c40cbf) Thanks [@konopkov](https://github.com/konopkov)! - Add optional `provenance` to `TimelineRow` events. The marker takes a shape (○ applied automatically, ● approved, ◆ waiting for approval, a hatched square for couldn't read, ▲ flag only) and the label says it in words. A new `TimelineProvenanceKey` keys the shapes. The shapes stay distinct in forced colours.
+
+### Patch Changes
+
+- [#515](https://github.com/knpkv/npm/pull/515) [`e57bb6d`](https://github.com/knpkv/npm/commit/e57bb6db1b393dbff8e116573cf2db23992c1cf4) Thanks [@konopkov](https://github.com/konopkov)! - Region stays inside its container when its title or body holds a token with no break point, such as a long branch name or id. The token breaks only where it cannot fit; words still wrap at spaces.
+
 ## 0.8.0
 
 ### Minor Changes

@@ -50,6 +50,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "pnpm lint:oxlint",
     "pnpm lint:ast",
     "pnpm lint:rly-colors",
+    "pnpm lint:rly-stripes",
     "pnpm lint:rly-css-tokens"
   ])
   assert.deepEqual(expandedScript("lint:config:static"), [
@@ -63,6 +64,8 @@ test("default lint retains every original check and both CI partitions", () => {
     "node scripts/check-workflow-action-pins.mjs",
     "node scripts/check-workflow-secret-boundaries.mjs",
     "pnpm skills:check",
+    "node scripts/check-debt-ledger.mjs",
+    "node --test scripts/check-debt-ledger.test.mjs",
     "node --test scripts/check-lint-partition.test.mjs"
   ])
   assert.deepEqual(expandedScript("lint"), [...staticCommands, ...coverageCommands])
@@ -84,6 +87,8 @@ test("default lint retains every original check and both CI partitions", () => {
     "check-workflow-action-pins.mjs",
     "check-workflow-secret-boundaries.mjs",
     "pnpm skills:check",
+    "check-debt-ledger.mjs",
+    "check-debt-ledger.test.mjs",
     "check-security-doc-examples.mjs",
     "check-control-center-live-aws.mjs",
     "bootstrap.test.sh",
@@ -94,6 +99,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "ast-grep test",
     "ast-grep scan",
     "lint:colors",
+    "lint:stripes",
     "lint:rly-css-tokens",
     "check-lint-partition.test.mjs"
   ]) {

@@ -9,11 +9,14 @@ import type {
   WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
   WorkDecisionRevisionConflictError,
+  WorkGoalAbandonmentConflictError,
   WorkGoalAgentTargetConflictError,
   WorkGoalBindingRequiresAgentError,
+  WorkGoalLaneActiveError,
   WorkGoalOwnerMismatchError,
   WorkGoalReassignmentConflictError,
   WorkGoalRevisionConflictError,
+  WorkGoalTerminalError,
   WorkLaneClaimConflictError,
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
@@ -30,18 +33,26 @@ import type {
   WorkDecisionHandoff,
   WorkExistingGoalRecovery,
   WorkExistingOwnerReconciliation,
+  WorkGoalAbandoned,
+  WorkGoalAbandonment,
   WorkGoalCheckpoint,
   WorkGoalReassigned,
   WorkGoalReassignment,
   WorkLaneClaim,
   WorkLaneClaimed,
+  WorkObservationEnvelope,
+  WorkObservedAdmission,
+  WorkObserveReport,
   WorkProspectiveAdmission,
+  WorkReconcileOptions,
+  WorkReconcileOutcome,
   WorkRecoveryContext,
   WorkRecoveryPreflight,
   WorkRecoveryTarget,
   WorkSnapshots
 } from "./model.js"
-import { WorkGoalId, WorkPullRequestLink, WorkPullRequestLinkRequest } from "./model.js"
+import { isTerminalWorkState, WorkGoalId, WorkPullRequestLink, WorkPullRequestLinkRequest } from "./model.js"
+import { withActivityProvenance, withObservedFacts, workSnapshotBudgetBytes } from "./observed.js"
 import { projectWorkSnapshots } from "./projection.js"
 import type { WorkStoreService } from "./store.js"
 
@@ -69,11 +80,37 @@ export interface WorkService {
     | WorkProjectionError
     | WorkStoreError
   >
+  /**
+   * Approval-bound move of a goal to `abandoned`; refuses a goal with an active
+   * lane or one already finished. Replaying the same approval job returns the
+   * prior result.
+   */
+  readonly abandon: (
+    request: WorkGoalAbandonment
+  ) => Effect.Effect<
+    WorkGoalAbandoned,
+    | WorkGoalAbandonmentConflictError
+    | WorkGoalLaneActiveError
+    | WorkGoalOwnerMismatchError
+    | WorkGoalRevisionConflictError
+    | WorkGoalTerminalError
+    | WorkProjectionError
+    | WorkStoreError
+  >
   readonly admissionPreflight: (
     target: WorkAdmissionTarget
   ) => Effect.Effect<WorkAdmissionPreflight, WorkProjectionError | WorkStoreError>
   readonly admitExistingOwner: (
     request: WorkProspectiveAdmission
+  ) => Effect.Effect<WorkPullRequestLink, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
+  /**
+   * Admits a worker the reconciler observed, without an approval: the same
+   * write as `admitExistingOwner`, credited to the observation. The caller has
+   * checked the pane's host, lineage and worktree; the store re-checks the
+   * absence evidence.
+   */
+  readonly admitObserved: (
+    request: WorkObservedAdmission
   ) => Effect.Effect<WorkPullRequestLink, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
   readonly inspectPullRequest: (
     request: WorkPullRequestLinkRequest
@@ -105,8 +142,24 @@ export interface WorkService {
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
   /**
+   * Records goals whose pull request is observed merged or closed as completed
+   * or abandoned. Run it after `observe`; it never writes anything else.
+   */
+  readonly reconcile: (options: WorkReconcileOptions) => Effect.Effect<
+    ReadonlyArray<WorkReconcileOutcome>,
+    WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+  >
+  /**
+   * Stores observed facts (a pull request's state, an agent's status) for the
+   * Work tab. Facts are not goal history and never change an approval token.
+   */
+  readonly observe: (
+    envelopes: ReadonlyArray<WorkObservationEnvelope>
+  ) => Effect.Effect<WorkObserveReport, WorkStoreError>
+  /**
    * Projects history at an explicit timestamp, or at the later of the current
-   * clock and the coordinator-owned logical timestamp when none is given.
+   * clock and the coordinator-owned logical timestamp when none is given. The
+   * `now` window also carries each goal's observed facts.
    */
   readonly snapshots: (observedAt?: number) => Effect.Effect<WorkSnapshots, WorkStoreError | WorkProjectionError>
   readonly recordMany: (
@@ -180,11 +233,15 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
     store.recoverExistingGoal(request)
   )
   const reassign = Effect.fn("HerdrWork.reassign")((request: WorkGoalReassignment) => store.reassign(request))
+  const abandon = Effect.fn("HerdrWork.abandon")((request: WorkGoalAbandonment) => store.abandon(request))
   const admissionPreflight = Effect.fn("HerdrWork.admissionPreflight")((target: WorkAdmissionTarget) =>
     store.admissionPreflight(target)
   )
   const admitExistingOwner = Effect.fn("HerdrWork.admitExistingOwner")((request: WorkProspectiveAdmission) =>
     store.admitExistingOwner(request)
+  )
+  const admitObserved = Effect.fn("HerdrWork.admitObserved")((request: WorkObservedAdmission) =>
+    store.admitObserved(request)
   )
   const linkError = (request: WorkPullRequestLinkRequest, reason: WorkPullRequestLinkError["reason"]) =>
     new WorkPullRequestLinkError({ goalId: request.goalId, laneId: request.laneId, reason })
@@ -205,7 +262,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
     ) {
       return yield* linkError(decoded, "missing_provenance")
     }
-    if (goal.state === "completed" || goal.state === "deployed") {
+    if (isTerminalWorkState(goal.state)) {
       return yield* linkError(decoded, "terminal_goal")
     }
     const goalEvent = source.events.filter(({ goal: candidate }) => candidate.id === goal.id).at(-1)
@@ -281,8 +338,24 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       yield* Clock.currentTimeMillis,
       source.logicalObservedAt ?? 0
     )
-    return yield* projectWorkSnapshots(source.events, timestamp)
+    // Provenance first: an unknown author is worse than a missing observation.
+    return withObservedFacts(
+      withActivityProvenance(
+        yield* projectWorkSnapshots(source.events, timestamp),
+        source.approvals,
+        [...source.reconcilerEvents, ...source.observedAdmissions],
+        source.activityOrigins,
+        workSnapshotBudgetBytes
+      ),
+      source.facts,
+      source.failures,
+      workSnapshotBudgetBytes
+    )
   })
+  const observe = Effect.fn("HerdrWork.observe")((envelopes: ReadonlyArray<WorkObservationEnvelope>) =>
+    store.observe(envelopes)
+  )
+  const reconcile = Effect.fn("HerdrWork.reconcile")((options: WorkReconcileOptions) => store.reconcile(options))
   const recordMany = Effect.fn("HerdrWork.recordMany")((
     transactionId: string,
     events: ReadonlyArray<WorkGoalCheckpoint>
@@ -301,8 +374,10 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       recoveryPreflight,
       recoverExistingGoal,
       reassign,
+      abandon,
       admissionPreflight,
       admitExistingOwner,
+      admitObserved,
       agentBinding,
       inspectPullRequest,
       reconcileExistingOwner,
@@ -313,6 +388,8 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       currentClaim,
       decisions,
       handoff,
+      observe,
+      reconcile,
       record,
       recordMany,
       snapshots

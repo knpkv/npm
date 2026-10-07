@@ -1,6 +1,11 @@
-import { agentConnectTarget, fleetResponseBodyMaxBytes, workReassignActivitySummary } from "@knpkv/herdr-fleet"
+import {
+  agentConnectTarget,
+  fleetResponseBodyMaxBytes,
+  workAbandonActivitySummary,
+  workReassignActivitySummary
+} from "@knpkv/herdr-fleet"
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
-import { Clock, Crypto, Effect, Equal, Option, Schema } from "effect"
+import { Clock, Crypto, Effect, Equal, Option, Result, Schema } from "effect"
 import { Hex } from "effect/encoding"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { makeWorkAgentBinding } from "./agent-binding.js"
@@ -13,11 +18,14 @@ import {
   WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
   WorkDecisionRevisionConflictError,
+  WorkGoalAbandonmentConflictError,
   WorkGoalAgentTargetConflictError,
   WorkGoalBindingRequiresAgentError,
+  WorkGoalLaneActiveError,
   WorkGoalOwnerMismatchError,
   WorkGoalReassignmentConflictError,
   WorkGoalRevisionConflictError,
+  WorkGoalTerminalError,
   WorkLaneClaimConflictError,
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
@@ -75,6 +83,19 @@ import {
   resolveLegacyLaneClaim
 } from "./internal/legacy-lane-claim.js"
 import {
+  enforcesOneHandoffPerSession,
+  SessionIndexDefinition,
+  sessionIndexDefinitionQuery
+} from "./internal/session-index.js"
+import {
+  goalActivityLimit,
+  terminalCandidates,
+  terminalCheckpoint,
+  withoutBlockers
+} from "./internal/terminal-reconcile.js"
+import {
+  admissionEvidence,
+  isTerminalWorkState,
   WorkAdmissionTarget,
   WorkAgentBinding,
   WorkAgentBindingRequest,
@@ -83,6 +104,8 @@ import {
   WorkDispatchHandoff,
   WorkExistingGoalRecovery,
   WorkGoal,
+  WorkGoalAbandoned,
+  WorkGoalAbandonment,
   WorkGoalCheckpoint,
   WorkGoalId,
   WorkGoalReassigned,
@@ -90,26 +113,56 @@ import {
   workHistoryMaxEvents,
   WorkLaneClaim,
   WorkLaneClaimed,
+  WorkObservationEnvelope,
+  WorkObservationId,
+  workObservationMaxSkewMillis,
+  WorkObservationSubject,
+  WorkObservedAdmission,
+  WorkObservedFact,
+  workObservedFactMaxBytes,
+  workObservedFactMaxRecords,
+  WorkObservedFailure,
   WorkProspectiveAdmission,
   WorkPullRequestLink,
+  WorkReconcileOptions,
+  workReconcilerHeadroom,
   WorkRecoveryTarget,
   workSnapshotMaxGoals
 } from "./model.js"
 import type {
+  WorkActivity as WorkActivityType,
   WorkAdmissionPreflight as WorkAdmissionPreflightType,
   WorkAdmissionTarget as WorkAdmissionTargetType,
   WorkAgentBinding as WorkAgentBindingType,
   WorkAgentBindingRequest as WorkAgentBindingRequestType,
+  WorkAgentObservation as WorkAgentObservationType,
   WorkDecisionHandoff as WorkDecisionHandoffType,
   WorkExistingGoalRecovery as WorkExistingGoalRecoveryType,
+  WorkGoalAbandoned as WorkGoalAbandonedType,
+  WorkGoalAbandonment as WorkGoalAbandonmentType,
   WorkGoalCheckpoint as WorkGoalCheckpointType,
   WorkGoalReassigned as WorkGoalReassignedType,
   WorkGoalReassignment as WorkGoalReassignmentType,
+  WorkObservationEnvelope as WorkObservationEnvelopeType,
+  WorkObservedAdmission as WorkObservedAdmissionType,
+  WorkObservedFact as WorkObservedFactType,
+  WorkObservedFailure as WorkObservedFailureType,
+  WorkObserveOutcome,
+  WorkObserveReport,
   WorkProspectiveAdmission as WorkProspectiveAdmissionType,
   WorkPullRequestLink as WorkPullRequestLinkType,
+  WorkPullRequestObservation as WorkPullRequestObservationType,
+  WorkReconcileOutcome,
   WorkRecoveryPreflight as WorkRecoveryPreflightType,
   WorkRecoveryTarget as WorkRecoveryTargetType
 } from "./model.js"
+import {
+  asciiLower,
+  canonicalSubject,
+  observationSubject,
+  reconcilerEventPrefix,
+  type WorkApprovedActivity
+} from "./observed.js"
 
 const StoredEventRow = Schema.Struct({ record: Schema.String })
 const StoredEventRows = Schema.Array(StoredEventRow)
@@ -244,6 +297,33 @@ const storeError = (operation: string) => (cause: unknown) => new WorkStoreError
 
 const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
   new WorkStoreError({ cause: error.cause, operation: error.operation })
+
+/**
+ * Files written before the session index was unique carry a plain index under
+ * the same name, which `CREATE UNIQUE INDEX IF NOT EXISTS` leaves in place.
+ * Replace it, failing closed when two handoffs already share a session. Runs
+ * inside `WorkStore.open`'s schema transaction, so a failure leaves the plain
+ * index in place.
+ */
+const requireUniqueSessionIndex = (database: DatabaseSync): void => {
+  const sessionIndex = Schema.decodeUnknownSync(Schema.Array(SessionIndexDefinition))(
+    database.prepare(sessionIndexDefinitionQuery).all()
+  )[0]
+  if (sessionIndex === undefined || enforcesOneHandoffPerSession(sessionIndex)) return
+  // NULL sessions never collide under a UNIQUE index, so they are not duplicates.
+  const duplicateGroups = `SELECT session_id AS sessionId, COUNT(*) AS rows, group_concat(handoff_id) AS handoffIds
+    FROM work_decision_handoffs WHERE session_id IS NOT NULL
+    GROUP BY session_id HAVING COUNT(*) > 1`
+  const duplicates = database.prepare(`${duplicateGroups} LIMIT 10`).all()
+  if (duplicates.length > 0) {
+    const total = database.prepare(`SELECT COUNT(*) AS sessions FROM (${duplicateGroups})`).get()
+    throw new WorkStoreError({ cause: { duplicates, total }, operation: "open.migrate.session-index" })
+  }
+  database.exec(`
+    DROP INDEX work_decision_handoffs_session;
+    CREATE UNIQUE INDEX work_decision_handoffs_session ON work_decision_handoffs (session_id);
+  `)
+}
 
 /**
  * Upgrades pre-session Work tables in place. Runs inside `WorkStore.open`'s
@@ -1226,7 +1306,17 @@ const readLaneOperationLedgerTotals = (database: DatabaseSync) =>
        FROM work_lane_operation_totals WHERE singleton = 1`
     ).get()
   )
-type AppendRejection = WorkCheckpointConflictError | WorkProjectionError
+type AppendRejection = WorkCheckpointConflictError | WorkGoalRevisionConflictError | WorkProjectionError
+
+/** What a reconciler write was planned from, and the history it must leave free. */
+interface ReconcilerGuard {
+  readonly head: WorkGoalCheckpointType
+  readonly fact: { readonly subject: string; readonly observationId: string }
+  readonly reserve: number
+}
+
+const ObservationIdRow = Schema.Struct({ observationId: Schema.String, confirmedAt: Schema.Number })
+const FailureLastAtRow = Schema.Struct({ lastAt: Schema.Number })
 type AppendDecision =
   | { readonly _tag: "inserted"; readonly changes: bigint | number }
   | { readonly _tag: "replayed"; readonly event: WorkGoalCheckpointType }
@@ -1259,6 +1349,17 @@ type ReassignDecision =
   | { readonly _tag: "reassigned"; readonly result: WorkGoalReassignedType }
   | { readonly _tag: "rejected"; readonly error: ReassignRejection }
 const ReassignmentRow = Schema.Struct({ approvalJobId: Schema.String, goalId: Schema.String, record: Schema.String })
+type AbandonRejection =
+  | WorkGoalAbandonmentConflictError
+  | WorkGoalLaneActiveError
+  | WorkGoalOwnerMismatchError
+  | WorkGoalRevisionConflictError
+  | WorkGoalTerminalError
+  | WorkProjectionError
+  | WorkStoreError
+type AbandonDecision =
+  | { readonly _tag: "abandoned"; readonly result: WorkGoalAbandonedType }
+  | { readonly _tag: "rejected"; readonly error: AbandonRejection }
 
 /** Applies a reassignment's agent choice; `keep` is only reached when the goal has no target. */
 const withReassignedAgent = <G extends object>(
@@ -1506,12 +1607,12 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
     ) ||
     // A session id stays claimed by its lane even after a reassignment supersedes that binding.
     bindings.some(({ request }) =>
-      (request.prospectiveAdmission?.sessionId === target.sessionId && request.laneId !== target.laneId) ||
+      (admissionEvidence(request)?.sessionId === target.sessionId && request.laneId !== target.laneId) ||
       (request.existingGoalRecovery?.sessionId === target.sessionId && request.laneId !== target.laneId)
     ) || authority.ambiguousLanes.has(target.laneId)
   const exact = goal !== undefined && lane !== undefined && binding !== undefined &&
-    goal.goal.id === target.goalId && goal.goal.state !== "completed" &&
-    goal.goal.state !== "deployed" && goal.goal.goalFamily?.role === "canonical" &&
+    goal.goal.id === target.goalId && !isTerminalWorkState(goal.goal.state) &&
+    goal.goal.goalFamily?.role === "canonical" &&
     goal.goal.goalFamily.canonicalGoalId === target.goalId &&
     Equal.equals(goal.goal.owner, target.owner) &&
     lane.goalId === target.goalId && lane.head === target.head &&
@@ -1519,10 +1620,10 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
     lane.phase !== "shipped" && Equal.equals(lane.owner, target.owner) &&
     binding.lane.laneId === target.laneId &&
     Equal.equals(binding.request.worker, target.worker) &&
-    (binding.request.prospectiveAdmission === undefined || (
-      binding.request.prospectiveAdmission.sessionId === target.sessionId &&
-      binding.request.prospectiveAdmission.workAssignment === target.expectedWork &&
-      binding.request.prospectiveAdmission.baseHead === target.baseHead
+    (admissionEvidence(binding.request) === undefined || (
+      admissionEvidence(binding.request)?.sessionId === target.sessionId &&
+      admissionEvidence(binding.request)?.workAssignment === target.expectedWork &&
+      admissionEvidence(binding.request)?.baseHead === target.baseHead
     )) &&
     (binding.request.existingGoalRecovery === undefined ||
       (binding.request.existingGoalRecovery.sessionId === target.sessionId &&
@@ -1556,7 +1657,7 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
       claim.worktree === target.worktree
     ) || authority.latest.some(({ request }) => request.worker.agentId === target.worker.agentId) ||
     bindings.some(({ request }) =>
-      request.prospectiveAdmission?.sessionId === target.sessionId ||
+      admissionEvidence(request)?.sessionId === target.sessionId ||
       request.existingGoalRecovery?.sessionId === target.sessionId
     )
   if (conflicts) {
@@ -1718,8 +1819,7 @@ const recoveryState = (database: DatabaseSync, target: WorkRecoveryTargetType): 
         goal.connectTarget !== null ||
         (goal.agentHierarchy !== undefined && goal.agentHierarchy !== null) ||
         (goal.review?.url !== null && goal.review?.url !== undefined && goal.review.url !== target.reviewUrl) ||
-        goal.state === "completed" ||
-        goal.state === "deployed"
+        isTerminalWorkState(goal.state)
     )
   ) {
     return conflict("canonical goal history is linked, terminal, or belongs to another owner")
@@ -1774,7 +1874,7 @@ const recoveryState = (database: DatabaseSync, target: WorkRecoveryTargetType): 
       ({ request }) =>
         request.laneId === target.laneId ||
         request.worker.agentId === target.worker.agentId ||
-        request.prospectiveAdmission?.sessionId === target.sessionId ||
+        admissionEvidence(request)?.sessionId === target.sessionId ||
         request.existingGoalRecovery?.sessionId === target.sessionId
     ) ||
     decisions.some(({ record }) => {
@@ -1818,11 +1918,17 @@ export interface WorkStoreService {
   readonly reassign: (
     request: WorkGoalReassignmentType
   ) => Effect.Effect<WorkGoalReassignedType, ReassignRejection>
+  readonly abandon: (
+    request: WorkGoalAbandonmentType
+  ) => Effect.Effect<WorkGoalAbandonedType, AbandonRejection>
   readonly admissionPreflight: (
     target: WorkAdmissionTargetType
   ) => Effect.Effect<WorkAdmissionPreflightType, WorkProjectionError | WorkStoreError>
   readonly admitExistingOwner: (
     request: WorkProspectiveAdmissionType
+  ) => Effect.Effect<WorkPullRequestLinkType, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
+  readonly admitObserved: (
+    request: WorkObservedAdmissionType
   ) => Effect.Effect<WorkPullRequestLinkType, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
   readonly bindAgent: (
     request: WorkAgentBindingRequestType
@@ -1887,11 +1993,293 @@ export interface WorkStoreService {
     laneId: string
   ) => Effect.Effect<ReadonlyArray<WorkDecisionHandoff>, WorkStoreError>
   readonly list: () => Effect.Effect<ReadonlyArray<WorkGoalCheckpointType>, WorkStoreError>
-  /** Atomically reads projection history and its coordinator-owned logical-time boundary. */
+  /**
+   * Stores the latest observed facts per subject. Facts are never goal history
+   * and never input to an approval token, so observing cannot invalidate a
+   * pending approval or fill the goal history.
+   */
+  readonly observe: (
+    envelopes: ReadonlyArray<WorkObservationEnvelopeType>
+  ) => Effect.Effect<WorkObserveReport, WorkStoreError>
+  /**
+   * Records each goal whose pull request is observed merged or closed as
+   * completed or abandoned, stamped with the close time. Only these terminal
+   * facts are ever written to goal history; everything else stays an overlay.
+   */
+  readonly reconcile: (options: WorkReconcileOptions) => Effect.Effect<
+    ReadonlyArray<WorkReconcileOutcome>,
+    WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+  >
+  /** Atomically reads projection history, observed facts, and the coordinator-owned logical-time boundary. */
   readonly snapshotInput: () => Effect.Effect<{
     readonly events: ReadonlyArray<WorkGoalCheckpointType>
+    readonly facts: ReadonlyArray<WorkObservedFactType>
+    readonly failures: ReadonlyArray<WorkObservedFailureType>
+    /** Each activity an approved Fleet job wrote, with that job's id. */
+    readonly approvals: ReadonlyArray<WorkApprovedActivity>
+    /** The checkpoints the reconciler wrote, from its own record of them. */
+    readonly reconcilerEvents: ReadonlyArray<{ readonly goalId: string; readonly eventId: string }>
+    /**
+     * The admission checkpoints the reconciler wrote for observed workers, from
+     * their bindings. Kept apart from `reconcilerEvents`, which also marks a goal
+     * as already given its terminal checkpoint.
+     */
+    readonly observedAdmissions: ReadonlyArray<{ readonly goalId: string; readonly eventId: string }>
+    /** The checkpoint that started each current activity's unchanged run, and its content, keyed by goal id and activity id. */
+    readonly activityOrigins: ReadonlyMap<string, { readonly eventId: string; readonly activity: WorkActivityType }>
     readonly logicalObservedAt: number | null
   }, WorkStoreError>
+}
+
+const ReassignmentApprovalRow = Schema.Struct({ approvalJobId: Schema.String, goalId: Schema.String })
+const ReconcilerEventRow = Schema.Struct({ eventId: Schema.String, goalId: Schema.String })
+
+const ObservedFactRow = Schema.Struct({
+  subject: Schema.String,
+  observationId: Schema.String,
+  observedAt: Schema.Number,
+  confirmedAt: Schema.Number,
+  record: Schema.String
+})
+
+const StoredFactRow = Schema.Struct({ observationId: Schema.String, confirmedAt: Schema.Number })
+const FactTotalsRow = Schema.Struct({ count: Schema.Number, bytes: Schema.Number })
+const EvictionRow = Schema.Struct({ subject: Schema.String, bytes: Schema.Number, age: Schema.Number })
+const EvictedThroughRow = Schema.Struct({ evictedThrough: Schema.Number })
+
+type PreparedObservation =
+  | {
+    readonly _tag: "fact"
+    readonly subject: string
+    readonly observationId: WorkObservationId
+    readonly observedAt: number
+    readonly record: string
+  }
+  | { readonly _tag: "future"; readonly subject: string }
+  | {
+    readonly _tag: "unknown"
+    readonly subject: string
+    readonly source: "github" | "herdr" | "git"
+    readonly reason: string
+    readonly observedAt: number
+  }
+
+const canonicalObservation = (
+  observation: WorkPullRequestObservationType | WorkAgentObservationType
+): WorkPullRequestObservationType | WorkAgentObservationType =>
+  observation._tag === "agent"
+    ? { ...observation, host: asciiLower(observation.host) }
+    : { ...observation, repository: asciiLower(observation.repository) }
+
+/**
+ * Applies each observation in one transaction, then evicts the oldest rows
+ * until facts and failures are each within their bounds.
+ *
+ * - The same facts again keep their first-seen time and move `confirmed_at`.
+ * - Different facts replace the stored ones, unless the stored ones were
+ *   confirmed at or after this observation (then it is stale).
+ * - A good read ends the subject's run of failures. A failure starts a run,
+ *   or keeps the running one's `since`; one older than the last good read is stale.
+ */
+const writeObservations = (
+  database: DatabaseSync,
+  prepared: ReadonlyArray<PreparedObservation>
+): WorkObserveReport => {
+  database.exec("BEGIN IMMEDIATE")
+  try {
+    const readFact = database.prepare(
+      `SELECT observation_id AS observationId, confirmed_at AS confirmedAt
+       FROM work_observed_facts WHERE subject = ?`
+    )
+    // The newest time of any row eviction has removed. A subject with no row
+    // may have had one, so a fact read no newer than this can't be shown to
+    // be current, and is stale: eviction never makes an old read new again.
+    const evictedRow = database.prepare(
+      "SELECT evicted_through AS evictedThrough FROM work_observed_eviction WHERE singleton = 1"
+    ).get()
+    const evictedThrough = evictedRow === undefined
+      ? Number.NEGATIVE_INFINITY
+      : Schema.decodeUnknownSync(EvictedThroughRow)(evictedRow).evictedThrough
+    const upsertFact = database.prepare(
+      `INSERT INTO work_observed_facts (subject, observation_id, observed_at, confirmed_at, record)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (subject) DO UPDATE SET observation_id = excluded.observation_id,
+         observed_at = excluded.observed_at, confirmed_at = excluded.confirmed_at, record = excluded.record`
+    )
+    const confirmFact = database.prepare(
+      "UPDATE work_observed_facts SET confirmed_at = max(confirmed_at, ?) WHERE subject = ?"
+    )
+    // A good read ends a run of failures only if it is newer than the run's
+    // latest failure.
+    const clearFailures = database.prepare("DELETE FROM work_observed_failures WHERE subject = ? AND last_at <= ?")
+    // We keep only the run's first and latest failure, so a run split by a
+    // delayed good read restarts at its latest failure: a real failed read.
+    const trimFailures = database.prepare(
+      "UPDATE work_observed_failures SET since = last_at WHERE subject = ? AND since <= ? AND last_at > ?"
+    )
+    const endFailures = {
+      run: (subject: string, observedAt: number) => {
+        clearFailures.run(subject, observedAt)
+        trimFailures.run(subject, observedAt, observedAt)
+      }
+    }
+    // `since` is the earliest failure of the run; source and reason come from
+    // the latest one, whatever order the failures arrive in.
+    const recordFailure = database.prepare(
+      `INSERT INTO work_observed_failures (subject, source, reason, since, last_at) VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT (subject) DO UPDATE SET
+         since = min(since, excluded.since),
+         source = CASE WHEN excluded.last_at >= last_at THEN excluded.source ELSE source END,
+         reason = CASE WHEN excluded.last_at >= last_at THEN excluded.reason ELSE reason END,
+         last_at = max(last_at, excluded.last_at)`
+    )
+    const outcomes = prepared.map((item): WorkObserveOutcome => {
+      if (item._tag === "future") return { _tag: "stale", subject: item.subject }
+      const row = readFact.get(item.subject)
+      const stored = row === undefined ? undefined : Schema.decodeUnknownSync(StoredFactRow)(row)
+      if (item._tag === "unknown") {
+        if (stored !== undefined && stored.confirmedAt >= item.observedAt) {
+          return { _tag: "stale", subject: item.subject }
+        }
+        recordFailure.run(item.subject, item.source, item.reason, item.observedAt, item.observedAt)
+        return { _tag: "unknown", reason: item.reason, subject: item.subject }
+      }
+      if (stored === undefined && item.observedAt <= evictedThrough) return { _tag: "stale", subject: item.subject }
+      // The same facts read before the stored confirmation confirm nothing now.
+      if (stored?.observationId === item.observationId && stored.confirmedAt > item.observedAt) {
+        return { _tag: "stale", subject: item.subject }
+      }
+      if (stored?.observationId === item.observationId) {
+        confirmFact.run(item.observedAt, item.subject)
+        endFailures.run(item.subject, item.observedAt)
+        return { _tag: "unchanged", observationId: item.observationId, subject: item.subject }
+      }
+      if (stored !== undefined && stored.confirmedAt >= item.observedAt) return { _tag: "stale", subject: item.subject }
+      upsertFact.run(item.subject, item.observationId, item.observedAt, item.observedAt, item.record)
+      endFailures.run(item.subject, item.observedAt)
+      return { _tag: "stored", observationId: item.observationId, subject: item.subject }
+    })
+    // Totals are read once and kept current as rows go, so eviction is one
+    // indexed lookup and delete per row, not a full rescan per row.
+    // A failure disputes its subject's fact while it is newer than that fact's
+    // confirmation; evicting such a failure evicts the fact with it, so a
+    // disputed fact never outlives the record of its dispute.
+    const removeDisputedFact = database.prepare(
+      `DELETE FROM work_observed_facts WHERE subject = ? AND confirmed_at <
+         (SELECT last_at FROM work_observed_failures WHERE subject = ?)`
+    )
+    let newestEvicted = Number.NEGATIVE_INFINITY
+    const evict = (table: string, age: string, payload: string, beforeRemove?: (subject: string) => number): number => {
+      const size = `length(CAST(subject AS BLOB)) + length(CAST(${payload} AS BLOB))`
+      const totals = Schema.decodeUnknownSync(FactTotalsRow)(
+        database.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${size}), 0) AS bytes FROM ${table}`).get()
+      )
+      const oldest = database.prepare(
+        `SELECT subject, ${size} AS bytes, ${age} AS age FROM ${table} ORDER BY ${age} ASC, subject ASC LIMIT 1`
+      )
+      const remove = database.prepare(`DELETE FROM ${table} WHERE subject = ?`)
+      let { bytes, count } = totals
+      let evicted = 0
+      while (count > workObservedFactMaxRecords || bytes > workObservedFactMaxBytes) {
+        const row = Schema.decodeUnknownSync(EvictionRow)(oldest.get())
+        newestEvicted = Math.max(newestEvicted, row.age)
+        evicted += beforeRemove?.(row.subject) ?? 0
+        remove.run(row.subject)
+        count -= 1
+        bytes -= row.bytes
+        evicted += 1
+      }
+      return evicted
+    }
+    // The least recently read rows go first: a fact by its last confirmation,
+    // a failure by its latest failed read.
+    const evicted = evict("work_observed_facts", "confirmed_at", "record") +
+      evict(
+        "work_observed_failures",
+        "last_at",
+        "reason",
+        (subject) => Number(removeDisputedFact.run(subject, subject).changes)
+      )
+    if (newestEvicted > evictedThrough) {
+      database.prepare(
+        `INSERT INTO work_observed_eviction (singleton, evicted_through) VALUES (1, ?)
+         ON CONFLICT (singleton) DO UPDATE SET evicted_through = max(evicted_through, excluded.evicted_through)`
+      ).run(newestEvicted)
+    }
+    // Reported last, after every write and eviction in this call: a stored or
+    // unchanged fact that a later envelope replaced, or eviction removed, is no
+    // longer the subject's fact and confirms nothing.
+    // Only a subject's last accepted read can still be its fact: an earlier one
+    // with the same content (A, B, A) was replaced in between.
+    const lastAccepted = new Map<string, number>()
+    outcomes.forEach((outcome, index) => {
+      if (outcome._tag === "stored" || outcome._tag === "unchanged") lastAccepted.set(outcome.subject, index)
+    })
+    const finalOutcomes = outcomes.map((outcome, index): WorkObserveOutcome => {
+      if (outcome._tag !== "stored" && outcome._tag !== "unchanged") return outcome
+      if (lastAccepted.get(outcome.subject) !== index) return { _tag: "stale", subject: outcome.subject }
+      const row = readFact.get(outcome.subject)
+      const current = row === undefined ? undefined : Schema.decodeUnknownSync(StoredFactRow)(row)
+      return current?.observationId === outcome.observationId ? outcome : { _tag: "stale", subject: outcome.subject }
+    })
+    database.exec("COMMIT")
+    return { evicted, outcomes: finalOutcomes }
+  } catch (cause) {
+    if (database.isTransaction) database.exec("ROLLBACK")
+    throw cause
+  }
+}
+
+/** The admission fields both kinds share: an approved job adds its approval, the reconciler its observation. */
+type WorkAdmissionInput = Omit<WorkProspectiveAdmissionType, "kind" | "approvalJobId" | "approvalActor">
+
+/** Who admitted a worker: an approved Fleet job, or the reconciler from an observation. */
+type AdmissionProvenance =
+  | { readonly _tag: "approved"; readonly approvalJobId: string; readonly approvalActor: string }
+  | { readonly _tag: "observed"; readonly observationId: string }
+
+interface AdmissionEvidence {
+  readonly sessionId: string
+  readonly workAssignment: string
+  readonly baseHead: string
+  readonly expectedAbsenceToken: string
+}
+
+const admissionSummary = (provenance: AdmissionProvenance): string =>
+  provenance._tag === "approved"
+    ? `Prospective admission of an existing owner by approved Fleet job ${provenance.approvalJobId}`
+    : `Admission of an observed worker by the reconciler from observation ${provenance.observationId}`
+
+/** The binding-request key that records how a worker was admitted. */
+const admissionRecord = (
+  provenance: AdmissionProvenance,
+  evidence: AdmissionEvidence
+): Pick<WorkAgentBindingRequestType, "prospectiveAdmission" | "observedAdmission"> =>
+  provenance._tag === "approved"
+    ? {
+      prospectiveAdmission: {
+        ...evidence,
+        approvalJobId: provenance.approvalJobId,
+        approvalActor: provenance.approvalActor
+      }
+    }
+    : { observedAdmission: { ...evidence, actor: "reconciler", observationId: provenance.observationId } }
+
+/** Whether a stored binding was admitted by exactly this provenance and absence evidence (an exact replay). */
+const sameAdmission = (
+  request: WorkAgentBindingRequestType,
+  expectedAbsenceToken: string,
+  provenance: AdmissionProvenance
+): boolean => {
+  if (provenance._tag === "approved") {
+    const stored = request.prospectiveAdmission
+    return stored !== undefined &&
+      stored.expectedAbsenceToken === expectedAbsenceToken &&
+      stored.approvalJobId === provenance.approvalJobId && stored.approvalActor === provenance.approvalActor
+  }
+  const stored = request.observedAdmission
+  return stored !== undefined &&
+    stored.expectedAbsenceToken === expectedAbsenceToken && stored.observationId === provenance.observationId
 }
 
 export class WorkStore implements WorkStoreService {
@@ -1920,6 +2308,9 @@ export class WorkStore implements WorkStoreService {
           migrateLegacyAuthorityTables(database)
           const hadLaneOperationLedger = database.prepare(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_lane_operations'"
+          ).get() !== undefined
+          const hadEvictionWatermark = database.prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_observed_eviction'"
           ).get() !== undefined
           database.exec(`
         CREATE TABLE IF NOT EXISTS work_goal_events (
@@ -2001,6 +2392,13 @@ export class WorkStore implements WorkStoreService {
           goal_id TEXT NOT NULL,
           record TEXT NOT NULL
         );
+        -- One row per approved abandonment, committed with the goal checkpoint whose
+        -- event id equals its approval job id, so work_goal_events bounds it too.
+        CREATE TABLE IF NOT EXISTS work_goal_abandonments (
+          approval_job_id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL,
+          record TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS work_decision_handoffs (
           handoff_id TEXT PRIMARY KEY,
           session_id TEXT NOT NULL UNIQUE,
@@ -2024,14 +2422,56 @@ export class WorkStore implements WorkStoreService {
         END;
         CREATE INDEX IF NOT EXISTS work_decision_handoffs_lane_time
           ON work_decision_handoffs (lane_id, occurred_at, handoff_id);
-        CREATE INDEX IF NOT EXISTS work_decision_handoffs_session
+        CREATE UNIQUE INDEX IF NOT EXISTS work_decision_handoffs_session
           ON work_decision_handoffs (session_id);
+        CREATE TABLE IF NOT EXISTS work_observed_facts (
+          subject TEXT PRIMARY KEY,
+          observation_id TEXT NOT NULL,
+          observed_at INTEGER NOT NULL,
+          confirmed_at INTEGER NOT NULL,
+          record TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS work_observed_facts_age
+          ON work_observed_facts (confirmed_at, subject);
+        CREATE TABLE IF NOT EXISTS work_reconciler_events (
+          event_id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS work_observed_failures (
+          subject TEXT PRIMARY KEY,
+          source TEXT NOT NULL,
+          reason TEXT NOT NULL,
+          since INTEGER NOT NULL,
+          last_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS work_observed_failures_age
+          ON work_observed_failures (last_at, subject);
+        CREATE TABLE IF NOT EXISTS work_observed_eviction (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          evicted_through INTEGER NOT NULL
+        );
       `)
+          requireUniqueSessionIndex(database)
           const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
             database.prepare("PRAGMA table_info(work_goal_events)").all()
           )
           if (!columns.some(({ name }) => name === "transaction_id")) {
             database.exec("ALTER TABLE work_goal_events ADD COLUMN transaction_id TEXT")
+          }
+          if (!hadEvictionWatermark) {
+            // Older stores evicted without a watermark, and may have kept a fact
+            // whose dispute they evicted. Their reads are a cache of the
+            // providers, so they are dropped and every one becomes stale; the
+            // next pass reads them again, newer.
+            database.exec(`
+          INSERT INTO work_observed_eviction (singleton, evicted_through)
+          SELECT 1, max(at) FROM (
+            SELECT confirmed_at AS at FROM work_observed_facts
+            UNION ALL SELECT last_at FROM work_observed_failures
+          ) HAVING max(at) IS NOT NULL;
+          DELETE FROM work_observed_facts;
+          DELETE FROM work_observed_failures;
+        `)
           }
           if (!hadLaneOperationLedger) {
             database.exec(`
@@ -2696,6 +3136,172 @@ export class WorkStore implements WorkStoreService {
     return decision.result
   })
 
+  /**
+   * Applies an approved `work.abandon` job: the goal, owned by exactly the
+   * approved owner and still at the approved head, becomes `abandoned` with its
+   * blocker cleared and a status activity naming the job. A goal with an
+   * active lane, or already finished, is refused; nothing else is written. An
+   * exact replay of the job returns the stored result.
+   */
+  readonly abandon = Effect.fn("WorkStore.abandon")(function*(
+    this: WorkStore,
+    request: WorkGoalAbandonmentType
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(WorkGoalAbandonment)(request).pipe(
+      Effect.mapError(storeError("abandon.decode"))
+    )
+    const jobId = decoded.approvalJobId
+    const observedAt = yield* Clock.currentTimeMillis
+    yield* this.secureFiles()
+    const decision = yield* Effect.try({
+      try: (): AbandonDecision => {
+        let transaction = false
+        const reject = (error: AbandonRejection): AbandonDecision => {
+          this.#database.exec("ROLLBACK")
+          transaction = false
+          return { _tag: "rejected", error }
+        }
+        try {
+          this.#database.exec("BEGIN IMMEDIATE")
+          transaction = true
+          const priorRaw = this.#database
+            .prepare(
+              `SELECT approval_job_id AS approvalJobId, goal_id AS goalId, record
+               FROM work_goal_abandonments WHERE approval_job_id = ?`
+            )
+            .get(jobId)
+          if (priorRaw !== undefined) {
+            const row = Schema.decodeUnknownSync(ReassignmentRow)(priorRaw)
+            const prior = Schema.decodeUnknownSync(WorkGoalAbandoned)(JSON.parse(row.record))
+            if (row.approvalJobId !== prior.abandonment.approvalJobId || row.goalId !== prior.abandonment.goalId) {
+              return reject(
+                new WorkStoreError({ cause: { prior, row }, operation: "abandon.replay.identity-mismatch" })
+              )
+            }
+            if (!Equal.equals(prior.abandonment, decoded)) {
+              return reject(new WorkGoalAbandonmentConflictError({ approvalJobId: jobId, reason: "payload_mismatch" }))
+            }
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return { _tag: "abandoned", result: prior }
+          }
+          const collision = this.#database
+            .prepare(
+              `SELECT 1 FROM work_goal_events WHERE event_id = ?
+               UNION ALL SELECT 1 FROM work_lane_operations WHERE operation_id = ?
+               UNION ALL SELECT 1 FROM work_agent_bindings WHERE dispatch_request_id = ? LIMIT 1`
+            )
+            .get(jobId, jobId, jobId)
+          if (collision !== undefined) {
+            return reject(new WorkGoalAbandonmentConflictError({ approvalJobId: jobId, reason: "identifier_in_use" }))
+          }
+          const eventRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingGoalEventRow))(
+            this.#database
+              .prepare(
+                `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
+                 FROM work_goal_events ORDER BY occurred_at ASC, event_id ASC LIMIT ?`
+              )
+              .all(workHistoryMaxEvents + 1)
+          )
+          const history: Array<WorkGoalCheckpointType> = []
+          for (const row of eventRows) {
+            const event = decodeAgentBindingGoalEvent(row, "abandon.history")
+            if (event._tag === "invalid") return reject(event.error)
+            history.push(event.checkpoint)
+          }
+          const head = history.filter(({ goal }) => goal.id === decoded.goalId).at(-1)
+          if (
+            head === undefined ||
+            head.eventId !== decoded.expectedGoalEventId ||
+            head.goal.updatedAt !== decoded.expectedGoalUpdatedAt
+          ) {
+            return reject(
+              new WorkGoalRevisionConflictError({
+                goalId: decoded.goalId,
+                expectedEventId: decoded.expectedGoalEventId,
+                expectedUpdatedAt: decoded.expectedGoalUpdatedAt,
+                actualEventId: head?.eventId ?? null,
+                actualUpdatedAt: head?.goal.updatedAt ?? null
+              })
+            )
+          }
+          if (!Equal.equals(head.goal.owner, decoded.owner)) {
+            return reject(
+              new WorkGoalOwnerMismatchError({
+                goalId: decoded.goalId,
+                laneId: null,
+                expectedOwner: { id: decoded.owner.id, name: decoded.owner.name },
+                actualOwner: { id: head.goal.owner.id, name: head.goal.owner.name }
+              })
+            )
+          }
+          if (isTerminalWorkState(head.goal.state)) {
+            return reject(new WorkGoalTerminalError({ goalId: decoded.goalId, state: head.goal.state }))
+          }
+          const ledger = readValidatedLaneLedger(this.#database, "abandon.lane")
+          if (ledger._tag === "invalid") return reject(ledger.error)
+          const active = ledger.entries.find(({ claim }) =>
+            claim.goalId === decoded.goalId && claim.phase !== "shipped"
+          )
+          if (active !== undefined) {
+            return reject(new WorkGoalLaneActiveError({ goalId: decoded.goalId, laneId: active.claim.laneId }))
+          }
+          // occurredAt equals updatedAt for every valid checkpoint; both bound the ordering defensively.
+          const at = Math.max(observedAt, head.occurredAt + 1, head.goal.updatedAt + 1)
+          const existingActivity = head.goal.activity ?? []
+          const goal = Schema.decodeUnknownSync(WorkGoal)({
+            ...withoutBlockers(head.goal),
+            state: "abandoned",
+            // A full activity list keeps the owner's entries and takes no note; the
+            // checkpoint's event id and the abandonments table still name the job.
+            activity: existingActivity.length >= goalActivityLimit ? existingActivity : [
+              ...existingActivity,
+              {
+                id: jobId,
+                kind: "status",
+                summary: workAbandonActivitySummary(decoded, jobId, decoded.approvalHash),
+                occurredAt: at
+              }
+            ],
+            updatedAt: at
+          })
+          const checkpoint = Schema.decodeUnknownSync(WorkGoalCheckpoint)({
+            version: "herdr.work.event.v1",
+            eventId: jobId,
+            occurredAt: at,
+            goal
+          })
+          const result = Schema.decodeUnknownSync(WorkGoalAbandoned)({ abandonment: decoded, checkpoint })
+          const familyError = validateGoalFamilyHistory([...history, checkpoint])
+          if (familyError !== undefined) return reject(familyError)
+          const capacity = agentBindingAdmissionError({
+            history,
+            candidate: checkpoint,
+            operationCount: 0,
+            operationBytes: 0,
+            candidateOperationBytes: 0
+          })
+          if (capacity !== undefined) return reject(capacity)
+          this.#database
+            .prepare("INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)")
+            .run(checkpoint.eventId, checkpoint.goal.id, checkpoint.occurredAt, JSON.stringify(checkpoint))
+          this.#database
+            .prepare("INSERT INTO work_goal_abandonments (approval_job_id, goal_id, record) VALUES (?, ?, ?)")
+            .run(jobId, decoded.goalId, JSON.stringify(result))
+          this.#database.exec("COMMIT")
+          transaction = false
+          return { _tag: "abandoned", result }
+        } catch (cause) {
+          if (transaction) this.#database.exec("ROLLBACK")
+          throw cause
+        }
+      },
+      catch: storeError("abandon.transaction")
+    })
+    if (decision._tag === "rejected") return yield* decision.error
+    return decision.result
+  })
+
   readonly admissionPreflight = Effect.fn("WorkStore.admissionPreflight")(function*(
     this: WorkStore,
     target: WorkAdmissionTargetType
@@ -2719,6 +3325,10 @@ export class WorkStore implements WorkStoreService {
     return preflight
   })
 
+  /**
+   * Admits an existing owner after an approved Fleet job. Its absence token is
+   * re-checked inside the write; an exact replay returns the stored link.
+   */
   readonly admitExistingOwner = Effect.fn("WorkStore.admitExistingOwner")(function*(
     this: WorkStore,
     request: WorkProspectiveAdmissionType
@@ -2726,6 +3336,32 @@ export class WorkStore implements WorkStoreService {
     const decoded = yield* Schema.decodeUnknownEffect(WorkProspectiveAdmission)(request).pipe(
       Effect.mapError(storeError("admission.decode"))
     )
+    return yield* this.#admit(decoded, {
+      _tag: "approved",
+      approvalActor: decoded.approvalActor,
+      approvalJobId: decoded.approvalJobId
+    })
+  })
+
+  /**
+   * Admits a worker the reconciler observed, without an approval: the same
+   * write and checks as `admitExistingOwner`, credited to the observation.
+   */
+  readonly admitObserved = Effect.fn("WorkStore.admitObserved")(function*(
+    this: WorkStore,
+    request: WorkObservedAdmissionType
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(WorkObservedAdmission)(request).pipe(
+      Effect.mapError(storeError("admission.decode"))
+    )
+    return yield* this.#admit(decoded, { _tag: "observed", observationId: decoded.observationId })
+  })
+
+  readonly #admit = Effect.fn("WorkStore.admit")(function*(
+    this: WorkStore,
+    decoded: WorkAdmissionInput,
+    provenance: AdmissionProvenance
+  ) {
     const target = Schema.decodeUnknownSync(WorkAdmissionTarget)(decoded)
     const now = yield* Clock.currentTimeMillis
     yield* this.secureFiles()
@@ -2755,13 +3391,10 @@ export class WorkStore implements WorkStoreService {
           const state = admissionState(this.#database, target)
           if (state._tag === "existing") {
             const existing = state.link
-            const provenance = existing.binding.request.prospectiveAdmission
             this.#database.exec("ROLLBACK")
             transaction = false
             return existing.binding.request.dispatchRequestId === decoded.operationId &&
-                provenance?.expectedAbsenceToken === decoded.expectedAbsenceToken &&
-                provenance?.approvalJobId === decoded.approvalJobId &&
-                provenance.approvalActor === decoded.approvalActor &&
+                sameAdmission(existing.binding.request, decoded.expectedAbsenceToken, provenance) &&
                 existing.goal.title === decoded.title &&
                 existing.goal.summary === decoded.summary &&
                 existing.goal.detail === decoded.detail
@@ -2810,7 +3443,7 @@ export class WorkStore implements WorkStoreService {
             activity: [{
               id: `${decoded.operationId}.admission`,
               kind: "status",
-              summary: `Prospective admission of an existing owner by approved Fleet job ${decoded.approvalJobId}`,
+              summary: admissionSummary(provenance),
               occurredAt: createdAt
             }],
             review: { state: "requested", summary: null, updatedAt: createdAt, url: decoded.reviewUrl },
@@ -2844,14 +3477,12 @@ export class WorkStore implements WorkStoreService {
               laneId: decoded.laneId,
               expectedRevision: 0,
               worker: decoded.worker,
-              prospectiveAdmission: {
+              ...admissionRecord(provenance, {
                 sessionId: decoded.sessionId,
                 workAssignment: decoded.expectedWork,
                 baseHead: decoded.baseHead,
-                expectedAbsenceToken: decoded.expectedAbsenceToken,
-                approvalJobId: decoded.approvalJobId,
-                approvalActor: decoded.approvalActor
-              }
+                expectedAbsenceToken: decoded.expectedAbsenceToken
+              })
             },
             lane,
             checkpoint: {
@@ -2906,7 +3537,7 @@ export class WorkStore implements WorkStoreService {
               _tag: "rejected",
               error: capacity ?? new WorkProjectionError({
                 cause: decoded,
-                detail: "prospective admission exceeds Work capacity",
+                detail: "admission exceeds Work capacity",
                 reason: "capacity_exceeded"
               })
             }
@@ -3104,7 +3735,7 @@ export class WorkStore implements WorkStoreService {
           )
           if (currentDecision._tag === "invalid") return reject(currentDecision.error)
           const current = currentDecision.checkpoint
-          if (current.goal.state === "completed") {
+          if (current.goal.state === "completed" || current.goal.state === "abandoned") {
             return reject(
               new WorkAgentBindingAuthorityError({
                 actualRevision: lane.revision,
@@ -3320,13 +3951,35 @@ export class WorkStore implements WorkStoreService {
     return entries.map(({ dispatchRequestId }) => dispatchRequestId)
   })
 
-  readonly append = Effect.fn("WorkStore.append")(function*(
+  readonly append = (event: WorkGoalCheckpointType) =>
+    this.appendAt(event, null).pipe(
+      // Only an expected head can raise it; a plain append never checks one.
+      Effect.catchTag("WorkGoalRevisionConflictError", Effect.die)
+    )
+
+  /**
+   * Appends one checkpoint. With `expectedHead`, the goal's latest checkpoint
+   * must still be that one when the write commits (an exact replay always
+   * succeeds), so a writer that planned from the head cannot bury a newer
+   * owner checkpoint.
+   */
+  private readonly appendAt = Effect.fn("WorkStore.append")(function*(
     this: WorkStore,
-    event: WorkGoalCheckpointType
+    event: WorkGoalCheckpointType,
+    guard: ReconcilerGuard | null
   ) {
     const decoded = yield* Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
       Effect.mapError(storeError("append.decode"))
     )
+    // The reconciler's event and activity ids are its provenance; no other
+    // writer may use them.
+    if (guard === null && decoded.eventId.startsWith(reconcilerEventPrefix)) {
+      return yield* new WorkProjectionError({
+        cause: decoded.eventId,
+        detail: `event ids starting with ${reconcilerEventPrefix} are reserved for the reconciler`,
+        reason: "malformed"
+      })
+    }
     yield* this.secureFiles()
     const decision = yield* Effect.try({
       try: () => {
@@ -3347,12 +4000,60 @@ export class WorkStore implements WorkStoreService {
               )
               .all(decoded.eventId, decoded.goal.id, decoded.occurredAt)
           ).map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
-          if (collisions.length > 0) {
-            if (collisions.every((existing) => Equal.equals(existing, decoded))) {
-              this.#database.exec("ROLLBACK")
-              transaction = false
-              return { _tag: "replayed", event: decoded } satisfies AppendDecision
+          if (collisions.length > 0 && collisions.every((existing) => Equal.equals(existing, decoded))) {
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return { _tag: "replayed", event: decoded } satisfies AppendDecision
+          }
+          if (guard !== null) {
+            // Planned from this head and this fact: if either moved, the plan is stale.
+            const headRow = this.#database.prepare(
+              `SELECT record FROM work_goal_events WHERE goal_id = ?
+               ORDER BY occurred_at DESC, event_id DESC LIMIT 1`
+            ).get(decoded.goal.id)
+            const head = headRow === undefined ? null : Schema.decodeUnknownSync(WorkGoalCheckpoint)(
+              JSON.parse(Schema.decodeUnknownSync(StoredEventRow)(headRow).record)
+            )
+            const factRow = this.#database.prepare(
+              `SELECT observation_id AS observationId, confirmed_at AS confirmedAt
+               FROM work_observed_facts WHERE subject = ?`
+            ).get(guard.fact.subject)
+            const fact = factRow === undefined ? null : Schema.decodeUnknownSync(ObservationIdRow)(factRow)
+            const failureRow = this.#database.prepare(
+              "SELECT last_at AS lastAt FROM work_observed_failures WHERE subject = ?"
+            ).get(guard.fact.subject)
+            const failedAt = failureRow === undefined
+              ? null
+              : Schema.decodeUnknownSync(FailureLastAtRow)(failureRow).lastAt
+            // A failed read recorded while the plan was made also makes it stale.
+            const stillFresh = fact !== null && (failedAt === null || failedAt <= fact.confirmedAt)
+            if (
+              head?.eventId !== guard.head.eventId || fact?.observationId !== guard.fact.observationId || !stillFresh
+            ) {
+              return reject(
+                new WorkGoalRevisionConflictError({
+                  actualEventId: head?.eventId ?? null,
+                  actualUpdatedAt: head?.goal.updatedAt ?? null,
+                  expectedEventId: guard.head.eventId,
+                  expectedUpdatedAt: guard.head.goal.updatedAt,
+                  goalId: decoded.goal.id
+                })
+              )
             }
+            const count = Schema.decodeUnknownSync(CountRow)(
+              this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_events").get()
+            ).count
+            if (count + 1 > workHistoryMaxEvents - guard.reserve) {
+              return reject(
+                new WorkProjectionError({
+                  cause: count,
+                  detail: `the reconciler leaves ${guard.reserve} of ${workHistoryMaxEvents} checkpoints free`,
+                  reason: "capacity_exceeded"
+                })
+              )
+            }
+          }
+          if (collisions.length > 0) {
             return reject(
               new WorkCheckpointConflictError({
                 eventId: decoded.eventId,
@@ -3429,6 +4130,14 @@ export class WorkStore implements WorkStoreService {
           const result = this.#database.prepare(
             "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
           ).run(decoded.eventId, decoded.goal.id, decoded.occurredAt, JSON.stringify(decoded))
+          // The reconciler's own record of what it wrote: its authorship and its
+          // once-per-goal rule come from this table, never from an id's spelling.
+          if (guard !== null) {
+            this.#database.prepare("INSERT INTO work_reconciler_events (event_id, goal_id) VALUES (?, ?)").run(
+              decoded.eventId,
+              decoded.goal.id
+            )
+          }
           this.#database.exec("COMMIT")
           transaction = false
           return { _tag: "inserted", changes: result.changes } satisfies AppendDecision
@@ -3466,6 +4175,14 @@ export class WorkStore implements WorkStoreService {
       Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
         Effect.mapError(storeError("appendMany.decode.event"))
       ))
+    const reserved = decoded.find(({ eventId }) => eventId.startsWith(reconcilerEventPrefix))
+    if (reserved !== undefined) {
+      return yield* new WorkProjectionError({
+        cause: reserved.eventId,
+        detail: `event ids starting with ${reconcilerEventPrefix} are reserved for the reconciler`,
+        reason: "malformed"
+      })
+    }
     if (decoded.length === 0) {
       return yield* new WorkProjectionError({
         cause: events,
@@ -4019,7 +4736,7 @@ export class WorkStore implements WorkStoreService {
               goal.goalFamily?.role !== "canonical" ||
               goal.goalFamily.canonicalGoalId !== goal.id
             ) return rejectLink("missing_provenance")
-            if (goal.state === "completed" || goal.state === "deployed") return rejectLink("terminal_goal")
+            if (isTerminalWorkState(goal.state)) return rejectLink("terminal_goal")
             if (!Equal.equals(goal.owner, reconciliation.expectedOwner)) return rejectLink("owner_mismatch")
             const bindingRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingRow))(
               this.#database.prepare(
@@ -4536,9 +5253,26 @@ export class WorkStore implements WorkStoreService {
              FROM work_lane_operations ORDER BY operation_id ASC
              LIMIT ?`
           ).all(workLaneOperationMaxRecords + 1)
+          const facts = this.#database.prepare(
+            `SELECT subject, observation_id AS observationId, observed_at AS observedAt,
+               confirmed_at AS confirmedAt, record
+             FROM work_observed_facts ORDER BY subject ASC
+             LIMIT ?`
+          ).all(workObservedFactMaxRecords + 1)
+          const failures = this.#database.prepare(
+            `SELECT subject, source, reason, since, last_at AS lastAt
+             FROM work_observed_failures ORDER BY subject ASC LIMIT ?`
+          ).all(workObservedFactMaxRecords + 1)
+          const reconcilerRows = this.#database.prepare(
+            "SELECT event_id AS eventId, goal_id AS goalId FROM work_reconciler_events ORDER BY event_id ASC LIMIT ?"
+          ).all(workHistoryMaxEvents + 1)
+          const reassignments = this.#database.prepare(
+            `SELECT approval_job_id AS approvalJobId, goal_id AS goalId FROM work_goal_reassignments
+             UNION ALL SELECT approval_job_id AS approvalJobId, goal_id AS goalId FROM work_goal_abandonments`
+          ).all()
           this.#database.exec("COMMIT")
           inTransaction = false
-          return { bindings, events, laneOperations }
+          return { bindings, events, facts, failures, laneOperations, reassignments, reconcilerRows }
         } catch (cause) {
           if (inTransaction) this.#database.exec("ROLLBACK")
           throw cause
@@ -4569,6 +5303,24 @@ export class WorkStore implements WorkStoreService {
     const eventById = new Map(eventRows.map((row) => [row.eventId, row]))
     const laneByOperation = new Map(laneRows.map((row) => [row.operationId, row]))
     let logicalObservedAt: number | null = null
+    // An approved job's activity id is its operation (recovery), the operation
+    // plus `.admission` (prospective admission), or the job id (reassignment).
+    const reassignmentRows = yield* Schema.decodeUnknownEffect(Schema.Array(ReassignmentApprovalRow))(
+      source.reassignments
+    ).pipe(Effect.mapError(storeError("snapshot-input.decode-reassignments")))
+    // An approved reassignment or abandonment may be stamped past the clock
+    // (one past a future-dated head); like a binding, it moves logical time so
+    // a default snapshot shows what the approved job wrote.
+    for (const { approvalJobId } of reassignmentRows) {
+      const written = eventById.get(approvalJobId)
+      if (written !== undefined) logicalObservedAt = Math.max(logicalObservedAt ?? 0, written.occurredAt)
+    }
+    const approvals: Array<WorkApprovedActivity> = reassignmentRows.map(({ approvalJobId, goalId }) => ({
+      activityId: approvalJobId,
+      approvalJobId,
+      goalId
+    }))
+    const observedAdmissions: Array<{ readonly goalId: string; readonly eventId: string }> = []
     for (const row of bindingRows) {
       const binding = yield* Effect.try({
         try: () => Schema.decodeUnknownSync(WorkAgentBinding)(JSON.parse(row.record)),
@@ -4595,8 +5347,226 @@ export class WorkStore implements WorkStoreService {
       )
       if (readbackError !== undefined) return yield* readbackError
       logicalObservedAt = Math.max(logicalObservedAt ?? 0, binding.checkpoint.occurredAt)
+      const goalId = binding.checkpoint.goal.id
+      const { dispatchRequestId, existingGoalRecovery, observedAdmission, ownerReassignment, prospectiveAdmission } =
+        binding.request
+      if (observedAdmission !== undefined) {
+        observedAdmissions.push({ eventId: `${dispatchRequestId}.admission`, goalId })
+      }
+      if (prospectiveAdmission !== undefined) {
+        approvals.push({
+          activityId: `${dispatchRequestId}.admission`,
+          approvalJobId: prospectiveAdmission.approvalJobId,
+          goalId
+        })
+      }
+      if (existingGoalRecovery !== undefined) {
+        approvals.push({ activityId: dispatchRequestId, approvalJobId: existingGoalRecovery.approvalJobId, goalId })
+      }
+      if (ownerReassignment !== undefined) {
+        approvals.push({
+          activityId: ownerReassignment.approvalJobId,
+          approvalJobId: ownerReassignment.approvalJobId,
+          goalId
+        })
+      }
     }
-    return { events, logicalObservedAt }
+    const factRows = yield* Schema.decodeUnknownEffect(Schema.Array(ObservedFactRow))(source.facts).pipe(
+      Effect.mapError(storeError("snapshot-input.decode-fact-rows"))
+    )
+    const failures = yield* Schema.decodeUnknownEffect(Schema.Array(WorkObservedFailure))(source.failures).pipe(
+      Effect.mapError(storeError("snapshot-input.decode-failures"))
+    )
+    if (factRows.length > workObservedFactMaxRecords || failures.length > workObservedFactMaxRecords) {
+      return yield* new WorkStoreError({ cause: factRows.length, operation: "snapshot-input.fact-capacity" })
+    }
+    const facts = yield* Effect.forEach(factRows, (row) =>
+      Effect.try({
+        try: () =>
+          Schema.decodeUnknownSync(WorkObservedFact)({
+            confirmedAt: row.confirmedAt,
+            observation: JSON.parse(row.record),
+            observationId: row.observationId,
+            observedAt: row.observedAt,
+            subject: row.subject
+          }),
+        catch: storeError("snapshot-input.decode-fact")
+      }))
+    // A row is filed under its own facts' subject; anything else is a corrupt row.
+    const misfiled = facts.find((fact) => fact.subject !== observationSubject(fact.observation))
+    if (misfiled !== undefined) {
+      return yield* new WorkStoreError({ cause: misfiled.subject, operation: "snapshot-input.fact-subject" })
+    }
+    const reconcilerEvents = yield* Schema.decodeUnknownEffect(Schema.Array(ReconcilerEventRow))(source.reconcilerRows)
+      .pipe(Effect.mapError(storeError("snapshot-input.decode-reconciler-events")))
+    // Each current activity's origin: the checkpoint that started its current
+    // unchanged run. An activity that disappears, or reads differently, starts
+    // a new run, so a later owner rewrite or re-creation is never credited to
+    // whoever wrote an earlier version.
+    const activityOrigins = new Map<string, { readonly eventId: string; readonly activity: WorkActivityType }>()
+    const previousByGoal = new Map<string, ReadonlyMap<string, WorkActivityType>>()
+    const ordered = events.toSorted((left, right) =>
+      left.occurredAt - right.occurredAt || (left.eventId < right.eventId ? -1 : left.eventId > right.eventId ? 1 : 0)
+    )
+    for (const event of ordered) {
+      const previous = previousByGoal.get(event.goal.id) ?? new Map<string, WorkActivityType>()
+      const current = new Map((event.goal.activity ?? []).map((activity) => [activity.id, activity]))
+      for (const [id, activity] of current) {
+        const before = previous.get(id)
+        const unchanged = before !== undefined && before.kind === activity.kind &&
+          before.summary === activity.summary &&
+          before.occurredAt === activity.occurredAt
+        if (!unchanged) activityOrigins.set(`${event.goal.id}\u0000${id}`, { activity, eventId: event.eventId })
+      }
+      previousByGoal.set(event.goal.id, current)
+    }
+    return {
+      activityOrigins,
+      approvals,
+      events,
+      facts,
+      failures,
+      logicalObservedAt,
+      observedAdmissions,
+      reconcilerEvents
+    }
+  })
+
+  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore, request: WorkReconcileOptions) {
+    const options = yield* Schema.decodeUnknownEffect(WorkReconcileOptions)(request).pipe(
+      Effect.mapError(storeError("reconcile.options"))
+    )
+    const source = yield* this.snapshotInput()
+    if (workHistoryMaxEvents - source.events.length < workReconcilerHeadroom) {
+      return yield* new WorkProjectionError({
+        cause: source.events.length,
+        detail: `the reconciler leaves ${workReconcilerHeadroom} of ${workHistoryMaxEvents} checkpoints free`,
+        reason: "capacity_exceeded"
+      })
+    }
+    // A confirmation names the fact the caller read; one that is no longer the
+    // subject's stored fact (replaced, evicted) is the caller's stale view.
+    const current = new Map(source.facts.map((fact) => [fact.subject, fact.observationId]))
+    const outdated = options.confirmed.filter(({ observationId, subject }) => current.get(subject) !== observationId)
+    if (outdated.length > 0) {
+      return yield* new WorkStoreError({ cause: outdated, operation: "reconcile.confirmed" })
+    }
+    // A goal is stamped by the reconciler at most once, whatever its facts
+    // look like later: a reopened goal stays the owner's.
+    const stamped = new Map(source.reconcilerEvents.map(({ eventId, goalId }) => [goalId, eventId]))
+    const cryptoService = this.#cryptoService
+    const now = yield* Clock.currentTimeMillis
+    const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) => this.appendAt(checkpoint, guard)
+    return yield* Effect.forEach(
+      terminalCandidates(
+        source.events,
+        source.facts,
+        source.failures,
+        new Set(options.confirmed.map(({ observationId, subject }) => `${subject}\u0000${observationId}`))
+      ),
+      Effect.fnUntraced(function*(candidate): Effect.fn.Return<
+        WorkReconcileOutcome,
+        WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
+      > {
+        const goalId = candidate.head.goal.id
+        const previous = stamped.get(goalId)
+        if (previous !== undefined) return { _tag: "recorded", eventId: previous, goalId }
+        const digest = yield* cryptoService.digest(
+          "SHA-256",
+          utf8.encode(`${candidate.fact.observationId}\u0000${goalId}`)
+        ).pipe(Effect.mapError(storeError("reconcile.digest")))
+        const eventId = `${reconcilerEventPrefix}${Hex.encode(digest)}`
+        const checkpoint = terminalCheckpoint(candidate, eventId, now)
+        // A goal that cannot take its terminal checkpoint (an activity already
+        // holds the reconciler's id, a timestamp past the bound) is left for
+        // its owner: reported as a conflict, never failing the other goals.
+        if (Result.isFailure(checkpoint)) return { _tag: "conflict", goalId }
+        return yield* appendAt(checkpoint.success, {
+          fact: { observationId: candidate.fact.observationId, subject: candidate.fact.subject },
+          head: candidate.head,
+          reserve: workReconcilerHeadroom
+        }).pipe(
+          Effect.as<WorkReconcileOutcome>({
+            _tag: "applied",
+            eventId,
+            goalId,
+            state: candidate.pullRequest.state === "merged" ? "completed" : "abandoned"
+          }),
+          Effect.catchTag(
+            "WorkGoalRevisionConflictError",
+            () => Effect.succeed<WorkReconcileOutcome>({ _tag: "conflict", goalId })
+          )
+        )
+      })
+    )
+  })
+
+  readonly observe = Effect.fn("WorkStore.observe")(function*(
+    this: WorkStore,
+    envelopes: ReadonlyArray<WorkObservationEnvelopeType>
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(
+      Schema.Array(WorkObservationEnvelope).check(Schema.isMaxLength(workObservedFactMaxRecords))
+    )(envelopes).pipe(Effect.mapError(storeError("observe.decode")))
+    const cryptoService = this.#cryptoService
+    // An observation from further ahead than clock skew allows would outrank
+    // every real reading until wall time caught up, so it is skipped as stale.
+    const clockNow = yield* Clock.currentTimeMillis
+    const latestAllowed = clockNow + workObservationMaxSkewMillis
+    const prepared = yield* Effect.forEach(
+      decoded,
+      Effect.fnUntraced(function*(envelope) {
+        // Composite subjects are bounded on their own; check before anything is written.
+        const subject = yield* Schema.decodeUnknownEffect(WorkObservationSubject)(
+          observationSubject(envelope.observation)
+        ).pipe(Effect.mapError(storeError("observe.subject")))
+        if (envelope.observedAt > latestAllowed) return { _tag: "future", subject } satisfies PreparedObservation
+        if (envelope.observation._tag === "unknown") {
+          if (canonicalSubject(envelope.observation.source, envelope.observation.subject) === null) {
+            return yield* new WorkStoreError({ cause: envelope.observation, operation: "observe.subject" })
+          }
+          return {
+            _tag: "unknown",
+            // Within the skew allowance, a reading from slightly ahead counts
+            // as now, so it is visible to a snapshot taken now.
+            observedAt: Math.min(envelope.observedAt, clockNow),
+            reason: envelope.observation.reason,
+            source: envelope.observation.source,
+            subject
+          } satisfies PreparedObservation
+        }
+        // Case-insensitive identities are lowercased so a spelling change is the
+        // same fact; encoding emits keys in schema field order, so equal facts
+        // give equal text and one id.
+        const record = JSON.stringify(
+          Schema.encodeSync(WorkObservationEnvelope)({
+            ...envelope,
+            observation: canonicalObservation(envelope.observation)
+          })
+            .observation
+        )
+        const observationId = yield* cryptoService.digest("SHA-256", utf8.encode(record)).pipe(
+          Effect.map(Hex.encode),
+          Effect.flatMap(Schema.decodeUnknownEffect(WorkObservationId)),
+          Effect.mapError(storeError("observe.digest"))
+        )
+        return {
+          _tag: "fact",
+          observationId,
+          observedAt: Math.min(envelope.observedAt, clockNow),
+          record,
+          subject
+        } satisfies PreparedObservation
+      })
+    )
+    yield* this.secureFiles()
+    const report = yield* Effect.try({
+      try: () => writeObservations(this.#database, prepared),
+      catch: storeError("observe.write")
+    })
+    // The write may have created the WAL siblings; they get the same private mode.
+    yield* this.secureFiles()
+    return report
   })
 
   private secureFiles() {
