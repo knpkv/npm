@@ -12,6 +12,92 @@ The store preserves safe caller-owned state-directory modes, but rejects
 group- or world-writable POSIX directories and substituted database paths before
 opening the authority database.
 
+`observe` stores observed facts for the Work tab: a pull request's state, head,
+review and checks as GitHub reported them, or an agent's Herdr status. One
+latest fact is kept per subject (`github:<repo>#<n>`, `herdr:<host>/<agentId>`).
+The same facts again keep their first-seen time (`observedAt`) and move their
+last confirmation (`confirmedAt`); facts older than the last confirmation are
+skipped, and so are facts stamped more than five minutes ahead of the store's
+clock, which would otherwise outrank every real reading; a fact stamped less
+than that ahead counts as read now. An `unknown` observation (a source that could not be read) never
+replaces a fact: it starts or continues the subject's run of failures, whose
+`since` stays at the first failure until a good read newer than every failure
+ends it (a delayed good read inside the run restarts it at its latest failure). Hostd names the
+failed subject the same way as its facts (`pullRequestSubject`, `agentSubject`). Facts are not goal
+history: they never write a checkpoint, never count against the history bound,
+and are not part of any approval token, so observing cannot invalidate a pending
+approval. Facts and failures each have their own bounds (4,096 rows, 2 MiB); beyond them
+the rows read least recently go first. Pull request subjects lowercase the repository, since GitHub names are
+case-insensitive. `snapshots` merges the facts into the `now` window, for each
+goal something was observed about, as
+`observed` entries: the matching facts, the oldest current failure among the
+goal's own subjects as `unknown` (with `lastGoodAt`, the last confirmation of
+that subject's facts), and a derived `displayState` (a recorded
+terminal state, then a merged or closed pull request, then the owner's blocker,
+then the agent's working or blocked status, then an open pull request as
+`review`, then the goal's own state) and a `stale` flag for an owner whose agent
+has been gone for more than 24 hours on unfinished work. Entries are kept, most
+recently updated goals first, while the encoded snapshots fit the 1 MiB response
+budget; any left out are counted in `observedOmitted`. `observed` is always
+present, empty when nothing was observed; when not even that fits, the `now`
+window carries no overlay keys, which means live state is not available. The overlay keeps only the latest
+facts per subject, not their history, so a snapshot taken at an explicit time
+shows a subject's current facts only if they were first seen by then (with
+their latest confirmation if it was made by then, else their first sighting),
+and a failure only if its latest failed read was by then. Facts that were
+replaced later are not shown at all. Failure subjects are spelled the same way
+as fact subjects; a failure that names another source's subject is rejected.
+Earlier windows stay as recorded. A goal's agent is its agent hierarchy, or its
+connect target on older goals; host and repository letter case never makes a
+new fact.
+
+`reconcile` turns the one kind of observed fact that is final into goal
+history: a goal whose pull request is observed merged becomes `completed`
+(delivery `merged`), and one closed without merging becomes `abandoned`. The
+checkpoint is stamped with the pull request's close time, never later than the
+store's clock and one millisecond after the goal's latest checkpoint when an
+owner wrote later. It is written only if, inside the write's transaction, the
+goal's latest checkpoint and the pull request's fact are still the ones it was
+planned from (otherwise that goal is reported as a conflict), and 256
+checkpoints of history stay free. A goal is stamped at most once, by the
+reconciler's own record of what it wrote, so a goal its owner reopens stays
+reopened. The checkpoint adds a `reconciler.` activity unless the goal's
+activity list is full; owner activity is never dropped to make room.
+`abandon` applies an approved `work.abandon` job. The goal, owned by exactly the
+approved owner and still at the approved head, becomes `abandoned`: its blocker
+is cleared, and a status activity naming the job is added, credited to the
+approval, unless the goal's activity list is full; owner activity is never
+dropped to make room. A goal with an active (not shipped) lane is refused with
+`WorkGoalLaneActiveError`, which names the lane, so abandoning never releases
+anyone's lane. A goal that has already finished is refused with
+`WorkGoalTerminalError`. An exact replay of the job returns the stored result.
+`isTerminalWorkState`
+names the finished states: `completed`, `deployed` and `abandoned`.
+
+`admitObserved` admits a worker the reconciler observed, without an approval.
+It makes the same goal, lane and binding write as `admitExistingOwner`, checked
+against the same absence token inside the transaction, but records
+`observedAdmission` (actor `reconciler`, the observation id) on the binding
+instead of `prospectiveAdmission`. The caller (hostd) checks what the store
+can't see: the pane is on this host with agent lineage, and its worktree is the
+canonical toplevel on the PR branch at the PR head, with an origin equal to the
+PR's repository. An exact replay of the same observation returns the stored link;
+another observation, or an approved job, over the same binding is a conflict.
+Its admission activity is credited to the reconciler, and the goal can still take
+its terminal checkpoint when its pull request merges or closes.
+
+The `now` window also says who wrote each activity that is not the owner's:
+`activityProvenance` lists reconciler and approved-job activities (with the
+job id). An activity is credited only when the checkpoint that started its
+current unchanged run is the writer's own: an approved operation's checkpoint
+(whose event id is the activity id), one in the reconciler's record, or an
+observed admission's checkpoint. A later
+owner rewrite or re-creation is the owner's. Authorship never comes from an id's
+spelling, and `activityProvenanceGoals` lists the goals whose such activities
+are all present. In a covered goal an unlisted activity is the owner's; a goal
+left out to stay within the response budget is counted in
+`activityProvenanceOmitted` and its provenance is unknown.
+
 `WorkStore.appendMany` validates a whole checkpoint batch before one SQLite
 transaction. Reusing its transaction ID with the same batch replays it. A
 changed event with an existing event ID or goal/timestamp returns

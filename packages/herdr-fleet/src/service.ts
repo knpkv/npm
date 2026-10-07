@@ -569,7 +569,8 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       })
     }
     if (
-      (record.payload.kind === "work.recover" || record.payload.kind === "work.reassign") &&
+      (record.payload.kind === "work.recover" || record.payload.kind === "work.reassign" ||
+        record.payload.kind === "work.abandon") &&
       (record.approvedBy === null ||
         record.approvedAt === null || record.approvedAt === undefined ||
         record.hash !==

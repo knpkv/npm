@@ -30,6 +30,10 @@ export const dayHeading = (day: string): DayHeading => {
   return { date: String(at.getDate()), weekday: weekdayNames[(at.getDay() + 6) % 7] ?? "" }
 }
 
+/** `Mon 7 Sep`, for a heading that names one day; a heading never shows an ISO date. */
+export const dayLabel = (day: string): string =>
+  new Date(`${day}T12:00:00`).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
+
 /** `16–22 June 2025`, or `30 June – 6 July 2025` when the week straddles a month. */
 export const weekLabel = (days: ReadonlyArray<string>): string => {
   const first = days[0]

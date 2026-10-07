@@ -1,9 +1,14 @@
 import * as Predicate from "effect/Predicate"
 import { useEffect, useRef, type ReactNode } from "react"
 
-/** Focus returns to the trigger, or its week when saving removes that suggestion, without scrolling. */
+/**
+ * Opening focuses the editor's heading; closing returns focus to the trigger, or its week when saving
+ * removes that suggestion, without scrolling. A `notice` (a failed write, a read error) leads the
+ * frame, so feedback stays beside the fields it concerns instead of floating over the page.
+ */
 export const EditorFrame = (props: {
   readonly children: ReactNode
+  readonly notice?: ReactNode
   readonly identity: string
   readonly busy: boolean
   readonly label: string
@@ -14,7 +19,12 @@ export const EditorFrame = (props: {
     const previous = document.activeElement
     const triggerId = previous?.id
     const week = previous?.closest<HTMLElement>(".jcf-week-view")
-    frame.current?.focus({ preventScroll: true })
+    const heading = frame.current?.querySelector<HTMLElement>(".jcf-editor-fields h2")
+    if (heading == null) frame.current?.focus({ preventScroll: true })
+    else {
+      heading.tabIndex = -1
+      heading.focus({ preventScroll: true })
+    }
     return () => {
       // Rollback may recreate the suggestion after its optimistic preview removed the original node.
       const replacement = triggerId !== undefined && triggerId !== "" ? document.getElementById(triggerId) : null
@@ -36,6 +46,7 @@ export const EditorFrame = (props: {
         }
       }}
     >
+      {props.notice === undefined ? null : <div className="jcf-editor-notice">{props.notice}</div>}
       <fieldset className="jcf-editor-fields" disabled={props.busy}>
         {props.children}
       </fieldset>

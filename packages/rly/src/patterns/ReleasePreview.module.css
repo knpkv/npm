@@ -44,6 +44,11 @@
     padding: var(--rly-space-4);
   }
 
+  /* The surface clips overflow, so the scroll region's ring sits inside its edge to stay whole. */
+  .dialogScroll:focus-visible {
+    outline-offset: calc(-1 * var(--rly-space-2));
+  }
+
   .summary {
     gap: var(--rly-space-32);
   }

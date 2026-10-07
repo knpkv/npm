@@ -471,7 +471,7 @@ describe("LAN Work pairing boundary", () => {
     expect(pairMarkup).toContain("never placed in a URL")
     expect(pairMarkup).not.toContain("?pairingCode=")
     const workMarkup = renderToStaticMarkup(LanWorkPage({ snapshots: emptySnapshots }))
-    expect(workMarkup).toContain("Daily fleet Work")
+    expect(workMarkup).toContain(">Work</h1>")
     expect(workMarkup).toContain("href=\"/?window=week\"")
     expect(workMarkup).not.toContain("href=\"https://")
     expect(workMarkup).not.toContain("approve")

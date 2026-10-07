@@ -10,27 +10,27 @@ export const RLY_NOTICE_VARIANTS = defineVariants({
     neutral: {
       className: style("neutral"),
       purpose: "Neutral context",
-      tokens: ["color-text-2", "color-surface-2", "color-border-1"]
+      tokens: ["color-text-2", "color-border-1"]
     },
     positive: {
       className: style("positive"),
       purpose: "Completed outcome",
-      tokens: ["color-success-ink", "color-success-tint"]
+      tokens: ["color-success-ink"]
     },
     critical: {
       className: style("critical"),
       purpose: "Failure that needs attention",
-      tokens: ["color-blocked-ink", "color-blocked-tint"]
+      tokens: ["color-blocked-ink"]
     },
     caution: {
       className: style("caution"),
       purpose: "Limitation or warning",
-      tokens: ["color-held-ink", "color-held-tint"]
+      tokens: ["color-held-ink"]
     },
     progress: {
       className: style("progress"),
       purpose: "Work in progress",
-      tokens: ["color-deploying-ink", "color-deploying-tint"]
+      tokens: ["color-deploying-ink"]
     }
   }
 })

@@ -80,12 +80,15 @@ const annotationMetaStyle = {
   gap: "var(--rly-space-8)"
 } satisfies CSSProperties
 
-const annotationTagStyle = {
-  border: "1px solid var(--rly-color-border-1)",
-  borderRadius: "var(--rly-radius-round)",
-  font: "var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height) var(--rly-type-label-font)",
-  padding: "var(--rly-space-2) var(--rly-space-8)"
-} satisfies CSSProperties
+const severityInk = {
+  critical: "var(--rly-color-blocked-ink)",
+  high: "var(--rly-color-blocked-ink)",
+  low: "var(--rly-color-text-2)",
+  medium: "var(--rly-color-held-ink)",
+  note: "var(--rly-color-text-2)"
+} satisfies Record<RichAnnotationModel["severity"], string>
+
+const capitalized = (word: string): string => `${word.charAt(0).toUpperCase()}${word.slice(1)}`
 
 const RichAnnotationCard = ({
   context,
@@ -95,11 +98,15 @@ const RichAnnotationCard = ({
   readonly model: RichAnnotationModel
 }): ReactElement => (
   <article data-annotation-presentation="annotated" data-annotation-status={model.status} style={annotationCardStyle}>
-    <div style={annotationMetaStyle}>
-      <span style={annotationTagStyle}>{model.severity} severity</span>
-      <span style={annotationTagStyle}>{model.confidence} confidence</span>
-      <span style={annotationTagStyle}>{model.status}</span>
-    </div>
+    {/* One line of words, not chips: the severity in its ink, then confidence and status as plain text. */}
+    <p style={{ ...annotationMetaStyle, margin: 0 }}>
+      <Text as="span" style={{ color: severityInk[model.severity], fontWeight: 600 }} variant="label">
+        {capitalized(model.severity)}
+      </Text>
+      <Text as="span" tone="secondary" variant="label">
+        {model.confidence} confidence, {model.status}
+      </Text>
+    </p>
     <Text as="strong">{model.title}</Text>
     <Text tone="secondary">{model.evidence}</Text>
     {model.replacement === undefined ? null : <Text>Replacement: {model.replacement}</Text>}

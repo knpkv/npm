@@ -5,9 +5,13 @@
     box-sizing: border-box;
     color: var(--rly-color-text-1);
     display: grid;
+    /* One bounded track, so an unbreakable token in the title or body cannot widen the region. */
+    grid-template-columns: minmax(0, 1fr);
     grid-template-rows: auto 1fr;
     max-inline-size: 100%;
     min-inline-size: var(--rly-space-0);
+    /* Inherited by title and body: breaks only a token that cannot fit; words still wrap at spaces. */
+    overflow-wrap: break-word;
   }
 
   .default {
@@ -63,6 +67,7 @@
   .body {
     display: grid;
     gap: var(--rly-space-16);
+    grid-template-columns: minmax(0, 1fr);
     min-inline-size: var(--rly-space-0);
     padding: var(--rly-space-16);
   }

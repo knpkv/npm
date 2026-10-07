@@ -18,15 +18,6 @@ const headerStyle: CSSProperties = {
   maxWidth: "42rem"
 }
 
-const eyebrowStyle: CSSProperties = {
-  color: "var(--rly-color-text-2)",
-  fontSize: "var(--rly-type-label-size)",
-  fontWeight: "var(--rly-type-label-weight)",
-  letterSpacing: ".08em",
-  margin: 0,
-  textTransform: "uppercase"
-}
-
 const headingStyle: CSSProperties = {
   fontSize: "var(--rly-type-section-title-size)",
   fontWeight: "var(--rly-type-section-title-weight)",
@@ -67,7 +58,8 @@ const nameStyle: CSSProperties = {
   fontFamily: "var(--rly-font-mono)",
   fontSize: "var(--rly-type-meta-size)",
   lineHeight: "var(--rly-type-meta-line-height)",
-  overflowWrap: "anywhere"
+  // An icon name is one token: it never splits at its hyphen.
+  whiteSpace: "nowrap"
 }
 
 const scaleStyle: CSSProperties = {
@@ -88,7 +80,6 @@ const scaleItemStyle: CSSProperties = {
 const IconCatalog = () => (
   <main style={pageStyle}>
     <header style={headerStyle}>
-      <p style={eyebrowStyle}>rly foundation</p>
       <h1 style={headingStyle}>Interface glyphs</h1>
       <p style={summaryStyle}>
         A small, current-color vocabulary for navigation and controls. Meaning stays in the surrounding label.
@@ -109,13 +100,13 @@ const IconCatalog = () => (
         <span key={size} style={scaleItemStyle}>
           <Icon decorative name="search" size={size === "small" ? "small" : size === "large" ? "large" : "default"} />
           <span>
-            {size} · {definition.pixels}px
+            {size}, {definition.pixels}px
           </span>
         </span>
       ))}
       <span style={scaleItemStyle}>
         <Icon label="Search interface" name="search" size={RLY_ICON_DEFAULT_VARIANTS.size} />
-        <span>informative · labelled</span>
+        <span>informative, labelled</span>
       </span>
     </section>
   </main>

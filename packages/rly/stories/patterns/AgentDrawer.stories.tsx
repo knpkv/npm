@@ -21,7 +21,16 @@ const EvidenceCardinalities = (): ReactElement => (
     <Text tone="secondary">Zero missing evidence references</Text>
     <Text>One primary source · PR #184 at 8fa21c7</Text>
     <details>
-      <summary>20 supporting records</summary>
+      <summary
+        style={{
+          alignItems: "center",
+          cursor: "pointer",
+          display: "flex",
+          minBlockSize: "var(--rly-control-height-dense)"
+        }}
+      >
+        20 supporting records
+      </summary>
       <ol style={listStyle}>
         {Array.from({ length: 20 }, (_, index) => (
           <li key={index}>Evidence record {index + 1}</li>

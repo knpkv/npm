@@ -10,27 +10,27 @@ export const RLY_STATE_PANEL_VARIANTS = defineVariants({
     neutral: {
       className: style("neutral"),
       purpose: "Neutral explanatory state",
-      tokens: ["color-text-2", "color-surface-2"]
+      tokens: ["color-text-2", "color-border-2"]
     },
     positive: {
       className: style("positive"),
       purpose: "Positive outcome",
-      tokens: ["color-success-ink", "color-success-tint"]
+      tokens: ["color-success-ink"]
     },
     critical: {
       className: style("critical"),
       purpose: "Critical outcome requiring attention",
-      tokens: ["color-blocked-ink", "color-blocked-tint"]
+      tokens: ["color-blocked-ink"]
     },
     caution: {
       className: style("caution"),
       purpose: "Held outcome requiring review",
-      tokens: ["color-held-ink", "color-held-tint"]
+      tokens: ["color-held-ink"]
     },
     progress: {
       className: style("progress"),
       purpose: "Work currently in progress",
-      tokens: ["color-deploying-ink", "color-deploying-tint"]
+      tokens: ["color-deploying-ink"]
     }
   }
 })

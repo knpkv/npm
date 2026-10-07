@@ -892,14 +892,15 @@ test("keeps every service card's title and state whole-word at the narrowest car
       contentType: "application/json",
       status: 200
     }))
-  // 1280 lays the cards out three across, the narrowest a card gets on a desktop; 390 is a phone.
-  for (const width of [1280, 390]) {
+  // A sweep across phones, tablets and desktops, including the 1261 where a mark's provider name once
+  // broke ("Confluen|ce"); 640 at device scale 2 stands in for 200% zoom at 1280.
+  for (const width of [320, 360, 390, 480, 640, 768, 900, 1024, 1100, 1180, 1261, 1280, 1440, 1600, 1920]) {
     await page.setViewportSize({ height: 900, width })
     await page.goto("/services")
     await expect(page.getByText("Installed").first()).toBeVisible()
     // Every word in a card's title and state sits on one line: wrapping only happens between words.
     const split = await page.evaluate(
-      `[...document.querySelectorAll("article h2, article [class*='status']")].flatMap((element) => {
+      `[...document.querySelectorAll("article h2, article [class*='status'], article [data-rly-service]")].flatMap((element) => {
       const words = []
       const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
       for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
@@ -913,7 +914,7 @@ test("keeps every service card's title and state whole-word at the narrowest car
       return words
     })`
     )
-    expect(split).toEqual([])
+    expect(split, `at ${width}px`).toEqual([])
     // The state is a word, not a bordered chip.
     await expect(page.locator("article [class*='status']").first()).toHaveCSS("border-top-style", "none")
   }

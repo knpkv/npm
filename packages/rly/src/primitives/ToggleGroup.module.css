@@ -74,10 +74,16 @@
     }
   }
 
+  /* Forced colours: the selected option keeps a ring, since the fill that marks it is dropped. */
   @media (forced-colors: active) {
     .item[data-state="checked"] {
       outline: 2px solid CanvasText;
       outline-offset: -2px;
     }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .item[data-state="checked"] {
+    outline: 2px solid CanvasText;
+    outline-offset: -2px;
   }
 }

@@ -140,7 +140,13 @@ export const resolveAccounts = (state: PRState) =>
       const now = yield* Clock.currentTimeMillis
       yield* SubscriptionRef.update(
         state,
-        (s) => ({ ...s, status: idleStatus, lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)) })
+        // No account was refreshed, so none of the last refresh's unevaluated pull requests still apply.
+        (s) => ({
+          ...s,
+          status: idleStatus,
+          lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)),
+          unevaluatedPullRequests: []
+        })
       )
       return undefined
     }

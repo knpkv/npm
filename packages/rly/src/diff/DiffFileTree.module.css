@@ -5,14 +5,18 @@
     border-radius: var(--rly-radius-group);
     container-type: inline-size;
     display: grid;
+    /* One bounded track: an implicit auto track can't shrink below its content, so it overflowed at 320. */
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
     min-inline-size: var(--rly-space-0);
     overflow: hidden;
   }
 
+  /* Heading and count share a row while they fit; the count wraps below in a narrow tree. */
   .header {
-    align-items: end;
+    align-items: baseline;
     display: flex;
-    gap: var(--rly-space-16);
+    flex-wrap: wrap;
+    gap: var(--rly-space-4) var(--rly-space-16);
     justify-content: space-between;
     padding: var(--rly-space-20);
   }
@@ -32,7 +36,6 @@
     overflow-wrap: break-word;
   }
 
-  .eyebrow,
   .notice,
   .empty,
   .error,
@@ -42,14 +45,10 @@
       var(--rly-type-meta-font);
   }
 
-  .eyebrow {
-    text-transform: uppercase;
-  }
-
   .count {
-    color: var(--rly-color-text-1);
-    font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / 0.8 var(--rly-type-page-title-font);
-    letter-spacing: var(--rly-type-page-title-tracking);
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
     white-space: nowrap;
   }
 
@@ -176,9 +175,8 @@
   .directoryName {
     font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
       var(--rly-type-code-font);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: break-word;
   }
 
   .directoryCount {
@@ -223,11 +221,11 @@
     min-inline-size: var(--rly-space-0);
   }
 
+  /* A path is the file's identity: it wraps after a slash (or, for one long name, inside it), never ellipsised. */
   .path,
   .previousPath {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-inline-size: var(--rly-space-0);
+    overflow-wrap: break-word;
   }
 
   .path {
@@ -252,6 +250,9 @@
     block-size: var(--rly-space-16);
     inline-size: var(--rly-space-16);
   }
+  .statusIcon svg {
+    display: block;
+  }
 
   .loadingIcon {
     animation: rly-diff-file-tree-spin 800ms linear infinite;
@@ -266,10 +267,6 @@
   @container (max-width: 24rem) {
     .header {
       align-items: start;
-    }
-
-    .count {
-      font-size: var(--rly-type-section-title-size);
     }
 
     .file {

@@ -66,9 +66,15 @@
 
   .algorithm {
     color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    overflow-wrap: break-word;
+  }
+
+  .algorithmValue {
     font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
       var(--rly-type-code-font);
-    overflow-wrap: break-word;
+    white-space: nowrap;
   }
 
   .compact {

@@ -70,11 +70,6 @@
       var(--rly-type-meta-font);
   }
 
-  .scope span,
-  .findingsHeader > span {
-    text-transform: uppercase;
-  }
-
   .scopeValue {
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
@@ -124,12 +119,7 @@
     grid-template-columns: minmax(var(--rly-space-0), 1fr) auto;
   }
 
-  .findingsHeader > span {
-    grid-column: 1 / -1;
-  }
-
-  .findingsHeader h2,
-  .findingsHeader strong {
+  .findingsHeader h2 {
     margin: var(--rly-space-0);
   }
 
@@ -139,10 +129,8 @@
     letter-spacing: var(--rly-type-card-title-tracking);
   }
 
-  .findingsHeader strong {
+  .findingsHeader > span {
     align-self: center;
-    font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
-      var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
   }
 
   .findingList {

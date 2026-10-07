@@ -60,7 +60,8 @@
 .code {
   align-self: center;
   font-size: var(--rly-type-meta-size);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .sessions {
