@@ -1,5 +1,31 @@
 # @knpkv/codecommit-web
 
+## 0.24.0
+
+### Minor Changes
+
+- [#569](https://github.com/knpkv/npm/pull/569) [`5509cb8`](https://github.com/knpkv/npm/commit/5509cb87f90641d14211e2d993443e3cfcf40784) Thanks [@konopkov](https://github.com/konopkov)! - Approval and health now read honestly on real queues.
+
+  - `approvalOf` gains `NotRequired`, labelled "No approval required" (`approvalNotRequiredLabel`): CodeCommit evaluates a pull request with no approval rules as approved, though nobody signed off. "Approved" now appears only when rules exist and are satisfied. The CLI flags, TUI badge, web row, detail page and health score all show it. Status filters and counts treat it as neither approved nor pending.
+  - No "Approval granted" or "revoked" notification is sent for a pull request without rules. An identical pull-request notification that is still unread is not added again, so a restart no longer re-announces it.
+  - The cache records whether a pull request's approval baseline is known (migration 0024). A sign-off or withdrawal made while approval evaluation was failing is announced once evaluation recovers. A pull request first seen while evaluation fails holds only a placeholder, so its recovery is not announced.
+  - The health score uses a saturating curve: a base of 8, minus up to 6 for idleness and up to 2 for age, plus up to 1.5 for comments (3 counted), 2 for an approval and 1 for "No approval required". Long-idle pull requests are now ranked instead of all reading 0.0, and fresh ones stay green. A pull request CodeCommit gave no dates for scores Unknown ("Health —") and sorts last; comments that haven't loaded make the score a lower bound.
+
+- [#503](https://github.com/knpkv/npm/pull/503) [`281ce63`](https://github.com/knpkv/npm/commit/281ce63fec174b26c0c306b58ca4c473e83f9cc8) Thanks [@konopkov](https://github.com/konopkov)! - The Relay findings pane follows the space the pull request page actually has: a third column on wide windows, a "Findings" drawer beside the diff on medium ones (Esc closes it and returns focus), stacked below the diff on phones. Finding and line-comment highlights use a full 1px border instead of a thick stripe.
+
+### Patch Changes
+
+- [#575](https://github.com/knpkv/npm/pull/575) [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c) Thanks [@konopkov](https://github.com/konopkov)! - Focus rings match rly's: a solid 2px outline in the focus colour, 2px outside the control, from `--rly-focus-ring-width` and `--rly-focus-ring-offset`. Hand-rolled 1px to 3px rings, rings in agent, service or text colours, tinted halos and box-shadow rings are gone. Rings inside clipped containers pull the ring width inside.
+
+- [#568](https://github.com/knpkv/npm/pull/568) [`442b11d`](https://github.com/knpkv/npm/commit/442b11db369a5af5e85d4d91d00c334d46f8103d) Thanks [@konopkov](https://github.com/konopkov)! - The test suites of codecommit-core and codecommit-web are now typechecked as part of `check`, and both packages leave the test-typecheck allowlist.
+
+- [#570](https://github.com/knpkv/npm/pull/570) [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9) Thanks [@konopkov](https://github.com/konopkov)! - Executables linked from the repository (`pnpm link --global`, or `node dist/...`) run under plain Node: workspace packages resolve to their build output instead of TypeScript sources. Published `@knpkv/codecommit-core` now serves its `Domain.js`, `CacheService.js` and `SandboxService.js` subpaths; the last two resolved to files that do not exist before.
+- Updated dependencies [[`5509cb8`](https://github.com/knpkv/npm/commit/5509cb87f90641d14211e2d993443e3cfcf40784), [`0a0182c`](https://github.com/knpkv/npm/commit/0a0182c18f237ab420d17d0339f0969d9356c63a), [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c), [`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6), [`442b11d`](https://github.com/knpkv/npm/commit/442b11db369a5af5e85d4d91d00c334d46f8103d), [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9)]:
+  - @knpkv/codecommit-core@0.21.0
+  - @knpkv/review@0.4.2
+  - @knpkv/rly@0.12.0
+  - @knpkv/relay-product@0.2.6
+
 ## 0.23.0
 
 ### Minor Changes

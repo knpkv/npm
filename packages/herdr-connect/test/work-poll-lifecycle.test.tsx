@@ -5,6 +5,7 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
 import { ConnectSurface, makeConnectAtoms } from "../src/client.js"
+import { Predicate } from "effect"
 
 declare global {
   interface Window {
@@ -93,7 +94,7 @@ const linkedWork = JSON.stringify({
 })
 
 const requestPath = (input: RequestInfo | URL): string => {
-  const url = "href" in input ? input.href : "url" in input ? input.url : input
+  const url = Predicate.isString(input) ? input : "href" in input ? input.href : input.url
   return new URL(url, "http://localhost").pathname
 }
 
@@ -156,6 +157,8 @@ describe("Connect Work polling ownership", () => {
       if (path === "/v1/connect/agents") {
         return new Response(linkedAgents, { headers: { "content-type": "application/json" } })
       }
+      // Only Work polls count; anything else (the terminal's WebAssembly data URL) is not this API.
+      if (path !== "/v1/work") return new Response(null, { status: 404 })
       workRequests += 1
       if (workRequests === 3) return new Response(null, { status: 503 })
       return new Response(linkedWork, { headers: { "content-type": "application/json" } })
