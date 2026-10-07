@@ -1273,12 +1273,9 @@
       position: static;
     }
 
+    /* Wrap rather than scroll sideways: a scroller hid the last filter past the edge at 390. */
     .activity-filters {
-      flex-wrap: nowrap;
       justify-content: flex-start;
-      margin-inline: calc(var(--rly-space-8) * -1);
-      overflow-x: auto;
-      padding: var(--rly-space-2) var(--rly-space-8);
     }
 
     .activity-filters button {
