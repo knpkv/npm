@@ -213,8 +213,8 @@ tap elsewhere extends the span. The caller owns `selection` and words it through
 `describeSelection`. Only a selection the user makes is announced, politely, once it
 settles: the first render and a data refresh under the same selection stay quiet. Charts
 are presentation only: the application computes columns, bands and any projection.
-`columns` must be in time order without overlaps (gaps are fine), or the chart throws
-`RlyChartColumnsError`. Every bar stacks its series in one chart-wide order, the order
+`columns` must be in time order without overlaps (gaps are fine), or the chart throws an error naming
+the first column out of place. Every bar stacks its series in one chart-wide order, the order
 each id first appears. Bins group every N columns, so hourly columns that start on the
 hour bin on clock hours. The selection is outlined above the bars, and the window is a
 neutral dashed stretch, never the focus colour. A chart on a surface other than

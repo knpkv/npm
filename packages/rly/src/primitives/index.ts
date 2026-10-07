@@ -39,7 +39,7 @@ export type {
 } from "./Sheet.js"
 export { RLY_SKELETON_DEFAULT_VARIANTS, RLY_SKELETON_VARIANTS, Skeleton } from "./Skeleton.js"
 export type { RlySkeletonVariant, SkeletonProps } from "./Skeleton.js"
-export { RlyChartColumnsError, StackedBars } from "./StackedBars.js"
+export { StackedBars } from "./StackedBars.js"
 export type {
   RlyBandMark,
   RlyChartBin,

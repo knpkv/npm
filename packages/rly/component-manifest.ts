@@ -291,7 +291,6 @@ export const componentManifest = {
       category: "primitive",
       exports: [
         { kind: "value", name: "StackedBars" },
-        { kind: "value", name: "RlyChartColumnsError" },
         { kind: "type", name: "StackedBarsProps" },
         { kind: "type", name: "RlyStepBand" },
         { kind: "type", name: "RlyBandMark" },

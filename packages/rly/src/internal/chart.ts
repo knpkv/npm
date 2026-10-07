@@ -50,23 +50,12 @@ const groupStarts = (count: number, size: number): ReadonlyArray<number> => {
   return starts
 }
 
-/** Columns arrived out of time order or overlapping, so they cannot share one time axis. */
-export class RlyChartColumnsError extends Error {
-  override readonly name = "RlyChartColumnsError"
-  /** The first column that starts before the previous one ends, or ends before it starts. */
-  readonly index: number
-  constructor(index: number) {
-    super(`StackedBars columns must be in time order without overlaps; column ${index} is not`)
-    this.index = index
-  }
-}
-
 /** Fail loudly on columns that cannot share one time axis: each must start at or after the previous end. */
 export const validateColumns = (columns: ReadonlyArray<RlyChartColumn>): void => {
   for (const [index, column] of columns.entries()) {
     const previous = columns[index - 1]
     if (column.end < column.start || (previous !== undefined && column.start < previous.end)) {
-      throw new RlyChartColumnsError(index)
+      throw new Error(`StackedBars columns must be in time order without overlaps; column ${index} is not`)
     }
   }
 }

@@ -18,7 +18,6 @@ import styles from "./StackedBars.module.css"
 
 const style = (name: string): string => cssClass(styles, name)
 export type { RlyChartBin, RlyChartColumn, RlyChartSegment, RlyChartSelection } from "../internal/chart.js"
-export { RlyChartColumnsError } from "../internal/chart.js"
 
 /** A level over time above the bars, on the same axis; `level: null` is a stretch with no reading. */
 export interface RlyStepBand {
@@ -51,7 +50,7 @@ export type StackedBarsProps = StackedBarsBaseProps & {
   readonly instructions: string
   /**
    * Periods in time order, none overlapping (gaps are fine); anything else throws
-   * `RlyChartColumnsError`. Bins group every N columns, so hourly columns starting on the hour bin
+   * an error naming the column. Bins group every N columns, so hourly columns starting on the hour bin
    * on clock hours.
    */
   readonly columns: ReadonlyArray<RlyChartColumn>

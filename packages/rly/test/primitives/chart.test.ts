@@ -6,7 +6,6 @@ import {
   chooseBinSize,
   moveFocus,
   type RlyChartColumn,
-  RlyChartColumnsError,
   selectBin,
   validateColumns
 } from "../../src/internal/chart.js"
@@ -133,9 +132,9 @@ describe("chart model", () => {
 
   // ui-b S6: unsorted columns made a negative span and garbage bins without an error.
   it("rejects columns out of time order or overlapping, and accepts gaps", () => {
-    expect(() => validateColumns([column(1, { a: 1 }), column(0, { a: 1 })])).toThrow(RlyChartColumnsError)
+    expect(() => validateColumns([column(1, { a: 1 }), column(0, { a: 1 })])).toThrow(/in time order without overlaps/)
     expect(() => validateColumns([{ end: 2 * hour, segments: [], start: 0 }, column(1, { a: 1 })])).toThrow(
-      RlyChartColumnsError
+      /in time order without overlaps/
     )
     expect(() => validateColumns([column(0, { a: 1 }), column(5, { a: 1 })])).not.toThrow()
   })
