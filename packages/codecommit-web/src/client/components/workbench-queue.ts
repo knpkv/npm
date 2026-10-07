@@ -102,9 +102,33 @@ const viewerOf = (caller: Caller, pullRequest: Domain.PullRequest): Viewer | und
     : { arn: undefined, name: caller.username }
 }
 
+/**
+ * Open pull requests whose approval is unknown. They are never counted as waiting on the user, so the
+ * hero says them separately; `reason` is set when they all fail the same way, so the fix can be named.
+ */
+export interface ApprovalUnknownSummary {
+  readonly count: number
+  readonly reason: Domain.ApprovalUnknownReason | undefined
+}
+
 export interface WorkbenchQueue {
   readonly summary: WorkbenchSummary
   readonly rows: ReadonlyArray<WorkbenchRow>
+  readonly approvalUnknown: ApprovalUnknownSummary
+}
+
+/** {@link ApprovalUnknownSummary} over the open pull requests in `pullRequests`. */
+export const approvalUnknownSummary = (
+  pullRequests: ReadonlyArray<Domain.PullRequest>
+): ApprovalUnknownSummary => {
+  const reasons = pullRequests
+    .filter((pullRequest) => pullRequest.status === "OPEN")
+    .flatMap((pullRequest) => {
+      const approval = approvalOf(pullRequest)
+      return approval._tag === "Unknown" ? [approval.reason] : []
+    })
+  const shared = new Set(reasons.map((reason) => reason._tag)).size === 1 ? reasons[0] : undefined
+  return { count: reasons.length, reason: shared }
 }
 
 /**
@@ -356,10 +380,12 @@ export const workbenchQueue = (
       ]
     })
     .sort((a, b) => groupOrder[a.group] - groupOrder[b.group] || b.openMs - a.openMs)
-  if (!known) return { rows, summary: WorkbenchSummary.Unknown() }
+  const approvalUnknown = approvalUnknownSummary(pullRequests)
+  if (!known) return { approvalUnknown, rows, summary: WorkbenchSummary.Unknown() }
   const waiting = rows.filter((row) => row.group === "review")
   const oldest = waiting[0]
   return {
+    approvalUnknown,
     rows,
     summary: oldest === undefined
       ? WorkbenchSummary.Clear({

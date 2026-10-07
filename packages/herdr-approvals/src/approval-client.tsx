@@ -45,6 +45,8 @@ import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 import { SanitizedJobRecord } from "./approval-request.js"
 import { answerForStatus, answerSettles, answerText, DecisionAnswer } from "./countdown-model.js"
 import type { DecisionStatus } from "./countdown-view.js"
+import { useHubNow } from "./hub-clock.js"
+import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
@@ -475,6 +477,8 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   // created onDecision may be older by then).
   const latestObservedAt = useRef(0)
   const onDecision = async (decision: ApprovalDecision): Promise<void> => {
+    // The decided request's expiry, read from the snapshot it was decided on.
+    const expiresAt = currentSnapshot === null ? undefined : decidableExpiry(currentSnapshot, decision.jobId)
     setBusyJobId(decision.jobId)
     setSendingDecision(decision)
     setDecisionStatus(null)
@@ -483,9 +487,11 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     setSendingDecision(null)
     const answer = decisionAnswerOf(decision, exit)
     setDecisionStatus({
+      expiresAt,
       jobId: decision.jobId,
       // The snapshot on screen now, when the answer arrived; only a later read may unlock the request.
       observedAt: latestObservedAt.current,
+      outcome: answerOutcome(answer),
       settles: answerSettles(answer),
       text: answerText(answer)
     })
@@ -642,6 +648,11 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   useEffect(() => {
     if (currentSnapshot !== null) latestObservedAt.current = currentSnapshot.observedAt
   }, [currentSnapshot?.observedAt])
+  // The Work board's request clocks read hub time, like the Approvals countdown.
+  const workNow = useHubNow(
+    currentSnapshot?.observedAt ?? 0,
+    currentSnapshot?.pendingApprovals.local.map((record) => record.approvalExpiresAt ?? null) ?? []
+  )
   if (currentSnapshot === null) {
     return (
       <>
@@ -659,6 +670,13 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     current.work === null ? null : (
       <WorkBoard
         {...(workSelection.goalId === null ? {} : { initialGoalId: workSelection.goalId })}
+        decisions={workRequestDecisionsFor({
+          now: workNow,
+          onDecision: (decision) => void onDecision(decision),
+          sending: sendingDecision,
+          snapshot: current,
+          status: decisionStatus
+        })}
         initialWindow={workSelection.window}
         navigation={workNavigationHref}
         snapshots={current.work}

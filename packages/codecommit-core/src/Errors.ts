@@ -23,7 +23,7 @@
  * @category Errors
  * @module
  */
-import { Schema } from "effect"
+import { Predicate, Schema } from "effect"
 import { AwsProfileName, AwsRegion, SandboxId } from "./Domain.js"
 
 /**
@@ -179,6 +179,27 @@ export class PermissionDeniedError extends Schema.TaggedError<PermissionDeniedEr
  * @category Errors
  */
 export type AwsClientError = AwsCredentialError | AwsThrottleError | AwsApiError
+
+/**
+ * One line naming what the provider said, for notifications and logs: the provider error's own name and
+ * message ("UnrecognizedClientException: The security token included in the request is invalid."), not
+ * the wrapper's tag. Credentials and throttling say so first.
+ */
+export const describeAwsClientError = (error: AwsClientError): string => {
+  const inner = error.cause
+  const provider = Predicate.isError(inner)
+    ? `${inner.name !== "Error" ? `${inner.name}: ` : ""}${inner.message}`
+    : String(inner)
+  const detail = provider.trim().length > 0 ? provider.trim() : "no detail from the provider"
+  switch (error._tag) {
+    case "AwsCredentialError":
+      return `Credentials unavailable: ${detail}`
+    case "AwsThrottleError":
+      return `Throttled: ${detail}`
+    case "AwsApiError":
+      return detail
+  }
+}
 
 /**
  * Union of all CodeCommit errors for exhaustive matching.

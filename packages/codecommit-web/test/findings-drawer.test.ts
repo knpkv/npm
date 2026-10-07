@@ -60,6 +60,30 @@ describe("FindingsDrawer", () => {
     expect(dialog?.open).toBe(false)
     await act(async () => root.unmount())
   })
+
+  it("steps aside for an inline prompt that needs an answer, which a modal would leave inert", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => root.render(createElement(Harness)))
+    const dialog = host.querySelector("dialog")
+    await act(async () => host.querySelector<HTMLButtonElement>("button")?.click())
+    expect(dialog?.open).toBe(true)
+
+    const bar = document.createElement("div")
+    bar.setAttribute("data-needs-answer", "")
+    const allow = document.createElement("button")
+    allow.textContent = "Allow once"
+    bar.append(allow)
+    await act(async () => {
+      document.body.append(bar)
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(dialog?.open).toBe(false)
+    expect(document.activeElement).toBe(allow)
+    bar.remove()
+    await act(async () => root.unmount())
+  })
 })
 
 describe("insideOpenDialog", () => {

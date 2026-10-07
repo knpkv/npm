@@ -1,5 +1,24 @@
 # @knpkv/herdr-connect
 
+## 0.7.2
+
+### Patch Changes
+
+- Updated dependencies [[`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26), [`bfba87c`](https://github.com/knpkv/npm/commit/bfba87c566ca21d267c0626da60b431757dc5e32)]:
+  - @knpkv/herdr-fleet@0.7.0
+  - @knpkv/herdr-work@0.8.1
+
+## 0.7.1
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+
+- [#586](https://github.com/knpkv/npm/pull/586) [`1ef72d9`](https://github.com/knpkv/npm/commit/1ef72d9317a37e8f28563cae113e9908d8242c3a) Thanks [@konopkov](https://github.com/konopkov)! - The herdr-connect test suite, browser fixtures included, is now typechecked as part of `check`, and the package leaves the test-typecheck allowlist.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa), [`f8e842e`](https://github.com/knpkv/npm/commit/f8e842e901986b50edf55f98fa3591b742a7904e), [`30849c5`](https://github.com/knpkv/npm/commit/30849c598fdf6776a3a4a2c4061d276e843eaa8e)]:
+  - @knpkv/rly@0.12.1
+  - @knpkv/herdr-work@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes

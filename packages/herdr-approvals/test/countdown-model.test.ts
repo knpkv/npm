@@ -5,7 +5,6 @@ import {
   answerSettles,
   answerText,
   clockText,
-  countdownText,
   crossedIntoLastMinute,
   DecisionAnswer,
   factsOf,
@@ -62,11 +61,12 @@ const snapshot = (pending: DashboardSnapshot["pendingApprovals"]): DashboardSnap
 })
 
 describe("countdown model", () => {
-  it("reads seconds only under five minutes and never goes negative", () => {
-    expect(countdownText(52_000)).toBe("52s")
-    expect(countdownText(4 * 60_000 + 12_000)).toBe("4m 12s")
-    expect(countdownText(11 * 60_000 + 40_000)).toBe("11m")
-    expect(countdownText(-5_000)).toBe("0s")
+  it("reads seconds only under five minutes, never negative, in the Work board's words", () => {
+    expect(clockText(52_000, 0)).toBe("52s")
+    expect(clockText(4 * 60_000 + 12_000, 0)).toBe("4m 12s")
+    expect(clockText(11 * 60_000 + 40_000, 0)).toBe("11m")
+    expect(clockText(0, 5_000)).toBe("expiring")
+    expect(clockText(null, 0)).toBeNull()
   })
 
   it("says how long ago in minutes, hours, then whole days", () => {

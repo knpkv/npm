@@ -1,5 +1,21 @@
 # @knpkv/control-center
 
+## 0.10.3
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`0938903`](https://github.com/knpkv/npm/commit/0938903a17b6d2bdf13b96947471a1d49f10b42f), [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/codecommit-core@0.22.0
+  - @knpkv/ai-claude@0.4.2
+  - @knpkv/ai-codex@0.5.2
+  - @knpkv/atlassian-common@1.9.2
+  - @knpkv/clockify-api-client@3.0.1
+  - @knpkv/confluence-api-client@2.0.1
+  - @knpkv/confluence-to-markdown@2.5.2
+  - @knpkv/jira-api-client@2.1.1
+  - @knpkv/rly@0.12.1
+
 ## 0.10.2
 
 ### Patch Changes
