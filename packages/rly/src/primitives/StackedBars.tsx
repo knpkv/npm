@@ -317,10 +317,14 @@ export const StackedBars = ({
     setLabelWidth(LABEL_WIDTH)
   }, [binSize, axisStart, axisEnd])
 
+  // The end label may wrap when it is wider than the chart, so the axis grows to its tallest label.
+  const [axisHeight, setAxisHeight] = useState<number | undefined>(undefined)
   useLayoutEffect(() => {
-    const labels = axisRef.current?.querySelectorAll<HTMLElement>("[data-anchor]") ?? []
-    const widest = Math.max(0, ...[...labels].map((label) => label.scrollWidth))
+    const labels = [...(axisRef.current?.querySelectorAll<HTMLElement>("[data-anchor]") ?? [])]
+    const widest = Math.max(0, ...labels.map((label) => label.scrollWidth))
     if (widest + LABEL_GAP > labelWidth) setLabelWidth(widest + LABEL_GAP)
+    const tallest = Math.max(0, ...labels.map((label) => label.offsetHeight))
+    if (tallest > 0 && tallest !== axisHeight) setAxisHeight(tallest)
   })
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -360,6 +364,11 @@ export const StackedBars = ({
   const selected =
     selectionStart === undefined || selectionEnd === undefined ? null : span(selectionStart.start, selectionEnd.end)
   const focusedBin = focus === null ? undefined : bins[focus]
+  // The ring sits inside its bin by half its 2px stroke (in viewBox units), so on the last bin it
+  // never merges with the plot's own focus outline.
+  const plotHeight = Math.max(MIN_TARGET, height)
+  const insetX = 1000 / Math.max(1, width)
+  const insetY = 100 / plotHeight
   const focusSlot = focusedBin === undefined ? null : span(focusedBin.start, focusedBin.end)
 
   return (
@@ -377,7 +386,7 @@ export const StackedBars = ({
         onBlur={() => setCursor(null)}
         onKeyDown={onKeyDown}
         role="group"
-        style={{ blockSize: `${Math.max(MIN_TARGET, height)}px` }}
+        style={{ blockSize: `${plotHeight}px` }}
         tabIndex={0}
       >
         <svg aria-hidden="true" className={style("bars")} preserveAspectRatio="none" viewBox="0 0 1000 100">
@@ -393,55 +402,59 @@ export const StackedBars = ({
               x={selected.x}
             />
           )}
-          {bins.map((bin, index) => {
-            const slot = span(bin.start, bin.end)
-            const inSelection = selection !== null && bin.last >= selection.from && bin.first <= selection.to
-            return (
-              <g
-                data-focused={focus === index ? "true" : undefined}
-                data-selected={inSelection ? "true" : undefined}
-                key={bin.first}
-                onClick={(event) => {
-                  const touch = pointerType.current === "touch"
-                  // A second tap extends only a live selection; a cleared one starts a new gesture.
-                  const extend =
-                    event.shiftKey ||
-                    (touch &&
-                      selection !== null &&
-                      pendingTap !== null &&
-                      // The first tap must still anchor the live selection; a replaced one starts over.
-                      pendingTap >= selection.from &&
-                      pendingTap <= selection.to &&
-                      (pendingTap < bin.first || pendingTap > bin.last))
-                  emit(selectBin(selection, bins, index, extend))
-                  setCursor(bin.first)
-                  setPendingTap(touch && !extend ? bin.first : null)
-                }}
-                onPointerDown={(event) => {
-                  pointerType.current = event.pointerType
-                }}
-              >
-                <rect className={style("hit")} height={100} width={slot.width} x={slot.x} />
-                {bin.segments.map((segment) => {
-                  const rate = rates[index] ?? 1
-                  const top = max === 0 ? 0 : (((segment.offset + segment.value) * rate) / max) * 88
-                  const size = max === 0 ? 0 : ((segment.value * rate) / max) * 88
-                  return (
-                    <rect
-                      className={style("segment")}
-                      data-series={String(segment.series)}
-                      fill={rlySeriesColor(segment.series)}
-                      height={size}
-                      key={segment.id}
-                      width={slot.width}
-                      x={slot.x}
-                      y={100 - top}
-                    />
-                  )
-                })}
-              </g>
-            )
-          })}
+          {/* Clipped to the plot, so the gap strokes on the outer bars never notch past its edges. */}
+          <g className={style("barsClip")}>
+            {bins.map((bin, index) => {
+              const slot = span(bin.start, bin.end)
+              const inSelection = selection !== null && bin.last >= selection.from && bin.first <= selection.to
+              return (
+                <g
+                  data-bin={index}
+                  data-focused={focus === index ? "true" : undefined}
+                  data-selected={inSelection ? "true" : undefined}
+                  key={bin.first}
+                  onClick={(event) => {
+                    const touch = pointerType.current === "touch"
+                    // A second tap extends only a live selection; a cleared one starts a new gesture.
+                    const extend =
+                      event.shiftKey ||
+                      (touch &&
+                        selection !== null &&
+                        pendingTap !== null &&
+                        // The first tap must still anchor the live selection; a replaced one starts over.
+                        pendingTap >= selection.from &&
+                        pendingTap <= selection.to &&
+                        (pendingTap < bin.first || pendingTap > bin.last))
+                    emit(selectBin(selection, bins, index, extend))
+                    setCursor(bin.first)
+                    setPendingTap(touch && !extend ? bin.first : null)
+                  }}
+                  onPointerDown={(event) => {
+                    pointerType.current = event.pointerType
+                  }}
+                >
+                  <rect className={style("hit")} height={100} width={slot.width} x={slot.x} />
+                  {bin.segments.map((segment) => {
+                    const rate = rates[index] ?? 1
+                    const top = max === 0 ? 0 : (((segment.offset + segment.value) * rate) / max) * 88
+                    const size = max === 0 ? 0 : ((segment.value * rate) / max) * 88
+                    return (
+                      <rect
+                        className={style("segment")}
+                        data-series={String(segment.series)}
+                        fill={rlySeriesColor(segment.series)}
+                        height={size}
+                        key={segment.id}
+                        width={slot.width}
+                        x={slot.x}
+                        y={100 - top}
+                      />
+                    )
+                  })}
+                </g>
+              )
+            })}
+          </g>
           {selected === null || selected.width <= 0 ? null : (
             <>
               {/* A background halo under the edge, so it reads as a double line on bars of any colour. */}
@@ -476,14 +489,20 @@ export const StackedBars = ({
             <rect
               className={style("focusRing")}
               data-part="focus-ring"
-              height={100}
-              width={focusSlot.width}
-              x={focusSlot.x}
+              height={Math.max(0, 100 - 2 * insetY)}
+              width={Math.max(0, focusSlot.width - 2 * insetX)}
+              x={focusSlot.x + insetX}
+              y={insetY}
             />
           )}
         </svg>
       </div>
-      <div aria-hidden="true" className={style("axis")} ref={axisRef}>
+      <div
+        aria-hidden="true"
+        className={style("axis")}
+        ref={axisRef}
+        style={axisHeight === undefined ? undefined : { blockSize: `${axisHeight}px` }}
+      >
         {ticks.map((tick) => {
           const at = tick.anchor === "end" ? axisEnd : bins[tick.index]?.start
           if (at === undefined) return null

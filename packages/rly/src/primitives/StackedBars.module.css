@@ -156,16 +156,22 @@
     position: relative;
   }
   /*
-   * A label never runs past the axis: one wider than the whole chart is cut with an ellipsis. The
-   * axis is hidden from assistive technology, and the caller's table carries every time in full.
+   * A label never runs past the axis. Start labels are spaced by their measured width and stay on
+   * one line; the end label wraps when it alone is wider than the chart, and the axis grows to fit.
    */
   .tick {
     inset-block-start: 0;
     max-inline-size: 100%;
-    overflow: hidden;
     position: absolute;
-    text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .tick[data-anchor="end"] {
+    inline-size: max-content;
+    text-align: end;
+    white-space: normal;
+  }
+  .barsClip {
+    clip-path: inset(0);
   }
   .hidden {
     block-size: 1px;

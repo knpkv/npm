@@ -212,7 +212,8 @@ const Chart = ({ columns }: { readonly columns: ReadonlyArray<RlyChartColumn> })
       <Text as="h1" variant="section-title">
         Spend by booking
       </Text>
-      <div style={stackStyle}>
+      {/* A chart page is wider than the default 48rem reading column, so the week table fits at desktop widths. */}
+      <div style={{ ...stackStyle, maxWidth: "80rem" }}>
         <StackedBars
           bands={bands}
           columns={columns}
@@ -338,9 +339,9 @@ const busiest = halfDay.reduce(
 /** The selection is outlined above the bars, so even the tallest bar shows that it is selected. */
 const tallestSelectedPlay: Story["play"] = async ({ canvasElement }) => {
   const edge = canvasElement.querySelector<SVGRectElement>('[data-part="selection-edge"]')
-  const bars = [...canvasElement.querySelectorAll("svg:not([class*='band']) > g")]
+  const bars = canvasElement.querySelector("[data-bin]")?.parentElement
   await expect(edge).not.toBeNull()
-  await expect(edge?.previousElementSibling?.previousElementSibling).toBe(bars.at(-1))
+  await expect(edge?.previousElementSibling?.previousElementSibling).toBe(bars)
   if (edge !== null) await expect(getComputedStyle(edge).stroke).not.toBe("none")
 }
 
@@ -366,7 +367,10 @@ const LargeText = ({ children }: { readonly children: ReactNode }) => {
   return children
 }
 
-/** Long tick labels at doubled text size are spaced by their measured width, so none overlap. */
+/**
+ * Long tick labels at doubled text size are spaced by their measured width, so none overlap, and an
+ * end label wider than the chart wraps onto more lines instead of being cut.
+ */
 export const LongLabelsLargeText: Story = {
   args: {
     ...fixedArgs,
@@ -394,6 +398,9 @@ export const LongLabelsLargeText: Story = {
       tick.getBoundingClientRect()
     )
     await expect(ticks.length).toBeGreaterThan(0)
+    // The end label wraps rather than being cut, so every word of it stays readable.
+    const end = canvasElement.querySelector<HTMLElement>('[data-anchor="end"]')
+    await expect((end?.scrollWidth ?? 0) <= (end?.clientWidth ?? 0) + 1).toBe(true)
     // No label runs past the axis, even one wider than the whole chart.
     const axis = canvasElement.querySelector("[data-anchor]")?.parentElement?.getBoundingClientRect()
     for (const tick of ticks) {

@@ -132,16 +132,17 @@ describe("StackedBars", () => {
   it("outlines the selection again above every bar, over the same columns", () => {
     const root = render({ selection: { from: 2, to: 3 } })
     const edge = root.querySelector('[data-part="selection-edge"]')
-    const bars = [...root.querySelectorAll("svg:not([class*='band']) > g")]
+    const bars = root.querySelector("[data-bin]")?.parentElement
     // The halo sits between the last bar and the edge, so the edge reads on bars of any colour.
     expect(edge?.previousElementSibling).toBe(root.querySelector('[data-part="selection-halo"]'))
-    expect(edge?.previousElementSibling?.previousElementSibling).toBe(bars.at(-1))
+    expect(edge?.previousElementSibling?.previousElementSibling).toBe(bars)
     expect(numeric(edge, "x")).toBeCloseTo(1000 / 3)
     expect(numeric(edge, "width")).toBeCloseTo(1000 / 3)
   })
 
   // ui-b S2: each bin's ring was painted over by the next bar, so it showed 2px on one side and 1px on the other.
-  it("draws one focus ring above every bar, on the focused bin", async () => {
+  // ui-b V4: the last bin's ring merged with the plot's own outline into one thick edge.
+  it("draws one focus ring above every bar, inside the focused bin", async () => {
     const root = await mount(<StackedBars {...props} />)
     const plot = root.querySelector('[role="group"]')
     expect(root.querySelector('[data-part="focus-ring"]')).toBeNull()
@@ -150,8 +151,9 @@ describe("StackedBars", () => {
     expect(rings).toHaveLength(1)
     const ring = rings[0]
     expect(ring?.nextElementSibling).toBeNull()
-    expect(numeric(ring, "x")).toBe(0)
-    expect(numeric(ring, "width")).toBeCloseTo(1000 / 6)
+    // Inside its bin by half the 2px stroke (720px wide: 1000/720 units), so it never meets the plot outline.
+    expect(numeric(ring, "x")).toBeCloseTo(1000 / 720)
+    expect(numeric(ring, "width")).toBeCloseTo(1000 / 6 - 2000 / 720)
   })
 
   it("shades a window across the band and the bars and names it under the axis", () => {
@@ -305,7 +307,7 @@ describe("StackedBars", () => {
     const plot = root.querySelector('[role="group"]')
     const press = (key: string): void =>
       act(() => void plot?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key })))
-    const bar = (index: number): Element | undefined => root.querySelectorAll("svg:not([class*='band']) g")[index]
+    const bar = (index: number): Element | undefined => root.querySelectorAll("[data-bin]")[index]
     press("Home")
     act(() => void bar(3)?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
     press("ArrowRight")
@@ -351,7 +353,7 @@ describe("StackedBars", () => {
       )
     }
     const root = await mount(<Owner />)
-    const bar = (index: number): Element | undefined => root.querySelectorAll("svg:not([class*='band']) g")[index]
+    const bar = (index: number): Element | undefined => root.querySelectorAll("[data-bin]")[index]
     const tap = (index: number, pointerType: string, shiftKey = false): void =>
       act(() => {
         bar(index)?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType }))
@@ -412,7 +414,7 @@ describe("StackedBars", () => {
       )
     }
     const root = await mount(<Owner />)
-    const bar = (index: number): Element | undefined => root.querySelectorAll("svg:not([class*='band']) g")[index]
+    const bar = (index: number): Element | undefined => root.querySelectorAll("[data-bin]")[index]
     const tap = (index: number): void =>
       act(() => {
         bar(index)?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }))
@@ -459,7 +461,7 @@ describe("StackedBars", () => {
     await resizeTo(720)
     const tap = (index: number): void =>
       act(() => {
-        const bar = root.querySelectorAll("svg:not([class*='band']) g")[index]
+        const bar = root.querySelectorAll("[data-bin]")[index]
         bar?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }))
         bar?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       })
@@ -487,7 +489,7 @@ describe("StackedBars", () => {
       )
     }
     const root = await mount(<Owner />)
-    const bar = (index: number): Element | undefined => root.querySelectorAll("svg:not([class*='band']) g")[index]
+    const bar = (index: number): Element | undefined => root.querySelectorAll("[data-bin]")[index]
     const tap = (index: number): void =>
       act(() => {
         bar(index)?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }))
@@ -602,7 +604,7 @@ describe("StackedBars", () => {
       <StackedBars {...props} onSelectionChange={onSelectionChange} selection={selection} />
     )
     await act(async () => root.render(view(null)))
-    const bar = (index: number): Element | undefined => container.querySelectorAll("svg:not([class*='band']) g")[index]
+    const bar = (index: number): Element | undefined => container.querySelectorAll("[data-bin]")[index]
     const tap = (index: number): void =>
       act(() => {
         bar(index)?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }))
@@ -627,10 +629,7 @@ describe("StackedBars", () => {
     )
     await act(async () => root.render(view(null)))
     act(
-      () =>
-        void container
-          .querySelectorAll("svg:not([class*='band']) g")[1]
-          ?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      () => void container.querySelectorAll("[data-bin]")[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     )
     await act(async () => root.render(view({ from: 4, to: 4 })))
     act(
