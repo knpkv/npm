@@ -49,7 +49,12 @@ pnpm --filter @knpkv/rly lint:colors
 ```
 
 The color-policy lint rejects raw component colors, primitive palette
-variables, and component-local theme/media overrides.
+variables, component-local theme/media overrides, and focus outlines that do
+not take their width from `--rly-focus-ring-width`.
+
+Every focus ring is one solid 2px line in `--rly-color-focus`, drawn
+`--rly-focus-ring-offset` (2px) outside the control. Where the ring must stay
+inside a clipped container, use `outline-offset: calc(var(--rly-focus-ring-width) * -1)`.
 
 ## Foundations
 

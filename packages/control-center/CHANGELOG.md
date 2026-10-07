@@ -1,5 +1,20 @@
 # @knpkv/control-center
 
+## 0.10.1
+
+### Patch Changes
+
+- [#519](https://github.com/knpkv/npm/pull/519) [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5) Thanks [@konopkov](https://github.com/konopkov)! - `ServiceMark` takes a `name` variant: `visible` (default) prints the provider name, and `hidden` prints the glyph only, where an adjacent title already names the provider. The accessible name is present either way. The mark no longer draws a provider-coloured rail.
+
+  Control Center's Services cards use the hidden name, so the provider is no longer printed twice.
+
+- Updated dependencies [[`fd9d510`](https://github.com/knpkv/npm/commit/fd9d5103e3558561274b16c258023bee73b4b233), [`3a59848`](https://github.com/knpkv/npm/commit/3a598483979960e71bfc880f182c73d499001091), [`0573403`](https://github.com/knpkv/npm/commit/057340343fcc727fd0c56329d840a668170376ad), [`286f23e`](https://github.com/knpkv/npm/commit/286f23ece7fc85b9a7a754b7b5f96b5e65868244), [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5), [`8f64bdf`](https://github.com/knpkv/npm/commit/8f64bdfee2ab758c53d0555850be42cfe9f3626e)]:
+  - @knpkv/codecommit-core@0.20.0
+  - @knpkv/jira-api-client@2.1.0
+  - @knpkv/rly@0.11.0
+  - @knpkv/relay-product@0.2.5
+  - @knpkv/review@0.4.1
+
 ## 0.10.0
 
 ### Minor Changes

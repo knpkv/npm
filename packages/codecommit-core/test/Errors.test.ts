@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect } from "effect"
+import { AwsProfileName, AwsRegion } from "../src/Domain.js"
 import { AwsApiError, AwsCredentialError, ConfigError } from "../src/Errors.js"
 
 describe("Errors", () => {
@@ -8,7 +9,12 @@ describe("Errors", () => {
     Effect.gen(function*() {
       const result = yield* Effect.flip(
         Effect.gen(function*() {
-          return yield* new AwsApiError({ operation: "getPR", profile: "dev", region: "us-east-1", cause: "boom" })
+          return yield* new AwsApiError({
+            operation: "getPR",
+            profile: AwsProfileName.make("dev"),
+            region: AwsRegion.make("us-east-1"),
+            cause: "boom"
+          })
         })
       )
       expect(result._tag).toBe("AwsApiError")
@@ -19,7 +25,11 @@ describe("Errors", () => {
   it.effect("AwsCredentialError is catchable by tag", () =>
     Effect.gen(function*() {
       const program = Effect.gen(function*() {
-        return yield* new AwsCredentialError({ profile: "dev", region: "us-east-1", cause: "expired" })
+        return yield* new AwsCredentialError({
+          profile: AwsProfileName.make("dev"),
+          region: AwsRegion.make("us-east-1"),
+          cause: "expired"
+        })
       }).pipe(
         Effect.catchTag("AwsCredentialError", (e) => Effect.succeed(`caught: ${e.profile}`))
       )
@@ -41,7 +51,12 @@ describe("Errors", () => {
 
   // Errors must integrate with Cause for structured failure reporting
   it("errors render in Cause.pretty", () => {
-    const error = new AwsApiError({ operation: "listPRs", profile: "prod", region: "eu-west-1", cause: "timeout" })
+    const error = new AwsApiError({
+      operation: "listPRs",
+      profile: AwsProfileName.make("prod"),
+      region: AwsRegion.make("eu-west-1"),
+      cause: "timeout"
+    })
     const cause = Cause.fail(error)
     const pretty = Cause.pretty(cause)
     expect(pretty).toContain("AwsApiError")

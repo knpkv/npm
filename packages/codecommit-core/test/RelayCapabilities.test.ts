@@ -5,6 +5,7 @@ import { Effect, Exit, Layer, Option, Schema } from "effect"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { ConfigService } from "../src/ConfigService/index.js"
 import { TuiConfig } from "../src/ConfigService/internal.js"
+import { AwsProfileName, AwsRegion } from "../src/Domain.js"
 import { AwsCredentialError } from "../src/Errors.js"
 import { CodeCommitPullRequestRevision, CodeCommitReadClient } from "../src/ReadClient/index.js"
 import {
@@ -39,6 +40,10 @@ const row = (profile: string, id: string, overrides: Partial<Record<string, stri
     destinationBranch: "main",
     isMergeable: 1,
     isApproved: 0,
+    approvalUnknownReason: null,
+    observationSeq: 0,
+    approvalVersion: "2026-08-02T00:00:00.000Z",
+    approvalObservationSeq: 0,
     commentCount: 3,
     healthScore: null,
     link: `https://example.invalid/pr/${id}`,
@@ -70,7 +75,7 @@ const config = Schema.decodeSync(TuiConfig)({
 
 const pr42 = { accountId: "123456789012", region: "us-east-1", repositoryName: "payments", pullRequestId: "42" }
 
-const revision = new CodeCommitPullRequestRevision({
+const revision = Schema.decodeUnknownSync(CodeCommitPullRequestRevision)({
   pullRequestId: "42",
   revisionId: "rev-7",
   repositoryName: "payments",
@@ -190,7 +195,13 @@ describe("when CodeCommit or the config can't answer", () => {
 
   layer(services({
     getPullRequest: () =>
-      Effect.fail(new AwsCredentialError({ profile: "work", region: "us-east-1", cause: "token expired" }))
+      Effect.fail(
+        new AwsCredentialError({
+          profile: AwsProfileName.make("work"),
+          region: AwsRegion.make("us-east-1"),
+          cause: "token expired"
+        })
+      )
   }))((it) => {
     it.effect("tells the person how to sign in again when a post is refused", () =>
       Effect.gen(function*() {

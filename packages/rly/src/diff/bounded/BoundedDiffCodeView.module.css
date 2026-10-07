@@ -141,8 +141,8 @@
 
 .annotation:focus-visible,
 [data-rly-diff-line]:focus-visible {
-  outline: var(--rly-space-2) solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 @media (forced-colors: active) {

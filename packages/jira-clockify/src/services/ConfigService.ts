@@ -109,6 +109,8 @@ export interface ConfigServiceContract {
   readonly get: Effect.Effect<JcfConfig>
   readonly set: (patch: Partial<JcfConfig>) => Effect.Effect<void>
   readonly configDir: Effect.Effect<string>
+  /** Whether `~/.jcf/config.json` exists; when it does not, `get` is jcf's defaults. */
+  readonly fileExists: Effect.Effect<boolean>
 }
 
 export class ConfigService extends Context.Service<ConfigService, ConfigServiceContract>()("jcf/ConfigService") {}
@@ -246,7 +248,8 @@ export const layer = Layer.effect(
           const current = yield* read
           yield* write({ ...current, ...patch })
         }).pipe(Effect.catch(() => Effect.void)),
-      configDir: Effect.succeed(dir)
+      configDir: Effect.succeed(dir),
+      fileExists: fs.exists(filePath).pipe(Effect.orElseSucceed(() => false))
     }
   })
 )

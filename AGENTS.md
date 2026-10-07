@@ -85,6 +85,8 @@ This project adheres to a strict set of development standards to ensure code qua
 - **Comprehensive Tests**: All packages are expected to have comprehensive tests written with `@effect/vitest`.
 - **Test-Driven Development**: While not explicitly stated, the emphasis on testing suggests that TDD is a recommended practice.
 
+- **Typechecked Tests**: Every test file (`test/`, `e2e/`, `dtslint/`, `*.test.*`, `*.spec.*`) must be in a TypeScript project the package's `check` script typechecks, usually `test/tsconfig.json` run as `tsc -p test/tsconfig.json --noEmit`. `scripts/check-test-typecheck-coverage.mjs` (part of `pnpm lint`) enforces it; `scripts/test-typecheck-allowlist.json` names the packages still catching up and their owners, and only shrinks.
+
 ### Review Findings Become Guardrails
 
 Treat every confirmed review finding as both a defect to fix and a prevention opportunity. Before closing the finding, classify the most durable guardrail that would catch the same defect class earlier:

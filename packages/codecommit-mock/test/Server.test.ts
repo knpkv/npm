@@ -3,7 +3,7 @@ import * as Credentials from "@distilled.cloud/aws/Credentials"
 import * as Region from "@distilled.cloud/aws/Region"
 import * as sts from "@distilled.cloud/aws/sts"
 import { NodeHttpClient } from "@effect/platform-node"
-import { describe, expect, it } from "@effect/vitest"
+import { assert, describe, expect, it } from "@effect/vitest"
 import { AwsProfileName, AwsRegion, CodeCommitPullRequestUrl } from "@knpkv/codecommit-core/Domain.js"
 import {
   codeCommitMockAwsClientConfig,
@@ -86,6 +86,7 @@ describe("CodeCommit mock server", () => {
       Effect.gen(function*() {
         const repository = defaultScenario.repositories[0]
         const firstPullRequest = repository.pullRequests[0]
+        assert.isDefined(firstPullRequest)
         const mock = yield* startCodeCommitMock({
           ...defaultScenario,
           repositories: [{
@@ -104,6 +105,7 @@ describe("CodeCommit mock server", () => {
         }).pipe(Effect.provide(runtime))
         expect(firstPullRequestPage.pullRequestIds).toEqual(["17"])
         expect(firstPullRequestPage.nextToken).toBe("1")
+        assert.isDefined(firstPullRequestPage.nextToken)
         const secondPullRequestPage = yield* codecommit.listPullRequests({
           repositoryName: "payments-api",
           maxResults: 1,
@@ -120,6 +122,7 @@ describe("CodeCommit mock server", () => {
         }).pipe(Effect.provide(runtime))
         expect(firstDifferencePage.differences).toHaveLength(1)
         expect(firstDifferencePage.NextToken).toBe("1")
+        assert.isDefined(firstDifferencePage.NextToken)
         const secondDifferencePage = yield* codecommit.getDifferences({
           repositoryName: "payments-api",
           beforeCommitSpecifier: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -145,6 +148,7 @@ describe("CodeCommit mock server", () => {
         }).pipe(Effect.provide(runtime))
         expect(firstCommentPage.commentsForPullRequestData?.[0]?.comments?.[0]?.content).toBe("First root")
         expect(firstCommentPage.nextToken).toBe("1")
+        assert.isDefined(firstCommentPage.nextToken)
         const secondCommentPage = yield* codecommit.getCommentsForPullRequest({
           pullRequestId: "17",
           maxResults: 1,
