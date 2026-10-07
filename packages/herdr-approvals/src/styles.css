@@ -782,15 +782,15 @@
     min-inline-size: 0;
   }
 
+  /* Keeps the native disclosure marker, so it reads as something that opens; tall enough to tap. */
   .notification-help summary {
-    align-items: center;
     cursor: pointer;
-    display: flex;
-    min-block-size: var(--rly-space-32);
+    padding-block: var(--rly-space-6);
   }
 
   .notification-help[open] {
     background: var(--rly-color-surface-2);
+    box-sizing: border-box;
     border: 1px solid var(--rly-color-border-1);
     border-radius: var(--rly-radius-control);
     flex-basis: 100%;
@@ -824,13 +824,16 @@
     overflow-y: auto;
   }
 
+  /* Turns are rows in the log, separated by a rule, not cards inside the panel's card. */
   .chat-turn {
-    background: var(--rly-color-surface-2);
-    border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-control);
+    border-block-end: 1px solid var(--rly-color-border-1);
     display: grid;
     gap: var(--rly-space-8);
-    padding: var(--rly-space-16);
+    padding-block: var(--rly-space-12);
+  }
+
+  .chat-turn:last-child {
+    border-block-end: 0;
   }
 
   .chat-turn p {
@@ -862,11 +865,11 @@
     justify-content: space-between;
   }
 
+  /* The coordinator's answer under the question it answers; its "Coordinator" label marks it, no side bar. */
   .coordinator-reply {
-    border-inline-start: 2px solid var(--rly-color-agent);
     display: grid;
     gap: var(--rly-space-6);
-    padding-inline-start: var(--rly-space-12);
+    padding-block-start: var(--rly-space-4);
   }
 
   .chat-compose {
@@ -898,6 +901,17 @@
     font: inherit;
     padding: var(--rly-space-12);
     resize: vertical;
+  }
+
+  /* Forced colours would paint the placeholder in a link-like system colour; it is hint text. */
+  @media (forced-colors: active) {
+    .chat-compose textarea::placeholder {
+      color: GrayText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .chat-compose textarea::placeholder {
+    color: GrayText;
   }
 
   .chat-compose textarea:focus-visible {

@@ -302,8 +302,8 @@ type AgentDirectoryProps = {
 const plural = (count: number, one: string, many: string): string => `${String(count)} ${count === 1 ? one : many}`
 
 /**
- * The Connect directory's one sentence: how many agents are live, how many need attention, and
- * which hosts could not be read. `agents` is null while the first list loads or when it failed.
+ * The Connect directory's one sentence: how many agents are listed and how many are working, how
+ * many need attention, and which hosts could not be read. `agents` is null while the first list loads or when it failed.
  */
 export const ConnectSummary = ({
   agents,
@@ -315,39 +315,44 @@ export const ConnectSummary = ({
   readonly unavailable: boolean
 }) => {
   const needAttention = agents?.filter((agent) => activityFor(agent.state) === "attention").length ?? 0
+  const working = agents?.filter((agent) => activityFor(agent.state) === "working").length ?? 0
+  const total = agents?.length ?? 0
   return (
-    <Hero
-      caption="Choose a worker, reviewer, or coordinator to open its exact terminal."
-      fact={
-        agents === null ? (
-          unavailable ? (
-            "The fleet directory is unavailable"
+    <>
+      <Hero
+        fact={
+          agents === null ? (
+            unavailable ? (
+              "The fleet directory is unavailable"
+            ) : (
+              "Loading the fleet…"
+            )
           ) : (
-            "Loading the fleet…"
+            <>
+              {plural(total, "agent", "agents")}, {String(working)} working
+              {needAttention === 0 ? null : (
+                <>
+                  ,{" "}
+                  <HeroWord tone="held">{`${String(needAttention)} need${needAttention === 1 ? "s" : ""} attention`}</HeroWord>
+                </>
+              )}
+              {offlineHosts.length === 0 ? null : (
+                <>
+                  ;{" "}
+                  <HeroWord tone="blocked">
+                    {/* A host name stays whole; it may only break where it truly cannot fit. */}
+                    {`${offlineHosts.map((host) => host.replaceAll("-", "\u2011")).join(", ")} offline`}
+                  </HeroWord>
+                </>
+              )}
+            </>
           )
-        ) : (
-          <>
-            {plural(agents.length, "agent", "agents")} live
-            {needAttention === 0 ? null : (
-              <>
-                ,{" "}
-                <HeroWord tone="held">{`${String(needAttention)} need${needAttention === 1 ? "s" : ""} attention`}</HeroWord>
-              </>
-            )}
-            {offlineHosts.length === 0 ? null : (
-              <>
-                ;{" "}
-                <HeroWord tone="blocked">
-                  {/* A host name stays whole; it may only break where it truly cannot fit. */}
-                  {`${offlineHosts.map((host) => host.replaceAll("-", "\u2011")).join(", ")} offline`}
-                </HeroWord>
-              </>
-            )}
-          </>
-        )
-      }
-      label="Connect summary"
-    />
+        }
+        label="Connect summary"
+      />
+      {/* Connect's own caption, so narrow screens can drop it without reaching into the Hero's markup. */}
+      <p className="connect-intro-caption">Choose a worker, reviewer, or coordinator to open its exact terminal.</p>
+    </>
   )
 }
 
@@ -366,6 +371,8 @@ export const AgentDirectory = ({
   const statusFilterLabelId = useId()
   const hosts = connectAgentHosts(agents)
   const names: ReadonlyMap<string, string> = new Map(agents.map((entry) => [String(entry.id), entry.name]))
+  // With one host the filter already names it; rows repeat it only when it tells agents apart.
+  const severalHosts = hosts.length > 1
   const rows = connectLineageRows(agents).filter(({ agent }) => {
     const activity = activityFor(agent.state)
     return (
@@ -412,6 +419,13 @@ export const AgentDirectory = ({
       </div>
       <div className="connect-agent-tree">
         {rows.length === 0 ? <Text tone="secondary">No agents match “{query.trim()}”.</Text> : null}
+        {rows.length === 0 ? null : (
+          <div aria-hidden="true" className="connect-list-head">
+            <span>Last activity</span>
+            <span>Agent</span>
+            <span>State</span>
+          </div>
+        )}
         <div className="connect-agent-list">
           {rows.map(({ agent, depth, issue }, index) => {
             const key = connectAgentKey(agent)
@@ -429,6 +443,7 @@ export const AgentDirectory = ({
                 onClick={() => onSelect(agent)}
               >
                 <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
+                  <span className="connect-visually-hidden">Last active at </span>
                   {timeLabel(agent.lastActivityAt, timeZone)}
                 </time>
                 <span className="connect-agent-copy">
@@ -437,8 +452,13 @@ export const AgentDirectory = ({
                   </Text>
                   <Text as="small" variant="meta" tone="secondary">
                     {/* Host and work names are identifiers: each moves to the next line whole rather than splitting at a hyphen. */}
-                    <span className="connect-token">{agent.host}</span>, {relationLabel(agent, issue, names)},{" "}
-                    {workPrefix(agent)} <span className="connect-token">{agent.work}</span>
+                    {severalHosts ? (
+                      <>
+                        <span className="connect-token">{agent.host}</span>,{" "}
+                      </>
+                    ) : null}
+                    {relationLabel(agent, issue, names)}, {workPrefix(agent)}{" "}
+                    <span className="connect-token">{agent.work}</span>
                   </Text>
                 </span>
                 <span className="connect-agent-state" data-activity={activity}>

@@ -24,7 +24,8 @@ const summary = (props: Parameters<typeof ConnectSummary>[0]): string =>
 describe("Connect summary", () => {
   it("says how many agents are live, how many need attention, and which hosts are offline", () => {
     const markup = summary({ agents: fleet, offlineHosts: ["GAMMA"], unavailable: false })
-    expect(markup).toContain("3 agents live")
+    // The count says what it counts: listed agents, and how many of them are working.
+    expect(markup).toContain("3 agents, 1 working")
     expect(markup).toContain(">1 needs attention<")
     expect(markup).toContain(">GAMMA offline<")
     expect(markup).toContain('aria-label="Connect summary"')
@@ -32,7 +33,7 @@ describe("Connect summary", () => {
 
   it("leaves out attention and offline hosts when there are none", () => {
     const markup = summary({ agents: [fleet[0] ?? agent("agent-a", "working")], offlineHosts: [], unavailable: false })
-    expect(markup).toContain("1 agent live")
+    expect(markup).toContain("1 agent, 1 working")
     expect(markup).not.toContain("attention")
     expect(markup).not.toContain("offline")
   })
@@ -95,5 +96,34 @@ describe("AgentDirectory rows", () => {
     const orphan = render([child])
     expect(orphan).toContain('<span class="connect-token">agent-1f49bd90…</span>')
     expect(orphan).not.toContain("agent-1f49bd901df108248299")
+  })
+
+  it("repeat the host on a row only when the directory lists more than one host", () => {
+    const render = (agents: ReadonlyArray<ReturnType<typeof agent>>) =>
+      renderToStaticMarkup(
+        <AgentDirectory
+          activityFilter="all"
+          agents={agents}
+          hostFilter={null}
+          onActivityFilter={() => undefined}
+          onHostFilter={() => undefined}
+          onSelect={() => undefined}
+          query=""
+          selectedKey={null}
+        />
+      )
+    expect(render(fleet)).not.toContain('<span class="connect-token">SER8</span>,')
+    const elsewhere = Schema.decodeUnknownSync(ConnectAgent)({
+      host: "BETA",
+      id: Schema.decodeUnknownSync(AgentStableId)("agent-beta"),
+      kind: "codex",
+      lastActivityAt: 1_000,
+      name: "Agent beta",
+      state: "working",
+      work: "npm"
+    })
+    const two = render([...fleet, elsewhere])
+    expect(two).toContain('<span class="connect-token">SER8</span>,')
+    expect(two).toContain('<span class="connect-token">BETA</span>,')
   })
 })

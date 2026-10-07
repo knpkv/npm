@@ -101,7 +101,8 @@ const setEmbeddedDirectory = (page: Page): Promise<void> =>
             <div class="connect-directory-screen">
               <header class="connect-embedded-intro">
                 <h1 class="fixture-card-title">Connect</h1>
-                <section aria-label="Connect summary" data-rly-hero class="fixture-hero"><p>18 agents live</p><p>Choose a worker, reviewer, or coordinator to open its exact terminal.</p></section>
+                <section aria-label="Connect summary" data-rly-hero class="fixture-hero"><p>18 agents, 6 working</p></section>
+                <p class="connect-intro-caption">Choose a worker, reviewer, or coordinator to open its exact terminal.</p>
               </header>
               ${directory}
             </div>
@@ -220,9 +221,9 @@ test("390x844 keeps directory chrome dense and the full list reachable without a
   expect((await header.boundingBox())?.height).toBeLessThanOrEqual(48)
   expect((await navigation.boundingBox())?.height).toBeLessThanOrEqual(32)
   // The page title plus the summary sentence (it replaced the old count chip). Its caption is hidden, and three
-  // lines are reserved for the sentence so the list does not jump when the fleet loads.
-  expect((await intro.boundingBox())?.height).toBeLessThanOrEqual(132)
-  await expect(page.locator(".fixture-hero p").last()).toBeHidden()
+  // lines (of its column-scaled type) are reserved for the sentence so the list does not jump when the fleet loads.
+  expect((await intro.boundingBox())?.height).toBeLessThanOrEqual(144)
+  await expect(page.locator(".connect-intro-caption")).toBeHidden()
   expect((await filters.boundingBox())?.height).toBeLessThanOrEqual(128)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
   await expect
@@ -262,7 +263,7 @@ test("desktop keeps its spacious hierarchy and scroll ownership", async ({ page 
 
   // The summary sentence and its caption lead; the title is a page label, not a display headline.
   await expect(page.locator(".fixture-hero p").first()).toBeVisible()
-  await expect(page.locator(".fixture-hero p").last()).toBeVisible()
+  await expect(page.locator(".connect-intro-caption")).toBeVisible()
   await expect(page.locator(".connect-search > span")).toBeVisible()
   expect(
     await page.locator(".connect-embedded-intro h1").evaluate((element) =>

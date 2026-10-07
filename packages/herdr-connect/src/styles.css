@@ -67,8 +67,12 @@
     padding: var(--rly-space-12) var(--rly-space-20);
   }
 
-  /* The page title, then the one-sentence summary, on the directory's own column edge. */
+  /* The page title, then the one-sentence summary, on the directory's own column edge. The summary's
+     heading type scales with the column, so a long host name never reaches the edge at 320. */
   .connect-embedded-intro {
+    --rly-type-section-title-size: clamp(1.25rem, 6.5cqi, 2rem);
+    --rly-type-section-title-line-height: calc(var(--rly-type-section-title-size) * 1.15);
+    container-type: inline-size;
     display: grid;
     gap: var(--rly-space-16);
     inline-size: min(100%, 76rem);
@@ -80,14 +84,20 @@
     margin: var(--rly-space-0);
   }
 
+  .connect-intro-caption {
+    color: var(--rly-color-text-2);
+    margin: var(--rly-space-0);
+  }
+
   /* On a narrow screen the summary takes up to three lines once the fleet loads; reserve them so the list does not jump. */
   @media (max-width: 700px) {
-    .connect-embedded-intro [data-rly-hero] > p:first-child {
-      min-block-size: 3lh;
+    .connect-embedded-intro [data-rly-hero] {
+      /* Three lines of the Hero's heading-size sentence (its section-title type), measured from the token. */
+      min-block-size: calc(3 * var(--rly-type-section-title-line-height));
     }
 
     /* Phones keep the sentence and drop its caption, as the directory needs the room. */
-    .connect-embedded-intro [data-rly-hero] > p:last-child:not(:first-child) {
+    .connect-intro-caption {
       display: none;
     }
   }
@@ -127,6 +137,17 @@
     padding: var(--rly-space-8) var(--rly-space-12);
   }
 
+  /* Forced colours would paint the placeholder in a link-like system colour; it is hint text. */
+  @media (forced-colors: active) {
+    .connect-search input::placeholder {
+      color: GrayText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-search input::placeholder {
+    color: GrayText;
+  }
+
   .connect-search input:focus-visible {
     border-color: var(--rly-color-agent);
     outline: 2px solid color-mix(in srgb, var(--rly-color-agent) 35%, transparent);
@@ -147,8 +168,9 @@
   }
 
   .connect-filter-label {
-    color: var(--rly-color-text-3);
-    font-size: var(--rly-type-meta-size);
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
     padding-inline: var(--rly-space-4);
   }
 
@@ -225,6 +247,26 @@
     font-size: var(--rly-type-meta-size);
     font-weight: 400;
     font-variant-numeric: tabular-nums;
+  }
+
+  /* Column names over the rows, on the rows' own tracks. */
+  .connect-list-head {
+    color: var(--rly-color-text-2);
+    display: grid;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-12);
+    grid-template-columns: 4.25rem minmax(0, 1fr) auto;
+    padding: 0 var(--rly-space-12) var(--rly-space-6);
+  }
+
+  .connect-visually-hidden {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
   }
 
   .connect-agent-list {
@@ -719,6 +761,12 @@
       padding: var(--rly-space-8);
     }
 
+    .connect-list-head {
+      gap: var(--rly-space-8);
+      grid-template-columns: 3.5rem minmax(0, 1fr) auto;
+      padding-inline: var(--rly-space-8);
+    }
+
     .connect-failures,
     .connect-preference-error {
       display: none;
@@ -775,6 +823,19 @@
   @media (prefers-reduced-motion: reduce) {
     .connect-agent {
       transition: none;
+    }
+  }
+
+  /* The narrowest phones: tighter option padding keeps the five status words on one row. */
+  @media (max-width: 360px) {
+    .connect-group-filter,
+    .connect-status-filter {
+      gap: var(--rly-space-0);
+    }
+
+    .connect-group-filter button,
+    .connect-status-filter button {
+      padding-inline: var(--rly-space-6);
     }
   }
 }

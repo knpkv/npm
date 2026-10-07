@@ -221,8 +221,8 @@ export const NotificationPanel = ({
         </Text>
       ) : state === "error" ? (
         <Text as="small" className="notice" tone="secondary" variant="meta">
-          {failure === undefined ? "Couldn't check notifications." : `Couldn't check notifications: ${failure}.`} Try
-          Enable again.
+          {failure === undefined ? "Couldn't check notifications." : `Couldn't check notifications: ${failure}.`} Then
+          press Enable again.
         </Text>
       ) : null}
       {state === "unsupported" || state === "denied" ? null : (
