@@ -89,6 +89,8 @@ export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
       isMergeable: pr.isMergeable,
       isApproved: pr.isApproved,
       approvalUnknownReason: pr.approvalUnknown?._tag ?? null,
+      // A domain pull request carries no baseline: known only when its evaluation succeeded.
+      approvalBaselineKnown: pr.approvalUnknown === undefined,
       // A domain pull request carries no observation: the versions of a fresh, unwritten read.
       observationSeq: 0,
       approvalVersion: pr.lastModifiedDate,

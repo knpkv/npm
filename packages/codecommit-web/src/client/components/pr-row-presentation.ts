@@ -1,9 +1,14 @@
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
-import { approvalOf, approvalUnknownLabel, type PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import {
+  approvalNotRequiredLabel,
+  approvalOf,
+  approvalUnknownLabel,
+  type PullRequest
+} from "@knpkv/codecommit-core/Domain.js"
 import type { RlyStateTone } from "@knpkv/rly/primitives"
 
 type DecisionFacts = Pick<PullRequest, "approvedBy" | "isMergeable" | "status">
-type StatusFacts = Pick<PullRequest, "approvalUnknown" | "isApproved" | "isMergeable" | "status">
+type StatusFacts = Pick<PullRequest, "approvalUnknown" | "approvalRules" | "isApproved" | "isMergeable" | "status">
 type TimestampFacts = Pick<PullRequest, "creationDate" | "lastModifiedDate">
 
 export interface PullRequestRowDecision {
@@ -50,6 +55,7 @@ export const pullRequestRowStatus = (pr: StatusFacts): PullRequestRowStatus => {
   if (!pr.isMergeable) return { label: "Conflict", tone: "critical" }
   const approval = approvalOf(pr)
   if (approval._tag === "Unknown") return { label: approvalUnknownLabel, tone: "neutral" }
+  if (approval._tag === "NotRequired") return { label: approvalNotRequiredLabel, tone: "neutral" }
   if (approval._tag === "Approved") return { label: "Approved", tone: "positive" }
   return { label: "Pending", tone: "caution" }
 }
