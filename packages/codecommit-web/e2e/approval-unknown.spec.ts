@@ -45,7 +45,11 @@ test("labels an unknown approval and keeps it out of the approved filter", async
           currentUser: "viewer",
           pullRequests: [
             pullRequest("31", "Unknown approval", { isApproved: true, approvalUnknown: { _tag: "NotPermitted" } }),
-            pullRequest("32", "Known approval", { isApproved: true }),
+            // Approved means a rule exists and is satisfied; with no rules it would read "No approval required".
+            {
+              ...pullRequest("32", "Known approval", { isApproved: true }),
+              approvalRules: [{ ruleName: "r", requiredApprovals: 1, poolMembers: [], satisfied: true }]
+            },
             {
               ...pullRequest("33", "Conflicted unknown", {
                 isApproved: false,
