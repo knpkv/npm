@@ -1,6 +1,15 @@
 import { Effect } from "effect"
 import type { BoardView } from "../model.js"
-import { cardFacts, type Connection, connectionLine, headline, stateWord, totals } from "./board-copy.js"
+import {
+  breakSegments,
+  cardFacts,
+  type Connection,
+  connectionLine,
+  headline,
+  identifierFacts,
+  stateWord,
+  totals
+} from "./board-copy.js"
 import { readBoard } from "./read-board.js"
 import "@knpkv/rly/styles.css"
 import "./styles.css"
@@ -21,6 +30,16 @@ function element<K extends keyof HTMLElementTagNameMap>(tag: K, text: string, cl
   const node = document.createElement(tag)
   node.textContent = text
   if (className !== undefined) node.className = className
+  return node
+}
+
+/** A `dd` holding an identifier, with a break opportunity at each of its separators. */
+function identifier(value: string) {
+  const node = element("dd", "", "identifier")
+  breakSegments(value).forEach((segment, index) => {
+    if (index > 0) node.append(document.createElement("wbr"))
+    node.append(segment)
+  })
   return node
 }
 
@@ -69,7 +88,9 @@ if (
       const facts = cardFacts(agent)
       if (facts.known.length > 0) {
         const details = element("dl", "")
-        for (const [label, value] of facts.known) details.append(element("dt", label), element("dd", value))
+        for (const [label, value] of facts.known) {
+          details.append(element("dt", label), identifierFacts.has(label) ? identifier(value) : element("dd", value))
+        }
         row.append(details)
       }
       if (facts.unpublished.length > 0) {

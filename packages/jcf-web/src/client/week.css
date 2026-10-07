@@ -225,8 +225,8 @@
 }
 
 .jcf-block-gap:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 1px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 /* A packed stretch: one card over its real time, one row per ticket. Its drawn height is a floor;
@@ -302,8 +302,8 @@
 }
 
 .jcf-stretch-entry:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 1px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .jcf-stretch-duration {
@@ -345,8 +345,8 @@
 }
 
 .jcf-quick-approve:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: -2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .jcf-quick-approve:disabled {
@@ -687,8 +687,8 @@ body,
 }
 
 .jcf-block-logged:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 1px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .jcf-description-status {
@@ -740,8 +740,8 @@ body,
 
 .jcf-editor .jcf-editor-fields h2:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 /* Stays in view while the fields scroll, so a failure is seen next to the action that caused it. */
@@ -1150,8 +1150,8 @@ body,
   line-height: var(--rly-type-body-line-height);
 }
 .jcf-agent-message pre:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .jcf-conversation-heading {

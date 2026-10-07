@@ -11,13 +11,12 @@ a timesheet is actually read.
 ## Running it
 
 ```bash
-pnpm --filter "@knpkv/jcf-web..." --sort run build   # jcf-web and the packages it reads, client included
-pnpm --filter @knpkv/jcf-web start                   # prints the URL that gets you in
+pnpm --filter "@knpkv/jcf-web..." build   # this package and jcf, which it imports
+pnpm --filter @knpkv/jcf-web start        # prints the URL that gets you in
 ```
 
-In the workspace `start` runs the server from source with `tsx`, because workspace packages resolve
-each other's TypeScript sources; `scripts/test-workspace-start.ts` checks that it starts and serves the
-client.
+`start` first rebuilds jcf if its source changed, then runs the built server;
+`scripts/test-workspace-start.ts` checks that it starts from a fresh HOME and serves the client.
 
 When installed from the published package, run `jcf-web` from the package's bin directory
 (`pnpm exec jcf-web` in a pnpm project). The archive includes the built server and client;
@@ -35,7 +34,8 @@ file when it stops.
 A system that is not connected shows "Not connected" and the command that connects it
 (`jcf auth jira token`, `jcf auth clockify setup`), never a zero.
 
-For development, `pnpm --filter @knpkv/jcf-web dev` runs the server and Vite together and prints a
+For development, `pnpm --filter @knpkv/jcf-web dev` rebuilds jcf whenever its source changes, so the
+server never runs an old build of it, and runs the server and Vite together. It prints a
 URL on the dev origin, which proxies the API and the bootstrap exchange so the browser stays on one
 origin.
 

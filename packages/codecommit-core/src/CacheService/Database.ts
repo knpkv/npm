@@ -3,7 +3,7 @@
  *
  * Manages the `~/.codecommit/cache.db` database lifecycle: directory creation,
  * libsql client configuration (with camelCase column transform), and sequential
- * migration execution (0001 through 0023). The credential-bearing directory
+ * migration execution (0001 through 0024). The credential-bearing directory
  * and database are created or repaired with owner-only permissions first.
  *
  * @module
@@ -35,6 +35,7 @@ import migration0020 from "./migrations/0020_notification_coordinates.js"
 import migration0021 from "./migrations/0021_sandbox_legacy_retirement.js"
 import migration0022 from "./migrations/0022_pull_request_approval_unknown.js"
 import migration0023 from "./migrations/0023_pull_request_row_versions.js"
+import migration0024 from "./migrations/0024_pull_request_approval_baseline.js"
 
 export { ensurePrivateDatabasePath } from "./internal/PrivateDatabasePathNode.js"
 
@@ -83,7 +84,8 @@ export const MigrationsLive = LibsqlMigrator.layer({
     "0020_notification_coordinates": migration0020,
     "0021_sandbox_legacy_retirement": migration0021,
     "0022_pull_request_approval_unknown": migration0022,
-    "0023_pull_request_row_versions": migration0023
+    "0023_pull_request_row_versions": migration0023,
+    "0024_pull_request_approval_baseline": migration0024
   })
 })
 
