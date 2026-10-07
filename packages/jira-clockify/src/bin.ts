@@ -9,6 +9,7 @@ import { Effect } from "effect"
 import { Command } from "effect/cli"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
+import pkg from "../package.json" with { type: "json" }
 import { HeadlessLayer } from "./cli/layers.js"
 import { root } from "./cli/root.js"
 import { reportUnhandled } from "./cli/runtimeFailure.js"
@@ -19,9 +20,7 @@ const processArgv = Effect.gen(function*() {
   return args
 })
 
-const cli = Command.runWith(root, {
-  version: "0.1.0"
-})
+const cli = Command.runWith(root, { version: pkg.version })
 
 const program = reportUnhandled(processArgv.pipe(
   Effect.flatMap((argv) => cli(argv))

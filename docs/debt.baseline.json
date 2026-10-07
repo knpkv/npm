@@ -317,6 +317,34 @@
       "reasoned": true
     },
     {
+      "package": "capability",
+      "kind": "effect-diagnostics",
+      "file": "packages/capability/test/types.test.ts",
+      "text": "@effect-diagnostics missingEffectError:skip-file",
+      "reasoned": true
+    },
+    {
+      "package": "capability",
+      "kind": "typescript",
+      "file": "packages/capability/test/types.test.ts",
+      "text": "@ts-expect-error -- a write contract without describe and reversible must not typecheck",
+      "reasoned": true
+    },
+    {
+      "package": "capability",
+      "kind": "typescript",
+      "file": "packages/capability/test/types.test.ts",
+      "text": "@ts-expect-error -- describeCall accepts gated (write or host) contracts only",
+      "reasoned": true
+    },
+    {
+      "package": "capability",
+      "kind": "typescript",
+      "file": "packages/capability/test/types.test.ts",
+      "text": "@ts-expect-error -- the contract declares only Declared, so Undeclared must not typecheck",
+      "reasoned": true
+    },
+    {
       "package": "codecommit",
       "kind": "effect-diagnostics",
       "file": "packages/codecommit/src/bin.ts",
