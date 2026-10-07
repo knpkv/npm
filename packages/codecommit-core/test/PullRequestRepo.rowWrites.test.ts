@@ -172,4 +172,22 @@ describe("pull-request row writes", () => {
       yield* repo.upsert(listed(newest, "newest"))
       expect(Option.map(yield* snapshot, (row) => row.title)).toEqual(Option.some("PR newest"))
     })))
+
+  // Tombstones expire by when the deletion happened (the cache clock), not by the pull request's
+  // provider activity, which can be years old.
+  it.effect("keeps a tombstone of an old pull request through an expiry cutoff that precedes its deletion", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      yield* repo.upsert(listed(t0, "seed"))
+      yield* repo.deleteOne(account, "60", newer, coordinates)
+      // Before the deletion, after its provider version.
+      yield* repo.deleteStale("2026-10-05T00:00:00.000Z")
+      yield* repo.upsert(listed(older, "older"))
+      expect(Option.isNone(yield* snapshot)).toBe(true)
+      // After the deletion: the tombstone expires with the rest of the stale cache.
+      yield* repo.deleteStale("2999-01-01T00:00:00.000Z")
+      yield* repo.upsert(listed(older, "older"))
+      expect(Option.isSome(yield* snapshot)).toBe(true)
+    })))
 })
+

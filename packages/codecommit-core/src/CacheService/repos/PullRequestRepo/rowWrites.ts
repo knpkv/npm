@@ -95,7 +95,7 @@ export const rowWrites = (sql: SqlClient.SqlClient) => ({
         SELECT aws_account_id, id, repository_name, account_region, ${version.toISOString()}
         FROM pull_requests WHERE ${where} AND last_modified_date <= ${version.toISOString()}
         ON CONFLICT (aws_account_id, id, repository_name, account_region)
-          DO UPDATE SET version = MAX(version, excluded.version)`.pipe(
+          DO UPDATE SET version = MAX(version, excluded.version), deleted_at = excluded.deleted_at`.pipe(
         Effect.andThen(
           sql`DELETE FROM pull_requests WHERE ${where} AND last_modified_date <= ${version.toISOString()}`
         )
@@ -104,13 +104,14 @@ export const rowWrites = (sql: SqlClient.SqlClient) => ({
 
   /**
    * Cache expiry: delete rows (only OPEN ones with `openOnly`) not fetched since `olderThan`, and
-   * tombstones older than it, which no read in flight can still be behind.
+   * tombstones of deletions made before it (both on the cache clock), which no read in flight can
+   * still be behind.
    */
   deleteFetchedBefore: (olderThan: string, openOnly: boolean) =>
     (openOnly
       ? sql`DELETE FROM pull_requests WHERE status = 'OPEN' AND fetched_at < ${olderThan}`
       : sql`DELETE FROM pull_requests WHERE fetched_at < ${olderThan}`).pipe(
-        Effect.andThen(sql`DELETE FROM pull_request_tombstones WHERE version < ${olderThan}`)
+        Effect.andThen(sql`DELETE FROM pull_request_tombstones WHERE deleted_at < ${olderThan}`)
       ),
 
   /** Fill a NULL `repo_account_id` from another row of the same repository; an existing value is kept. */

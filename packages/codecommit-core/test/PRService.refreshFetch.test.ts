@@ -707,7 +707,7 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([])
     }))
 
-  it.effect("withholds scope success when a stale row cannot be refreshed or removed", () =>
+  it.effect("withholds scope success when a stale row the provider says is gone cannot be removed", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
       const subscribedRef = yield* Ref.make(new Set<string>())
@@ -722,7 +722,7 @@ describe("fetchAndUpsertPRs", () => {
           getPullRequest: () =>
             Effect.fail(
               new AwsApiError({
-                cause: new Error("provider unavailable"),
+                cause: { _tag: "PullRequestDoesNotExistException", message: "pull request 7 does not exist" },
                 operation: "getPullRequest",
                 profile: account.profile,
                 region: account.regions[0]!
@@ -751,7 +751,9 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([])
     }))
 
-  it.effect("withholds scope success when a failed stale read falls back to cache deletion", () =>
+  // A failed read is no evidence the pull request is gone: deleting it would leave a tombstone that
+  // hides a live pull request from every later listing at its version.
+  it.effect("keeps a stale row whose re-read fails for another reason, and withholds scope success", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
       const subscribedRef = yield* Ref.make(new Set<string>())
@@ -768,6 +770,51 @@ describe("fetchAndUpsertPRs", () => {
             Effect.fail(
               new AwsApiError({
                 cause: new Error("provider unavailable"),
+                operation: "getPullRequest",
+                profile: account.profile,
+                region: account.regions[0]!
+              })
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(yield* Ref.get(deleteCalls)).toBe(0)
+      expect(successfulScopes).toEqual([])
+    }))
+
+  it.effect("deletes a stale row the provider says no longer exists, and withholds scope success", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const deleteCalls = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () =>
+            Effect.fail(
+              new AwsApiError({
+                cause: { _tag: "PullRequestDoesNotExistException", message: "pull request 7 does not exist" },
                 operation: "getPullRequest",
                 profile: account.profile,
                 region: account.regions[0]!

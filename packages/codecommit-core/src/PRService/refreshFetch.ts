@@ -26,6 +26,10 @@ import { applyIdentityEvent, IdentityEvent } from "../IdentityLifecycle.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
 
+/** Whether a read failed because the provider says the pull request doesn't exist. */
+const isPullRequestGone = (error: AwsClientError): boolean =>
+  error._tag === "AwsApiError" && Predicate.isTagged(error.cause, "PullRequestDoesNotExistException")
+
 /**
  * Whether a refresh failure means the account's credentials no longer work, decided from its type: a
  * credential failure, or a provider error saying so, directly or inside a failed approval evaluation.
@@ -308,17 +312,23 @@ export const fetchAndUpsertPRs = (params: {
               })
               .pipe(
                 Effect.matchEffect({
-                  // Only a failed provider read can mean the pull request is gone, and not one whose
-                  // credentials stopped working: that marks the account and keeps the row.
+                  // Only the provider saying the pull request doesn't exist deletes its row (and leaves a
+                  // tombstone). Credentials that stopped working mark the account; any other failure is
+                  // no evidence it is gone, so the row stays for the next refresh.
                   onFailure: (error) =>
                     withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(
                       Effect.andThen(
-                        isAuthFailure(error) ?
-                          markAuthFailed(pr.accountProfile) :
-                          prRepo.deleteOne(pr.awsAccountId, pr.id, pr.lastModifiedDate, {
+                        isAuthFailure(error)
+                          ? markAuthFailed(pr.accountProfile)
+                          : isPullRequestGone(error)
+                          ? prRepo.deleteOne(pr.awsAccountId, pr.id, pr.lastModifiedDate, {
                             repositoryName: pr.repositoryName,
                             accountRegion: pr.accountRegion
                           }).pipe(Effect.catch(() => Effect.void))
+                          : Effect.logWarning(
+                            `stale pull request #${pr.id} could not be re-read; its row is kept`,
+                            error
+                          )
                       )
                     ),
                   // The provider proved it exists, so a failed cache write keeps the row and only withholds

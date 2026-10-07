@@ -1,0 +1,23 @@
+id: no-direct-pull-request-row-write
+snapshots:
+  ? |
+    sql`DELETE FROM pull_requests WHERE id = ${id}`
+  : labels:
+    - source: '`DELETE FROM pull_requests WHERE id = ${id}`'
+      style: primary
+      start: 3
+      end: 47
+  ? |
+    sql`UPDATE pull_requests SET health_score = ${score} WHERE id = ${id}`
+  : labels:
+    - source: '`UPDATE pull_requests SET health_score = ${score} WHERE id = ${id}`'
+      style: primary
+      start: 3
+      end: 70
+  ? |
+    sql`insert into pull_requests (id) values (${id})`
+  : labels:
+    - source: '`insert into pull_requests (id) values (${id})`'
+      style: primary
+      start: 3
+      end: 50

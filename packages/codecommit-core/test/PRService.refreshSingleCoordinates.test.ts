@@ -179,9 +179,20 @@ describe("PRService.refreshSinglePR coordinates", () => {
       expect(yield* Ref.get(providerCalls)).toEqual([{ region: "eu-west-1", repositoryName: "payments" }])
     }))
 
-  it.effect.each(singleRefreshApprovalCases)(
+  // The read is newer or older than the cached row (1 s). Either way the upsert carries the read's own
+  // version, so the cache's compare-and-set rejects the older one instead of storing it as current.
+  it.effect.each(
+    singleRefreshApprovalCases.flatMap(([name, unknown, expected]) =>
+      [2_000, 500].map((readAt): readonly [string, typeof unknown, typeof expected, number] => [
+        `${name} (read at ${readAt} ms)`,
+        unknown,
+        expected,
+        readAt
+      ])
+    )
+  )(
     "on a single refresh, %s",
-    ([, approvalUnknown, expected]) =>
+    ([, approvalUnknown, expected, readAt]) =>
       Effect.gen(function*() {
         const initialState: Domain.AppState = { pullRequests: [pullRequest], accounts: [], status: "idle" }
         const state = yield* SubscriptionRef.make(initialState)
@@ -210,7 +221,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
                     sourceBranch: "feature",
                     destinationBranch: "main",
                     creationDate: new Date(0),
-                    lastActivityDate: new Date(2_000),
+                    lastActivityDate: new Date(readAt),
                     approvedBy: [],
                     approvedByArns: [],
                     approvalRules: [],
@@ -237,9 +248,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
           )
         )
         expect(yield* Ref.get(upserted)).toEqual([expected])
-        // The read is newer than the cached row (2 s against 1 s), so the row moves to it: an older
-        // history read landing later is then dropped by the cache's revision guard.
-        expect(yield* Ref.get(stored)).toEqual([new Date(2_000).toISOString()])
+        expect(yield* Ref.get(stored)).toEqual([new Date(readAt).toISOString()])
       })
   )
 

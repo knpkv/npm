@@ -9,7 +9,7 @@
  * @internal
  */
 
-import { Clock, Effect, Option, Schema, SubscriptionRef } from "effect"
+import { Effect, Option, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { diffApprovalPools, diffComments, diffPR } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
@@ -239,11 +239,8 @@ export const makeRefreshSinglePR = (
       (account.profile === awsAccountId
         ? (yield* awsClient.getCallerIdentity(account)).accountId
         : awsAccountId)
-    // The later of the cached row and this read: a read newer than the row moves it forward, so the
-    // cache's revision guard drops an older read (the history sync's) that lands afterwards.
-    const lastModifiedDate = cached !== undefined
-      ? new Date(Math.max(cached.lastModifiedDate.getTime(), detail.lastActivityDate.getTime())).toISOString()
-      : yield* Clock.currentTimeMillis.pipe(Effect.map((nowMs) => new Date(nowMs).toISOString()))
+    // The read's own version: the cache's compare-and-set then stores it only if the row isn't newer.
+    const lastModifiedDate = detail.lastActivityDate.toISOString()
     const freshUpsert: UpsertInput = {
       id: prId,
       awsAccountId: durableAccountId,
