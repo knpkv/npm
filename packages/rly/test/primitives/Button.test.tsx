@@ -13,7 +13,14 @@ describe("Button", () => {
     expect(button?.getAttribute("type")).toBe("button")
     expect(button?.textContent).toContain("Approve")
     expect(button?.className).toContain(RLY_BUTTON_VARIANTS.variant.secondary.className)
-    expect(RLY_BUTTON_DEFAULT_VARIANTS).toEqual({ size: "default", variant: "secondary" })
+    expect(RLY_BUTTON_DEFAULT_VARIANTS).toEqual({ size: "dense", variant: "secondary" })
+  })
+
+  it("defaults to the dense size sized to its text, and keeps explicit sizes", () => {
+    expect(render(<Button>Save</Button>)?.className).toContain(RLY_BUTTON_VARIANTS.size.dense.className)
+    expect(render(<Button size="default">Save</Button>)?.className).toContain(
+      RLY_BUTTON_VARIANTS.size.default.className
+    )
   })
 
   it("preserves content geometry while loading", () => {

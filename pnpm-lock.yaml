@@ -1170,6 +1170,9 @@ importers:
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
+      '@playwright/test':
+        specifier: 1.63.0
+        version: 1.63.0
       '@types/node':
         specifier: ^26.6.4
         version: 26.6.4
@@ -1613,6 +1616,9 @@ importers:
       playwright:
         specifier: 1.63.0
         version: 1.63.0
+      postcss:
+        specifier: 8.5.23
+        version: 8.5.23
       react:
         specifier: ^19.3.0
         version: 19.3.0

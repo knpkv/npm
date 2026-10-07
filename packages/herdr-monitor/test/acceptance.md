@@ -8,27 +8,27 @@ the browser slot was released to guided-review.
 This validates desktop Chromium at tablet and phone viewports. No physical iPad
 or Safari acceptance has been performed.
 
-| Flow                                                                 | Result          |
-| -------------------------------------------------------------------- | --------------- |
-| Locked page exposes no published status                              | PASS            |
-| Invalid board identifier is rejected by the form                     | PASS            |
-| Keyboard login shows an empty board before publication               | PASS            |
-| Lock remains reachable on an empty board                             | PASS            |
-| Trusted CLI publication appears in the authenticated view            | PASS            |
-| Published HTML-like text remains text, with no image or link         | PASS            |
-| Clockify observation and agent elapsed duration have separate labels | PASS            |
-| 390 × 844 portrait layout has no horizontal overflow                 | PASS            |
-| 820 × 1180 portrait layout has no horizontal overflow                | PASS            |
-| 1180 × 820 landscape layout has no horizontal overflow               | PASS            |
-| Lighthouse accessibility snapshot                                    | PASS, score 100 |
-| Offline state hides status and keeps Lock reachable                  | PASS            |
-| Lock removes previous board title, ticket and card text from the DOM | PASS            |
-| Lock restores focus to the credential input                          | PASS            |
-| No application cookies, local storage or session storage             | PASS            |
-| Reconnection restores the explicitly published copy                  | PASS            |
-| Receipt-time ageing produces the stale state                         | PASS            |
-| Console contains only deliberately induced offline network errors    | PASS            |
-| No WebSocket connection                                              | PASS            |
+| Flow                                                                   | Result                |
+| ---------------------------------------------------------------------- | --------------------- |
+| Locked page exposes no published status                                | PASS                  |
+| Invalid board identifier is rejected by the form                       | PASS                  |
+| Keyboard login shows an empty board before publication                 | PASS                  |
+| Lock remains reachable on an empty board                               | PASS                  |
+| Trusted CLI publication appears in the authenticated view              | PASS                  |
+| Published HTML-like text remains text, with no image or link           | PASS                  |
+| Clockify observation and agent elapsed duration have separate labels   | PASS                  |
+| 390 × 844 portrait layout has no horizontal overflow                   | PASS                  |
+| 820 × 1180 portrait layout has no horizontal overflow                  | PASS                  |
+| 1180 × 820 landscape layout has no horizontal overflow                 | PASS                  |
+| Lighthouse accessibility snapshot                                      | PASS, score 100       |
+| Offline state keeps the last snapshot, labelled with its age, and Lock | PASS (pending re-run) |
+| Lock removes previous board title, ticket and card text from the DOM   | PASS                  |
+| Lock restores focus to the credential input                            | PASS                  |
+| No application cookies, local storage or session storage               | PASS                  |
+| Reconnection restores the explicitly published copy                    | PASS                  |
+| Receipt-time ageing produces the stale state                           | PASS                  |
+| Console contains only deliberately induced offline network errors      | PASS                  |
+| No WebSocket connection                                                | PASS                  |
 
 `browser-acceptance.py` repeats these flows with synthetic data and an on-page
 current-check indicator. It requires an explicitly granted browser slot, the

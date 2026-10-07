@@ -113,9 +113,9 @@ export const DiffWorkbench = ({
 
         <aside aria-label={visibleFindingsLabel} className={style("findings")} data-rly-diff-workbench-slot="findings">
           <header className={style("findingsHeader")}>
-            <span>Review evidence</span>
+            {/* The heading and its count in words: no eyebrow, no display figure. */}
             <h2>{visibleFindingsLabel}</h2>
-            <strong aria-label={`${findings.length} findings`}>{findings.length}</strong>
+            <span>{findings.length === 1 ? "1 finding" : `${findings.length} findings`}</span>
           </header>
           {findings.length === 0 ? (
             <div className={style("empty")}>{emptyFindings}</div>

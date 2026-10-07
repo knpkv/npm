@@ -14,7 +14,7 @@ const ButtonStates = () => (
         <Button data-button-size="compact" data-button-variant="primary" size="compact" variant="primary">
           Approve
         </Button>
-        <Button data-button-size="default" data-button-variant="secondary" leadingIcon="plus">
+        <Button data-button-size="dense" data-button-variant="secondary" leadingIcon="plus">
           Add note
         </Button>
         <Button data-button-variant="quiet" trailingIcon="arrow-right" variant="quiet">
@@ -24,6 +24,9 @@ const ButtonStates = () => (
       <div style={rowStyle}>
         <Button disabled>Unavailable</Button>
         <Button loading>Checking changes</Button>
+        <Button data-button-size="default" size="default">
+          Save draft
+        </Button>
         <Button data-button-size="principal" size="principal" variant="primary">
           Approve and continue
         </Button>
@@ -42,7 +45,7 @@ export const States: Story = {
     await expect(canvas.getByRole("button", { name: "Checking changes" })).toBeDisabled()
     await expect(canvas.getByRole("button", { name: "Approve and continue" })).toBeVisible()
     await expect(canvasElement.querySelectorAll("[data-button-variant]")).toHaveLength(3)
-    await expect(canvasElement.querySelectorAll("[data-button-size]")).toHaveLength(3)
+    await expect(canvasElement.querySelectorAll("[data-button-size]")).toHaveLength(4)
   },
   render: () => <ButtonStates />
 }
