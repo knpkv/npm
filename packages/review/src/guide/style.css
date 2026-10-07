@@ -1,5 +1,9 @@
 @import "@knpkv/rly/styles.css";
 
+/* Set by the export's head script until the inlined fonts are ready (at most a second). */
+html[data-review-fonts="loading"] body {
+  visibility: hidden;
+}
 .review-guide {
   --review-reading-ink: color-mix(in srgb, var(--rly-color-text-1) 60%, var(--rly-color-text-2));
   background: var(--rly-color-surface-2);
@@ -12,39 +16,55 @@
   color: inherit;
   text-underline-offset: 0.2em;
 }
-.review-nav {
+/* The side column: chapter links, then the reading controls. */
+.review-side {
   position: sticky;
   top: 0;
   height: 100vh;
   overflow-y: auto;
+  min-width: 0;
   padding: var(--rly-space-32) var(--rly-space-24);
-  border-right: 1px solid var(--rly-color-border-1);
+}
+.review-nav {
+  min-width: 0;
+}
+.review-nav-title {
+  color: var(--rly-color-text-1);
+  font-weight: 600;
+  margin: 0;
+  overflow-wrap: break-word;
 }
 .review-nav ol {
   list-style: none;
   padding: 0;
-  margin-block: var(--rly-space-32);
+  margin-block: var(--rly-space-16) var(--rly-space-32);
 }
-.review-nav li {
-  margin-block: var(--rly-space-12);
-}
+/* A long identifier in a chapter title wraps inside the column instead of widening the page. */
 .review-nav li a {
-  display: flex;
-  gap: var(--rly-space-12);
+  /* Block, not flex: a flex item keeps its text at min-content and an identifier could not wrap. */
+  display: block;
+  min-height: var(--rly-space-32);
+  overflow-wrap: break-word;
+  padding-block: var(--rly-space-4);
+  box-sizing: border-box;
   text-decoration: none;
-  line-height: 1.5;
+  line-height: var(--rly-type-body-line-height);
 }
 .review-nav li a:hover {
   text-decoration: underline;
 }
-.review-nav li span,
+.review-nav li a:focus-visible {
+  border-radius: var(--rly-radius-tag);
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 2px;
+}
 .review-muted {
   color: var(--rly-color-text-2);
 }
 .review-controls {
   display: grid;
   gap: var(--rly-space-16);
-  font-size: 0.875rem;
+  font-size: var(--rly-type-label-size);
 }
 .review-checkbox {
   display: flex;
@@ -83,8 +103,8 @@
   border-color: var(--rly-color-text-1);
 }
 .review-checkbox input:focus-visible {
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: 3px;
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 2px;
 }
 @media (forced-colors: active) {
   .review-checkbox input {
@@ -116,17 +136,24 @@
   border-color: var(--rly-color-border-2);
   color: var(--rly-color-text-1);
 }
+/* The column divider runs the full page height on the content side; the sticky side column is
+   only as tall as the window. */
 .review-content {
+  border-inline-start: 1px solid var(--rly-color-border-1);
   min-width: 0;
   padding: var(--rly-space-48) clamp(1rem, 4vw, 4rem);
   max-width: 108rem;
+  /* Paths and identifiers in prose are single long words; inherited, so every paragraph wraps them. */
+  overflow-wrap: break-word;
 }
 .review-header {
   padding-block-end: var(--rly-space-32);
 }
+/* A document's title, not a poster's: page-title type, capped so a long title stays a few lines. */
 .review-header h1 {
   margin-block: var(--rly-space-24);
   max-width: 28ch;
+  font-size: min(var(--rly-type-page-title-size), 2.75rem);
 }
 .review-explanation {
   padding-block: var(--rly-space-8);
@@ -134,6 +161,7 @@
 .review-roadmap {
   line-height: 1.8;
   padding-inline-start: var(--rly-space-24);
+  overflow-wrap: break-word;
 }
 .review-roadmap a {
   font-weight: 500;
@@ -146,14 +174,14 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--rly-space-12);
-  font-size: 0.875rem;
+  font-size: var(--rly-type-label-size);
 }
 .review-prose {
   max-width: 68ch;
-  font-size: 1rem;
+  font-size: var(--rly-type-body-size);
   line-height: 1.75;
   color: var(--review-reading-ink);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 .review-prose p {
   margin-block: var(--rly-space-16);
@@ -163,14 +191,18 @@
   padding: var(--rly-space-16);
   background: var(--rly-color-surface-2);
   border-radius: var(--rly-radius-field);
-  font-size: 0.875rem;
+  font-size: var(--rly-type-code-size);
+}
+.review-prose pre:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 2px;
 }
 .review-prose code {
   font-size: 0.875em;
 }
 .review-inline-markdown {
   color: var(--review-reading-ink);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   line-height: 1.6;
 }
 .review-inline-markdown code,
@@ -182,7 +214,7 @@
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-tag);
   padding: 0.08em 0.3em;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   -webkit-box-decoration-break: clone;
   box-decoration-break: clone;
 }
@@ -195,48 +227,76 @@
 .review-prose :is(h3, h4, h5, h6) {
   margin-block: var(--rly-space-24) var(--rly-space-8);
 }
-.review-prose .mermaid {
-  max-width: 100%;
+/* A diagram is an instrument: its own bordered panel with a caption bar, at a fixed height so
+   drawing it after first paint moves nothing below it. A taller diagram scrolls inside. */
+.review-prose .review-diagram {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
+  margin: var(--rly-space-24) 0;
+  overflow: hidden;
+}
+.review-diagram figcaption {
+  background: var(--rly-color-surface-2);
+  border-block-end: 1px solid var(--rly-color-border-1);
+  color: var(--rly-color-text-2);
+  font-size: var(--rly-type-label-size);
+  font-weight: 600;
+  padding: var(--rly-space-8) var(--rly-space-16);
+}
+.review-prose .review-diagram .mermaid {
+  background: transparent;
+  block-size: 24rem;
+  border-radius: 0;
+  box-sizing: border-box;
+  display: grid;
+  margin: 0;
+  overflow: auto;
+  /* safe: a diagram taller or wider than the frame starts at its top-left, where scrolling can reach it. */
+  place-items: safe center;
+  white-space: pre-wrap;
+}
+/* Once scripts run, the source waits unseen in its reserved space instead of flashing as text. */
+html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="true"]) {
+  color: transparent;
 }
 .review-prose svg {
   max-width: 100%;
   height: auto;
 }
+/* Edge labels sit on the panel's own surface in text ink, in both themes. */
+.review-diagram .edgeLabel,
+.review-diagram .edgeLabel p,
+.review-diagram .labelBkg {
+  background-color: var(--rly-color-surface-1) !important;
+  color: var(--rly-color-text-1) !important;
+}
+.review-diagram .edgeLabel rect {
+  fill: var(--rly-color-surface-1) !important;
+}
+.review-diagram .edgeLabel text {
+  fill: var(--rly-color-text-1) !important;
+}
+/* A note: a flat box with an even border; the kind is its first word, in the matching ink. */
 .review-prose .callout {
   margin-block: var(--rly-space-24);
   padding: var(--rly-space-16) var(--rly-space-24);
-  border-inline-start: 3px solid var(--rly-color-border-2);
-  background: var(--rly-color-surface-2);
-}
-.review-prose .callout-warning {
-  border-color: var(--rly-color-held-ink);
-  background: var(--rly-color-surface-1);
-}
-.review-prose .callout-important {
-  border-color: var(--rly-color-deploying-ink);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
   background: var(--rly-color-surface-1);
 }
 .review-prose .callout-label {
-  font-size: 0.75rem;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  color: var(--rly-color-text-1);
 }
 .review-chapter {
   border-top: 1px solid var(--rly-color-border-1);
   padding-block: var(--rly-space-40);
   scroll-margin-top: var(--rly-space-24);
 }
-.review-chapter-header {
-  display: flex;
-  align-items: baseline;
-  gap: var(--rly-space-16);
-}
-.review-chapter-header > span {
-  font-family: var(--rly-font-mono);
-  color: var(--rly-color-text-2);
-}
 .review-chapter h2 {
   margin: 0;
+  overflow-wrap: break-word;
 }
 .review-file {
   container-type: inline-size;
@@ -250,16 +310,21 @@
   gap: var(--rly-space-12);
   align-items: center;
   margin-block-end: var(--rly-space-12);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+/* A path is one unbreakable token: as a flex item it would keep its full width, so let it shrink and wrap. */
+.review-file-header code {
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 .review-file [data-rly-patch-diff] table {
   color: var(--review-reading-ink);
-  font-size: 0.875rem;
+  font-size: var(--rly-type-code-size);
   line-height: 1.65;
 }
 .review-file [data-rly-patch-diff] th {
   padding: var(--rly-space-8);
-  font-size: 0.75rem;
+  font-size: var(--rly-type-meta-size);
   text-align: left;
   color: var(--rly-color-text-2);
 }
@@ -276,9 +341,18 @@
 .review-finding .review-inline a {
   margin-inline-start: auto;
 }
+/* Every sub-head inside a finding, "Fix" included, shares one label style. */
+.review-finding .review-prose :is(h3, h4, h5, h6),
+.review-finding-fix {
+  color: var(--rly-color-text-1);
+  font-size: var(--rly-type-label-size);
+  font-weight: 600;
+  line-height: var(--rly-type-label-line-height);
+  margin-block: var(--rly-space-16) var(--rly-space-4);
+}
 .review-finding-title {
   margin-block: var(--rly-space-16);
-  font-size: 1.125rem;
+  font-size: var(--rly-type-body-large-size);
   line-height: 1.5;
   text-wrap: balance;
 }
@@ -311,19 +385,54 @@
   margin-block: var(--rly-space-16);
   align-items: baseline;
 }
+/* Flex items keep their longest word as a minimum width; let them shrink so long paths and names wrap. */
+.review-issues li > * {
+  min-width: 0;
+}
 .review-issues .review-issue-location {
-  font-size: 0.75rem;
+  font-size: var(--rly-type-meta-size);
   color: var(--rly-color-text-2);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+/* An inline-block keeps the link's underline off the code pills inside a summary. */
+.review-issues a code {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: break-word;
 }
 .review-usage {
   margin-block-start: var(--rly-space-24);
-  font-size: 0.875rem;
+  font-size: var(--rly-type-label-size);
 }
+/* A plain disclosure row with a drawn chevron instead of the browser's triangle. */
 .review-usage summary {
+  align-items: center;
+  border-radius: var(--rly-radius-tag);
   cursor: pointer;
   color: var(--rly-color-text-2);
-  padding-block: var(--rly-space-8);
+  display: flex;
+  gap: var(--rly-space-8);
+  list-style: none;
+  min-height: var(--rly-space-40);
+  width: fit-content;
+}
+.review-usage summary::-webkit-details-marker {
+  display: none;
+}
+.review-usage summary::after {
+  block-size: 0.45em;
+  border-block-end: 1.5px solid currentColor;
+  border-inline-end: 1.5px solid currentColor;
+  content: "";
+  inline-size: 0.45em;
+  transform: translateY(-0.15em) rotate(45deg);
+}
+.review-usage[open] summary::after {
+  transform: translateY(0.1em) rotate(-135deg);
+}
+.review-usage summary:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 2px;
 }
 .review-usage > section,
 .review-usage > div {
@@ -335,7 +444,7 @@
   gap: var(--rly-space-24);
 }
 .review-metrics dt {
-  font-size: 0.75rem;
+  font-size: var(--rly-type-meta-size);
   color: var(--rly-color-text-2);
 }
 .review-metrics dd {
@@ -353,24 +462,36 @@
 .review-skip:focus {
   top: 1rem;
 }
+/* Phone: the guide first, its title and summary on the first screen, then the chapter list, then the
+   reading controls. */
 @media (max-width: 800px) {
   .review-guide {
     grid-template-columns: minmax(0, 1fr);
   }
-  .review-nav {
-    position: static;
-    height: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--rly-color-border-1);
-    padding: var(--rly-space-24);
-  }
-  .review-nav ol {
-    margin-block: var(--rly-space-16);
+  .review-side {
+    display: contents;
   }
   .review-controls {
+    order: 3;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
+    gap: var(--rly-space-8) var(--rly-space-16);
+    padding: var(--rly-space-12) var(--rly-space-16);
+    border-top: 1px solid var(--rly-color-border-1);
+  }
+  .review-content {
+    border-inline-start: 0;
+    order: 1;
+  }
+  .review-nav {
+    order: 2;
+    border-top: 1px solid var(--rly-color-border-1);
+    padding: var(--rly-space-24) var(--rly-space-16);
+  }
+  .review-header h1 {
+    font-size: var(--rly-type-section-title-size);
+    overflow-wrap: break-word;
   }
   .review-content {
     padding: var(--rly-space-24) var(--rly-space-16);
@@ -395,7 +516,12 @@
     display: block;
   }
   .review-prose .mermaid[data-diagram-theme="dark"] {
-    background: #1f2020;
+    background: var(--rly-color-surface-1);
+  }
+  /* Paper has no scrolling: the frame grows to the whole diagram. */
+  .review-prose .review-diagram .mermaid {
+    block-size: auto;
+    overflow: visible;
   }
   .review-guide .review-reading > [role="tabpanel"][data-state="inactive"] {
     display: block;
@@ -403,8 +529,7 @@
   .review-guide .review-reading > [role="tablist"] {
     display: none;
   }
-  .review-nav,
-  .review-controls,
+  .review-side,
   .review-skip {
     display: none;
   }

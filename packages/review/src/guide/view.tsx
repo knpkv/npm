@@ -3,10 +3,41 @@
 import { findFile, type FileDiff, type Patch, PatchDiffView } from "@knpkv/rly/diff/patch"
 import { ThemeProvider } from "@knpkv/rly/foundations"
 import { Button, StateLabel, Surface, Tabs, Text } from "@knpkv/rly/primitives"
-import { memo, type ReactElement, useEffect, useId, useRef, useState } from "react"
+import { Fragment, memo, type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { renderInline, renderMarkdown } from "./markdown.js"
 import type { Findings, Guide, Issue, Usage } from "./model.js"
 import { bySeverity, placeAll, type Placed } from "./plan.js"
+
+/**
+ * A title with `<wbr>` before each camel-case hump of a long identifier, so a heading or link breaks
+ * between words of `verifySignedApproval…` instead of mid-word or leaving one letter on a line.
+ */
+const humane = (text: string): ReactNode =>
+  text.split(/(\s+)/u).map((word, index) =>
+    word.length < 16 ? (
+      word
+    ) : (
+      <Fragment key={index}>
+        {word.split(/(?<=[a-z0-9])(?=[A-Z])/u).map((part, at) => (
+          <Fragment key={at}>
+            {at === 0 ? null : <wbr />}
+            {part}
+          </Fragment>
+        ))}
+      </Fragment>
+    )
+  )
+
+/**
+ * The file as the diff should show it: a file's default mode (`100644`) on its only side is not news,
+ * so it is left out rather than shown as "Mode added: 100644".
+ */
+const withoutDefaultMode = (file: FileDiff): FileDiff => {
+  const { newMode, oldMode, ...rest } = file
+  const keepNew = newMode !== undefined && !(oldMode === undefined && newMode === "100644")
+  const keepOld = oldMode !== undefined && !(newMode === undefined && oldMode === "100644")
+  return { ...rest, ...(keepNew && { newMode }), ...(keepOld && { oldMode }) }
+}
 
 /** Keep Mermaid-owned DOM intact when unrelated diff or theme controls change. */
 const Prose = memo(({ text }: { readonly text: string }) => (
@@ -52,9 +83,7 @@ const FindingCard = ({
     {issue.explanation === undefined ? null : <Prose text={issue.explanation} />}
     {issue.status !== undefined || issue.recommendation === undefined ? null : (
       <>
-        <Text as="strong" variant="label">
-          Fix
-        </Text>
+        <h4 className="review-finding-fix">Fix</h4>
         <Prose text={issue.recommendation} />
       </>
     )}
@@ -110,7 +139,7 @@ export const GuideUsage = ({ usage }: { readonly usage: ReadonlyArray<Usage> | u
           </Text>
           <p className="review-muted">
             {run.scope}
-            {run.model === undefined ? "" : ` · ${run.model}`}
+            {run.model === undefined ? "" : `, ${run.model}`}
           </p>
           <dl className="review-metrics">
             <div>
@@ -134,7 +163,7 @@ export const GuideUsage = ({ usage }: { readonly usage: ReadonlyArray<Usage> | u
               <dd>
                 {run.cost === undefined
                   ? "Not recorded"
-                  : `${run.cost.currency} ${String(run.cost.amount)} · ${run.cost.basis}`}
+                  : `${run.cost.currency} ${String(run.cost.amount)}, ${run.cost.basis}`}
               </dd>
             </div>
           </dl>
@@ -145,11 +174,11 @@ export const GuideUsage = ({ usage }: { readonly usage: ReadonlyArray<Usage> | u
   return (
     <>
       <details className="review-usage" ref={ref}>
-        <summary>Execution · tokens, cost, and time</summary>
+        <summary>Execution: tokens, cost and time</summary>
         {receipt}
       </details>
       <section className="review-usage-print" aria-label="Execution evidence">
-        <h2>Execution · tokens, cost, and time</h2>
+        <h2>Execution: tokens, cost and time</h2>
         {receipt}
       </section>
     </>
@@ -187,9 +216,10 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
         </header>
         {summary === "" ? null : <Prose text={summary} />}
         <PatchDiffView
-          file={file}
+          file={withoutDefaultMode(file)}
           id={id}
-          mode={mode}
+          // A file that exists on one side only has nothing to show beside it: one column.
+          mode={file.status === "added" || file.status === "deleted" ? "stacked" : mode}
           wrap={wrap}
           renderAnnotation={(side, line) => {
             const issues = placed.filter(
@@ -219,40 +249,36 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
       <a className="review-skip" href={`#${fragmentId("content")}`}>
         Skip to changes
       </a>
-      <nav className="review-nav" aria-label="Guide chapters">
-        <Text as="p" variant="label">
-          CHANGE GUIDE & REVIEW
-        </Text>
-        <Text as="p" variant="body">
-          {guide.title}
-        </Text>
-        <ol>
-          {hasFindings ? (
-            <li>
-              <a href={`#${fragmentId("reading")}`} onClick={() => setReading("review")}>
-                Review
-              </a>
-            </li>
-          ) : null}
-          {guide.sections.map((section, index) => (
-            <li key={index}>
-              <a href={`#${fragmentId(`s${index + 1}`)}`}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                {section.title}
-              </a>
-            </li>
-          ))}
-          {guide.unplacedFiles.length > 0 ? (
-            <li>
-              <a href={`#${fragmentId("rest")}`}>Other files</a>
-            </li>
-          ) : null}
-          {general.length > 0 ? (
-            <li>
-              <a href={`#${fragmentId("general")}`}>Outside the diff</a>
-            </li>
-          ) : null}
-        </ol>
+      <div className="review-side">
+        <nav className="review-nav" aria-label="Guide chapters">
+          <Text as="p" className="review-nav-title" variant="label">
+            {humane(guide.title)}
+          </Text>
+          <ol>
+            {hasFindings ? (
+              <li>
+                <a href={`#${fragmentId("reading")}`} onClick={() => setReading("review")}>
+                  Review
+                </a>
+              </li>
+            ) : null}
+            {guide.sections.map((section, index) => (
+              <li key={index}>
+                <a href={`#${fragmentId(`s${index + 1}`)}`}>{humane(section.title)}</a>
+              </li>
+            ))}
+            {guide.unplacedFiles.length > 0 ? (
+              <li>
+                <a href={`#${fragmentId("rest")}`}>Other files</a>
+              </li>
+            ) : null}
+            {general.length > 0 ? (
+              <li>
+                <a href={`#${fragmentId("general")}`}>Outside the diff</a>
+              </li>
+            ) : null}
+          </ol>
+        </nav>
         <div className="review-controls">
           <Button size="compact" variant="secondary" onClick={() => setMode(mode === "split" ? "stacked" : "split")}>
             {mode === "split" ? "Unified view" : "Split view"}
@@ -272,7 +298,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
             </Button>
           </div>
         </div>
-      </nav>
+      </div>
       <main className="review-content" id={fragmentId("content")}>
         <header className="review-header">
           <div className="review-inline review-muted">
@@ -297,7 +323,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
             )}
           </div>
           <Text as="h1" variant="page-title">
-            {guide.title}
+            {humane(guide.title)}
           </Text>
           <Tabs
             aria-label="Read the change"
@@ -320,11 +346,10 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                     <ol className="review-roadmap">
                       {guide.sections.map((section, index) => (
                         <li key={index}>
-                          <a href={`#${fragmentId(`s${index + 1}`)}`}>{section.title}</a>
+                          <a href={`#${fragmentId(`s${index + 1}`)}`}>{humane(section.title)}</a>
                           {section.diffs.length === 0 ? null : (
                             <span className="review-muted">
-                              {" "}
-                              · {section.diffs.length} file{section.diffs.length === 1 ? "" : "s"}
+                              , {section.diffs.length} file{section.diffs.length === 1 ? "" : "s"}
                             </span>
                           )}
                         </li>
@@ -335,7 +360,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
               },
               {
                 value: "review",
-                label: `Review${findings.issues.length === 0 ? "" : ` · ${findings.issues.length}`}`,
+                label: `Review${findings.issues.length === 0 ? "" : ` (${findings.issues.length})`}`,
                 forceMount: true,
                 content: (
                   <Surface as="section" id={fragmentId("verdict")} className="review-verdict">
@@ -345,7 +370,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                     {findings.source === undefined ? (
                       <p className="review-muted">No review source supplied.</p>
                     ) : (
-                      <p className="review-muted">From {findings.source}</p>
+                      <p className="review-muted">Source: {findings.source}</p>
                     )}
                     <dl className="review-checklist">
                       {findings.checklist.map((check, index) => (
@@ -387,12 +412,9 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
         </header>
         {guide.sections.map((section, index) => (
           <section className="review-chapter" id={fragmentId(`s${index + 1}`)} key={index}>
-            <header className="review-chapter-header">
-              <span>{String(index + 1).padStart(2, "0")}</span>
-              <Text as="h2" variant="section-title">
-                {section.title}
-              </Text>
-            </header>
+            <Text as="h2" variant="section-title">
+              {humane(section.title)}
+            </Text>
             <Prose text={section.overview} />
             {section.diffs.map((diff) => {
               const file = findFile(patch, diff.file)
@@ -422,8 +444,8 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                   <code>
                     {issue.file}
                     {issue.line === undefined ? "" : `:${issue.line}`}
-                  </code>{" "}
-                  ·{" "}
+                  </code>
+                  :{" "}
                   {reason === "no-line"
                     ? "no line given"
                     : reason === "outside-hunks"
