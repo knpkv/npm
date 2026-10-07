@@ -308,8 +308,11 @@ export const CompactForcedColors: Story = {
     canvasElement.dataset.diffWorkbenchCompactPlayComplete = "true"
   },
   render: () => (
-    <main data-diff-workbench-compact="" style={{ ...pageStyle, inlineSize: "100%", maxInlineSize: "320px" }}>
-      <WorkbenchHarness presentation="compact" />
+    <main style={pageStyle}>
+      {/* The 320px slot sits inside the page padding, so the canary is 320px at every viewport. */}
+      <div data-diff-workbench-compact="" style={{ inlineSize: "100%", maxInlineSize: "320px" }}>
+        <WorkbenchHarness presentation="compact" />
+      </div>
     </main>
   )
 }

@@ -5,6 +5,8 @@
     border-radius: var(--rly-radius-group);
     container-type: inline-size;
     display: grid;
+    /* One bounded track: an implicit auto track can't shrink below its content, so it overflowed at 320. */
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
     min-inline-size: var(--rly-space-0);
     overflow: hidden;
   }
@@ -236,6 +238,7 @@
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
     gap: var(--rly-space-2);
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
     inline-size: 100%;
     min-block-size: 44px;
     padding: var(--rly-space-6) var(--rly-space-8);

@@ -272,3 +272,23 @@ test("split patch cells keep their add and remove signs in forced colours", asyn
   await expect(page.locator("[data-rly-patch-diff] table")).toBeVisible()
   expect(await signs()).toEqual({ added: ["\"+ \" / \"\"", "none"], removed: ["\"− \" / \"\"", "none"] })
 })
+
+test("keeps the indexed count clear of the title in the compact diff header", async ({ page }) => {
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ height: 900, width })
+    await page.goto(story("diff-diffheader--compact-forced-colors"))
+    const header = page.locator("#storybook-root header[data-rly-diff-layout]").first()
+    await expect(header).toBeVisible()
+    const overlap = await header.evaluate((element) => {
+      const title = element.querySelector("h1")?.getBoundingClientRect()
+      const count = element.querySelector("progress")?.previousElementSibling?.getBoundingClientRect()
+      if (title === undefined || count === undefined) return true
+      return !(count.bottom <= title.top || count.top >= title.bottom || count.right <= title.left ||
+        count.left >= title.right)
+    })
+    expect(overlap, `at ${width}px`).toBe(false)
+    expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), `at ${width}px`).toBe(
+      true
+    )
+  }
+})

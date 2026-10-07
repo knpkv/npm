@@ -5,14 +5,18 @@
     border-radius: var(--rly-radius-group);
     container-type: inline-size;
     display: grid;
+    /* One bounded track: an implicit auto track can't shrink below its content, so it overflowed at 320. */
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
     min-inline-size: var(--rly-space-0);
     overflow: hidden;
   }
 
+  /* Heading and count share a row while they fit; the count wraps below in a narrow tree. */
   .header {
-    align-items: end;
+    align-items: baseline;
     display: flex;
-    gap: var(--rly-space-16);
+    flex-wrap: wrap;
+    gap: var(--rly-space-4) var(--rly-space-16);
     justify-content: space-between;
     padding: var(--rly-space-20);
   }
@@ -245,6 +249,9 @@
   .statusIcon svg {
     block-size: var(--rly-space-16);
     inline-size: var(--rly-space-16);
+  }
+  .statusIcon svg {
+    display: block;
   }
 
   .loadingIcon {

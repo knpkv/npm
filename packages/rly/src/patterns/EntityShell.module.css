@@ -101,10 +101,6 @@
   }
 
   @container (max-width: 44rem) {
-    .root {
-      gap: var(--rly-space-32);
-    }
-
     .header {
       gap: var(--rly-space-24);
       padding-block-end: var(--rly-space-32);
