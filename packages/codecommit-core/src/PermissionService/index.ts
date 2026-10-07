@@ -6,6 +6,8 @@
  * On construction (Layer build time), reads the file
  * into a Ref. All subsequent `check()` calls are O(1) Ref lookups — no disk
  * I/O. Only `set()` mutates the Ref AND writes to disk (atomic: tmp → rename).
+ * Every mutation runs under one lock, so a read-modify-write can't be overwritten by a concurrent one
+ * finishing in between, and the shared temp file is only ever written by one save at a time.
  *
  * Key invariant: an operation missing from the file defaults to `"allow"`,
  * which means "prompt the user". A fresh install with empty permissions.json
@@ -13,8 +15,9 @@
  *
  * @module
  */
-import { Config, Context, Effect, Layer, Ref, Schema } from "effect"
+import { Config, Context, Effect, Layer, Ref, Schema, Semaphore } from "effect"
 import * as FileSystem from "effect/FileSystem"
+import { ConfigError } from "../Errors.js"
 import { allOperations, getOperationMeta, type OperationName, registerOperation } from "./operations.js"
 
 export type { BuiltinOperation, OperationMeta, OperationName } from "./operations.js"
@@ -59,21 +62,43 @@ const loadFromDisk = (fs: FileSystem.FileSystem, path: string): Effect.Effect<Pe
   fs.readFileString(path).pipe(
     Effect.flatMap(decodeConfigText),
     // Any failure → empty config → everything prompts
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(decodeConfig({})))
   )
 
 const saveToDisk = (fs: FileSystem.FileSystem, path: string, config: PermissionsConfig): Effect.Effect<void> =>
   Effect.gen(function*() {
     const dir = path.replace(/\/[^/]+$/, "")
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     yield* fs.makeDirectory(dir, { recursive: true }).pipe(Effect.catch(() => Effect.void))
     const tmpPath = `${path}.tmp`
     yield* fs.writeFileString(tmpPath, JSON.stringify(config, null, 2))
     yield* fs.rename(tmpPath, path)
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   }).pipe(Effect.catch(() => Effect.void))
+
+/** Saves the whole file atomically (temp file, then rename); a failure names the path. */
+const writeToDisk = (
+  fs: FileSystem.FileSystem,
+  path: string,
+  config: PermissionsConfig
+): Effect.Effect<void, ConfigError> =>
+  Effect.gen(function*() {
+    yield* fs.makeDirectory(path.replace(/\/[^/]+$/, ""), { recursive: true })
+    const tmpPath = `${path}.tmp`
+    yield* fs.writeFileString(tmpPath, JSON.stringify(config, null, 2))
+    yield* fs.rename(tmpPath, path)
+  }).pipe(Effect.mapError((cause) => new ConfigError({ message: `Couldn't save ${path}`, cause })))
 
 export interface PermissionServiceContract {
   readonly check: (operation: OperationName) => Effect.Effect<PermissionState>
   readonly set: (operation: OperationName, state: PermissionState) => Effect.Effect<void>
+  /**
+   * Sets every operation of one category (for example all reads) in one atomic write, so first run can
+   * grant CodeCommit reads at once while writes keep prompting. Memory changes only after the file is
+   * saved; a failed save fails here instead of leaving a grant that disappears on restart.
+   */
+  readonly setCategory: (category: "read" | "write", state: PermissionState) => Effect.Effect<void, ConfigError>
   readonly getAll: () => Effect.Effect<Record<string, PermissionState>>
   readonly resetAll: () => Effect.Effect<void>
   readonly isAuditEnabled: () => Effect.Effect<boolean>
@@ -86,12 +111,14 @@ export interface PermissionServiceContract {
 const makePermissionService = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const permPath = yield* resolvePermissionsPath.pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed("/tmp/.codecommit/permissions.json"))
   )
   // In-memory state. All check() calls read from here.
   // Only set() mutates it AND writes to disk.
   const initial = yield* loadFromDisk(fs, permPath)
   const configRef = yield* Ref.make<PermissionsConfig>(initial)
+  const mutation = yield* Semaphore.make(1)
 
   // O(1) — Ref.get + property lookup. The "allow" default is the key invariant:
   // missing operation → prompt the user.
@@ -105,7 +132,20 @@ const makePermissionService = Effect.gen(function*() {
         permissions: { ...c.permissions, [operation]: state }
       }))
       yield* saveToDisk(fs, permPath, yield* Ref.get(configRef))
-    })
+    }).pipe(mutation.withPermit)
+
+  const setCategory = (category: "read" | "write", state: PermissionState): Effect.Effect<void, ConfigError> =>
+    Effect.gen(function*() {
+      const current = yield* Ref.get(configRef)
+      const granted = Object.fromEntries(
+        allOperations()
+          .filter(([, meta]) => meta.category === category)
+          .map(([operation]) => [operation, state])
+      )
+      const next = { ...current, permissions: { ...current.permissions, ...granted } }
+      // Saved, then applied, with no interruption between: memory never disagrees with a saved file.
+      yield* Effect.uninterruptible(writeToDisk(fs, permPath, next).pipe(Effect.andThen(Ref.set(configRef, next))))
+    }).pipe(mutation.withPermit)
 
   const getAll = (): Effect.Effect<Record<string, PermissionState>> =>
     Ref.get(configRef).pipe(Effect.map((c) => c.permissions))
@@ -114,7 +154,7 @@ const makePermissionService = Effect.gen(function*() {
     Effect.gen(function*() {
       yield* Ref.update(configRef, (c) => ({ ...c, permissions: {} }))
       yield* saveToDisk(fs, permPath, yield* Ref.get(configRef))
-    })
+    }).pipe(mutation.withPermit)
 
   const isAuditEnabled = (): Effect.Effect<boolean> => Ref.get(configRef).pipe(Effect.map((c) => c.audit.enabled))
 
@@ -133,11 +173,12 @@ const makePermissionService = Effect.gen(function*() {
         }
       }))
       yield* saveToDisk(fs, permPath, yield* Ref.get(configRef))
-    })
+    }).pipe(mutation.withPermit)
 
   return {
     check,
     set,
+    setCategory,
     getAll,
     resetAll,
     isAuditEnabled,

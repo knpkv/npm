@@ -132,3 +132,39 @@ describe("PermissionService", () => {
       expect(yield* gate.getFirstPending()).toBeUndefined()
     }).pipe(Effect.provide(PermissionGateLiveTag.Default)))
 })
+
+describe("PermissionGateLive.resolveCategory", () => {
+  it.layer(PermissionGateLiveTag.Default)((it) => {
+    it.effect("releases every waiting read, and only reads, when the read category is answered", () =>
+      Effect.gen(function*() {
+        const gate = yield* PermissionGateLiveTag
+        const ask = (id: string, category: "read" | "write") =>
+          gate.request({ id, operation: "getBlob", category, context: id }).pipe(Effect.forkChild)
+        const identity = yield* ask("identity", "read")
+        yield* Effect.yieldNow
+        const listing = yield* ask("listing", "read")
+        yield* Effect.yieldNow
+        const merge = yield* ask("merge", "write")
+        yield* Effect.yieldNow
+
+        yield* gate.resolveCategory("read", "allow_once")
+        expect(yield* Fiber.join(identity)).toBe("allow_once")
+        expect(yield* Fiber.join(listing)).toBe("allow_once")
+        expect((yield* gate.getFirstPending())?.id).toBe("merge")
+        yield* gate.resolve("merge", "deny")
+        yield* Fiber.await(merge)
+      }))
+
+    it.effect("answers a prompt from a grant saved after its check, without anyone resolving it", () =>
+      Effect.gen(function*() {
+        const gate = yield* PermissionGateLiveTag
+        // The call checked "ask" before the grant; by the time it registers, the grant is saved.
+        const response = yield* gate.request(
+          { id: "late", operation: "getPullRequests", category: "read", context: "late" },
+          { standing: Effect.succeed("allow_once") }
+        )
+        expect(response).toBe("allow_once")
+        expect(yield* gate.getFirstPending()).toBeUndefined()
+      }))
+  })
+})

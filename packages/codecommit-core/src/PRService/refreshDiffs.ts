@@ -53,6 +53,7 @@ export const enrichDiffs = Effect.fn("enrichDiffs")(
     const prRepo = yield* PullRequestRepo
 
     const needsEnrichment = yield* prRepo.findMissingDiffStats().pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catchIf(() => true, () => Effect.succeed([]))
     )
 
@@ -89,6 +90,7 @@ export const enrichDiffs = Effect.fn("enrichDiffs")(
           filesModified: r.filesModified,
           filesDeleted: r.filesDeleted
         }, { repositoryName: r.repositoryName, accountRegion: r.accountRegion }).pipe(
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           Effect.catchIf(() => true, () => Effect.void)
         )
       },

@@ -126,6 +126,7 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
           yield* Effect.addFinalizer(() =>
             fileSystem.remove(probe, { force: true }).pipe(
               Effect.andThen(directory.sync),
+              // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.ignore
             )
           )

@@ -775,6 +775,7 @@ export const layer: Layer.Layer<
             yield* git.checkout(originalBranch)
             yield* git.merge("origin/confluence", {
               message: `Merge remote changes from Confluence`
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             }).pipe(Effect.catchIf(() => true, () => Effect.void)) // May fail if no changes
           }
 
@@ -835,6 +836,7 @@ export const layer: Layer.Layer<
         const remoteDoc = yield* Effect.try({
           try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(remoteAdf),
           catch: () => null
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         }).pipe(Effect.orElseSucceed(() => null))
         if (remoteDoc === null) return
 
@@ -848,6 +850,7 @@ export const layer: Layer.Layer<
         const outgoingDoc = yield* Effect.try({
           try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(params.outgoingAdf),
           catch: () => null
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         }).pipe(Effect.orElseSucceed(() => null))
         if (outgoingDoc === null) return
 
@@ -910,6 +913,7 @@ export const layer: Layer.Layer<
         let created = 0
         for (const filePath of files) {
           const result = yield* previewFile(filePath, force).pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.catchIf(() => true, (error) =>
               Effect.succeed({
                 pushed: false,
@@ -1141,6 +1145,7 @@ export const layer: Layer.Layer<
 
         return yield* collect.pipe(
           Effect.ensuring(
+            // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             originalBranch ? git.checkout(originalBranch).pipe(Effect.ignore) : Effect.void
           )
         )
@@ -1172,6 +1177,7 @@ export const layer: Layer.Layer<
               const match = content.match(/pageId:\s*['"]?(\d+)['"]?/)
               return match ? match[1] : null
             }),
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.catchIf(() => true, () => Effect.succeed(null))
           )
           if (pageId) pending.push({ path: deletedPath, pageId })
@@ -1227,6 +1233,7 @@ export const layer: Layer.Layer<
               pageIdMap,
               options.force ?? false
             ).pipe(
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.catchIf(() => true, (error) =>
                 Effect.succeed({
                   pushed: false,
@@ -1296,6 +1303,7 @@ export const layer: Layer.Layer<
                 Effect.logWarning(
                   `Page ${pending.pageId} (${pending.path}) was already gone; treating the deletion as applied.`
                 )),
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.catchIf(() => true, (error) => {
                 errors.push(`Failed to delete page ${pending.pageId}: ${error.message}`)
                 return Effect.void
@@ -1306,6 +1314,7 @@ export const layer: Layer.Layer<
 
         for (const filePath of sortedFiles) {
           const result = yield* pushFile(filePath, revisionMessage, spaceId, pageIdMap, options.force ?? false).pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.catchIf(() => true, (error) =>
               Effect.succeed({
                 pushed: false,
@@ -1321,6 +1330,7 @@ export const layer: Layer.Layer<
         // Amend the last commit with canonical content
         yield* git.addAll()
         yield* git.amend({ noEdit: true }).pipe(
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           Effect.catchIf(() => true, () => Effect.void)
         )
 

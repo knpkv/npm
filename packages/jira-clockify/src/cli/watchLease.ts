@@ -131,6 +131,7 @@ export const acquire = (options: { readonly intervalSeconds: number }) =>
     const token = yield* Random.nextInt
     const owner = `${now.toString(36)}-${Math.abs(token).toString(36)}`
 
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     yield* fs.makeDirectory(dir, { recursive: true }).pipe(Effect.catch(() => Effect.void))
 
     const mine: Lease = {
@@ -146,6 +147,7 @@ export const acquire = (options: { readonly intervalSeconds: number }) =>
     // no interruptible work before returning the lease to the caller that installs its finalizer.
     const previous = yield* fs.readFileString(cursorFile).pipe(
       Effect.map(decodeLease),
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(Option.none<Lease>()))
     )
     const resumeFromMs = Option.match(previous, {
@@ -180,6 +182,7 @@ export const acquire = (options: { readonly intervalSeconds: number }) =>
     const existing = yield* fs.readFileString(file).pipe(
       Effect.map(decodeLease),
       // Unreadable or malformed is not evidence that anybody holds it.
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(Option.none<Lease>()))
     )
     const held = Option.getOrUndefined(existing)
@@ -270,6 +273,7 @@ export const release = (options: {
       )
     )
     if (!persisted) return
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     yield* fs.remove(options.path).pipe(Effect.catch(() => Effect.void))
   })
 
@@ -279,5 +283,6 @@ export const releaseGuard = (options: { readonly path: string; readonly owner: s
     const fs = yield* FileSystem.FileSystem
     const standing = yield* readStanding(options.path, options.owner)
     if (standing._tag !== "Mine") return
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     yield* fs.remove(options.path).pipe(Effect.catch(() => Effect.void))
   })

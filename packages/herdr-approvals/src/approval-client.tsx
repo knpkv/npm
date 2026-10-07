@@ -43,6 +43,10 @@ import {
 import { FleetShell, FleetWorkPanel, fleetWorkRequestStateFromResult, fleetWorkStateFromRequest } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 import { SanitizedJobRecord } from "./approval-request.js"
+import { answerForStatus, answerSettles, answerText, DecisionAnswer } from "./countdown-model.js"
+import type { DecisionStatus } from "./countdown-view.js"
+import { useHubNow } from "./hub-clock.js"
+import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
@@ -134,10 +138,31 @@ const loadPendingApprovalTarget = Effect.fn("Dashboard.loadPendingApprovalTarget
 })
 
 const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecision) {
-  yield* fetchJson(SanitizedJobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
+  return yield* fetchJson(SanitizedJobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
     method: "POST"
   })
 })
+
+/**
+ * The hub's answer to one decision: the record it returned, a status, or no answer. A lost
+ * connection or an unreadable success body leaves the outcome open.
+ */
+const decisionAnswerOf = (
+  decision: ApprovalDecision,
+  exit: Exit.Exit<SanitizedJobRecord, BrowserNetworkError | BrowserStatusError | BrowserJsonError>
+): DecisionAnswer => {
+  if (Exit.isSuccess(exit)) return DecisionAnswer.Accepted({ decision: decision.decision, record: exit.value })
+  const failure = Cause.findErrorOption(exit.cause)
+  if (Option.isNone(failure)) return DecisionAnswer.Uncertain({ status: null })
+  switch (failure.value._tag) {
+    case "BrowserStatusError":
+      return answerForStatus(failure.value.status)
+    case "BrowserJsonError":
+      return DecisionAnswer.Unreadable()
+    case "BrowserNetworkError":
+      return DecisionAnswer.Uncertain({ status: null })
+  }
+}
 
 const loadChat = fetchJson(ChatHistory, "/v1/chat")
 const sendChat = Effect.fn("CoordinatorChat.send")(function* (request: ChatRequest) {
@@ -399,6 +424,8 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     mode: "promiseExit"
   })
   const [busyJobId, setBusyJobId] = useAtom(atoms.busyJob)
+  const [sendingDecision, setSendingDecision] = useState<ApprovalDecision | null>(null)
+  const [decisionStatus, setDecisionStatus] = useState<DecisionStatus | null>(null)
   const [busyChat, setBusyChat] = useAtom(atoms.busyChat)
   const [pull, setPull] = useAtom(atoms.pull)
   const [deepLinkTarget, setDeepLinkTarget] = useState<PendingApprovalTargetType | null>(null)
@@ -446,10 +473,30 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     }
     resetPull()
   }
+  // The latest rendered snapshot's time, read when a decision's answer arrives (the render that
+  // created onDecision may be older by then).
+  const latestObservedAt = useRef(0)
   const onDecision = async (decision: ApprovalDecision): Promise<void> => {
+    // The decided request's expiry, read from the snapshot it was decided on.
+    const expiresAt = currentSnapshot === null ? undefined : decidableExpiry(currentSnapshot, decision.jobId)
     setBusyJobId(decision.jobId)
+    setSendingDecision(decision)
+    setDecisionStatus(null)
     const exit = await runDecision(decision)
     setBusyJobId(null)
+    setSendingDecision(null)
+    const answer = decisionAnswerOf(decision, exit)
+    setDecisionStatus({
+      expiresAt,
+      jobId: decision.jobId,
+      // The snapshot on screen now, when the answer arrived; only a later read may unlock the request.
+      observedAt: latestObservedAt.current,
+      outcome: answerOutcome(answer),
+      settles: answerSettles(answer),
+      text: answerText(answer)
+    })
+    // Whatever the answer, the queue is re-read so the page shows the hub's own state next.
+    if (!Exit.isSuccess(exit)) refreshDashboard()
     if (Exit.isSuccess(exit)) {
       setDeepLinkTarget(null)
       refreshDashboard()
@@ -598,6 +645,14 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       target.removeAttribute("data-approval-target")
     }
   }, [currentSnapshot?.observedAt, deepLinkTarget])
+  useEffect(() => {
+    if (currentSnapshot !== null) latestObservedAt.current = currentSnapshot.observedAt
+  }, [currentSnapshot?.observedAt])
+  // The Work board's request clocks read hub time, like the Approvals countdown.
+  const workNow = useHubNow(
+    currentSnapshot?.observedAt ?? 0,
+    currentSnapshot?.pendingApprovals.local.map((record) => record.approvalExpiresAt ?? null) ?? []
+  )
   if (currentSnapshot === null) {
     return (
       <>
@@ -615,6 +670,13 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     current.work === null ? null : (
       <WorkBoard
         {...(workSelection.goalId === null ? {} : { initialGoalId: workSelection.goalId })}
+        decisions={workRequestDecisionsFor({
+          now: workNow,
+          onDecision: (decision) => void onDecision(decision),
+          sending: sendingDecision,
+          snapshot: current,
+          status: decisionStatus
+        })}
         initialWindow={workSelection.window}
         navigation={workNavigationHref}
         snapshots={current.work}
@@ -627,6 +689,8 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       approvalOnly={canonical}
       busyJobId={busyJobId}
       chatBusy={busyChat}
+      decisionStatus={decisionStatus}
+      sendingDecision={sendingDecision}
       historyLoading={historyBusy}
       pendingLoading={pendingBusy}
       notificationState={notificationState}

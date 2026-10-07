@@ -218,7 +218,12 @@ const seedWorkDatabase = (
   database.close()
 }
 
-const history = [
+const history: readonly [
+  WorkGoalCheckpointType,
+  WorkGoalCheckpointType,
+  WorkGoalCheckpointType,
+  WorkGoalCheckpointType
+] = [
   checkpoint("event-created", 0, "planned", "local"),
   checkpoint("event-working", 10 * day, "working", "local"),
   checkpoint("event-blocked", 25 * day, "blocked", "local"),
@@ -1145,7 +1150,7 @@ describe("durable Work projection", () => {
       const store = yield* openScopedStore(path)
       store.close()
 
-      const legacyEvents = history.slice(0, 2)
+      const legacyEvents: readonly [WorkGoalCheckpointType, WorkGoalCheckpointType] = [history[0], history[1]]
       const database = fixtureDatabase(path)
       database.prepare(
         "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
@@ -1218,7 +1223,7 @@ describe("durable Work projection", () => {
       const initial = yield* openScopedStore(path)
       initial.close()
 
-      const legacyEvents = history.slice(0, 2)
+      const legacyEvents: readonly [WorkGoalCheckpointType, WorkGoalCheckpointType] = [history[0], history[1]]
       const secondEvent = legacyEvents[1]
       if (secondEvent === undefined) return yield* Effect.die("legacy fixture missing its second event")
       const database = fixtureDatabase(path)
@@ -1280,7 +1285,7 @@ describe("durable Work projection", () => {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-compact-transaction-"))
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
       const path = join(directory, "work.sqlite")
-      const events = history.slice(0, 2)
+      const events: readonly [WorkGoalCheckpointType, WorkGoalCheckpointType] = [history[0], history[1]]
       const secondEvent = events[1]
       if (secondEvent === undefined) return yield* Effect.die("compact transaction fixture missing its second event")
       const opened = yield* openScopedStore(path)
@@ -2376,7 +2381,7 @@ database.close()`,
       const reopened = yield* openScopedStore(path)
       const service = yield* makeWorkService(reopened.store)
       expect(yield* service.claim(claim)).toMatchObject({ operationId: claim.operationId, revision: 1 })
-      const overflow = {
+      const overflow: WorkLaneClaim = {
         ...claim,
         expectedRevision: 1,
         operationId: "operation-cap-overflow",
@@ -3363,7 +3368,7 @@ database.close()`,
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
       const path = join(directory, "work.sqlite")
       const owner = { id: "owner:current-migration", name: "Current migration owner" }
-      const lane = {
+      const lane: WorkLaneClaimed = {
         branch: "feat/current-migration",
         expectedRevision: 1,
         goalId: "goal:current-migration",
@@ -3592,7 +3597,7 @@ database.close()`,
       const advancedCurrentLanePath = join(directory, "advanced-current-v2-lane.sqlite")
       copyFileSync(runningLifecyclePath, advancedCurrentLanePath)
       const advancedCurrentLane = fixtureDatabase(advancedCurrentLanePath)
-      const advancedCurrentClaim = {
+      const advancedCurrentClaim: WorkLaneClaimed = {
         ...lane,
         expectedRevision: lane.revision,
         operationId: "operation:advanced-current-v2",

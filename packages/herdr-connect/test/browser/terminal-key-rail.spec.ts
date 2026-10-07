@@ -7,7 +7,7 @@ type GhosttyTerminal = {
   readonly onData: (handler: (value: string) => void) => { readonly dispose: () => void }
   readonly open: (element: HTMLElement) => void
   readonly input: (value: string, wasUserInput?: boolean) => void
-  readonly write: (value: string) => void
+  readonly write: (value: string | Uint8Array) => void
   readonly dispose: () => void
 }
 

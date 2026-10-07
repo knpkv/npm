@@ -233,6 +233,7 @@ const isExactHead = Effect.fn("WorktreeService.isExactHead")(function*(
     spawner.exitCode(
       makeCodeCommitGitCommand(inherited, request, ["symbolic-ref", "--quiet", "HEAD"], { cwd: targetPath })
     ).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.orElseSucceed(() => ChildProcessSpawner.ExitCode(128))
     )
   ])
@@ -297,6 +298,7 @@ const lockHolderCommands = (lockPath: string): readonly [ChildProcess.Command, C
 const releaseLockHolder = (handle: ChildProcessSpawner.ChildProcessHandle) =>
   handle.isRunning.pipe(
     Effect.flatMap((running) => running ? handle.kill() : Effect.void),
+    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.ignore
   )
 

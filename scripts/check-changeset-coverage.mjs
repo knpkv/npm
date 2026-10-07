@@ -9673,6 +9673,11 @@ const resolveMergeBase = Effect.fn("ChangesetCoverage.resolveMergeBase")(
         if (explicitPendingBase) {
           return yield* fail(`Selected base ${candidate} must exactly match pending merge head ${pendingMergeHead}`)
         }
+        // Another worktree's fetch can advance the base branch while a merge is pending. A head the base
+        // branch already contains is still released code, so compare against the head itself; a head the
+        // base branch does not contain (an unreleased feature branch) keeps failing.
+        const released = yield* gitOption(git, ["merge-base", "--is-ancestor", pendingMergeHead, candidateCommit])
+        if (released !== undefined) return pendingMergeHead
         continue
       }
       // The pending tree already contains this base's released changes. Compare the
@@ -10188,6 +10193,15 @@ const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelf
   yield* git(["branch", "-m", "main", "release/x"])
   const noExactImplicitBase = yield* resolveMergeBase(git, undefined, undefined, pending).pipe(Effect.flip)
   yield* equal(noExactImplicitBase.reason.includes("exact pending merge head"), true)
+  // Another lane's fetch advances origin/main past the pending head: the head is still released code.
+  const advanced = yield* git(["commit-tree", `${released}^{tree}`, "-p", released, "-m", "advanced upstream"])
+  yield* git(["update-ref", "refs/remotes/origin/main", advanced])
+  yield* equal(yield* resolveMergeBase(git, undefined, undefined, pending), released)
+  yield* equal(yield* resolveMergeBase(git, undefined, "main", pending), released)
+  // An explicit base still has to name the pending head exactly.
+  const explicitAdvanced = yield* resolveMergeBase(git, "origin/main", undefined, pending).pipe(Effect.flip)
+  yield* equal(explicitAdvanced.reason.includes("must exactly match"), true)
+  yield* git(["update-ref", "refs/remotes/origin/main", initial])
   const missingBase = yield* resolveMergeBase(git, "missing", undefined, pending).pipe(Effect.flip)
   yield* equal(missingBase.reason.includes("Could not resolve"), true)
   // Non-main release baselines require an explicit choice, preserving coverage
