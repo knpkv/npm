@@ -553,7 +553,12 @@ describe("StackedBars", () => {
       <StackedBars {...props} onSelectionChange={onSelectionChange} selection={selection} />
     )
     await act(async () => root.render(view(null)))
-    act(() => void container.querySelectorAll("svg:not([class*='band']) g")[1]?.dispatchEvent(new MouseEvent("click", { bubbles: true })))
+    act(
+      () =>
+        void container
+          .querySelectorAll("svg:not([class*='band']) g")[1]
+          ?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    )
     await act(async () => root.render(view({ from: 4, to: 4 })))
     act(
       () =>

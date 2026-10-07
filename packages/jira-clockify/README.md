@@ -10,9 +10,11 @@ Built with Effect-TS and [@opentui/react](https://github.com/anomalyco/opentui).
 pnpm add @knpkv/jira-clockify
 ```
 
-Or link globally:
+Or link globally from this repository. The linked `jcf` runs the build output, so build it and the
+workspace packages it imports first:
 
 ```bash
+pnpm --filter "@knpkv/jira-clockify..." build
 cd packages/jira-clockify && pnpm link --global
 ```
 

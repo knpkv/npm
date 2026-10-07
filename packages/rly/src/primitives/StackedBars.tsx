@@ -274,7 +274,8 @@ export const StackedBars = ({
       setCursor(null)
       setPendingTap(null)
     }
-    emitted.current = selectedFrom === undefined || selectedTo === undefined ? null : { from: selectedFrom, to: selectedTo }
+    emitted.current =
+      selectedFrom === undefined || selectedTo === undefined ? null : { from: selectedFrom, to: selectedTo }
   }, [selectedFrom, selectedTo])
   const [announcement, setAnnouncement] = useState("")
   // The words, not the formatter's identity, decide when to announce, so parent renders don't postpone it.
