@@ -4,6 +4,7 @@ import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import { findFocusRingViolations } from "./focus-rings.js"
@@ -71,12 +72,12 @@ const program = Effect.gen(function*() {
   yield* Console.log(`focus rings checked ${files.length} stylesheets`)
 })
 
+// The entry point builds Node's platform services as a layer around the one-shot program.
 NodeRuntime.runMain(
-  program.pipe(
-    Effect.tapError((error) => Console.error(error.message)),
-    // The script's entry point: it provides Node's platform services once, here.
-    // @effect-diagnostics-next-line strictEffectProvide:off
-    Effect.provide(NodeServices.layer)
+  Layer.effectDiscard(program.pipe(Effect.tapError((error) => Console.error(error.message)))).pipe(
+    Layer.provide(NodeServices.layer),
+    Layer.build,
+    Effect.scoped
   ),
   { disableErrorReporting: true }
 )
