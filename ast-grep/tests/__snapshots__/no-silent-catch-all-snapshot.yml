@@ -1,0 +1,24 @@
+id: no-silent-catch-all
+snapshots:
+  ? |
+    const ignored = effect.pipe(Effect.catchAll(() => Effect.void))
+  : labels:
+      - source: Effect.catchAll(() => Effect.void)
+        style: primary
+        start: 28
+        end: 62
+      - source: Effect.void
+        style: secondary
+        start: 50
+        end: 61
+  ? |
+    const recovered = effect.pipe(Effect.catchAll(() => Effect.succeed(fallback)))
+  : labels:
+      - source: Effect.catchAll(() => Effect.succeed(fallback))
+        style: primary
+        start: 30
+        end: 77
+      - source: Effect.succeed(fallback)
+        style: secondary
+        start: 52
+        end: 76

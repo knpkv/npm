@@ -15,6 +15,14 @@ style preferences into noisy CI failures.
   the rules from `sgconfig.yml`, including the Effect-specific rules in
   `ast-grep/rules/effect` and TypeScript-wide rules in
   `ast-grep/rules/typescript`.
+- `scripts/check-ast-grep-rule-languages.mjs` (in `pnpm lint:config:static`)
+  requires every rule to have an invalid fixture in `ast-grep/tests`. It also
+  checks that every `files` glob selects files `sgconfig.yml` parses as the rule's
+  `language`: `languageGlobs` maps `.ts` to `tsx`, so a rule that names the
+  wrong language never runs. It then writes each rule's first invalid fixture to
+  a path every one of its globs selects and requires a finding there under the
+  real config. `ast-grep test` alone parses fixtures in the rule's own language
+  and cannot see this.
 - `pnpm lint:eslint` runs the shared ESLint config and local ESLint rules.
 - `pnpm lint:oxlint` runs every vendored anti-slop rule at error severity and
   requires zero diagnostics. There is no debt baseline or update command: any

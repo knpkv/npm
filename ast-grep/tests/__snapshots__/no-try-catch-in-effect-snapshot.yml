@@ -1,0 +1,31 @@
+id: no-try-catch-in-effect
+snapshots:
+  ? |
+    const program = Effect.gen(function* () {
+      try {
+        return parse(text)
+      } catch {
+        return undefined
+      }
+    })
+  : labels:
+      - source: |-
+          try {
+              return parse(text)
+            } catch {
+              return undefined
+            }
+        style: primary
+        start: 44
+        end: 109
+      - source: |-
+          Effect.gen(function* () {
+            try {
+              return parse(text)
+            } catch {
+              return undefined
+            }
+          })
+        style: secondary
+        start: 16
+        end: 112

@@ -1,0 +1,17 @@
+id: no-runpromise-inside-effect
+valid:
+  - |
+    const program = Effect.gen(function* () {
+      return yield* inner
+    })
+  - |
+    void Effect.runPromise(program)
+invalid:
+  - |
+    const program = Effect.gen(function* () {
+      return yield* Effect.promise(() => Effect.runPromise(inner))
+    })
+  - |
+    const program = Effect.gen(function* () {
+      return Effect.runSync(inner)
+    })

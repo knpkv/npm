@@ -1,0 +1,11 @@
+id: no-instanceof
+valid:
+  - |
+    const isMissing = Predicate.isTagged(error, "NotFound")
+  - |
+    const instance = "instanceof"
+invalid:
+  - |
+    if (error instanceof NotFound) return
+  - |
+    const isDate = value instanceof Date

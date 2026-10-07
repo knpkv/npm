@@ -1,0 +1,15 @@
+id: no-throw-in-effect-generator
+valid:
+  - |
+    const program = Effect.gen(function* () {
+      return yield* new ParseFailure({ input })
+    })
+  - |
+    function parse(input) {
+      throw new ParseFailure({ input })
+    }
+invalid:
+  - |
+    const program = Effect.gen(function* () {
+      throw new ParseFailure({ input })
+    })

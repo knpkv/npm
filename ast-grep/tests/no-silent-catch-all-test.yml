@@ -1,0 +1,11 @@
+id: no-silent-catch-all
+valid:
+  - |
+    const recovered = effect.pipe(Effect.catchAll((error) => Effect.fail(new Wrapped({ cause: error }))))
+  - |
+    const logged = effect.pipe(Effect.catchAll((error) => Effect.logWarning(error).pipe(Effect.as(fallback), Effect.andThen(Effect.succeed(fallback)))))
+invalid:
+  - |
+    const recovered = effect.pipe(Effect.catchAll(() => Effect.succeed(fallback)))
+  - |
+    const ignored = effect.pipe(Effect.catchAll(() => Effect.void))

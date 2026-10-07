@@ -1,0 +1,15 @@
+id: no-stale-effect-v3-api
+valid:
+  - |
+    class Users extends Context.Service<Users, UsersShape>()("Users") {}
+  - |
+    const recovered = effect.pipe(Effect.catch(() => Effect.succeed(fallback)))
+invalid:
+  - |
+    class Users extends Context.Tag("Users")<Users, UsersShape>() {}
+  - |
+    const recovered = effect.pipe(Effect.catchAll(() => Effect.succeed(fallback)))
+  - |
+    const program = Effect.gen(this, function* () {
+      return 1
+    })
