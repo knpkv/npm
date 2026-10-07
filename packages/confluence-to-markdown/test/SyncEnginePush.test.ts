@@ -183,7 +183,7 @@ const TestLayer = (params: {
       addAll: () => Ref.update(params.gitCalls, (c) => ({ ...c, addAll: c.addAll + 1 })),
       amend: () => Effect.void,
       updateBranch: () => Ref.update(params.gitCalls, (c) => ({ ...c, updateBranch: c.updateBranch + 1 })),
-      validateGit: () => Effect.void,
+      validateGit: () => Effect.succeed("git version 2.47.0"),
       init: () => Effect.void,
       status: () => Effect.die("not used"),
       commit: () => Effect.die("not used"),

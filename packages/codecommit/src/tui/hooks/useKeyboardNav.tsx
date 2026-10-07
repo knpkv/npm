@@ -381,7 +381,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
             const nextIdx = idx <= 0 ? dateValues.length - 1 : idx - 1
             setQuickFilterValues({ ...quickFilterValues, date: dateValues[nextIdx]! })
           } else if (quickFilterType === "status") {
-            const statusValues = ["approved", "pending", "mergeable", "conflicts"]
+            const statusValues = ["approved", "pending", "unknown", "mergeable", "conflicts"]
             const currentVal = quickFilterValues.status || "approved"
             const idx = statusValues.indexOf(currentVal)
             const nextIdx = idx <= 0 ? statusValues.length - 1 : idx - 1
@@ -421,7 +421,7 @@ export function useKeyboardNav({ onOpenInBrowser, onQuit }: UseKeyboardNavOption
             const nextIdx = idx >= dateValues.length - 1 ? 0 : idx + 1
             setQuickFilterValues({ ...quickFilterValues, date: dateValues[nextIdx]! })
           } else if (quickFilterType === "status") {
-            const statusValues = ["approved", "pending", "mergeable", "conflicts"]
+            const statusValues = ["approved", "pending", "unknown", "mergeable", "conflicts"]
             const currentVal = quickFilterValues.status || "approved"
             const idx = statusValues.indexOf(currentVal)
             const nextIdx = idx >= statusValues.length - 1 ? 0 : idx + 1

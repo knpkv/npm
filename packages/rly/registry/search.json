@@ -1142,12 +1142,15 @@
         "compact",
         "confluence",
         "default",
+        "hidden",
         "identify",
         "jira",
+        "name",
         "pattern",
         "service",
         "servicemark",
-        "size"
+        "size",
+        "visible"
       ]
     },
     {

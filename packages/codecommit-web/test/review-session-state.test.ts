@@ -186,7 +186,7 @@ describe("Relay finding dispositions", () => {
 
   it("does not rebind an ordinal finding turn to a changed rerun finding", () => {
     const previous = {
-      pullRequestId: "42",
+      pullRequestId: PullRequestId.make("42"),
       revisionId: "revision-1",
       baseCommit: "a".repeat(40),
       headCommit: "b".repeat(40),

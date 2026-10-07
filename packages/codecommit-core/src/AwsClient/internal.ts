@@ -31,7 +31,7 @@ import { Duration, Effect, Schedule, Schema } from "effect"
 import { HttpClient } from "effect/http"
 import * as Predicate from "effect/Predicate"
 import { AwsClientConfig, type AwsClientConfigContract, type AwsCredentialIdentity } from "../AwsClientConfig.js"
-import type { Account, AwsProfileName, AwsRegion } from "../Domain.js"
+import { type Account, ApprovalUnknownReason, type AwsProfileName, type AwsRegion } from "../Domain.js"
 import { AwsApiError, AwsCredentialError } from "../Errors.js"
 
 export { AwsApiError, AwsCredentialError } from "../Errors.js"
@@ -267,6 +267,12 @@ export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequ
   approvedBy: Schema.Array(Schema.String),
   approvedByArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
   repoAccountId: Schema.optional(Schema.String),
+  /** Whether the source merges cleanly into the destination, set by the merge check after decoding. */
+  isMergeable: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(false))),
+  /** The evaluated approval, set by the evaluation step after decoding; meaningless while `approvalUnknown` is set. */
+  isApproved: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(false))),
+  /** Set when this read's approval evaluation failed. */
+  approvalUnknown: Schema.optional(ApprovalUnknownReason),
   // Inline struct instead of Domain.ApprovalRule — Schema.Class constructors reject plain objects
   // from buildApprovalRules(). PullRequestDetail is an internal transport type, not a domain boundary.
   approvalRules: Schema.Array(Schema.Struct({

@@ -2678,6 +2678,10 @@ describe("PR detail workspace", () => {
       approval: "NEEDS REVIEW",
       mergeability: "MERGEABLE"
     })
+    expect(humanReviewState({ isApproved: true, approvalUnknown: { _tag: "Throttled" }, isMergeable: true })).toEqual({
+      approval: "APPROVAL UNKNOWN",
+      mergeability: "MERGEABLE"
+    })
     expect(exactRevisionReviewState()).toEqual({
       approval: "UNVERIFIED",
       mergeability: "UNVERIFIED"

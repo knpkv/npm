@@ -1,0 +1,15 @@
+id: no-direct-pull-request-row-write
+valid:
+  - |
+    const rows = sql`SELECT * FROM pull_requests WHERE id = ${id}`
+  - |
+    const update = sql`UPDATE pull_request_comments SET body = ${body}`
+  - |
+    writes.compareAndSet(where, version, sql`health_score = ${score}`)
+invalid:
+  - |
+    sql`UPDATE pull_requests SET health_score = ${score} WHERE id = ${id}`
+  - |
+    sql`DELETE FROM pull_requests WHERE id = ${id}`
+  - |
+    sql`insert into pull_requests (id) values (${id})`

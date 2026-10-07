@@ -1,5 +1,37 @@
 # @knpkv/codecommit-core
 
+## 0.20.0
+
+### Minor Changes
+
+- [#525](https://github.com/knpkv/npm/pull/525) [`fd9d510`](https://github.com/knpkv/npm/commit/fd9d5103e3558561274b16c258023bee73b4b233) Thanks [@konopkov](https://github.com/konopkov)! - A pull request whose approval rules fail to evaluate is now listed with its approval unknown, instead of being dropped (never cached before) or shown with a stale cached approval.
+
+  - `Domain` adds `ApprovalUnknownReason` (`NotPermitted`, `Throttled`, `ProviderFailed`), `PullRequest.approvalUnknown`, `approvalOf(pr)` (Approved, Pending or Unknown; Unknown wins), and the shared copy `approvalUnknownLabel` and `approvalUnknownReasonText`.
+  - The cache persists the reason and keeps the last known approval and rules until an evaluation succeeds. Health stats no longer count an unknown approval as approved.
+  - `AwsClient.getPullRequestRefresh` and `PullRequestRefreshItem` are removed: `getPullRequests` lists every pull request, with `approvalUnknown` set where evaluation failed. A single-PR refresh now also writes the evaluated approval.
+  - The CLI list, TUI badges and health score show "Approval unknown"; an unknown approval is neither approved nor pending. The TUI status filter gains `unknown`.
+  - codecommit-web's event stream and cached-row API carry the field. The web queue, workbench and detail page show "Approval unknown", and the reason on the detail page; an unknown approval is never shown or counted as approved, pending or ready. The status filter gains `unknown`, and "All open" includes those pull requests.
+  - An expired or rejected session found while evaluating approval rules fails the read instead of reading as an unknown approval, so the refresh marks the account signed out. A `GetPullRequest` answer without a pull request fails as `MissingPullRequestResponse`.
+  - No approval notification is sent when evaluation recovers from unknown: a pull request first seen while evaluation fails has no real last known value.
+  - Every write to a cached pull-request row goes through `PullRequestRepo/rowWrites`, under three rules that keep an older read from overwriting a newer one:
+    1. **Provider reads write whole column groups.** `upsert` (a listing) and the new `writeRead` (a re-read) take a complete `RowGroup` and `ApprovalGroup`, each written unless that group's version is newer. A version is the provider's last activity plus an observation number, which `PullRequestRepo.observe()` takes from the database before each read; compared in that order, it orders two reads of the same revision.
+    2. **Recomputed values never move a version.** The new `writeDerived` (diff stats, comment count, health score, commenters) applies only while the row still holds both versions it was read at. The comment cache and its notifications follow only when it applied.
+    3. **A tombstone keeps the later of both versions.** Only a provider "pull request does not exist" deletes a row, ordered by its observation, and the tombstone (migration 0023) stops a read that began earlier from bringing it back. Other read failures keep the row.
+
+    `upsert` reports which groups it wrote (`GroupsWritten`), and notifications, unknown-approval reporting and auto-subscription follow only those. `recordApprovalEvaluation`, `updateStatusAndClosedAt`, `updateDiffStats`, `updateCommentCount` and `updateHealthScore` are removed. `deleteOne` takes the not-found read's observation. `AwsClient`'s `PullRequestDetail` gains `isMergeable`, so a re-read carries a whole row. The ast-grep rules `no-direct-pull-request-row-write` and `no-pull-request-free-form-row-write` keep other code from writing the table directly or in part.
+
+- [#567](https://github.com/knpkv/npm/pull/567) [`3a59848`](https://github.com/knpkv/npm/commit/3a598483979960e71bfc880f182c73d499001091) Thanks [@konopkov](https://github.com/konopkov)! - A subscribed pull request's notifications describe the transition from the row the refresh actually replaced. `PullRequestRepo.upsert` and `upsertRead` read the row in the same transaction as the write and return it as `replaced` (`UpsertResult`). Before, the bulk and single refresh diffed a snapshot read earlier, so a write landing in between could hide a revocation or announce a change that didn't happen.
+
+- [#532](https://github.com/knpkv/npm/pull/532) [`8f64bdf`](https://github.com/knpkv/npm/commit/8f64bdfee2ab758c53d0555850be42cfe9f3626e) Thanks [@konopkov](https://github.com/konopkov)! - Refreshing a pull request that has an approval rule works again, and the rule shows its approvers.
+
+  - The cache's upsert input required `ApprovalRule` class instances, but the single-PR refresh passes the provider's rules as plain objects, so every refresh of such a PR failed (HTTP 500 in codecommit-web). `UpsertInput.approvalRules` now accepts the rule's plain shape.
+  - Rule content whose `ApprovalPoolMembers` is a single string, such as `"*"`, is read as a one-member pool instead of failing to parse and showing no approvers. A rule that can't be parsed now logs the schema error with its path.
+  - codecommit-web logs the cause of a failed refresh, and the PR page shares one in-flight refresh per pull request, so overlapping triggers no longer cancel each other.
+
+### Patch Changes
+
+- [#566](https://github.com/knpkv/npm/pull/566) [`286f23e`](https://github.com/knpkv/npm/commit/286f23ece7fc85b9a7a754b7b5f96b5e65868244) Thanks [@konopkov](https://github.com/konopkov)! - `PullRequestRepo.observe()` fails with a `CacheError` (cause `ObservationSequenceMissing`) when the observation sequence row is missing, instead of returning 0 for every read. That fallback would have silently stopped ordering reads of the same revision. Callers already skip a read whose observation fails.
+
 ## 0.19.0
 
 ### Minor Changes

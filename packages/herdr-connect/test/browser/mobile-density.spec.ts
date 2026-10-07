@@ -55,7 +55,8 @@ const fixtureCss = [
       font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height) var(--rly-type-meta-font);
       padding: var(--rly-space-4) var(--rly-space-8);
     }
-    .agent-presence { block-size: var(--rly-space-6); inline-size: var(--rly-space-6); border-radius: var(--rly-radius-round); }
+    .fixture-card-title { font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height) var(--rly-type-card-title-font); margin: 0; }
+    .fixture-hero p { margin: 0; }
   `
 ].join("\n")
 
@@ -64,9 +65,8 @@ const agentRows = Array.from({ length: 18 }, (_, index) => {
   return `
     <button class="connect-agent" type="button">
       <time>12:${agent}</time>
-      <span class="agent-presence"></span>
       <span class="connect-agent-copy"><strong>agent-${agent}</strong><small>SER8, Root agent, Working in npm</small></span>
-      <span class="fixture-state">working</span>
+      <span class="connect-agent-state" data-activity="working">Working</span>
     </button>`
 }).join("")
 
@@ -92,7 +92,7 @@ const setEmbeddedDirectory = (page: Page): Promise<void> =>
       <head><style>${fixtureCss}</style></head>
       <body>
         <header class="connect-header fixture-standalone-header">
-          <div><span class="fixture-meta">Herdr fleet</span><h1 class="fixture-page-title">Connect</h1></div>
+          <h1 class="fixture-page-title">Connect</h1>
           <nav class="fleet-app-nav" aria-label="Fleet applications"><a href="/">Approvals</a><a aria-current="page" href="/connect/">Connect</a></nav>
         </header>
         <div class="fixture-offset"></div>
@@ -100,8 +100,9 @@ const setEmbeddedDirectory = (page: Page): Promise<void> =>
           <div class="connect-workspace" data-mode="directory">
             <div class="connect-directory-screen">
               <header class="connect-embedded-intro">
-                <div><span class="fixture-meta">Live fleet directory</span><h1 class="fixture-page-title">Connect to an agent</h1><p>Choose a worker, reviewer, or coordinator to open its exact terminal.</p></div>
-                <span class="fixture-state">18 agents</span>
+                <h1 class="fixture-card-title">Connect</h1>
+                <section aria-label="Connect summary" data-rly-hero class="fixture-hero"><p>18 agents, 6 working</p></section>
+                <p class="connect-intro-caption">Choose a worker, reviewer, or coordinator to open its exact terminal.</p>
               </header>
               ${directory}
             </div>
@@ -120,7 +121,7 @@ const setStandaloneDirectory = (page: Page): Promise<void> =>
           <div class="connect-workspace" data-mode="directory">
             <div class="connect-directory-screen">
               <header class="connect-header">
-                <div><span class="fixture-meta">Herdr fleet</span><h1 class="fixture-page-title">Connect</h1></div>
+                <h1 class="fixture-page-title">Connect</h1>
                 <nav class="fleet-app-nav" aria-label="Fleet applications"><a href="/">Approvals</a><a aria-current="page" href="/connect/">Connect</a></nav>
               </header>
               ${directory}
@@ -219,7 +220,10 @@ test("390x844 keeps directory chrome dense and the full list reachable without a
   await expect(page.locator("[data-agent-count]")).toBeVisible()
   expect((await header.boundingBox())?.height).toBeLessThanOrEqual(48)
   expect((await navigation.boundingBox())?.height).toBeLessThanOrEqual(32)
-  expect((await intro.boundingBox())?.height).toBeLessThanOrEqual(64)
+  // The page title plus the summary sentence (it replaced the old count chip). Its caption is hidden, and three
+  // lines (of its column-scaled type) are reserved for the sentence so the list does not jump when the fleet loads.
+  expect((await intro.boundingBox())?.height).toBeLessThanOrEqual(144)
+  await expect(page.locator(".connect-intro-caption")).toBeHidden()
   expect((await filters.boundingBox())?.height).toBeLessThanOrEqual(128)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
   await expect
@@ -257,11 +261,15 @@ test("desktop keeps its spacious hierarchy and scroll ownership", async ({ page 
   await page.setViewportSize({ height: 800, width: 1280 })
   await setEmbeddedDirectory(page)
 
-  await expect(page.locator(".connect-embedded-intro p")).toBeVisible()
+  // The summary sentence and its caption lead; the title is a page label, not a display headline.
+  await expect(page.locator(".fixture-hero p").first()).toBeVisible()
+  await expect(page.locator(".connect-intro-caption")).toBeVisible()
   await expect(page.locator(".connect-search > span")).toBeVisible()
   expect(
-    await page.locator(".connect-embedded-intro h1").evaluate((element) => getComputedStyle(element).fontSize)
-  ).toBe("57.6px")
+    await page.locator(".connect-embedded-intro h1").evaluate((element) =>
+      Number.parseFloat(getComputedStyle(element).fontSize)
+    )
+  ).toBeLessThanOrEqual(24)
   expect(await page.locator(".connect-agent").first().evaluate((element) => getComputedStyle(element).paddingTop)).toBe(
     "12px"
   )

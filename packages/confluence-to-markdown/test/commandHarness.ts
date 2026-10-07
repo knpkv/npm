@@ -1,8 +1,10 @@
+import { NodeServices } from "@effect/platform-node"
 import { Command } from "effect/cli"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Ref from "effect/Ref"
 import * as Terminal from "effect/Terminal"
+import { layer as AdfSchemaValidatorLayer } from "../src/AdfSchemaValidator.js"
 import { PageId } from "../src/Brand.js"
 import type { ConfluenceCommandOptions } from "../src/commands/root.js"
 import { makeConfluenceCommand } from "../src/commands/root.js"
@@ -10,6 +12,7 @@ import { ConfluenceAuth } from "../src/ConfluenceAuth.js"
 import { ConfluenceClient } from "../src/ConfluenceClient.js"
 import { layerFromValues as ConfluenceConfigLayerFromValues } from "../src/ConfluenceConfig.js"
 import { GitService } from "../src/GitService.js"
+import { layer as LocalFileSystemLayer } from "../src/LocalFileSystem.js"
 import { MarkdownConverter } from "../src/MarkdownConverter.js"
 import { SyncEngine } from "../src/SyncEngine.js"
 
@@ -62,7 +65,7 @@ export interface CommandHarnessRefs {
 const CaptureTerminalLayer = (stdout: Ref.Ref<string>) =>
   Layer.succeed(
     Terminal.Terminal,
-    Terminal.Terminal.of({
+    Terminal.make({
       columns: Effect.succeed(80),
       rows: Effect.succeed(24),
       readInput: Effect.die("readInput should not be called"),
@@ -152,8 +155,12 @@ const ConfigLayer = ConfluenceConfigLayerFromValues({
   trackedPaths: ["**/*.md"]
 })
 
+/** Every service the root command needs; the platform first, so the capturing Terminal replaces its own. */
 export const CommandHarnessLayer = (refs: CommandHarnessRefs) =>
   Layer.mergeAll(
+    NodeServices.layer,
+    LocalFileSystemLayer.pipe(Layer.provide(NodeServices.layer)),
+    AdfSchemaValidatorLayer,
     AuthLayer,
     GitShouldNotBeCalledLayer(refs.gitCalls),
     SyncEngineLayer,

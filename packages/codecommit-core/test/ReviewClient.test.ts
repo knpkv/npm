@@ -9,13 +9,14 @@ import * as Stream from "effect/Stream"
 import { TestClock } from "effect/testing"
 
 import { applyAwsOperationTimeout } from "../src/AwsClient/internal.js"
-import { AwsProfileName, AwsRegion } from "../src/Domain.js"
+import { AwsProfileName, AwsRegion, RepositoryName } from "../src/Domain.js"
 import { AwsApiError } from "../src/Errors.js"
 import {
   CodeCommitAccountIdentity,
   CodeCommitBlobContent,
   CodeCommitBlobId,
   CodeCommitChangedFilesPage,
+  CodeCommitCommitId,
   CodeCommitPullRequestPage,
   CodeCommitPullRequestRevision,
   CodeCommitRepositoryIdentity,
@@ -34,6 +35,9 @@ import {
   makeUpdateCommentRequest,
   reviewProviderTimeoutPolicy
 } from "../src/ReviewClient/ReviewProvider.js"
+
+// Each action decoded by its own case, so a fixture keeps its variant type.
+const ReviewActions = CodeCommitReviewAction.pipe(Schema.toTaggedUnion("_tag"))
 
 const account = {
   profile: Schema.decodeUnknownSync(AwsProfileName)("production"),
@@ -57,7 +61,7 @@ const pullRequest = Schema.decodeUnknownSync(CodeCommitPullRequestRevision)({
   lastActivityDate: new Date("2026-07-23T09:00:00.000Z")
 })
 
-const commentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+const commentAction = Schema.decodeUnknownSync(ReviewActions.cases["request-changes"])({
   _tag: "request-changes",
   target: {
     account,
@@ -72,7 +76,7 @@ const commentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   clientRequestToken: "0".repeat(64)
 })
 
-const inlineCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+const inlineCommentAction = Schema.decodeUnknownSync(ReviewActions.cases["comment"])({
   _tag: "comment",
   target: commentAction.target,
   content: "Preserve the authorization binding.",
@@ -84,14 +88,14 @@ const inlineCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   }
 })
 
-const plainCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+const plainCommentAction = Schema.decodeUnknownSync(ReviewActions.cases["comment"])({
   _tag: "comment",
   target: commentAction.target,
   content: "Preserve the authorization binding.",
   clientRequestToken: "3".repeat(64)
 })
 
-const updateCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+const updateCommentAction = Schema.decodeUnknownSync(ReviewActions.cases["update-comment"])({
   _tag: "update-comment",
   target: commentAction.target,
   commentId: "comment-1",
@@ -99,7 +103,7 @@ const updateCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   clientRequestToken: "4".repeat(64)
 })
 
-const replyCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+const replyCommentAction = Schema.decodeUnknownSync(ReviewActions.cases["reply-comment"])({
   _tag: "reply-comment",
   target: commentAction.target,
   commentId: "comment-1",
@@ -107,7 +111,7 @@ const replyCommentAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
   clientRequestToken: "5".repeat(64)
 })
 
-const mergeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+const mergeAction = Schema.decodeUnknownSync(ReviewActions.cases["merge"])({
   _tag: "merge",
   target: {
     ...commentAction.target,
@@ -128,7 +132,9 @@ const baseReadClient = (
       })
     ),
   listRepositoriesPage: () =>
-    Effect.succeed(new CodeCommitRepositoryPage({ repositoryNames: ["payments-api"], nextToken: null })),
+    Effect.succeed(
+      new CodeCommitRepositoryPage({ repositoryNames: [RepositoryName.make("payments-api")], nextToken: null })
+    ),
   getBlob: () =>
     Effect.succeed(
       new CodeCommitBlobContent({
@@ -143,7 +149,10 @@ const baseReadClient = (
   getPullRequest: () => Effect.succeed(pullRequest),
   getRepositoryIdentity: () =>
     Effect.succeed(
-      new CodeCommitRepositoryIdentity({ accountId: "123456789012", repositoryName: "payments-api" })
+      new CodeCommitRepositoryIdentity({
+        accountId: "123456789012",
+        repositoryName: RepositoryName.make("payments-api")
+      })
     ),
   getChangedFilesPage: () =>
     Effect.succeed(new CodeCommitChangedFilesPage({ files: [], nextToken: null, providerPageLimit: 100 })),
@@ -212,9 +221,9 @@ describe("CodeCommitReviewClient", () => {
     const plain = makePostCommentForPullRequestRequest(plainCommentAction)
     const reviewState = makePostCommentForPullRequestRequest(commentAction)
 
-    assert.strictEqual(inline.location.filePath, "src/authorization.ts")
-    assert.strictEqual(inline.location.filePosition, 42)
-    assert.strictEqual(inline.location.relativeFileVersion, "AFTER")
+    assert.strictEqual(inline.location?.filePath, "src/authorization.ts")
+    assert.strictEqual(inline.location?.filePosition, 42)
+    assert.strictEqual(inline.location?.relativeFileVersion, "AFTER")
     assert.notProperty(plain, "location")
     assert.notProperty(reviewState, "location")
   })
@@ -275,7 +284,7 @@ describe("CodeCommitReviewClient", () => {
       const providerCalls = yield* Ref.make(0)
       const stalePullRequest = new CodeCommitPullRequestRevision({
         ...pullRequest,
-        sourceCommit: "new-head-commit-17"
+        sourceCommit: CodeCommitCommitId.make("new-head-commit-17")
       })
       const result = yield* runWithClients(
         baseReadClient({ getPullRequest: () => Effect.succeed(stalePullRequest) }),
@@ -732,7 +741,7 @@ describe("CodeCommitReviewClient", () => {
 
   it.effect("classifies the maximum-approval rejection as a terminal conflict", () =>
     Effect.gen(function*() {
-      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+      const approveAction = Schema.decodeUnknownSync(ReviewActions.cases["approve"])({
         _tag: "approve",
         target: commentAction.target
       })
@@ -766,7 +775,7 @@ describe("CodeCommitReviewClient", () => {
         ...pullRequest,
         repositoryName: "different-repository"
       })
-      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+      const approveAction = Schema.decodeUnknownSync(ReviewActions.cases["approve"])({
         _tag: "approve",
         target: commentAction.target
       })
@@ -898,11 +907,11 @@ describe("CodeCommitReviewClient", () => {
 
   it.effect("reconciles a revoked approval when the caller is absent while approval remains pending", () =>
     Effect.gen(function*() {
-      const revokeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+      const revokeAction = Schema.decodeUnknownSync(ReviewActions.cases["revoke-approval"])({
         _tag: "revoke-approval",
         target: commentAction.target
       })
-      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+      const approveAction = Schema.decodeUnknownSync(ReviewActions.cases["approve"])({
         _tag: "approve",
         target: commentAction.target
       })
@@ -924,7 +933,7 @@ describe("CodeCommitReviewClient", () => {
 
   it.effect("reconciles an explicit REVOKE state while keeping APPROVE pending", () =>
     Effect.gen(function*() {
-      const revokeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+      const revokeAction = Schema.decodeUnknownSync(ReviewActions.cases["revoke-approval"])({
         _tag: "revoke-approval",
         target: commentAction.target
       })
@@ -954,7 +963,7 @@ describe("CodeCommitReviewClient", () => {
 
   it.effect("normalizes assumed-role identities when reconciling approvals", () =>
     Effect.gen(function*() {
-      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+      const approveAction = Schema.decodeUnknownSync(ReviewActions.cases["approve"])({
         _tag: "approve",
         target: commentAction.target
       })
@@ -988,7 +997,7 @@ describe("CodeCommitReviewClient", () => {
 
   it.effect("does not reconcile an approval from another account with the same username", () =>
     Effect.gen(function*() {
-      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+      const approveAction = Schema.decodeUnknownSync(ReviewActions.cases["approve"])({
         _tag: "approve",
         target: commentAction.target
       })
@@ -1022,7 +1031,7 @@ describe("CodeCommitReviewClient", () => {
 
   it.effect("keeps an approval pending for a different normalized identity", () =>
     Effect.gen(function*() {
-      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+      const approveAction = Schema.decodeUnknownSync(ReviewActions.cases["approve"])({
         _tag: "approve",
         target: commentAction.target
       })
@@ -1056,11 +1065,11 @@ describe("CodeCommitReviewClient", () => {
 
   it.effect("distinguishes approve and revoke receipts on the same revision", () =>
     Effect.gen(function*() {
-      const approveAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+      const approveAction = Schema.decodeUnknownSync(ReviewActions.cases["approve"])({
         _tag: "approve",
         target: commentAction.target
       })
-      const revokeAction = Schema.decodeUnknownSync(CodeCommitReviewAction)({
+      const revokeAction = Schema.decodeUnknownSync(ReviewActions.cases["revoke-approval"])({
         _tag: "revoke-approval",
         target: commentAction.target
       })

@@ -1584,6 +1584,7 @@ export const componentManifest = {
         { kind: "value", name: "RLY_SERVICE_MARK_VARIANTS" },
         { kind: "value", name: "ServiceMark" },
         { kind: "type", name: "RlyService" },
+        { kind: "type", name: "RlyServiceMarkName" },
         { kind: "type", name: "RlyServiceMarkSize" },
         { kind: "type", name: "ServiceMarkProps" }
       ],
@@ -1598,6 +1599,7 @@ export const componentManifest = {
           name: "service",
           values: ["codecommit", "codepipeline", "jira", "confluence", "clockify"]
         },
+        { defaultValue: "visible", name: "name", values: ["visible", "hidden"] },
         { defaultValue: "default", name: "size", values: ["compact", "default"] }
       ],
       visual: {

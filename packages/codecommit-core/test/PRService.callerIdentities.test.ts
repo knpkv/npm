@@ -58,7 +58,10 @@ const accounts = Layer.mergeAll(
     }
   }),
   Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
-  Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([]) }),
+  Layer.mock(PullRequestRepo, {
+    observe: () => Effect.succeed(1),
+    findAll: () => Effect.succeed([])
+  }),
   Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
   Layer.mock(ConfigService, { load: Effect.succeed(config), detectProfiles: Effect.succeed([]) })
 )
@@ -103,7 +106,10 @@ describe("resolveAccounts caller identities", () => {
       const disabled = Layer.mergeAll(
         Layer.mock(AwsClient, {}),
         Layer.mock(NotificationRepo, {}),
-        Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([]) }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findAll: () => Effect.succeed([])
+        }),
         Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
         Layer.mock(ConfigService, {
           load: Effect.succeed(
@@ -144,7 +150,10 @@ describe("resolveAccounts caller identities", () => {
               )
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
-        Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([]) }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findAll: () => Effect.succeed([])
+        }),
         Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
         Layer.mock(ConfigService, {
           load: Effect.succeed(
@@ -155,8 +164,6 @@ describe("resolveAccounts caller identities", () => {
           detectProfiles: Effect.succeed([])
         })
       )
-      // Test entry point: this case's own racing transport is provided once here.
-      // @effect-diagnostics-next-line strictEffectProvide:off
       const resolving = yield* resolveAccounts(state).pipe(
         Effect.provide(racing),
         Effect.forkChild({ startImmediately: true })
@@ -207,7 +214,10 @@ describe("resolveAccounts caller identities", () => {
               )
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
-        Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([]) }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findAll: () => Effect.succeed([])
+        }),
         Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
         Layer.mock(ConfigService, {
           load: Effect.succeed(
@@ -218,8 +228,6 @@ describe("resolveAccounts caller identities", () => {
           detectProfiles: Effect.succeed([])
         })
       )
-      // Test entry point: this case's own slow transport is provided once here.
-      // @effect-diagnostics-next-line strictEffectProvide:off
       const resolving = yield* resolveAccounts(state).pipe(
         Effect.provide(slow),
         Effect.forkChild({ startImmediately: true })
@@ -253,7 +261,10 @@ describe("resolveAccounts caller identities", () => {
             )
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
-        Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([]) }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findAll: () => Effect.succeed([])
+        }),
         Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
         Layer.mock(ConfigService, {
           load: Effect.succeed(
@@ -262,8 +273,6 @@ describe("resolveAccounts caller identities", () => {
           detectProfiles: Effect.succeed([])
         })
       )
-      // Test entry point: this case's own failing transport is provided once here.
-      // @effect-diagnostics-next-line strictEffectProvide:off
       const resolving = yield* resolveAccounts(state).pipe(
         Effect.provide(failing),
         Effect.forkChild({ startImmediately: true })
@@ -288,7 +297,10 @@ describe("resolveAccounts caller identities", () => {
         Layer.mock(NotificationRepo, {
           addSystem: () => Effect.fail(new CacheError({ operation: "addSystem", cause: "disk full" }))
         }),
-        Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([]) }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findAll: () => Effect.succeed([])
+        }),
         Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
         Layer.mock(ConfigService, {
           load: Effect.succeed(
