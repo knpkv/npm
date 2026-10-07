@@ -115,7 +115,17 @@ export function PRRow({ caller, pr, showUpdated, to }: PRRowProps) {
               {score.total.toFixed(1)}
             </span>
           </div>
-        ) : null}
+        ) : (
+          // Unknown: CodeCommit gave no activity or creation date, so there is nothing to score.
+          <div className={styles.health} title="Not enough data to score: no activity date from CodeCommit.">
+            <Text tone="tertiary" variant="meta">
+              Health
+            </Text>
+            <span aria-label="unknown" className={styles.healthScore}>
+              —
+            </span>
+          </div>
+        )}
         <Text className={styles.approvalCount} tone="tertiary" variant="meta">
           {decision.summary}
         </Text>

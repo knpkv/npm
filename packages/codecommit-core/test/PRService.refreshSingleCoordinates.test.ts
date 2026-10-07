@@ -53,6 +53,7 @@ const cachedPullRequest = Schema.decodeSync(CachedPullRequest)({
   isMergeable: 1,
   isApproved: 0,
   approvalUnknownReason: null,
+  approvalBaselineKnown: 1,
   observationSeq: 0,
   approvalVersion: "2026-08-02T00:00:00.000Z",
   approvalObservationSeq: 0,
@@ -280,7 +281,11 @@ describe("PRService.refreshSinglePR coordinates", () => {
         const commentWrites = yield* Ref.make(0)
         const approvedCache = Schema.decodeSync(CachedPullRequest)({
           ...Schema.encodeSync(CachedPullRequest)(cachedPullRequest),
-          isApproved: 1
+          isApproved: 1,
+          // A rule on both sides: without one, nobody signed off and no approval change is announced.
+          approvalRules: JSON.stringify([
+            { ruleName: "r", requiredApprovals: 1, poolMembers: [], poolMemberArns: [], satisfied: true }
+          ])
         })
         yield* runWithLayer(
           makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
@@ -305,7 +310,13 @@ describe("PRService.refreshSinglePR coordinates", () => {
                     approvedBy: [],
                     approvedByArns: [],
                     isMergeable: true,
-                    approvalRules: [],
+                    approvalRules: [{
+                      ruleName: "r",
+                      requiredApprovals: 1,
+                      poolMembers: [],
+                      poolMemberArns: [],
+                      satisfied: false
+                    }],
                     isApproved: false
                   })
                 ),

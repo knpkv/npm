@@ -149,7 +149,21 @@ const makeNotificationRepo = Effect.gen(function*() {
       )
     },
 
-    add: (n: NewNotification) => add_(n).pipe(Effect.tap(() => publish), cacheError("add")),
+    /**
+     * Add a pull-request notification, unless an identical one (same pull request, type and message)
+     * is still unread. A restart re-diffs every subscribed pull request, so without this one change
+     * would be announced again each time.
+     */
+    add: (n: NewNotification) =>
+      sql<{ count: number }>`
+        SELECT count(*) as count FROM notifications
+        WHERE pull_request_id = ${n.pullRequestId} AND aws_account_id = ${n.awsAccountId}
+          AND repository_name = ${n.repositoryName ?? ""} AND account_region = ${n.accountRegion ?? ""}
+          AND type = ${n.type} AND message = ${n.message} AND read = 0
+      `.pipe(
+        Effect.flatMap((rows) => (rows[0]?.count ?? 0) > 0 ? Effect.void : add_(n).pipe(Effect.tap(() => publish))),
+        cacheError("add")
+      ),
 
     addSystem: (n: {
       readonly type: string

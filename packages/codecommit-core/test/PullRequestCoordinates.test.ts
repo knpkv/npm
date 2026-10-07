@@ -10,6 +10,7 @@ import migration0019 from "../src/CacheService/migrations/0019_dependent_pr_coor
 import migration0020 from "../src/CacheService/migrations/0020_notification_coordinates.js"
 import migration0022 from "../src/CacheService/migrations/0022_pull_request_approval_unknown.js"
 import migration0023 from "../src/CacheService/migrations/0023_pull_request_row_versions.js"
+import migration0024 from "../src/CacheService/migrations/0024_pull_request_approval_baseline.js"
 import { UpsertInput } from "../src/CacheService/repos/PullRequestRepo/internal.js"
 import { mutations } from "../src/CacheService/repos/PullRequestRepo/mutations.js"
 
@@ -99,6 +100,12 @@ describe("pull request coordinate migration", () => {
       // The repository writes the approval column added later.
       yield* migration0022.pipe(Effect.provideService(SqlClient.SqlClient, sql))
       yield* migration0023.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      yield* sql`UPDATE pull_requests SET approval_unknown_reason = 'Throttled'`
+      yield* migration0024.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      // A row already unknown may hold a placeholder, so its baseline starts unknown.
+      expect(yield* sql<{ known: number }>`SELECT approval_baseline_known AS known FROM pull_requests`)
+        .toEqual([{ known: 0 }])
+      yield* sql`UPDATE pull_requests SET approval_unknown_reason = NULL, approval_baseline_known = 1`
       yield* insertPullRequest(sql, "orders", "us-east-1")
       const repo = mutations(sql, Effect.void)
       yield* repo.upsert(upsertInput("orders", "us-east-1", "Orders updated"), 1)

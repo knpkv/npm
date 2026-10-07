@@ -39,6 +39,10 @@ export interface DiffablePR {
   readonly isApproved: boolean | number
   /** Set (non-null) when the approval evaluation failed: `isApproved` is then only the last known value. */
   readonly approvalUnknownReason?: string | null | undefined
+  /** Whether the cached `isApproved` came from a successful evaluation, rather than a first-seen placeholder. */
+  readonly approvalBaselineKnown?: boolean | number | null | undefined
+  /** With no rules, CodeCommit's "approved" means nothing needed sign-off, not that anyone approved. */
+  readonly approvalRules?: ReadonlyArray<object> | null | undefined
   readonly isMergeable: boolean | number
   readonly commentCount?: number | null | undefined
 }
@@ -73,11 +77,14 @@ export const diffPR = (
   const freshMergeable = isEnabled(fresh.isMergeable)
   const cachedMergeable = isEnabled(cached.isMergeable)
 
-  // Only a change between two known evaluations is announced. An unknown fresh approval is no
-  // transition, and neither is recovery: a pull request first seen while its evaluation fails is cached
-  // as not approved, a placeholder indistinguishable from a last known value.
+  // Only a real change is announced: the fresh evaluation is known, and so is what it is compared with
+  // (a known cached evaluation, or the last known value an unknown row keeps over a known baseline; a
+  // pull request first seen while its evaluation fails holds a placeholder instead). Without rules on
+  // either side, nobody signed off or withdrew, so a flip of the evaluation is not announced either.
+  const ruleBacked = (pr: DiffablePR) => (pr.approvalRules?.length ?? 0) > 0
+  const cachedKnown = cached.approvalUnknownReason == null || isEnabled(cached.approvalBaselineKnown ?? false)
   if (
-    fresh.approvalUnknownReason == null && cached.approvalUnknownReason == null &&
+    fresh.approvalUnknownReason == null && cachedKnown && ruleBacked(fresh) && ruleBacked(cached) &&
     freshApproved !== cachedApproved
   ) {
     notifications.push({

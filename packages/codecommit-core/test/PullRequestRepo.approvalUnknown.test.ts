@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, FileSystem, Layer, Option, Schema } from "effect"
 import { DatabaseLive } from "../src/CacheService/Database.js"
+import { diffPR } from "../src/CacheService/diff.js"
 import { CachedPullRequest, PullRequestRepo, UpsertInput } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { StatsRepo } from "../src/CacheService/repos/StatsRepo/index.js"
 import { approvalOf } from "../src/Domain.js"
@@ -167,6 +168,61 @@ describe("PullRequestRepo approval unknown", () => {
       expect([evaluated.isApproved, evaluated.approvalUnknownReason]).toEqual([false, null])
       expect(evaluated.approvalRules.map((r) => r.satisfied)).toEqual([false])
     })))
+
+  // Recovery from Unknown is announced only over a known baseline: a pull request first seen while its
+  // evaluation fails is cached as not approved, a placeholder, not a last known value.
+  describe("approval baseline", () => {
+    const approvalAnnouncements = (cached: CachedPullRequest, fresh: { readonly isApproved: boolean }) =>
+      diffPR(cached, {
+        ...cached,
+        isApproved: fresh.isApproved,
+        approvalUnknownReason: null,
+        approvalRules: [rule(fresh.isApproved)]
+      }, "123456789012").filter((n) => n.type === "approval_changed").map((n) => n.message)
+
+    it.effect("announces nothing when a pull request first seen as unknown evaluates approved", () =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        yield* repo.upsert(
+          upsertInput("50", { isApproved: 0, satisfied: false, unknown: "NotPermitted" }),
+          yield* repo.observe()
+        )
+        expect(approvalAnnouncements(yield* read("50"), { isApproved: true })).toEqual([])
+      })))
+
+    it.effect("announces a sign-off made while evaluation was failing, once the baseline was known", () =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        yield* repo.upsert(upsertInput("51", { isApproved: 0, satisfied: false, unknown: null }), yield* repo.observe())
+        yield* repo.upsert(
+          upsertInput("51", { isApproved: 0, satisfied: false, unknown: "Throttled" }),
+          yield* repo.observe()
+        )
+        const cached = yield* read("51")
+        expect(approvalAnnouncements(cached, { isApproved: true })).toEqual([
+          "Approval granted on #51 PR 51 (payments)"
+        ])
+        // Unchanged across the outage: nothing to announce.
+        expect(approvalAnnouncements(cached, { isApproved: false })).toEqual([])
+      })))
+
+    it.effect("keeps the baseline known through a re-read that records unknown", () =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
+        yield* repo.upsert(upsertInput("52", { isApproved: 1, satisfied: true, unknown: null }), yield* repo.observe())
+        yield* repo.writeRead(
+          "123456789012",
+          "52",
+          reread({ unknown: "Throttled" }),
+          yield* repo.observe(),
+          coordinates
+        )
+        expect(approvalAnnouncements(yield* read("52"), { isApproved: false })).toEqual([
+          "Approval revoked on #52 Re-read (payments)"
+        ])
+      })))
+  })
 
   // The write contract takes complete rules: a partial one would decode to no rules on the next read,
   // silently dropping the approval requirements.

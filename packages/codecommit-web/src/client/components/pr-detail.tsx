@@ -27,6 +27,7 @@ import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
 import {
+  approvalNotRequiredLabel,
   approvalOf,
   approvalUnknownLabel,
   approvalUnknownReasonText,
@@ -889,7 +890,10 @@ const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresent
         }
       }
       return {
-        reason: "CodeCommit reports a clean merge and the provider approval is satisfied.",
+        reason:
+          approval._tag === "NotRequired"
+            ? "CodeCommit reports a clean merge, and no approval rules apply to this pull request."
+            : "CodeCommit reports a clean merge and the provider approval is satisfied.",
         tone: "positive",
         verdict: "Ready to merge."
       }
@@ -1503,6 +1507,8 @@ export function PRDetail() {
               <>
                 {approvalOf(pr)._tag === "Unknown" ? (
                   <StateLabel label={approvalUnknownLabel} size="compact" tone="neutral" />
+                ) : approvalOf(pr)._tag === "NotRequired" ? (
+                  <StateLabel label={approvalNotRequiredLabel} size="compact" tone="neutral" />
                 ) : (
                   <Link
                     className={styles.stateLink}
