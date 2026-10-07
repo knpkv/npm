@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import {
   ActivityHistory,
   activityItemsFor,
+  activityKeyBelongsElsewhere,
   activityNavigationIndex,
   filterActivityItems
 } from "../src/activity-history.js"
@@ -211,6 +212,18 @@ describe("activity history", () => {
     expect(activityNavigationIndex({ current: 0, key: "x", total: 3 })).toBeNull()
   })
 
+  it("leaves J and K to any field inside the list and to modified keys", () => {
+    const plain = { altKey: false, ctrlKey: false, metaKey: false }
+    expect(activityKeyBelongsElsewhere({ ...plain, target: { nodeName: "BUTTON" } })).toBe(false)
+    for (const nodeName of ["INPUT", "TEXTAREA", "SELECT"]) {
+      expect(activityKeyBelongsElsewhere({ ...plain, target: { nodeName } })).toBe(true)
+    }
+    expect(activityKeyBelongsElsewhere({ ...plain, target: { nodeName: "DIV", isContentEditable: true } })).toBe(true)
+    expect(activityKeyBelongsElsewhere({ ...plain, ctrlKey: true, target: { nodeName: "BUTTON" } })).toBe(true)
+    expect(activityKeyBelongsElsewhere({ ...plain, metaKey: true, target: { nodeName: "BUTTON" } })).toBe(true)
+    expect(activityKeyBelongsElsewhere({ ...plain, altKey: true, target: { nodeName: "BUTTON" } })).toBe(true)
+  })
+
   it("renders filters, search, expandable rows, and bounded loading", () => {
     const records = Array.from({ length: 30 }, (_, index): JobRecord => ({
       ...delegated,
@@ -223,8 +236,9 @@ describe("activity history", () => {
     expect(markup).toContain('name="activity-search"')
     expect(markup).toContain('aria-label="Filter activity"')
     expect(markup).toContain('aria-expanded="false"')
-    expect(markup).toContain("24 visible · 30 matching · 30 jobs")
-    expect(markup).toContain("Load earlier · 6 remaining")
+    expect(markup).toContain("Showing 24 of 30 matching, 30 jobs in all")
+    expect(markup).toContain("Load earlier (6 remaining)")
+    expect(markup).not.toContain(" · ")
     expect([...markup.matchAll(/data-activity-row=""/g)]).toHaveLength(24)
     expect(markup).not.toContain(sensitivePrompt)
   })

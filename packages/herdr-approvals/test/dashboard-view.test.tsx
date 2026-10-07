@@ -202,7 +202,7 @@ describe("dashboard approval capability", () => {
       />
     )
     expect(html).toContain("Reconcile existing Work owner")
-    expect(html).toContain("knpkv/npm#433 · existing owner")
+    expect(html).toContain("knpkv/npm#433: existing owner")
   })
 
   it("shows the goal reassignment title and summary", () => {
@@ -248,7 +248,7 @@ describe("dashboard approval capability", () => {
       />
     )
     expect(html).toContain("Reassign Work goal owner")
-    expect(html).toContain("goal-ser8-control-surface · Codex host coordinator → Claude coordinator")
+    expect(html).toContain("goal-ser8-control-surface: Codex host coordinator → Claude coordinator")
   })
 
   it("hides decisions on a non-approval listener", () => {
