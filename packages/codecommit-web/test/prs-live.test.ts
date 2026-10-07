@@ -169,7 +169,7 @@ describe("PR handler selection", () => {
         cause: { _tag: "AccessDeniedException" }
       })
       const failure = yield* completeSinglePullRequestRefresh(
-        Effect.fail<PRService.RefreshSinglePRResult, Errors.AwsApiError>(denial)
+        Effect.fail(denial)
       ).pipe(Effect.flip)
 
       expect(failure).toBe(denial)

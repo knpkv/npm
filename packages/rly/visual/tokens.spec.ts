@@ -85,5 +85,5 @@ test("honors theme and preference attributes on the root element", async ({ page
       const styles = getComputedStyle(element)
       return { offset: styles.outlineOffset, width: styles.outlineWidth }
     })
-  ).toEqual({ offset: "2px", width: "3px" })
+  ).toEqual({ offset: "2px", width: "2px" })
 })

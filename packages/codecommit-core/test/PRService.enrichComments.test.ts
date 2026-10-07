@@ -70,7 +70,6 @@ describe("enrichComments", () => {
         }),
         Layer.mock(PullRequestRepo, {
           findAll: () => Effect.succeed([row]),
-          findSubscribedByCoordinates: () => Effect.succeed(false),
           writeDerived: (_, __, ___, columns) =>
             Ref.update(writes, (all) => [...all, `count ${String(columns.commentCount)}`]).pipe(Effect.as(true)),
           refreshCommentedBy: () => Effect.void
