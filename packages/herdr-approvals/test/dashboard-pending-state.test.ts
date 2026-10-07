@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { JobRecord } from "@knpkv/herdr-fleet/model"
 import { Exit } from "effect"
-import type { FleetPendingApprovals } from "../src/dashboard-model.js"
+import { type SanitizedJobRecord, sanitizeJobRecord } from "../src/approval-request.js"
+import type { FleetPendingApprovals, PendingApproval } from "../src/dashboard-model.js"
 import {
   dashboardHistoryState,
   dashboardPendingBadgeCount,
@@ -12,18 +12,30 @@ import {
   rotateFailedDashboardPendingPage
 } from "../src/internal/dashboard-pending-state.js"
 
-const record = (id: string): JobRecord => ({
+/** A pending job as the dashboard receives it: the sanitized projection of the host's record. */
+const record = (id: string): SanitizedJobRecord =>
+  sanitizeJobRecord({
+    actor: "andrey@example.com",
+    approvalNonce: `nonce-${id}`,
+    approvedBy: null,
+    createdAt: 1,
+    error: null,
+    hash: id.padStart(64, "0"),
+    id,
+    payload: { kind: "nix.check" },
+    result: null,
+    status: "pending_approval",
+    updatedAt: 1
+  })
+
+/** A remote host's pending approval as its summary endpoint reports it. */
+const pendingApproval = (id: string): PendingApproval => ({
   actor: "andrey@example.com",
-  approvalNonce: `nonce-${id}`,
-  approvedBy: null,
+  approvalExpiresAt: null,
   createdAt: 1,
-  error: null,
-  hash: id.padStart(64, "0"),
   id,
   payload: { kind: "nix.check" },
-  result: null,
-  status: "pending_approval",
-  updatedAt: 1
+  status: "pending_approval"
 })
 
 const cursor = (host: string, id: string) => ({
@@ -173,12 +185,11 @@ describe("dashboard pending continuation state", () => {
 
     const healthyLoad = loadDashboardPendingPage(state, load, update)
     expect(requested).toEqual([offline, healthy])
-    second.resolve(
-      Exit.succeed({
-        ...emptyPage([]),
-        remote: [{ approval: record("job-healthy"), approvalUrl: "https://ser8.example.test", host: "SER8" }]
-      })
-    )
+    const healthyPage: FleetPendingApprovals = {
+      ...emptyPage([]),
+      remote: [{ approval: pendingApproval("job-healthy"), approvalUrl: "https://ser8.example.test", host: "SER8" }]
+    }
+    second.resolve(Exit.succeed(healthyPage))
     expect((await healthyLoad)._tag).toBe("Success")
     expect(state.remote.map(({ approval }) => approval.id)).toEqual(["job-healthy"])
     expect(state.nextCursors).toEqual([offline])
