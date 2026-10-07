@@ -188,6 +188,20 @@ describe("observed facts", () => {
       expect((yield* reopened.snapshots(10_000)).now.observed?.[0]?.displayState).toBe("completed")
     })))
 
+  it.effect("upgrading a store without an eviction watermark drops its reads and makes every one of them stale", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { open, path, work } = yield* fixture
+      const read = pullRequest({ closedAt: 4_900, state: "merged" })
+      yield* work.observe([at(5_000, read)])
+      // A store from before the watermark: it may have kept a fact whose dispute it evicted.
+      const database = new DatabaseSync(path)
+      database.exec("DROP TABLE work_observed_eviction")
+      database.close()
+      const upgraded = yield* makeWorkService(yield* open.pipe(provideNodeServices))
+      expect((yield* upgraded.observe([at(5_000, read)])).outcomes[0]?._tag).toBe("stale")
+      expect((yield* upgraded.observe([at(5_001, read)])).outcomes[0]?._tag).toBe("stored")
+    })))
+
   it.effect("evicts the oldest facts once the overlay is over its row bound", () =>
     Effect.scoped(Effect.gen(function*() {
       const { work } = yield* fixture

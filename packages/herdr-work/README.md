@@ -71,7 +71,7 @@ stored confirmation confirms nothing. Evicting a failed read that disputes a fac
 evicts that fact too, and the store keeps the newest time of anything it has
 evicted: a fact read no newer than that, for a subject with no stored row, is
 reported `stale`. So neither an old confirmation nor a replay of it can close a
-goal once eviction has forgotten why it was stale. An
+goal once eviction has forgotten why it was stale. A store opened from before the watermark existed drops its observed reads on upgrade and starts its watermark at the newest of them. An
 `observationId` is lowercase hex of the SHA-256 of the UTF-8 bytes stored as the
 fact's record: the JSON of the encoded observation alone (its pull request or
 agent fields, in schema field order), with the repository or host

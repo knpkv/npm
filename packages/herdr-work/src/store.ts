@@ -2309,6 +2309,9 @@ export class WorkStore implements WorkStoreService {
           const hadLaneOperationLedger = database.prepare(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_lane_operations'"
           ).get() !== undefined
+          const hadEvictionWatermark = database.prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_observed_eviction'"
+          ).get() !== undefined
           database.exec(`
         CREATE TABLE IF NOT EXISTS work_goal_events (
           event_id TEXT PRIMARY KEY,
@@ -2454,6 +2457,21 @@ export class WorkStore implements WorkStoreService {
           )
           if (!columns.some(({ name }) => name === "transaction_id")) {
             database.exec("ALTER TABLE work_goal_events ADD COLUMN transaction_id TEXT")
+          }
+          if (!hadEvictionWatermark) {
+            // Older stores evicted without a watermark, and may have kept a fact
+            // whose dispute they evicted. Their reads are a cache of the
+            // providers, so they are dropped and every one becomes stale; the
+            // next pass reads them again, newer.
+            database.exec(`
+          INSERT INTO work_observed_eviction (singleton, evicted_through)
+          SELECT 1, max(at) FROM (
+            SELECT confirmed_at AS at FROM work_observed_facts
+            UNION ALL SELECT last_at FROM work_observed_failures
+          ) HAVING max(at) IS NOT NULL;
+          DELETE FROM work_observed_facts;
+          DELETE FROM work_observed_failures;
+        `)
           }
           if (!hadLaneOperationLedger) {
             database.exec(`
