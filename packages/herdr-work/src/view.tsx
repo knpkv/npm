@@ -223,18 +223,29 @@ const decisionBarFor = (request: WorkRequest, decisions: WorkRequestDecisions | 
   const { expiresAt, jobId } = decidability
   const pending = decisions.expiresAt(jobId) !== undefined && request.state === "open"
   // Once the request has left the hub's queue, the snapshot's outcome is the proven one.
-  const outcome = request.state === "open" ? "Left the hub's queue." : `${requestPresentation[request.state].label}.`
+  const proven = request.state !== "open"
+  const outcome = proven ? `${requestPresentation[request.state].label}.` : "Left the hub's queue."
+  const answer = decisions.answer?.jobId === jobId ? decisions.answer : null
   const state: RlyDecisionBarState =
     decisions.sending?.jobId === jobId
       ? { _tag: "sending", action: decisions.sending.decision }
       : decisions.sending !== null
         ? { _tag: "off", reason: "Another decision is waiting for the hub." }
-        : pending
-          ? { _tag: "ready" }
-          : { _tag: "off", reason: outcome }
-  const answer = decisions.answer?.jobId === jobId ? decisions.answer : null
-  // An uncertain answer stands only until the snapshot proves what happened.
-  const status = answer === null ? undefined : answer.settled || pending ? answer.text : `${outcome} ${answer.text}`
+        : // The hub took a decision; the host's pending list has not caught up yet, so nothing else may be sent.
+          answer?.outcome === "accepted" && pending
+          ? { _tag: "off", reason: "The hub has your decision." }
+          : pending
+            ? { _tag: "ready" }
+            : { _tag: "off", reason: outcome }
+  // An uncertain answer stands only until the snapshot proves what happened, then the proof replaces it.
+  const status =
+    answer === null
+      ? undefined
+      : answer.outcome !== "uncertain" || pending
+        ? answer.text
+        : proven
+          ? outcome
+          : `${outcome} ${answer.text}`
   const decide = (decision: "approve" | "reject") => () => {
     if (state._tag === "ready") decisions.onDecision({ decision, jobId })
   }

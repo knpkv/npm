@@ -19,13 +19,14 @@ export interface WorkRequestDecision {
 
 /**
  * The hub's own words about the last decision sent from this page, for the job it decided.
- * `settled` is true when the hub answered (accepted or refused); false when the outcome is
- * uncertain (the request failed in transit, a 5xx, an unreadable reply). An unsettled answer gives
- * way to the outcome a later snapshot proves.
+ * `outcome` is `accepted` when the hub took the decision, `refused` when it answered no, and
+ * `uncertain` when the request failed in transit (a 5xx, an unreadable reply). An accepted answer
+ * keeps the bar off until the host's pending list drops the job; an uncertain one gives way to the
+ * outcome a later snapshot proves.
  */
 export interface WorkRequestAnswer {
   readonly jobId: string
-  readonly settled: boolean
+  readonly outcome: "accepted" | "refused" | "uncertain"
   readonly text: string
 }
 

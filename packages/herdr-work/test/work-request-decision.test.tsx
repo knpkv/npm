@@ -157,7 +157,7 @@ describe("Work requests decided in place", () => {
   it("keeps the bar and announces the hub's answer after the request leaves the queue", async () => {
     const { decisions, sent } = decisionsOf(
       {},
-      { answer: { jobId: "job-1", settled: true, text: "The hub recorded your approval." } }
+      { answer: { jobId: "job-1", outcome: "accepted", text: "The hub recorded your approval." } }
     )
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
     const status = [...host.querySelectorAll("[role='status']")].map(({ textContent }) => textContent)
@@ -170,19 +170,41 @@ describe("Work requests decided in place", () => {
 
   it("lets the snapshot's proven outcome replace an uncertain answer, and names it as the off reason", async () => {
     const uncertain = "Couldn't reach the hub, so the decision may not have arrived."
-    const { decisions } = decisionsOf({}, { answer: { jobId: "job-1", settled: false, text: uncertain } })
+    const { decisions } = decisionsOf({}, { answer: { jobId: "job-1", outcome: "uncertain", text: uncertain } })
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
     const status = [...host.querySelectorAll("[role='status']")].map(({ textContent }) => textContent)
-    expect(status).toContain(`Approved. ${uncertain}`)
-    expect(host.textContent).toContain("Approved.")
+    expect(status).toContain("Approved.")
+    expect(host.textContent).not.toContain(uncertain)
     expect(host.textContent).not.toContain("no longer lists")
+  })
+
+  it("keeps an accepted decision off while the host still lists the job as pending", async () => {
+    const { decisions, sent } = decisionsOf(
+      { "job-1": NOW + 60_000 },
+      { answer: { jobId: "job-1", outcome: "accepted", text: "The hub recorded your approval." } }
+    )
+    const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1")]) })
+    const reject = button(host, "Reject: Apply r1")
+    expect(reject?.getAttribute("aria-disabled")).toBe("true")
+    await act(async () => reject?.click())
+    expect(sent).toEqual([])
+    expect(host.textContent).toContain("The hub has your decision.")
+  })
+
+  it("lets a refused decision be tried again while the job is still pending", async () => {
+    const { decisions } = decisionsOf(
+      { "job-1": NOW + 60_000 },
+      { answer: { jobId: "job-1", outcome: "refused", text: "The hub refused: approver not allowed." } }
+    )
+    const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1")]) })
+    expect(button(host, "Approve: Apply r1")?.getAttribute("aria-disabled")).toBeNull()
   })
 
   it("keeps an uncertain answer as it is while the request is still waiting", async () => {
     const uncertain = "Couldn't reach the hub, so the decision may not have arrived."
     const { decisions } = decisionsOf(
       { "job-1": NOW + 60_000 },
-      { answer: { jobId: "job-1", settled: false, text: uncertain } }
+      { answer: { jobId: "job-1", outcome: "uncertain", text: uncertain } }
     )
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1")]) })
     const status = [...host.querySelectorAll("[role='status']")].map(({ textContent }) => textContent)
