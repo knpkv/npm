@@ -18,9 +18,8 @@
 import { Effect, Schema } from "effect"
 import type * as SqlClient from "effect/sql/SqlClient"
 import * as SqlSchema from "effect/sql/SqlSchema"
-import type { ApprovalUnknownTag } from "../../../Domain.js"
 import { type CommentThreadJson, decodeCommentLocationJson } from "../commentLocations.js"
-import { cacheError, joinApprovedBy, UpsertInput } from "./internal.js"
+import { type ApprovalRead, cacheError, joinApprovedBy, UpsertInput } from "./internal.js"
 import { PullRequestAmbiguityError } from "./queries.js"
 
 export interface PullRequestCoordinates {
@@ -158,36 +157,33 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       ),
 
     /**
-     * Record a re-read's approval evaluation on its row. While unknown, the last known approval and
-     * rules are kept and only the reason is set; an evaluation replaces both and clears the reason.
+     * Record a provider re-read's approval evaluation on its row. While unknown, the last known
+     * approval and rules are kept and only the reason is set; an evaluation replaces both and clears
+     * the reason. A read older than the cached revision (its last activity is earlier) is not written:
+     * the history sync runs outside the refresh lock, so a refresh may have stored a newer revision.
      */
     recordApprovalEvaluation: (
       awsAccountId: string,
       id: string,
-      evaluation:
-        | { readonly _tag: "Unknown"; readonly reason: ApprovalUnknownTag }
-        | {
-          readonly _tag: "Evaluated"
-          readonly isApproved: boolean
-          // Complete rules, as the upsert takes them: a partial rule would decode to none on the next read.
-          readonly approvalRules: UpsertInput["approvalRules"]
-        },
+      read: ApprovalRead,
       coordinates?: PullRequestCoordinates
-    ) =>
-      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+    ) => {
+      const where = sql`${pullRequestWhere(awsAccountId, id, coordinates)}
+        AND last_modified_date <= ${read.lastActivityDate.toISOString()}`
+      return ensureUnambiguous(awsAccountId, id, coordinates).pipe(
         Effect.andThen(
-          evaluation._tag === "Unknown"
-            ? sql`UPDATE pull_requests SET approval_unknown_reason = ${evaluation.reason}
-              WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
-            : sql`UPDATE pull_requests SET is_approved = ${evaluation.isApproved ? 1 : 0},
+          read.approvalUnknown !== undefined
+            ? sql`UPDATE pull_requests SET approval_unknown_reason = ${read.approvalUnknown._tag} WHERE ${where}`
+            : sql`UPDATE pull_requests SET is_approved = ${read.isApproved ? 1 : 0},
               approval_unknown_reason = NULL,
-              approval_rules = ${evaluation.approvalRules.length > 0 ? JSON.stringify(evaluation.approvalRules) : "[]"}
-              WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
+              approval_rules = ${read.approvalRules.length > 0 ? JSON.stringify(read.approvalRules) : "[]"}
+              WHERE ${where}`
         ),
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("recordApprovalEvaluation")
-      ),
+      )
+    },
 
     updateStatusAndClosedAt: (
       awsAccountId: string,

@@ -12,7 +12,14 @@
  * @category CacheService
  */
 import { Effect, Schema, SchemaGetter } from "effect"
-import { ApprovalRule, ApprovalUnknownTag, PullRequestId, PullRequestStatus, RepositoryName } from "../../../Domain.js"
+import {
+  ApprovalRule,
+  type ApprovalUnknownReason,
+  ApprovalUnknownTag,
+  PullRequestId,
+  PullRequestStatus,
+  RepositoryName
+} from "../../../Domain.js"
 import { CacheError } from "../../CacheError.js"
 
 /** DB column `TEXT` (comma-separated) <-> `readonly string[]` */
@@ -117,6 +124,27 @@ export const UpsertInput = Schema.Struct({
 })
 
 export type UpsertInput = typeof UpsertInput.Type
+
+/**
+ * A provider read's approval, as `recordApprovalEvaluation` and `approvalColumnsOf` take it: the
+ * evaluated value and its complete rules, or the reason evaluation failed, and when the read's
+ * revision last changed. A `PullRequestDetail` is one.
+ */
+export interface ApprovalRead {
+  readonly isApproved: boolean
+  readonly approvalRules: UpsertInput["approvalRules"]
+  readonly approvalUnknown?: ApprovalUnknownReason | undefined
+  readonly lastActivityDate: Date
+}
+
+/**
+ * The approval columns an upsert writes for a provider read. While approval is unknown, `isApproved`
+ * is a placeholder: the upsert keeps an existing row's last known value.
+ */
+export const approvalColumnsOf = (read: Omit<ApprovalRead, "lastActivityDate">) => ({
+  isApproved: read.approvalUnknown === undefined && read.isApproved ? 1 : 0,
+  approvalUnknownReason: read.approvalUnknown?._tag ?? null
+})
 
 /** Wrap an Effect with CacheError mapping and a span. */
 export const cacheError = (op: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>

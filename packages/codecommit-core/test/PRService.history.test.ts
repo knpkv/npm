@@ -42,6 +42,15 @@ const cachedRow = (profile: string, id: string) =>
     approvalRules: null
   })
 
+/** Run `effect` with `layer`'s services, built in the effect's own scope. */
+const runWithLayer = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>): Effect.Effect<A, E> =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const context = yield* Layer.build(layer)
+      return yield* effect.pipe(Effect.provideContext(context))
+    })
+  )
+
 const detail = (approvalUnknown: { readonly _tag: "NotPermitted" } | undefined) =>
   new PullRequestDetail({
     revisionId: "revision-11",
@@ -83,7 +92,7 @@ describe("history sync approval evaluation", () => {
           findAll: () => Effect.succeed([cachedRow("kept-profile", "11")]),
           findStaleOpen: () => Effect.succeed([cachedRow("kept-profile", "11")]),
           recordApprovalEvaluation: (_, __, evaluation) =>
-            Ref.update(recorded, (all) => [...all, evaluation._tag === "Unknown" ? evaluation.reason : "Evaluated"]),
+            Ref.update(recorded, (all) => [...all, evaluation.approvalUnknown?._tag ?? "Evaluated"]),
           refreshCommentedBy: () => Effect.void
         }),
         Layer.mock(ConfigService, {
@@ -94,10 +103,7 @@ describe("history sync approval evaluation", () => {
           )
         })
       )
-      yield* syncWeek(state, "2026-W31").pipe(
-        // @effect-diagnostics-next-line strictEffectProvide:off
-        Effect.provide(dependencies)
-      )
+      yield* runWithLayer(syncWeek(state, "2026-W31"), dependencies)
       expect(yield* Ref.get(recorded)).toEqual([expected])
     }))
 
@@ -131,11 +137,7 @@ describe("history sync approval evaluation", () => {
           )
         })
       )
-      yield* syncWeek(state, "2026-W31").pipe(
-        // @effect-diagnostics-next-line strictEffectProvide:off
-        Effect.provide(dependencies),
-        Effect.withLogger(logger)
-      )
+      yield* runWithLayer(syncWeek(state, "2026-W31"), dependencies).pipe(Effect.withLogger(logger))
       expect(warnings.some((message) => message.includes("#11"))).toBe(true)
     }))
 })

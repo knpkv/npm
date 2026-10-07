@@ -15,7 +15,7 @@ import { EventsHub, RepoChange } from "../../EventsHub.js"
 import { mutations } from "./mutations.js"
 import * as Q from "./queries.js"
 
-export { CachedPullRequest, type SearchResult, UpsertInput } from "./internal.js"
+export { approvalColumnsOf, type ApprovalRead, CachedPullRequest, type SearchResult, UpsertInput } from "./internal.js"
 export type { CachedPullRequest as CachedPullRequestType } from "./internal.js"
 export { PullRequestAmbiguityError } from "./queries.js"
 

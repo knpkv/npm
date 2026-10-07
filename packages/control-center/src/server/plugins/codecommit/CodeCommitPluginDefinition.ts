@@ -13,6 +13,7 @@
  *
  * @internal
  */
+import { isCredentialInvalidCause } from "@knpkv/codecommit-core/AwsCredentialErrors.js"
 import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import * as ReviewClient from "@knpkv/codecommit-core/ReviewClient.js"
@@ -192,7 +193,7 @@ const failRead = Effect.fn("CodeCommitPlugin.failRead")(function*(
     case "CodeCommitReadNotFoundError":
       return yield* new PluginConfigurationFailure({ diagnosticCode: "codecommit-provider-object-not-found" })
     case "AwsApiError": {
-      if (causeHasTag(error.cause, ["InvalidClientTokenId", "UnrecognizedClientException", "ExpiredTokenException"])) {
+      if (isCredentialInvalidCause(error.cause)) {
         return yield* new PluginAuthenticationFailure({ operation })
       }
       if (causeHasTag(error.cause, ["AccessDeniedException", "EncryptionKeyAccessDeniedException"])) {
@@ -261,7 +262,7 @@ const failReview = Effect.fn("CodeCommitPlugin.failReview")(function*(
         diagnosticCode: `codecommit-${error.reason}`
       })
     case "AwsApiError": {
-      if (causeHasTag(error.cause, ["InvalidClientTokenId", "UnrecognizedClientException", "ExpiredTokenException"])) {
+      if (isCredentialInvalidCause(error.cause)) {
         return yield* new PluginAuthenticationFailure({ operation })
       }
       if (causeHasTag(error.cause, ["AccessDeniedException", "EncryptionKeyAccessDeniedException"])) {

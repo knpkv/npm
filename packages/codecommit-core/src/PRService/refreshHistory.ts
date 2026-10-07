@@ -135,19 +135,7 @@ export const syncWeek = Effect.fn("syncWeek")(
                 const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
                 // The re-read's evaluation reaches the cache like the refresh's stale pass: an unknown one
                 // marks the row, a successful one replaces the last known approval and clears the reason.
-                const recordEvaluation = prRepo.recordApprovalEvaluation(
-                  pr.awsAccountId,
-                  pr.id,
-                  detail.approvalUnknown === undefined
-                    ? {
-                      _tag: "Evaluated",
-                      // ast-grep-ignore: no-raw-pull-request-approval-read -- writes the evaluated value to the cache.
-                      isApproved: detail.isApproved,
-                      approvalRules: detail.approvalRules
-                    }
-                    : { _tag: "Unknown", reason: detail.approvalUnknown._tag },
-                  coordinates
-                )
+                const recordEvaluation = prRepo.recordApprovalEvaluation(pr.awsAccountId, pr.id, detail, coordinates)
                 if (detail.status !== "OPEN") {
                   return prRepo
                     .updateStatusAndClosedAt(

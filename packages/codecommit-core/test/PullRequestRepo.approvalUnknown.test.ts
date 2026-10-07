@@ -1,5 +1,3 @@
-/** @effect-diagnostics strictEffectProvide:skip-file */
-
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, FileSystem, Layer, Option, Schema } from "effect"
@@ -46,7 +44,29 @@ const upsertInput = (
     approvalRules: [rule(evaluation.satisfied)]
   })
 
+/**
+ * A provider re-read of the pull request at the cached revision (same last activity), evaluated or
+ * with its approval unknown.
+ */
+const reread = (
+  read: { readonly isApproved?: boolean; readonly unknown?: "Throttled"; readonly lastActivityDate?: string }
+) => ({
+  isApproved: read.isApproved ?? false,
+  approvalRules: [rule(read.isApproved ?? false)],
+  ...(read.unknown !== undefined && { approvalUnknown: { _tag: read.unknown } }),
+  lastActivityDate: new Date(read.lastActivityDate ?? "2026-10-05T00:00:00.000Z")
+})
+
 const withCache = <A, E>(
+  body: Effect.Effect<A, E, PullRequestRepo | StatsRepo>
+) =>
+  Effect.gen(function*() {
+    const node = yield* Layer.build(NodeServices.layer)
+    return yield* withServices(body).pipe(Effect.provideContext(node))
+  }).pipe(Effect.scoped)
+
+/** The repositories on a fresh cache database under a temporary HOME. */
+const withServices = <A, E>(
   body: Effect.Effect<A, E, PullRequestRepo | StatsRepo>
 ) =>
   Effect.gen(function*() {
@@ -56,8 +76,9 @@ const withCache = <A, E>(
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: root } })))
     )
-    return yield* body.pipe(Effect.provide(services), Effect.scoped)
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+    const context = yield* Layer.build(services)
+    return yield* body.pipe(Effect.provideContext(context))
+  })
 
 const read = (id: string) =>
   Effect.flatMap(PullRequestRepo, (repo) => repo.findByCoordinates("123456789012", id, "payments", "eu-west-1")).pipe(
@@ -109,15 +130,11 @@ describe("PullRequestRepo approval unknown", () => {
       const repo = yield* PullRequestRepo
       const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
       yield* repo.upsert(upsertInput("46", { isApproved: 1, satisfied: true, unknown: null }))
-      yield* repo.recordApprovalEvaluation("123456789012", "46", { _tag: "Unknown", reason: "Throttled" }, coordinates)
+      yield* repo.recordApprovalEvaluation("123456789012", "46", reread({ unknown: "Throttled" }), coordinates)
       const unknown = yield* read("46")
       expect([unknown.isApproved, unknown.approvalUnknownReason]).toEqual([true, "Throttled"])
 
-      yield* repo.recordApprovalEvaluation("123456789012", "46", {
-        _tag: "Evaluated",
-        isApproved: false,
-        approvalRules: [rule(false)]
-      }, coordinates)
+      yield* repo.recordApprovalEvaluation("123456789012", "46", reread({ isApproved: false }), coordinates)
       const evaluated = yield* read("46")
       expect([evaluated.isApproved, evaluated.approvalUnknownReason]).toEqual([false, null])
       expect(evaluated.approvalRules.map((r) => r.satisfied)).toEqual([false])
@@ -130,13 +147,35 @@ describe("PullRequestRepo approval unknown", () => {
       const repo = yield* PullRequestRepo
       const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
       yield* repo.upsert(upsertInput("47", { isApproved: 0, satisfied: false, unknown: null }))
-      yield* repo.recordApprovalEvaluation(
-        "123456789012",
-        "47",
-        { _tag: "Evaluated", isApproved: true, approvalRules: [rule(true)] },
-        coordinates
-      )
+      yield* repo.recordApprovalEvaluation("123456789012", "47", reread({ isApproved: true }), coordinates)
       expect((yield* read("47")).approvalRules.map((r) => [r.ruleName, r.requiredApprovals, r.satisfied]))
         .toEqual([["two-reviewers", 2, true]])
+    })))
+
+  // The history sync runs outside the refresh lock: its read of an older revision must not overwrite
+  // the approval a refresh has since stored for a newer one.
+  it.effect("keeps a newer revision's approval when an older read's evaluation lands after it", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
+      yield* repo.upsert(
+        Schema.decodeSync(UpsertInput)({
+          ...Schema.encodeSync(UpsertInput)(upsertInput("48", { isApproved: 0, satisfied: false, unknown: null })),
+          lastModifiedDate: "2026-10-06T00:00:00.000Z"
+        })
+      )
+      yield* repo.recordApprovalEvaluation("123456789012", "48", reread({ isApproved: true }), coordinates)
+      yield* repo.recordApprovalEvaluation("123456789012", "48", reread({ unknown: "Throttled" }), coordinates)
+      const kept = yield* read("48")
+      expect([kept.isApproved, kept.approvalUnknownReason]).toEqual([false, null])
+
+      // A read of the newer revision is recorded.
+      yield* repo.recordApprovalEvaluation(
+        "123456789012",
+        "48",
+        reread({ isApproved: true, lastActivityDate: "2026-10-06T00:00:00.000Z" }),
+        coordinates
+      )
+      expect((yield* read("48")).isApproved).toBe(true)
     })))
 })

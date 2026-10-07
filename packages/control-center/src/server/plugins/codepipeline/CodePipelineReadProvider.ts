@@ -16,6 +16,7 @@ import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import * as s3 from "@distilled.cloud/aws/s3"
 import * as sts from "@distilled.cloud/aws/sts"
 import { collectBounded } from "@knpkv/bounded-io"
+import { credentialInvalidTags, isCredentialInvalidCause } from "@knpkv/codecommit-core/AwsCredentialErrors.js"
 import { makeProfileCredentialProvider } from "@knpkv/codecommit-core/AwsProfileCredentials.js"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
@@ -352,13 +353,8 @@ export const mapCodePipelineAwsFailure = Effect.fn("CodePipelineReadProvider.map
     return yield* new CodePipelineProviderNotFoundFailure({ operation })
   }
   if (
-    hasTag(cause, [
-      "CredentialsProviderError",
-      "ExpiredTokenException",
-      "InvalidClientTokenId",
-      "InvalidSignatureException",
-      "UnrecognizedClientException"
-    ])
+    // Raw @aws-sdk/client-codepipeline exceptions carry the code in `name`, which `hasTag` also reads.
+    isCredentialInvalidCause(cause) || hasTag(cause, [...credentialInvalidTags, "CredentialsProviderError"])
   ) {
     return yield* new PluginAuthenticationFailure({ operation })
   }

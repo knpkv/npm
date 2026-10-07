@@ -177,21 +177,9 @@ export const fetchAndUpsertPRs = (params: {
     ) =>
       Effect.gen(function*() {
         const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
+        yield* prRepo.recordApprovalEvaluation(pr.awsAccountId, pr.id, detail, coordinates)
         const reason = detail.approvalUnknown
-        if (reason === undefined) {
-          return yield* prRepo.recordApprovalEvaluation(pr.awsAccountId, pr.id, {
-            _tag: "Evaluated",
-            // ast-grep-ignore: no-raw-pull-request-approval-read -- writes the evaluated value to the cache.
-            isApproved: detail.isApproved,
-            approvalRules: detail.approvalRules
-          }, coordinates)
-        }
-        yield* prRepo.recordApprovalEvaluation(
-          pr.awsAccountId,
-          pr.id,
-          { _tag: "Unknown", reason: reason._tag },
-          coordinates
-        )
+        if (reason === undefined) return
         yield* Ref.update(
           partialScopes,
           (scopes) => new Set(scopes).add(accountRegionKey(pr.accountProfile, pr.accountRegion))

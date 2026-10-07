@@ -118,7 +118,9 @@ const singleRefreshApprovalCases: ReadonlyArray<
   readonly [string, Domain.ApprovalUnknownReason | undefined, readonly [number, Domain.ApprovalUnknownTag | null]]
 > = [
   ["an evaluated approval replaces the cached one and clears the reason", undefined, [0, null]],
-  ["an unknown approval keeps the cached one and stores the reason", { _tag: "NotPermitted" }, [1, "NotPermitted"]]
+  // While unknown the input's approval is a placeholder: the upsert keeps the cached value
+  // (PullRequestRepo.approvalUnknown.test.ts proves that against the database).
+  ["an unknown approval stores the reason, with a placeholder approval", { _tag: "NotPermitted" }, [0, "NotPermitted"]]
 ]
 
 describe("PRService.refreshSinglePR coordinates", () => {

@@ -19,7 +19,11 @@ import type {
   PullRequestRepoContract,
   UpsertInput
 } from "../CacheService/repos/PullRequestRepo/index.js"
-import { PullRequestAmbiguityError, PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
+import {
+  approvalColumnsOf,
+  PullRequestAmbiguityError,
+  PullRequestRepo
+} from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import {
@@ -254,17 +258,8 @@ export const makeRefreshSinglePR = (
       sourceBranch: detail.sourceBranch,
       destinationBranch: detail.destinationBranch,
       isMergeable: cached !== undefined ? (cached.isMergeable ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
-      // A failed evaluation keeps the last known approval (the upsert keeps the cached value too).
-      isApproved: detail.approvalUnknown === undefined
-        // ast-grep-ignore: no-raw-pull-request-approval-read -- writes the evaluated value to the cache.
-        ? (detail.isApproved ? 1 : 0)
-        : cached !== undefined
-        // ast-grep-ignore: no-raw-pull-request-approval-read -- carries the last known value forward.
-        ? (cached.isApproved ? 1 : 0)
-        : detail.status === "MERGED"
-        ? 1
-        : 0,
-      approvalUnknownReason: detail.approvalUnknown?._tag ?? null,
+      // A failed evaluation keeps the last known approval: the upsert keeps the cached value.
+      ...approvalColumnsOf(detail),
       commentCount: countAllComments(locs),
       link: cached?.link ?? pr?.link ??
         codecommitConsoleUrl(account.region, coordinates?.repositoryName ?? detail.repositoryName, prId),

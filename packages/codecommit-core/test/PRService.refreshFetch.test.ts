@@ -432,7 +432,7 @@ describe("fetchAndUpsertPRs", () => {
           recordApprovalEvaluation: (_, id, evaluation) =>
             Ref.update(
               marked,
-              (all) => [...all, [id, evaluation._tag === "Unknown" ? evaluation.reason : "Evaluated"]]
+              (all) => [...all, [id, evaluation.approvalUnknown?._tag ?? "Evaluated"]]
             ),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -906,11 +906,9 @@ describe("fetchAndUpsertPRs", () => {
         currentUser: undefined,
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
-      expect(yield* Ref.get(recorded)).toEqual([[staleOpenPR.id, {
-        _tag: "Evaluated",
-        isApproved: true,
-        approvalRules: []
-      }]])
+      expect((yield* Ref.get(recorded)).map(([id, read]) => [id, read.approvalUnknown, read.isApproved])).toEqual([
+        [staleOpenPR.id, undefined, true]
+      ])
       // Evaluated, so nothing is unknown and the scope is not partial.
       expect(successfulScopes).toEqual([{ profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }])
     }))
