@@ -45,6 +45,12 @@ const headers = {
 }
 const empty = (status: number) => HttpServerResponse.empty({ status, headers })
 
+/**
+ * The status for a request the handler could not finish: a publish that stalls past the deadline is
+ * a timeout (408); any other failure reading or decoding it is the publisher's request (400).
+ */
+export const failureStatus = (error: { readonly _tag: string }): 400 | 408 => error._tag === "TimeoutError" ? 408 : 400
+
 /** Owns one in-memory board, its high-water sequence, rate limits and expiry. No upstream services. */
 export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorOptions, assets: WebAssets) {
   const config = {
@@ -136,8 +142,10 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
   }).pipe(
     Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_BYTES)),
     Effect.timeout("5 seconds"),
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    Effect.catch(() => Effect.succeed(empty(400)))
+    // Logged, so a broken or stalling publisher shows in the server log.
+    Effect.catch((error) =>
+      Effect.logWarning("monitor request failed", error).pipe(Effect.as(empty(failureStatus(error))))
+    )
   )
   return { handler }
 })
