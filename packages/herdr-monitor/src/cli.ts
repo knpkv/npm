@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node"
+import type { PlatformError } from "effect"
 import { Clock, Config, Console, Crypto, Effect, FileSystem, Option, Path, Redacted, Schema } from "effect"
 import { Argument, Command, Flag } from "effect/cli"
 import { Base64Url } from "effect/encoding"
@@ -30,9 +31,33 @@ const required = <A>(name: string, config: Config.Config<A>) =>
       onSome: Effect.succeed
     }))
   )
-/** A variable with a default; a value it cannot parse fails naming it. */
+/**
+ * A variable with a default; a value it cannot parse fails naming it and echoing the value. Only for
+ * settings that are not secret: keys go through `required`, which never echoes.
+ */
 const optional = <A>(name: string, config: Config.Config<A>) =>
-  config.pipe(Effect.mapError(() => new InvalidSetting({ name })))
+  config.pipe(
+    Effect.catch(() =>
+      Config.option(Config.String(name)).pipe(
+        Effect.orElseSucceed(() => Option.none<string>()),
+        Effect.flatMap((value) => Effect.fail(new InvalidSetting({ name, value: Option.getOrUndefined(value) })))
+      )
+    )
+  )
+
+/** What a file read failure means, in words: the system tag, not the platform's call trace. */
+const fileProblem = (error: PlatformError.PlatformError): string => {
+  switch (error.reason._tag) {
+    case "NotFound":
+      return "no such file"
+    case "PermissionDenied":
+      return "permission denied"
+    case "BadResource":
+      return "not a readable file"
+    default:
+      return "it could not be read"
+  }
+}
 
 const origin = optional(
   "MONITOR_ORIGIN",
@@ -86,8 +111,8 @@ const send = Command.make(
   { file: Argument.String("snapshot-file") },
   Effect.fn(function*({ file }) {
     const fs = yield* FileSystem.FileSystem
-    const unreadable = (error: { readonly message: string }) =>
-      new SnapshotFileUnreadable({ file, reason: error.message })
+    const unreadable = (error: PlatformError.PlatformError) =>
+      new SnapshotFileUnreadable({ file, reason: fileProblem(error) })
     const stat = yield* fs.stat(file).pipe(Effect.mapError(unreadable))
     const bytes = Number(stat.size)
     if (bytes > MAX_BYTES) return yield* new SnapshotFileTooLarge({ file, bytes })

@@ -12,8 +12,11 @@ html {
 * {
   box-sizing: border-box;
 }
+/* Content stops at 90rem, like the other hub pages, so a wall display does not spread facts far
+   from their labels. */
 body {
-  margin: 0;
+  margin: 0 auto;
+  max-inline-size: 90rem;
   padding: var(--rly-space-24);
 }
 /* Product name and Lock on the first row, the connection line on its own row below, a rule under
@@ -204,7 +207,8 @@ dl {
   display: grid;
   font-size: var(--rly-type-body-size);
   gap: var(--rly-space-8) var(--rly-space-12);
-  grid-template-columns: max-content minmax(0, 1fr);
+  /* One key width for every tile, so values line up across a row; it fits "Clockify recorded". */
+  grid-template-columns: 9.5em minmax(0, 1fr);
   margin: var(--rly-space-12) 0 0;
   padding-top: var(--rly-space-12);
 }
@@ -231,5 +235,15 @@ footer {
 @media (max-width: 30rem) {
   body {
     padding: var(--rly-space-16);
+  }
+  /* Tiles stack one per row here, so there is no row to line up with; values get the room. */
+  dl {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+}
+/* At 320px the section title wrapped to two lines beside Lock board. */
+@media (max-width: 22.5rem) {
+  h1 {
+    font-size: var(--rly-type-card-title-size);
   }
 }

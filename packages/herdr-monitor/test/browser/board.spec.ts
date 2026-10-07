@@ -104,3 +104,34 @@ for (
     expect(await positions()).toEqual(before)
   })
 }
+
+// ui-b on #577: "Herdr monitor" wrapped to two lines beside Lock board at 320px.
+test("at 320px the title stays on one line beside Lock", async ({ page }) => {
+  await openDemo(page, 320)
+  const [title, lock] = await Promise.all([
+    page.getByRole("heading", { level: 1 }).evaluate((heading) => {
+      const range = document.createRange()
+      range.selectNodeContents(heading)
+      return range.getClientRects().length
+    }),
+    page.locator("#lock").boundingBox()
+  ])
+  expect(title).toBe(1)
+  expect(lock !== null && lock.x + lock.width <= 320).toBe(true)
+})
+
+// ui-b on #577: at 1920 the board ran full width and fact values floated far from their labels, and
+// each tile sized its own label column, so values did not line up across a row.
+test("on a wall display content stops at 90rem and fact values line up across tiles", async ({ page }) => {
+  await openDemo(page, 1920)
+  const width = await page.locator("main").evaluate((main) => main.getBoundingClientRect().width)
+  const rem = await page.evaluate(() => Number.parseFloat(getComputedStyle(document.documentElement).fontSize))
+  expect(width).toBeLessThanOrEqual(90 * rem)
+  const valueStarts = await page.locator(".agent").evaluateAll((tiles) =>
+    tiles.map((tile) => {
+      const value = tile.querySelector("dd")?.getBoundingClientRect().left ?? 0
+      return Math.round(value - tile.getBoundingClientRect().left)
+    })
+  )
+  expect(new Set(valueStarts).size).toBe(1)
+})

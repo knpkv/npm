@@ -15,7 +15,11 @@ import type { MonitorConfigurationError, MonitorSetting } from "./server.js"
 /** A required environment variable is unset or empty. */
 export class MissingSetting extends Schema.TaggedError<MissingSetting>()("MissingSetting", { name: Schema.String }) {}
 /** An environment variable is set to something herdr-monitor cannot use. */
-export class InvalidSetting extends Schema.TaggedError<InvalidSetting>()("InvalidSetting", { name: Schema.String }) {}
+export class InvalidSetting extends Schema.TaggedError<InvalidSetting>()("InvalidSetting", {
+  name: Schema.String,
+  /** The value as set, for settings that are not secret; absent for keys. */
+  value: Schema.optional(Schema.String)
+}) {}
 /** The snapshot file could not be read; `reason` is the platform's description. */
 export class SnapshotFileUnreadable extends Schema.TaggedError<SnapshotFileUnreadable>()("SnapshotFileUnreadable", {
   file: Schema.String,
@@ -102,10 +106,12 @@ export const describeFailure = (error: CliFailure | CliError.CliError): string |
   switch (error._tag) {
     case "MissingSetting":
       return `${error.name} is not set. Run: herdr-monitor init, then load the file it writes.`
-    case "InvalidSetting":
-      return `${error.name} is set to a value herdr-monitor cannot use${
-        error.name === "MONITOR_PORT" ? "; it must be a port number from 1 to 65535" : ""
-      }.`
+    case "InvalidSetting": {
+      const setting = error.value === undefined ? error.name : `${error.name}=${error.value}`
+      return error.name === "MONITOR_PORT"
+        ? `${setting} is not a port number (1–65535).`
+        : `${setting} is not a value herdr-monitor can use.`
+    }
     case "MonitorConfigurationError":
       return `${settingVariable[error.setting]} ${settingRule[error.setting]}`
     case "InvalidOrigin":
@@ -117,13 +123,13 @@ export const describeFailure = (error: CliFailure | CliError.CliError): string |
     case "SnapshotTooLarge":
       return `The snapshot is ${error.bytes} bytes; the limit is ${MAX_BYTES}.`
     case "MonitorUnreachable":
-      return `Cannot reach the monitor at ${error.origin}. Is herdr-monitor serve running there? (${error.reason})`
+      return `Cannot reach the monitor at ${error.origin}. Is herdr-monitor serve running there?`
     case "PublishTimedOut":
       return `The monitor at ${error.origin} did not answer within 5 seconds.`
     case "PublishRejected":
       return `The monitor at ${error.origin} refused the snapshot (HTTP ${error.status}): ${rejection(error.status)}.`
     case "SnapshotFileUnreadable":
-      return `Cannot read ${error.file}: ${error.reason}`
+      return `Cannot read ${error.file}: ${error.reason}.`
     case "SnapshotFileTooLarge":
       return `${error.file} is ${error.bytes} bytes; a snapshot is at most ${MAX_BYTES}.`
     case "SnapshotFileInvalid":

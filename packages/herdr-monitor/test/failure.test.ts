@@ -19,8 +19,8 @@ describe("describeFailure", () => {
     expect(describeFailure(new MissingSetting({ name: "MONITOR_VIEW_TOKEN" }))).toBe(
       "MONITOR_VIEW_TOKEN is not set. Run: herdr-monitor init, then load the file it writes."
     )
-    expect(describeFailure(new InvalidSetting({ name: "MONITOR_PORT" }))).toBe(
-      "MONITOR_PORT is set to a value herdr-monitor cannot use; it must be a port number from 1 to 65535."
+    expect(describeFailure(new InvalidSetting({ name: "MONITOR_PORT", value: "4999x" }))).toBe(
+      "MONITOR_PORT=4999x is not a port number (1–65535)."
     )
   })
 
@@ -37,8 +37,8 @@ describe("describeFailure", () => {
   })
 
   it("names the snapshot file and what is wrong with it", () => {
-    expect(describeFailure(new SnapshotFileUnreadable({ file: "missing.json", reason: "NotFound" }))).toBe(
-      "Cannot read missing.json: NotFound"
+    expect(describeFailure(new SnapshotFileUnreadable({ file: "missing.json", reason: "no such file" }))).toBe(
+      "Cannot read missing.json: no such file."
     )
     expect(describeFailure(new SnapshotFileInvalid({ file: "board.json", reason: "Missing key\n  at [\"agents\"]" })))
       .toBe("board.json is not a valid snapshot: Missing key at [\"agents\"]")
@@ -51,7 +51,7 @@ describe("describeFailure", () => {
     )
     expect(describeFailure(new PublishRejected({ origin: at, status: 409 }))).toContain("publish a higher sequence")
     expect(describeFailure(new MonitorUnreachable({ origin: at, reason: "Transport error" }))).toBe(
-      `Cannot reach the monitor at ${at}. Is herdr-monitor serve running there? (Transport error)`
+      `Cannot reach the monitor at ${at}. Is herdr-monitor serve running there?`
     )
     expect(describeFailure(new KeysExist({ path: "/home/u/.config/herdr-monitor/monitor.env" }))).toContain(
       "never replaces them"
