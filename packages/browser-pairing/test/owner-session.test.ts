@@ -25,10 +25,8 @@ const DEV_PROXY = "http://localhost:5173"
 /** Distinct random bytes per call, so owner, CSRF and bootstrap codes never coincide. */
 const counterCrypto = (): Crypto.Crypto => {
   let next = 1
-  return Crypto.Crypto.of({
-    randomBytes: (size) => Effect.sync(() => new Uint8Array(size).fill(next++)),
-    randomUUIDv4: Effect.succeed("00000000-0000-4000-8000-000000000000"),
-    randomUUIDv7: Effect.succeed("01900000-0000-7000-8000-000000000000"),
+  return Crypto.make({
+    randomBytes: (size) => new Uint8Array(size).fill(next++),
     digest: (_algorithm, bytes) => Effect.succeed(new Uint8Array(32).fill(bytes[0] ?? 0))
   })
 }

@@ -31,7 +31,7 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force",
-    "check": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",
