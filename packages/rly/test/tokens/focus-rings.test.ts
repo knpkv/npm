@@ -31,8 +31,15 @@ describe("focus ring policy", () => {
     expect(rules(`.x:focus-visible { ${RING} outline: none; }`)).toEqual(["focus-outline"])
   })
 
-  it("lets a child drop its outline when a parent :focus-within draws the ring", () => {
-    expect(rules(`.field:focus-within { ${RING} } .field input:focus-visible { outline: none; }`)).toEqual([])
+  it("rejects a :focus-visible rule that removes the outline without drawing the ring", () => {
+    expect(rules(".a:hover, .a:focus-visible { outline: none; }")).toEqual(["focus-outline"])
+    expect(rules(".a:focus-visible { outline-width: 0; }")).toEqual(["focus-outline"])
+  })
+
+  it("lets plain :focus and mouse focus drop the outline", () => {
+    expect(rules(".a:focus:not(:focus-visible) { outline: none; }")).toEqual([])
+    expect(rules(".editor:focus { outline: none; }")).toEqual([])
+    expect(rules(`.field:focus-within { ${RING} } .field input:focus { outline: none; }`)).toEqual([])
   })
 
   it("exempts forced colours, which draw the system ring", () => {
