@@ -543,7 +543,7 @@ test("renders a substantive Relay explanation", async ({ page }) => {
   await routeReviewWorkspace(page, "explain")
   await page.goto("/accounts/111111111111/prs/42")
 
-  await expect(page.getByLabel("Profile")).toHaveValue("thorough")
+  await expect(page.getByRole("combobox", { name: "Profile" })).toHaveText("Thorough review")
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByRole("heading", { name: "Change explanation" })).toBeVisible()
   await expect(page.getByText("The patch raises the retry budget used by the payment request flow.")).toBeVisible()
@@ -617,8 +617,7 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
   })
   defaultProfileId = "thorough"
   await page.reload()
-  await expect(page.getByLabel("Profile")).toHaveValue("quick")
-  await expect(page.getByLabel("Profile").locator("option:checked")).toHaveText("Test review")
+  await expect(page.getByRole("combobox", { name: "Profile" })).toHaveText("Test review")
   await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByPlaceholder("Ask Relay about this finding…").fill("Continue this security review.")
@@ -640,7 +639,8 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
       { message: "Confirmed against the same exact revision.", role: "assistant" }
     ]
   })
-  await page.getByLabel("Profile").selectOption("thorough")
+  await page.getByRole("combobox", { name: "Profile" }).click()
+  await page.getByRole("option", { name: "Thorough review" }).click()
   await page.getByRole("button", { name: "Run again" }).click()
   await expect.poll(() => runs.length).toBe(2)
   expect(runs[1]).toMatchObject({
@@ -1149,7 +1149,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   await expect(page.getByRole("heading", { exact: true, name: "Diff" })).toBeVisible()
   const relayPane = page.getByRole("complementary", { name: "Relay findings" })
   await expect(relayPane.getByRole("region", { name: "Relay controls" })).toBeVisible()
-  await expect(relayPane.getByLabel("Profile")).toBeVisible()
+  await expect(relayPane.getByRole("combobox", { name: "Profile" })).toBeVisible()
   await expect(relayPane.getByRole("button", { name: "Run Relay" })).toBeVisible()
   await expect(page.getByText("export const retries = 3")).toBeVisible()
   const srcDirectory = page.getByRole("button", { name: "src, directory, 1 changed file" })
@@ -1167,7 +1167,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   expect(fileBox).not.toBeNull()
   expect(fileBox!.x).toBeGreaterThan(directoryBox!.x + 8)
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await expect(relayPane.getByLabel("Profile")).toBeDisabled()
+  await expect(relayPane.getByRole("combobox", { name: "Profile" })).toBeDisabled()
   await expect(relayPane.getByRole("group", { name: "Relay review focus" })).toHaveCount(0)
   await expect(page.getByRole("heading", { name: "Relay is reviewing" })).toBeVisible()
   await expect(page.getByText("Live stages are updating above.")).toBeVisible()
