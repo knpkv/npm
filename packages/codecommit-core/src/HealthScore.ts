@@ -1,5 +1,5 @@
 import { Match, Option } from "effect"
-import type { PullRequest } from "./Domain.js"
+import { approvalOf, approvalUnknownLabel, approvalUnknownReasonText, type PullRequest } from "./Domain.js"
 
 export interface HealthScoreBreakdown {
   readonly label: string
@@ -37,6 +37,8 @@ const daysBetween = (from: Date, to: Date): number => Math.max(0, (to.getTime() 
 
 const hasScope = (title: string): boolean => /^\w+(\([^)]+\))?:/.test(title) || /^[A-Z]+-\d+:/.test(title)
 
+type ApprovalCategory = Pick<HealthScoreCategory, "description" | "status" | "statusLabel">
+
 export const calculateHealthScore = (pr: PullRequest, now: Date): Option.Option<HealthScore> => {
   const daysSinceLastActivity = daysBetween(pr.lastModifiedDate, now)
   const daysSinceCreation = daysBetween(pr.creationDate, now)
@@ -47,7 +49,8 @@ export const calculateHealthScore = (pr: PullRequest, now: Date): Option.Option<
   const timeDecay = -(daysSinceLastActivity * 1.0)
   const agePenalty = -(daysSinceCreation * 0.5)
   const commentBonus = commentCount * 1.0
-  const approvalBonus = pr.isApproved ? 2 : 0
+  const approval = approvalOf(pr)
+  const approvalBonus = approval._tag === "Approved" ? 2 : 0
   const conflictPenalty = pr.isMergeable ? 0 : -3
   const scopeBonus = scopeDetected ? 0.5 : 0
   const descriptionBonus = hasDescription ? 0.5 : 0
@@ -100,11 +103,24 @@ export const calculateHealthScore = (pr: PullRequest, now: Date): Option.Option<
     },
     {
       label: "Approval",
-      description: pr.isApproved ? "+2 bonus for approval" : "No approval yet (+2 when approved)",
       value: approvalBonus,
-      ...pr.isApproved
-        ? { status: "positive", statusLabel: "APPROVED" }
-        : { status: "neutral", statusLabel: "PENDING" }
+      ...Match.valueTags(approval, {
+        Approved: (): ApprovalCategory => ({
+          description: "+2 bonus for approval",
+          status: "positive",
+          statusLabel: "APPROVED"
+        }),
+        Pending: (): ApprovalCategory => ({
+          description: "No approval yet (+2 when approved)",
+          status: "neutral",
+          statusLabel: "PENDING"
+        }),
+        Unknown: ({ reason }): ApprovalCategory => ({
+          description: `${approvalUnknownLabel}: ${approvalUnknownReasonText(reason)}`,
+          status: "neutral",
+          statusLabel: "UNKNOWN"
+        })
+      })
     },
     {
       label: "Mergeable",

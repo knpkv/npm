@@ -26,7 +26,7 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
   return Effect.all({
     prs: sql<PRForReviewRow>`
         SELECT id, title, author, aws_account_id, repository_name, account_region, creation_date, closed_at,
-          COALESCE(closed_at, last_modified_date) as last_modified_date, is_approved, status, merged_by, approved_by
+          COALESCE(closed_at, last_modified_date) as last_modified_date, status, merged_by, approved_by
         FROM pull_requests
         WHERE COALESCE(closed_at, last_modified_date) >= ${weekStart} AND COALESCE(closed_at, last_modified_date) < ${weekEnd}
           AND status != 'CLOSED'
@@ -75,7 +75,6 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
               creationDate: new Date(p.creationDate),
               closedAt: p.closedAt === null ? null : new Date(p.closedAt),
               lastModifiedDate: new Date(p.lastModifiedDate),
-              isApproved: p.isApproved === 1,
               isMerged: p.status === "MERGED",
               mergedBy: p.mergedBy,
               approvedBy: p.approvedBy === null

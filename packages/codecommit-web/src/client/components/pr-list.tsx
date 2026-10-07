@@ -9,7 +9,7 @@
  * @module
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import { LogInIcon } from "lucide-react"
@@ -74,8 +74,10 @@ export function PRList() {
     for (const pr of prs) {
       if (pr.status !== "OPEN") continue
       open += 1
-      if (pr.isApproved) approved += 1
-      else pending += 1
+      // An unknown approval counts as neither.
+      const approval = Domain.approvalOf(pr)._tag
+      if (approval === "Approved") approved += 1
+      else if (approval === "Pending") pending += 1
       if (needsYourReview(pr, caller)) review += 1
     }
     return { approved, open, pending, review }
