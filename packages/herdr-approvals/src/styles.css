@@ -43,6 +43,24 @@
     align-items: center;
     display: flex;
     gap: var(--rly-space-12);
+    white-space: nowrap;
+  }
+  .fleet-shell-brand {
+    white-space: nowrap;
+  }
+  /* Shortcuts need a keyboard: touch screens and phone widths don't get the button (? still works). */
+  @media (hover: none), (pointer: coarse), (max-width: 40rem) {
+    .fleet-shell-shortcuts-button {
+      display: none;
+    }
+  }
+  /* Full-screen on a phone: the content sits at the top instead of spreading its rows apart. */
+  .fleet-shortcuts-dialog {
+    align-content: start;
+  }
+  .fleet-shortcuts-actions {
+    display: flex;
+    justify-content: flex-end;
   }
   .fleet-shortcuts {
     display: grid;

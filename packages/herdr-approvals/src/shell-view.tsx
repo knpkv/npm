@@ -188,6 +188,7 @@ const ShortcutsDialog = ({
 }): ReactElement => (
   <Dialog.Root onOpenChange={onOpenChange} open={open}>
     <Dialog.Content
+      className="fleet-shortcuts-dialog"
       description="Type a sequence with no field focused; Ctrl+K works anywhere. The tabs are also reachable with Tab, then the arrow keys."
       title="Keyboard shortcuts"
     >
@@ -206,9 +207,32 @@ const ShortcutsDialog = ({
           </div>
         ))}
       </dl>
+      {/* Esc closes it too, but a phone has no Esc: the close action is always on screen. */}
+      <div className="fleet-shortcuts-actions">
+        <Dialog.Close size="compact" variant="secondary">
+          Close
+        </Dialog.Close>
+      </div>
     </Dialog.Content>
   </Dialog.Root>
 )
+
+/** How long Ctrl+K keeps trying to reach agent search while the Connect tab shows and loads. */
+const SEARCH_FOCUS_MS = 3000
+
+/**
+ * Focuses the element `id` once it is mounted and shown. Switching to Connect renders its panel a
+ * frame or more later, and the search field can mount later still, so one attempt can land before
+ * it exists or while it is hidden: keep trying each frame until it has focus, for a bounded time.
+ */
+const focusWhenShown = (id: string, deadline: number = performance.now() + SEARCH_FOCUS_MS): void => {
+  window.requestAnimationFrame((now) => {
+    const element = document.getElementById(id)
+    element?.focus()
+    if (element !== null && document.activeElement === element) return
+    if (now < deadline) focusWhenShown(id, deadline)
+  })
+}
 
 const isEditableTarget = (target: EventTarget | null): boolean => {
   if (!Predicate.hasProperty(target, "nodeName") || !Predicate.isString(target.nodeName)) return false
@@ -318,7 +342,7 @@ export const FleetShell = ({
         return
       }
       selectTab("connect")
-      window.requestAnimationFrame(() => document.getElementById("connect-agent-search")?.focus())
+      focusWhenShown("connect-agent-search")
     }
     window.addEventListener("keydown", handleShortcut)
     return () => window.removeEventListener("keydown", handleShortcut)
@@ -365,7 +389,13 @@ export const FleetShell = ({
             <Text tone="secondary" variant="meta">
               {hostCount === 1 ? "1 host" : `${String(hostCount)} hosts`}
             </Text>
-            <Button onClick={() => setShortcutsOpen(true)} size="compact" title="Or press ?" variant="quiet">
+            <Button
+              className="fleet-shell-shortcuts-button"
+              onClick={() => setShortcutsOpen(true)}
+              size="compact"
+              title="Or press ?"
+              variant="quiet"
+            >
               Keyboard shortcuts
             </Button>
           </div>

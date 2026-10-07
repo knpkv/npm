@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, useEffect } from "react"
+import { act, useEffect, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
@@ -54,6 +54,43 @@ describe("iPhone fleet shell regressions", () => {
     await render(shell)
     await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "?" })))
     expect(document.querySelector("[role='dialog']")?.textContent).toContain("Search agents")
+  })
+
+  it("closes the shortcut list from its own Close action, for a screen with no Esc", async () => {
+    await render(shell)
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "?" })))
+    const close = [...document.querySelectorAll<HTMLButtonElement>("[role='dialog'] button")].find(
+      (candidate) => candidate.textContent === "Close"
+    )
+    await act(async () => close?.click())
+    expect(document.querySelector("[role='dialog']")).toBeNull()
+  })
+
+  // The search field can mount after Connect is selected (its panel renders later, its data later still).
+  it("focuses agent search with Ctrl+K even when the field appears after the tab switch", async () => {
+    const LateSearch = () => {
+      const [shown, setShown] = useState(false)
+      useEffect(() => {
+        const timer = window.setTimeout(() => setShown(true), 120)
+        return () => window.clearTimeout(timer)
+      }, [])
+      return shown ? <input aria-label="Search agents" id="connect-agent-search" /> : <p>Loading agents</p>
+    }
+    await render(
+      <FleetShell
+        approvals={<section>Approvals</section>}
+        connect={<LateSearch />}
+        hostCount={1}
+        work={<section>Work board</section>}
+      />
+    )
+    await act(async () =>
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "k" }))
+    )
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 400))
+    })
+    expect(document.activeElement?.id).toBe("connect-agent-search")
   })
 
   it("moves focus to the selected tab before hiding a focused panel", async () => {
