@@ -5,15 +5,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## agent-usage
 
-9 directives (ast-grep 6, effect-diagnostics 3), 0 without a reason.
+4 directives (ast-grep 1, effect-diagnostics 3), 0 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/agent-usage/src/client/api.ts](../packages/agent-usage/src/client/api.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/agent-usage/src/server/ControlSocket.ts](../packages/agent-usage/src/server/ControlSocket.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/agent-usage/src/server/ControlSocket.ts](../packages/agent-usage/src/server/ControlSocket.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/agent-usage/src/server/Live.ts](../packages/agent-usage/src/server/Live.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/agent-usage/src/server/Live.ts](../packages/agent-usage/src/server/Live.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/agent-usage/test/login.test.ts](../packages/agent-usage/test/login.test.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- the spawned server takes PORT from its environment; follow-up: let it bind 0 and report its port.` | yes |
 | [packages/agent-usage/src/client/api.ts](../packages/agent-usage/src/client/api.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/agent-usage/src/main.ts](../packages/agent-usage/src/main.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
@@ -632,12 +627,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## herdr-monitor
 
-7 directives (ast-grep 2, effect-diagnostics 5), 0 without a reason.
+5 directives (effect-diagnostics 5), 0 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/herdr-monitor/src/cli.ts](../packages/herdr-monitor/src/cli.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/herdr-monitor/src/server.ts](../packages/herdr-monitor/src/server.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/herdr-monitor/src/cli.ts](../packages/herdr-monitor/src/cli.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-monitor/src/cli.ts](../packages/herdr-monitor/src/cli.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-monitor/src/client/read-board.ts](../packages/herdr-monitor/src/client/read-board.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
@@ -813,12 +806,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## rly
 
-32 directives (ast-grep 2, effect-diagnostics 3, eslint 1, typescript 26), 0 without a reason.
+30 directives (effect-diagnostics 3, eslint 1, typescript 26), 0 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/rly/scripts/visual/classify-git-changes-effect.ts](../packages/rly/scripts/visual/classify-git-changes-effect.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/rly/scripts/visual/classify-git-changes-effect.ts](../packages/rly/scripts/visual/classify-git-changes-effect.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/rly/scripts/build-storybook.ts](../packages/rly/scripts/build-storybook.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/rly/scripts/test-packed-package.ts](../packages/rly/scripts/test-packed-package.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/rly/scripts/tokens/lint-stripes.ts](../packages/rly/scripts/tokens/lint-stripes.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
