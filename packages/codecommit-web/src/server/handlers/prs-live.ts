@@ -366,6 +366,8 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             prService.refreshSinglePR(route.accountId, params.prId, route.coordinates)
           )
         }).pipe(
+          // The response carries only a short message, so the server log keeps the full cause.
+          Effect.tapError((error) => Effect.logWarning("single pull request refresh failed", error)),
           Effect.mapError((error) =>
             Predicate.isTagged(error, "ApiError") ? error : new ApiError({ message: extractAwsMessage(error) })
           )

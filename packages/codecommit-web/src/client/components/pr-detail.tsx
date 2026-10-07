@@ -99,6 +99,7 @@ import {
 } from "../review-comment-navigation.js"
 import { StorageKeys } from "../storage-keys.js"
 import { extractScope } from "../utils/extractScope.js"
+import { makeInFlight, pullRequestRefreshKey } from "../utils/inFlight.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog.js"
@@ -911,8 +912,20 @@ export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
   const [searchParams] = useSearchParams()
   const state = useAtomValue(appStateAtom)
-  const refreshSingle = useAtomSet(refreshSinglePrAtom)
-  const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom, { mode: "promise" })
+  // The pull request as the route names it: these never change while the page shows it, unlike the
+  // account id and coordinates the loaded PR supplies later.
+  const refreshKey = pullRequestRefreshKey(
+    accountId,
+    prId ?? "",
+    searchParams.get("repository") ?? undefined,
+    searchParams.get("region") ?? undefined
+  )
+  const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom(refreshKey), { mode: "promise" })
+  // One refresh per pull request at a time: overlapping triggers share it instead of cancelling it.
+  // Scoped to the route: leaving a pull request releases its refresh atom, which can interrupt a
+  // pending call whose promise then never settles, so a later visit starts from a fresh map rather
+  // than wait on it.
+  const shareRefresh = useMemo(() => makeInFlight<Awaited<ReturnType<typeof refreshSingleWithResult>>>(), [refreshKey])
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
@@ -928,6 +941,22 @@ export function PRDetail() {
   const refreshAccountId = pr === null ? accountId : reviewApiAccountId(pr)
   const refreshRepositoryName = pr === null ? (searchParams.get("repository") ?? undefined) : String(pr.repositoryName)
   const refreshRegion = pr === null ? (searchParams.get("region") ?? undefined) : String(pr.account.region)
+  // Keyed by the route, so the mount refresh and a later click share one request even after the
+  // loaded PR replaces the account id and coordinates the request uses. `fresh` waits for a pending
+  // request (it may have read the state before a change) and then reads again.
+  const requestRefresh = useCallback(
+    (requestAccountId: string, id: string, policy: "share" | "fresh" = "share") =>
+      shareRefresh[policy](refreshKey, () =>
+        refreshSingleWithResult({
+          params: { awsAccountId: requestAccountId, prId: PullRequestId.make(id) },
+          query:
+            refreshRepositoryName !== undefined && refreshRegion !== undefined
+              ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
+              : {}
+        })
+      ),
+    [refreshKey, refreshRegion, refreshRepositoryName, refreshSingleWithResult, shareRefresh]
+  )
 
   // Collect ALL known users from all PRs (authors, approvers, commenters, pool members)
   // Build CodeCommitApprovers:REPO_ACCT:username directly — no ARN needed
@@ -967,14 +996,8 @@ export function PRDetail() {
     const key = `${refreshAccountId}:${prId}:${refreshRepositoryName ?? ""}:${refreshRegion ?? ""}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    refreshSingle({
-      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
-      query:
-        refreshRepositoryName !== undefined && refreshRegion !== undefined
-          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
-          : {}
-    })
-  }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingle, routeAmbiguous])
+    void requestRefresh(refreshAccountId, prId).catch(() => {})
+  }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, requestRefresh, routeAmbiguous])
 
   const score: HealthScore | undefined = useMemo(
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
@@ -1140,17 +1163,12 @@ export function PRDetail() {
   const refreshAfterApprovalMutation = useCallback(() => {
     if (refreshAccountId === undefined || refreshAccountId.length === 0 || prId === undefined || prId.length === 0)
       return
-    void refreshSingleWithResult({
-      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
-      query:
-        refreshRepositoryName !== undefined && refreshRegion !== undefined
-          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
-          : {}
-    }).then(
+    // A refresh already in flight may have read the rules before this change, so read again after it.
+    void requestRefresh(refreshAccountId, prId, "fresh").then(
       (refreshed) => invalidateReview(refreshed, false),
       () => {}
     )
-  }, [invalidateReview, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingleWithResult])
+  }, [invalidateReview, prId, refreshAccountId, requestRefresh])
   const handleRefresh = useCallback(() => {
     if (
       refreshAccountId === undefined ||
@@ -1161,13 +1179,7 @@ export function PRDetail() {
     )
       return
     setIsRefreshing(true)
-    void refreshSingleWithResult({
-      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
-      query:
-        refreshRepositoryName !== undefined && refreshRegion !== undefined
-          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
-          : {}
-    }).then(
+    void requestRefresh(refreshAccountId, prId).then(
       (refreshed) => {
         invalidateReview(refreshed, true)
         setIsRefreshing(false)
@@ -1179,15 +1191,7 @@ export function PRDetail() {
         })
       }
     )
-  }, [
-    invalidateReview,
-    isRefreshing,
-    prId,
-    refreshAccountId,
-    refreshRegion,
-    refreshRepositoryName,
-    refreshSingleWithResult
-  ])
+  }, [invalidateReview, isRefreshing, prId, refreshAccountId, requestRefresh])
 
   // Copy console URL
   const consoleUrl =
