@@ -1,5 +1,15 @@
 # @knpkv/codecommit-web
 
+## 0.26.0
+
+### Minor Changes
+
+- [#603](https://github.com/knpkv/npm/pull/603) [`4ecc3c2`](https://github.com/knpkv/npm/commit/4ecc3c249223f4999e6c7aa868cfa044267412f7) Thanks [@konopkov](https://github.com/konopkov)! - Pull requests whose approval is unknown are said apart from "waiting on your review": the queue's summary adds "N pull requests with approval unknown", naming the reason when they all share one, and only when there are any. A row's "Approval unknown" carries its reason as hover text and as the row's accessible description, in the queue and in the rail.
+
+### Patch Changes
+
+- [#606](https://github.com/knpkv/npm/pull/606) [`d73f798`](https://github.com/knpkv/npm/commit/d73f7988432fbecedde47885f610908d4c405a35) Thanks [@konopkov](https://github.com/konopkov)! - Settings → Relay writes a profile's model, provider and harness as a phrase ("default on codex, through native-codex") and a skill's source on its own line, instead of joining them with middots.
+
 ## 0.25.0
 
 ### Minor Changes
