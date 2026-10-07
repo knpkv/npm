@@ -60,10 +60,22 @@ test("credits only tsc invocations that typecheck, in command position", () => {
     "tsc -p test/tsconfig.json --listFilesOnly",
     "tsc -b tsconfig.json --clean",
     "tsc -b tsconfig.json --dry",
-    "echo tsc -p test/tsconfig.json"
+    "echo tsc -p test/tsconfig.json",
+    "tsc -p test/tsconfig.json --nocheck",
+    "tsc -p test/tsconfig.json --NoCheck",
+    "tsc source.ts --noEmit --ignoreConfig",
+    "tsc -p test/tsconfig.json --noEmit test/extra.ts",
+    "tsc -p"
   ]) {
     assert.deepEqual(checkedProjects(script), [], script)
   }
+  assert.deepEqual(checkedProjects("tsc -P test/tsconfig.json --NOEMIT"), [
+    { project: "test/tsconfig.json", build: false }
+  ])
+  assert.deepEqual(checkedProjects("tsc -b packages/a packages/b"), [
+    { project: "packages/a/tsconfig.json", build: true },
+    { project: "packages/b/tsconfig.json", build: true }
+  ])
   assert.deepEqual(checkedProjects("pnpm exec tsc -p test/tsconfig.json --noEmit"), [
     { project: "test/tsconfig.json", build: false }
   ])

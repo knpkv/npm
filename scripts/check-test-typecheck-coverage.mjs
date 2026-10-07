@@ -24,8 +24,43 @@ const fail = (reason) => new TestTypecheckCoverageError({ reason })
 
 const allowlistPath = "scripts/test-typecheck-allowlist.json"
 
-// tsc modes that succeed without typechecking: they never establish coverage.
-const nonCheckingFlags = /(?:^|\s)--(?:noCheck|showConfig|listFilesOnly|clean|dry|help|version|init)(?:\s|=|$)/u
+// tsc options (compared lowercased, as tsc does) that keep a run a full typecheck of its projects. Anything else,
+// such as --noCheck, --showConfig or a source file argument, may check less, so it credits nothing (fail closed).
+const checkingFlags = new Set(["--noemit", "--pretty", "--incremental", "--verbose", "--force"])
+const projectFlags = new Set(["-p", "--project"])
+const buildFlags = new Set(["-b", "--build"])
+
+const configName = (project) => {
+  const name = project.replaceAll(/["']/gu, "").replace(/^\.\//u, "")
+  return name.endsWith(".json") ? name : `${name === "." ? "" : `${name}/`}tsconfig.json`
+}
+
+// The projects one tsc argument list checks, or [] when any argument is outside the allowlist.
+const invocationProjects = (args) => {
+  const tokens = args.split(/\s+/u).filter((token) => token !== "")
+  const build = tokens.some((token) => buildFlags.has(token.toLowerCase()))
+  const projects = []
+  for (let index = 0; index < tokens.length; index++) {
+    const token = tokens[index]
+    const flag = token.toLowerCase()
+    if (projectFlags.has(flag) && !build) {
+      const project = tokens[++index]
+      if (project === undefined || project.startsWith("-")) return []
+      projects.push(project)
+    } else if (buildFlags.has(flag) || checkingFlags.has(flag)) {
+      continue
+    } else if (build && !token.startsWith("-")) {
+      projects.push(token)
+    } else {
+      return []
+    }
+  }
+  if (!build && projects.length > 1) return []
+  return (projects.length === 0 ? ["tsconfig.json"] : projects).map((project) => ({
+    project: configName(project),
+    build
+  }))
+}
 
 const sourceFile = /\.(?:[cm]?ts|tsx)$/u
 const declarationFile = /\.d\.[cm]?ts$/u
@@ -44,7 +79,7 @@ export const isTestSource = (relativePath) =>
 /**
  * The TypeScript projects a package's `check` script typechecks, as paths relative to the package.
  * `tsc -p X`/`--project X` names X, `tsc -b X`/`--build X` names X, and a bare `tsc` or `tsc -b` is
- * `tsconfig.json`. `build` is true for build mode, the only mode in which tsc also checks the project's
+ * `tsconfig.json`; only an allowlisted argument list counts. `build` is true for build mode, the only mode in which tsc also checks the project's
  * references. Only commands that gate the script count: segments joined by `&&`. A segment that
  * contains `||`, `;`, a pipe or `&` can succeed while tsc fails, so it is not counted (fail closed).
  */
@@ -57,13 +92,7 @@ export const checkedProjects = (checkScript) => {
     // tsc must be the command itself, optionally behind `pnpm exec`/`npm exec`/`npx`; `echo tsc …` is not a check.
     const command = segment.trim().match(/^(?:(?:pnpm|npm)\s+exec\s+|npx\s+)?(?:tsc|tspc|tsgo)(?:\s+(.*))?$/u)
     if (command === null) return []
-    const args = command[1] ?? ""
-    if (nonCheckingFlags.test(args)) return []
-    const build = /(?:^|\s)(?:-b|--build)(?:\s|$)/u.test(args)
-    const project =
-      args.match(/(?:^|\s)(?:-p|--project)\s+(\S+)/u)?.[1] ?? args.match(/(?:^|\s)(?:-b|--build)\s+([^\s-]\S*)/u)?.[1]
-    const name = (project ?? "tsconfig.json").replaceAll(/["']/gu, "").replace(/^\.\//u, "")
-    return [{ project: name.endsWith(".json") ? name : `${name === "." ? "" : `${name}/`}tsconfig.json`, build }]
+    return invocationProjects(command[1] ?? "")
   })
 }
 
