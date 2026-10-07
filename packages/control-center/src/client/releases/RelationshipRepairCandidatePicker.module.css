@@ -34,7 +34,11 @@
 .candidate:focus-visible {
   background: var(--rly-color-surface-2);
   border-color: var(--rly-color-border-2);
-  outline: none;
+}
+
+.candidate:focus-visible {
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .candidate > span:first-child {
