@@ -125,10 +125,6 @@
     "reason": "Terminal output (.terminal-text-lines) wraps anywhere like a terminal; it has no word boundaries to keep."
   },
   {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/herdr-monitor/src/client/styles.css"
-  },
-  {
     "declaration": "inline-size: 3px",
     "path": "packages/rly/src/patterns/ServiceMark.module.css"
   }
