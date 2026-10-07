@@ -4,6 +4,7 @@ import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
 import type { WorkGoal, WorkGoalObservedEntry, WorkSnapshot, WorkSnapshots } from "../src/model.js"
+import { encodeWorkBoardNavigationGoal } from "../src/navigation.js"
 import { WorkBoard } from "../src/view.js"
 import { workTriage } from "../src/work-triage.js"
 
@@ -173,6 +174,18 @@ describe("Work board with the observed overlay", () => {
     expect(notes.some((text) => text?.includes("Couldn't read GitHub") && text.includes("never been read"))).toBe(true)
     expect(host.querySelector(".work-row-caption")?.textContent).toMatch(/^Owner gone since/)
     expect(host.querySelector("[data-rly-timeline-provenance='unknown']")).not.toBeNull()
+  })
+
+  it("restores a link whose filter is the observed state the row showed", async () => {
+    const link = encodeWorkBoardNavigationGoal({
+      detailsOpen: true,
+      goalId: "g1",
+      statusFilter: "completed",
+      visibleGoalCount: 10
+    })
+    const host = await mount(snapshotOf([goal("g1"), goal("g2")], { observed: [merged("g1", NOW - 2 * HOUR)] }), link)
+    expect(host.querySelector(".work-facts")?.textContent).toContain("#42 merged, checks passing")
+    expect([...host.querySelectorAll(".work-board-row")]).toHaveLength(1)
   })
 
   it("filters by the state each row shows", async () => {

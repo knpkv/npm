@@ -658,16 +658,16 @@ export const WorkBoard = ({
   const requestedInitialSelectedId = boardNavigation === null ? (initialGoalId ?? null) : boardNavigation.goalId
   const initialStatusFilter = boardNavigation?.statusFilter ?? "all"
   const requestedInitialSelectedGoal = snapshot.goals.find(({ id }) => id === requestedInitialSelectedId)
+  // A link's filter names the state its row showed, so restore it against the same displayed state.
   const initialSelectedGoal =
     requestedInitialSelectedGoal !== undefined &&
-    (initialStatusFilter === "all" || requestedInitialSelectedGoal.state === initialStatusFilter)
+    (initialStatusFilter === "all" || displayStateOf(snapshot, requestedInitialSelectedGoal) === initialStatusFilter)
       ? requestedInitialSelectedGoal
       : undefined
   const initialSelectedId = initialSelectedGoal?.id ?? null
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId)
   const [detailsOpen, setDetailsOpen] = useState(
     initialSelectedGoal !== undefined &&
-      (initialStatusFilter === "all" || initialSelectedGoal.state === initialStatusFilter) &&
       (boardNavigation?.detailsOpen ?? (initialGoalId !== undefined && initialGoalId !== null))
   )
   const [statusFilter, setStatusFilter] = useState<"all" | WorkGoal["state"]>(initialStatusFilter)
