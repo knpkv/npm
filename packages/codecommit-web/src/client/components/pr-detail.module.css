@@ -101,8 +101,8 @@
 .suggestedApprover:focus-visible,
 .removeApprover:focus-visible,
 .approverInput:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .decisionWorkspace {
@@ -603,7 +603,7 @@
 .commentReply[data-active="true"] {
   background: color-mix(in srgb, var(--rly-color-action-background) 8%, var(--rly-color-surface-2));
   border-radius: var(--rly-radius-control);
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-4);
   padding-inline: var(--rly-space-12);
 }
@@ -648,8 +648,8 @@
 }
 
 .commentJump:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 @container pr-column (width <= 64rem) {

@@ -2,10 +2,11 @@ import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import { SystemError } from "effect/PlatformError"
+import { PlatformError, SystemError } from "effect/PlatformError"
 import {
   deleteProfileBySelector,
   HomeDirectoryLive,
+  type HomeDirectoryTag,
   loadActiveProfileToken,
   loadProfiles,
   type OAuthToken,
@@ -21,7 +22,9 @@ const profilesPath = `${basePath}/profiles.json`
 
 const fsError = (method: string) =>
   Effect.fail(
-    new SystemError({ _tag: "NotFound", module: "FileSystem", method, description: "mock not found" })
+    new PlatformError(
+      new SystemError({ _tag: "NotFound", module: "FileSystem", method, description: "mock not found" })
+    )
   )
 
 const makeToken = (n: number): OAuthToken => ({
@@ -57,7 +60,7 @@ const makeMockFS = (files: Record<string, string> = {}) => {
 
   return {
     store,
-    layer: Layer.succeed(FileSystem.FileSystem, FileSystem.FileSystem.of(partial))
+    layer: FileSystem.layerNoop(partial)
   }
 }
 
@@ -66,7 +69,7 @@ const ConfigProviderLive = ConfigProvider.layer(
 )
 
 const run = <A>(
-  effect: Effect.Effect<A, unknown, FileSystem.FileSystem | Path.Path>,
+  effect: Effect.Effect<A, unknown, FileSystem.FileSystem | Path.Path | HomeDirectoryTag>,
   files?: Record<string, string>
 ) => {
   const mock = makeMockFS(files)

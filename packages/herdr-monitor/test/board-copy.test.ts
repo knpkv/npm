@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { cardFacts, connectionLine, duration, headline, totals } from "../src/client/board-copy.js"
+import { breakSegments, cardFacts, connectionLine, duration, headline, totals } from "../src/client/board-copy.js"
 import type { AgentStatus } from "../src/model.js"
 
 const agent = (overrides: Partial<AgentStatus>): AgentStatus => ({
@@ -66,5 +66,13 @@ describe("board copy", () => {
     )
     expect(connectionLine({ _tag: "Offline", shownFrom: 0 }).rest).toMatch(/^showing the snapshot from /u)
     expect(connectionLine({ _tag: "Offline", shownFrom: 0 }).word).toBe("Offline")
+  })
+
+  // QA-104: a narrow tile split "CheckpointRecovery" as "Checkpoi/ntRecovery"; it now breaks only between words.
+  it("breaks identifiers after separators and between camelCase words, never inside a word", () => {
+    expect(breakSegments("feat/CheckpointRecovery")).toEqual(["feat/", "Checkpoint", "Recovery"])
+    expect(breakSegments("qa/herdr-monitor_3.x")).toEqual(["qa/", "herdr-", "monitor_", "3.", "x"])
+    expect(breakSegments("PROJ-123")).toEqual(["PROJ-", "123"])
+    expect(breakSegments("main")).toEqual(["main"])
   })
 })

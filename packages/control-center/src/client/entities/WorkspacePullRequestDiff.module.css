@@ -31,8 +31,8 @@
 
 .filters button:focus-visible,
 .overview button:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .overview,

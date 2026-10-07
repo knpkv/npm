@@ -50,6 +50,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "pnpm lint:oxlint",
     "pnpm lint:ast",
     "pnpm lint:rly-colors",
+    "pnpm lint:rly-focus-rings",
     "pnpm lint:rly-stripes",
     "pnpm lint:rly-css-tokens"
   ])
@@ -61,6 +62,8 @@ test("default lint retains every original check and both CI partitions", () => {
     "node scripts/check-changed-effect-diagnostics.mjs",
     "node --test scripts/check-changed-effect-diagnostics.test.mjs",
     "node scripts/check-package-script-portability.mjs",
+    "node scripts/check-workspace-exports.mjs",
+    "node --test scripts/check-workspace-exports.test.mjs",
     "node scripts/check-workflow-action-pins.mjs",
     "node scripts/check-workflow-secret-boundaries.mjs",
     "pnpm skills:check",
@@ -72,8 +75,11 @@ test("default lint retains every original check and both CI partitions", () => {
   ])
   assert.deepEqual(expandedScript("lint"), [...staticCommands, ...coverageCommands])
   assert.deepEqual(expandedScript("lint:config"), [...expandedScript("lint:config:static"), ...coverageCommands])
-  assert.equal(coverageCommands.join("\n"), "node scripts/check-changeset-coverage.mjs")
-  assert.equal(staticCommands.includes("node scripts/check-changeset-coverage.mjs"), false)
+  assert.equal(coverageCommands.join("\n"), "node --max-old-space-size=1536 scripts/check-changeset-coverage.mjs")
+  assert.equal(
+    staticCommands.some((command) => command.includes("scripts/check-changeset-coverage.mjs")),
+    false
+  )
   assert.equal(
     staticCommands[0],
     'pnpm --recursive --sort --config.enable-pre-post-scripts=false --filter "@knpkv/herdr-approvals^..." --filter "@knpkv/relay-product" --filter "@knpkv/browser-pairing" --filter "@knpkv/review" run build'
@@ -86,6 +92,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "check-changed-effect-diagnostics.mjs",
     "check-changed-effect-diagnostics.test.mjs",
     "check-package-script-portability.mjs",
+    "check-workspace-exports.mjs",
     "check-workflow-action-pins.mjs",
     "check-workflow-secret-boundaries.mjs",
     "pnpm skills:check",
