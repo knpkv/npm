@@ -5,13 +5,20 @@
   "license": "MIT",
   "author": "knpkv",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
   "bin": {
     "jcf-web": "dist/main.js"
   },
   "exports": {
-    ".": "./src/index.ts",
-    "./*.js": "./src/*.ts"
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./dist/index.js"
+    },
+    "./*.js": {
+      "types": "./src/*.ts",
+      "default": "./dist/*.js"
+    }
   },
   "publishConfig": {
     "access": "public",
@@ -32,8 +39,8 @@
     "dist"
   ],
   "scripts": {
-    "start": "node dist/main.js",
-    "dev": "JCF_WEB_PUBLIC_ORIGIN=http://localhost:5173 tsx watch src/main.ts & vite --clearScreen false",
+    "start": "node ../../scripts/require-built.mjs @knpkv/jira-clockify && node dist/main.js",
+    "dev": "node ../../scripts/require-built.mjs @knpkv/jira-clockify && (JCF_WEB_PUBLIC_ORIGIN=http://localhost:5173 tsx watch src/main.ts & vite --clearScreen false)",
     "build": "tsc -b && vite build",
     "prepack": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",

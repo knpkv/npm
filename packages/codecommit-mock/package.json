@@ -6,7 +6,7 @@
     "codecommit-mock": "dist/cli.js"
   },
   "scripts": {
-    "start": "tsx src/cli.ts",
+    "start": "node ../../scripts/require-built.mjs @knpkv/codecommit-core && tsx src/cli.ts",
     "build": "tsc -b",
     "check": "tsc -b tsconfig.json",
     "test": "vitest run",

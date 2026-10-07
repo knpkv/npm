@@ -3,7 +3,8 @@
   "version": "0.22.0",
   "description": "Web server and frontend for CodeCommit PR browser",
   "type": "module",
-  "main": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "src/index.ts",
   "publishConfig": {
     "access": "public",
     "main": "dist/index.js",
@@ -13,10 +14,10 @@
     "dist"
   ],
   "scripts": {
-    "start": "bun run src/main.ts",
+    "start": "node ../../scripts/require-built.mjs @knpkv/codecommit-core && bun run src/main.ts",
     "predev": "pnpm --filter @knpkv/browser-pairing build && pnpm --filter \"@knpkv/relay-product...\" build && pnpm --filter \"@knpkv/review...\" build && pnpm build",
     "prestart": "pnpm --filter @knpkv/browser-pairing build && pnpm --filter \"@knpkv/relay-product...\" build && pnpm --filter \"@knpkv/review...\" build && pnpm build",
-    "dev": "CODECOMMIT_WEB_PUBLIC_ORIGIN=http://localhost:5173 bun run --watch src/main.ts & vite --clearScreen false",
+    "dev": "node ../../scripts/require-built.mjs @knpkv/codecommit-core && (CODECOMMIT_WEB_PUBLIC_ORIGIN=http://localhost:5173 bun run --watch src/main.ts & vite --clearScreen false)",
     "prepack": "pnpm --filter @knpkv/browser-pairing build && tsc -b && vite build",
     "prebuild": "pnpm --filter @knpkv/browser-pairing build",
     "precheck": "pnpm --filter @knpkv/browser-pairing build",

@@ -16,7 +16,9 @@ The command prints these operator handoff values:
 
 Operator stdout is the intended one-time handoff for private mock locators; application logs are not. The mock deletes its temporary repository when the process exits.
 
-Run the TUI with the AWS endpoint:
+Run the TUI with the AWS endpoint. Workspace packages run from their build output, so build
+`@knpkv/codecommit-core` first (`pnpm --filter "@knpkv/codecommit-core..." build`); `start` says so if
+it is missing.
 
 ```bash
 CODECOMMIT_MOCK_ENDPOINT=http://127.0.0.1:<port> \

@@ -11,8 +11,8 @@ a timesheet is actually read.
 ## Running it
 
 ```bash
-pnpm --filter @knpkv/jcf-web build   # the client is a static bundle the server serves
-pnpm --filter @knpkv/jcf-web start   # prints the URL that gets you in
+pnpm --filter "@knpkv/jcf-web..." build   # this package and jcf, which it imports
+pnpm --filter @knpkv/jcf-web start        # prints the URL that gets you in
 ```
 
 When installed from the published package, run `jcf-web` from the package's bin directory
