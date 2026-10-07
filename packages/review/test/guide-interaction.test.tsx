@@ -307,7 +307,7 @@ it("retains a rendered diagram when diff mode and wrapping change", async () => 
     if (diagram === null) throw new TypeError("Fixture has no Mermaid container")
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
     diagram.replaceChildren(svg)
-    const mode = host.querySelector(".review-controls button")
+    const mode = host.querySelector<HTMLButtonElement>(".review-controls button")
     const wrap = host.querySelector<HTMLInputElement>('.review-controls input[type="checkbox"]')
     if (mode === null || wrap === null) throw new TypeError("Fixture has no diff controls")
     expect(wrap.labels?.[0]?.textContent?.trim()).toBe("Wrap code")

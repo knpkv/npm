@@ -23,7 +23,7 @@ import * as FileSystem from "effect/FileSystem"
 import { ChildProcessSpawner } from "effect/process"
 import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxRepo.js"
 import * as ChildEnv from "../src/ChildEnv.js"
-import { ConfigService, defaultSandboxConfig } from "../src/ConfigService/index.js"
+import { ConfigService, defaultReviewConfig, defaultSandboxConfig, type TuiConfig } from "../src/ConfigService/index.js"
 import { SandboxId } from "../src/Domain.js"
 import { DockerError } from "../src/Errors.js"
 import { type ContainerInfo, DockerService } from "../src/SandboxService/DockerService.js"
@@ -40,11 +40,12 @@ const createParams = {
   region: "us-east-1"
 }
 
-const config = {
+const config: TuiConfig = {
   accounts: [],
   autoDetect: false,
   autoRefresh: false,
   refreshIntervalSeconds: 300,
+  review: defaultReviewConfig,
   sandbox: defaultSandboxConfig
 }
 
@@ -177,7 +178,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
       ),
     findRegionlessByPrAll: () =>
       Effect.succeed(
-        options?.regionlessByPrAll ?? (options?.regionlessByPr === undefined ? [] : [options.regionlessByPr])
+        [...(options?.regionlessByPrAll ?? (options?.regionlessByPr === undefined ? [] : [options.regionlessByPr]))]
       ),
     findActive: () =>
       Ref.get(rowRef).pipe(
@@ -215,7 +216,8 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
             : Deferred.succeed(options.insertGate.inserted, undefined).pipe(
               Effect.andThen(Deferred.await(options.insertGate.release))
             )
-        )
+        ),
+        Effect.as([])
       ),
     findById: (id) =>
       (options?.restartAdmissionGate !== undefined && String(id) === options.restartAdmissionGate.id
@@ -225,13 +227,14 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
         : Effect.void).pipe(
           Effect.andThen(
             Ref.get(rowRef).pipe(
-              Effect.flatMap((row) =>
-                options?.rowsById?.[String(id)] !== undefined
-                  ? Effect.succeed(options.rowsById[String(id)])
+              Effect.flatMap((row) => {
+                const byId = options?.rowsById?.[String(id)]
+                return byId !== undefined
+                  ? Effect.succeed(byId)
                   : row === undefined
                   ? Effect.die("Sandbox row was not inserted")
                   : Effect.succeed(row)
-              )
+              })
             )
           )
         ),
@@ -254,13 +257,17 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
           status === "error"
             ? Deferred.succeed(errorTransitioned, undefined)
             : Effect.void
-        )
+        ),
+        Effect.as([])
       ),
     updateDetail: (_id, detail) =>
-      Ref.update(rowRef, (row) => row === undefined ? row : { ...row, statusDetail: detail }),
+      Ref.update(rowRef, (row) => row === undefined ? row : { ...row, statusDetail: detail }).pipe(Effect.as([])),
     appendLog: (_id, line) =>
-      Ref.update(rowRef, (row) => row === undefined ? row : { ...row, logs: `${row.logs ?? ""}${line}\n` }),
-    updateRegion: (id, region) => Ref.update(regionUpdates, (updates) => [...updates, { id: String(id), region }])
+      Ref.update(rowRef, (row) => row === undefined ? row : { ...row, logs: `${row.logs ?? ""}${line}\n` }).pipe(
+        Effect.as([])
+      ),
+    updateRegion: (id, region) =>
+      Ref.update(regionUpdates, (updates) => [...updates, { id: String(id), region }]).pipe(Effect.as([]))
   })
 
   const dependencies = Layer.mergeAll(
@@ -325,8 +332,9 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
           ),
           Effect.andThen(
             options?.listContainersByLabel?.() ??
-              Effect.succeed([...(options?.untrackedContainers ?? [])])
-          )
+              Effect.succeed(options?.untrackedContainers ?? [])
+          ),
+          Effect.map((containers) => [...containers])
         )
     }),
     Layer.mock(PluginService, {
@@ -349,7 +357,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     Layer.mock(ConfigService, { load: Effect.succeed(options?.config ?? config) }),
     Layer.succeed(
       FileSystem.FileSystem,
-      FileSystem.FileSystem.of({
+      FileSystem.makeNoop({
         makeDirectory,
         stat: () =>
           Effect.succeed({
@@ -405,15 +413,17 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
           fork: (worker, release) =>
             Effect.gen(function*() {
               const started = yield* Deferred.make<void>()
-              const forkScope = options?.closedFork === true ? yield* Scope.make() : scope
-              if (options?.closedFork === true) yield* Scope.close(forkScope, Exit.void)
-              const gatedRelease = options?.workerReleaseGate === undefined
+              const forkScope = options?.closedFork === true
+                ? yield* Scope.make().pipe(Effect.tap((closed) => Scope.close(closed, Exit.void)))
+                : scope
+              const gate = options?.workerReleaseGate
+              const gatedRelease = gate === undefined
                 ? release
                 : Effect.gen(function*() {
-                  yield* Deferred.succeed(options.workerReleaseGate.reached, undefined)
-                  yield* Deferred.await(options.workerReleaseGate.release)
+                  yield* Deferred.succeed(gate.reached, undefined)
+                  yield* Deferred.await(gate.release)
                   yield* release
-                  yield* Deferred.succeed(options.workerReleaseGate.completed, undefined)
+                  yield* Deferred.succeed(gate.completed, undefined)
                 })
               const fiber = yield* Effect.forkIn(
                 Effect.acquireUseRelease(

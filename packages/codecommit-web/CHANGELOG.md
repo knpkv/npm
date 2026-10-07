@@ -1,5 +1,51 @@
 # @knpkv/codecommit-web
 
+## 0.23.0
+
+### Minor Changes
+
+- [#525](https://github.com/knpkv/npm/pull/525) [`fd9d510`](https://github.com/knpkv/npm/commit/fd9d5103e3558561274b16c258023bee73b4b233) Thanks [@konopkov](https://github.com/konopkov)! - A pull request whose approval rules fail to evaluate is now listed with its approval unknown, instead of being dropped (never cached before) or shown with a stale cached approval.
+
+  - `Domain` adds `ApprovalUnknownReason` (`NotPermitted`, `Throttled`, `ProviderFailed`), `PullRequest.approvalUnknown`, `approvalOf(pr)` (Approved, Pending or Unknown; Unknown wins), and the shared copy `approvalUnknownLabel` and `approvalUnknownReasonText`.
+  - The cache persists the reason and keeps the last known approval and rules until an evaluation succeeds. Health stats no longer count an unknown approval as approved.
+  - `AwsClient.getPullRequestRefresh` and `PullRequestRefreshItem` are removed: `getPullRequests` lists every pull request, with `approvalUnknown` set where evaluation failed. A single-PR refresh now also writes the evaluated approval.
+  - The CLI list, TUI badges and health score show "Approval unknown"; an unknown approval is neither approved nor pending. The TUI status filter gains `unknown`.
+  - codecommit-web's event stream and cached-row API carry the field. The web queue, workbench and detail page show "Approval unknown", and the reason on the detail page; an unknown approval is never shown or counted as approved, pending or ready. The status filter gains `unknown`, and "All open" includes those pull requests.
+  - An expired or rejected session found while evaluating approval rules fails the read instead of reading as an unknown approval, so the refresh marks the account signed out. A `GetPullRequest` answer without a pull request fails as `MissingPullRequestResponse`.
+  - No approval notification is sent when evaluation recovers from unknown: a pull request first seen while evaluation fails has no real last known value.
+  - Every write to a cached pull-request row goes through `PullRequestRepo/rowWrites`, under three rules that keep an older read from overwriting a newer one:
+    1. **Provider reads write whole column groups.** `upsert` (a listing) and the new `writeRead` (a re-read) take a complete `RowGroup` and `ApprovalGroup`, each written unless that group's version is newer. A version is the provider's last activity plus an observation number, which `PullRequestRepo.observe()` takes from the database before each read; compared in that order, it orders two reads of the same revision.
+    2. **Recomputed values never move a version.** The new `writeDerived` (diff stats, comment count, health score, commenters) applies only while the row still holds both versions it was read at. The comment cache and its notifications follow only when it applied.
+    3. **A tombstone keeps the later of both versions.** Only a provider "pull request does not exist" deletes a row, ordered by its observation, and the tombstone (migration 0023) stops a read that began earlier from bringing it back. Other read failures keep the row.
+
+    `upsert` reports which groups it wrote (`GroupsWritten`), and notifications, unknown-approval reporting and auto-subscription follow only those. `recordApprovalEvaluation`, `updateStatusAndClosedAt`, `updateDiffStats`, `updateCommentCount` and `updateHealthScore` are removed. `deleteOne` takes the not-found read's observation. `AwsClient`'s `PullRequestDetail` gains `isMergeable`, so a re-read carries a whole row. The ast-grep rules `no-direct-pull-request-row-write` and `no-pull-request-free-form-row-write` keep other code from writing the table directly or in part.
+
+### Patch Changes
+
+- [#519](https://github.com/knpkv/npm/pull/519) [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5) Thanks [@konopkov](https://github.com/konopkov)! - No one-sided accent stripes in the CodeCommit app:
+
+  - The pull request's revision panel is a flat panel without the orange edge and tint.
+  - Reply threads are shown by indentation.
+  - Finding and comment lines in the diff have an even border.
+  - The Relay pane is separated by a hairline.
+  - A selected finding shows a background and `aria-current`, not an edge bar.
+  - Your own Relay turns sit on a deeper surface.
+  - The sandbox eyebrow loses its bar.
+  - rly components are no longer reset by Tailwind's preflight: page titles, buttons and state panels get their rly styles again.
+  - Metadata reads as plain text ("ana, 2h ago"; "Pull request 12, created …, port 8080") instead of dot-separated lists.
+
+- [#532](https://github.com/knpkv/npm/pull/532) [`8f64bdf`](https://github.com/knpkv/npm/commit/8f64bdfee2ab758c53d0555850be42cfe9f3626e) Thanks [@konopkov](https://github.com/konopkov)! - Refreshing a pull request that has an approval rule works again, and the rule shows its approvers.
+
+  - The cache's upsert input required `ApprovalRule` class instances, but the single-PR refresh passes the provider's rules as plain objects, so every refresh of such a PR failed (HTTP 500 in codecommit-web). `UpsertInput.approvalRules` now accepts the rule's plain shape.
+  - Rule content whose `ApprovalPoolMembers` is a single string, such as `"*"`, is read as a one-member pool instead of failing to parse and showing no approvers. A rule that can't be parsed now logs the schema error with its path.
+  - codecommit-web logs the cause of a failed refresh, and the PR page shares one in-flight refresh per pull request, so overlapping triggers no longer cancel each other.
+
+- Updated dependencies [[`fd9d510`](https://github.com/knpkv/npm/commit/fd9d5103e3558561274b16c258023bee73b4b233), [`3a59848`](https://github.com/knpkv/npm/commit/3a598483979960e71bfc880f182c73d499001091), [`286f23e`](https://github.com/knpkv/npm/commit/286f23ece7fc85b9a7a754b7b5f96b5e65868244), [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5), [`8f64bdf`](https://github.com/knpkv/npm/commit/8f64bdfee2ab758c53d0555850be42cfe9f3626e)]:
+  - @knpkv/codecommit-core@0.20.0
+  - @knpkv/rly@0.11.0
+  - @knpkv/relay-product@0.2.5
+  - @knpkv/review@0.4.1
+
 ## 0.22.0
 
 ### Minor Changes

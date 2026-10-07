@@ -61,6 +61,14 @@ const makeRecordingLayer = (respond: (request: HttpClientRequest.HttpClientReque
 
 const json = <UnparsedInput>(body: UnparsedInput, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+/** Run `effect` with `layer`'s services, built in the effect's own scope. */
+const runWithLayer = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>): Effect.Effect<A, E> =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const context = yield* Layer.build(layer)
+      return yield* effect.pipe(Effect.provideContext(context))
+    })
+  )
 
 describe("IssueService.edit", () => {
   /**
@@ -102,9 +110,13 @@ describe("IssueService.edit", () => {
       expect(issue.fixVersions).toEqual(["OOB 100"])
       expect(issue.labels).toEqual(["domain:oob"])
     }).pipe(
-      Effect.provide(IssueServiceLayer),
-      Effect.provide(layer),
-      Effect.provide(Layer.succeed(SiteUrl, "https://example.atlassian.net"))
+      (effect) =>
+        runWithLayer(
+          effect,
+          IssueServiceLayer.pipe(
+            Layer.provideMerge(Layer.merge(layer, Layer.succeed(SiteUrl, "https://example.atlassian.net")))
+          )
+        )
     )
   })
 
@@ -128,9 +140,13 @@ describe("IssueService.edit", () => {
       // The write really did go out — that is why the wording matters.
       expect(calls.filter((call) => call.method === "PUT")).toHaveLength(1)
     }).pipe(
-      Effect.provide(IssueServiceLayer),
-      Effect.provide(layer),
-      Effect.provide(Layer.succeed(SiteUrl, "https://example.atlassian.net"))
+      (effect) =>
+        runWithLayer(
+          effect,
+          IssueServiceLayer.pipe(
+            Layer.provideMerge(Layer.merge(layer, Layer.succeed(SiteUrl, "https://example.atlassian.net")))
+          )
+        )
     )
   })
 
@@ -147,9 +163,13 @@ describe("IssueService.edit", () => {
       expect(result.message).toContain("--fix-version cannot be combined")
       expect(calls).toHaveLength(0)
     }).pipe(
-      Effect.provide(IssueServiceLayer),
-      Effect.provide(layer),
-      Effect.provide(Layer.succeed(SiteUrl, "https://example.atlassian.net"))
+      (effect) =>
+        runWithLayer(
+          effect,
+          IssueServiceLayer.pipe(
+            Layer.provideMerge(Layer.merge(layer, Layer.succeed(SiteUrl, "https://example.atlassian.net")))
+          )
+        )
     )
   })
 })
@@ -180,7 +200,7 @@ describe("VersionService.createVersion", () => {
       expect(post?.body).toEqual({ name: "OOB 100", projectId: 10001, description: "Q3 release" })
       expect(version.id).toBe("10042")
       expect(version.released).toBe(false)
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(layer))
+    }).pipe((effect) => runWithLayer(effect, VersionServiceLayer.pipe(Layer.provideMerge(layer))))
   })
 
   /** Omitted optional fields must be absent, not sent as `undefined`/null. */
@@ -199,7 +219,7 @@ describe("VersionService.createVersion", () => {
         name: "OOB 100",
         projectId: 10001
       })
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(layer))
+    }).pipe((effect) => runWithLayer(effect, VersionServiceLayer.pipe(Layer.provideMerge(layer))))
   })
 
   /**
@@ -215,6 +235,6 @@ describe("VersionService.createVersion", () => {
 
       expect(error.message).toContain("no usable numeric id")
       expect(calls.filter((call) => call.method === "POST")).toHaveLength(0)
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(layer))
+    }).pipe((effect) => runWithLayer(effect, VersionServiceLayer.pipe(Layer.provideMerge(layer))))
   })
 })

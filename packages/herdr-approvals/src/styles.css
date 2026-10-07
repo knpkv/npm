@@ -766,7 +766,10 @@
     min-block-size: 2rem;
   }
 
-  .notification-status-action .notice {
+  /* The explanation reads as a paragraph: its own full line, aligned to the start. */
+  .notification-status .notice {
+    flex-basis: 100%;
+    text-align: start;
     background: transparent;
     color: var(--rly-color-text-2);
     margin-block: 0;
@@ -774,21 +777,32 @@
     padding: 0;
   }
 
+  /* A flex item that wraps its own text: the open guidance never runs past the panel edge. */
   .notification-help {
     color: var(--rly-color-text-3);
     font-size: var(--rly-type-meta-size);
+    max-inline-size: 100%;
+    min-inline-size: 0;
   }
 
+  /* Keeps the native disclosure marker, so it reads as something that opens; tall enough to tap. */
   .notification-help summary {
     cursor: pointer;
+    padding-block: var(--rly-space-6);
   }
 
   .notification-help[open] {
     background: var(--rly-color-surface-2);
+    box-sizing: border-box;
     border: 1px solid var(--rly-color-border-1);
     border-radius: var(--rly-radius-control);
     flex-basis: 100%;
     padding: var(--rly-space-12);
+  }
+
+  .install-guidance li,
+  .notification-url {
+    overflow-wrap: break-word;
   }
 
   .install-guidance {
@@ -813,19 +827,38 @@
     overflow-y: auto;
   }
 
+  /* Turns are rows in the log, separated by a rule, not cards inside the panel's card. */
   .chat-turn {
-    background: var(--rly-color-surface-2);
-    border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-control);
+    border-block-end: 1px solid var(--rly-color-border-1);
     display: grid;
     gap: var(--rly-space-8);
-    padding: var(--rly-space-16);
+    padding-block: var(--rly-space-12);
+  }
+
+  .chat-turn:last-child {
+    border-block-end: 0;
   }
 
   .chat-turn p {
     margin: 0;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     white-space: pre-wrap;
+  }
+
+  /* A turn's state as a word; only a failure takes ink. */
+  .chat-turn-state {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+  }
+
+  .chat-turn-state[data-state="failed"] {
+    color: var(--rly-color-blocked-ink);
+  }
+
+  .chat-history:focus-visible {
+    outline: 2px solid var(--rly-color-focus);
+    outline-offset: 2px;
   }
 
   .chat-turn-heading {
@@ -835,11 +868,11 @@
     justify-content: space-between;
   }
 
+  /* The coordinator's answer under the question it answers; its "Coordinator" label marks it, no side bar. */
   .coordinator-reply {
-    border-inline-start: 2px solid var(--rly-color-agent);
     display: grid;
     gap: var(--rly-space-6);
-    padding-inline-start: var(--rly-space-12);
+    padding-block-start: var(--rly-space-4);
   }
 
   .chat-compose {
@@ -871,6 +904,17 @@
     font: inherit;
     padding: var(--rly-space-12);
     resize: vertical;
+  }
+
+  /* Forced colours would paint the placeholder in a link-like system colour; it is hint text. */
+  @media (forced-colors: active) {
+    .chat-compose textarea::placeholder {
+      color: GrayText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .chat-compose textarea::placeholder {
+    color: GrayText;
   }
 
   .chat-compose textarea:focus-visible {

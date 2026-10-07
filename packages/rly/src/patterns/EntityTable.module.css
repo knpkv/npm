@@ -58,8 +58,8 @@
   }
 
   .headerSort:focus-visible {
-    outline: 3px solid var(--rly-color-focus);
-    outline-offset: var(--rly-space-2);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .sortSelect {
@@ -135,8 +135,8 @@
   }
 
   .sortButton:focus-visible {
-    outline: 3px solid var(--rly-color-focus);
-    outline-offset: var(--rly-space-2);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .cell {

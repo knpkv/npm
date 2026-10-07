@@ -261,8 +261,15 @@ describe("guide", () => {
     }
   })
   it("identifies source pull requests with their supplied title or number", () => {
+    const { source: _source, ...withoutSource } = guide
     const render = (source: Guide["source"]) =>
-      renderToStaticMarkup(<GuidePage guide={{ ...guide, source }} patch={patch} findings={findings} />)
+      renderToStaticMarkup(
+        <GuidePage
+          guide={source === undefined ? withoutSource : { ...withoutSource, source }}
+          patch={patch}
+          findings={findings}
+        />
+      )
     const pr = { url: "https://example.invalid/pull/7", title: "Signed release approval" }
     expect(render({ pr })).toContain(">Signed release approval</a>")
     expect(render({ pr: { ...pr, number: 7 } })).toContain("PR 7")

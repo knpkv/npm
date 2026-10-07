@@ -8,7 +8,7 @@
  * to the client yet), *quiet* runs from the last modification. An unknown caller identity is
  * reported as `Unknown`, never as an empty queue.
  */
-import { identityMatches } from "@knpkv/codecommit-core/Domain.js"
+import { approvalOf, identityMatches } from "@knpkv/codecommit-core/Domain.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { Data } from "effect"
 
@@ -248,9 +248,12 @@ export const ruleProgress = (pullRequest: Domain.PullRequest): RuleProgress | un
 const stuckReason = (pullRequest: Domain.PullRequest, quietMs: number): StuckReason => {
   if (!pullRequest.isMergeable) return "conflicts"
   if (quietMs > QUIET_AFTER_MS) return "quiet"
+  const approval = approvalOf(pullRequest)
+  // An unknown approval has only last known rules, so it can be neither ready nor waiting on approvals.
+  if (approval._tag === "Unknown") return "unverified"
   if (pullRequest.approvalRules.length === 0) return "ready"
   if (!pullRequest.approvalRules.every((rule) => rule.satisfied)) return "approvals"
-  return pullRequest.isApproved ? "ready" : "unverified"
+  return approval._tag === "Approved" ? "ready" : "unverified"
 }
 
 /**
@@ -274,9 +277,17 @@ const approvedToward = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRu
 /**
  * Yours first; then, for the unsatisfied rules the caller hasn't approved toward, `review` when one
  * certainly counts their approval (named member, or no pool at all) and `pool` when one only might.
+ * While approval is unknown, which rules are satisfied is only last known: any rule the caller could
+ * count toward makes it `pool`, never the certain `review`.
  */
 const groupOf = (pullRequest: Domain.PullRequest, viewer: Viewer): WorkbenchGroup | undefined => {
   if (identityMatches(viewer.name, pullRequest.author)) return "yours"
+  if (approvalOf(pullRequest)._tag === "Unknown") {
+    const couldCount = pullRequest.approvalRules
+      .filter((rule) => !approvedToward(pullRequest, rule, viewer))
+      .some((rule) => poolStanding(rule, viewer) !== "out")
+    if (couldCount) return "pool"
+  }
   const standings = pullRequest.approvalRules
     .filter((rule) => !rule.satisfied && !approvedToward(pullRequest, rule, viewer))
     .map((rule) => poolStanding(rule, viewer))
@@ -334,8 +345,13 @@ export const workbenchQueue = (
           openMs: Math.max(0, now.getTime() - pullRequest.creationDate.getTime()),
           pullRequest,
           quietMs,
-          rule: ruleProgress(pullRequest),
-          stuck: group === "yours" ? stuckReason(pullRequest, quietMs) : undefined
+          // While approval is unknown, rule progress is only last known, so the row says unknown instead.
+          rule: approvalOf(pullRequest)._tag === "Unknown" ? undefined : ruleProgress(pullRequest),
+          stuck: group === "yours"
+            ? stuckReason(pullRequest, quietMs)
+            : approvalOf(pullRequest)._tag === "Unknown"
+            ? "unverified"
+            : undefined
         }
       ]
     })

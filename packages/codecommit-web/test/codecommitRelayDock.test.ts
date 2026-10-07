@@ -47,7 +47,7 @@ const conversation = Schema.decodeUnknownSync(PullRequestConversation)({
 })
 
 const explainReview: PullRequestRelayReviewResponse = {
-  pullRequestId: "42",
+  pullRequestId: Domain.PullRequestId.make("42"),
   revisionId: "revision-1",
   baseCommit: "a".repeat(40),
   headCommit: "b".repeat(40),
@@ -117,8 +117,8 @@ describe("CodeCommit Relay dock adapter", () => {
   it("uses repository account identity without changing the credential route alias", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
-      profile: "dev-administratoraccess",
-      region: "eu-central-1",
+      profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+      region: Domain.AwsRegion.make("eu-central-1"),
       repoAccountId: "repository-account"
     })
 
@@ -130,8 +130,8 @@ describe("CodeCommit Relay dock adapter", () => {
   it("uses the credential account when repository identity is empty", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
-      profile: "dev-administratoraccess",
-      region: "eu-central-1",
+      profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+      region: Domain.AwsRegion.make("eu-central-1"),
       repoAccountId: ""
     })
 
@@ -146,14 +146,14 @@ describe("CodeCommit Relay dock adapter", () => {
           repositoryName: Domain.RepositoryName.make("payments")
         },
         selection
-      ).thread.accountId
-    ).toBe("credential-account")
+      ).thread
+    ).toMatchObject({ accountId: "credential-account" })
     expect(
       codeCommitRouteAccountIdentity(
         new Domain.Account({
           awsAccountId: "",
-          profile: "dev-administratoraccess",
-          region: "eu-central-1",
+          profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+          region: Domain.AwsRegion.make("eu-central-1"),
           repoAccountId: ""
         })
       )
@@ -163,8 +163,8 @@ describe("CodeCommit Relay dock adapter", () => {
   it("keeps the located repository and region in the redirect route", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
-      profile: "dev-administratoraccess",
-      region: "eu-central-1",
+      profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+      region: Domain.AwsRegion.make("eu-central-1"),
       repoAccountId: "repository-account"
     })
     const candidate = {
@@ -221,8 +221,8 @@ describe("CodeCommit Relay dock adapter", () => {
   it("recomputes the canonical thread identity when only the region changes", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
-      profile: "dev-administratoraccess",
-      region: "us-east-1",
+      profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+      region: Domain.AwsRegion.make("us-east-1"),
       repoAccountId: "repository-account"
     })
     const pullRequest = {
@@ -237,8 +237,8 @@ describe("CodeCommit Relay dock adapter", () => {
         ...pullRequest,
         account: new Domain.Account({
           awsAccountId: "credential-account",
-          profile: "dev-administratoraccess",
-          region: "us-west-2",
+          profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+          region: Domain.AwsRegion.make("us-west-2"),
           repoAccountId: "repository-account"
         })
       },

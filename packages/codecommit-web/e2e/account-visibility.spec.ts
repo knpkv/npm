@@ -83,4 +83,10 @@ test("filters queues and facets without losing disabled-account detail routes", 
   await page.reload()
   await expect(page.getByRole("link", { name: "Change from kept-profile" })).toBeVisible()
   await expect(page.getByRole("link", { name: "Change from disabled-profile" })).toBeVisible()
+
+  // An active filter chip is named by what it shows, so saying "Status: open" reaches it.
+  await page.goto("/?f=status:open")
+  const chip = page.getByRole("button", { name: "Status: open, remove filter" })
+  await expect(chip).toBeVisible()
+  await expect(chip).toContainText("Status: open")
 })

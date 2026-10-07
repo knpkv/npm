@@ -40,6 +40,7 @@ import {
   unknownHostDetail,
   unknownKindDetail,
   usage,
+  workPayload,
   workUsage
 } from "./internal/fleetctl-cli.js"
 import {
@@ -268,91 +269,16 @@ export const payloadFrom = Effect.fn("Fleetctl.payloadFrom")(function*(args: Rea
         )
       )
     }
-    case "work.reconcile": {
-      const body = args[1]
-      if (args.length !== 2 || body === undefined) {
-        return yield* new FleetValidationError({ detail: "work.reconcile requires one JSON payload" })
-      }
-      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
-        onExcessProperty: "error"
-      })(body).pipe(
-        Effect.mapError(() => new FleetValidationError({ detail: "work.reconcile payload is invalid" })),
-        Effect.filterOrFail(
-          (payload) => payload.kind === "work.reconcile",
-          () => new FleetValidationError({ detail: "work.reconcile payload kind does not match the command" })
-        )
-      )
-    }
-    case "work.admit": {
-      const body = args[1]
-      if (args.length !== 2 || body === undefined) {
-        return yield* new FleetValidationError({ detail: "work.admit requires one JSON payload" })
-      }
-      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
-        onExcessProperty: "error"
-      })(body).pipe(
-        Effect.mapError(() => new FleetValidationError({ detail: "work.admit payload is invalid" })),
-        Effect.filterOrFail(
-          (payload) => payload.kind === "work.admit",
-          () => new FleetValidationError({ detail: "work.admit payload kind does not match the command" })
-        )
-      )
-    }
-    case "work.recover": {
-      const body = args[1]
-      if (args.length !== 2 || body === undefined) {
-        return yield* new FleetValidationError({
-          detail: "work.recover requires one JSON payload"
-        })
-      }
-      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
-        onExcessProperty: "error"
-      })(body).pipe(
-        Effect.mapError(
-          () =>
-            new FleetValidationError({
-              detail: "work.recover payload is invalid"
-            })
-        ),
-        Effect.filterOrFail(
-          (payload) => payload.kind === "work.recover",
-          () =>
-            new FleetValidationError({
-              detail: "work.recover payload kind does not match the command"
-            })
-        )
-      )
-    }
-    case "work.reassign": {
-      const body = args[1]
-      if (args.length !== 2 || body === undefined) {
-        return yield* new FleetValidationError({ detail: "work.reassign requires one JSON payload" })
-      }
-      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
-        onExcessProperty: "error"
-      })(body).pipe(
-        Effect.mapError(() => new FleetValidationError({ detail: "work.reassign payload is invalid" })),
-        Effect.filterOrFail(
-          (payload) => payload.kind === "work.reassign",
-          () => new FleetValidationError({ detail: "work.reassign payload kind does not match the command" })
-        )
-      )
-    }
-    case "work.abandon": {
-      const body = args[1]
-      if (args.length !== 2 || body === undefined) {
-        return yield* new FleetValidationError({ detail: "work.abandon requires one JSON payload" })
-      }
-      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
-        onExcessProperty: "error"
-      })(body).pipe(
-        Effect.mapError(() => new FleetValidationError({ detail: "work.abandon payload is invalid" })),
-        Effect.filterOrFail(
-          (payload) => payload.kind === "work.abandon",
-          () => new FleetValidationError({ detail: "work.abandon payload kind does not match the command" })
-        )
-      )
-    }
+    case "work.reconcile":
+      return yield* workPayload("work.reconcile", args)
+    case "work.admit":
+      return yield* workPayload("work.admit", args)
+    case "work.recover":
+      return yield* workPayload("work.recover", args)
+    case "work.reassign":
+      return yield* workPayload("work.reassign", args)
+    case "work.abandon":
+      return yield* workPayload("work.abandon", args)
     default:
       return yield* new FleetValidationError({ detail: unknownKindDetail(kind) })
   }

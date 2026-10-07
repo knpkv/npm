@@ -20,6 +20,7 @@
  * @module
  */
 import {
+  ApprovalUnknownReason,
   AppStatus,
   AwsProfileName,
   AwsRegion,
@@ -55,6 +56,7 @@ const PullRequestWire = Schema.Struct({
   destinationBranch: Schema.String,
   isMergeable: Schema.Boolean,
   isApproved: Schema.Boolean,
+  approvalUnknown: Schema.optionalKey(ApprovalUnknownReason),
   commentCount: Schema.optional(Schema.Number),
   healthScore: Schema.optional(Schema.Number),
   fetchedAt: Schema.optional(Schema.DateFromString),

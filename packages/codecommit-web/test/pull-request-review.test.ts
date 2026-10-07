@@ -4,7 +4,12 @@ import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { Deferred, Effect, Exit, Fiber, Layer, Option, Schema, Semaphore, Sink, Stream } from "effect"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
-import { RelayReviewContinueStreamRequest, RelayReviewResult, RelayReviewStreamRequest } from "../src/server/Api.js"
+import {
+  RelayReviewContinueStreamRequest,
+  type RelayReviewFinding,
+  RelayReviewResult,
+  RelayReviewStreamRequest
+} from "../src/server/Api.js"
 
 import {
   collectRelayPatch,
@@ -109,7 +114,7 @@ const makeReadClient = (
   getBlob: ({ blobId }) =>
     Effect.succeed(
       new ReadClient.CodeCommitBlobContent({
-        blobId,
+        blobId: ReadClient.CodeCommitBlobId.make(blobId),
         bytes: new TextEncoder().encode(blobId === currentChangedFile.before?.blobId ? "before\n" : "after\n")
       })
     ),
@@ -149,7 +154,6 @@ const makeClaudeSpawner = (
       isRunning: Effect.succeed(false),
       kill: () => Effect.void,
       pid: ChildProcessSpawner.ProcessId(42),
-      reref: Effect.void,
       stderr,
       stdin: Sink.drain,
       stdout,
@@ -720,7 +724,7 @@ describe("CodeCommit web review boundary", () => {
         getBlob: ({ blobId }) =>
           Effect.succeed(
             new ReadClient.CodeCommitBlobContent({
-              blobId,
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
               bytes: blobId === changedFile.before?.blobId
                 ? new Uint8Array([0])
                 : new TextEncoder().encode("after\n")
@@ -744,7 +748,7 @@ describe("CodeCommit web review boundary", () => {
             )
             : Effect.succeed(
               new ReadClient.CodeCommitBlobContent({
-                blobId,
+                blobId: ReadClient.CodeCommitBlobId.make(blobId),
                 bytes: new TextEncoder().encode("after\n")
               })
             )
@@ -762,7 +766,7 @@ describe("CodeCommit web review boundary", () => {
         getBlob: ({ blobId }) =>
           Effect.succeed(
             new ReadClient.CodeCommitBlobContent({
-              blobId,
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
               bytes: blobId === changedFile.before?.blobId ? encoder.encode("same\n") : bomText
             })
           )
@@ -779,7 +783,10 @@ describe("CodeCommit web review boundary", () => {
 
       const unchangedClient: ReadClient.CodeCommitReadClientService = {
         ...changedClient,
-        getBlob: ({ blobId }) => Effect.succeed(new ReadClient.CodeCommitBlobContent({ blobId, bytes: bomText }))
+        getBlob: ({ blobId }) =>
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({ blobId: ReadClient.CodeCommitBlobId.make(blobId), bytes: bomText })
+          )
       }
       const unchanged = yield* loadPullRequestDiffContent(unchangedClient, pullRequest, expectedRevision, 0)
       expect(unchanged).toMatchObject({ state: "text", before: "\uFEFFsame\n", after: "\uFEFFsame\n" })
@@ -911,7 +918,7 @@ describe("CodeCommit web review boundary", () => {
         getBlob: ({ blobId }) =>
           Effect.succeed(
             new ReadClient.CodeCommitBlobContent({
-              blobId,
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
               bytes: new TextEncoder().encode(blobId === specialPathFile.before?.blobId ? "before\n" : "after\n")
             })
           )
@@ -929,7 +936,12 @@ describe("CodeCommit web review boundary", () => {
       const binaryClient: ReadClient.CodeCommitReadClientService = {
         ...textClient,
         getBlob: ({ blobId }) =>
-          Effect.succeed(new ReadClient.CodeCommitBlobContent({ blobId, bytes: new Uint8Array([0]) }))
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
+              bytes: new Uint8Array([0])
+            })
+          )
       }
       const binary = yield* collectRelayPatch(binaryClient, scope, [specialPathFile])
       expect(binary).toContain(`Binary files ${quotedBeforeIdentity} and ${quotedAfterIdentity} differ`)
@@ -1091,7 +1103,7 @@ describe("CodeCommit web review boundary", () => {
         getBlob: ({ blobId }) =>
           Effect.succeed(
             new ReadClient.CodeCommitBlobContent({
-              blobId,
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
               bytes: new Uint8Array([0])
             })
           )
@@ -1127,7 +1139,7 @@ describe("CodeCommit web review boundary", () => {
         getBlob: ({ blobId }) =>
           Effect.succeed(
             new ReadClient.CodeCommitBlobContent({
-              blobId,
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
               bytes: new TextEncoder().encode("x".repeat(786_500))
             })
           )
@@ -1157,7 +1169,12 @@ describe("CodeCommit web review boundary", () => {
       const client: ReadClient.CodeCommitReadClientService = {
         ...makeReadClient(),
         getBlob: ({ blobId }) =>
-          Effect.succeed(new ReadClient.CodeCommitBlobContent({ blobId, bytes: new Uint8Array() }))
+          Effect.succeed(
+            new ReadClient.CodeCommitBlobContent({
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
+              bytes: new Uint8Array()
+            })
+          )
       }
       const scope = {
         account: { profile: pullRequest.account.profile, region: pullRequest.account.region },
@@ -1210,7 +1227,7 @@ describe("CodeCommit web review boundary", () => {
           reads.push(blobId)
           return Effect.succeed(
             new ReadClient.CodeCommitBlobContent({
-              blobId,
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
               bytes: new TextEncoder().encode(blobId === firstFile.after?.blobId ? "x".repeat(786_500) : "later")
             })
           )
@@ -1235,7 +1252,7 @@ describe("CodeCommit web review boundary", () => {
         getBlob: ({ blobId }) =>
           Effect.succeed(
             new ReadClient.CodeCommitBlobContent({
-              blobId,
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
               bytes: new TextEncoder().encode(
                 blobId === changedFile.before?.blobId ? disjointBefore : disjointAfter
               )
@@ -1282,7 +1299,7 @@ describe("CodeCommit web review boundary", () => {
           reads.push(blobId)
           return Effect.succeed(
             new ReadClient.CodeCommitBlobContent({
-              blobId,
+              blobId: ReadClient.CodeCommitBlobId.make(blobId),
               bytes: new TextEncoder().encode(`${blobId.slice(0, 1)}\n`)
             })
           )
