@@ -59,7 +59,7 @@ const mockStatsRepo = (overrides: Partial<{
   contributors: Array<{ author: string; prCount: number }>
   mostActivePRs: WeeklyStats["mostActivePRs"]
   stalePRs: WeeklyStats["stalePRs"]
-  health: { total: number; withComments: number; approved: number }
+  health: { total: number; withComments: number; approved: number; ruleBacked: number }
   mergeDetails: Array<Detail>
   reviewerData: ReviewerData
 }> = {}) =>

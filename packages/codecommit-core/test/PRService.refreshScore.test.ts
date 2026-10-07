@@ -55,7 +55,9 @@ describe("calculateHealthScores", () => {
       const context = yield* Layer.build(Layer.mock(PullRequestRepo, {
         findAll: () => Effect.succeed([cachedRow("dev", "11"), undated]),
         writeDerived: (_, id, __, columns) =>
-          Ref.update(stored, (all) => [...all, [id, columns.healthScore]]).pipe(Effect.as(true))
+          Ref.update(stored, (all) => [...all, [id, columns.healthScore] satisfies (typeof all)[number]]).pipe(
+            Effect.as(true)
+          )
       }))
       yield* calculateHealthScores(state).pipe(Effect.provideContext(context))
       const scores = new Map(yield* Ref.get(stored))

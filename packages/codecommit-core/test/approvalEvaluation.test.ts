@@ -36,6 +36,9 @@ const pullRequest = {
   approvalRules: [{ approvalRuleName: "two-reviewers", approvalRuleContent: "{}" }]
 }
 
+// The same pull request as CodeCommit returns it without a last-activity date.
+const { lastActivityDate: _lastActivityDate, ...withoutActivity } = pullRequest
+
 /**
  * `"8-denied"`: three open pull requests, and evaluation is denied for pull request 8 only.
  * `"three-approved"`: three open pull requests in one repository, all approved.
@@ -113,7 +116,7 @@ const answer = (
       return evaluation === "empty"
         ? json({})
         : evaluation === "undated"
-        ? json({ pullRequest: { ...pullRequest, lastActivityDate: undefined, pullRequestId: "7" } })
+        ? json({ pullRequest: { ...withoutActivity, pullRequestId: "7" } })
         : json({ pullRequest: { ...pullRequest, pullRequestId: requestedPullRequestId(request.body) } })
     case "GetRepository":
       return json({ repositoryMetadata: { accountId: "111111111111" } })

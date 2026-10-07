@@ -18,7 +18,11 @@ const rule = (satisfied: boolean) => ({
 
 const upsertInput = (
   id: string,
-  evaluation: { readonly isApproved: 0 | 1; readonly satisfied: boolean; readonly unknown: "NotPermitted" | null }
+  evaluation: {
+    readonly isApproved: 0 | 1
+    readonly satisfied: boolean
+    readonly unknown: "NotPermitted" | "Throttled" | null
+  }
 ) =>
   Schema.decodeSync(UpsertInput)({
     id,
