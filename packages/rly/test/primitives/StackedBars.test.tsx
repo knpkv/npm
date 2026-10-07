@@ -133,7 +133,9 @@ describe("StackedBars", () => {
     const root = render({ selection: { from: 2, to: 3 } })
     const edge = root.querySelector('[data-part="selection-edge"]')
     const bars = [...root.querySelectorAll("svg:not([class*='band']) > g")]
-    expect(edge?.previousElementSibling).toBe(bars.at(-1))
+    // The halo sits between the last bar and the edge, so the edge reads on bars of any colour.
+    expect(edge?.previousElementSibling).toBe(root.querySelector('[data-part="selection-halo"]'))
+    expect(edge?.previousElementSibling?.previousElementSibling).toBe(bars.at(-1))
     expect(numeric(edge, "x")).toBeCloseTo(1000 / 3)
     expect(numeric(edge, "width")).toBeCloseTo(1000 / 3)
   })

@@ -443,13 +443,23 @@ export const StackedBars = ({
             )
           })}
           {selected === null || selected.width <= 0 ? null : (
-            <rect
-              className={style("selectionEdge")}
-              data-part="selection-edge"
-              height={100}
-              width={selected.width}
-              x={selected.x}
-            />
+            <>
+              {/* A background halo under the edge, so it reads as a double line on bars of any colour. */}
+              <rect
+                className={style("selectionHalo")}
+                data-part="selection-halo"
+                height={100}
+                width={selected.width}
+                x={selected.x}
+              />
+              <rect
+                className={style("selectionEdge")}
+                data-part="selection-edge"
+                height={100}
+                width={selected.width}
+                x={selected.x}
+              />
+            </>
           )}
           {/* The window's edges again over the bars, so a narrow window stays visible where bars cover its fill. */}
           {shaded === null || shaded.width <= 0 ? null : (

@@ -67,7 +67,17 @@
   .selection {
     fill: var(--rly-color-surface-3);
   }
-  /* The selection's outline, drawn over the bars, so a selected bar shows it at any height. */
+  /*
+   * The selection's outline, drawn over the bars, so a selected bar shows it at any height: a 2px
+   * ink line on a 6px background halo, which stays visible where the bar is the ink colour too.
+   */
+  .selectionHalo {
+    fill: none;
+    pointer-events: none;
+    stroke: var(--rly-stacked-bars-gap);
+    stroke-width: 6px;
+    vector-effect: non-scaling-stroke;
+  }
   .selectionEdge {
     fill: none;
     pointer-events: none;
@@ -145,9 +155,16 @@
     block-size: var(--rly-type-meta-line-height);
     position: relative;
   }
+  /*
+   * A label never runs past the axis: one wider than the whole chart is cut with an ellipsis. The
+   * axis is hidden from assistive technology, and the caller's table carries every time in full.
+   */
   .tick {
     inset-block-start: 0;
+    max-inline-size: 100%;
+    overflow: hidden;
     position: absolute;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
   .hidden {
@@ -171,6 +188,9 @@
     }
     .selection {
       fill: none;
+    }
+    .selectionHalo {
+      stroke: Canvas;
     }
     .windowSwatch {
       background: none;
@@ -205,6 +225,9 @@
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .selection {
     fill: none;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .selectionHalo {
+    stroke: Canvas;
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .windowSwatch {
     background: none;
