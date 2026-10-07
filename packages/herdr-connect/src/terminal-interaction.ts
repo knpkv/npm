@@ -85,6 +85,23 @@ type ServerPosition =
   | { readonly _tag: "Unknown" }
   | { readonly _tag: "Known"; readonly offset: number }
 
+type Timer = ReturnType<typeof setTimeout>
+
+/** A jump to the newest output. Either way at most one command is in flight, so it never floods the hub. */
+type Jump =
+  // Position unknown: a page per frame until a frame comes back unchanged.
+  | { readonly _tag: "Frames"; readonly previous: string | null; readonly sent: number; readonly timer: Timer }
+  // Position known: the exact lines left, then a reading taken after the last page decides — output
+  // that arrived meanwhile is sent too, and only a reading of 0 ends it.
+  | {
+    readonly _tag: "Known"
+    readonly remaining: number
+    readonly inFlight: boolean
+    readonly reading: number | null
+    readonly sent: number
+    readonly timer: Timer
+  }
+
 const isCopyKey = (event: KeyboardEvent): boolean =>
   (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c"
 
@@ -115,9 +132,7 @@ export const bindTerminalInteraction = (
   let serverPosition: ServerPosition = { _tag: "NoSignal" }
   let holdTimer: ReturnType<typeof setTimeout> | null = null
   let wheelTimer: ReturnType<typeof setTimeout> | null = null
-  // herdr keeps a reader's place while output arrives, so how far back the client is cannot be
-  // known exactly. Jumping scrolls down a page per frame until a frame comes back unchanged.
-  let jump: { previous: string | null; sent: number; timer: ReturnType<typeof setTimeout> | null } | null = null
+  let jump: Jump | null = null
 
   // Cell by cell, not translateToString: that drops empty cells and counts a wide character as one
   // column, so text after a CJK character or a cursor-made gap would land in the wrong column.
@@ -146,8 +161,15 @@ export const bindTerminalInteraction = (
     const cell = cellAt(clientX, clientY)
     return cell === null ? null : (urlAt(visibleRows(), terminal.cols, cell)?.url ?? null)
   }
-  const sendLines = (scroll: LineScroll): void =>
+  // Every scroll this client sends moves a known position by the same lines, so it never goes stale
+  // between readings; the next reading corrects any clamping at either end.
+  const sendLines = (scroll: LineScroll): void => {
+    if (serverPosition._tag === "Known") {
+      const moved = serverPosition.offset + (scroll.direction === "up" ? scroll.lines : -scroll.lines)
+      serverPosition = { _tag: "Known", offset: Math.max(0, moved) }
+    }
     send({ type: "terminal.scroll", direction: scroll.direction, lines: scroll.lines, source: "wheel", modifiers: 0 })
+  }
   const draw = (): void => {
     const target = canvas()
     if (target !== null) {
@@ -269,15 +291,33 @@ export const bindTerminalInteraction = (
     view.onSelectText(logicalLines(visibleRows(), terminal.cols).map((line) => line.text.trimEnd()))
 
   const endJump = (): void => {
-    if (jump?.timer !== null && jump?.timer !== undefined) clearTimeout(jump.timer)
+    if (jump !== null) clearTimeout(jump.timer)
     jump = null
   }
-  // One page down per frame, so at most one command is ever in flight; silence also ends it.
-  const jumpStep = (previous: string | null): void => {
-    if (jump === null) return
-    if (jump.timer !== null) clearTimeout(jump.timer)
-    jump = { previous, sent: jump.sent + 1, timer: setTimeout(endJump, jumpSilenceMs) }
+  // Each step restarts the silence timer: a jump that hears nothing for a while ends.
+  const silence = (): Timer => {
+    if (jump !== null) clearTimeout(jump.timer)
+    return setTimeout(endJump, jumpSilenceMs)
+  }
+  const frameStep = (previous: string | null, sent: number): void => {
+    jump = { _tag: "Frames", previous, sent: sent + 1, timer: silence() }
     sendLines({ direction: "down", lines: maximumLinesPerCommand })
+  }
+  const knownStep = (remaining: number, sent: number): void => {
+    const lines = Math.min(maximumLinesPerCommand, remaining)
+    jump = {
+      _tag: "Known",
+      remaining: remaining - lines,
+      inFlight: true,
+      reading: null,
+      sent: sent + 1,
+      timer: silence()
+    }
+    sendLines({ direction: "down", lines })
+  }
+  const settleKnown = (reading: number, sent: number): void => {
+    if (reading === 0 || sent >= maximumJumpCommands) endJump()
+    else knownStep(reading, sent)
   }
 
   const copySelection = (): string | null => {
@@ -327,30 +367,37 @@ export const bindTerminalInteraction = (
       track.frameArrived()
       draw()
       if (jump === null) return
-      const key = frameKey(data)
-      if (key === jump.previous || jump.sent >= maximumJumpCommands) endJump()
-      else jumpStep(key)
+      if (jump._tag === "Frames") {
+        const key = frameKey(data)
+        if (key === jump.previous || jump.sent >= maximumJumpCommands) endJump()
+        else frameStep(key, jump.sent)
+      } else if (jump.inFlight) {
+        if (jump.remaining > 0) {
+          if (jump.sent >= maximumJumpCommands) endJump()
+          else knownStep(jump.remaining, jump.sent)
+        } else if (jump.reading !== null) settleKnown(jump.reading, jump.sent)
+        else jump = { ...jump, inFlight: false }
+      }
     },
     selectText: showText,
     jumpToLatest: () => {
       velocity = 0
       track.reset()
       endJump()
-      // With the real position known, send exactly the pages it takes; herdr clamps at the bottom.
-      if (serverPosition._tag === "Known") {
-        for (let remaining = serverPosition.offset; remaining > 0; remaining -= maximumLinesPerCommand) {
-          sendLines({ direction: "down", lines: Math.min(maximumLinesPerCommand, remaining) })
-        }
-        serverPosition = { _tag: "Known", offset: 0 }
-        draw()
-        return
-      }
+      if (serverPosition._tag !== "Known") frameStep(null, 0)
+      else if (serverPosition.offset > 0) knownStep(serverPosition.offset, 0)
       draw()
-      jump = { previous: null, sent: 0, timer: null }
-      jumpStep(null)
     },
     serverScrollState: (offsetFromBottom) => {
       serverPosition = offsetFromBottom === null ? { _tag: "Unknown" } : { _tag: "Known", offset: offsetFromBottom }
+      if (jump?._tag === "Known") {
+        // A reading that fails mid-jump hands the rest to the page-per-frame jump.
+        if (offsetFromBottom === null) {
+          if (jump.inFlight) jump = { _tag: "Frames", previous: null, sent: jump.sent, timer: jump.timer }
+          else frameStep(null, jump.sent)
+        } else if (jump.inFlight) jump = { ...jump, reading: offsetFromBottom }
+        else if (jump.remaining === 0) settleKnown(offsetFromBottom, jump.sent)
+      }
       draw()
     },
     dispose: () => {

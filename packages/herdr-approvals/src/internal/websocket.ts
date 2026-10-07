@@ -16,3 +16,51 @@ export const terminalBufferCanAccept = (
 ): boolean =>
   bufferedBytes === 0 ||
   bufferedBytes + payloadBytes <= terminalBufferLimitBytes
+
+/** The parts of a socket a newest-value signal needs. */
+export interface SignalSocket {
+  readonly bufferedAmount: () => number
+  readonly isOpen: () => boolean
+  readonly send: (payload: string) => void
+}
+
+export interface LatestSignalSender {
+  readonly offer: (payload: string) => void
+  readonly dispose: () => void
+}
+
+/**
+ * Sends a signal where only the newest value matters, such as a pane's scroll position. Under
+ * backpressure it holds the newest payload and retries every `retryMs` until the buffer accepts it;
+ * a newer offer replaces a held one. Dropping instead would lose the value for good, because
+ * producers report only changes. Call `dispose` when the socket closes.
+ */
+export const makeLatestSignalSender = (socket: SignalSocket, retryMs: number): LatestSignalSender => {
+  let pending: string | null = null
+  let timer: ReturnType<typeof setTimeout> | null = null
+  const flush = (): void => {
+    timer = null
+    if (pending === null || !socket.isOpen()) {
+      pending = null
+      return
+    }
+    if (terminalBufferCanAccept(socket.bufferedAmount(), Buffer.byteLength(pending))) {
+      const payload = pending
+      pending = null
+      socket.send(payload)
+      return
+    }
+    timer = setTimeout(flush, retryMs)
+  }
+  return {
+    offer: (payload) => {
+      pending = payload
+      if (timer === null) flush()
+    },
+    dispose: () => {
+      if (timer !== null) clearTimeout(timer)
+      timer = null
+      pending = null
+    }
+  }
+}

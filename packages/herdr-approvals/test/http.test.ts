@@ -1,5 +1,5 @@
 import { NodeServices } from "@effect/platform-node"
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it, vi } from "@effect/vitest"
 import {
   connectAgentPageMaxRecords,
   FleetConnectAgentPage,
@@ -62,7 +62,12 @@ import {
   startHttpServer
 } from "../src/http.js"
 import { dashboardDocumentTitle } from "../src/internal/html.js"
-import { relayTerminalCloseCode, terminalBufferCanAccept, terminalBufferLimitBytes } from "../src/internal/websocket.js"
+import {
+  makeLatestSignalSender,
+  relayTerminalCloseCode,
+  terminalBufferCanAccept,
+  terminalBufferLimitBytes
+} from "../src/internal/websocket.js"
 import { commandOutputMaxBytes } from "../src/operations.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
@@ -2497,6 +2502,51 @@ esac
     expect(terminalBufferCanAccept(1, terminalBufferLimitBytes)).toBe(false)
     expect(terminalBufferCanAccept(0, terminalBufferLimitBytes + 1)).toBe(true)
     expect(terminalBufferCanAccept(terminalBufferLimitBytes - 1, 1)).toBe(true)
+  })
+
+  it("holds the newest scroll state under backpressure and sends it once the socket drains", () => {
+    vi.useFakeTimers()
+    try {
+      let buffered = terminalBufferLimitBytes
+      const sent: Array<string> = []
+      const signals = makeLatestSignalSender({
+        bufferedAmount: () => buffered,
+        isOpen: () => true,
+        send: (payload) => sent.push(payload)
+      }, 100)
+      signals.offer("offset 7")
+      signals.offer("offset 0")
+      vi.advanceTimersByTime(1_000)
+      expect(sent).toEqual([])
+      buffered = 0
+      vi.advanceTimersByTime(100)
+      expect(sent).toEqual(["offset 0"])
+      signals.offer("offset 3")
+      expect(sent).toEqual(["offset 0", "offset 3"])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("stops retrying a held scroll state once the socket closes", () => {
+    vi.useFakeTimers()
+    try {
+      let buffered = terminalBufferLimitBytes
+      const sent: Array<string> = []
+      const signals = makeLatestSignalSender({
+        bufferedAmount: () => buffered,
+        isOpen: () => true,
+        send: (payload) => sent.push(payload)
+      }, 100)
+      signals.offer("offset 7")
+      signals.dispose()
+      buffered = 0
+      vi.advanceTimersByTime(1_000)
+      expect(sent).toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it.effect("pages pending approvals below the peer response limit", () => {

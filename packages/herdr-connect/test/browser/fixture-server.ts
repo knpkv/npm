@@ -14,7 +14,11 @@
  * (`Date.now()`); `POST /__test/reset` clears them. `GET /__test/screen` returns the latest
  * session's rows and size, so tests can aim at text and measurements can read the top line.
  * `POST /__test/scroll-state?mode=known|unknown&start=N` makes the next sessions report their scroll
- * position as the hub does — off by default, which is how a hub without that signal behaves.
+ * position as the hub does — off by default, which is how a hub without that signal behaves; `lines=N`
+ * gives them N lines of history instead of 300. `POST /__test/scroll-state/mute?on=1` holds readings
+ * back, as a slow or rate-limited hub would; `POST /__test/grow?lines=N` streams N lines into the
+ * latest session without a reading. `GET /__test/in-flight` returns the most scroll commands that
+ * were ever waiting to render at once.
  */
 import { NodeRuntime } from "@effect/platform-node"
 import { Config, Console, Effect, Option, Schema } from "effect"
@@ -82,8 +86,8 @@ const agent = {
 }
 
 /** History lines: numbered, with plain URLs, an unsafe scheme and one row that wraps at 80 columns. */
-const initialHistory = (): Array<string> =>
-  Array.from({ length: 300 }, (_, index) => {
+const initialHistory = (length: number): Array<string> =>
+  Array.from({ length }, (_, index) => {
     const line = String(index + 1).padStart(3, "0")
     if (index === 280) return `${line} docs https://example.test/guide?step=2, then retry.`
     if (index === 282) return `${line} unsafe javascript:alert(1) and file:///etc/passwd stay text`
@@ -111,12 +115,18 @@ let latestScreen: FixtureScreen = { cols: 0, rows: [] }
 interface ScrollStateMode {
   readonly report: "off" | "known" | "unknown"
   readonly startOffset: number
+  readonly historyLines: number
 }
-let scrollStateMode: ScrollStateMode = { report: "off", startOffset: 0 }
+const defaultScrollStateMode: ScrollStateMode = { report: "off", startOffset: 0, historyLines: 300 }
+let scrollStateMode = defaultScrollStateMode
+let readingsMuted = false
+let scrollsInFlight = 0
+let mostScrollsInFlight = 0
+let growLatest: (lines: number) => void = () => {}
 
 /** One session: a screen of `rows` lines ending `offset` lines above the newest. */
 const session = (socket: WebSocket, cols: number, rows: number, { rttMs, tickMs }: SessionTiming) => {
-  const history = initialHistory()
+  const history = initialHistory(scrollStateMode.historyLines)
   let offset = scrollStateMode.startOffset
   let width = cols
   let height = rows
@@ -133,38 +143,43 @@ const session = (socket: WebSocket, cols: number, rows: number, { rttMs, tickMs 
     return wrapped.slice(Math.max(0, end - height), end)
   }
   const reportScroll = (): void => {
-    if (scrollStateMode.report === "off") return
+    if (scrollStateMode.report === "off" || readingsMuted) return
     screenRows()
     const offsetFromBottom = scrollStateMode.report === "known" ? offset : null
     socket.send(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom }))
   }
-  const render = (): void => {
+  const render = (report = true): void => {
     if (socket.readyState !== socket.OPEN) return
     latestScreen = { cols: width, rows: screenRows() }
     // Erase-to-end only on short rows: at the last column it would erase the final character.
     const body = screenRows()
       .map((row, index) => `\u001b[${index + 1};1H${row}${row.length < width ? "\u001b[K" : ""}`)
       .join("")
-    reportScroll()
+    if (report) reportScroll()
     socket.send(Buffer.from(`\u001b[?25l\u001b[H\u001b[2J${body}`), { binary: true })
   }
+  // Keep the reader's place while they are scrolled back, like a pager would.
+  const stream = (lines: number, report: boolean): void => {
+    for (let line = 0; line < lines; line += 1) {
+      history.push(`${String(history.length + 1).padStart(3, "0")} streamed output`)
+      if (offset > 0) offset += 1
+    }
+    render(report)
+  }
+  growLatest = (lines) => stream(lines, false)
   socket.send(JSON.stringify({ type: "terminal.ready" }))
   render()
-  const ticker = tickMs > 0
-    ? setInterval(() => {
-      history.push(`${String(history.length + 1).padStart(3, "0")} streamed output`)
-      // Keep the reader's place while they are scrolled back, like a pager would.
-      if (offset > 0) offset += 1
-      render()
-    }, tickMs)
-    : undefined
+  const ticker = tickMs > 0 ? setInterval(() => stream(1, true), tickMs) : undefined
   socket.on("message", (data) => {
     const decoded = decodeCommand(String(data))
     if (Option.isNone(decoded)) return
     const command = decoded.value
     commands.push({ at: Date.now(), command })
     if (command.type === "terminal.scroll") {
+      scrollsInFlight += 1
+      mostScrollsInFlight = Math.max(mostScrollsInFlight, scrollsInFlight)
       setTimeout(() => {
+        scrollsInFlight -= 1
         offset += command.direction === "up" ? command.lines : -command.lines
         render()
       }, rttMs)
@@ -206,12 +221,23 @@ const handle = (request: IncomingMessage, response: ServerResponse): void => {
     const mode = url.searchParams.get("mode")
     scrollStateMode = {
       report: mode === "known" || mode === "unknown" ? mode : "off",
-      startOffset: Number(url.searchParams.get("start") ?? "0")
+      startOffset: Number(url.searchParams.get("start") ?? "0"),
+      historyLines: Number(url.searchParams.get("lines") ?? "300")
     }
     json(response, JSON.stringify(scrollStateMode))
+  } else if (url.pathname === "/__test/scroll-state/mute" && request.method === "POST") {
+    readingsMuted = url.searchParams.get("on") === "1"
+    json(response, JSON.stringify({ muted: readingsMuted }))
+  } else if (url.pathname === "/__test/grow" && request.method === "POST") {
+    growLatest(Number(url.searchParams.get("lines") ?? "1"))
+    json(response, JSON.stringify({ ok: true }))
+  } else if (url.pathname === "/__test/in-flight") {
+    json(response, JSON.stringify({ most: mostScrollsInFlight }))
   } else if (url.pathname === "/__test/reset" && request.method === "POST") {
     commands.length = 0
-    scrollStateMode = { report: "off", startOffset: 0 }
+    scrollStateMode = defaultScrollStateMode
+    readingsMuted = false
+    mostScrollsInFlight = scrollsInFlight
     json(response, JSON.stringify({ ok: true }))
   } else {
     response.writeHead(404)

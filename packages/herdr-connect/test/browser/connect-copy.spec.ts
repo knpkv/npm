@@ -10,7 +10,10 @@ const Command = Schema.Struct({
   lines: Schema.optional(Schema.Number)
 })
 
-const open = async (page: Page, scrollState?: { readonly mode: "known" | "unknown"; readonly start?: number }) => {
+const open = async (
+  page: Page,
+  scrollState?: { readonly mode: "known" | "unknown"; readonly start?: number; readonly lines?: number }
+) => {
   // Opened links land on a stub page instead of a DNS failure, so the popup keeps its URL.
   await page.context().route(
     "https://example.test/**",
@@ -18,7 +21,11 @@ const open = async (page: Page, scrollState?: { readonly mode: "known" | "unknow
   )
   await page.request.post("/__test/reset")
   if (scrollState !== undefined) {
-    await page.request.post(`/__test/scroll-state?mode=${scrollState.mode}&start=${String(scrollState.start ?? 0)}`)
+    await page.request.post(
+      `/__test/scroll-state?mode=${scrollState.mode}&start=${String(scrollState.start ?? 0)}&lines=${
+        String(scrollState.lines ?? 300)
+      }`
+    )
   }
   await page.goto("/")
   await page.getByRole("button", { name: /fixture-pane/ }).click()
@@ -288,6 +295,46 @@ test.describe("scroll position from the hub", () => {
     await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
     await expect(olderOutput(page)).toHaveCount(0)
     expect(await downs(page)).toEqual([50])
+  })
+
+  test("a deep jump keeps one command in flight and still lands on the newest line", async ({ page }) => {
+    await open(page, { mode: "known", start: 30_000, lines: 31_000 })
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 30000 lines back")
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    await expect(olderOutput(page)).toHaveCount(0, { timeout: 20_000 })
+    const sent = await downs(page)
+    expect(sent.reduce((total, lines) => total + lines, 0)).toBe(30_000)
+    expect(sent.length).toBe(75)
+    const inFlight = Schema.decodeUnknownSync(Schema.Struct({ most: Schema.Number }))(
+      await (await page.request.get("/__test/in-flight")).json()
+    )
+    expect(inFlight.most).toBe(1)
+  })
+
+  test("output that arrives before Latest is clicked is sent too", async ({ page }) => {
+    await open(page, { mode: "known", start: 50 })
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back")
+    // herdr keeps the reader's place, so 10 new lines put the pane 60 back before any reading says so.
+    await page.request.post("/__test/grow?lines=10")
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    await expect.poll(() => downs(page)).toEqual([50, 10])
+    await expect(olderOutput(page)).toHaveCount(0)
+    await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith("310 "))).toBe(true)
+  })
+
+  test("a page scrolled up locally is returned by Latest before any reading arrives", async ({ page }) => {
+    await open(page, { mode: "known", start: 0 })
+    await page.request.post("/__test/scroll-state/mute?on=1")
+    const point = await cellPoint(page, "295 ", 2)
+    await page.mouse.click(point.x, point.y)
+    await page.keyboard.press("PageUp")
+    await expect.poll(async () => (await commands(page)).some((command) => command.direction === "up")).toBe(true)
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    const ups = (await commands(page)).filter((command) => command.direction === "up").map((command) =>
+      command.lines ?? 0
+    )
+    await expect.poll(() => downs(page)).toEqual(ups)
+    await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith("300 "))).toBe(true)
   })
 
   test("an unreadable position falls back to the local estimate and the page-by-page jump", async ({ page }) => {

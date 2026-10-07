@@ -116,7 +116,7 @@ import { DashboardView } from "./dashboard-view.js"
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { dashboardDocumentTitle } from "./internal/html.js"
-import { relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
+import { makeLatestSignalSender, relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
 import { LanWorkPage, LanWorkPairPage } from "./lan-work-view.js"
 import {
   decodeLanWorkPairRequest,
@@ -2146,6 +2146,12 @@ export const startHttpServer = async (
           closeSocket(socket, 4400, "invalid terminal command")
         }
       })
+      const scrollSignals = makeLatestSignalSender({
+        bufferedAmount: () => socket.bufferedAmount,
+        isOpen: () => socket.readyState === WebSocketClient.OPEN,
+        send: (payload) => socket.send(payload)
+      }, 100)
+      socket.once("close", scrollSignals.dispose)
       const eventLoop = Stream.runForEach(session.events, (event) =>
         Effect.sync(() => {
           if (socket.readyState !== WebSocketClient.OPEN) return
@@ -2157,10 +2163,9 @@ export const startHttpServer = async (
             }
             socket.send(payload, { binary: true })
           } else if (event.type === "terminal.scroll_state") {
-            // The pane's scroll position as the connector read it; dropped under backpressure,
-            // since the next read replaces it.
-            const payload = JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event))
-            if (terminalBufferCanAccept(socket.bufferedAmount, Buffer.byteLength(payload))) socket.send(payload)
+            // The pane's scroll position as the connector read it. Under backpressure the newest one
+            // waits for the buffer to drain; the connector reports only changes, so none may be lost.
+            scrollSignals.offer(JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event)))
           } else {
             const payload = JSON.stringify(
               Schema.decodeUnknownSync(TerminalServerSignal)({
