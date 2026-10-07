@@ -11,7 +11,7 @@ import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
 import pkg from "../package.json" with { type: "json" }
 import { HeadlessLayer } from "./cli/layers.js"
-import { commandNames, root } from "./cli/root.js"
+import { root } from "./cli/root.js"
 import { reportUnhandled } from "./cli/runtimeFailure.js"
 import { unknownCommandLine } from "./cli/unknownCommand.js"
 
@@ -31,7 +31,7 @@ class UnknownCommand extends Data.TaggedError("UnknownCommand")<{}> {
 const program = reportUnhandled(processArgv.pipe(
   Effect.flatMap((argv) =>
     Effect.gen(function*() {
-      const unknown = unknownCommandLine(argv, commandNames)
+      const unknown = unknownCommandLine(argv, root)
       if (unknown !== undefined) {
         yield* Console.error(unknown)
         return yield* new UnknownCommand()

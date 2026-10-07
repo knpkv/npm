@@ -345,6 +345,8 @@ const layoutWidth = (columns: number): number => (columns >= 60 ? Math.min(colum
  */
 export const agentReportJson = (options: {
   readonly agent: string
+  /** The systems this run read; a side left out reports zero deltas, which is not "nothing missing". */
+  readonly sides: ReconcileSides
   readonly period: ReconcilePeriod
   readonly report: SessionProposalReport
   readonly tickets: ReadonlyMap<string, TicketFacts>
@@ -377,6 +379,7 @@ export const agentReportJson = (options: {
     agent: options.agent,
     from: localDay(options.period.from),
     to: localDay(new Date(options.period.to.getTime() - 1)),
+    sides: options.sides,
     sessionCount: options.report.sessionCount,
     sessionRootCount: options.report.sessionRootCount,
     attributorAvailable: options.report.attributorAvailable,
@@ -389,6 +392,15 @@ export const agentReportJson = (options: {
     ignoredTickets: options.report.ignoredTickets,
     excludedDays: options.report.excludedDays
   }
+}
+
+/** "Nothing to propose" for the systems a run read; a one-sided run never calls the other complete. */
+const nothingToProposeLine = (sides: ReconcileSides): string => {
+  const accounted = "everything these sessions account for"
+  if (sides.clockify && sides.jira) return `  Nothing to propose — both sides already hold ${accounted}.`
+  return sides.clockify
+    ? `  Nothing to propose — Clockify already holds ${accounted}. Jira was not read.`
+    : `  Nothing to propose — Jira already holds ${accounted}. Clockify was not read.`
 }
 
 /** The tail of a path, for naming a session by somewhere recognisable rather than by a UUID. */
@@ -468,15 +480,16 @@ const runAgentMode = (options: {
     // In --json mode every human-facing line goes to stderr so stdout holds one JSON value.
     const say = options.json ? Console.error : Console.log
 
-    // Progress goes to stderr in both modes: it is not part of the JSON value, and reading
-    // transcripts then waking a Coding Agent takes long enough that silence reads as a hang.
     // A side that is not connected cannot be read, and an unread side is indistinguishable from an
     // empty one. Stop before planning, naming both ways forward, rather than half-writing a plan.
-    const jiraConnected = yield* JiraAccess.use((access) => access.connection).pipe(
-      Effect.map(Option.isSome),
-      Effect.orElseSucceed(() => false)
-    )
-    const clockifyConnected = yield* ClockifyAuth.use((auth) => auth.isConfigured)
+    // A side left out with `--only` is never touched, not even to ask whether it is connected.
+    const jiraConnected = options.sides.jira
+      ? yield* JiraAccess.use((access) => access.connection).pipe(
+        Effect.map(Option.isSome),
+        Effect.orElseSucceed(() => false)
+      )
+      : false
+    const clockifyConnected = options.sides.clockify ? yield* ClockifyAuth.use((auth) => auth.isConfigured) : false
     if (options.sides.jira && !jiraConnected) {
       return yield* new CommandFailed({
         message:
@@ -488,6 +501,8 @@ const runAgentMode = (options: {
         message: "Clockify is not connected. Run jcf auth clockify setup, or pass --only jira to reconcile Jira alone."
       })
     }
+    // Progress goes to stderr in both modes: it is not part of the JSON value, and reading
+    // transcripts then waking a Coding Agent takes long enough that silence reads as a hang.
     const report = yield* svc.proposeFromSessions(options.period, {
       sides: options.sides,
       onProgress: (progress) => reportProgress(options.agent, progress)
@@ -502,7 +517,9 @@ const runAgentMode = (options: {
     }
 
     const ownershipSettings = yield* config.get
-    const ownershipFacts = ownershipSettings.sessionOwnership === "assigned"
+    // Ownership and titles come from Jira. Without it every row counts as yours and has no title,
+    // as in jcf-web's Clockify-only scope.
+    const ownershipFacts = options.sides.jira && ownershipSettings.sessionOwnership === "assigned"
       ? (yield* issues.lookup(report.proposals.map((proposal) => proposal.ticketKey))).facts
       : new Map()
     const ownership = {
@@ -516,10 +533,12 @@ const runAgentMode = (options: {
 
     // Looked up for every row that names an Issue Key, including the withheld ones — a row you
     // cannot identify is a row you cannot judge, whether or not it is offered.
-    const tickets = yield* resolveTickets([
-      ...report.proposals.map((proposal) => proposal.ticketKey),
-      ...report.withheld.map((entry) => entry.ticketKey)
-    ])
+    const tickets = options.sides.jira
+      ? yield* resolveTickets([
+        ...report.proposals.map((proposal) => proposal.ticketKey),
+        ...report.withheld.map((entry) => entry.ticketKey)
+      ])
+      : new Map<string, TicketFacts>()
 
     if (options.json) {
       yield* Console.log(JSON.stringify(
@@ -613,15 +632,19 @@ const runAgentMode = (options: {
       if (needsAttention) {
         yield* say("  Nothing written — the rows above still need you before they can be recorded.")
       } else if (notOwned.length === 0) {
-        yield* say("  Nothing to propose — both sides already hold everything these sessions account for.")
+        yield* say(nothingToProposeLine(options.sides))
       }
       return
     }
 
     const clockifyTotal = proposals.reduce((sum, p) => sum + p.clockifyDelta, 0)
     const jiraTotal = proposals.reduce((sum, p) => sum + p.jiraDelta, 0)
+    const additions = [
+      ...(options.sides.clockify ? [`Clockify ${formatDuration(clockifyTotal)}`] : []),
+      ...(options.sides.jira ? [`Jira ${formatDuration(jiraTotal)}`] : [])
+    ]
     yield* say(
-      `\n  Would add Clockify ${formatDuration(clockifyTotal)}, Jira ${formatDuration(jiraTotal)}` +
+      `\n  Would add ${additions.join(", ")}` +
         ` across ${proposals.length} row(s).`
     )
 
@@ -694,7 +717,7 @@ const runAgentMode = (options: {
           // inside it so no watch, browser tab or second reconcile can authorize the same gap.
           const refreshed = yield* svc.refreshRecordedTime(options.period, report)
           const currentSettings = yield* config.get
-          const currentFacts = currentSettings.sessionOwnership === "assigned"
+          const currentFacts = options.sides.jira && currentSettings.sessionOwnership === "assigned"
             ? (yield* issues.lookup(chosen.map((proposal) => proposal.ticketKey))).facts
             : new Map()
           const currentOwnership = {

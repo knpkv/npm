@@ -206,6 +206,7 @@ const ReportProposal = Schema.Struct({
 
 const AgentReport = Schema.Struct({
   mode: Schema.optional(Schema.String),
+  sides: Schema.Struct({ clockify: Schema.Boolean, jira: Schema.Boolean }),
   proposals: Schema.Array(ReportProposal),
   ignored: Schema.Array(Schema.Struct({ ticketKey: Schema.String, day: Schema.String, seconds: Schema.Finite })),
   ignoredTickets: Schema.Array(Schema.String),
@@ -2307,6 +2308,68 @@ describe("jcf sync reconcile --agent: unreadable recorded state", () => {
       expect(exit._tag === "Failure" ? Cause.prettyErrors(exit.cause)[0]?.message : "succeeded").toBe(
         "Jira is not connected. Run jcf auth jira token, or pass --only clockify to reconcile Clockify alone."
       )
+    }))
+
+  // Review of #563: `--only clockify` still read Jira for ownership and titles, so a slow or failing
+  // Jira delayed the run and Jira's assignment could withhold a Clockify-only proposal.
+  it.effect("--only clockify sends no Jira request and lets Jira's assignment withhold nothing", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(["--only", "clockify"]),
+        baseOptions({
+          config: { sessionRoots: [WORK_ROOT], sessionOwnership: "assigned" },
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5662-review",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+            })
+          },
+          issueAssignees: { "PROJ-5662": "acct-other" },
+          keep: [true]
+        })
+      )
+      expect(world.jiraRequests).toEqual([])
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(output(world.stdout)).toContain("Would add Clockify 35m 0s across 1 row(s).")
+      expect(output(world.stdout)).not.toContain("Jira 0s")
+    }))
+
+  // A side that was not read reports zero deltas; the report has to say it was not read, or an
+  // empty one-sided run reads as "both systems are complete".
+  const recordedInClockify = baseOptions({
+    transcripts: {
+      "work-repo/s1.jsonl": transcript({
+        sessionId: "s1",
+        cwd: `${WORK_ROOT}/repo`,
+        gitBranch: "feat/PROJ-5662-review",
+        events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+      })
+    },
+    clockifyEntries: [{
+      description: "[PROJ-5662] review",
+      start: iso(at(DAY.year, DAY.month, DAY.day, 10, 0)),
+      end: iso(at(DAY.year, DAY.month, DAY.day, 11, 0))
+    }]
+  })
+
+  it.effect("a one-sided --json report names the sides it read", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(agent(["--only", "clockify", "--json"]), recordedInClockify)
+      const report = decodeAgentReport(world.stdout.join("\n"))
+      expect(Option.map(report, (decoded) => decoded.sides)).toEqual(Option.some({ clockify: true, jira: false }))
+      expect(Option.map(report, (decoded) => decoded.proposals)).toEqual(Option.some([]))
+    }))
+
+  it.effect("a one-sided run with nothing to add says the other system was not read", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(agent(["--only", "clockify"]), recordedInClockify)
+      const printed = output(world.stdout)
+      expect(printed).toContain(
+        "Nothing to propose — Clockify already holds everything these sessions account for. Jira was not read."
+      )
+      expect(printed).not.toContain("both sides")
     }))
 
   it.effect("--only applies to --agent runs only", () =>
