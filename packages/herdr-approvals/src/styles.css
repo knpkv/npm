@@ -307,21 +307,21 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  /* The state label drops under the name before it can squeeze it; names and work wrap whole. */
   .agent-line {
     align-items: center;
+    flex-wrap: wrap;
   }
 
   .agent-line > div {
     display: grid;
-    flex: 1;
+    flex: 1 1 12rem;
     min-inline-size: 0;
   }
 
   .agent-line small,
   .agent-line strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
   }
 
   .agenda-list {
@@ -621,10 +621,9 @@
     min-inline-size: 0;
   }
 
+  /* Titles and descriptions wrap: at phone width an ellipsis left a third of the sentence. */
   .activity-row-copy > * {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
   }
 
   .activity-actor {
