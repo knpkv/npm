@@ -243,8 +243,9 @@ const RemoteAgendaItem = ({
   >
     <div className="agenda-heading">
       <div>
+        {/* Where it is decided, in words: no coloured edge marks remote requests. */}
         <Text variant="meta" tone="secondary">
-          Remote · {host}
+          Decided on {host}
         </Text>
         <Text as="h3" variant="card-title">
           {jobTitle(approval)}

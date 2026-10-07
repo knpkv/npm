@@ -338,14 +338,6 @@
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--rly-color-agent) 24%, transparent);
   }
 
-  .agenda-item {
-    border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink);
-  }
-
-  .agenda-item-remote {
-    border-inline-start-color: var(--rly-color-agent);
-  }
-
   .agenda-heading > div {
     display: grid;
     gap: var(--rly-space-4);
@@ -846,10 +838,9 @@
   }
 
   .coordinator-reply {
-    border-inline-start: 2px solid var(--rly-color-agent);
     display: grid;
     gap: var(--rly-space-6);
-    padding-inline-start: var(--rly-space-12);
+    padding-block-start: var(--rly-space-4);
   }
 
   .chat-compose {
