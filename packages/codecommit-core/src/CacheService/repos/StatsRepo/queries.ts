@@ -159,13 +159,16 @@ export const healthIndicators =
         -- A row whose last evaluation failed has only a last known approval, so it is not counted; nor
         -- is one with no rules, which CodeCommit evaluates as approved with nothing to satisfy.
         COUNT(CASE WHEN is_approved = 1 AND approval_unknown_reason IS NULL
-          AND json_array_length(COALESCE(approval_rules, '[]')) > 0 THEN 1 END) as approved
+          AND json_array_length(COALESCE(approval_rules, '[]')) > 0 THEN 1 END) as approved,
+        -- The approval rate's denominator: evaluated pull requests with rules, approved or pending.
+        COUNT(CASE WHEN approval_unknown_reason IS NULL
+          AND json_array_length(COALESCE(approval_rules, '[]')) > 0 THEN 1 END) as rule_backed
       FROM pull_requests
       WHERE creation_date >= ${weekStart} AND creation_date < ${weekEnd}
         AND status != 'CLOSED'
         ${f.repo} ${f.author} ${f.account}
     `.pipe(
-      Effect.map((rows) => rows[0] ?? { total: 0, withComments: 0, approved: 0 }),
+      Effect.map((rows) => rows[0] ?? { total: 0, withComments: 0, approved: 0, ruleBacked: 0 }),
       cacheError("healthIndicators")
     )
   }

@@ -32,6 +32,7 @@ import {
   approvalUnknownLabel,
   approvalUnknownReasonText,
   AwsRegion,
+  identityMatches,
   PullRequestId
 } from "@knpkv/codecommit-core/Domain.js"
 import {
@@ -210,14 +211,12 @@ const isTextInputTarget = (target: EventTarget | null): boolean => {
 }
 
 /**
- * Whether someone other than the author signed off, as review evidence for time to first review. No
- * rules means approval isn't required, not that nobody reviewed, so a voluntary sign-off counts; an
- * unknown approval holds only a last known one, so it doesn't.
+ * Whether someone other than the author signed off, as review evidence for time to first review. Any
+ * sign-off counts: one of two required, or a voluntary one where no rules apply. An unknown approval
+ * holds only a last known one, so it doesn't.
  */
-export const signedOffByOthers = (pr: Domain.PullRequest): boolean => {
-  const approval = approvalOf(pr)._tag
-  return (approval === "Approved" || approval === "NotRequired") && pr.approvedBy.some((a) => a !== pr.author)
-}
+export const signedOffByOthers = (pr: Domain.PullRequest): boolean =>
+  approvalOf(pr)._tag !== "Unknown" && pr.approvedBy.some((approver) => !identityMatches(approver, pr.author))
 
 /**
  * True when Enter on the focused element already does something (follow a link, press a button),

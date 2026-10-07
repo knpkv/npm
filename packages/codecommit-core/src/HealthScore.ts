@@ -141,7 +141,10 @@ export const calculateHealthScore = (pr: PullRequest, now: Date): Option.Option<
         ? `+0.5 per comment, up to ${COMMENTS_COUNTED} (${commentCount} comments)`
         : "Comments not loaded yet",
       value: round1(commentBonus),
-      ...commentCount >= 3
+      // Not loaded is missing data, not silence.
+      ...!commentsLoaded
+        ? { status: "neutral", statusLabel: "NOT LOADED" }
+        : commentCount >= 3
         ? { status: "positive", statusLabel: "ACTIVE" }
         : commentCount >= 1
         ? { status: "neutral", statusLabel: "QUIET" }

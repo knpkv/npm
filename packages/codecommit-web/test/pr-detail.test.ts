@@ -234,12 +234,23 @@ describe("review evidence from sign-offs", () => {
       poolMemberArns: [],
       satisfied: true
     })
+    const twoNeeded = new Domain.ApprovalRule({
+      ruleName: "two",
+      requiredApprovals: 2,
+      poolMembers: [],
+      poolMemberArns: [],
+      satisfied: false
+    })
     expect([
       signed({ isApproved: true, approvedBy: ["alice"] }),
       signed({ isApproved: true, approvedBy: ["alice"], approvalRules: [satisfied] }),
+      // One of two required sign-offs: pending, but someone reviewed.
+      signed({ isApproved: false, approvedBy: ["alice"], approvalRules: [twoNeeded] }),
       signed({ isApproved: true, approvedBy: [] }),
       signed({ isApproved: true, approvedBy: ["reviewer"] }),
+      // The author's own sign-off, under another spelling of the identity.
+      signed({ isApproved: true, approvedBy: ["arn:aws:iam::111122223333:user/Reviewer"] }),
       signed({ isApproved: true, approvedBy: ["alice"], approvalUnknown: { _tag: "NotPermitted" } })
-    ]).toEqual([true, true, false, false, false])
+    ]).toEqual([true, true, true, false, false, false, false])
   })
 })

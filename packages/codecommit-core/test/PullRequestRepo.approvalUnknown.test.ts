@@ -166,7 +166,7 @@ describe("PullRequestRepo approval unknown", () => {
         yield* repo.observe()
       )
       const health = yield* stats.healthIndicators("2026-10-01T00:00:00.000Z", "2026-10-08T00:00:00.000Z", {})
-      expect([health.total, health.approved]).toEqual([2, 1])
+      expect([health.total, health.approved, health.ruleBacked]).toEqual([2, 1, 1])
     })))
 
   it.effect("records a re-read's evaluation: unknown keeps the last known approval, evaluated replaces it", () =>

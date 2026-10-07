@@ -293,8 +293,13 @@ describe("health curve A", () => {
     const inputs = { ...table[10]![1], commentCount: undefined }
     const score = Option.getOrThrow(calculateHealthScore(pullRequest(inputs), now))
     expect(score.total).toBeLessThanOrEqual(Option.getOrThrow(total(table[10]![1])))
-    expect(score.categories.find((category) => category.label === "Engagement")?.description)
-      .toBe("Comments not loaded yet")
+    const engagement = score.categories.find((category) => category.label === "Engagement")
+    // Not loaded is not silent: missing data is neutral, a loaded zero is negative.
+    expect([engagement?.description, engagement?.status, engagement?.statusLabel])
+      .toEqual(["Comments not loaded yet", "neutral", "NOT LOADED"])
+    const loadedZero = Option.getOrThrow(calculateHealthScore(pullRequest({ ...inputs, commentCount: 0 }), now))
+      .categories.find((category) => category.label === "Engagement")
+    expect([loadedZero?.status, loadedZero?.statusLabel]).toEqual(["negative", "SILENT"])
   })
 
   it("never rises with more idle days, and never falls with more comments", () => {
