@@ -893,13 +893,28 @@ export const WorkObservationEnvelope = Schema.Struct({
 export interface WorkObservationEnvelope extends Schema.Schema.Type<typeof WorkObservationEnvelope> {}
 
 /**
+ * A stored observation's id, and what `reconcile` accepts as confirmation of
+ * it: lowercase hex of the SHA-256 of the UTF-8 bytes persisted in
+ * `work_observed_facts.record`. That record is the JSON of the encoded
+ * observation alone (a pull request's or an agent's fields, in schema field
+ * order) with its case-insensitive identity, the repository or host,
+ * ASCII-lowercased. `observedAt` is not an input, so the same facts read again
+ * keep their id.
+ */
+export const WorkObservationId = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)).pipe(
+  Schema.brand("WorkObservationId")
+)
+export type WorkObservationId = typeof WorkObservationId.Type
+
+/**
  * The latest stored fact for one subject. `observedAt` is when these exact
  * facts were first seen, so for a `gone` agent it is the time it went away;
  * `confirmedAt` is the last time a read returned them again.
  */
+
 export const WorkObservedFact = Schema.Struct({
   subject: WorkObservationSubject,
-  observationId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+  observationId: WorkObservationId,
   observedAt: Timestamp,
   confirmedAt: Timestamp,
   observation: Schema.Union([WorkPullRequestObservation, WorkAgentObservation])
@@ -941,8 +956,8 @@ export const workObservedFactMaxBytes = 2 * 1024 * 1024
  * a source it could not read.
  */
 export const WorkObserveOutcome = Schema.TaggedUnion({
-  stored: { subject: WorkObservationSubject },
-  unchanged: { subject: WorkObservationSubject },
+  stored: { subject: WorkObservationSubject, observationId: WorkObservationId },
+  unchanged: { subject: WorkObservationSubject, observationId: WorkObservationId },
   stale: { subject: WorkObservationSubject },
   unknown: { subject: WorkObservationSubject, reason: FailureReason }
 })
@@ -964,6 +979,20 @@ export const workReconcilerHeadroom = 256
  * or found a newer owner checkpoint than the one it planned from (it tries
  * again on the next run).
  */
+/**
+ * What `reconcile` may act on: `confirmed` lists the pull request facts the
+ * caller has just read and the store accepted, the `subject` and
+ * `observationId` of each `stored` or `unchanged` outcome from that `observe`.
+ * A read refused as stale, or one that failed, confirms nothing, so a fact
+ * stored earlier (the pull request may since have reopened) is never acted on.
+ */
+export const WorkReconcileOptions = Schema.Struct({
+  confirmed: Schema.Array(Schema.Struct({ subject: WorkObservationSubject, observationId: WorkObservationId })).check(
+    Schema.isMaxLength(workObservedFactMaxRecords)
+  )
+})
+export interface WorkReconcileOptions extends Schema.Schema.Type<typeof WorkReconcileOptions> {}
+
 export const WorkReconcileOutcome = Schema.TaggedUnion({
   applied: { goalId: WorkGoalId, eventId: Identifier, state: Schema.Literals(["completed", "abandoned"]) },
   recorded: { goalId: WorkGoalId, eventId: Identifier },
