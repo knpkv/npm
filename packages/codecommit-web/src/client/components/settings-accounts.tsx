@@ -251,13 +251,15 @@ function AccountsList({
 
   const enabledAccounts = accounts.filter((a) => a.enabled)
   const enabledCount = enabledAccounts.length
+  const signedIn = currentUser !== undefined && currentUser.length > 0
 
   return (
     <>
-      {/* Who is signed in only means something once a profile exists. */}
-      <div className="flex items-center gap-2 text-sm" hidden={enabledCount === 0}>
+      {/* A signed-in user always keeps sign-out (it ends every SSO session on the machine); "Not logged in"
+          only means something once an account is switched on. */}
+      <div className="flex items-center gap-2 text-sm" hidden={signedIn ? false : enabledCount === 0}>
         <UserIcon className="size-4 text-muted-foreground" />
-        {currentUser ? (
+        {signedIn ? (
           <>
             <span className="text-muted-foreground">Current user:</span>
             <span className="font-medium">{currentUser}</span>
