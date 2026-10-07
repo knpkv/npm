@@ -2044,7 +2044,8 @@ const ObservedFactRow = Schema.Struct({
 
 const StoredFactRow = Schema.Struct({ observationId: Schema.String, confirmedAt: Schema.Number })
 const FactTotalsRow = Schema.Struct({ count: Schema.Number, bytes: Schema.Number })
-const EvictionRow = Schema.Struct({ subject: Schema.String, bytes: Schema.Number })
+const EvictionRow = Schema.Struct({ subject: Schema.String, bytes: Schema.Number, age: Schema.Number })
+const EvictedThroughRow = Schema.Struct({ evictedThrough: Schema.Number })
 
 type PreparedObservation =
   | {
@@ -2090,6 +2091,15 @@ const writeObservations = (
       `SELECT observation_id AS observationId, confirmed_at AS confirmedAt
        FROM work_observed_facts WHERE subject = ?`
     )
+    // The newest time of any row eviction has removed. A subject with no row
+    // may have had one, so a fact read no newer than this can't be shown to
+    // be current, and is stale: eviction never makes an old read new again.
+    const evictedRow = database.prepare(
+      "SELECT evicted_through AS evictedThrough FROM work_observed_eviction WHERE singleton = 1"
+    ).get()
+    const evictedThrough = evictedRow === undefined
+      ? Number.NEGATIVE_INFINITY
+      : Schema.decodeUnknownSync(EvictedThroughRow)(evictedRow).evictedThrough
     const upsertFact = database.prepare(
       `INSERT INTO work_observed_facts (subject, observation_id, observed_at, confirmed_at, record)
        VALUES (?, ?, ?, ?, ?)
@@ -2134,6 +2144,7 @@ const writeObservations = (
         recordFailure.run(item.subject, item.source, item.reason, item.observedAt, item.observedAt)
         return { _tag: "unknown", reason: item.reason, subject: item.subject }
       }
+      if (stored === undefined && item.observedAt <= evictedThrough) return { _tag: "stale", subject: item.subject }
       // The same facts read before the stored confirmation confirm nothing now.
       if (stored?.observationId === item.observationId && stored.confirmedAt > item.observedAt) {
         return { _tag: "stale", subject: item.subject }
@@ -2151,36 +2162,28 @@ const writeObservations = (
     // Totals are read once and kept current as rows go, so eviction is one
     // indexed lookup and delete per row, not a full rescan per row.
     // A failure disputes its subject's fact while it is newer than that fact's
-    // confirmation. Undisputing failures are evicted first, so the record of a
-    // dispute survives (and keeps an older replay of the fact stale); only
-    // when nothing else is left to evict does a dispute go, taking its fact.
+    // confirmation; evicting such a failure evicts the fact with it, so a
+    // disputed fact never outlives the record of its dispute.
     const removeDisputedFact = database.prepare(
       `DELETE FROM work_observed_facts WHERE subject = ? AND confirmed_at <
          (SELECT last_at FROM work_observed_failures WHERE subject = ?)`
     )
-    const evict = (
-      table: string,
-      age: string,
-      payload: string,
-      failures?: { readonly preferred: string; readonly beforeRemove: (subject: string) => number }
-    ): number => {
+    let newestEvicted = Number.NEGATIVE_INFINITY
+    const evict = (table: string, age: string, payload: string, beforeRemove?: (subject: string) => number): number => {
       const size = `length(CAST(subject AS BLOB)) + length(CAST(${payload} AS BLOB))`
       const totals = Schema.decodeUnknownSync(FactTotalsRow)(
         database.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${size}), 0) AS bytes FROM ${table}`).get()
       )
       const oldest = database.prepare(
-        `SELECT subject, ${size} AS bytes FROM ${table} ORDER BY ${age} ASC, subject ASC LIMIT 1`
-      )
-      const oldestPreferred = failures === undefined ? undefined : database.prepare(
-        `SELECT subject, ${size} AS bytes FROM ${table} WHERE ${failures.preferred}
-         ORDER BY ${age} ASC, subject ASC LIMIT 1`
+        `SELECT subject, ${size} AS bytes, ${age} AS age FROM ${table} ORDER BY ${age} ASC, subject ASC LIMIT 1`
       )
       const remove = database.prepare(`DELETE FROM ${table} WHERE subject = ?`)
       let { bytes, count } = totals
       let evicted = 0
       while (count > workObservedFactMaxRecords || bytes > workObservedFactMaxBytes) {
-        const row = Schema.decodeUnknownSync(EvictionRow)(oldestPreferred?.get() ?? oldest.get())
-        evicted += failures?.beforeRemove(row.subject) ?? 0
+        const row = Schema.decodeUnknownSync(EvictionRow)(oldest.get())
+        newestEvicted = Math.max(newestEvicted, row.age)
+        evicted += beforeRemove?.(row.subject) ?? 0
         remove.run(row.subject)
         count -= 1
         bytes -= row.bytes
@@ -2191,11 +2194,18 @@ const writeObservations = (
     // The least recently read rows go first: a fact by its last confirmation,
     // a failure by its latest failed read.
     const evicted = evict("work_observed_facts", "confirmed_at", "record") +
-      evict("work_observed_failures", "last_at", "reason", {
-        preferred: `NOT EXISTS (SELECT 1 FROM work_observed_facts AS fact
-          WHERE fact.subject = work_observed_failures.subject AND fact.confirmed_at < work_observed_failures.last_at)`,
-        beforeRemove: (subject) => Number(removeDisputedFact.run(subject, subject).changes)
-      })
+      evict(
+        "work_observed_failures",
+        "last_at",
+        "reason",
+        (subject) => Number(removeDisputedFact.run(subject, subject).changes)
+      )
+    if (newestEvicted > evictedThrough) {
+      database.prepare(
+        `INSERT INTO work_observed_eviction (singleton, evicted_through) VALUES (1, ?)
+         ON CONFLICT (singleton) DO UPDATE SET evicted_through = max(evicted_through, excluded.evicted_through)`
+      ).run(newestEvicted)
+    }
     // Reported last, after every write and eviction in this call: a stored or
     // unchanged fact that a later envelope replaced, or eviction removed, is no
     // longer the subject's fact and confirms nothing.
@@ -2433,6 +2443,10 @@ export class WorkStore implements WorkStoreService {
         );
         CREATE INDEX IF NOT EXISTS work_observed_failures_age
           ON work_observed_failures (last_at, subject);
+        CREATE TABLE IF NOT EXISTS work_observed_eviction (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          evicted_through INTEGER NOT NULL
+        );
       `)
           requireUniqueSessionIndex(database)
           const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(

@@ -67,9 +67,11 @@ read and the store accepted: `confirmed` lists the `subject` and
 read refused as stale, or one that failed, confirms nothing, so a fact stored
 earlier (the pull request may since have reopened) never closes a goal,
 including one the snapshot hides as superseded. An identical read older than the
-stored confirmation confirms nothing. Under eviction pressure, failed reads that
-dispute a fact go after every other failed read; when one does go, its fact goes
-with it, so an old confirmation, or a replay of it, can't close a goal. An
+stored confirmation confirms nothing. Evicting a failed read that disputes a fact
+evicts that fact too, and the store keeps the newest time of anything it has
+evicted: a fact read no newer than that, for a subject with no stored row, is
+reported `stale`. So neither an old confirmation nor a replay of it can close a
+goal once eviction has forgotten why it was stale. An
 `observationId` is lowercase hex of the SHA-256 of the UTF-8 bytes stored as the
 fact's record: the JSON of the encoded observation alone (its pull request or
 agent fields, in schema field order), with the repository or host

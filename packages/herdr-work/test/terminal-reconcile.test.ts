@@ -326,34 +326,45 @@ describe("terminal reconcile", () => {
       expect((yield* currentGoal(work))?.state).toBe("review")
     })))
 
-  it.effect("a failed read that disputes a fact survives eviction pressure: no old confirmation or replay closes the goal", () =>
+  it.effect("evicting a dispute with its fact rejects the old confirmation and keeps a replay of it stale", () =>
     Effect.scoped(Effect.gen(function*() {
       const { work } = yield* fixture
       yield* record(work, "goal-pr7.1", goal())
       const closedRead = pullRequest({ closedAt: 5_000, state: "closed" })
-      const closed = yield* work.observe([{ observation: closedRead, observedAt: 6_000 }])
-      yield* work.observe([{
+      const failed = (repository: string, pullRequest: number): WorkObservationEnvelope => ({
         observation: {
           _tag: "unknown",
-          reason: "GitHub returned 502",
+          reason: "x".repeat(512),
           source: "github",
-          subject: "github:knpkv/npm#7"
+          subject: `github:${repository}#${String(pullRequest)}`
         },
         observedAt: 7_000
-      }])
-      yield* work.observe(Array.from({ length: 4_096 }, (_, index): WorkObservationEnvelope => ({
-        observation: {
-          _tag: "unknown",
-          reason: "GitHub returned 502",
-          source: "github",
-          subject: `github:knpkv/other#${String(index + 1)}`
-        },
-        observedAt: 8_000
-      })))
-      expect(yield* work.reconcile({ confirmed: confirmedIn(closed) })).toEqual([])
+      })
+      // Every failure disputes a fact, and byte pressure evicts the oldest:
+      // knpkv/npm#7's, which sorts first, taking its fact with it.
+      const others = Array.from({ length: 4_095 }, (_, index) => index + 1)
+      const closed = yield* work.observe([
+        { observation: closedRead, observedAt: 6_000 },
+        ...others.map((number): WorkObservationEnvelope => ({
+          observation: pullRequest({ pullRequest: number, repository: "knpkv/zz" }),
+          observedAt: 6_000
+        }))
+      ])
+      const pressure = yield* work.observe([
+        failed("knpkv/npm", 7),
+        ...others.map((number) => failed("knpkv/zz", number))
+      ])
+      expect(pressure.evicted).toBeGreaterThan(0)
+      expect(yield* Effect.result(work.reconcile({ confirmed: confirmedIn(closed).slice(0, 1) }))).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "reconcile.confirmed" }
+      })
       const replay = yield* work.observe([{ observation: closedRead, observedAt: 6_000 }])
+      expect(replay.outcomes.map(({ _tag }) => _tag)).toEqual(["stale"])
       expect(yield* work.reconcile({ confirmed: confirmedIn(replay) })).toEqual([])
       expect((yield* currentGoal(work))?.state).toBe("review")
+      // A read newer than anything evicted is current again.
+      const fresh = yield* work.observe([{ observation: closedRead, observedAt: 8_000 }])
+      expect(fresh.outcomes.map(({ _tag }) => _tag)).toEqual(["stored"])
     })))
 
   it.effect("an identical read older than the stored confirmation confirms nothing", () =>
