@@ -154,5 +154,17 @@ describe("PermissionGateLive.resolveCategory", () => {
         yield* gate.resolve("merge", "deny")
         yield* Fiber.await(merge)
       }))
+
+    it.effect("answers a prompt from a grant saved after its check, without anyone resolving it", () =>
+      Effect.gen(function*() {
+        const gate = yield* PermissionGateLiveTag
+        // The call checked "ask" before the grant; by the time it registers, the grant is saved.
+        const response = yield* gate.request(
+          { id: "late", operation: "getPullRequests", category: "read", context: "late" },
+          { standing: Effect.succeed("allow_once") }
+        )
+        expect(response).toBe("allow_once")
+        expect(yield* gate.getFirstPending()).toBeUndefined()
+      }))
   })
 })

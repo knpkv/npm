@@ -60,6 +60,54 @@ const saveDetached = (registry: Registry, payload: SavePayload, onSettled?: (sav
   registry.set(configSaveAtom, { payload })
 }
 
+/**
+ * Config saves run one at a time, newest payload first: writing the save mutation again would
+ * interrupt the call in flight, and each payload is the whole account state, so only the latest one
+ * matters. A save queued behind a running one replaces any older queued payload; everyone waiting on
+ * a replaced payload learns the outcome of the save that carried it. Module state, because a save
+ * outlives the Settings page that started it.
+ */
+interface QueuedSave {
+  readonly payload: SavePayload
+  readonly waiters: ReadonlyArray<(saved: boolean) => void>
+}
+interface SaveQueue {
+  running: boolean
+  next: QueuedSave | null
+  readonly idle: Array<() => void>
+}
+const saveQueue: SaveQueue = {
+  running: false,
+  next: null,
+  idle: []
+}
+
+const drainSaves = (registry: Registry): void => {
+  const job = saveQueue.next
+  if (job === null) {
+    saveQueue.running = false
+    for (const resolve of saveQueue.idle.splice(0)) resolve()
+    return
+  }
+  saveQueue.next = null
+  saveQueue.running = true
+  saveDetached(registry, job.payload, (saved) => {
+    for (const waiter of job.waiters) waiter(saved)
+    drainSaves(registry)
+  })
+}
+
+/** Queues `payload` as the newest config; resolves with whether the save that carried it succeeded. */
+const queueSave = (registry: Registry, payload: SavePayload): Promise<boolean> =>
+  new Promise((resolve) => {
+    saveQueue.next = { payload, waiters: [...(saveQueue.next?.waiters ?? []), resolve] }
+    if (!saveQueue.running) drainSaves(registry)
+  })
+
+/** Resolves once no save is running or queued. */
+const savesSettled = (): Promise<void> =>
+  saveQueue.running ? new Promise((resolve) => saveQueue.idle.push(resolve)) : Promise.resolve()
+
 export function SettingsAccounts() {
   const config = useAtomValue(configQueryAtom)
   const appState = useAtomValue(appStateAtom)
@@ -79,7 +127,7 @@ export function SettingsAccounts() {
   useEffect(
     () => () => {
       if (debounceRef.current !== null) clearTimeout(debounceRef.current)
-      if (pendingRef.current !== null) saveDetached(registry, pendingRef.current)
+      if (pendingRef.current !== null) void queueSave(registry, pendingRef.current)
     },
     [registry]
   )
@@ -90,7 +138,7 @@ export function SettingsAccounts() {
       pendingRef.current = payload
       debounceRef.current = setTimeout(() => {
         pendingRef.current = null
-        saveDetached(registry, payload)
+        void queueSave(registry, payload)
       }, 500)
     },
     [registry]
@@ -166,25 +214,28 @@ export function SettingsAccounts() {
             setStatusFilter={setStatusFilter}
             toggleAccount={toggleAccount}
             setAutoDetect={setAutoDetect}
-            turnOnAutoDetect={(data) => {
-              // An explicit "detect" with auto-detect off: save the switch now, then read the config again.
+            prepareDetect={(data) => {
+              // Detection reads the saved config, so anything still waiting out the debounce is sent
+              // first; with auto-detect off, the same save switches it on, since a re-read would find nothing.
+              if (debounceRef.current !== null) clearTimeout(debounceRef.current)
+              debounceRef.current = null
+              const pending = pendingRef.current
+              pendingRef.current = null
+              const autoDetect = autoDetectChoice ?? data.autoDetect
+              if (pending === null && autoDetect) return savesSettled().then(() => true)
               setAutoDetectChoice(true)
-              return new Promise<boolean>((resolve) =>
-                saveDetached(
-                  registry,
-                  {
-                    accounts: data.accounts.map((a) => ({
-                      profile: a.profile,
-                      regions: [...a.regions],
-                      enabled: overrides[a.profile] ?? a.enabled
-                    })),
-                    autoDetect: true,
-                    autoRefresh: data.autoRefresh,
-                    refreshIntervalSeconds: data.refreshIntervalSeconds
-                  },
-                  resolve
-                )
-              )
+              return queueSave(registry, {
+                ...(pending ?? {
+                  accounts: data.accounts.map((a) => ({
+                    profile: a.profile,
+                    regions: [...a.regions],
+                    enabled: overrides[a.profile] ?? a.enabled
+                  })),
+                  autoRefresh: data.autoRefresh,
+                  refreshIntervalSeconds: data.refreshIntervalSeconds
+                }),
+                autoDetect: true
+              })
             }}
             onSsoLogin={(profile) => {
               try {
@@ -221,10 +272,11 @@ type DetectPhase<A> =
  */
 function NoProfiles({
   autoDetect,
-  turnOnAutoDetect
+  prepareDetect
 }: {
   readonly autoDetect: boolean
-  readonly turnOnAutoDetect: () => Promise<boolean>
+  /** Sends any unsaved change (switching auto-detect on if it's off); resolves with whether it saved. */
+  readonly prepareDetect: () => Promise<boolean>
 }) {
   const paths = useAtomValue(configPathQueryAtom)
   const config = useAtomValue(configQueryAtom)
@@ -246,13 +298,9 @@ function NoProfiles({
 
   const detect = () => {
     setPhase({ _tag: "Requested", from: config })
-    if (autoDetect) {
-      detectAgain()
-      return
-    }
-    void turnOnAutoDetect().then((saved) => {
+    void prepareDetect().then((saved) => {
       if (saved) detectAgain()
-      else setPhase({ _tag: "Failed", reason: "auto-detect couldn't be switched on" })
+      else setPhase({ _tag: "Failed", reason: "the settings couldn't be saved first" })
     })
   }
 
@@ -298,13 +346,13 @@ function AccountsList({
   onSsoLogin,
   onSsoLogout,
   overrides,
+  prepareDetect,
   search,
   setAutoDetect,
   setSearch,
   setStatusFilter,
   statusFilter,
-  toggleAccount,
-  turnOnAutoDetect
+  toggleAccount
 }: {
   readonly autoDetect: boolean
   readonly currentUser: string | undefined
@@ -316,7 +364,7 @@ function AccountsList({
   readonly setStatusFilter: (f: StatusFilter) => void
   readonly toggleAccount: (profile: string, data: ConfigData) => void
   readonly setAutoDetect: (autoDetect: boolean, data: ConfigData) => void
-  readonly turnOnAutoDetect: (data: ConfigData) => Promise<boolean>
+  readonly prepareDetect: (data: ConfigData) => Promise<boolean>
   readonly onSsoLogin: (profile: string) => void
   readonly onSsoLogout: () => void
 }) {
@@ -382,7 +430,7 @@ function AccountsList({
         )}
       </div>
       {accounts.length === 0 ? (
-        <NoProfiles autoDetect={autoDetect} turnOnAutoDetect={() => turnOnAutoDetect(data)} />
+        <NoProfiles autoDetect={autoDetect} prepareDetect={() => prepareDetect(data)} />
       ) : (
         <>
           <div className="flex items-center gap-2">

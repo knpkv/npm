@@ -97,3 +97,32 @@ test("keeps the rule and says why when removing it fails", async ({ page }) => {
   await expect(page.getByRole("alert").filter({ hasText: "Couldn't remove the rule" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Remove rule" })).toBeEnabled()
 })
+
+test("says the rule is gone when only the refresh after removing it fails, and refreshes on request", async ({ page }) => {
+  let deleted = false
+  let refreshes = 0
+  let failRefresh = true
+  await serve(page, () => [managedRule])
+  await page.route("**/api/prs/approval-rules", (route) => {
+    deleted = true
+    return route.fulfill({ json: "ok" })
+  })
+  await page.route("**/api/prs/*/51/refresh*", (route) => {
+    refreshes += 1
+    return deleted && failRefresh
+      ? route.fulfill({ json: { _tag: "ApiError", message: "Throttled" }, status: 500 })
+      : route.fulfill({ json: { headCommit: "c".repeat(40), revisionId: "revision-1" } })
+  })
+
+  await page.goto(detail)
+  await page.getByRole("button", { name: "Remove rule" }).click()
+  const notice = page.getByRole("alert").filter({ hasText: "Removed the rule, but this page couldn't refresh" })
+  await expect(notice).toBeVisible()
+  // The rule is already deleted: removing again is off, refreshing is the way forward.
+  await expect(page.getByRole("button", { name: "Remove rule" })).toBeDisabled()
+  failRefresh = false
+  const before = refreshes
+  await notice.getByRole("button", { name: "Refresh" }).click()
+  await expect.poll(() => refreshes).toBeGreaterThan(before)
+  await expect(notice).toHaveCount(0)
+})

@@ -9,7 +9,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
-import { IconButton } from "@knpkv/rly/primitives"
+import { Button, IconButton } from "@knpkv/rly/primitives"
 import {
   BarChart3Icon,
   BellIcon,
@@ -36,7 +36,7 @@ import { useTheme } from "./theme-provider.js"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.js"
 import { SsoSignOutDialog } from "./sso-sign-out-dialog.js"
 import { Kbd } from "./ui/kbd.js"
-import { connectionDetail, connectionLabel, streamConnectionAtom } from "../connection.js"
+import { connectionDetail, connectionLabel, streamConnectionAtom, streamRetryAtom } from "../connection.js"
 
 interface NavigationItem {
   readonly active: (pathname: string) => boolean
@@ -96,6 +96,7 @@ export function Header() {
   const headerRef = usePublishedBlockSize<HTMLElement>("--app-header-block-size")
   const state = useAtomValue(appStateAtom)
   const connection = useAtomValue(streamConnectionAtom)
+  const requestReconnect = useAtomSet(streamRetryAtom)
   const refresh = useAtomSet(refreshAtom)
   const [signOutOpen, setSignOutOpen] = useState(false)
   const setCommandPaletteOpen = useAtomSet(commandPaletteAtom)
@@ -180,6 +181,12 @@ export function Header() {
 
       <div className={styles.utilities}>
         <SyncStatus detail={statusDetail} label={statusLabel} state={status} />
+        {/* Once automatic retries stop, every page offers the way back, not only an empty queue. */}
+        {connection._tag === "Failed" && connection.retryAt === null ? (
+          <Button onClick={() => requestReconnect((n) => n + 1)} size="compact" variant="secondary">
+            Reconnect
+          </Button>
+        ) : null}
 
         <IconButton
           className={styles.commandButton}

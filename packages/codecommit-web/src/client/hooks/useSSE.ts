@@ -196,13 +196,21 @@ export const decodeSseState = (json: string): AppState => toAppState(decode(json
 /** Tries before the stream gives up and waits for "Retry now". */
 const MAX_RETRIES = 50
 
+/** How long the probe waits; a server that doesn't answer by then counts as unreachable. */
+const PROBE_TIMEOUT_MS = 5_000
+
 /**
  * Asks a cheap authenticated endpoint what the server says, since an EventSource can't see the
- * status of a refused connection. A framework boundary: the browser's fetch.
+ * status of a refused connection. Bounded, so a stalled answer can't hold up the reconnect; `signal`
+ * cancels it when the hook unmounts. A framework boundary: the browser's fetch.
  */
-const probeStream = async (): Promise<StreamProbe> => {
+const probeStream = async (signal: AbortSignal): Promise<StreamProbe> => {
   try {
-    const response = await window.fetch("/api/config", { credentials: "same-origin", method: "GET" })
+    const response = await window.fetch("/api/config", {
+      credentials: "same-origin",
+      method: "GET",
+      signal: AbortSignal.any([signal, AbortSignal.timeout(PROBE_TIMEOUT_MS)])
+    })
     return { _tag: "Status", status: response.status }
   } catch {
     return { _tag: "Unreachable" }
@@ -241,6 +249,7 @@ export function useSSE(
     let retryCount = 0
     let retryTimeout: ReturnType<typeof setTimeout> | null = null
     let disposed = false
+    const probes = new AbortController()
 
     const connect = () => {
       setConnection({ _tag: "Connecting" })
@@ -311,7 +320,7 @@ export function useSSE(
 
       es.onerror = () => {
         es?.close()
-        void probeStream().then((probe) => {
+        void probeStream(probes.signal).then((probe) => {
           if (disposed) return
           const giveUp = retryCount >= MAX_RETRIES
           const delay = retryDelayMs(retryCount)
@@ -334,6 +343,7 @@ export function useSSE(
     })
     return () => {
       disposed = true
+      probes.abort()
       es?.close()
       if (retryTimeout !== undefined && retryTimeout !== null) clearTimeout(retryTimeout)
     }

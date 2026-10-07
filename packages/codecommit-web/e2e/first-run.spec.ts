@@ -133,6 +133,29 @@ test("with auto-detect off, detecting switches it on before reading again", asyn
   await expect(page.getByRole("status").filter({ hasText: "still no profiles" })).toBeVisible()
 })
 
+test("detecting right after unticking auto-detect sends one save, with auto-detect on", async ({ page }) => {
+  await page.clock.install()
+  await routeCommon(page)
+  await page.route(
+    "**/api/events/",
+    (route) => route.fulfill({ body: `data: ${JSON.stringify(emptySnapshot)}\n\n`, contentType: "text/event-stream" })
+  )
+  await page.route("**/api/config", (route) => route.fulfill({ json: config }))
+  const saves: Array<{ readonly autoDetect: boolean }> = []
+  await page.route("**/api/config/save", (route) => {
+    saves.push(JSON.parse(route.request().postData() ?? "{}"))
+    return route.fulfill({ json: "saved" })
+  })
+
+  await page.goto("/settings/accounts")
+  await page.getByRole("checkbox", { name: "Add new profiles from your AWS configuration automatically" }).click()
+  // Within the debounce: the unticked choice is still waiting to be saved.
+  await page.getByRole("button", { name: "Turn on auto-detect and detect" }).click()
+  await expect(page.getByRole("status").filter({ hasText: "still no profiles" })).toBeVisible()
+  await page.clock.runFor(2_000)
+  expect(saves.map((save) => save.autoDetect)).toEqual([true])
+})
+
 test("keeps the auto-detect choice, and an account switched next saves it too", async ({ page }) => {
   await routeCommon(page)
   await page.route(

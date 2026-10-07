@@ -23,7 +23,12 @@
 import { Context, Deferred, Effect, Layer, Ref } from "effect"
 import { EventsHub, RepoChange } from "../CacheService/EventsHub.js"
 import { PermissionDeniedError } from "../Errors.js"
-import { PermissionGate, type PermissionPrompt, type PermissionResponse } from "./PermissionGate.js"
+import {
+  PermissionGate,
+  type PermissionPrompt,
+  type PermissionRequestOptions,
+  type PermissionResponse
+} from "./PermissionGate.js"
 
 interface PendingEntry {
   readonly deferred: Deferred.Deferred<PermissionResponse>
@@ -31,7 +36,10 @@ interface PendingEntry {
 }
 
 export interface PermissionGateLive {
-  readonly request: (prompt: PermissionPrompt) => Effect.Effect<PermissionResponse, PermissionDeniedError>
+  readonly request: (
+    prompt: PermissionPrompt,
+    options?: PermissionRequestOptions
+  ) => Effect.Effect<PermissionResponse, PermissionDeniedError>
   readonly resolve: (promptId: string, response: PermissionResponse) => Effect.Effect<void>
   /**
    * Answers every pending prompt of one category, after a standing grant for it was saved: calls that
@@ -58,20 +66,30 @@ const makePermissionGateLive = Effect.gen(function*() {
       return next
     }).pipe(Effect.andThen(hub.publish(RepoChange.PermissionResolved())))
 
-  const request = (prompt: PermissionPrompt): Effect.Effect<PermissionResponse, PermissionDeniedError> =>
+  const request = (
+    prompt: PermissionPrompt,
+    options?: PermissionRequestOptions
+  ): Effect.Effect<PermissionResponse, PermissionDeniedError> =>
     Effect.gen(function*() {
       const deferred = yield* Deferred.make<PermissionResponse>()
       const response = yield* Effect.acquireUseRelease(
         Ref.update(pending, (m) => new Map(m).set(prompt.id, { deferred, prompt })),
         () =>
-          hub.publish(RepoChange.PermissionRequired()).pipe(
-            Effect.andThen(Deferred.await(deferred)),
-            Effect.timeout("30 seconds"),
-            Effect.catchTag(
-              "TimeoutError",
-              () => Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "timeout" }))
-            )
-          ),
+          // Registered first, then re-read: a grant saved in between either released this prompt
+          // (resolveCategory saw it) or is visible here.
+          (options?.standing === undefined
+            ? Effect.void
+            : options.standing.pipe(
+              Effect.flatMap((standing) => standing === undefined ? Effect.void : Deferred.succeed(deferred, standing))
+            )).pipe(
+              Effect.andThen(hub.publish(RepoChange.PermissionRequired())),
+              Effect.andThen(Deferred.await(deferred)),
+              Effect.timeout("30 seconds"),
+              Effect.catchTag(
+                "TimeoutError",
+                () => Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "timeout" }))
+              )
+            ),
         () => removePending(prompt.id)
       )
 
