@@ -246,8 +246,9 @@ for (const width of [320, 390]) {
     const tabs = page.getByRole("tablist", { name: "Read the change" }).getByRole("tab")
     const [guide, review] = await Promise.all([tabs.nth(0).boundingBox(), tabs.nth(1).boundingBox()])
     expect(guide !== null && review !== null && guide.y === review.y && guide.x + guide.width <= review.x).toBe(true)
-    const underline = await tabs.nth(0).evaluate((tab) => getComputedStyle(tab, "::after").opacity)
-    expect(underline).toBe("1")
+    const underline = (index: number) => tabs.nth(index).evaluate((tab) => getComputedStyle(tab, "::after").opacity)
+    expect(await underline(0)).toBe("1")
+    expect(await underline(1)).toBe("0")
     const fits = await page.getByRole("tablist", { name: "Read the change" }).evaluate((list) =>
       list.scrollWidth <= list.clientWidth
     )
