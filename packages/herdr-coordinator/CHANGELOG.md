@@ -1,5 +1,12 @@
 # @knpkv/herdr-coordinator
 
+## 0.3.4
+
+### Patch Changes
+
+- Updated dependencies [[`f8e842e`](https://github.com/knpkv/npm/commit/f8e842e901986b50edf55f98fa3591b742a7904e), [`30849c5`](https://github.com/knpkv/npm/commit/30849c598fdf6776a3a4a2c4061d276e843eaa8e)]:
+  - @knpkv/herdr-work@0.8.0
+
 ## 0.3.3
 
 ### Patch Changes

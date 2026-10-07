@@ -1,5 +1,13 @@
 # @knpkv/agent-usage
 
+## 0.5.5
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/rly@0.12.1
+
 ## 0.5.4
 
 ### Patch Changes

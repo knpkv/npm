@@ -1,5 +1,18 @@
 # @knpkv/herdr-work
 
+## 0.8.0
+
+### Minor Changes
+
+- [#527](https://github.com/knpkv/npm/pull/527) [`f8e842e`](https://github.com/knpkv/npm/commit/f8e842e901986b50edf55f98fa3591b742a7904e) Thanks [@konopkov](https://github.com/konopkov)! - `WorkBoard` takes an optional `decisions` prop so a host that can decide approvals lets the reader approve or reject a goal's request in place, with its clock ("4m 12s left") on the request and its row. Requests the host cannot decide keep their link to the hub, the bar stays mounted after a decision so the hub's answer is announced, and the read-only view never offers a decision.
+
+- [#528](https://github.com/knpkv/npm/pull/528) [`30849c5`](https://github.com/knpkv/npm/commit/30849c598fdf6776a3a4a2c4061d276e843eaa8e) Thanks [@konopkov](https://github.com/konopkov)! - The Work tab shows what the reconciler observed. Goals group, filter and show their state by the observed overlay where there is one (a merged pull request is done, a closed one abandoned), and the detail names the recorded state when they differ. The open goal lists its observed pull request, flags an owner whose agent has been gone for a day, and says when a source could not be read and how old its facts are; observed events join the activity timeline with their provenance, an unreadable source drawn hatched. The header says when live state is unavailable or trimmed. Planned goals get their own "Not started" group instead of counting as moving, rows name the repository instead of its full path, facts stack on narrow screens, and the empty board says how to delegate the first goal.
+
+### Patch Changes
+
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/rly@0.12.1
+
 ## 0.7.2
 
 ### Patch Changes

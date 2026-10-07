@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/agent-usage",
-  "version": "0.5.4",
+  "version": "0.5.5",
   "description": "Claude and Codex subscription usage over time, per ticket and against limits, in a local browser view",
   "license": "MIT",
   "author": "knpkv",
