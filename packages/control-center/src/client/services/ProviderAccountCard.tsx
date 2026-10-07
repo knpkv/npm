@@ -222,16 +222,17 @@ export const ProviderAccountCard = ({
     <Surface as="article" className={styles.accountCard} padding="default" form="grouped">
       <div className={styles.accountHeading}>
         <div className={styles.accountIdentity}>
-          <Text as="h2" variant="section-title">
+          <Text as="h2" variant="card-title">
             {account.providerFamily === "aws"
               ? "AWS account"
               : account.providerFamily === "atlassian"
                 ? "Atlassian site"
                 : "Provider account"}{" "}
-            {account.displayName}
+            {/* An account id is one token: the line breaks before it, never inside it. */}
+            <span className={styles.accountName}>{account.displayName}</span>
           </Text>
           <Text className={styles.identifier} tone="secondary" variant="meta">
-            Verified identity · {account.providerImmutableId}
+            Verified identity: {account.providerImmutableId}
           </Text>
         </div>
         <StateLabel

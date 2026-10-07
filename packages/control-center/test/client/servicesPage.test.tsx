@@ -1040,7 +1040,10 @@ describe("ServicesPage connection tests", () => {
 
     expect(host.textContent).toContain("Connected accounts")
     expect(host.textContent).toContain("AWS account 123456789012")
-    expect(host.textContent).toContain("Verified identity · 123456789012")
+    // The account id is its own unbreakable token, so a narrow card wraps before it, never inside it.
+    const heading = [...host.querySelectorAll("h2")].find((element) => element.textContent?.startsWith("AWS account"))
+    expect(heading?.querySelector("span")?.textContent).toBe("123456789012")
+    expect(host.textContent).toContain("Verified identity: 123456789012")
     expect(host.textContent).toContain("payments")
     expect(host.textContent).toContain("payments-release")
     const resources = [...host.querySelectorAll<HTMLDetailsElement>("details")]
@@ -1256,7 +1259,7 @@ describe("ServicesPage connection tests", () => {
     await act(async () => undefined)
 
     expect(host.textContent).toContain("Atlassian site acme.atlassian.net")
-    expect(host.textContent).toContain("Verified identity · cloud-2")
+    expect(host.textContent).toContain("Verified identity: cloud-2")
     expect(host.textContent).toContain("Project · project-payments")
     expect(host.textContent).toContain("Space · space-payments")
     expect(host.textContent).toContain("Old Confluence setup")

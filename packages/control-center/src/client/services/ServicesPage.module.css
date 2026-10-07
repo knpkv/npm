@@ -243,6 +243,11 @@
   overflow-wrap: break-word;
 }
 
+/* An account id stays whole; its heading wraps before it instead. */
+.accountName {
+  white-space: nowrap;
+}
+
 @media (max-width: 32rem) {
   .cardHeading,
   .cardAction,
