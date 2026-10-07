@@ -99,5 +99,17 @@ test("labels an unknown approval and keeps it out of the approved filter", async
   await page.goto("/accounts/production/prs/33?repository=example-repository&region=eu-west-1")
   // The verdict is the bold lead of the review-state sentence, not a heading.
   await expect(page.getByRole("main").getByText("Resolve conflicts.", { exact: true })).toBeVisible()
-  await expect(page.getByText("codecommit:EvaluatePullRequestApprovalRules")).toBeVisible()
+  await expect(page.getByText("codecommit:EvaluatePullRequestApprovalRules").first()).toBeVisible()
+
+  // The rail beside the page says them apart from the review count, and its text wraps inside the card.
+  await page.setViewportSize({ height: 900, width: 1280 })
+  const rail = page.getByRole("region", { name: /^Queue/ })
+  await expect(rail.getByText("with approval unknown", { exact: false })).toBeVisible()
+  const overflow = await rail.evaluate((region) =>
+    [...region.querySelectorAll("p")].map((paragraph) => paragraph.scrollWidth - paragraph.clientWidth)
+  )
+  expect(Math.max(0, ...overflow)).toBeLessThanOrEqual(1)
+  const railBox = await rail.boundingBox()
+  const lineBox = await rail.getByText("with approval unknown", { exact: false }).boundingBox()
+  expect((lineBox?.x ?? 0) + (lineBox?.width ?? 0)).toBeLessThanOrEqual((railBox?.x ?? 0) + (railBox?.width ?? 0))
 })
