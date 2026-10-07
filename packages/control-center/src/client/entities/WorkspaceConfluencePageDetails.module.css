@@ -246,8 +246,8 @@
 }
 
 .editorToolbar button:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 1px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .editorCanvas {
@@ -262,7 +262,8 @@
 
 .editorCanvas:focus {
   border-color: var(--rly-color-service-confluence);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rly-color-service-confluence) 22%, transparent);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .collections {

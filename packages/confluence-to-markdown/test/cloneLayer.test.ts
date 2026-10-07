@@ -24,14 +24,26 @@ const OperationConfigLayer = ConfluenceConfigLayerFromValues({
   trackedPaths: ["**/*.md"]
 })
 
+/** Run `effect` with `layer`'s services, built in the effect's own scope. */
+const runWithLayer = <A, E, R>(effect: Effect.Effect<A, E, R>, layer: Layer.Layer<R>): Effect.Effect<A, E> =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const context = yield* Layer.build(layer)
+      return yield* effect.pipe(Effect.provideContext(context))
+    })
+  )
+
 it.effect("binds clone author lookups to the operation client", () =>
   Effect.gen(function*() {
     const user = yield* Effect.gen(function*() {
       const cache = yield* UserCache
       return yield* cache.get("account-1")
     }).pipe(
-      Effect.provide(makeCloneOperationLayer(OperationConfigLayer, OperationClientLayer)),
-      Effect.provide(CloneLayer)
+      (effect) =>
+        runWithLayer(
+          effect,
+          makeCloneOperationLayer(OperationConfigLayer, OperationClientLayer).pipe(Layer.provideMerge(CloneLayer))
+        )
     )
 
     expect(user.displayName).toBe("Operation User")
@@ -67,8 +79,11 @@ it.effect("owns the operation client until the clone operation scope closes", ()
         expect(yield* Ref.get(finalized)).toBe(false)
         return loaded
       }).pipe(
-        Effect.provide(makeCloneOperationLayer(OperationConfigLayer, scopedClientLayer)),
-        Effect.provide(CloneLayer)
+        (effect) =>
+          runWithLayer(
+            effect,
+            makeCloneOperationLayer(OperationConfigLayer, scopedClientLayer).pipe(Layer.provideMerge(CloneLayer))
+          )
       )
     )
 

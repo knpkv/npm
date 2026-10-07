@@ -60,7 +60,8 @@ const testRuntime = (
     Layer.provide(Layer.succeed(ConfigService, {
       get: Ref.get(settings).pipe(Effect.map((sessionAgent) => ({ ...defaultJcfConfig, sessionAgent }))),
       set: () => Effect.die("Provider operations must never write config"),
-      configDir: Effect.succeed("/fake-home/.jcf")
+      configDir: Effect.succeed("/fake-home/.jcf"),
+      fileExists: Effect.succeed(true)
     })),
     Layer.provide(Layer.succeed(HomeDirectory, { path: "/fake-home" })),
     Layer.provide(fakeSpawner(calls, inventory)),
