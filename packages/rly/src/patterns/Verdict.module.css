@@ -1,5 +1,7 @@
 @layer rly.components {
   .root {
+    /* The verdict sizes to the column it sits in, not the viewport (see .verdict). */
+    container-type: inline-size;
     display: grid;
     gap: var(--rly-space-24);
     max-inline-size: 100%;
@@ -10,11 +12,16 @@
     color: var(--rly-color-text-1);
     font: var(--rly-type-verdict-weight) var(--rly-type-verdict-size) / var(--rly-type-verdict-line-height)
       var(--rly-type-verdict-font);
+    /*
+     * The token is viewport-fluid; a verdict in a narrow column (an entity shell, a preview) would
+     * then hold words wider than the column. Cap it at the container's width so every word fits.
+     */
+    font-size: clamp(var(--rly-type-card-title-size), 11cqi, var(--rly-type-verdict-size));
     letter-spacing: var(--rly-type-verdict-tracking);
     margin: var(--rly-space-0);
     max-inline-size: 100%;
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     text-wrap: balance;
   }
 
@@ -46,9 +53,8 @@
   .reasonPanel {
     align-items: start;
     background: var(--rly-verdict-tone-tint, var(--rly-color-surface-2));
-    border-end-end-radius: var(--rly-radius-control);
-    border-inline-start: var(--rly-space-4) solid var(--rly-verdict-tone-ink, var(--rly-color-text-2));
-    border-start-end-radius: var(--rly-radius-control);
+    border: 1px solid color-mix(in oklab, var(--rly-verdict-tone-ink, var(--rly-color-text-2)) 35%, transparent);
+    border-radius: var(--rly-radius-field);
     display: grid;
     gap: var(--rly-space-12);
     grid-template-columns: auto minmax(var(--rly-space-0), 1fr);
@@ -68,7 +74,7 @@
       var(--rly-type-body-font);
     margin: var(--rly-space-0);
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     text-wrap: pretty;
   }
 

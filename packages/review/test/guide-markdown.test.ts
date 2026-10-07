@@ -14,10 +14,13 @@ test("fence info accepts punctuated languages and metadata without consuming fol
     ]]
   ) {
     const { html } = renderMarkdown(`\`\`\`${info}\n<x>\n\`\`\`\n\nFollowing paragraph.`)
-    assert.equal(html, `<pre><code class="lang-${language}">&lt;x&gt;</code></pre>\n<p>Following paragraph.</p>`)
+    assert.equal(
+      html,
+      `<pre tabindex="0"><code class="lang-${language}">&lt;x&gt;</code></pre>\n<p>Following paragraph.</p>`
+    )
   }
   const { html } = renderMarkdown("```ts\"onclick=\"bad metadata\ncode\n```")
-  assert.equal(html, "<pre><code class=\"lang-ts-onclick--bad\">code</code></pre>")
+  assert.equal(html, "<pre tabindex=\"0\"><code class=\"lang-ts-onclick--bad\">code</code></pre>")
 })
 
 test("inline: code wins over other markup, html is escaped, only safe links", () => {
@@ -140,9 +143,9 @@ const a = "<x>";
       "<p>Intro line continues.</p>",
       "<h4>Why</h4>",
       "<ul><li>one</li><li>two wrapped</li></ul>",
-      "<aside class=\"callout callout-warning\"><span class=\"callout-label\">WARNING</span><p>Careful with <code>x</code>.</p></aside>",
+      "<aside class=\"callout callout-warning\"><p><strong class=\"callout-label\">Warning:</strong> Careful with <code>x</code>.</p></aside>",
       "<blockquote><p>plain quote</p></blockquote>",
-      "<pre><code class=\"lang-ts\">const a = &quot;&lt;x&gt;&quot;;</code></pre>"
+      "<pre tabindex=\"0\"><code class=\"lang-ts\">const a = &quot;&lt;x&gt;&quot;;</code></pre>"
     ].join("\n")
   )
 })
@@ -150,7 +153,10 @@ const a = "<x>";
 test("a mermaid fence becomes a diagram and flags the page", () => {
   const { html, mermaid } = renderMarkdown("```mermaid\nsequenceDiagram\n  A->>B: hi\n```")
   assert.equal(mermaid, true)
-  assert.equal(html, "<pre class=\"mermaid\">sequenceDiagram\n  A-&gt;&gt;B: hi</pre>")
+  assert.equal(
+    html,
+    "<figure class=\"review-diagram\"><figcaption>Diagram</figcaption><pre class=\"mermaid\" tabindex=\"0\">sequenceDiagram\n  A-&gt;&gt;B: hi</pre></figure>"
+  )
 })
 
 test("balanced and escaped destination parentheses preserve exact URLs", () => {
@@ -208,7 +214,10 @@ test("variable-length backtick fences retain shorter runs and terminate before f
     }
   }
   assert.equal(renderMarkdown("````mermaid\nflowchart LR; A-->B\n````").mermaid, true)
-  assert.equal(renderMarkdown("```ts\nunclosed").html, "<pre><code class=\"lang-ts\">unclosed</code></pre>")
+  assert.equal(
+    renderMarkdown("```ts\nunclosed").html,
+    "<pre tabindex=\"0\"><code class=\"lang-ts\">unclosed</code></pre>"
+  )
 })
 
 test("ordered continuations preserve the procedural sequence and item ownership", () => {

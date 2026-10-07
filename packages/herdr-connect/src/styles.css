@@ -115,7 +115,7 @@
     font: inherit;
     inline-size: 100%;
     min-block-size: 2.5rem;
-    padding: var(--rly-space-8) var(--rly-space-10);
+    padding: var(--rly-space-8) var(--rly-space-12);
   }
 
   .connect-search input:focus-visible {
@@ -188,7 +188,7 @@
 
   .connect-agent-tree {
     display: grid;
-    gap: var(--rly-space-28);
+    gap: var(--rly-space-24);
   }
 
   .connect-day-heading {
@@ -208,7 +208,7 @@
 
   .connect-day-heading strong {
     color: var(--rly-color-text-1);
-    font-size: var(--rly-type-heading-size);
+    font-size: var(--rly-type-body-large-size);
   }
 
   .connect-day-heading span,
@@ -322,7 +322,7 @@
   }
 
   .connect-preference-error {
-    color: var(--rly-color-critical-ink);
+    color: var(--rly-color-blocked-ink);
     margin: var(--rly-space-12) var(--rly-space-8) 0;
   }
 
@@ -330,11 +330,11 @@
     color: var(--rly-color-text-2);
     display: block;
     margin-block-start: var(--rly-space-16);
-    padding: var(--rly-space-10) var(--rly-space-12);
+    padding: var(--rly-space-8) var(--rly-space-12);
   }
 
   .connect-status-message[data-tone="critical"] {
-    color: var(--rly-color-critical-ink);
+    color: var(--rly-color-blocked-ink);
   }
 
   .terminal-stage {
@@ -409,7 +409,7 @@
     gap: var(--rly-space-8);
     min-inline-size: 0;
     overflow-x: auto;
-    scrollbar-width: thin;
+    scrollbar-width: none;
   }
 
   .terminal-key-group {
@@ -418,11 +418,37 @@
     gap: var(--rly-space-4);
   }
 
+  /* View actions stay in reach at the end of the rail while the keys scroll under them. */
+  .terminal-key-rail,
+  .terminal-key-scroll {
+    background: inherit;
+  }
+
+  .terminal-key-group-pinned {
+    background: inherit;
+    inset-inline-end: 0;
+    margin-inline-start: auto;
+    padding-inline-start: var(--rly-space-8);
+    position: sticky;
+  }
+
+  /* Keys scrolling underneath fade out into the rail's own background instead of a hard cut. */
+  .terminal-key-group-pinned::before {
+    background: inherit;
+    content: "";
+    inline-size: var(--rly-space-16);
+    inset-block: 0;
+    inset-inline-end: 100%;
+    mask-image: linear-gradient(to left, black, transparent);
+    pointer-events: none;
+    position: absolute;
+  }
+
   .terminal-key {
     align-items: center;
     background: var(--rly-color-surface-2);
     border: 1px solid var(--rly-color-border-2);
-    border-radius: var(--rly-radius-control);
+    border-radius: var(--rly-radius-tag);
     color: var(--rly-color-text-1);
     cursor: pointer;
     display: inline-flex;
@@ -430,7 +456,7 @@
     justify-content: center;
     min-block-size: 2.25rem;
     min-inline-size: 2.25rem;
-    padding: var(--rly-space-6) var(--rly-space-10);
+    padding: var(--rly-space-6) var(--rly-space-12);
     touch-action: manipulation;
     white-space: nowrap;
   }
@@ -453,10 +479,13 @@
   }
 
   .terminal-key-error {
-    color: var(--rly-color-critical-ink);
+    color: var(--rly-color-blocked-ink);
     display: block;
-    min-block-size: 1lh;
     overflow-wrap: anywhere;
+  }
+
+  .terminal-key-error:empty {
+    display: none;
   }
 
   .terminal-bar strong,
@@ -469,7 +498,7 @@
   .terminal-back {
     background: var(--rly-color-surface-2);
     border: 1px solid var(--rly-color-border-2);
-    border-radius: var(--rly-radius-control);
+    border-radius: var(--rly-radius-tag);
     color: var(--rly-color-text-1);
     cursor: pointer;
     font: inherit;
@@ -483,11 +512,86 @@
     outline: none;
   }
 
+  .terminal-viewport-stage {
+    container-type: inline-size;
+    display: grid;
+    min-block-size: 0;
+    min-inline-size: 0;
+    position: relative;
+  }
+
   .ghostty-terminal {
     min-block-size: 0;
     overflow: hidden;
+    overscroll-behavior: contain;
     padding: var(--rly-space-12);
     touch-action: none;
+  }
+
+  .ghostty-terminal canvas {
+    will-change: transform;
+  }
+
+  .terminal-older-output {
+    align-self: center;
+    color: var(--rly-color-text-2);
+    padding-inline-end: var(--rly-space-4);
+    white-space: nowrap;
+  }
+
+  .terminal-key[data-behind="true"] {
+    background: var(--rly-color-surface-3);
+    border-color: var(--rly-color-agent);
+  }
+
+  .terminal-text-word {
+    white-space: nowrap;
+  }
+
+  .terminal-text-layer {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    inset: 0;
+    position: absolute;
+  }
+
+  .terminal-text-actions {
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: flex;
+    gap: var(--rly-space-8);
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+
+  .terminal-text-actions .terminal-key:last-child {
+    margin-inline-start: auto;
+  }
+
+  .terminal-text-hint {
+    align-self: center;
+    color: var(--rly-color-text-2);
+  }
+
+  @media (pointer: coarse) {
+    .terminal-text-actions .terminal-key {
+      min-block-size: 44px;
+    }
+  }
+
+  .terminal-text-lines {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    font:
+      13px/1.2 "Geist Mono",
+      ui-monospace,
+      monospace;
+    /* Terminal cells never join; a ligature would also draw "--" outside the text start. */
+    font-variant-ligatures: none;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    overscroll-behavior: contain;
+    padding: var(--rly-space-12);
+    user-select: text;
+    white-space: pre-wrap;
   }
 
   .ghostty-terminal > div,
@@ -643,6 +747,34 @@
       min-block-size: 2rem;
       min-inline-size: 2rem;
       padding-inline: var(--rly-space-8);
+    }
+  }
+
+  /* Phones get every key whole: four 44px columns instead of a row that scrolls sideways. */
+  @media (max-width: 640px) {
+    .terminal-key-scroll {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      overflow: visible;
+    }
+
+    .terminal-key-group,
+    .terminal-key-group-pinned {
+      display: contents;
+    }
+
+    .terminal-key-group-pinned::before {
+      display: none;
+    }
+
+    .terminal-key-scroll .terminal-key {
+      min-block-size: 44px;
+      min-inline-size: 0;
+    }
+
+    .terminal-older-output {
+      grid-column: span 2;
+      justify-self: end;
     }
   }
 

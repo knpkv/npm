@@ -1,0 +1,8 @@
+id: no-unconfirmed-sso-logout
+valid:
+  - |
+    const [signOutOpen, setSignOutOpen] = useState(false)
+    return <SsoSignOutDialog onOpenChange={setSignOutOpen} open={signOutOpen} />
+invalid:
+  - |
+    const ssoLogout = useAtomSet(notificationsSsoLogoutAtom)

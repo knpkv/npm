@@ -104,31 +104,73 @@ const PortfolioLiveStatus = ({
   )
 }
 
-const EmptyPortfolio = (): ReactElement => (
-  <section aria-labelledby="first-service-title" className={styles.firstService}>
-    <div className={styles.firstServiceCopy}>
-      <Text as="h2" id="first-service-title" variant="page-title">
-        Choose your first service
-      </Text>
-      <Text tone="secondary" variant="body-large">
-        Enable and verify one source. Its releases, people, and delivery evidence will appear here automatically.
-      </Text>
-    </div>
-    <nav aria-label="Services available to enable" className={styles.serviceLauncher}>
-      {firstPartyServiceIdentities.map((service) => (
-        <Link
-          className={styles.serviceChoice}
-          data-service={service.providerId}
-          key={service.providerId}
-          to={serviceSetupPath(service.providerId)}
-        >
-          <ServiceMark service={service.providerId} />
-          <span className={styles.serviceAction}>Enable</span>
-        </Link>
-      ))}
-    </nav>
-  </section>
+const serviceLauncher = (
+  providers: ReadonlyArray<(typeof firstPartyServiceIdentities)[number]>,
+  label: string
+): ReactElement => (
+  <nav aria-label={label} className={styles.serviceLauncher}>
+    {providers.map((service) => (
+      <Link
+        className={styles.serviceChoice}
+        data-service={service.providerId}
+        key={service.providerId}
+        to={serviceSetupPath(service.providerId)}
+      >
+        <ServiceMark service={service.providerId} />
+        <span className={styles.serviceAction}>Enable</span>
+      </Link>
+    ))}
+  </nav>
 )
+
+const listNames = (names: ReadonlyArray<string>): string =>
+  names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`
+
+/**
+ * The portfolio has no releases. With nothing connected that is a first run; with sources connected it
+ * says what is connected and what still produces a release, so setup never looks undone.
+ */
+const EmptyPortfolio = ({
+  connectedProviders
+}: {
+  readonly connectedProviders: PortfolioPresentation["connectedProviders"]
+}): ReactElement => {
+  if (connectedProviders.length === 0) {
+    return (
+      <section aria-labelledby="first-service-title" className={styles.firstService}>
+        <div className={styles.firstServiceCopy}>
+          <Text as="h2" id="first-service-title" variant="page-title">
+            Choose your first service
+          </Text>
+          <Text tone="secondary" variant="body-large">
+            Enable and verify one source. Its releases, people, and delivery evidence will appear here automatically.
+          </Text>
+        </div>
+        {serviceLauncher(firstPartyServiceIdentities, "Services available to enable")}
+      </section>
+    )
+  }
+  const connectedNames = firstPartyServiceIdentities
+    .filter(({ providerId }) => connectedProviders.includes(providerId))
+    .map(({ displayName }) => displayName)
+  const remaining = firstPartyServiceIdentities.filter(({ providerId }) => !connectedProviders.includes(providerId))
+  const jiraConnected = connectedProviders.includes("jira")
+  return (
+    <section aria-labelledby="first-service-title" className={styles.firstService}>
+      <div className={styles.firstServiceCopy}>
+        <Text as="h2" id="first-service-title" variant="page-title">
+          No releases yet
+        </Text>
+        <Text tone="secondary" variant="body-large">
+          {jiraConnected
+            ? `${listNames(connectedNames)} connected. A release appears here once a Jira release version has items.`
+            : `${listNames(connectedNames)} connected. Releases come from Jira release versions: connect Jira to start tracking them, and this evidence attaches automatically.`}
+        </Text>
+      </div>
+      {remaining.length === 0 ? null : serviceLauncher(remaining, "More services to enable")}
+    </section>
+  )
+}
 
 const LoadingPortfolio = (): ReactElement => (
   <div className={styles.loading}>
@@ -353,7 +395,7 @@ const ReadyPortfolio = ({
   readonly portfolio: PortfolioPresentation
   readonly previewPathForRelease?: (releaseId: PortfolioReleasePresentation["id"]) => string
 }): ReactElement => {
-  if (portfolio.releases.length === 0) return <EmptyPortfolio />
+  if (portfolio.releases.length === 0) return <EmptyPortfolio connectedProviders={portfolio.connectedProviders} />
   const location = useLocation()
   const activeFilter = portfolioFilterFromSearch(location.search)
   const releases = filterPortfolioReleases(portfolio.releases, activeFilter)

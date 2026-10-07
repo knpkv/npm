@@ -344,11 +344,13 @@ export const componentManifest = {
       exports: [
         { kind: "value", name: "RLY_COLOR_TOKEN_NAMES" },
         { kind: "value", name: "RLY_MOTION_TOKEN_NAMES" },
+        { kind: "value", name: "RLY_CONTROL_HEIGHT_TOKEN_NAMES" },
         { kind: "value", name: "RLY_RADIUS_TOKEN_NAMES" },
         { kind: "value", name: "RLY_SPACE_TOKEN_NAMES" },
         { kind: "value", name: "RLY_TYPE_TOKEN_NAMES" },
         { kind: "type", name: "RlyColorToken" },
         { kind: "type", name: "RlyMotionToken" },
+        { kind: "type", name: "RlyControlHeightToken" },
         { kind: "type", name: "RlyRadiusToken" },
         { kind: "type", name: "RlySpaceToken" },
         { kind: "type", name: "RlyTypeToken" }
@@ -699,7 +701,7 @@ export const componentManifest = {
       styles: ["src/primitives/Button.module.css"],
       variants: [
         { defaultValue: "secondary", name: "variant", values: ["primary", "secondary", "quiet"] },
-        { defaultValue: "default", name: "size", values: ["compact", "default", "principal"] }
+        { defaultValue: "dense", name: "size", values: ["dense", "compact", "default", "principal"] }
       ],
       visual: {
         story: "stories/primitives/Button.stories.tsx",
@@ -775,7 +777,7 @@ export const componentManifest = {
       source: "src/primitives/Field.tsx",
       status: "stable",
       styles: ["src/primitives/Field.module.css"],
-      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+      variants: [{ defaultValue: "dense", name: "size", values: ["dense", "compact", "default"] }],
       visual: {
         story: "stories/primitives/Field.stories.tsx",
         storyId: "primitives-field--states",
@@ -800,7 +802,7 @@ export const componentManifest = {
       styles: ["src/primitives/IconButton.module.css"],
       variants: [
         { defaultValue: "secondary", name: "variant", values: ["primary", "secondary", "quiet"] },
-        { defaultValue: "default", name: "size", values: ["compact", "default", "principal"] }
+        { defaultValue: "dense", name: "size", values: ["dense", "compact", "default", "principal"] }
       ],
       visual: {
         story: "stories/primitives/IconButton.stories.tsx",
@@ -853,7 +855,7 @@ export const componentManifest = {
       source: "src/primitives/Select.tsx",
       status: "stable",
       styles: ["src/primitives/Select.module.css"],
-      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+      variants: [{ defaultValue: "dense", name: "size", values: ["dense", "compact", "default"] }],
       visual: {
         story: "stories/primitives/Select.stories.tsx",
         storyId: "primitives-select--states",
@@ -1075,8 +1077,12 @@ export const componentManifest = {
       source: "src/primitives/ThemeSelect.tsx",
       status: "stable",
       styles: ["src/primitives/ThemeSelect.module.css"],
-      variants: [{ defaultValue: "visible", name: "labelVisibility", values: ["visible", "hidden"] }],
+      variants: [
+        { defaultValue: "visible", name: "labelVisibility", values: ["visible", "hidden"] },
+        { defaultValue: "dense", name: "size", values: ["dense", "compact", "default"] }
+      ],
       visual: {
+        coverageStoryIds: ["primitives-themeselect--sizes"],
         story: "stories/primitives/ThemeSelect.stories.tsx",
         storyId: "primitives-themeselect--gallery",
         tests: ["test/primitives/ThemeSelect.test.tsx"]
@@ -1098,7 +1104,7 @@ export const componentManifest = {
       source: "src/primitives/ToggleGroup.tsx",
       status: "experimental",
       styles: ["src/primitives/ToggleGroup.module.css"],
-      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+      variants: [{ defaultValue: "dense", name: "size", values: ["dense", "compact", "default"] }],
       visual: {
         story: "stories/primitives/ToggleGroup.stories.tsx",
         storyId: "primitives-togglegroup--interaction",

@@ -77,7 +77,7 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
     const resolved = yield* resolveAccounts(state)
     if (resolved === undefined) return
 
-    const { accountIdMap, currentUser, enabledAccounts, subscribedRef } = resolved
+    const { accountIdMap, currentUser, enabledAccounts, identityGeneration, subscribedRef } = resolved
     const staleNow = yield* Clock.currentTimeMillis
     const staleThreshold = DateTime.toDate(DateTime.makeUnsafe(staleNow)).toISOString().slice(0, 19) + "Z"
 
@@ -89,6 +89,7 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
           accountIdMap,
           subscribedRef,
           currentUser,
+          identityGeneration,
           staleThreshold
         })
         yield* enrichComments({ state, subscribedRef })

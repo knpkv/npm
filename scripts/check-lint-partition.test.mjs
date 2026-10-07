@@ -50,6 +50,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "pnpm lint:oxlint",
     "pnpm lint:ast",
     "pnpm lint:rly-colors",
+    "pnpm lint:rly-stripes",
     "pnpm lint:rly-css-tokens"
   ])
   assert.deepEqual(expandedScript("lint:config:static"), [
@@ -98,6 +99,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "ast-grep test",
     "ast-grep scan",
     "lint:colors",
+    "lint:stripes",
     "lint:rly-css-tokens",
     "check-lint-partition.test.mjs"
   ]) {

@@ -77,3 +77,25 @@ export const PicksTheme: Story = {
   },
   render: () => <ThemeSelectGallery />
 }
+
+/** The forwarded Select sizes: dense by default beside header controls, compact and default for forms. */
+export const Sizes: Story = {
+  args: { onValueChange: () => undefined, value: "system" },
+  play: async ({ canvas }) => {
+    const [dense, compact, standard] = canvas.getAllByRole("combobox", { name: "Appearance" })
+    const height = (element: HTMLElement | undefined): number => element?.getBoundingClientRect().height ?? 0
+    await expect(height(dense)).toBeLessThan(height(compact))
+    await expect(height(compact)).toBeLessThan(height(standard))
+  },
+  render: () => (
+    <PortalProvider>
+      <main style={pageStyle}>
+        <div style={stackStyle}>
+          <ThemeSelect labelVisibility="hidden" onValueChange={() => undefined} size="dense" value="system" />
+          <ThemeSelect labelVisibility="hidden" onValueChange={() => undefined} size="compact" value="system" />
+          <ThemeSelect labelVisibility="hidden" onValueChange={() => undefined} size="default" value="system" />
+        </div>
+      </main>
+    </PortalProvider>
+  )
+}
