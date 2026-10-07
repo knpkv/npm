@@ -57,7 +57,8 @@ export function SearchBar() {
           {[...selectedMap.entries()].flatMap(([key, values]) =>
             values.map((value) => (
               <button
-                aria-label={`Remove ${filterLabels[key]} filter ${value}`}
+                // The name starts with the visible text, so saying "Status: open" reaches it.
+                aria-label={`${filterLabels[key]}: ${value}, remove filter`}
                 className={styles.filterChip}
                 key={`${key}:${value}`}
                 onClick={() => toggleFilter(key, value)}
@@ -70,7 +71,7 @@ export function SearchBar() {
           )}
           {hasDateRange ? (
             <button
-              aria-label="Remove date range filter"
+              aria-label={`Date: ${state.from ?? "Any"} → ${state.to ?? "Any"}, remove filter`}
               className={styles.filterChip}
               onClick={clearDateRange}
               type="button"

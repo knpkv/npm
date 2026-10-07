@@ -40,31 +40,22 @@ import {
   type HealthScore,
   type HealthScoreCategory
 } from "@knpkv/codecommit-core/HealthScore.js"
-import { ServiceMark, Verdict, type RlyVerdictTone } from "@knpkv/rly/patterns"
+import { ServiceMark } from "@knpkv/rly/patterns"
 import {
   Button as RlyButton,
   Field,
+  Notice,
   StateLabel,
   StatePanel,
   Surface,
   Text,
+  type RlyNoticeTone,
   type RlyStateTone
 } from "@knpkv/rly/primitives"
 import { Exit, Option } from "effect"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
-import {
-  ArrowRightIcon,
-  BellIcon,
-  BellOffIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  CodeIcon,
-  LoaderIcon,
-  PlusIcon,
-  RefreshCwIcon,
-  TrashIcon
-} from "lucide-react"
+import { ArrowRightIcon, CheckIcon, ChevronDownIcon, CodeIcon, LoaderIcon, PlusIcon, TrashIcon } from "lucide-react"
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router"
@@ -230,12 +221,12 @@ const formatRelativeDate = (dateStr: string): string => {
   const abs = date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
   const diffMs = Date.now() - date.getTime()
   const diffMins = Math.floor(diffMs / 60_000)
-  if (diffMins < 1) return `${abs} · just now`
-  if (diffMins < 60) return `${abs} · ${diffMins}m ago`
+  if (diffMins < 1) return `${abs}, just now`
+  if (diffMins < 60) return `${abs}, ${diffMins}m ago`
   const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${abs} · ${diffHours}h ago`
+  if (diffHours < 24) return `${abs}, ${diffHours}h ago`
   const diffDays = Math.floor(diffHours / 24)
-  return `${abs} · ${diffDays}d ago`
+  return `${abs}, ${diffDays}d ago`
 }
 
 const earliestDate = (loc: { readonly comments: ReadonlyArray<CommentThreadJsonEncoded> }): number => {
@@ -376,9 +367,10 @@ function CommentThread({
     >
       <div className={styles.commentBody}>
         <div className={styles.commentMeta}>
-          <strong>{thread.root.author}</strong>
-          <span aria-hidden="true">·</span>
-          <time dateTime={thread.root.creationDate}>{formatRelativeDate(thread.root.creationDate)}</time>
+          <span>
+            <strong>{thread.root.author}</strong>,{" "}
+            <time dateTime={thread.root.creationDate}>{formatRelativeDate(thread.root.creationDate)}</time>
+          </span>
           {target === null ? null : (
             <button className={styles.commentJump} onClick={() => onNavigateToDiff(target)} type="button">
               <CodeIcon aria-hidden="true" /> View in diff
@@ -709,7 +701,7 @@ function ApproversCard({
     <Surface as="section" className={styles.approverCard} padding="default" form="grouped" tone="secondary">
       <header className={styles.approverHeading}>
         <div className={styles.approverTitle}>
-          <Text as="h3" variant="card-title">
+          <Text as="h3" variant="label">
             {title}
           </Text>
           {required &&
@@ -790,7 +782,7 @@ function ApproversCard({
         )}
         {!showPicker && prefix.length > 0 && addable.length > 0 && (
           <div className={styles.suggestedApprovers}>
-            <Text tone="tertiary" variant="meta">
+            <Text tone="secondary" variant="meta">
               Suggested
             </Text>
             {addable.slice(0, 5).map(([name, arn]) => (
@@ -846,7 +838,7 @@ function ApproversCard({
 
 interface PullRequestDecisionPresentation {
   readonly reason: string
-  readonly tone: RlyVerdictTone
+  readonly tone: RlyNoticeTone
   readonly verdict: string
 }
 
@@ -1362,32 +1354,31 @@ export function PRDetail() {
       </nav>
 
       <header className={styles.hero}>
-        <div className={styles.eyebrow}>
-          <ServiceMark service="codecommit" size="compact" />
-          <Text tone="secondary" variant="label">
-            Pull request {pr.id}
-          </Text>
-        </div>
-        <Text as="h1" className={styles.title} variant="page-title">
+        <Text as="h1" className={styles.title} variant="section-title">
           {pr.title}
         </Text>
         <div className={styles.heroMeta}>
-          <Link className={styles.textLink} to={`/?f=author:${encodeURIComponent(pr.author)}`}>
-            {pr.author}
-          </Link>
-          <span aria-hidden="true">·</span>
-          <time dateTime={pr.creationDate.toISOString()}>{DateUtils.formatDate(pr.creationDate)}</time>
-          {pr.fetchedAt && (
-            <>
-              <span aria-hidden="true">·</span>
-              <span>{DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}</span>
-            </>
-          )}
+          <ServiceMark service="codecommit" size="compact" />
+          <span>
+            Pull request {pr.id} by{" "}
+            <Link className={styles.textLink} to={`/?f=author:${encodeURIComponent(pr.author)}`}>
+              {pr.author}
+            </Link>
+            , opened <time dateTime={pr.creationDate.toISOString()}>{DateUtils.formatDate(pr.creationDate)}</time>.
+            {pr.fetchedAt !== undefined ? (
+              <> {DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}.</>
+            ) : null}
+          </span>
         </div>
       </header>
 
       <section aria-label="Pull request decision and actions" className={styles.decisionWorkspace}>
-        <Verdict className={styles.verdict} reason={decision.reason} tone={decision.tone} verdict={decision.verdict} />
+        {/* The review state is a sentence under the title, not the largest thing on the page. */}
+        <Notice className={styles.verdict} tone={decision.tone}>
+          <Text as="span" tone="inherit" variant="body-large">
+            <strong>{decision.verdict}</strong> {decision.reason}
+          </Text>
+        </Notice>
         <aside className={styles.actionRail}>
           <div className={styles.actionHeading}>
             <Text tone="secondary" variant="label">
@@ -1396,31 +1387,27 @@ export function PRDetail() {
             <StateLabel label={statusLabel} size="compact" tone={pullRequestStatusTone(pr.status)} />
           </div>
           <div className={styles.actionGroup}>
-            <Button
-              className={styles.actionButton}
-              disabled={isRefreshing}
-              onClick={handleRefresh}
-              size="sm"
-              variant="outline"
-            >
-              <RefreshCwIcon className={`size-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button className={styles.actionButton} onClick={handleSubscriptionToggle} size="sm" variant="outline">
-              {isSubscribed ? <BellOffIcon className="size-3.5" /> : <BellIcon className="size-3.5" />}
-              {isSubscribed ? "Unsubscribe" : "Subscribe"}
-            </Button>
-            <Button className={styles.actionButton} onClick={handleSandbox} size="sm" variant="outline">
-              <CodeIcon className="size-3.5" />
-              {stoppingSandbox !== undefined ? "Stopping…" : existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
-            </Button>
             <RlyButton
               className={styles.actionButton}
-              leadingIcon={copied ? "check" : "link"}
-              onClick={handleCopy}
+              loading={isRefreshing}
+              onClick={handleRefresh}
               size="compact"
               variant="secondary"
             >
+              Refresh
+            </RlyButton>
+            <RlyButton
+              className={styles.actionButton}
+              onClick={handleSubscriptionToggle}
+              size="compact"
+              variant="secondary"
+            >
+              {isSubscribed ? "Unsubscribe" : "Subscribe"}
+            </RlyButton>
+            <RlyButton className={styles.actionButton} onClick={handleSandbox} size="compact" variant="secondary">
+              {stoppingSandbox !== undefined ? "Stopping…" : existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
+            </RlyButton>
+            <RlyButton className={styles.actionButton} onClick={handleCopy} size="compact" variant="secondary">
               {copied ? "Copied" : "Copy Link"}
             </RlyButton>
             <RlyButton
@@ -1433,8 +1420,8 @@ export function PRDetail() {
               Open in Console
             </RlyButton>
           </div>
-          <Text tone="tertiary" variant="meta">
-            Enter or O opens CodeCommit · . opens the sandbox · Esc returns to the list
+          <Text tone="secondary" variant="meta">
+            Enter or O opens CodeCommit. Period opens the sandbox. Esc returns to the list.
           </Text>
         </aside>
       </section>
@@ -1445,11 +1432,12 @@ export function PRDetail() {
             <Text tone="secondary" variant="label">
               Current revision
             </Text>
-            <Text as="h2" variant="section-title">
+            <Text as="h2" variant="card-title">
               {pr.repositoryName}
             </Text>
+            {/* In the text flow, not the corner, so the floating Relay dock can't cover it. */}
+            <ScoreBadge score={score} />
           </div>
-          <ScoreBadge score={score} />
         </header>
 
         <div aria-label={`${pr.sourceBranch} into ${pr.destinationBranch}`} className={styles.branchPair}>
@@ -1578,7 +1566,7 @@ export function PRDetail() {
           {pr.description && (
             <Surface as="section" className={styles.contentSection} padding="spacious" form="grouped">
               <header className={styles.sectionHeading}>
-                <Text as="h2" variant="section-title">
+                <Text as="h2" variant="card-title">
                   Description
                 </Text>
                 <Text tone="secondary" variant="meta">
@@ -1618,7 +1606,7 @@ export function PRDetail() {
         <aside className={styles.evidenceColumn}>
           <section className={styles.approvalSection}>
             <header className={styles.sectionHeading}>
-              <Text as="h2" variant="section-title">
+              <Text as="h2" variant="card-title">
                 Decision evidence
               </Text>
               <Text tone="secondary" variant="meta">

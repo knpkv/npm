@@ -10,7 +10,6 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as Domain from "@knpkv/codecommit-core/Domain.js"
-import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import { LogInIcon } from "lucide-react"
 import { useCallback, useMemo } from "react"
@@ -286,12 +285,6 @@ export function PRList() {
   return (
     <div className={styles.page}>
       <header className={styles.hero}>
-        <div className={styles.eyebrow}>
-          <ServiceMark service="codecommit" size="compact" />
-          <Text tone="secondary" variant="meta">
-            Review queue
-          </Text>
-        </div>
         <Text as="h1" className={styles.title} variant="page-title">
           What needs a decision.
         </Text>
@@ -324,7 +317,7 @@ export function PRList() {
           </Text>
           <Text aria-live="polite" tone="tertiary" variant="meta">
             {sorted.length} {sorted.length === 1 ? "result" : "results"}
-            {accountCount > 0 ? ` · ${accountCount} ${accountCount === 1 ? "AWS account" : "AWS accounts"}` : ""}
+            {accountCount > 0 ? `, ${accountCount} ${accountCount === 1 ? "AWS account" : "AWS accounts"}` : ""}
           </Text>
         </div>
 

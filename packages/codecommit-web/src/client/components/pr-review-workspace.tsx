@@ -168,7 +168,7 @@ const locationLabel = (finding: RelayReviewFinding): string => {
     case "file":
       return finding.location.filePath
     case "line":
-      return `${finding.location.filePath}:${finding.location.line} · ${finding.location.side}`
+      return `${finding.location.filePath}:${finding.location.line}, ${finding.location.side === "after" ? "new" : "old"} side`
   }
 }
 
@@ -265,7 +265,7 @@ const annotationsFor = (
         render: () => (
           <aside className={styles.lineFinding}>
             <strong>
-              {finding.priority} · {finding.title}
+              {finding.priority}: {finding.title}
             </strong>
             <span>{finding.summary}</span>
           </aside>
@@ -584,6 +584,7 @@ const ReviewFindings = ({
           <li key={finding.id}>
             <article
               className={styles.findingCard}
+              aria-current={selectedFindingId === finding.id ? "true" : undefined}
               data-selected={selectedFindingId === finding.id ? "true" : undefined}
             >
               <button className={styles.findingBody} onClick={() => onSelect(finding)} type="button">
@@ -630,7 +631,7 @@ const ReviewFindings = ({
                   size="compact"
                   variant="primary"
                 >
-                  Accept · post
+                  Accept and post
                 </Button>
                 <button
                   disabled={
@@ -1507,11 +1508,11 @@ const ReadyReviewWorkspace = ({
             <Text tone="secondary" variant="label">
               Exact-revision review
             </Text>
-            <Text as="h2" variant="section-title">
+            <Text as="h2" variant="card-title">
               Diff
             </Text>
             <Text tone="secondary" variant="meta">
-              {diff.files.length} changed {diff.files.length === 1 ? "file" : "files"} · head{" "}
+              {diff.files.length} changed {diff.files.length === 1 ? "file" : "files"} at head{" "}
               {diff.headCommit.slice(0, 12)}
             </Text>
           </div>
@@ -1595,7 +1596,7 @@ const ReadyReviewWorkspace = ({
               <div className={styles.agentTitle}>
                 <span>
                   <BotIcon aria-hidden="true" />
-                  <Text as="h2" variant="section-title">
+                  <Text as="h2" variant="card-title">
                     Relay
                   </Text>
                 </span>

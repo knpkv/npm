@@ -61,12 +61,16 @@ test("default lint retains every original check and both CI partitions", () => {
     "node scripts/check-changed-effect-diagnostics.mjs",
     "node --test scripts/check-changed-effect-diagnostics.test.mjs",
     "node scripts/check-package-script-portability.mjs",
+    "node scripts/check-workspace-exports.mjs",
+    "node --test scripts/check-workspace-exports.test.mjs",
     "node scripts/check-workflow-action-pins.mjs",
     "node scripts/check-workflow-secret-boundaries.mjs",
     "pnpm skills:check",
     "node scripts/check-debt-ledger.mjs",
     "node --test scripts/check-debt-ledger.test.mjs",
-    "node --test scripts/check-lint-partition.test.mjs"
+    "node --test scripts/check-lint-partition.test.mjs",
+    "node scripts/check-test-typecheck-coverage.mjs",
+    "node --test scripts/check-test-typecheck-coverage.test.mjs"
   ])
   assert.deepEqual(expandedScript("lint"), [...staticCommands, ...coverageCommands])
   assert.deepEqual(expandedScript("lint:config"), [...expandedScript("lint:config:static"), ...coverageCommands])
@@ -84,6 +88,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "check-changed-effect-diagnostics.mjs",
     "check-changed-effect-diagnostics.test.mjs",
     "check-package-script-portability.mjs",
+    "check-workspace-exports.mjs",
     "check-workflow-action-pins.mjs",
     "check-workflow-secret-boundaries.mjs",
     "pnpm skills:check",

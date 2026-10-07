@@ -4183,6 +4183,10 @@
         },
         {
           "kind": "type",
+          "name": "RlyServiceMarkName"
+        },
+        {
+          "kind": "type",
           "name": "RlyServiceMarkSize"
         },
         {
@@ -4208,6 +4212,7 @@
       "name": "ServiceMark",
       "props": {
         "defaults": {
+          "name": "visible",
           "size": "default"
         },
         "types": [
@@ -4223,10 +4228,27 @@
         "compact",
         "confluence",
         "default",
-        "jira"
+        "hidden",
+        "jira",
+        "visible"
       ],
       "status": "stable",
       "variants": [
+        {
+          "defaultValue": "visible",
+          "description": "Controls the name presentation axis of ServiceMark.",
+          "name": "name",
+          "values": [
+            {
+              "description": "Use hidden for the name presentation.",
+              "name": "hidden"
+            },
+            {
+              "description": "Use visible for the name presentation.",
+              "name": "visible"
+            }
+          ]
+        },
         {
           "description": "Controls the service presentation axis of ServiceMark.",
           "name": "service",

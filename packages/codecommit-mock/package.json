@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node ../../scripts/require-built.mjs @knpkv/codecommit-core && tsx src/cli.ts",
     "build": "tsc -b",
-    "check": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit",
     "test": "vitest run",
     "lint": "eslint \"{src,test}/**/*.ts\""
   },
