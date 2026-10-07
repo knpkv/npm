@@ -62,13 +62,11 @@ const program = Effect.gen(function*() {
     for (const violation of findFocusRingViolations(path.relative(repoRoot, file), source)) violations.push(violation)
   }
   if (violations.length > 0) {
-    return yield* Effect.fail(
-      new FocusRingLintError({
-        reason: violations.map((violation) =>
-          `${violation.path}:${violation.line}:${violation.column} ${violation.rule} (${violation.declaration})`
-        ).join("\n")
-      })
-    )
+    return yield* new FocusRingLintError({
+      reason: violations.map((violation) =>
+        `${violation.path}:${violation.line}:${violation.column} ${violation.rule} (${violation.declaration})`
+      ).join("\n")
+    })
   }
   yield* Console.log(`focus rings checked ${files.length} stylesheets`)
 })
@@ -76,6 +74,8 @@ const program = Effect.gen(function*() {
 NodeRuntime.runMain(
   program.pipe(
     Effect.tapError((error) => Console.error(error.message)),
+    // The script's entry point: it provides Node's platform services once, here.
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(NodeServices.layer)
   ),
   { disableErrorReporting: true }
