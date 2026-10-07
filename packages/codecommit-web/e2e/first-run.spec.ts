@@ -54,7 +54,9 @@ test("names an unreachable server and retries on request", async ({ page }) => {
 
   await page.goto("/")
   await expect(page.getByText("Can't reach the CodeCommit server", { exact: true })).toBeVisible()
-  await expect(page.getByText("The CodeCommit server answered 503.", { exact: false }).first()).toBeVisible()
+  // The queue's panel names the cause; the header keeps it on its status (inline only on wide screens).
+  await expect(page.getByRole("main").getByText("The CodeCommit server answered 503.", { exact: false }).first())
+    .toBeVisible()
   const before = streamCalls
   await page.getByRole("button", { name: "Retry now" }).click()
   await expect.poll(() => streamCalls).toBeGreaterThan(before)
