@@ -1,5 +1,13 @@
 # @knpkv/agent-usage
 
+## 0.5.6
+
+### Patch Changes
+
+- [#588](https://github.com/knpkv/npm/pull/588) [`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047) Thanks [@konopkov](https://github.com/konopkov)! - Add `StackedBars`: stacked values per period with limit bands above, a shaded window such as the current limit window, width-aware binning, and a single-stop keyboard span selection. Columns out of time order throw an error naming the column. The focus-ring lint now also holds SVG focus strokes to the shared width token, and reserves the focus colour for focus; agent-usage's chart focus stroke uses the token.
+- Updated dependencies [[`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/rly@0.13.0
+
 ## 0.5.5
 
 ### Patch Changes

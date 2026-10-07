@@ -14,7 +14,7 @@ import { dashboardDocumentTitle } from "./html.js"
  * `approval.js`, so it must be `renderToString`: static markup merges adjacent text nodes and
  * drops the separators hydration needs (React #418).
  */
-export const dashboardPage = (snapshot: DashboardSnapshot): string => {
+export const dashboardPage = (snapshot: DashboardSnapshot, fontPreload: string): string => {
   const markup = snapshot.approvalApp.canonical ? "" : renderToString(
     createElement(
       "div",
@@ -46,7 +46,7 @@ export const dashboardPage = (snapshot: DashboardSnapshot): string => {
 <title>${dashboardDocumentTitle(snapshot.host)}</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/assets/approval-icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/assets/index.css">
+${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark">
 <div id="fleet-dashboard-root">${markup}</div>

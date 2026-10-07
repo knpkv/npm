@@ -679,19 +679,17 @@ describe("sanitized approval requests", () => {
   })
 
   it("redacts encoded query credentials inside URI path segments", () => {
-    const refs = [
-      "https://example.test/repo%3FX-Amz-Signature%3Dleaked-canary",
-      "https://example.test/repo%3Fref%3Dmain"
-    ]
-    const request = approvalRequestFor({ kind: "nix.apply", ref: refs[0] })
+    const signedRef = "https://example.test/repo%3FX-Amz-Signature%3Dleaked-canary"
+    const plainRef = "https://example.test/repo%3Fref%3Dmain"
+    const request = approvalRequestFor({ kind: "nix.apply", ref: signedRef })
     const projection = sanitizeJobRecord({
       ...recordFor("pending_approval"),
-      payload: { kind: "nix.apply", ref: refs[0] }
+      payload: { kind: "nix.apply", ref: signedRef }
     })
     const encoded = JSON.stringify({ request, projection })
     expect(encoded).not.toContain("leaked-canary")
     expect(encoded).toContain("%5Bredacted%20credential%5D")
-    expect(approvalRequestFor({ kind: "nix.apply", ref: refs[1] }).fields[0]?.value).toBe(refs[1])
+    expect(approvalRequestFor({ kind: "nix.apply", ref: plainRef }).fields[0]?.value).toBe(plainRef)
   })
 
   it("redacts credentials in malformed encoded URI path segments", () => {

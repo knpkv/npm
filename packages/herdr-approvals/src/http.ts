@@ -114,6 +114,7 @@ import {
 } from "./dashboard-model.js"
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
+import { fontPreloadLink } from "./font-preload.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
@@ -1174,7 +1175,7 @@ export const notificationCandidates = Effect.fn(
   } satisfies ApprovalNotificationBatch
 })
 
-const connectPage = (): string =>
+const connectPage = (fontPreload: string): string =>
   `<!doctype html>
 <html lang="en">
 <head>
@@ -1183,7 +1184,7 @@ const connectPage = (): string =>
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0b0d10">
 <title>Fleet connect</title>
-<link rel="stylesheet" href="/assets/index.css">
+${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark" class="connect-body">
 <div id="fleet-connect-root"></div>
@@ -1191,7 +1192,7 @@ const connectPage = (): string =>
 </body>
 </html>`
 
-const lanWorkDocument = (body: string): string =>
+const lanWorkDocument = (body: string, fontPreload: string): string =>
   `<!doctype html>
 <html lang="en">
 <head>
@@ -1200,15 +1201,18 @@ const lanWorkDocument = (body: string): string =>
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#111418">
 <title>Fleet Work</title>
-<link rel="stylesheet" href="/assets/index.css">
+${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark">
 ${body}
 </body>
 </html>`
 
-const lanPairPage = (error: string | undefined): string =>
-  lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPairPage, error === undefined ? {} : { error })))
+const lanPairPage = (error: string | undefined, fontPreload: string): string =>
+  lanWorkDocument(
+    renderToStaticMarkup(createElement(LanWorkPairPage, error === undefined ? {} : { error })),
+    fontPreload
+  )
 
 const lanHtmlSecurityHeaders = {
   "content-security-policy": "frame-ancestors 'none'",
@@ -1238,8 +1242,9 @@ const lanPairErrorMessage = (error: LanPairError): string => {
 
 const lanWorkPage = (
   snapshots: WorkSnapshots,
-  selection: { readonly goalId: string | null; readonly window: WorkSnapshotWindow }
-): string => lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPage, { ...selection, snapshots })))
+  selection: { readonly goalId: string | null; readonly window: WorkSnapshotWindow },
+  fontPreload: string
+): string => lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPage, { ...selection, snapshots })), fontPreload)
 
 const lanWorkSelectionFromUrl = Effect.fn("ApprovalHttp.decodeLanWorkSelection")(
   function*(url: URL) {
@@ -1451,6 +1456,7 @@ export const startHttpServer = async (
 }> => {
   const isHub = config.crossHost &&
     config.host.toLowerCase() === config.approvalHub.host.toLowerCase()
+  const fontPreload = fontPreloadLink(uiAssets.fonts)
   const workBindAddress = config.workBindAddress ?? "127.0.0.1"
   const approvalTls = config.approvalTls
   if (isHub && approvalTls === null) {
@@ -2456,7 +2462,7 @@ export const startHttpServer = async (
                   "content-type": "text/html; charset=utf-8",
                   ...lanHtmlSecurityHeaders
                 })
-                response.end(lanPairPage(lanPairErrorMessage(error)))
+                response.end(lanPairPage(lanPairErrorMessage(error), fontPreload))
               } else {
                 json(response, mapped.status, mapped.body)
               }
@@ -2480,7 +2486,7 @@ export const startHttpServer = async (
                   "content-type": "text/html; charset=utf-8",
                   ...lanHtmlSecurityHeaders
                 })
-                response.end(lanPairPage(undefined))
+                response.end(lanPairPage(undefined, fontPreload))
               }
               return
             }
@@ -2532,7 +2538,7 @@ export const startHttpServer = async (
                   "content-type": "text/html; charset=utf-8",
                   ...lanHtmlSecurityHeaders
                 })
-                response.end(lanWorkPage(result.success, selection.success))
+                response.end(lanWorkPage(result.success, selection.success, fontPreload))
               } else if (
                 result.failure._tag === "LanWorkSessionRequiredError" ||
                 result.failure._tag === "LanWorkSessionRejectedError"
@@ -3282,7 +3288,7 @@ export const startHttpServer = async (
                 now()
               )
             })
-            response.end(dashboardPage(result.success))
+            response.end(dashboardPage(result.success, fontPreload))
             return
           }
           if (
@@ -3302,7 +3308,7 @@ export const startHttpServer = async (
               "content-type": "text/html; charset=utf-8",
               "x-frame-options": "DENY"
             })
-            response.end(connectPage())
+            response.end(connectPage(fontPreload))
             return
           }
           json(response, 404, { error: "not_found" })

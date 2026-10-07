@@ -18,18 +18,14 @@ const record = (id: string, overrides: Partial<JobRecord> = {}): JobRecord => ({
   actor: "submitter@example.com",
   approvalAvailable: true,
   approvalExpiresAt: Date.now() + 4 * 60_000,
-  approvalNonce: "nonce",
   approvedAt: null,
   approvedBy: null,
   createdAt: Date.now() - 60_000,
-  error: null,
   expiredAt: null,
-  hash: "hash",
   id,
   payload: { kind: "nix.apply", ref: "main" },
   rejectedAt: null,
   rejectedBy: null,
-  result: null,
   status: "pending_approval",
   updatedAt: Date.now(),
   ...overrides
@@ -172,7 +168,7 @@ describe("ApprovalsCountdown", () => {
                 approvalExpiresAt: Date.now() + 3 * 60_000,
                 createdAt: Date.now(),
                 id: "remote-1",
-                payload: { kind: "nix.check", ref: "main" },
+                payload: { kind: "nix.check" },
                 status: "pending_approval"
               },
               approvalUrl: "https://beta.example.test/approve/remote-1",
@@ -203,7 +199,9 @@ describe("ApprovalsCountdown", () => {
         jobId: "job-1",
         observedAt: OBSERVED_AT,
         settles: true,
-        text: "The hub refused: this request already changed."
+        text: "The hub refused: this request already changed.",
+        outcome: "refused",
+        expiresAt: undefined
       },
       snapshot: snapshot()
     })
@@ -269,7 +267,9 @@ describe("ApprovalsCountdown", () => {
         jobId: "job-1",
         observedAt: OBSERVED_AT,
         settles: true,
-        text: "The hub recorded your approval; the job is queued."
+        text: "The hub recorded your approval; the job is queued.",
+        outcome: "accepted",
+        expiresAt: undefined
       },
       snapshot: snapshot({
         pendingApprovals: {
@@ -355,7 +355,7 @@ describe("ApprovalsCountdown", () => {
         approvalExpiresAt: Date.now() + 3 * 60_000,
         createdAt: Date.now(),
         id: "job-1",
-        payload: { kind: "nix.check", ref: "main" },
+        payload: { kind: "nix.check" },
         status: "pending_approval"
       },
       approvalUrl: "https://beta.example.test/approve/job-1",
@@ -382,7 +382,9 @@ describe("ApprovalsCountdown", () => {
         jobId: "job-1",
         observedAt: OBSERVED_AT,
         settles: true,
-        text: "The hub refused: this request already changed."
+        text: "The hub refused: this request already changed.",
+        outcome: "refused",
+        expiresAt: undefined
       },
       snapshot: snapshot()
     })
@@ -437,7 +439,14 @@ describe("ApprovalsCountdown", () => {
 
   it("lets a refused request be retried once a newer read still lists it as decidable", () => {
     const answeredAt = Date.now() - 1_000
-    const status = { jobId: "job-1", observedAt: answeredAt, settles: true, text: "The hub refused." }
+    const status: DecisionStatus = {
+      jobId: "job-1",
+      observedAt: answeredAt,
+      settles: true,
+      text: "The hub refused.",
+      outcome: "refused",
+      expiresAt: undefined
+    }
     const view = mount({ decisionStatus: status, snapshot: snapshot({ observedAt: answeredAt }) })
     expect(view.bar()?.dataset["state"]).toBe("off")
     view.render({ decisionStatus: status, snapshot: snapshot({ observedAt: answeredAt + 5_000 }) })
@@ -452,7 +461,7 @@ describe("ApprovalsCountdown", () => {
         approvalExpiresAt: Date.now() + 3 * 60_000,
         createdAt: Date.now(),
         id: "job-9",
-        payload: { kind: "nix.check", ref: "main" },
+        payload: { kind: "nix.check" },
         status: "pending_approval"
       },
       approvalUrl: "https://beta.example.test/approve/job-9",
@@ -501,7 +510,7 @@ describe("ApprovalsCountdown", () => {
         approvalExpiresAt: Date.now() + 9 * 60_000,
         createdAt: Date.now(),
         id: "job-1",
-        payload: { kind: "nix.check", ref: "main" },
+        payload: { kind: "nix.check" },
         status: "pending_approval"
       },
       approvalUrl: "https://beta.example.test/approve/job-1",
@@ -515,7 +524,9 @@ describe("ApprovalsCountdown", () => {
         jobId: "job-1",
         observedAt: OBSERVED_AT,
         settles: true,
-        text: "The hub recorded your approval."
+        text: "The hub recorded your approval.",
+        outcome: "accepted",
+        expiresAt: undefined
       },
       snapshot: snapshot({ pendingApprovals: pending })
     })
@@ -552,11 +563,13 @@ describe("ApprovalsCountdown", () => {
 
   it("replaces an uncertain answer with the outcome a later read proves", () => {
     const view = mount({ snapshot: snapshot() })
-    const status = {
+    const status: DecisionStatus = {
       jobId: "job-1",
       observedAt: OBSERVED_AT,
       settles: false,
-      text: "The hub didn't confirm the decision."
+      text: "The hub didn't confirm the decision.",
+      outcome: "uncertain",
+      expiresAt: undefined
     }
     view.render({ decisionStatus: status, snapshot: snapshot() })
     expect(view.bar()?.querySelector("[role='status']")?.textContent).toBe("The hub didn't confirm the decision.")
@@ -601,7 +614,14 @@ describe("ApprovalsCountdown", () => {
   })
 
   it("shows a confirmed expiry over an earlier refusal", () => {
-    const status = { jobId: "job-1", observedAt: OBSERVED_AT, settles: true, text: "The hub refused." }
+    const status: DecisionStatus = {
+      jobId: "job-1",
+      observedAt: OBSERVED_AT,
+      settles: true,
+      text: "The hub refused.",
+      outcome: "refused",
+      expiresAt: undefined
+    }
     const view = mount({ decisionStatus: status, snapshot: snapshot() })
     view.render({
       decisionStatus: status,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { JobRecord } from "@knpkv/herdr-fleet/model"
 import { Effect, Result } from "effect"
+import { type SanitizedJobRecord, sanitizeJobRecord } from "../src/approval-request.js"
 import { authorize } from "../src/auth.js"
 import type { DashboardSnapshot, PendingApprovalTarget } from "../src/dashboard-model.js"
 import {
@@ -18,19 +18,21 @@ import {
   showApprovalNotification
 } from "../src/pwa.js"
 
-const approvalRecord = (id: string): JobRecord => ({
-  actor: "andrey@example.com",
-  approvalNonce: `nonce-${id}`,
-  approvedBy: null,
-  createdAt: 1,
-  error: null,
-  hash: "a".repeat(64),
-  id,
-  payload: { kind: "nix.check" },
-  result: null,
-  status: "pending_approval",
-  updatedAt: 1
-})
+/** A pending job as the dashboard receives it: the sanitized projection of the host's record. */
+const approvalRecord = (id: string): SanitizedJobRecord =>
+  sanitizeJobRecord({
+    actor: "andrey@example.com",
+    approvalNonce: `nonce-${id}`,
+    approvedBy: null,
+    createdAt: 1,
+    error: null,
+    hash: "a".repeat(64),
+    id,
+    payload: { kind: "nix.check" },
+    result: null,
+    status: "pending_approval",
+    updatedAt: 1
+  })
 
 describe("approval PWA", () => {
   it("removes a cached deep-link card after definitive revalidation", () => {
