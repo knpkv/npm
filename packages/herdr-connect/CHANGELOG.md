@@ -1,5 +1,14 @@
 # @knpkv/herdr-connect
 
+## 0.7.3
+
+### Patch Changes
+
+- [#594](https://github.com/knpkv/npm/pull/594) [`16244c5`](https://github.com/knpkv/npm/commit/16244c58b41cd8dcee799fd8e8e058598df3fb90) Thanks [@konopkov](https://github.com/konopkov)! - When a terminal session ends and herdr does not take the release command, does not exit, or cannot be killed afterwards, Connect now logs a warning for each instead of dropping the failure silently. Cleanup still never fails the session.
+- Updated dependencies [[`0d6cc4d`](https://github.com/knpkv/npm/commit/0d6cc4df23eca64c5d29725bf50899776cc52435), [`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/herdr-work@0.9.0
+  - @knpkv/rly@0.13.0
+
 ## 0.7.2
 
 ### Patch Changes

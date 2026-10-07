@@ -36,7 +36,7 @@ export function SettingsPermissions() {
 
   const renderGroup = (label: string, group: typeof items) => (
     <div className="space-y-2">
-      <h4 className="text-sm font-medium text-muted-foreground">{label}</h4>
+      <h2 className="text-sm font-medium text-muted-foreground">{label}</h2>
       {group.map((p) => (
         <div key={p.operation} className="flex items-center justify-between rounded-md border px-3 py-2">
           <div className="flex items-center gap-2 min-w-0">
@@ -73,7 +73,7 @@ export function SettingsPermissions() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">API Permissions</h3>
+        <h1 className="text-lg font-semibold">API Permissions</h1>
         <p className="text-sm text-muted-foreground">Control which AWS API calls the app can make</p>
       </div>
 

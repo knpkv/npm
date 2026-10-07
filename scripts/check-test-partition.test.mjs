@@ -42,11 +42,11 @@ test("unit tests and packed-package checks run as separate CI jobs with their ow
   }
 })
 
-test("the neovim install has its own cap so a stalled apt mirror cannot spend the unit budget", () => {
+test("the neovim install is pinned, avoids apt, and has its own cap", () => {
   const install = jobs["test-unit"].steps.find((step) => step.name === "Install neovim for nvim plugin specs")
   assert.equal(Number.isInteger(install["timeout-minutes"]), true)
   assert.ok(install["timeout-minutes"] < jobs["test-unit"]["timeout-minutes"])
-  assert.match(install.run, /Acquire::http::Timeout=/)
+  assert.equal(install.uses, "./.github/actions/setup-neovim")
 })
 
 test("the existing Test check requires both partitions without a skip-success path", () => {

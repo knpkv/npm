@@ -1,0 +1,255 @@
+@layer rly.components {
+  /* `--rly-stacked-bars-gap` colours the gap between bars; a chart on another surface sets it to that background. */
+  .root {
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: 0;
+  }
+  .band {
+    display: grid;
+    gap: var(--rly-space-2);
+  }
+  .bandLabel,
+  .scale,
+  .tick {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+  .bandPlot {
+    background: var(--rly-color-surface-2);
+    block-size: var(--rly-space-24);
+    display: block;
+    inline-size: 100%;
+  }
+  .level {
+    fill: var(--rly-color-text-3);
+  }
+  .level[data-tone="near"] {
+    fill: var(--rly-color-held-ink);
+  }
+  .level[data-tone="full"] {
+    fill: var(--rly-color-blocked-ink);
+  }
+  .unknown {
+    fill: var(--rly-color-surface-3);
+  }
+  .near {
+    stroke: var(--rly-color-text-3);
+    stroke-dasharray: 2 3;
+    vector-effect: non-scaling-stroke;
+  }
+  .plot {
+    border-radius: var(--rly-radius-tag);
+    position: relative;
+  }
+  .plot:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .bars {
+    block-size: 100%;
+    display: block;
+    inline-size: 100%;
+    overflow: visible;
+  }
+  /* A 2px background-coloured edge (1px each side) separates neighbouring bars and stacked segments at any scale. */
+  .segment {
+    stroke: var(--rly-stacked-bars-gap, var(--rly-color-surface-1));
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+  .hit {
+    cursor: pointer;
+    fill: transparent;
+  }
+  .selection {
+    fill: var(--rly-color-surface-3);
+  }
+  /*
+   * The selection's outline, drawn over the bars, so a selected bar shows it at any height: a 2px
+   * ink line on a 6px background halo, which stays visible where the bar is the ink colour too.
+   */
+  .selectionHalo {
+    fill: none;
+    pointer-events: none;
+    stroke: var(--rly-stacked-bars-gap, var(--rly-color-surface-1));
+    stroke-width: 6px;
+    vector-effect: non-scaling-stroke;
+  }
+  .selectionEdge {
+    fill: none;
+    pointer-events: none;
+    stroke: var(--rly-color-text-1);
+    stroke-width: 2px;
+    vector-effect: non-scaling-stroke;
+  }
+  /*
+   * The window shading sits under the selection and bars; its dashed edges mark where it starts and
+   * ends. Neutral ink, not the focus colour, so it never reads as a focus ring.
+   */
+  .window {
+    fill: color-mix(in srgb, var(--rly-color-text-3) 12%, transparent);
+    stroke: var(--rly-color-text-2);
+    stroke-dasharray: 3 3;
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+  .windowEdge {
+    fill: none;
+    pointer-events: none;
+    stroke: var(--rly-color-text-2);
+    stroke-dasharray: 3 3;
+    stroke-width: 1px;
+    vector-effect: non-scaling-stroke;
+  }
+  .keys {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-4) var(--rly-space-16);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .windowKey {
+    align-items: center;
+    color: var(--rly-color-text-2);
+    display: flex;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-6);
+    margin: 0;
+  }
+  .windowSwatch {
+    background: color-mix(in srgb, var(--rly-color-text-3) 12%, transparent);
+    block-size: var(--rly-space-12);
+    border: 1px dashed var(--rly-color-text-2);
+    flex: none;
+    inline-size: var(--rly-space-12);
+  }
+  .nearSwatch {
+    block-size: 0;
+    border-block-start: 1px dashed var(--rly-color-text-3);
+    flex: none;
+    inline-size: var(--rly-space-12);
+  }
+  .unknownSwatch {
+    background: var(--rly-color-surface-3);
+    block-size: var(--rly-space-12);
+    border: 1px solid var(--rly-color-border-2);
+    flex: none;
+    inline-size: var(--rly-space-12);
+  }
+  .focusRing {
+    fill: none;
+    pointer-events: none;
+    stroke: none;
+    vector-effect: non-scaling-stroke;
+  }
+  .plot:focus-visible .focusRing {
+    stroke: var(--rly-color-focus);
+    stroke-width: var(--rly-focus-ring-width);
+  }
+  .axis {
+    block-size: var(--rly-type-meta-line-height);
+    position: relative;
+  }
+  /*
+   * A label never runs past the axis. Start labels are spaced by their measured width and stay on
+   * one line; the end label wraps when it alone is wider than the chart, and the axis grows to fit.
+   */
+  .tick {
+    inset-block-start: 0;
+    max-inline-size: 100%;
+    position: absolute;
+    white-space: nowrap;
+  }
+  .tick[data-anchor="end"] {
+    inline-size: max-content;
+    text-align: end;
+    white-space: normal;
+  }
+  .barsClip {
+    clip-path: inset(0);
+  }
+  .hidden {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    margin: 0;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+  }
+  @media (forced-colors: active) {
+    .segment {
+      stroke: Canvas;
+    }
+    .window,
+    .windowEdge,
+    .selectionEdge {
+      fill: none;
+      stroke: CanvasText;
+    }
+    .selection {
+      fill: none;
+    }
+    .selectionHalo {
+      stroke: Canvas;
+    }
+    .windowSwatch {
+      background: none;
+      border-color: CanvasText;
+    }
+    /* No-reading stretches lose their fill; a dotted outline keeps them apart from the empty track. */
+    .unknown {
+      fill: none;
+      stroke: CanvasText;
+      stroke-dasharray: 1 3;
+      vector-effect: non-scaling-stroke;
+    }
+    .nearSwatch,
+    .unknownSwatch {
+      border-color: CanvasText;
+    }
+    .unknownSwatch {
+      background: none;
+      border-style: dotted;
+    }
+  }
+
+  /* The Storybook forced-colours toolbar draws the same overrides as the real mode. */
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .segment {
+    stroke: Canvas;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .window,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .windowEdge,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .selectionEdge {
+    fill: none;
+    stroke: CanvasText;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .selection {
+    fill: none;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .selectionHalo {
+    stroke: Canvas;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .windowSwatch {
+    background: none;
+    border-color: CanvasText;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .unknown {
+    fill: none;
+    stroke: CanvasText;
+    stroke-dasharray: 1 3;
+    vector-effect: non-scaling-stroke;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .nearSwatch,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .unknownSwatch {
+    border-color: CanvasText;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .unknownSwatch {
+    background: none;
+    border-style: dotted;
+  }
+}

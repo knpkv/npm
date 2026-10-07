@@ -1,8 +1,6 @@
 import { RegistryContext, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { AwsProfileName } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
-import * as Cause from "effect/Cause"
-import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { LogInIcon, LogOutIcon, SearchIcon, UserIcon } from "lucide-react"
 import { StatePanel } from "@knpkv/rly/primitives"
@@ -15,6 +13,7 @@ import {
   accountsConfigSaveAtom,
   notificationsSsoLoginAtom
 } from "../atoms/app.js"
+import { ConfigUnavailable } from "./load-failed.js"
 import { Button, ButtonGroup } from "./ui/button.js"
 import { Input } from "./ui/input.js"
 import { SsoSignOutDialog } from "./sso-sign-out-dialog.js"
@@ -186,24 +185,14 @@ export function SettingsAccounts() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Accounts</h2>
+        <h1 className="text-lg font-semibold">Accounts</h1>
         <p className="text-sm text-muted-foreground">AWS profiles configured for CodeCommit</p>
       </div>
       <Separator />
       {AsyncResult.builder(config)
         // Only the first load replaces the list; a re-detect keeps it (and its result line) on screen.
         .onInitial(() => <p className="text-sm text-muted-foreground">Loading...</p>)
-        .onFailure((cause) => {
-          // Typed errors and defects alike stay here with their reason, never thrown into the router.
-          const error = Cause.squash(cause)
-          return (
-            <p className="text-sm" role="alert">
-              Couldn't read the CodeCommit settings:{" "}
-              {Predicate.isError(error) ? error.message : "the server didn't answer"}. Check ~/.codecommit/config.json,
-              or reload once the server is running.
-            </p>
-          )
-        })
+        .onFailure(() => <ConfigUnavailable />)
         .onSuccess((data) => (
           <AccountsList
             currentUser={appState.currentUser}
@@ -249,7 +238,7 @@ export function SettingsAccounts() {
             onSsoLogout={() => setSignOutOpen(true)}
           />
         ))
-        .render()}
+        .exhaustive()}
       <SsoSignOutDialog onOpenChange={setSignOutOpen} open={signOutOpen} />
     </div>
   )
