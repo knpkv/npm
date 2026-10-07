@@ -77,6 +77,13 @@ export const componentManifest = {
   schemaVersion: 1,
   assets: [
     { id: "styles", output: "dist/styles.css", source: "src/styles/styles.css", subpath: "./styles.css" },
+    // Relay's mark on its agent tile, for a host's favicon or app icon.
+    {
+      id: "relay-mark",
+      output: "dist/assets/relay-mark.svg",
+      source: "src/assets/relay-mark.svg",
+      subpath: "./relay-mark.svg"
+    },
     {
       id: "registry-components",
       output: "registry/components.json",
@@ -237,6 +244,51 @@ export const componentManifest = {
         story: "stories/patterns/DecisionBar.stories.tsx",
         storyId: "patterns-decisionbar--states",
         tests: ["test/patterns/DecisionBar.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayMark" },
+        { kind: "value", name: "RLY_RELAY_MARK_SIZES" },
+        { kind: "value", name: "RLY_RELAY_MARK_TILE_SIZES" },
+        { kind: "type", name: "RelayMarkProps" },
+        { kind: "type", name: "RelayMarkTileProps" },
+        { kind: "type", name: "RlyRelayMarkSize" },
+        { kind: "type", name: "RlyRelayMarkTileSize" }
+      ],
+      name: "RelayMark",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayMark.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayMark.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayMark.stories.tsx",
+        storyId: "patterns-relaymark--sizes",
+        tests: ["test/patterns/RelayMark.test.tsx", "test/patterns/RelayMark.favicon.test.ts"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayLauncher" },
+        { kind: "value", name: "relayShortcut" },
+        { kind: "type", name: "RelayLauncherProps" },
+        { kind: "type", name: "RlyRelayShortcut" }
+      ],
+      name: "RelayLauncher",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayLauncher.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayLauncher.module.css"],
+      variants: [{ defaultValue: "false", name: "expanded", values: ["false", "true"] }],
+      visual: {
+        story: "stories/patterns/RelayLauncher.stories.tsx",
+        storyId: "patterns-relaylauncher--header",
+        tests: ["test/patterns/RelayLauncher.test.tsx"]
       }
     },
     // scaffold:components:insert

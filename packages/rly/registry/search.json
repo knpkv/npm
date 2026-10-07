@@ -994,6 +994,52 @@
     },
     {
       "capabilities": [
+        "agent",
+        "open"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayLauncher",
+      "states": [
+        "closed",
+        "default",
+        "open"
+      ],
+      "terms": [
+        "agent",
+        "closed",
+        "expanded",
+        "false",
+        "open",
+        "pattern",
+        "relaylauncher",
+        "true"
+      ]
+    },
+    {
+      "capabilities": [
+        "brand",
+        "present"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayMark",
+      "states": [
+        "bare",
+        "default",
+        "tile"
+      ],
+      "terms": [
+        "bare",
+        "brand",
+        "pattern",
+        "present",
+        "relaymark",
+        "tile"
+      ]
+    },
+    {
+      "capabilities": [
         "inspect",
         "release"
       ],

@@ -1,0 +1,43 @@
+@layer rly.components {
+  .root {
+    display: inline-block;
+    flex: none;
+    vertical-align: middle;
+  }
+  .tile {
+    align-items: center;
+    background: var(--rly-color-agent);
+    block-size: 24px;
+    border-radius: var(--rly-radius-control);
+    box-sizing: border-box;
+    color: var(--rly-color-surface-1);
+    display: inline-flex;
+    flex: none;
+    inline-size: 24px;
+    justify-content: center;
+  }
+  .tile[data-size="20"] {
+    block-size: 20px;
+    inline-size: 20px;
+  }
+  .tile[data-size="32"] {
+    block-size: 32px;
+    inline-size: 32px;
+  }
+  .tileGlyph {
+    display: block;
+  }
+  /* The agent fill is dropped by the system; an outline in the link colour keeps the tile's shape. */
+  @media (forced-colors: active) {
+    .tile {
+      background: none;
+      border: 1px solid LinkText;
+      color: LinkText;
+    }
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .tile {
+    background: none;
+    border: 1px solid LinkText;
+    color: LinkText;
+  }
+}

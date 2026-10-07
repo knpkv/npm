@@ -448,6 +448,27 @@ target, expected revision, impact, and evidence beside a named human reviewer.
 Its owned authorization button stays disabled until the controlled exact-action
 confirmation is checked, and terminal outcomes remain visible after review.
 
+`RelayMark` is Relay's mark, the baton: two open hooks with a stroke passed between
+them. The bare mark is drawn in the current colour, so it follows its host's text in
+every theme and in forced colours; sizes are 16, 20 (default), 24 and 32px, and 16px
+stays legible in one colour. `RelayMark.Tile` sets it on the agent colour (20, 24 or
+32px); in forced colours the tile becomes a LinkText outline. Both are decorative
+unless given a `label`. The same mark on its tile ships as `@knpkv/rly/relay-mark.svg`
+for a host's favicon.
+
+`RelayLauncher` is the header button that opens and closes Relay: the mark, a label
+("Relay" unless the host names it) and the Ctrl/⌘+J hint. It sits in the host's header
+like any other control, never fixed over the page. `expanded` drives `aria-expanded`,
+and `aria-keyshortcuts` names the shortcut while the visible hint stays hidden from
+assistive technology; pass `shortcut={null}` where the host keeps Ctrl/⌘+J for itself.
+The hint hides at 40rem and below, and the button is 32px tall, 44px for a coarse pointer.
+
+```tsx
+import { RelayLauncher } from "@knpkv/rly/patterns"
+
+;<RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} />
+```
+
 `RelayDock` is the shared product frame for one adapter-owned Relay thread. It
 starts collapsed, keeps context plus profile and model selection visible above
 the scrolling thread, and accepts explicit ready, loading, empty, error, and
