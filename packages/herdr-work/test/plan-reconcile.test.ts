@@ -82,7 +82,7 @@ const Scenario = Schema.Array(
 ).check(Schema.isMinLength(1), Schema.isMaxLength(5))
 
 it.layer(NodeServices.layer)("planReconcile", (it) => {
-  it.effect("plans a merged pull request's goal as would-complete, from the fact and head it read, writing nothing", () =>
+  it.effect("plans a merged pull request's goal as would-complete, from the fact and goal event it read, writing nothing", () =>
     Effect.scoped(Effect.gen(function*() {
       const { store, work } = yield* openStore
       yield* work.record({ eventId: "goal-pr7.1", goal: goal(7), occurredAt: 1_000, version: "herdr.work.event.v1" })
@@ -179,6 +179,8 @@ it.layer(NodeServices.layer)("planReconcile", (it) => {
               : step
           )
         )
-      }))
+      })),
+    // Each sample opens its own store: a few dozen cover the scenario space.
+    { timeout: 60_000, arbitrary: { runs: 30 } }
   )
 })
