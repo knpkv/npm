@@ -69,7 +69,10 @@ export function Header() {
         : state.accounts.length
 
   const title = VIEW_TITLES[view] || "CodeCommit"
-  const userStr = state.status === "idle" && state.currentUser ? ` · ${state.currentUser}` : ""
+  const userStr =
+    state.status === "idle" && state.currentUser !== undefined && state.currentUser !== ""
+      ? `, ${state.currentUser}`
+      : ""
   const countLabel =
     view === "prs"
       ? `${count} PR${count === 1 ? "" : "s"}`
@@ -86,15 +89,12 @@ export function Header() {
       style={{ height: 2, width: "100%", backgroundColor: theme.backgroundHeader, paddingLeft: 1, paddingRight: 1 }}
     >
       <box style={{ flexDirection: "row", width: "100%" }}>
-        <text fg={theme.textAccent} bg={theme.accentTint}>
-          {" CC "}
-        </text>
-        <text fg={theme.text}>{" Control Center"}</text>
-        <text fg={theme.textMuted}>{" / CodeCommit / "}</text>
+        <text fg={theme.text}>{"CodeCommit"}</text>
+        <text fg={theme.textMuted}>{" / "}</text>
         <text fg={theme.text}>{title}</text>
         <box style={{ flexGrow: 1 }} />
         <text fg={state.status === "loading" || creatingPr ? theme.textAccent : theme.textMuted}>
-          {`${countLabel} · ${lastUpdateStr}${userStr}`}
+          {`${countLabel}, ${lastUpdateStr}${userStr}`}
         </text>
       </box>
     </box>

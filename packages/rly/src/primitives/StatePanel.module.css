@@ -1,43 +1,44 @@
 @layer rly.components {
   .root {
-    background: var(--rly-color-surface-2);
-    border: 1px solid currentcolor;
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-state-panel-edge, var(--rly-state-panel-ink, var(--rly-color-border-2)));
     border-radius: var(--rly-radius-control);
     box-sizing: border-box;
     color: var(--rly-color-text-2);
     display: grid;
     gap: var(--rly-space-16);
-    grid-template-columns: var(--rly-space-4) auto minmax(var(--rly-space-0), 1fr);
+    grid-template-columns: auto minmax(var(--rly-space-0), 1fr);
     max-inline-size: 100%;
     padding: var(--rly-space-24);
   }
 
+  .root[data-icon="none"] {
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
+  }
+
+  /*
+   * The tone colours the icon and the even border; the title stays in text ink and the copy in
+   * secondary ink, on the plain surface, so a state panel never reads as a tinted block.
+   */
   .neutral {
-    background: var(--rly-color-surface-2);
-    color: var(--rly-color-text-2);
+    --rly-state-panel-edge: var(--rly-color-border-2);
+    --rly-state-panel-ink: var(--rly-color-text-2);
   }
   .positive {
-    background: var(--rly-color-success-tint);
-    color: var(--rly-color-success-ink);
+    --rly-state-panel-ink: var(--rly-color-success-ink);
   }
   .critical {
-    background: var(--rly-color-blocked-tint);
-    color: var(--rly-color-blocked-ink);
+    --rly-state-panel-ink: var(--rly-color-blocked-ink);
   }
   .caution {
-    background: var(--rly-color-held-tint);
-    color: var(--rly-color-held-ink);
+    --rly-state-panel-ink: var(--rly-color-held-ink);
   }
   .progress {
-    background: var(--rly-color-deploying-tint);
-    color: var(--rly-color-deploying-ink);
+    --rly-state-panel-ink: var(--rly-color-deploying-ink);
   }
-  .rail {
-    align-self: stretch;
-    background: currentcolor;
-    border-radius: var(--rly-radius-round);
-  }
+
   .icon {
+    color: var(--rly-state-panel-ink, var(--rly-color-text-2));
     display: inline-flex;
     padding-block-start: var(--rly-space-2);
   }
@@ -49,32 +50,19 @@
   }
 
   .title {
-    color: var(--rly-color-text-2);
+    color: var(--rly-color-text-1);
     font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
-  }
-
-  .positive .title {
-    color: var(--rly-color-success-ink);
-  }
-  .critical .title {
-    color: var(--rly-color-blocked-ink);
-  }
-  .caution .title {
-    color: var(--rly-color-held-ink);
-  }
-  .progress .title {
-    color: var(--rly-color-deploying-ink);
+    overflow-wrap: break-word;
   }
 
   .description {
     color: var(--rly-color-text-2);
     font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
       var(--rly-type-body-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
   .description > :first-child {
     margin-block-start: var(--rly-space-0);

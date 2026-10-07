@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-direct-aws-node-provider-chain
+language: tsx
+severity: error
+message: "Resolve AWS profiles through makeProfileCredentialProvider, not fromNodeProviderChain directly"
+
+rule:
+  any:
+    - pattern: fromNodeProviderChain($$$ARGS)
+    - pattern: fromNodeProviderChain($$$ARGS)($$$CALL)
+
+files:
+  - "packages/**/src/**/*.ts"
+  - "packages/**/src/**/*.tsx"
+
+ignores:
+  - "packages/codecommit-core/src/AwsProfileCredentials.ts"
+  - "**/generated/**"
+
+note: |
+  The SDK's standard chain reads ~/.aws/credentials before the SSO settings in ~/.aws/config, so a
+  leftover static section silently shadows a fresh `aws sso login`. Call
+  `makeProfileCredentialProvider({ sso: fromSSO, fallback: fromNodeProviderChain })` from
+  `@knpkv/codecommit-core/AwsProfileCredentials.js`; passing `fromNodeProviderChain` as the fallback
+  reference stays allowed.

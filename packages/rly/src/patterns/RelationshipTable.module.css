@@ -13,7 +13,7 @@
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .empty {
@@ -49,8 +49,9 @@
     inline-size: 28%;
   }
 
+  /* The relation column never drops below its longest phrase ("Implemented by"). */
   .head th:nth-child(2) {
-    inline-size: 24%;
+    inline-size: max(24%, 10rem);
   }
 
   .head th:nth-child(4) {
@@ -97,7 +98,7 @@
     color: var(--rly-color-text-1);
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .reference,
@@ -107,7 +108,7 @@
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .missingEndpoint {
@@ -184,7 +185,7 @@
       font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
         var(--rly-type-meta-font);
       font-weight: 650;
-      overflow-wrap: anywhere;
+      overflow-wrap: break-word;
       text-transform: uppercase;
     }
 

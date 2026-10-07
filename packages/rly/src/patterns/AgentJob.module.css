@@ -2,7 +2,6 @@
   .root {
     background: var(--rly-color-surface-1);
     border: 1px solid var(--rly-color-border-1);
-    border-block-start: var(--rly-space-4) solid var(--rly-color-agent);
     border-radius: var(--rly-radius-group);
     container-type: inline-size;
     display: grid;
@@ -43,7 +42,7 @@
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .eyebrow,
@@ -53,7 +52,7 @@
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .eyebrow {
@@ -112,7 +111,7 @@
   }
 
   .metadata code {
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .slot {
@@ -129,7 +128,8 @@
   }
 
   .outcome {
-    border-inline-start: var(--rly-space-4) solid var(--rly-color-agent);
+    border: 1px solid color-mix(in oklab, var(--rly-color-agent) 40%, transparent);
+    border-radius: var(--rly-radius-field);
   }
 
   .footer {

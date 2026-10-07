@@ -35,14 +35,24 @@
     border-color: var(--rly-color-surface-2);
     color: var(--rly-color-text-1);
   }
+  /* Tool density: as tall as its text needs, a small radius, not a pill. Touch targets come from the token. */
+  .dense {
+    border-radius: var(--rly-radius-tag);
+    min-block-size: var(--rly-control-height-dense);
+    min-inline-size: var(--rly-control-height-dense);
+    padding-inline: var(--rly-space-12);
+  }
+  .dense .content {
+    padding-block: var(--rly-space-4);
+  }
   .compact {
-    min-block-size: var(--rly-space-40);
+    min-block-size: var(--rly-control-height-compact);
   }
   .defaultSize {
-    min-block-size: var(--rly-space-48);
+    min-block-size: var(--rly-control-height-default);
   }
   .principal {
-    min-block-size: calc(var(--rly-space-48) + var(--rly-space-8));
+    min-block-size: var(--rly-control-height-principal);
     padding-inline: var(--rly-space-24);
   }
   .stretch {
@@ -60,7 +70,7 @@
 
   .label {
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
   .loadingContent {
     opacity: 0;
@@ -79,5 +89,27 @@
     .primary:not(:disabled):hover {
       background: var(--rly-color-text-2);
     }
+  }
+
+  /*
+   * Forced colours repaint a primary or pressed button's fill and label to the same system colour,
+   * leaving a solid box. Draw them as the system's selected pair instead, so the label stays readable.
+   */
+  @media (forced-colors: active) {
+    .primary,
+    .root[aria-pressed="true"] {
+      background: Highlight;
+      border-color: Highlight;
+      color: HighlightText;
+      forced-color-adjust: none;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .primary,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-pressed="true"] {
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
   }
 }

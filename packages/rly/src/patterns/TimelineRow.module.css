@@ -14,7 +14,7 @@
     color: var(--rly-color-text-2);
     font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
       var(--rly-type-code-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     padding-block-start: var(--rly-space-2);
   }
 
@@ -56,7 +56,7 @@
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .link {
@@ -80,7 +80,7 @@
     font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
       var(--rly-type-body-font);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     text-wrap: pretty;
   }
 

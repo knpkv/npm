@@ -18,7 +18,8 @@ const IconButtonStates = () => (
           label="Add item"
           size="compact"
         />
-        <IconButton data-icon-button-size="default" icon="search" label="Search" />
+        <IconButton data-icon-button-size="dense" icon="check" label="Mark done" />
+        <IconButton data-icon-button-size="default" icon="search" label="Search" size="default" />
         <IconButton
           data-icon-button-size="principal"
           data-icon-button-variant="primary"
@@ -48,7 +49,7 @@ export const States: Story = {
     await expect(canvas.getByRole("button", { name: "Loading item" })).toBeDisabled()
     await expect(canvas.getByRole("button", { name: "Continue" })).toBeVisible()
     await expect(canvasElement.querySelectorAll("[data-icon-button-variant]")).toHaveLength(3)
-    await expect(canvasElement.querySelectorAll("[data-icon-button-size]")).toHaveLength(3)
+    await expect(canvasElement.querySelectorAll("[data-icon-button-size]")).toHaveLength(4)
   },
   render: () => <IconButtonStates />
 }

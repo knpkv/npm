@@ -17,6 +17,15 @@ export default defineConfig({
   fullyParallel: false,
   // Per-run, so a concurrent copy never shares trace or screenshot files.
   outputDir: `test-results/rly-visual-${port}`,
+  projects: [
+    { name: "fine", testIgnore: /\.coarse\.spec\.ts$/ },
+    // Blink pointer type 2 is coarse: the browser reports a touch-first device to `(pointer: coarse)`.
+    {
+      name: "coarse",
+      testMatch: /\.coarse\.spec\.ts$/,
+      use: { launchOptions: { args: ["--blink-settings=primaryPointerType=2,availablePointerTypes=2"] } }
+    }
+  ],
   reporter: "list",
   retries: 0,
   testDir: "visual",
