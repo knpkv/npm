@@ -56,6 +56,7 @@ import {
   type RlyStateTone
 } from "@knpkv/rly/primitives"
 import { Exit, Option } from "effect"
+import * as Cause from "effect/Cause"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { ArrowRightIcon, CheckIcon, ChevronDownIcon, CodeIcon, LoaderIcon, PlusIcon, TrashIcon } from "lucide-react"
@@ -68,6 +69,7 @@ import { toast } from "sonner"
 import {
   appStateAtom,
   createApprovalRuleAtom,
+  deleteApprovalRuleAtom,
   createSandboxAtom,
   openPrAtom,
   refreshSinglePrAtom,
@@ -470,15 +472,7 @@ function CommentsSection({
         tone="progress"
       />
     ))
-    .onError(() => (
-      <StatePanel
-        announce="polite"
-        description="Refresh the pull request to try reading the conversation again."
-        title="Comments unavailable"
-        tone="critical"
-      />
-    ))
-    .onDefect(() => (
+    .onFailure(() => (
       <StatePanel
         announce="polite"
         description="Refresh the pull request to try reading the conversation again."
@@ -528,7 +522,7 @@ function CommentsSection({
         </div>
       )
     })
-    .render()
+    .exhaustive()
 }
 
 function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
@@ -663,9 +657,20 @@ interface ApproversCardProps {
   readonly currentUser: string | undefined
   readonly repoAccountId: string
   readonly onSetApprovers: (arns: ReadonlyArray<string>) => void
-  readonly onRefresh: () => void
+  /**
+   * Deletes this card's own rule (never a template rule), then refreshes the pull request. Says which
+   * step failed: a failed refresh is retried with `onRefresh`, never by deleting again.
+   */
+  readonly onRemoveRule: () => Promise<RuleRemoval>
+  readonly onRefresh: () => Promise<boolean>
   readonly permissionPrompt: boolean
 }
+
+/** How removing a rule ended. */
+type RuleRemoval =
+  | { readonly _tag: "Removed" }
+  | { readonly _tag: "DeleteFailed"; readonly reason: string }
+  | { readonly _tag: "RefreshFailed" }
 
 function ApproversCard({
   approvalRules,
@@ -674,6 +679,7 @@ function ApproversCard({
   currentUser,
   knownUserArns,
   onRefresh,
+  onRemoveRule,
   onSetApprovers,
   permissionPrompt,
   repoAccountId,
@@ -691,6 +697,11 @@ function ApproversCard({
     onRefresh
   })
   const { pendingAdd, pendingRemove } = optimistic
+  // Removing stays on until the refreshed rules drop the rule (the button goes with it), so it can't be
+  // clicked again against a rule that is already gone.
+  const [removal, setRemoval] = useState<{ readonly _tag: "Idle" } | { readonly _tag: "Removing" } | RuleRemoval>({
+    _tag: "Idle"
+  })
 
   // Pool members for THIS card: template rules + this card's managed rule (not other managed rules)
   const allPoolMembers = useMemo(() => {
@@ -707,6 +718,18 @@ function ApproversCard({
   const managedRule = approvalRules.find((r) => r.ruleName === ruleName && r.fromTemplate === undefined)
   const managedArns = managedRule?.poolMemberArns ?? []
   const managedMembers = managedRule?.poolMembers ?? []
+  const hasManagedRule = managedRule !== undefined
+  useEffect(() => {
+    if (!hasManagedRule) setRemoval({ _tag: "Idle" })
+  }, [hasManagedRule])
+  const removeRule = () => {
+    setRemoval({ _tag: "Removing" })
+    void onRemoveRule().then(setRemoval)
+  }
+  const refreshAfterRemoval = () => {
+    setRemoval({ _tag: "Removing" })
+    void onRefresh().then((refreshed) => setRemoval(refreshed ? { _tag: "Removed" } : { _tag: "RefreshFailed" }))
+  }
 
   // Users available to add (have known ARN + not already in pool)
   const addable = useMemo(
@@ -762,7 +785,32 @@ function ApproversCard({
         >
           <PlusIcon className="size-4" />
         </Button>
+        {managedRule === undefined ? null : (
+          // Only the rule this page created can be removed; template rules belong to the repository.
+          <RlyButton
+            // Removed and waiting for the refreshed rules to drop it: no second delete.
+            disabled={removal._tag === "Removed" || removal._tag === "RefreshFailed"}
+            loading={removal._tag === "Removing"}
+            onClick={removeRule}
+            size="compact"
+            variant="quiet"
+          >
+            Remove rule
+          </RlyButton>
+        )}
       </header>
+      {removal._tag === "DeleteFailed" ? (
+        <p className={styles.removeFailure} role="alert">
+          Couldn't remove the rule: {removal.reason}
+        </p>
+      ) : removal._tag === "RefreshFailed" ? (
+        <p className={styles.removeFailure} role="alert">
+          Removed the rule, but this page couldn't refresh to show it.{" "}
+          <RlyButton onClick={refreshAfterRemoval} size="compact" variant="quiet">
+            Refresh
+          </RlyButton>
+        </p>
+      ) : null}
       <div className={styles.approverBody}>
         {showPicker && (
           <div className={styles.approverPicker}>
@@ -961,6 +1009,7 @@ export function PRDetail() {
   const shareRefresh = useMemo(() => makeInFlight<Awaited<ReturnType<typeof refreshSingleWithResult>>>(), [refreshKey])
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
+  const deleteRule = useAtomSet(deleteApprovalRuleAtom, { mode: "promiseExit" })
   const fetchedRef = useRef<string | null>(null)
   const routeSelection = useMemo(() => {
     const route = pullRequestRouteCoordinates(accountId, prId, searchParams)
@@ -1194,13 +1243,17 @@ export function PRDetail() {
     },
     [commentNavigationIdentity, pr?.commentCount]
   )
-  const refreshAfterApprovalMutation = useCallback(() => {
+  /** Re-reads this pull request after an approval change; resolves with whether the refresh succeeded. */
+  const refreshAfterApprovalMutation = useCallback((): Promise<boolean> => {
     if (refreshAccountId === undefined || refreshAccountId.length === 0 || prId === undefined || prId.length === 0)
-      return
+      return Promise.resolve(false)
     // A refresh already in flight may have read the rules before this change, so read again after it.
-    void requestRefresh(refreshAccountId, prId, "fresh").then(
-      (refreshed) => invalidateReview(refreshed, false),
-      () => {}
+    return requestRefresh(refreshAccountId, prId, "fresh").then(
+      (refreshed) => {
+        invalidateReview(refreshed, false)
+        return true
+      },
+      () => false
     )
   }, [invalidateReview, prId, refreshAccountId, requestRefresh])
   const handleRefresh = useCallback(() => {
@@ -1698,6 +1751,22 @@ export function PRDetail() {
                     })
                   }
                 }}
+                onRemoveRule={() =>
+                  deleteRule({
+                    payload: { account: pr.account, approvalRuleName: card.ruleName, pullRequestId: pr.id }
+                  }).then((exit): Promise<RuleRemoval> | RuleRemoval => {
+                    if (Exit.isSuccess(exit)) {
+                      return refreshAfterApprovalMutation().then((refreshed) =>
+                        refreshed ? { _tag: "Removed" } : { _tag: "RefreshFailed" }
+                      )
+                    }
+                    const error = Cause.squash(exit.cause)
+                    return {
+                      _tag: "DeleteFailed",
+                      reason: Predicate.isError(error) ? error.message : "the server didn't answer."
+                    }
+                  })
+                }
                 permissionPrompt={state.permissionPrompt !== undefined}
                 repoAccountId={currentAcct}
                 required={card.required}

@@ -9,6 +9,7 @@
  *
  * @module
  */
+import { workRequestClockText } from "@knpkv/herdr-work/react"
 import { Data } from "effect"
 import { jobTitle } from "./activity-history.js"
 import type { SanitizedJobRecord } from "./approval-request.js"
@@ -84,26 +85,18 @@ export const pendingItems = (snapshot: DashboardSnapshot): ReadonlyArray<Pending
   )
 }
 
-/** "52s", "4m 12s", "11m": seconds only matter under five minutes. Never negative. */
-export const countdownText = (leftMs: number): string => {
-  const seconds = Math.max(0, Math.floor(leftMs / 1000))
-  const minutes = Math.floor(seconds / 60)
-  if (minutes === 0) return `${seconds}s`
-  return leftMs < SOON_MS ? `${minutes}m ${String(seconds % 60).padStart(2, "0")}s` : `${minutes}m`
-}
-
 /** How close a request is to its expiry, for its word and its clock's ink. */
 export type Urgency = "calm" | "soon" | "imminent" | "due"
 
 export const urgencyOf = (leftMs: number): Urgency =>
   leftMs <= 0 ? "due" : leftMs < IMMINENT_MS ? "imminent" : leftMs < SOON_MS ? "soon" : "calm"
 
-/** The clock for one request: its text, or "expiring" at zero while the hub has not answered. */
-export const clockText = (expiresAt: number | null, now: number): string | null => {
-  if (expiresAt === null) return null
-  const left = expiresAt - now
-  return left <= 0 ? "expiring" : countdownText(left)
-}
+/**
+ * The clock for one request: its text, or "expiring" at zero while the hub has not answered. The
+ * same words as the Work board's request clocks, from herdr-work, so the two tabs never disagree.
+ */
+export const clockText = (expiresAt: number | null, now: number): string | null =>
+  expiresAt === null ? null : workRequestClockText(expiresAt, now)
 
 /**
  * How much of a request's approval window is used, for its row's LimitTrack: `value` in percent of

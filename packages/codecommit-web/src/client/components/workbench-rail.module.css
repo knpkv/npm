@@ -42,12 +42,16 @@
   align-content: start;
   display: grid;
   gap: var(--rly-space-16);
+  /* One track as wide as the rail: an auto track grows to the longest unbreakable token and clips. */
+  grid-template-columns: minmax(var(--rly-space-0), 1fr);
   overflow-y: auto;
   padding: var(--rly-space-16) var(--rly-space-8);
 }
 
 .summary {
   margin: 0;
+  /* An IAM action ("codecommit:EvaluatePullRequestApprovalRules") is one token; let it wrap. */
+  overflow-wrap: break-word;
   padding-inline: var(--rly-space-8);
 }
 
