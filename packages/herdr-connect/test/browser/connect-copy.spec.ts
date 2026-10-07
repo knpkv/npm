@@ -10,17 +10,23 @@ const Command = Schema.Struct({
   lines: Schema.optional(Schema.Number)
 })
 
-const open = async (page: Page) => {
+const open = async (page: Page, scrollState?: { readonly mode: "known" | "unknown"; readonly start?: number }) => {
   // Opened links land on a stub page instead of a DNS failure, so the popup keeps its URL.
   await page.context().route(
     "https://example.test/**",
     (route) => route.fulfill({ body: "linked", contentType: "text/plain" })
   )
   await page.request.post("/__test/reset")
+  if (scrollState !== undefined) {
+    await page.request.post(`/__test/scroll-state?mode=${scrollState.mode}&start=${String(scrollState.start ?? 0)}`)
+  }
   await page.goto("/")
   await page.getByRole("button", { name: /fixture-pane/ }).click()
   await expect(page.getByText("connected", { exact: true })).toBeVisible()
-  await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith("300 "))).toBe(true)
+  // A session that starts scrolled back never shows the newest line, so wait for any screen instead.
+  const newest = (scrollState?.start ?? 0) > 0 ? "" : "300 "
+  await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith(newest) && row.trim() !== ""))
+    .toBe(true)
 }
 
 const screen = async (page: Page) =>
@@ -269,3 +275,25 @@ for (const width of [320, 390]) {
     ).toBeLessThanOrEqual(0)
   })
 }
+
+test.describe("scroll position from the hub", () => {
+  const rail = (page: Page) => page.getByRole("toolbar", { name: "Terminal keyboard controls" })
+  const downs = async (page: Page) =>
+    (await commands(page)).filter((command) => command.type === "terminal.scroll" && command.direction === "down")
+      .map((command) => command.lines ?? 0)
+
+  test("a pane left scrolled back says so on open, and Latest returns in exact pages", async ({ page }) => {
+    await open(page, { mode: "known", start: 50 })
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back")
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    await expect(olderOutput(page)).toHaveCount(0)
+    expect(await downs(page)).toEqual([50])
+  })
+
+  test("an unreadable position falls back to the local estimate and the page-by-page jump", async ({ page }) => {
+    await open(page, { mode: "unknown", start: 30 })
+    await expect(olderOutput(page)).toHaveCount(0)
+    await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
+    await expect.poll(() => downs(page)).toContain(400)
+  })
+})

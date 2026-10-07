@@ -157,11 +157,26 @@ export const HerdrTerminalEvent = Schema.Union([
 ])
 export type HerdrTerminalEvent = typeof HerdrTerminalEvent.Type
 
+/**
+ * How far herdr has the pane scrolled back, read from `herdr pane get`. herdr keeps that position
+ * while output arrives and between viewers, so only the server can know it. `null` means the read
+ * failed and the position is unknown — never "at the bottom".
+ */
+export const TerminalScrollState = Schema.Struct({
+  type: Schema.Literal("terminal.scroll_state"),
+  offsetFromBottom: Schema.NullOr(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)))
+})
+export type TerminalScrollState = typeof TerminalScrollState.Type
+
+/** What a terminal session yields: herdr's own events plus the scroll state the connector reads. */
+export type TerminalSessionEvent = HerdrTerminalEvent | TerminalScrollState
+
 export const TerminalServerSignal = Schema.Union([
   Schema.Struct({ type: Schema.Literal("terminal.ready") }),
   Schema.Struct({
     type: Schema.Literal("terminal.closed"),
     reason: Schema.String.check(Schema.isMaxLength(1_024))
-  })
+  }),
+  TerminalScrollState
 ])
 export type TerminalServerSignal = typeof TerminalServerSignal.Type

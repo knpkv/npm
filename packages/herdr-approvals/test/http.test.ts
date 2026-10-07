@@ -3963,7 +3963,7 @@ esac
             events: attempt === 2
               ? Stream.empty
               : attempt === 4
-              ? Stream.make({
+              ? Stream.make({ type: "terminal.scroll_state", offsetFromBottom: 42 }, {
                 bytes: Buffer.alloc((terminalFrameMaxEncodedBytes / 4) * 3).toString("base64"),
                 encoding: "ansi",
                 full: true,
@@ -4100,6 +4100,7 @@ esac
             expect(sends).toBe(1)
 
             let maximumFrameBytes = 0
+            const signals: Array<string> = []
             const maximumFrameClose = yield* Effect.promise(
               () =>
                 new Promise<number>((resolve, reject) => {
@@ -4107,12 +4108,15 @@ esac
                   socket.once("error", reject)
                   socket.on("message", (data, isBinary) => {
                     if (isBinary) maximumFrameBytes = Buffer.byteLength(data)
+                    else signals.push(data.toString())
                   })
                   socket.once("close", (code) => resolve(code))
                 })
             )
             expect(maximumFrameClose).toBe(1_000)
             expect(maximumFrameBytes).toBe((terminalFrameMaxEncodedBytes / 4) * 3)
+            // The scroll position is relayed as a signal and does not end the session.
+            expect(signals).toContain(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 42 }))
 
             const held = yield* Effect.promise(
               () =>

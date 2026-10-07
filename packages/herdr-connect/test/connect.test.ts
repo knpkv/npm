@@ -1486,6 +1486,7 @@ describe("Connect public seams", () => {
     writeFileSync(
       command,
       `#!/bin/sh
+case "$1" in pane) printf '%s\\n' '{"result":{"pane":{"scroll":{"offset_from_bottom":0}}}}'; exit 0 ;; esac
 printf '%s\\n' "$@" > '${argumentsPath}'
 dd if=/dev/zero bs=131072 count=1 2>/dev/null >&2
 printf '%s\\n' '{"type":"terminal.frame","seq":1,"encoding":"ansi","width":100,"height":30,"full":true,"bytes":"b2s="}'

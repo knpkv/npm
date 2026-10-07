@@ -45,6 +45,8 @@ export interface TerminalInteraction {
   /** Output landed: requested scroll lines are now on screen. */
   readonly frameArrived: (data: Uint8Array) => void
   readonly jumpToLatest: () => void
+  /** The pane's real scroll position from the server; `null` when the server could not read it. */
+  readonly serverScrollState: (offsetFromBottom: number | null) => void
   /** Ask the view to show the screen as selectable text, as a long-press does. */
   readonly selectText: () => void
   readonly dispose: () => void
@@ -77,6 +79,12 @@ const maximumJumpCommands = 300
 /** Jump-to-latest gives up only after this long without a screen, so a slow host still gets there. */
 const jumpSilenceMs = 2_000
 
+/** What the server has said about herdr's scroll position. */
+type ServerPosition =
+  | { readonly _tag: "NoSignal" }
+  | { readonly _tag: "Unknown" }
+  | { readonly _tag: "Known"; readonly offset: number }
+
 const isCopyKey = (event: KeyboardEvent): boolean =>
   (event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === "c"
 
@@ -102,6 +110,9 @@ export const bindTerminalInteraction = (
   let frame: number | null = null
   let lastTick = 0
   let reportedBack = 0
+  // The server's reading of herdr's position. Without a known one — an older hub, or a read that
+  // failed — the local estimate and the frame-by-frame jump stand in.
+  let serverPosition: ServerPosition = { _tag: "NoSignal" }
   let holdTimer: ReturnType<typeof setTimeout> | null = null
   let wheelTimer: ReturnType<typeof setTimeout> | null = null
   // herdr keeps a reader's place while output arrives, so how far back the client is cannot be
@@ -143,7 +154,7 @@ export const bindTerminalInteraction = (
       const offset = track.translate()
       target.style.transform = offset === 0 ? "" : `translate3d(0, ${offset}px, 0)`
     }
-    const back = track.linesBack()
+    const back = serverPosition._tag === "Known" ? serverPosition.offset : track.linesBack()
     if (back !== reportedBack) {
       reportedBack = back
       view.onLinesBack(back)
@@ -324,10 +335,23 @@ export const bindTerminalInteraction = (
     jumpToLatest: () => {
       velocity = 0
       track.reset()
-      draw()
       endJump()
+      // With the real position known, send exactly the pages it takes; herdr clamps at the bottom.
+      if (serverPosition._tag === "Known") {
+        for (let remaining = serverPosition.offset; remaining > 0; remaining -= maximumLinesPerCommand) {
+          sendLines({ direction: "down", lines: Math.min(maximumLinesPerCommand, remaining) })
+        }
+        serverPosition = { _tag: "Known", offset: 0 }
+        draw()
+        return
+      }
+      draw()
       jump = { previous: null, sent: 0, timer: null }
       jumpStep(null)
+    },
+    serverScrollState: (offsetFromBottom) => {
+      serverPosition = offsetFromBottom === null ? { _tag: "Unknown" } : { _tag: "Known", offset: offsetFromBottom }
+      draw()
     },
     dispose: () => {
       endJump()

@@ -13,6 +13,8 @@
  * `GET /__test/commands` returns every client command received with its arrival time
  * (`Date.now()`); `POST /__test/reset` clears them. `GET /__test/screen` returns the latest
  * session's rows and size, so tests can aim at text and measurements can read the top line.
+ * `POST /__test/scroll-state?mode=known|unknown&start=N` makes the next sessions report their scroll
+ * position as the hub does — off by default, which is how a hub without that signal behaves.
  */
 import { NodeRuntime } from "@effect/platform-node"
 import { Config, Console, Effect, Option, Schema } from "effect"
@@ -105,10 +107,17 @@ const decodeCommand = Schema.decodeUnknownOption(Schema.fromJsonString(TerminalC
 const commands: Array<ReceivedCommand> = []
 let latestScreen: FixtureScreen = { cols: 0, rows: [] }
 
+/** Whether sessions report their scroll position, and where a new session starts. */
+interface ScrollStateMode {
+  readonly report: "off" | "known" | "unknown"
+  readonly startOffset: number
+}
+let scrollStateMode: ScrollStateMode = { report: "off", startOffset: 0 }
+
 /** One session: a screen of `rows` lines ending `offset` lines above the newest. */
 const session = (socket: WebSocket, cols: number, rows: number, { rttMs, tickMs }: SessionTiming) => {
   const history = initialHistory()
-  let offset = 0
+  let offset = scrollStateMode.startOffset
   let width = cols
   let height = rows
   // Soft-wraps long lines to the terminal width, as the pane would before herdr renders it.
@@ -123,6 +132,12 @@ const session = (socket: WebSocket, cols: number, rows: number, { rttMs, tickMs 
     const end = wrapped.length - offset
     return wrapped.slice(Math.max(0, end - height), end)
   }
+  const reportScroll = (): void => {
+    if (scrollStateMode.report === "off") return
+    screenRows()
+    const offsetFromBottom = scrollStateMode.report === "known" ? offset : null
+    socket.send(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom }))
+  }
   const render = (): void => {
     if (socket.readyState !== socket.OPEN) return
     latestScreen = { cols: width, rows: screenRows() }
@@ -130,6 +145,7 @@ const session = (socket: WebSocket, cols: number, rows: number, { rttMs, tickMs 
     const body = screenRows()
       .map((row, index) => `\u001b[${index + 1};1H${row}${row.length < width ? "\u001b[K" : ""}`)
       .join("")
+    reportScroll()
     socket.send(Buffer.from(`\u001b[?25l\u001b[H\u001b[2J${body}`), { binary: true })
   }
   socket.send(JSON.stringify({ type: "terminal.ready" }))
@@ -186,8 +202,16 @@ const handle = (request: IncomingMessage, response: ServerResponse): void => {
     json(response, JSON.stringify(latestScreen))
   } else if (url.pathname === "/__test/commands") {
     json(response, JSON.stringify(commands))
+  } else if (url.pathname === "/__test/scroll-state" && request.method === "POST") {
+    const mode = url.searchParams.get("mode")
+    scrollStateMode = {
+      report: mode === "known" || mode === "unknown" ? mode : "off",
+      startOffset: Number(url.searchParams.get("start") ?? "0")
+    }
+    json(response, JSON.stringify(scrollStateMode))
   } else if (url.pathname === "/__test/reset" && request.method === "POST") {
     commands.length = 0
+    scrollStateMode = { report: "off", startOffset: 0 }
     json(response, JSON.stringify({ ok: true }))
   } else {
     response.writeHead(404)

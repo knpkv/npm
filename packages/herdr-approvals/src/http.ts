@@ -2156,6 +2156,11 @@ export const startHttpServer = async (
               return
             }
             socket.send(payload, { binary: true })
+          } else if (event.type === "terminal.scroll_state") {
+            // The pane's scroll position as the connector read it; dropped under backpressure,
+            // since the next read replaces it.
+            const payload = JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event))
+            if (terminalBufferCanAccept(socket.bufferedAmount, Buffer.byteLength(payload))) socket.send(payload)
           } else {
             const payload = JSON.stringify(
               Schema.decodeUnknownSync(TerminalServerSignal)({
