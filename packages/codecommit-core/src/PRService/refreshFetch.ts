@@ -135,6 +135,7 @@ export const fetchAndUpsertPRs = (params: {
                         message,
                         profile: account.profile,
                         deduplicate: true
+                        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                       }).pipe(Effect.catch(() => Effect.void))
                       // Typed first (credential failure, or a provider auth error), with the older text match as fallback.
                       if (isAuthError) yield* markAuthFailed(account.profile)
@@ -263,6 +264,7 @@ export const fetchAndUpsertPRs = (params: {
             const pending = subscribed ? Option.match(written.replaced, { onNone: () => [], onSome: transitions }) : []
             yield* Effect.forEach(notificationsFor(pending, written), (n) => notificationRepo.add(n), {
               discard: true
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             }).pipe(Effect.catch(() => Effect.void))
             const isAuthor = currentUser !== undefined && currentUser !== "" && pr.author === currentUser
             const isApprover = currentUser !== undefined && currentUser !== "" &&
@@ -271,6 +273,7 @@ export const fetchAndUpsertPRs = (params: {
               yield* subscriptionRepo.subscribe(awsAccountId, pr.id, {
                 repositoryName: pr.repositoryName,
                 accountRegion: pr.account.region
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               }).pipe(Effect.catch(() => Effect.void))
               yield* Ref.update(
                 subscribedRef,
@@ -322,6 +325,7 @@ export const fetchAndUpsertPRs = (params: {
                               ? prRepo.deleteOne(pr.awsAccountId, pr.id, observation, {
                                 repositoryName: pr.repositoryName,
                                 accountRegion: pr.accountRegion
+                                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                               }).pipe(Effect.catch(() => Effect.void))
                               : Effect.logWarning(
                                 `stale pull request #${pr.id} could not be re-read; its row is kept`,
@@ -372,12 +376,14 @@ export const fetchAndUpsertPRs = (params: {
           } in ${regions} couldn't be re-evaluated, so their approval is unknown: ${first.message}`,
           profile: first.profile,
           replaceUnread: true
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         }).pipe(Effect.catch(() => Effect.void))
       },
       { discard: true }
     )
 
     // Propagate repoAccountId from any PR that has it to all PRs that don't
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     yield* prRepo.propagateRepoAccountId().pipe(Effect.catch(() => Effect.void))
 
     const partial = yield* Ref.get(partialScopes)

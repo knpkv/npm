@@ -1,0 +1,11 @@
+id: no-raw-pull-request-approvers-read
+valid:
+  - |
+    const count = currentApprovers(pr).length
+  - |
+    const row = { approvedBy: [] }
+invalid:
+  - |
+    const count = pr.approvedBy.length
+  - |
+    return pullRequest.approvedBy.some((name) => name === viewer)

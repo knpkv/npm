@@ -109,6 +109,7 @@ describe("pull request coordinate migration", () => {
       yield* sql`UPDATE pull_requests SET approval_unknown_reason = 'Throttled'`
       yield* sql`UPDATE pull_requests SET is_approved = 1 WHERE repository_name = 'billing'`
       yield* migration0024.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      yield* sql`UPDATE pull_requests SET status = 'MERGED' WHERE repository_name = 'billing'`
       yield* migration0025.pipe(Effect.provideService(SqlClient.SqlClient, sql))
       // An unknown row not approved may be a first-seen placeholder, so its baseline starts unknown; an
       // unknown approved one kept an earlier successful evaluation (placeholders are stored unapproved).
@@ -116,11 +117,12 @@ describe("pull request coordinate migration", () => {
         yield* sql<{ repository: string; known: number }>`
           SELECT repository_name AS repository, approval_baseline_known AS known FROM pull_requests ORDER BY 1`
       ).toEqual([{ repository: "billing", known: 1 }, { repository: "payments", known: 0 }])
-      // Before 0025 a revoked approver was never cleared, so every existing approver list is only last known.
+      // Before 0025 a revoked approver was never cleared, so an open row's list is only last known; the
+      // next refresh re-reads it. A merged or closed row is never re-read, so its list stays history.
       expect(
         yield* sql<{ repository: string; unknown: number }>`
           SELECT repository_name AS repository, approvers_unknown AS unknown FROM pull_requests ORDER BY 1`
-      ).toEqual([{ repository: "billing", unknown: 1 }, { repository: "payments", unknown: 1 }])
+      ).toEqual([{ repository: "billing", unknown: 0 }, { repository: "payments", unknown: 1 }])
       yield* sql`DELETE FROM pull_requests WHERE repository_name = 'billing'`
       yield* sql`UPDATE pull_requests SET approval_unknown_reason = NULL, approval_baseline_known = 1`
       yield* insertPullRequest(sql, "orders", "us-east-1")

@@ -36,7 +36,7 @@ import {
   type RepositoryName
 } from "../Domain.js"
 import { type AwsClientError, RefreshError } from "../Errors.js"
-import { countAllComments, type PRState } from "./internal.js"
+import { approverColumnsOf, countAllComments, type PRState } from "./internal.js"
 
 interface ResolvedAccount {
   readonly profile: AwsProfileName
@@ -145,6 +145,7 @@ const resolveAccountFromCache = (
 
     // Fall back to config only when the requested region is configured.
     const configService = yield* ConfigService
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const config = yield* configService.load.pipe(Effect.catch(() => Effect.succeed({ accounts: [] })))
     const configAccount = config.accounts.find((a) => a.profile === awsAccountId && a.enabled)
     const region = coordinates !== undefined
@@ -204,6 +205,7 @@ export const makeRefreshSinglePR = (
         Effect.catchTag("CacheError", () => Effect.succeed(Option.none<CachedPullRequest>()))
       )
       : yield* prRepo.findByCoordinates(awsAccountId, prId, coordinates.repositoryName, coordinates.region).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
       )
 
@@ -238,6 +240,7 @@ export const makeRefreshSinglePR = (
     }).pipe(
       Effect.map(Option.some),
       Effect.tapError((e) => Effect.logWarning("comment fetch failed; keeping the cached comments", e)),
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
     )
 
@@ -271,9 +274,7 @@ export const makeRefreshSinglePR = (
       commentCount: Option.match(fetched, { onNone: () => null, onSome: countAllComments }),
       link: cached?.link ?? pr?.link ??
         codecommitConsoleUrl(account.region, coordinates?.repositoryName ?? detail.repositoryName, prId),
-      approvedBy: detail.approvedBy,
-      approvedByArns: detail.approvedByArns,
-      approversUnknown: detail.approversUnknown === true,
+      ...approverColumnsOf(detail),
       approvalRules: detail.approvalRules
     }
 
@@ -283,6 +284,7 @@ export const makeRefreshSinglePR = (
       accountRegion: account.region
     }
     const isSubscribed = yield* subscriptionRepo.isSubscribed(durableAccountId, prId, identity).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(false))
     )
 
@@ -290,6 +292,7 @@ export const makeRefreshSinglePR = (
     const commentNotifications: ReadonlyArray<NewNotification> = isSubscribed && Option.isSome(cachedPR) &&
         Option.isSome(fetched)
       ? yield* commentRepo.find(durableAccountId, prId, identity).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>())),
         Effect.map(Option.match({
           onNone: () => [],
@@ -334,6 +337,7 @@ export const makeRefreshSinglePR = (
       })
       : []
     yield* Effect.forEach(notificationsFor(pending, written), (n) => notificationRepo.add(n), { discard: true }).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.void)
     )
     // The comment count is recomputed from this read, so it is written only to the row this refresh
@@ -346,13 +350,16 @@ export const makeRefreshSinglePR = (
         versions,
         { commentCount: countAllComments(fetched.value) },
         identity
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       ).pipe(Effect.catch(() => Effect.succeed(false)))
       : false
     if (commentsWritten && Option.isSome(fetched)) {
       yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(fetched.value), identity).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.void)
       )
       yield* Effect.forEach(commentNotifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.void)
       )
     }

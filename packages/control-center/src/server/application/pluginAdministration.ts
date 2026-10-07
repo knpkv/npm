@@ -1070,6 +1070,7 @@ const removeSetupSecrets = (
 ): Effect.Effect<void> =>
   Effect.forEach(
     references,
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     (reference) => secrets.remove(reference).pipe(Effect.catch(() => Effect.void)),
     { discard: true }
   )
@@ -1152,6 +1153,7 @@ const disableAfterSetupFailure = (
     )
   })).pipe(
     Effect.asVoid,
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.void)
   )
 

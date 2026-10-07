@@ -187,6 +187,19 @@ export const prToUpsertInput = (pr: PullRequest, awsAccountId: string): UpsertIn
   approvalRules: pr.approvalRules
 })
 
+/** A detail read's approver columns for the upsert: the list exactly as read, beside its unknown marker. */
+export const approverColumnsOf = (
+  detail: {
+    readonly approvedBy: ReadonlyArray<string>
+    readonly approvedByArns: ReadonlyArray<string>
+    readonly approversUnknown?: true | undefined
+  }
+): Pick<UpsertInput, "approvedBy" | "approvedByArns" | "approversUnknown"> => ({
+  approvedBy: detail.approvedBy,
+  approvedByArns: detail.approvedByArns,
+  approversUnknown: detail.approversUnknown === true
+})
+
 const countThreadComments = (thread: CommentThread): number =>
   1 + thread.replies.reduce((sum, r) => sum + countThreadComments(r), 0)
 

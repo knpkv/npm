@@ -4,6 +4,7 @@ import {
   approvalOf,
   approvalUnknownLabel,
   approversUnknownLabel,
+  currentApprovers,
   type PullRequest
 } from "@knpkv/codecommit-core/Domain.js"
 import type { RlyStateTone } from "@knpkv/rly/primitives"
@@ -27,7 +28,7 @@ export const pullRequestRowDecision = (pr: DecisionFacts): PullRequestRowDecisio
     case "OPEN": {
       if (!pr.isMergeable) return { actionLabel: "Inspect conflict", summary: "Merge blocked" }
       if (pr.approversUnknown === true) return { actionLabel: "Open review", summary: approversUnknownLabel }
-      const approvedCount = pr.approvedBy.length
+      const approvedCount = currentApprovers(pr).length
       return {
         actionLabel: "Open review",
         summary: `${approvedCount} ${approvedCount === 1 ? "approval" : "approvals"}`

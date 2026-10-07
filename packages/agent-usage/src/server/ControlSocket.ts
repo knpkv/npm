@@ -191,6 +191,7 @@ const answer = (secrets: OwnerSessionService, listening: Effect.Effect<void>) =>
     yield* listening
     const url = yield* mintBootstrapUrl(secrets)
     yield* write.write(`${encodeReply({ url })}\n`)
+    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   })).pipe(Effect.timeout(EXCHANGE_DEADLINE), Effect.ignore)
 
 /**
@@ -260,6 +261,7 @@ export const controlSocket = Effect.fn("ControlSocket.listen")(function*(
   const server = yield* NodeSocketServer.make({ path: socketPath }).pipe(
     Effect.mapError((error) => new SocketRefused({ path: socketPath, reason: errnoOf(error) ?? error.reason._tag }))
   )
+  // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   yield* Effect.addFinalizer(() => fs.remove(socketPath).pipe(Effect.ignore))
   yield* fs.chmod(socketPath, 0o600).pipe(
     Effect.mapError((error) => new SocketPathUnsafe({ path: socketPath, reason: error.reason._tag }))

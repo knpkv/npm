@@ -1013,7 +1013,7 @@ export function PRDetail() {
     }
     for (const p of state.pullRequests) {
       addUser(p.author)
-      for (const name of p.approvedBy) addUser(name)
+      for (const name of currentApprovers(p)) addUser(name)
       for (const name of p.commentedBy) addUser(name)
       for (const rule of p.approvalRules) {
         for (const name of rule.poolMembers) addUser(name)

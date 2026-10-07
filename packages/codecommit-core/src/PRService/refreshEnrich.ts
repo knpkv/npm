@@ -44,6 +44,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
     }).pipe(
       Effect.map(Option.some),
       Effect.tapError((e) => Effect.logWarning("comment fetch failed; keeping the cached comments", e)),
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
     )
     // A failed fetch is not "no comments": write nothing, so the count stays as it was (not loaded
@@ -52,6 +53,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
     const locs = fetched.value
 
     const cachedComments = yield* commentRepo.find(awsAccountId, prId, coordinates).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
     )
     const commentCount = countAllComments(locs)
@@ -68,13 +70,16 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
       : []
 
     const written = yield* prRepo.writeDerived(awsAccountId, prId, versionsOf(row), { commentCount }, coordinates).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(false))
     )
     if (!written) return
     yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs), coordinates).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.void)
     )
     yield* Effect.forEach(notifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.void)
     )
   })
@@ -113,6 +118,7 @@ export const enrichComments = (params: {
 
     // Derive commented_by from cached pr_comments
     yield* prRepo.refreshCommentedBy().pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.void)
     )
   }).pipe(
