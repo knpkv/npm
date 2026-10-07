@@ -27,7 +27,7 @@
   },
   "scripts": {
     "build": "tsc -b tsconfig.build.json --force",
-    "check": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run"
   },

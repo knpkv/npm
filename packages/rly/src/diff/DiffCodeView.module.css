@@ -28,8 +28,8 @@
   }
 
   .viewer:focus-visible {
-    outline: var(--rly-space-2) solid var(--rly-color-focus);
-    outline-offset: calc(var(--rly-space-2) * -1);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
   }
 
   .annotation {
@@ -43,8 +43,8 @@
   }
 
   .annotation:focus-visible {
-    outline: var(--rly-space-2) solid var(--rly-color-focus);
-    outline-offset: calc(var(--rly-space-2) * -1);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
   }
 
   .empty,

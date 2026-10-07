@@ -1,5 +1,5 @@
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
-import { describe, expect, it } from "@effect/vitest"
+import { assert, describe, expect, it } from "@effect/vitest"
 import * as ChildEnv from "@knpkv/codecommit-core/ChildEnv.js"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
@@ -154,6 +154,7 @@ describe("CodeCommit Git and review fixtures", () => {
         const afterPush = yield* clone("after-push")
         expect(yield* hasObject(afterPush, fixture.revisions.secondHead)).toBe(true)
         const pullRequest = scenario.repositories[0].pullRequests[0]
+        assert.isDefined(pullRequest)
         for (const revision of pullRequest.revisions) {
           const gitFiles = (yield* runGit([
             "-C",

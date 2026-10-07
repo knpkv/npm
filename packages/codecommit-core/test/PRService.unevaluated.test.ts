@@ -13,7 +13,10 @@ import { resolveAccounts } from "../src/PRService/refreshResolve.js"
 const noEnabledAccounts = Layer.mergeAll(
   Layer.mock(AwsClient, {}),
   Layer.mock(NotificationRepo, {}),
-  Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([]) }),
+  Layer.mock(PullRequestRepo, {
+    observe: () => Effect.succeed(1),
+    findAll: () => Effect.succeed([])
+  }),
   Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
   Layer.mock(ConfigService, {
     load: Effect.succeed(

@@ -187,7 +187,7 @@ describe("stripEmails", () => {
     const stripped = stripEmails(versionWithEmails)
     expect(stripped.driver?.displayName).toBe("Dana")
     expect(stripped.contributors.map((c) => c.accountId)).toEqual(["c1", "c2"])
-    expect(stripped.approvers[0].status).toBe("APPROVED")
+    expect(stripped.approvers[0]?.status).toBe("APPROVED")
     expect(stripped.tickets.map((t) => t.key)).toEqual(["PROJ-1", "PROJ-2"])
   })
 
@@ -195,7 +195,7 @@ describe("stripEmails", () => {
     // The command emits the unmodified version when --emails is set; assert the
     // original is untouched (stripEmails returns a copy, never mutating input).
     expect(versionWithEmails.driver?.emailAddress).toBe("dana@example.com")
-    expect(versionWithEmails.tickets[0].assignee?.emailAddress).toBe("tom@example.com")
+    expect(versionWithEmails.tickets[0]?.assignee?.emailAddress).toBe("tom@example.com")
   })
 
   it("handles a null driver and null assignees without throwing", () => {
@@ -249,39 +249,40 @@ const makeJiraLayer = () => {
   )
 }
 
-describe("listProjectVersions filtering", () => {
+// One stateless Jira stub for the block; the layer is built once per block, not per test.
+it.layer(VersionServiceLayer.pipe(Layer.provideMerge(makeJiraLayer())))("listProjectVersions filtering", (it) => {
   it.effect("returns all versions when neither flag is set", () =>
     Effect.gen(function*() {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ")
       expect(list.map((v) => v.id)).toEqual(["1", "2", "3", "4"])
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+    }))
 
   it.effect("keeps only released versions when released=true", () =>
     Effect.gen(function*() {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ", { released: true })
       expect(list.map((v) => v.id)).toEqual(["1", "3"])
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+    }))
 
   it.effect("keeps only unreleased versions when unreleased=true", () =>
     Effect.gen(function*() {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ", { unreleased: true })
       expect(list.map((v) => v.id)).toEqual(["2", "4"])
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+    }))
 
   it.effect("caps the result count at maxResults", () =>
     Effect.gen(function*() {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ", { maxResults: 2 })
       expect(list.map((v) => v.id)).toEqual(["1", "2"])
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+    }))
 
   it.effect("preserves Jira Premium contributors decoded from the generated Version schema", () =>
     Effect.gen(function*() {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ", { maxResults: 1 })
       expect(list[0]?.contributors.map((person) => person.accountId)).toEqual(["account-1", "account-2"])
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+    }))
 })
