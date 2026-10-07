@@ -17,6 +17,8 @@ files:
   - "packages/rly/src/**/*.ts"
   - "packages/herdr-connect/src/**/*.tsx"
   - "packages/herdr-connect/src/**/*.ts"
+  - "packages/codecommit-web/src/client/**/*.tsx"
+  - "packages/codecommit-web/src/client/**/*.ts"
 
 note: |
   "A · B · C" is template chrome (Andrey's visual bar, item 3). Write the facts as a

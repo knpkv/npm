@@ -57,7 +57,8 @@ const makePermissionService = (
       ? Effect.void
       : Ref.update(updates, (current) => [...current, update])
   },
-  setAudit: () => Effect.void
+  setAudit: () => Effect.void,
+  setCategory: () => Effect.void
 })
 
 const makeAuditLog = (entries: Ref.Ref<ReadonlyArray<NewAuditLogEntry>>): AuditLogRepo["Service"] => ({

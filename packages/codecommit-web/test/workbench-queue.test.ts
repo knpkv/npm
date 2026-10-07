@@ -3,6 +3,7 @@ import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 
 import {
+  approvalUnknownSummary,
   type Caller,
   type CallerIdentity,
   formatSpan,
@@ -550,5 +551,20 @@ describe("workbenchQueue with the caller's resolved identity", () => {
     const pullRequests = [make({ approvalRules: [reviewers], id: "1" })]
     expect(yourReviewCount(pullRequests, resolved)).toBe(1)
     expect(yourReviewCount(pullRequests, byName("andrey"))).toBe(0)
+  })
+})
+
+describe("approvalUnknownSummary", () => {
+  it("counts open pull requests with approval unknown and names the reason only when they share one", () => {
+    const unknown = (id: string, tag: "NotPermitted" | "Throttled", status: "OPEN" | "MERGED" = "OPEN") =>
+      make({ approvalUnknown: { _tag: tag }, id, isApproved: true, status })
+    expect(approvalUnknownSummary([make({ id: "1" })])).toEqual({ count: 0, reason: undefined })
+    expect(approvalUnknownSummary([unknown("1", "Throttled"), unknown("2", "Throttled")])).toEqual({
+      count: 2,
+      reason: { _tag: "Throttled" }
+    })
+    expect(approvalUnknownSummary([unknown("1", "Throttled"), unknown("2", "NotPermitted")]).reason).toBeUndefined()
+    // Closed and merged pull requests wait on no one.
+    expect(approvalUnknownSummary([unknown("1", "Throttled", "MERGED")]).count).toBe(0)
   })
 })

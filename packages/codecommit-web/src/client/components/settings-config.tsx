@@ -93,10 +93,11 @@ export function SettingsConfig() {
           .onError(() => <p className="text-xs text-destructive py-1">Failed to load config path</p>)
           .onDefect(() => <p className="text-xs text-destructive py-1">Failed to load config path</p>)
           .onSuccess((data) => {
-            const validationDetail = AsyncResult.isSuccess(validation) ? ` · ${validation.value.status}` : ""
+            const validationDetail = AsyncResult.isSuccess(validation) ? `, ${validation.value.status}` : ""
+            // A missing file is the normal first run: defaults apply until a setting is saved.
             const detail = data.exists
               ? `${fmtModified(data.modifiedAt)}${validationDetail}`
-              : `Not created yet${validationDetail}`
+              : "No file yet: using defaults. It's written the first time you save a setting."
             return (
               <PathRow
                 label="Config file"
@@ -133,7 +134,7 @@ export function SettingsConfig() {
           .onDefect(() => <p className="text-xs text-destructive py-1">Failed to load database info</p>)
           .onSuccess((data) => {
             const detail = data.exists
-              ? `${formatBytes(data.sizeBytes)} · ${fmtModified(data.modifiedAt)}`
+              ? `${formatBytes(data.sizeBytes)}, ${fmtModified(data.modifiedAt)}`
               : "Not created yet"
             return (
               <PathRow
