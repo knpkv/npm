@@ -145,12 +145,21 @@
   background: var(--rly-color-blocked-ink);
 }
 
+/*
+ * The failure's words, inline only where the header has room for them beside the navigation.
+ * Narrower, the label and dot stay, and the full detail stays on the status's title and accessible
+ * name, so it is never cut to an ellipsis or pushed over the navigation.
+ */
 .statusErrorDetail {
-  overflow: hidden;
-  max-inline-size: min(15rem, 20vw);
+  display: none;
   color: var(--rly-color-blocked-ink);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+@media (min-width: 110rem) {
+  .statusErrorDetail {
+    display: inline;
+    max-inline-size: 22rem;
+  }
 }
 
 .commandButton,
@@ -377,10 +386,6 @@
   .utilities {
     grid-column: 2;
     grid-row: 1;
-  }
-
-  .statusErrorDetail {
-    max-inline-size: min(9rem, 22vw);
   }
 }
 
