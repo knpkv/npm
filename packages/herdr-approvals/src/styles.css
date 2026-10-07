@@ -509,6 +509,11 @@
     gap: var(--rly-space-16);
   }
 
+  /* A failed refresh's notice sits in the page gutter above the content it is about. */
+  .dashboard-refresh-failed {
+    margin-block-end: var(--rly-space-12);
+  }
+
   .activity-toolbar {
     align-items: end;
     background: color-mix(in srgb, var(--rly-color-surface-1) 94%, transparent);

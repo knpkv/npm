@@ -26,6 +26,22 @@ describe("shared fleet shell", () => {
     expect(markup.indexOf("Keyboard shortcuts")).toBeLessThan(markup.indexOf("APPROVALS_ONLY"))
   })
 
+  it("places a page notice under the masthead and above the tabs, inside the page", () => {
+    const markup = renderToStaticMarkup(
+      <FleetShell
+        approvals={<section>APPROVALS_ONLY</section>}
+        connect={<section>CONNECT</section>}
+        hostCount={1}
+        notice={<p>REFRESH_FAILED</p>}
+        work={<section>WORK</section>}
+      />
+    )
+    const notice = markup.indexOf("REFRESH_FAILED")
+    expect(notice).toBeGreaterThan(markup.indexOf('<main class="fleet-shell-main">'))
+    expect(notice).toBeGreaterThan(markup.indexOf("</header>"))
+    expect(notice).toBeLessThan(markup.indexOf('role="tablist"'))
+  })
+
   it("maps global shortcuts without stealing editable input", () => {
     expect(fleetShortcutFor({ editable: false, key: "1", modified: false })).toEqual({
       _tag: "select_tab",

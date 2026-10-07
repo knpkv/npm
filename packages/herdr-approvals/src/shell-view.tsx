@@ -158,11 +158,14 @@ export const FleetShell = ({
   approvals,
   connect,
   hostCount,
+  notice = null,
   work
 }: {
   readonly approvals: ReactNode
   readonly connect: ReactNode
   readonly hostCount: number
+  /** A page-level notice (such as a failed refresh): under the masthead, in the gutter, above the tabs. */
+  readonly notice?: ReactNode
   readonly work: ReactNode
 }): ReactElement => {
   const [tab, setTab] = useState<FleetShellTab>("approvals")
@@ -300,6 +303,7 @@ export const FleetShell = ({
         <StateLabel label={`${String(hostCount)} configured hosts`} size="compact" tone="positive" />
       </header>
       <main className="fleet-shell-main">
+        {notice}
         <Tabs
           aria-label="Fleet applications"
           data-mobile-layout="single-row"
