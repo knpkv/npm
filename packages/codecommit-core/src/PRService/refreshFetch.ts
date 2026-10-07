@@ -22,8 +22,49 @@ import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import type { PullRequestRefreshScope, UnevaluatedPullRequest } from "../Domain.js"
 import type { AwsClientError } from "../Errors.js"
+import { applyIdentityEvent, IdentityEvent } from "../IdentityLifecycle.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
+
+/**
+ * Provider tags that mean the credentials themselves no longer work. Deliberately narrower than the
+ * provider's own auth category, which also covers missing grants (AccessDenied, NotAuthorized) and
+ * service opt-in (OptInRequired): there the credentials work and the identity still holds.
+ */
+const credentialInvalidTags = new Set([
+  "ExpiredTokenException",
+  "ExpiredToken",
+  "UnrecognizedClientException",
+  "InvalidClientTokenId",
+  "InvalidSignatureException",
+  "IncompleteSignature",
+  "MissingAuthenticationToken",
+  "SignatureDoesNotMatch",
+  "AuthFailure"
+])
+
+const tagOf = <Value>(value: Value, key: "_tag" | "errorTag"): string =>
+  Predicate.hasProperty(value, key) && Predicate.isString(value[key]) ? value[key] : ""
+
+/**
+ * Whether a provider error says the credentials are invalid: its tag, or, for an error the provider
+ * client doesn't know, its wire tag.
+ */
+const isCredentialInvalidCause = <Cause>(cause: Cause): boolean =>
+  credentialInvalidTags.has(tagOf(cause, "_tag")) ||
+  (tagOf(cause, "_tag") === "UnknownAwsError" && credentialInvalidTags.has(tagOf(cause, "errorTag")))
+
+/**
+ * Whether a refresh failure means the account's credentials no longer work, decided from its type: a
+ * credential failure, or a provider error saying so, directly or inside a failed approval evaluation.
+ */
+const isAuthFailure = (error: AwsClientError | CacheError): boolean =>
+  error._tag === "AwsCredentialError" ||
+  (error._tag === "AwsApiError" && (
+    isCredentialInvalidCause(error.cause) ||
+    (Predicate.isTagged(error.cause, "ApprovalEvaluationError") && Predicate.hasProperty(error.cause, "cause") &&
+      isCredentialInvalidCause(error.cause.cause))
+  ))
 
 /** A pull-request read that failed only because its approval rules could not be evaluated. */
 const failedOnlyOnApprovalEvaluation = (error: AwsClientError | CacheError): boolean =>
@@ -65,6 +106,8 @@ export const fetchAndUpsertPRs = (params: {
   readonly accountIdMap: Map<string, string>
   readonly subscribedRef: Ref.Ref<Set<string>>
   readonly currentUser: string | undefined
+  /** The refresh's identity generation, from `resolveAccounts`. */
+  readonly identityGeneration: number
   readonly staleThreshold: string
 }): Effect.Effect<
   ReadonlyArray<PullRequestRefreshScope>,
@@ -77,7 +120,8 @@ export const fetchAndUpsertPRs = (params: {
     const notificationRepo = yield* NotificationRepo
     const subscriptionRepo = yield* SubscriptionRepo
 
-    const { accountIdMap, currentUser, enabledAccounts, staleThreshold, state, subscribedRef } = params
+    const { accountIdMap, currentUser, enabledAccounts, identityGeneration, staleThreshold, state, subscribedRef } =
+      params
 
     // Stale rows are safe to reconcile only when their owning list operation
     // completed successfully. A failed account stream says nothing about which
@@ -105,6 +149,14 @@ export const fetchAndUpsertPRs = (params: {
         return next
       })
 
+    // The account's credentials stopped working during this refresh: an identity event of this
+    // refresh's generation, so it does nothing once a newer refresh, login or logout has happened.
+    const markAuthFailed = (profile: string) =>
+      SubscriptionRef.update(
+        state,
+        (s) => applyIdentityEvent(s, IdentityEvent.RefreshAuthFailed({ generation: identityGeneration, profile }))
+      )
+
     const accountLabels = enabledAccounts.flatMap((a) => (a.regions ?? []).map((r) => `${a.profile}(${r})`))
     yield* SubscriptionRef.update(state, (s) => ({
       ...s,
@@ -127,7 +179,8 @@ export const fetchAndUpsertPRs = (params: {
               region,
               cause: causeStr
             })
-            const isAuthError = /ExpiredToken|Unauthorized|AuthFailure|credentials/i.test(causeStr)
+            const isAuthError = isAuthFailure(error) ||
+              /ExpiredToken|Unauthorized|AuthFailure|credentials/i.test(causeStr)
             return Stream.fromEffectDrain(
               Effect.gen(function*() {
                 yield* Ref.update(successfullyFetchedScopes, (scopes) => {
@@ -142,9 +195,8 @@ export const fetchAndUpsertPRs = (params: {
                   profile: account.profile,
                   deduplicate: true
                 }).pipe(Effect.catch(() => Effect.void))
-                if (isAuthError) {
-                  yield* SubscriptionRef.update(state, ({ currentUser: _, ...rest }) => rest)
-                }
+                // Typed first (credential failure, or a provider auth error), with the older text match as fallback.
+                if (isAuthError) yield* markAuthFailed(account.profile)
               })
             )
           })
@@ -185,6 +237,8 @@ export const fetchAndUpsertPRs = (params: {
       Stream.runForEach(({ awsAccountId, item, label, profile, region }) =>
         Effect.gen(function*() {
           if (item._tag === "EvaluationFailed") {
+            // An evaluation that failed because the credentials stopped working is an auth failure too.
+            if (isCredentialInvalidCause(item.error.cause)) yield* markAuthFailed(profile)
             // Only this pull request is unknown: its cached row stays as it was, the account's other
             // pull requests carry on, and the account's refresh counts as partial rather than successful.
             yield* Ref.update(unevaluated, (all) => [...all, {
@@ -308,6 +362,8 @@ export const fetchAndUpsertPRs = (params: {
                 ),
                 Effect.catch((error) =>
                   withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(
+                    // Credentials that stopped working while stale rows are re-read are an auth failure too.
+                    Effect.andThen(isAuthFailure(error) ? markAuthFailed(pr.accountProfile) : Effect.void),
                     Effect.andThen(
                       // The pull request was read; only its approval enrichment failed. That is not
                       // evidence it is gone, so the row stays for the next refresh to settle.
