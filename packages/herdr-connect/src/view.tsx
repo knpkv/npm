@@ -421,7 +421,7 @@ export const AgentDirectory = ({
         {rows.length === 0 ? <Text tone="secondary">No agents match “{query.trim()}”.</Text> : null}
         {rows.length === 0 ? null : (
           <div aria-hidden="true" className="connect-list-head">
-            <span>Last activity</span>
+            <span>Active</span>
             <span>Agent</span>
             <span>State</span>
           </div>

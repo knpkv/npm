@@ -838,4 +838,20 @@
       padding-inline: var(--rly-space-4);
     }
   }
+
+  /* The narrowest phones give the options the whole row; the groups keep their names through aria-labelledby. */
+  @media (max-width: 360px) {
+    .connect-filter-set {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .connect-filter-label {
+      block-size: 1px;
+      clip-path: inset(50%);
+      inline-size: 1px;
+      overflow: hidden;
+      position: absolute;
+      white-space: nowrap;
+    }
+  }
 }
