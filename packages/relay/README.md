@@ -12,8 +12,10 @@ gate, and one event stream for the dock.
   SQLite (`@libsql/client`, so Node and Bun both work). Every input, model turn and tool call is committed
   before it is shown. A process killed mid-run continues from its last checkpoint when the store is next
   opened, and a `write` that was interrupted is never run twice; the model is told it was interrupted.
-- **Capabilities are the only way in.** A product declares each action as a `Capability`: Schema input,
-  output and failure, plus a permission class.
+- **Capabilities are the only way in.** A product declares each action once as a `@knpkv/capability`
+  contract (Schema input, output and declared failures, plus its access) and binds a handler with
+  `implement`; `register` hands it to Relay. The model sees a declared failure's reason and fix, never a
+  defect's internals.
   - `read` runs when the model calls it, and reruns after a crash.
   - `write` waits for the person to confirm the exact action (`ConfirmationRequired` carries verb, target,
     arguments and whether it is reversible). The decision is remembered per call, so a restart neither asks

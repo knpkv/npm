@@ -6,5 +6,9 @@
     "incremental": true,
     "tsBuildInfoFile": "node_modules/.cache/tsconfig.build.tsbuildinfo"
   },
-  "references": [{ "path": "../ai-claude/tsconfig.build.json" }, { "path": "../ai-codex/tsconfig.build.json" }]
+  "references": [
+    { "path": "../capability/tsconfig.build.json" },
+    { "path": "../ai-claude/tsconfig.build.json" },
+    { "path": "../ai-codex/tsconfig.build.json" }
+  ]
 }

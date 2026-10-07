@@ -10,16 +10,13 @@ export type { RelayBackend, RelayHarnessOptions, RelayHarnessService } from "./h
 export {
   BackendStatus,
   BackendUnavailableCause,
-  CapabilityEffect,
-  defineCapability,
+  CapabilityAccess,
   ObjectRef,
   objectRefKey,
-  PendingAction,
   RelayBackendId,
   RelayEvent,
   RelayProduct,
   SessionTool
 } from "./model.js"
-export type { Capability } from "./model.js"
-export { CapabilityFailed, CapabilityInputInvalid, CapabilityOutputInvalid, register } from "./registry.js"
-export type { CapabilityResult, RegisteredCapability } from "./registry.js"
+export { register } from "./registry.js"
+export type { Gate, RegisteredCapability } from "./registry.js"

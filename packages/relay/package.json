@@ -45,7 +45,8 @@
     "@earendil-works/pi-durable": "1.0.4",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
-    "@libsql/client": "^0.18.0"
+    "@libsql/client": "^0.18.0",
+    "@knpkv/capability": "workspace:^"
   },
   "devDependencies": {
     "@effect/platform-node": "4.0.0",

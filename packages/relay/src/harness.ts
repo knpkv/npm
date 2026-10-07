@@ -20,6 +20,7 @@ import type { Message } from "@earendil-works/pi-ai"
 import { createRegistry, defineDoc, Harness, watchEvents } from "@earendil-works/pi-durable"
 import type { AgentEvent, Conversation, ConversationId, SubmissionId } from "@earendil-works/pi-durable"
 import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite"
+import * as Capability from "@knpkv/capability"
 import { createClient } from "@libsql/client"
 import {
   Clock,
@@ -40,8 +41,8 @@ import {
 import type { LanguageModel } from "effect/ai"
 import type { PlatformError } from "effect/PlatformError"
 import { libsqlDatabase } from "./libsqlDatabase.js"
-import { ObjectRef, objectRefKey } from "./model.js"
-import type { RelayBackendId, RelayEvent, SessionTool } from "./model.js"
+import { objectRefKey } from "./model.js"
+import type { ObjectRef, RelayBackendId, RelayEvent, SessionTool } from "./model.js"
 import { relayModels, relayProvider } from "./piProvider.js"
 import type { TurnRunner } from "./piProvider.js"
 import { relayExtension } from "./piTools.js"
@@ -263,7 +264,7 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
   return RelayHarness.of({
     tools: options.capabilities.map((capability) => ({
       name: capability.name,
-      effect: capability.effect,
+      access: capability.gate?.access ?? "read",
       available: true
     })),
     send: (ref, text, requestId) =>
@@ -309,7 +310,7 @@ const entryText = (messages: ReadonlyArray<Message> | undefined): string =>
     .join("\n")
 
 /** The citations a capability call records in its Pi tool details. */
-const decodeCites = Schema.decodeUnknownOption(Schema.Struct({ cites: Schema.Array(ObjectRef) }))
+const decodeCites = Schema.decodeUnknownOption(Schema.Struct({ cites: Schema.Array(Capability.ObjectRef) }))
 
 /** A Relay event before the stream numbers it. */
 type Unsequenced = RelayEvent extends infer Event ? Event extends RelayEvent ? Omit<Event, "seq"> : never : never
@@ -334,7 +335,7 @@ const sessionEvents = (
       (watch) => Effect.promise(() => watch.stop())
     )
   )
-  const cites = new Map<string, ReadonlyArray<ObjectRef>>()
+  const cites = new Map<string, ReadonlyArray<Capability.ObjectRef>>()
   // Text already shown per content block of the in-flight message, so each change emits only what's new.
   const sent = new Map<number, string>()
   const textFrom = (index: number, full: string): ReadonlyArray<Unsequenced> => {
