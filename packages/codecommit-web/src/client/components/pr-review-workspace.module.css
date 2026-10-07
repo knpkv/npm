@@ -412,9 +412,10 @@
   border-color: var(--rly-color-border-2);
 }
 
+/* Selection is a background and aria-current, never an edge bar. */
 .findingCard[data-selected="true"] {
-  border-color: var(--rly-color-held-ink);
-  box-shadow: inset var(--rly-space-4) 0 var(--rly-color-action-background);
+  background: var(--rly-color-surface-3);
+  border-color: var(--rly-color-border-2);
 }
 
 .findingBody > strong {
@@ -677,8 +678,9 @@
   padding: var(--rly-space-8);
 }
 
+/* The reader's own turns sit on the deeper surface; the role label says who spoke. */
 .conversation li[data-role="user"] {
-  border-inline-start: var(--rly-space-2) solid var(--rly-color-action-background);
+  background: var(--rly-color-surface-3);
 }
 
 .conversation form {

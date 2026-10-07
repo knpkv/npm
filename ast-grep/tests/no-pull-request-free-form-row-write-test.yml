@@ -1,0 +1,9 @@
+id: no-pull-request-free-form-row-write
+valid:
+  - |
+    const writeRead = (where: Statement.Fragment, version: RowVersion, row: RowGroup, approval: ApprovalGroup) => where
+  - |
+    const writeDerived = (where: Statement.Fragment, observed: RowVersions, columns: DerivedColumns) => where
+invalid:
+  - |
+    const compareAndSet = (where: Statement.Fragment, version: RowVersion, set: Statement.Fragment) => where

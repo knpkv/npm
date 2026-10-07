@@ -3,24 +3,23 @@
     align-items: center;
     display: inline-grid;
     gap: var(--rly-space-8);
-    /* A provider name is one fixed word ("Confluence"): its column never shrinks below it. */
-    grid-template-columns: 3px auto auto;
     /* Stretched in a table cell, the name stays beside its glyph instead of drifting to the middle. */
     justify-content: start;
     max-inline-size: 100%;
     min-inline-size: var(--rly-space-0);
   }
 
-  .rail {
-    align-self: stretch;
-    background: currentcolor;
-    border-radius: var(--rly-radius-round);
-    inline-size: 3px;
-    min-block-size: var(--rly-space-24);
-  }
-
   .glyph {
     display: block;
+  }
+
+  .nameVisible {
+    /* A provider name is one fixed word ("Confluence"): its column never shrinks below it. */
+    grid-template-columns: auto auto;
+  }
+
+  .nameHidden {
+    grid-template-columns: auto;
   }
 
   .name {

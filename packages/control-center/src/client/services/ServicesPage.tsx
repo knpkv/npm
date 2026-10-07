@@ -156,12 +156,15 @@ const ConnectionCard = ({
   onStartAtlassianOAuth,
   onSynchronize,
   onTest,
+  providerName,
   synchronizationState,
   testState
 }: {
   readonly canConfigure: boolean
   readonly canTest: boolean
   readonly connection: PluginConnectionSummary
+  /** The provider's catalog name; the mark prints it only when the connection's own name differs. */
+  readonly providerName: string | undefined
   readonly administrationState: ConnectionAdministrationViewState | undefined
   readonly enablementState: ConnectionEnablementState | undefined
   readonly onConfigure: () => void
@@ -186,7 +189,11 @@ const ConnectionCard = ({
     <Surface as="article" className={styles.card} padding="default" form="grouped">
       <div className={styles.cardHeading}>
         <div className={styles.connectionIdentity}>
-          <ServiceMark service={connection.providerId} size="compact" />
+          <ServiceMark
+            name={connection.displayName === providerName ? "hidden" : "visible"}
+            service={connection.providerId}
+            size="compact"
+          />
           <Text as="h2" variant="card-title">
             {connection.displayName}
           </Text>
@@ -397,7 +404,7 @@ const CatalogCard = ({
     <Surface as="article" className={styles.card} padding="default" form="grouped">
       <div className={styles.cardHeading}>
         <div className={styles.connectionIdentity}>
-          <ServiceMark service={catalog.providerId} size="compact" />
+          <ServiceMark name="hidden" service={catalog.providerId} size="compact" />
           <Text as="h2" variant="card-title">
             {catalog.displayName}
           </Text>
@@ -481,7 +488,7 @@ const ServicePreviewCard = ({
   <Surface as="article" className={`${styles.card} ${styles.previewCard}`} padding="default" form="grouped">
     <div className={styles.cardHeading}>
       <div className={styles.connectionIdentity}>
-        <ServiceMark service={service.providerId} size="compact" />
+        <ServiceMark name="hidden" service={service.providerId} size="compact" />
         <Text as="h2" variant="card-title">
           {service.displayName}
         </Text>
@@ -1317,6 +1324,10 @@ export const ServicesPage = ({
               )
               const cards = standaloneConnections.map((connection) => (
                 <ConnectionCard
+                  providerName={
+                    connectionsState.overview.catalog.find(({ providerId }) => providerId === connection.providerId)
+                      ?.displayName
+                  }
                   administrationState={administrationStates.get(connection.pluginConnectionId)}
                   canConfigure={canConfigure}
                   canTest={canConfigure}

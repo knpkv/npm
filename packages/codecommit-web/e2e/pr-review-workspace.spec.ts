@@ -535,7 +535,7 @@ test("keeps a replacement Relay stream visibly active after aborting its predece
   expect(runCount).toBe(2)
 
   replacementRun.resolve()
-  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   await expect(run).toBeEnabled()
 })
 
@@ -604,7 +604,7 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
   await page.goto("/accounts/111111111111/prs/42")
 
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   expect(runs[0]).toMatchObject({
     profile: {
       id: "quick",
@@ -619,7 +619,7 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
   await page.reload()
   await expect(page.getByLabel("Profile")).toHaveValue("quick")
   await expect(page.getByLabel("Profile").locator("option:checked")).toHaveText("Test review")
-  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByPlaceholder("Ask Relay about this finding…").fill("Continue this security review.")
   await page.getByRole("button", { exact: true, name: "Send" }).click()
@@ -998,7 +998,7 @@ test("recovers an interrupted finding publication after reload", async ({ page }
   await routeReviewWorkspace(page)
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   await expect.poll(() => page.evaluate(() => window.localStorage.length)).toBeGreaterThan(0)
   await page.evaluate(() => {
     const key = Object.keys(window.localStorage).find((candidate) =>
@@ -1012,10 +1012,10 @@ test("recovers an interrupted finding publication after reload", async ({ page }
 
   await page.reload()
   await expect(page.getByText("failed", { exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Accept · post" }).first()).toBeEnabled()
+  await expect(page.getByRole("button", { name: "Accept and post" }).first()).toBeEnabled()
   await expect(page.getByRole("button", { exact: true, name: "Ack" }).first()).toBeEnabled()
   await expect(page.getByRole("button", { exact: true, name: "Reject" }).first()).toBeEnabled()
-  await expect(page.getByRole("button", { name: "Accept · post" }).nth(1)).toBeDisabled()
+  await expect(page.getByRole("button", { name: "Accept and post" }).nth(1)).toBeDisabled()
 })
 
 test("preserves an active finding publication across changed live reconciliation", async ({ page }) => {
@@ -1034,7 +1034,7 @@ test("preserves an active finding publication across changed live reconciliation
   await page.getByRole("button", { name: "Run Relay" }).click()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
 
-  const post = page.getByRole("button", { name: "Accept · post" }).first()
+  const post = page.getByRole("button", { name: "Accept and post" }).first()
   await post.click()
   await postStarted.promise
   await expect(post).toBeDisabled()
@@ -1072,7 +1072,7 @@ test("releases a changed finding after its active publication fails", async ({ p
   await page.getByRole("button", { name: "Run Relay" }).click()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
 
-  const post = page.getByRole("button", { name: "Accept · post" }).first()
+  const post = page.getByRole("button", { name: "Accept and post" }).first()
   await post.click()
   await postStarted.promise
   await page.getByPlaceholder("Ask Relay about this finding…").fill("Re-check while publication is active.")
@@ -1174,7 +1174,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   reviewGate.resolve()
   await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect(page.getByText("Relay is reviewing the exact patch")).toBeVisible()
-  await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   await expect(page.getByText("2 actionable findings")).toBeVisible()
   await expect(page.getByText("The changed constant expands retries without an idempotency guard.")).toBeHidden()
   await page.getByText("Evidence & recommendation").first().click()
@@ -1207,7 +1207,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   await page.getByRole("button", { exact: true, name: "Ack" }).first().click()
   await expect(page).toHaveURL(/\/accounts\/111111111111\/prs\/42$/)
   await expect(page.getByText("acknowledged")).toBeVisible()
-  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await page.getByRole("button", { name: "Accept and post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByText("P2: Retry amplification").last()).toBeVisible()
   await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
@@ -1263,7 +1263,7 @@ test("settles an optimistic comment count from refreshed provider comments", asy
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
   await page.getByRole("button", { name: "Run Relay" }).click()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await page.getByRole("button", { name: "Accept and post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
 
@@ -1286,7 +1286,7 @@ test("settles an optimistic comment count when the provider total is unchanged",
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
   await page.getByRole("button", { name: "Run Relay" }).click()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await page.getByRole("button", { name: "Accept and post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
 
@@ -1319,10 +1319,10 @@ test("preserves unobserved optimistic comment increments across partial provider
   await page.getByRole("button", { name: "Run Relay" }).click()
 
   await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await page.getByRole("button", { name: "Accept and post" }).first().click()
   await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
   await page.getByRole("button", { name: /Before-path evidence/ }).click()
-  await page.getByRole("button", { name: "Accept · post" }).last().click()
+  await page.getByRole("button", { name: "Accept and post" }).last().click()
   await expect(page.getByText("posted", { exact: true })).toHaveCount(2)
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 
@@ -1364,9 +1364,9 @@ test("does not double-count pending comments after partial authoritative growth"
   await page.getByRole("button", { name: "Run Relay" }).click()
 
   await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await page.getByRole("button", { name: "Accept and post" }).first().click()
   await page.getByRole("button", { name: /Before-path evidence/ }).click()
-  await page.getByRole("button", { name: "Accept · post" }).last().click()
+  await page.getByRole("button", { name: "Accept and post" }).last().click()
   await expect(page.getByText("posted", { exact: true })).toHaveCount(2)
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 
@@ -1411,9 +1411,9 @@ test("reconciles unrelated comment growth while Comments remains collapsed", asy
   await page.getByRole("button", { name: "Run Relay" }).click()
 
   await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await page.getByRole("button", { name: "Accept and post" }).first().click()
   await page.getByRole("button", { name: /Before-path evidence/ }).click()
-  await page.getByRole("button", { name: "Accept · post" }).last().click()
+  await page.getByRole("button", { name: "Accept and post" }).last().click()
   await expect(page.getByText("posted", { exact: true })).toHaveCount(2)
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
 
@@ -1453,7 +1453,7 @@ test("preserves a pending Relay comment across unrelated SSE growth", async ({ p
   await page.getByRole("button", { name: /^Comments/ }).click()
   await page.getByRole("button", { name: "Run Relay" }).click()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByRole("button", { name: "Accept · post" }).first().click()
+  await page.getByRole("button", { name: "Accept and post" }).first().click()
   await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
 
   unrelatedCount = 1
@@ -1520,7 +1520,7 @@ test("clears a failed publication error after a successful retry", async ({ page
   await page.goto("/accounts/111111111111/prs/42")
 
   await page.getByRole("button", { name: "Run Relay" }).click()
-  const post = page.getByRole("button", { name: "Accept · post" }).first()
+  const post = page.getByRole("button", { name: "Accept and post" }).first()
   await post.click()
   await expect(page.getByText("Finding post failed")).toBeVisible()
   await expect(page.getByText("Newer PR review preserved")).toHaveCount(0)
@@ -1585,7 +1585,7 @@ test("rejects description-target findings before presenting a post action", asyn
 
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByText("Relay review failed")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Accept · post" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Accept and post" })).toHaveCount(0)
   expect(postAttempts).toBe(0)
 })
 

@@ -36,7 +36,7 @@
   },
   "scripts": {
     "build": "tsc",
-    "check": "tsc --noEmit && tsc -p scripts/tsconfig.json",
+    "check": "tsc --noEmit && tsc -p scripts/tsconfig.json && tsc -p test/tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src",

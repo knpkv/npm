@@ -53,7 +53,7 @@
   "scripts": {
     "example:guide": "pnpm build && tsx scripts/example-guide.ts",
     "build": "rimraf dist && tsc -b --force && tsx scripts/build-guide-assets.ts",
-    "check": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json && tsc -p test/tsconfig.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test,scripts}/**/*.{ts,tsx}\" playwright.config.ts",
     "test": "vitest run",

@@ -107,7 +107,7 @@ export type {
   RlyReleaseTransitionNames
 } from "./ReleaseRow.js"
 export { RLY_SERVICE_MARK_DEFAULT_VARIANTS, RLY_SERVICE_MARK_VARIANTS, ServiceMark } from "./ServiceMark.js"
-export type { RlyService, RlyServiceMarkSize, ServiceMarkProps } from "./ServiceMark.js"
+export type { RlyService, RlyServiceMarkName, RlyServiceMarkSize, ServiceMarkProps } from "./ServiceMark.js"
 export { RLY_STAGE_RAIL_DEFAULT_VARIANTS, RLY_STAGE_RAIL_VARIANTS, StageRail } from "./StageRail.js"
 export type { RlyStage, RlyStageRailSize, StageRailProps } from "./StageRail.js"
 export { TimelineProvenanceKey, TimelineRow } from "./TimelineRow.js"

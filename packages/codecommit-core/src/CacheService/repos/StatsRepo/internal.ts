@@ -97,7 +97,6 @@ export interface PRForReviewRow {
   readonly creationDate: string
   readonly closedAt: string | null
   readonly lastModifiedDate: string
-  readonly isApproved: number
   readonly mergedBy: string | null
   readonly repositoryName: string
   readonly status: string
