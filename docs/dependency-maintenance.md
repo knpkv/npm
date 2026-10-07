@@ -87,6 +87,22 @@ The existing CI Audit job guards the resolved graph. Validate with separate
 frozen install, the docs build, and the full formatting, lint, type and test gates.
 No publishable runtime manifest changes are needed for this remediation.
 
+## Known install weight
+
+`packages/codecommit/scripts/test-packed-cli.ts` (`pnpm --filter @knpkv/codecommit test:pack`)
+installs the packed CLI with `--prod` into an empty consumer, prints its ten largest packages, and
+fails over 90 packages or 440,000 KiB. Measured 2026-10-07: 82 packages, 398,512 KiB. What remains is
+debt we chose to keep:
+
+| Package                |     KiB | Why it installs                                                                                             |
+| ---------------------- | ------: | ----------------------------------------------------------------------------------------------------------- |
+| `@distilled.cloud/aws` | 210,520 | codecommit-core's AWS client; it ships every AWS service. Replacing it is a separate decision, not planned. |
+| `typescript`           |  23,396 | required peer of `bun-ffi-structs`, through `@opentui/core`                                                 |
+| `react-devtools-core`  |  15,536 | peer of `@opentui/react`                                                                                    |
+| `@redis/client`        |  11,448 | `redis` peer of `@effect/platform-node`                                                                     |
+
+Shrinking any of these lowers the budget in the same change.
+
 ## Update the Effect Subtree
 
 `repos/effect` is a squash-imported git subtree from the canonical
