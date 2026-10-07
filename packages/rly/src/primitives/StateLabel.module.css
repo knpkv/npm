@@ -1,33 +1,29 @@
 @layer rly.components {
+  /*
+   * A state is a word and its icon in the tone's ink: no border, tint or padding, so it never reads
+   * as a chip. Words wrap only between words, so a squeezed row never splits one ("Installe / d").
+   */
   .root {
     align-items: center;
-    border: 1px solid currentcolor;
-    border-radius: var(--rly-radius-tag);
     display: inline-flex;
     gap: var(--rly-space-6);
     max-inline-size: 100%;
-    padding: var(--rly-space-4) var(--rly-space-8);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .neutral {
-    background: var(--rly-color-surface-2);
     color: var(--rly-color-text-2);
   }
   .positive {
-    background: var(--rly-color-success-tint);
     color: var(--rly-color-success-ink);
   }
   .critical {
-    background: var(--rly-color-blocked-tint);
     color: var(--rly-color-blocked-ink);
   }
   .caution {
-    background: var(--rly-color-held-tint);
     color: var(--rly-color-held-ink);
   }
   .progress {
-    background: var(--rly-color-deploying-tint);
     color: var(--rly-color-deploying-ink);
   }
   .compact {

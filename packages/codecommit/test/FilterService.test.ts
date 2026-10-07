@@ -120,7 +120,11 @@ const awsStub = (cfg: StubConfig): Layer.Layer<AwsClient.AwsClient> =>
             })
           )
         }
-        return Effect.succeed({ username, accountId: "123456789012" })
+        return Effect.succeed({
+          username,
+          accountId: "123456789012",
+          arn: `arn:aws:sts::123456789012:assumed-role/Dev/${username}`
+        })
       },
       // Unused by FilterService — fail loudly if ever called.
       createPullRequest: () => Effect.die("not implemented"),

@@ -28,7 +28,7 @@
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .agentGlyph,
@@ -118,7 +118,7 @@
     color: var(--rly-color-text-1);
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .actorText span,
@@ -137,14 +137,15 @@
     color: var(--rly-color-text-1);
     font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
       var(--rly-type-body-font);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     white-space: pre-wrap;
   }
 
   .evidence {
-    border-inline-start: var(--rly-space-2) solid var(--rly-color-border-2);
+    background: var(--rly-color-surface-2);
+    border-radius: var(--rly-radius-tag);
     min-inline-size: var(--rly-space-0);
-    padding-inline-start: var(--rly-space-12);
+    padding: var(--rly-space-8) var(--rly-space-12);
   }
 
   .actions {

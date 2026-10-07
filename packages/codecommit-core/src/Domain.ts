@@ -41,6 +41,7 @@
  * @module
  */
 import { Data, Effect, Match, Schema, SchemaGetter, SchemaIssue } from "effect"
+import type { IdentityLifecycle } from "./IdentityLifecycle.js"
 
 // ---------------------------------------------------------------------------
 // Branded Types
@@ -683,19 +684,72 @@ export interface PullRequestRefreshScope {
 }
 
 /**
+ * Why the caller is unknown in one account: only the failures core can tell apart. An expired
+ * SSO login reaches core as a credential failure, with no expiry marker, so it is
+ * `CredentialsUnavailable`; `ExpiredToken` from STS itself is `StsRejected`. Reasons carry no
+ * message, because provider text can include profile paths; the account's notification explains.
+ *
+ * @category Domain
+ */
+export const CallerIdentityUnresolvedReason = Schema.TaggedUnion({
+  /** Credentials could not be acquired: profile missing, SSO login expired, provider timed out. */
+  CredentialsUnavailable: {},
+  /** STS answered GetCallerIdentity with an error, e.g. ExpiredToken or AccessDenied. */
+  StsRejected: {},
+  /** STS was still throttling after retries. */
+  Throttled: {},
+  /** The pull-request refresh hit an authentication error after the identity had resolved. */
+  RefreshAuthFailed: {},
+  /** `aws sso logout` succeeded and nothing has resolved since. */
+  SignedOut: {}
+})
+
+/** @category Domain */
+export type CallerIdentityUnresolvedReason = typeof CallerIdentityUnresolvedReason.Type
+
+/**
+ * Who the caller is in one configured account, from STS GetCallerIdentity on its primary region.
+ * `arn` is the raw STS Arn: for an SSO session its last segment is usually the person's email, so it
+ * is a client-visible identifier that only travels to its owner over the authenticated event stream.
+ *
+ * @category Domain
+ */
+export const CallerIdentityState = Schema.TaggedUnion({
+  Resolved: { accountId: Schema.String, arn: Schema.String, username: Schema.String },
+  Unresolved: { reason: CallerIdentityUnresolvedReason }
+})
+
+/** @category Domain */
+export type CallerIdentityState = typeof CallerIdentityState.Type
+
+/**
+ * The caller's identity per configured account, keyed by AWS profile (the same value as
+ * `PullRequest.account.profile`). A profile with no key is not enabled, or not resolved yet.
+ *
+ * @category Domain
+ */
+export const CallerIdentities = Schema.Record(Schema.String, CallerIdentityState)
+
+/** @category Domain */
+export type CallerIdentities = typeof CallerIdentities.Type
+
+/**
  * A pull request the last refresh read but could not re-evaluate: its approval rules failed to
  * evaluate, so its cached row is kept as it was and its account's refresh counts as partial.
  *
  * @category Domain
  */
-export interface UnevaluatedPullRequest {
-  readonly profile: AwsProfileName
-  readonly region: AwsRegion
-  readonly pullRequestId: string
-  readonly repositoryName: string
+export const UnevaluatedPullRequest = Schema.Struct({
+  profile: AwsProfileName,
+  region: AwsRegion,
+  pullRequestId: Schema.String,
+  repositoryName: Schema.String,
   /** Names the failed operation and the provider's reason. */
-  readonly message: string
-}
+  message: Schema.String
+})
+
+/** @category Domain */
+export type UnevaluatedPullRequest = typeof UnevaluatedPullRequest.Type
 
 /**
  * Application state.
@@ -710,6 +764,13 @@ export interface AppState {
   readonly error?: string | undefined
   readonly lastUpdated?: Date
   readonly currentUser?: string
+  /**
+   * Per-account caller identity; absent until something is known. Written only by
+   * `IdentityLifecycle.applyIdentityEvent`, like `currentUser`.
+   */
+  readonly callerIdentities?: CallerIdentities
+  /** The identity state machine's own slice; not sent to clients. */
+  readonly identityLifecycle?: IdentityLifecycle
   /** Pull requests the last refresh kept from cache because their approval rules failed to evaluate. */
   readonly unevaluatedPullRequests?: ReadonlyArray<UnevaluatedPullRequest>
   /**

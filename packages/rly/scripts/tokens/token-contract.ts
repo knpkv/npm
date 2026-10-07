@@ -1,4 +1,5 @@
 import { colorTokenSource, contrastPairSource } from "../../src/tokens/colors.js"
+import { controlHeightTokenSource } from "../../src/tokens/control.js"
 import { motionTokenSource } from "../../src/tokens/motion.js"
 import { radiusTokenSource } from "../../src/tokens/shape.js"
 import { spaceTokenSource } from "../../src/tokens/space.js"
@@ -28,6 +29,7 @@ export const validateTokenSource = (): void => {
   uniqueNames(radiusTokenSource, "radius")
   uniqueNames(typeTokenSource, "type")
   uniqueNames(motionTokenSource, "motion")
+  uniqueNames(controlHeightTokenSource, "control height")
   for (const result of measureContrastPairs(colorTokenSource, contrastPairSource)) {
     if (result.ratio < result.minimum) {
       throw new Error(
@@ -49,6 +51,11 @@ const renderReducedMotion = (): string =>
     .map((token) => declaration(`motion-${token.name}-duration`, token.reducedDuration))
     .join("\n")
 
+const renderCoarseControlHeights = (): string =>
+  controlHeightTokenSource
+    .map((token) => declaration(`control-height-${token.name}`, token.coarse))
+    .join("\n")
+
 const renderSchemeColors = (): string =>
   colorTokenSource
     .map((token) => declaration(`color-${token.name}`, `light-dark(${token.light}, ${token.dark})`))
@@ -63,6 +70,7 @@ export const renderTokenCss = (): string => {
     renderSchemeColors(),
     ...spaceTokenSource.map((token) => declaration(`space-${token.name}`, token.value)),
     ...radiusTokenSource.map((token) => declaration(`radius-${token.name}`, token.value)),
+    ...controlHeightTokenSource.map((token) => declaration(`control-height-${token.name}`, token.value)),
     ...typeTokenSource.flatMap((token) => [
       declaration(`type-${token.name}-font`, `var(--rly-font-${token.font})`),
       declaration(`type-${token.name}-size`, token.size),
@@ -125,6 +133,12 @@ ${renderReducedMotion()}
     }
   }
 
+  @media (pointer: coarse) {
+    :root {
+${renderCoarseControlHeights()}
+    }
+  }
+
   :root:is([data-reduced-motion="reduce"], [data-rly-reduced-motion="reduce"]),
   :where([data-reduced-motion="reduce"], [data-rly-reduced-motion="reduce"]) {
 ${renderReducedMotion()}
@@ -148,7 +162,14 @@ ${renderNames("RLY_COLOR_TOKEN_NAMES", "RlyColorToken", colorTokenSource.map(({ 
 ${renderNames("RLY_SPACE_TOKEN_NAMES", "RlySpaceToken", spaceTokenSource.map(({ name }) => name))}
 ${renderNames("RLY_RADIUS_TOKEN_NAMES", "RlyRadiusToken", radiusTokenSource.map(({ name }) => name))}
 ${renderNames("RLY_TYPE_TOKEN_NAMES", "RlyTypeToken", typeTokenSource.map(({ name }) => name))}
-${renderNames("RLY_MOTION_TOKEN_NAMES", "RlyMotionToken", motionTokenSource.map(({ name }) => name))}`
+${renderNames("RLY_MOTION_TOKEN_NAMES", "RlyMotionToken", motionTokenSource.map(({ name }) => name))}
+${
+    renderNames(
+      "RLY_CONTROL_HEIGHT_TOKEN_NAMES",
+      "RlyControlHeightToken",
+      controlHeightTokenSource.map(({ name }) => name)
+    )
+  }`
 }
 
 /** Render registry metadata for tooling and later docs generation. */
@@ -159,6 +180,7 @@ export const renderTokenRegistry = (): string => {
       {
         schemaVersion: 1,
         color: colorTokenSource,
+        controlHeight: controlHeightTokenSource,
         contrast: measureContrastPairs(colorTokenSource, contrastPairSource).map((result) => ({
           ...result,
           ratio: Number(result.ratio.toFixed(2))

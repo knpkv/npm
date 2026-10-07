@@ -154,3 +154,46 @@ describe("SSE approval unknown", () => {
     expect(Schema.encodeSync(CachedPullRequestResponse)(row).approvalUnknownReason).toBe("Throttled")
   })
 })
+
+describe("SSE caller identities", () => {
+  it("keeps every account's caller identity, resolved or not, from the wire snapshot", () => {
+    const callerIdentities = {
+      alpha: {
+        _tag: "Resolved",
+        accountId: "111111111111",
+        arn: "arn:aws:sts::111111111111:assumed-role/Reviewers/alice@example.com",
+        username: "alice@example.com"
+      },
+      beta: { _tag: "Unresolved", reason: { _tag: "CredentialsUnavailable" } }
+    }
+    const state = decodeSseState(JSON.stringify({
+      pullRequests: [],
+      accounts: [],
+      status: "idle",
+      pendingReviewCount: 0,
+      callerIdentities
+    }))
+
+    expect(state.callerIdentities).toEqual(callerIdentities)
+  })
+})
+
+describe("SSE unevaluated pull requests", () => {
+  it("keeps the pull requests a refresh could not re-evaluate from the wire snapshot", () => {
+    const unevaluatedPullRequests = [{
+      profile: "alpha",
+      region: "eu-west-1",
+      pullRequestId: "8",
+      repositoryName: "payments",
+      message: "EvaluatePullRequestApprovalRules failed for pull request 8: not authorized"
+    }]
+    const state = decodeSseState(JSON.stringify({
+      pullRequests: [],
+      accounts: [],
+      status: "idle",
+      unevaluatedPullRequests
+    }))
+
+    expect(state.unevaluatedPullRequests).toEqual(unevaluatedPullRequests)
+  })
+})

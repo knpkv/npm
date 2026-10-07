@@ -125,6 +125,9 @@ const enforcementLabels = {
   "type-check": "Type check"
 } satisfies Readonly<Record<RlyDiffFindingPrevention["enforcement"], string>>
 
+/** A status or severity as a word in sentence case ("Critical"), never shouted in capitals. */
+const sentence = (word: string): string => `${word.charAt(0).toUpperCase()}${word.slice(1)}`
+
 /** Render a finding as evidence; agent authorship never implies human approval. */
 export const DiffFinding = ({ className, finding, onAnchorActivate, ...props }: DiffFindingProps): ReactElement => {
   validateFinding(finding)
@@ -146,13 +149,15 @@ export const DiffFinding = ({ className, finding, onAnchorActivate, ...props }: 
         </span>
         <span className={style("identity")}>
           <strong>{finding.authorName}</strong>
-          <span>{finding.source === "agent" ? "Agent finding · not an approval" : "Human finding"}</span>
+          <span>{finding.source === "agent" ? "Agent finding, not an approval" : "Human finding"}</span>
         </span>
-        <span className={style("state")}>{finding.status}</span>
+        <span className={style("state")}>{sentence(finding.status)}</span>
       </header>
 
       <section className={style("body")}>
-        <span className={style("severity")}>{finding.severity}</span>
+        <span className={style("severity")} data-rly-diff-finding-severity={finding.severity}>
+          {sentence(finding.severity)}
+        </span>
         <h2 id={titleId}>{finding.title}</h2>
         <p>{finding.body}</p>
       </section>

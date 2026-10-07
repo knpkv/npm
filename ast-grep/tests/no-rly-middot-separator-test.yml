@@ -1,0 +1,7 @@
+id: no-rly-middot-separator
+valid:
+  - "const label = <span>{provider}, {capability}</span>"
+  - 'const text = "Agent finding, not an approval"'
+invalid:
+  - "const label = <span>{provider} · {capability}</span>"
+  - 'const text = "Agent finding · not an approval"'

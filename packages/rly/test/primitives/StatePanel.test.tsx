@@ -39,6 +39,20 @@ describe("StatePanel", () => {
     expect(render(<StatePanel announce="assertive" role="region" title="Failed" />)?.getAttribute("role")).toBe("alert")
   })
 
+  it("draws no one-sided rail; icon, tint and border carry the state", () => {
+    const panel = render(<StatePanel title="Blocked" tone="critical" />)
+    expect(panel?.querySelectorAll(":scope > span")).toHaveLength(1)
+  })
+
+  it("draws no glyph for a neutral panel unless the caller names one", () => {
+    const plain = render(<StatePanel title="No releases yet" />)
+    expect(plain?.querySelector("svg")).toBeNull()
+    expect(plain?.dataset.icon).toBe("none")
+    const named = render(<StatePanel icon="search" title="No results" />)
+    expect(named?.querySelector("svg")).not.toBeNull()
+    expect(named?.dataset.icon).toBeUndefined()
+  })
+
   it("rejects blank titles", () => {
     expect(() => renderToStaticMarkup(<StatePanel title=" " />)).toThrow("visible text")
   })

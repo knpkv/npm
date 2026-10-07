@@ -117,7 +117,12 @@ describe("PRService.refresh", () => {
       })
       const liveDependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "123456789012" }),
+          getCallerIdentity: () =>
+            Effect.succeed({
+              username: "viewer",
+              accountId: "123456789012",
+              arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
+            }),
           getPullRequests: () => Stream.make(fetchedPR),
           getCommentsForPullRequest: () => Effect.succeed([])
         }),
@@ -335,7 +340,12 @@ describe("PRService.refresh", () => {
       const liveDependencies = (switchedOffEnabled: boolean) =>
         Layer.mergeAll(
           Layer.mock(AwsClient, {
-            getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "123456789012" }),
+            getCallerIdentity: () =>
+              Effect.succeed({
+                username: "viewer",
+                accountId: "123456789012",
+                arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
+              }),
             // Empty provider results: anything in the published state came from cache.
             getPullRequests: (options: { readonly profile: string }) =>
               Stream.fromEffect(Ref.update(queriedProfiles, (seen) => [...seen, options.profile])).pipe(
@@ -432,7 +442,12 @@ describe("PRService.refresh", () => {
       // @effect-diagnostics-next-line strictEffectProvide:off
       yield* makeRefresh(state).pipe(Effect.provide(Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "123456789012" }),
+          getCallerIdentity: () =>
+            Effect.succeed({
+              username: "viewer",
+              accountId: "123456789012",
+              arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
+            }),
           getPullRequests: () => Stream.empty,
           getCommentsForPullRequest: () => Effect.succeed([])
         }),

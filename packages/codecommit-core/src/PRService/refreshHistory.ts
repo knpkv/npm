@@ -28,7 +28,8 @@ const errorStatus: AppStatus = "error"
 
 const fallbackIdentity = (accountId: string): CallerIdentity => ({
   accountId,
-  username: ""
+  username: "",
+  arn: ""
 })
 
 export const syncWeek = Effect.fn("syncWeek")(
