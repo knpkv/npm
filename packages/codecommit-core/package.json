@@ -11,6 +11,7 @@
     "./ConfigService.js": "./src/ConfigService/index.ts",
     "./ReadClient.js": "./src/ReadClient/index.ts",
     "./ReviewClient.js": "./src/ReviewClient/index.ts",
+    "./RelayCapabilities.js": "./src/RelayCapabilities/index.ts",
     "./SandboxService.js": "./src/SandboxService/index.ts",
     "./*.js": "./src/*.ts"
   },
@@ -23,6 +24,7 @@
       "./ConfigService.js": "./dist/ConfigService/index.js",
       "./ReadClient.js": "./dist/ReadClient/index.js",
       "./ReviewClient.js": "./dist/ReviewClient/index.js",
+      "./RelayCapabilities.js": "./dist/RelayCapabilities/index.js",
       "./*.js": "./dist/*.js"
     }
   },
@@ -42,6 +44,7 @@
     "@aws-sdk/credential-providers": "^3.1145.0",
     "@distilled.cloud/aws": "1.0.0-rc.13",
     "@effect/sql-libsql": "4.0.0",
+    "@knpkv/capability": "workspace:^",
     "@libsql/client": "^0.18.0",
     "@smithy/core": "^3.35.1",
     "effect": "4.0.0"

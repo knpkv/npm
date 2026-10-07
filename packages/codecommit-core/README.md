@@ -151,6 +151,14 @@ persisted container ID, and remains unready until every shutdown succeeds.
 Custom runtime composition must provide Effect `Crypto`, `Path`,
 filesystem, process, and configuration services required by the sandbox layer.
 
+### RelayCapabilities
+
+`@knpkv/codecommit-core/RelayCapabilities.js` declares what the Relay assistant may do with CodeCommit, as `@knpkv/capability` contracts bound to handlers (`capabilities.getPullRequest`, `.listPullRequests`, `.postComment`).
+
+- `get_pull_request` and `list_pull_requests` read the local cache, so Relay answers from the rows the queue and detail page show. Listing is a queue surface: it hides accounts switched off in `~/.codecommit/config.json` and fails, rather than listing everything, when that config can't be read. Approval state is not reported until it can distinguish "not approved" from "unknown".
+- `post_comment` is the one write. Relay asks the person to confirm the exact text first, and the action can't be undone. It re-reads the pull request from CodeCommit and posts through `ReviewClient`'s `comment` action, pinned to that revision; the client request token is a digest of the revision and the text, so a retried post lands once. It needs `codecommit:GetPullRequest` and `codecommit:PostCommentForPullRequest`.
+- A pull request is addressed by `{ accountId, region, repositoryName, pullRequestId }`; its Relay object id is those four joined with `/`. Failures are `PullRequestNotCached` or `CodeCommitUnavailable`, each with a `fix` naming the next step (refresh, or `aws sso login --profile <profile>`).
+
 ## Deep Imports
 
 Client-side code must use deep imports to avoid pulling in server-only deps:
