@@ -2187,8 +2187,15 @@ const writeObservations = (
     // Reported last, after every write and eviction in this call: a stored or
     // unchanged fact that a later envelope replaced, or eviction removed, is no
     // longer the subject's fact and confirms nothing.
-    const finalOutcomes = outcomes.map((outcome): WorkObserveOutcome => {
+    // Only a subject's last accepted read can still be its fact: an earlier one
+    // with the same content (A, B, A) was replaced in between.
+    const lastAccepted = new Map<string, number>()
+    outcomes.forEach((outcome, index) => {
+      if (outcome._tag === "stored" || outcome._tag === "unchanged") lastAccepted.set(outcome.subject, index)
+    })
+    const finalOutcomes = outcomes.map((outcome, index): WorkObserveOutcome => {
       if (outcome._tag !== "stored" && outcome._tag !== "unchanged") return outcome
+      if (lastAccepted.get(outcome.subject) !== index) return { _tag: "stale", subject: outcome.subject }
       const row = readFact.get(outcome.subject)
       const current = row === undefined ? undefined : Schema.decodeUnknownSync(StoredFactRow)(row)
       return current?.observationId === outcome.observationId ? outcome : { _tag: "stale", subject: outcome.subject }

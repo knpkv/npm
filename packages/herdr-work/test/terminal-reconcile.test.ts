@@ -383,6 +383,18 @@ describe("terminal reconcile", () => {
       expect((yield* work.reconcile({ confirmed: confirmedIn(report) }))[0]?._tag).toBe("applied")
     })))
 
+  it.effect("in an A, B, A batch only the last read of a subject is reported current", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      const closed = pullRequest({ closedAt: 5_000, state: "closed" })
+      const report = yield* work.observe([
+        { observation: closed, observedAt: 6_000 },
+        { observation: pullRequest({ closedAt: null, state: "open" }), observedAt: 6_500 },
+        { observation: closed, observedAt: 7_000 }
+      ])
+      expect(report.outcomes.map(({ _tag }) => _tag)).toEqual(["stale", "stale", "stored"])
+    })))
+
   it.effect("records a pull request closed without merging as abandoned", () =>
     Effect.scoped(Effect.gen(function*() {
       const { store, work } = yield* fixture
