@@ -253,6 +253,8 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
  */
 export type Approval =
   | { readonly _tag: "Approved" }
+  /** CodeCommit evaluates no approval rules as approved: nothing to satisfy (a sign-off is voluntary). */
+  | { readonly _tag: "NotRequired" }
   | { readonly _tag: "Pending" }
   | { readonly _tag: "Unknown"; readonly reason: ApprovalUnknownReason }
 
@@ -263,13 +265,26 @@ export type Approval =
  * @category Domain
  */
 export const approvalOf = (
-  pr: { readonly isApproved: boolean; readonly approvalUnknown?: ApprovalUnknownReason | undefined }
+  pr: {
+    readonly isApproved: boolean
+    readonly approvalRules: ReadonlyArray<unknown>
+    readonly approvalUnknown?: ApprovalUnknownReason | undefined
+  }
 ): Approval =>
   pr.approvalUnknown !== undefined
     ? { _tag: "Unknown", reason: pr.approvalUnknown }
+    : pr.isApproved && pr.approvalRules.length === 0
+    ? { _tag: "NotRequired" }
     : pr.isApproved
     ? { _tag: "Approved" }
     : { _tag: "Pending" }
+
+/**
+ * The label every surface shows for an {@link Approval} of `NotRequired`.
+ *
+ * @category Domain
+ */
+export const approvalNotRequiredLabel = "No approval required"
 
 /**
  * The label every surface shows for an {@link Approval} of `Unknown`.

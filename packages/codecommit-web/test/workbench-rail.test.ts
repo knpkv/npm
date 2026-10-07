@@ -89,6 +89,17 @@ describe("WorkbenchRailView", () => {
     ])
   })
 
+  // No rules means nothing to approve: the ready caption must not claim someone approved it.
+  it("says an own ready pull request without rules needs no approval, and keeps approved for a rule-backed one", async () => {
+    const satisfied = [{ poolMembers: ["ana"], requiredApprovals: 1, ruleName: "Approvals", satisfied: true }]
+    const noRules = await render([make("5", { author: "andrey", isApproved: true, approvalRules: [] })], "andrey")
+    expect(noRules.textContent).toContain("no approval required, not merged")
+    expect(noRules.textContent).not.toContain("approved, not merged")
+    await act(async () => root?.unmount())
+    const ruled = await render([make("6", { author: "andrey", isApproved: true, approvalRules: satisfied })], "andrey")
+    expect(ruled.textContent).toContain("approved, not merged")
+  })
+
   it("uses the singular for one waiting pull request", async () => {
     const host = await render([make("1")], "andrey")
     expect(host.textContent).toContain("1 pull request waits on your review.")

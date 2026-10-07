@@ -10,7 +10,8 @@ import {
   reviewApiAccountId,
   sandboxAccountIdForPullRequest,
   sandboxMatchesPullRequest,
-  selectCodeCommitPullRequest
+  selectCodeCommitPullRequest,
+  signedOffByOthers
 } from "../src/client/components/pr-detail.js"
 
 const pullRequest = new Domain.PullRequest({
@@ -217,5 +218,39 @@ describe("PR page Enter shortcut", () => {
     ])
     expect(ownsEnterKey({ tagName: "BODY" })).toBe(false)
     expect(ownsEnterKey(null)).toBe(false)
+  })
+})
+
+describe("review evidence from sign-offs", () => {
+  // No rules means approval isn't required, not that nobody reviewed: a colleague's sign-off still
+  // counts toward time to first review. An unknown approval only has a last known one, so it doesn't.
+  it("counts another person's sign-off whether rules required it or not, never while approval is unknown", () => {
+    const signed = (fields: Partial<Domain.PullRequest>) =>
+      signedOffByOthers(new Domain.PullRequest({ ...pullRequest, ...fields }))
+    const satisfied = new Domain.ApprovalRule({
+      ruleName: "r",
+      requiredApprovals: 1,
+      poolMembers: [],
+      poolMemberArns: [],
+      satisfied: true
+    })
+    const twoNeeded = new Domain.ApprovalRule({
+      ruleName: "two",
+      requiredApprovals: 2,
+      poolMembers: [],
+      poolMemberArns: [],
+      satisfied: false
+    })
+    expect([
+      signed({ isApproved: true, approvedBy: ["alice"] }),
+      signed({ isApproved: true, approvedBy: ["alice"], approvalRules: [satisfied] }),
+      // One of two required sign-offs: pending, but someone reviewed.
+      signed({ isApproved: false, approvedBy: ["alice"], approvalRules: [twoNeeded] }),
+      signed({ isApproved: true, approvedBy: [] }),
+      signed({ isApproved: true, approvedBy: ["reviewer"] }),
+      // The author's own sign-off, under another spelling of the identity.
+      signed({ isApproved: true, approvedBy: ["arn:aws:iam::111122223333:user/Reviewer"] }),
+      signed({ isApproved: true, approvedBy: ["alice"], approvalUnknown: { _tag: "NotPermitted" } })
+    ]).toEqual([true, true, true, false, false, false, false])
   })
 })

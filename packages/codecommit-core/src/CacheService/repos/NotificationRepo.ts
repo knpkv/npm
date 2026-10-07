@@ -149,7 +149,33 @@ const makeNotificationRepo = Effect.gen(function*() {
       )
     },
 
-    add: (n: NewNotification) => add_(n).pipe(Effect.tap(() => publish), cacheError("add")),
+    /**
+     * Add a pull-request notification, unless an identical one (same pull request, type and message)
+     * is still unread. A restart re-diffs every subscribed pull request, so without this one change
+     * would be announced again each time. The check and the insert are one statement, so concurrent
+     * refreshes announcing the same change write one copy; only a written one is published.
+     */
+    add: (n: NewNotification) =>
+      Clock.currentTimeMillis.pipe(
+        Effect.flatMap((nowMs) =>
+          sql<{ id: number }>`INSERT INTO notifications (
+              pull_request_id, aws_account_id, type, message, title, profile,
+              repository_name, account_region, created_at
+            )
+            SELECT ${n.pullRequestId}, ${n.awsAccountId}, ${n.type}, ${n.message}, ${n.title ?? ""},
+              ${n.profile ?? ""}, ${n.repositoryName ?? ""}, ${n.accountRegion ?? ""},
+              ${new Date(nowMs).toISOString()}
+            WHERE NOT EXISTS (
+              SELECT 1 FROM notifications
+              WHERE pull_request_id = ${n.pullRequestId} AND aws_account_id = ${n.awsAccountId}
+                AND repository_name = ${n.repositoryName ?? ""} AND account_region = ${n.accountRegion ?? ""}
+                AND type = ${n.type} AND message = ${n.message} AND read = 0
+            )
+            RETURNING id`
+        ),
+        Effect.flatMap((inserted) => inserted.length > 0 ? publish : Effect.void),
+        cacheError("add")
+      ),
 
     addSystem: (n: {
       readonly type: string

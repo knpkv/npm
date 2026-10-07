@@ -524,6 +524,8 @@ type TerminalKeyRailProps = {
   readonly onJumpToLatest?: () => void
   /** Lines this client knows it scrolled back; above 0 the rail says so beside Latest. */
   readonly linesBack?: number
+  /** The position is not confirmed (Latest's last reading never came, or a read failed); the rail says so instead of nothing. */
+  readonly positionUnconfirmed?: boolean
 }
 
 const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
@@ -538,7 +540,8 @@ export const TerminalKeyRail = ({
   onJumpToLatest,
   onKey,
   onModifierChange,
-  onSelectText
+  onSelectText,
+  positionUnconfirmed = false
 }: TerminalKeyRailProps) => {
   const [activeIndex, setActiveIndex] = useState(0)
   const modifierCount = terminalModifiers.length
@@ -645,12 +648,16 @@ export const TerminalKeyRail = ({
               >
                 <span aria-hidden="true">{`${linesBack} ${linesBack === 1 ? "line" : "lines"} back`}</span>
               </span>
+            ) : positionUnconfirmed ? (
+              <span aria-label="Position not confirmed" className="terminal-older-output" role="status">
+                <span aria-hidden="true">Not confirmed</span>
+              </span>
             ) : null}
             {viewActions.map((action, index) => (
               <button
                 aria-label={action.ariaLabel}
                 className="terminal-key"
-                data-behind={action.key === "latest" && linesBack > 0 ? "true" : undefined}
+                data-behind={action.key === "latest" && (linesBack > 0 || positionUnconfirmed) ? "true" : undefined}
                 data-terminal-key={action.key}
                 disabled={disabled}
                 key={action.key}

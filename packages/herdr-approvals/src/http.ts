@@ -116,7 +116,14 @@ import { DashboardView } from "./dashboard-view.js"
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { dashboardDocumentTitle } from "./internal/html.js"
-import { relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
+import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
+import {
+  isRelayedScrollState,
+  makeLatestSignalSender,
+  rawText,
+  relayTerminalCloseCode,
+  terminalBufferCanAccept
+} from "./internal/websocket.js"
 import { LanWorkPage, LanWorkPairPage } from "./lan-work-view.js"
 import {
   decodeLanWorkPairRequest,
@@ -1300,12 +1307,7 @@ const rejectUpgrade = (
 }
 
 const terminalSelectionFromUrl = (url: URL) =>
-  Schema.decodeUnknownEffect(TerminalSelection)({
-    host: url.searchParams.get("host"),
-    agentId: url.searchParams.get("agent"),
-    cols: Number(url.searchParams.get("cols")),
-    rows: Number(url.searchParams.get("rows"))
-  }).pipe(
+  Schema.decodeUnknownEffect(TerminalSelection)(terminalSelectionInput(url)).pipe(
     Effect.mapError(
       (cause) =>
         new FleetValidationError({
@@ -2146,6 +2148,12 @@ export const startHttpServer = async (
           closeSocket(socket, 4400, "invalid terminal command")
         }
       })
+      const scrollSignals = makeLatestSignalSender({
+        bufferedAmount: () => socket.bufferedAmount,
+        isOpen: () => socket.readyState === WebSocketClient.OPEN,
+        send: (payload) => socket.send(payload)
+      }, 100)
+      socket.once("close", scrollSignals.dispose)
       const eventLoop = Stream.runForEach(session.events, (event) =>
         Effect.sync(() => {
           if (socket.readyState !== WebSocketClient.OPEN) return
@@ -2156,6 +2164,14 @@ export const startHttpServer = async (
               return
             }
             socket.send(payload, { binary: true })
+          } else if (event.type === "terminal.scroll_state") {
+            // The pane's scroll position as the connector read it. Under backpressure the newest one
+            // waits for the buffer to drain; the connector reports only changes, so none may be lost.
+            relayScrollState(
+              selection,
+              JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event)),
+              scrollSignals.offer
+            )
           } else {
             const payload = JSON.stringify(
               Schema.decodeUnknownSync(TerminalServerSignal)({
@@ -2193,11 +2209,7 @@ export const startHttpServer = async (
         closeSocket(socket, 4404, "host unavailable")
         return
       }
-      const remoteUrl = new URL(peer.terminalUrl)
-      remoteUrl.searchParams.set("host", selection.host)
-      remoteUrl.searchParams.set("agent", selection.agentId)
-      remoteUrl.searchParams.set("cols", String(selection.cols))
-      remoteUrl.searchParams.set("rows", String(selection.rows))
+      const remoteUrl = remoteTerminalUrl(peer.terminalUrl, selection)
       const remote = new WebSocketClient(remoteUrl, {
         headers: { host: remoteUrl.host },
         maxPayload: terminalFrameMaxPayload,
@@ -2239,7 +2251,18 @@ export const startHttpServer = async (
           }
         })
       })
+      // Scroll states hold the newest value under backpressure, as on a local terminal.
+      const scrollSignals = makeLatestSignalSender({
+        bufferedAmount: () => socket.bufferedAmount,
+        isOpen: () => socket.readyState === WebSocketClient.OPEN,
+        send: (payload) => socket.send(payload)
+      }, 100)
+      socket.once("close", scrollSignals.dispose)
       remote.on("message", (data, isBinary) => {
+        if (isRelayedScrollState(data, isBinary)) {
+          relayScrollState(selection, rawText(data), scrollSignals.offer)
+          return
+        }
         if (socket.readyState === WebSocketClient.OPEN) {
           const payloadBytes = Array.isArray(data)
             ? data.reduce((bytes, part) => bytes + part.byteLength, 0)
