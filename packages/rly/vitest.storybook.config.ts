@@ -3,6 +3,7 @@ import { playwright } from "@vitest/browser-playwright"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { defineConfig, type TestProjectInlineConfiguration } from "vitest/config"
+import { COARSE_POINTER_LAUNCH_ARGS } from "./scripts/browser/coarse-pointer.js"
 
 const packageRoot = dirname(fileURLToPath(import.meta.url))
 
@@ -15,9 +16,6 @@ interface StoryProject {
   /** Chromium reports a coarse primary pointer, so `(pointer: coarse)` matches and touch floors apply. */
   readonly coarsePointer?: boolean
 }
-
-// The same launch flag as visual/touch.coarse: CDP media emulation does not reach matchMedia.
-const COARSE_POINTER = ["--blink-settings=primaryPointerType=2,availablePointerTypes=2"]
 
 /**
  * Every story's play test runs three times: on a desktop, on a phone, and with a coarse (touch)
@@ -41,7 +39,10 @@ const storyProject = (
         ? { configDir: join(packageRoot, ".storybook") }
         : {
           configDir: join(packageRoot, ".storybook"),
-          initialGlobals: { viewport: { isRotated: false, value: storyViewport } }
+          // rlyPointer marks the touch project for the ThemeSelect environment canary.
+          initialGlobals: coarsePointer
+            ? { rlyPointer: "coarse", viewport: { isRotated: false, value: storyViewport } }
+            : { viewport: { isRotated: false, value: storyViewport } }
         }
     )
   ],
@@ -50,7 +51,7 @@ const storyProject = (
       enabled: true,
       headless: true,
       instances: [{ browser: "chromium" }],
-      provider: playwright(coarsePointer ? { launchOptions: { args: COARSE_POINTER } } : {}),
+      provider: playwright(coarsePointer ? { launchOptions: { args: [...COARSE_POINTER_LAUNCH_ARGS] } } : {}),
       screenshotFailures: false,
       trace: "retain-on-failure",
       viewport: page

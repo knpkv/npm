@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { expect, userEvent, within } from "storybook/test"
+import { storyMedia } from "../storyMedia.js"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import { ThemeProvider, useDocumentTheme, useStoredTheme } from "../../src/foundations/ThemeProvider.js"
 import { Text } from "../../src/primitives/Text.js"
@@ -81,12 +82,17 @@ export const PicksTheme: Story = {
 /** The forwarded Select sizes: dense by default beside header controls, compact and default for forms. */
 export const Sizes: Story = {
   args: { onValueChange: () => undefined, value: "system" },
-  play: async ({ canvas, canvasElement }) => {
+  play: async ({ canvas, canvasElement, globals }) => {
     const [dense, compact, standard] = canvas.getAllByRole("combobox", { name: "Appearance" })
     const height = (element: HTMLElement | undefined): number => element?.getBoundingClientRect().height ?? 0
     // A coarse pointer floors every size at 44px, so dense and compact meet there; on a fine
     // pointer each size is strictly taller than the last.
-    const coarse = canvasElement.ownerDocument.defaultView?.matchMedia("(pointer: coarse)").matches ?? false
+    const coarse = storyMedia(canvasElement, "(pointer: coarse)")
+    // Environment canary: the touch play project must be a real touch device (coarse, no hover),
+    // and every other project a fine pointer that hovers; otherwise touch coverage is fiction.
+    const touchProject = globals["rlyPointer"] === "coarse"
+    await expect(coarse).toBe(touchProject)
+    await expect(storyMedia(canvasElement, "(hover: none)")).toBe(touchProject)
     if (coarse) {
       await expect(height(dense)).toBeGreaterThanOrEqual(44)
       await expect(height(dense)).toBeLessThanOrEqual(height(compact))

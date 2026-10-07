@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { type CSSProperties, type ReactElement, type ReactNode, useState } from "react"
 import { expect, userEvent, waitFor, within } from "storybook/test"
+import { storyMedia } from "../storyMedia.js"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import {
   RelayDock,
@@ -14,6 +15,8 @@ import { Field } from "../../src/primitives/Field.js"
 import { Text } from "../../src/primitives/Text.js"
 import { pageStyle, stackStyle } from "../primitives/storyStyles.js"
 
+// The dock's own compact breakpoint (RelayDock.tsx compactViewportQuery): a sheet below it, a rail above.
+const compactDock = "(max-width: 40rem), (max-height: 40rem) and (pointer: coarse)"
 const profiles = [
   { label: "Review", value: "review" },
   { label: "Fast scan", value: "fast-scan" }
@@ -281,10 +284,7 @@ export const Interaction: Story = {
 /** The rail on a desktop; a phone-sized viewport turns it into the modal sheet, which the play accepts. */
 export const DesktopRail: Story = {
   play: async ({ canvas, canvasElement }) => {
-    const compact =
-      canvasElement.ownerDocument.defaultView?.matchMedia(
-        "(max-width: 40rem), (max-height: 40rem) and (pointer: coarse)"
-      ).matches ?? false
+    const compact = storyMedia(canvasElement, compactDock)
     const name = /^Relay(?: \(.+\))?$/
     await expect(
       compact
@@ -347,9 +347,7 @@ export const Loading: Story = {
 export const MobileSheet: Story = {
   globals: { viewport: { isRotated: false, value: "mobile1" } },
   play: async ({ canvas, canvasElement }) => {
-    const compact =
-      canvasElement.ownerDocument.defaultView?.matchMedia("(max-width: 40rem), (max-height: 40rem) and (pointer: coarse)")
-        .matches ?? false
+    const compact = storyMedia(canvasElement, compactDock)
     const name = /^Relay(?: \(.+\))?$/
     await expect(
       compact
