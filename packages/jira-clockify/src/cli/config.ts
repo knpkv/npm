@@ -9,6 +9,7 @@ import { Argument as Args, Command, Flag as Options, Prompt } from "effect/cli"
 import { isTicketKey } from "../agent/sessions.js"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 import { ConfigService, defaultJcfConfig, type JcfConfig } from "../services/ConfigService.js"
+import { CommandFailed } from "./CommandFailed.js"
 
 // ---------------------------------------------------------------------------
 // show
@@ -72,16 +73,19 @@ const configSetProject = Command.make(
       const cfg = yield* ConfigService
       const clockifyAuth = yield* ClockifyAuth
       const clockifyClient = yield* ClockifyApiClient
-      const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
-      if (auth === null) {
-        yield* Console.log("Clockify not configured. Run: jcf auth clockify setup")
-        return
-      }
+      const auth = yield* clockifyAuth.getConfig.pipe(
+        Effect.mapError(() => new CommandFailed({ message: "Clockify is not connected. Run jcf auth clockify setup." }))
+      )
       const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-        Effect.catch(() => Effect.succeed([]))
+        Effect.mapError(() =>
+          new CommandFailed({ message: "Could not read Clockify projects. Check the connection and try again." })
+        )
       )
       if (projects.length === 0) {
-        yield* Console.log("No projects found in Clockify workspace.")
+        yield* Console.log(
+          "This Clockify workspace has no projects, so entries are saved without one. " +
+            "Create a project at https://app.clockify.me/projects to choose a default."
+        )
         return
       }
       const selected = yield* Prompt.Select({
@@ -374,10 +378,11 @@ const configSet = Command.make(
       "Config set: project, billable, jql, session-root, session-ticket, idle-cap, dwell, ownership, mine, session-ignore"
     )
 ).pipe(
+  Command.withDescription("Change one setting"),
   Command.withSubcommands([
-    configSetProject,
-    configSetBillable,
-    configSetJql,
+    configSetProject.pipe(Command.withDescription("Choose the default Clockify project")),
+    configSetBillable.pipe(Command.withDescription("Choose whether new entries are billable by default")),
+    configSetJql.pipe(Command.withDescription("Set the Jira query that lists your issues")),
     configSetSessionRoot,
     configSetSessionTicket,
     configSetIdleCap,
@@ -389,6 +394,7 @@ const configSet = Command.make(
 )
 
 const configUnset = Command.make("unset", {}, () => Console.log("Config unset: session-ignore")).pipe(
+  Command.withDescription("Clear one setting"),
   Command.withSubcommands([configUnsetSessionIgnore])
 )
 
@@ -406,5 +412,11 @@ export const config = Command.make(
       yield* printConfig(yield* cfg.get)
     })
 ).pipe(
-  Command.withSubcommands([configShow, configSet, configUnset, configReset])
+  Command.withDescription("Show and change jcf settings"),
+  Command.withSubcommands([
+    configShow.pipe(Command.withDescription("Show the current settings")),
+    configSet,
+    configUnset,
+    configReset.pipe(Command.withDescription("Reset every setting to its default"))
+  ])
 )

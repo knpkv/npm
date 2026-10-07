@@ -1,0 +1,28 @@
+id: no-angle-type-assertion
+valid:
+  - |
+    /** Reads the <fixture url> the test server prints. */
+    export const url = (base: string) => base
+  - |
+    // Returns <word word> when nothing matches.
+    export const fallback = "none"
+  - |
+    export const template = "x = <T> y"
+  - |
+    export const identity = <T>(value: T) => value
+  - |
+    export const constrained = <T extends string>(value: T) => value
+  - |
+    export const cast = (value: unknown) => value as string
+invalid:
+  - |
+    export const read = (value: unknown) => {
+      const text = <string>value
+      return text
+    }
+  - |
+    export const first = (values: unknown) => {
+      return <ReadonlyArray<string>>values
+    }
+  - |
+    export const call = (value: unknown) => consume(<Options>value, 1)
