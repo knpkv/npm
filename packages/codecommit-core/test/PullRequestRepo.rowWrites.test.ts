@@ -190,4 +190,3 @@ describe("pull-request row writes", () => {
       expect(Option.isSome(yield* snapshot)).toBe(true)
     })))
 })
-
