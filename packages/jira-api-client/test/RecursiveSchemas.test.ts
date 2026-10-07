@@ -5,7 +5,7 @@ import { JiraApi } from "../src/index.js"
 // @effect/openapi-generator 4.0.0 emits Schema.Never for these recursive unions; the committed client keeps them usable.
 describe("recursive generated schemas", () => {
   it("decodes a nested JQL query clause", () => {
-    const clause = {
+    const clause: typeof JiraApi.JqlQueryClause.Encoded = {
       clauses: [
         { field: { name: "project" }, operator: "=", operand: { value: "KNP" } },
         { clauses: [{ field: { name: "status" }, operator: "!=", operand: { value: "Done" } }], operator: "not" }
@@ -16,7 +16,7 @@ describe("recursive generated schemas", () => {
   })
 
   it("decodes a nested workflow condition tree", () => {
-    const condition = {
+    const condition: typeof JiraApi.WorkflowCondition.Encoded = {
       conditions: [{ nodeType: "simple", type: "PermissionCondition", configuration: { permissionKey: "BROWSE" } }],
       nodeType: "compound",
       operator: "AND"
