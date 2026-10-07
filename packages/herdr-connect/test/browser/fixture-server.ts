@@ -16,7 +16,8 @@
  * `POST /__test/scroll-state?mode=known|unknown&start=N` makes the next sessions report their scroll
  * position as the hub does — off by default, which is how a hub without that signal behaves; `lines=N`
  * gives them N lines of history instead of 300, `chase=N` streams 5 lines behind each of the first N
- * down-scrolls (output arriving while Latest runs), and `delay=ms` delivers readings that late. `POST /__test/scroll-state/mute?on=1` holds readings
+ * down-scrolls (output arriving while Latest runs), `delay=ms` delivers readings that late, and
+ * `rtt=ms` holds each scroll that long before it renders. `POST /__test/scroll-state/mute?on=1` holds readings
  * back, as a slow or rate-limited hub would; `POST /__test/grow?lines=N` streams N lines into the
  * latest session without a reading, and `POST /__test/reading?offset=N&commands=M` sends it a
  * reading taken before its last scrolls, as a slow `herdr pane get` would (`offset=null` for a
@@ -122,13 +123,16 @@ interface ScrollStateMode {
   readonly historyLines: number
   readonly chaseScrolls: number
   readonly readingDelayMs: number
+  // Overrides the server's scroll round trip for new sessions, to hold a page in flight.
+  readonly rttMs: number | null
 }
 const defaultScrollStateMode: ScrollStateMode = {
   report: "off",
   startOffset: 0,
   historyLines: 300,
   chaseScrolls: 0,
-  readingDelayMs: 0
+  readingDelayMs: 0,
+  rttMs: null
 }
 let scrollStateMode = defaultScrollStateMode
 let readingsMuted = false
@@ -151,6 +155,7 @@ const session = (
   let height = rows
   let appliedScrolls = 0
   let chaseLeft = scrollStateMode.chaseScrolls
+  const scrollRttMs = scrollStateMode.rttMs ?? rttMs
   // Soft-wraps long lines to the terminal width, as the pane would before herdr renders it.
   const screenRows = (): Array<string> => {
     const wrapped = history.flatMap((line) => {
@@ -220,7 +225,7 @@ const session = (
         }
         offset += command.direction === "up" ? command.lines : -command.lines
         render()
-      }, rttMs)
+      }, scrollRttMs)
     }
     if (command.type === "terminal.resize") {
       width = command.cols
@@ -262,7 +267,8 @@ const handle = (request: IncomingMessage, response: ServerResponse): void => {
       startOffset: Number(url.searchParams.get("start") ?? "0"),
       historyLines: Number(url.searchParams.get("lines") ?? "300"),
       chaseScrolls: Number(url.searchParams.get("chase") ?? "0"),
-      readingDelayMs: Number(url.searchParams.get("delay") ?? "0")
+      readingDelayMs: Number(url.searchParams.get("delay") ?? "0"),
+      rttMs: url.searchParams.has("rtt") ? Number(url.searchParams.get("rtt")) : null
     }
     json(response, JSON.stringify(scrollStateMode))
   } else if (url.pathname === "/__test/scroll-state/mute" && request.method === "POST") {

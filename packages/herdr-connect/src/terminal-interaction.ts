@@ -107,6 +107,8 @@ type Jump =
     readonly _tag: "Known"
     readonly remaining: number
     readonly lastCommand: number
+    // The frame for the last page arrived, so nothing is in flight.
+    readonly landed: boolean
     readonly timer: Timer
   }
 
@@ -335,7 +337,7 @@ export const bindTerminalInteraction = (
     const lines = Math.min(maximumLinesPerCommand, remaining)
     const timer = silence(knownJumpSilenceMs)
     sendLines({ direction: "down", lines })
-    jump = { _tag: "Known", remaining: remaining - lines, lastCommand: sentScrolls, timer }
+    jump = { _tag: "Known", remaining: remaining - lines, lastCommand: sentScrolls, landed: false, timer }
   }
 
   const copySelection = (): string | null => {
@@ -390,6 +392,7 @@ export const bindTerminalInteraction = (
         if (key === jump.previous || jump.sent >= maximumJumpCommands) endJump()
         else frameStep(key, jump.sent)
       } else if (jump.remaining > 0) knownStep(jump.remaining)
+      else jump = { ...jump, landed: true }
     },
     selectText: showText,
     jumpToLatest: () => {
@@ -406,10 +409,24 @@ export const bindTerminalInteraction = (
       serverPosition = offsetFromBottom === null
         ? { _tag: "Unknown", estimate: believedBack() }
         : { _tag: "Known", offset: Math.max(0, offsetFromBottom + pending) }
-      if (jump?._tag === "Known") {
-        // A reading that fails mid-jump hands the rest to the page-per-frame jump.
-        if (serverPosition._tag === "Unknown") frameStep(null, 0)
-        else if (jump.remaining === 0 && scrollCommands >= jump.lastCommand) {
+      if (jump?._tag === "Frames" && serverPosition._tag === "Known") {
+        // The position became known mid-jump (a late first reading): send the exact rest instead,
+        // once the probe in flight lands.
+        if (serverPosition.offset === 0) endJump()
+        else {jump = {
+            _tag: "Known",
+            remaining: serverPosition.offset,
+            lastCommand: sentScrolls,
+            landed: false,
+            timer: jump.timer
+          }}
+      } else if (jump?._tag === "Known") {
+        // A reading that fails mid-jump hands the rest to the page-per-frame jump, never with two
+        // pages in flight: it starts now only if the last page already landed.
+        if (serverPosition._tag === "Unknown") {
+          if (jump.landed) frameStep(null, 0)
+          else jump = { _tag: "Frames", previous: null, sent: 0, timer: jump.timer }
+        } else if (jump.remaining === 0 && scrollCommands >= jump.lastCommand) {
           if (serverPosition.offset === 0) endJump()
           else knownStep(serverPosition.offset)
         }

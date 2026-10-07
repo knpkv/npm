@@ -139,6 +139,9 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
   let lastOffset: number | null | undefined = undefined
   let lastCommands = 0
   let forwardedScrolls = 0
+  // Forwarding only queues a scroll; the frame herdr sends after it is the evidence it applied.
+  // Readings are stamped with the scrolls seen applied, so none claims one it may predate.
+  let appliedScrolls = 0
   let scrollUnseen = false
   let failureLogged = false
   const report = (offsetFromBottom: number | null, scrollCommands: number) =>
@@ -154,7 +157,7 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
       const at = yield* Clock.currentTimeMillis
       if (!hostWindow.tryTake(at)) return
       sessionWindow.tryTake(at)
-      const scrollCommands = forwardedScrolls
+      const scrollCommands = appliedScrolls
       const offset = yield* read.pipe(
         Effect.catch((error) =>
           Effect.gen(function*() {
@@ -186,6 +189,7 @@ export const makePaneScrollReporter = Effect.fn("HerdrTerminal.paneScrollReporte
     frameSeen: Effect.suspend(() => {
       if (!scrollUnseen && !scrolledBack()) return Effect.void
       scrollUnseen = false
+      appliedScrolls = forwardedScrolls
       return request
     }),
     states: Stream.fromQueue(states)

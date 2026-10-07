@@ -168,8 +168,8 @@ export type HerdrTerminalEvent = typeof HerdrTerminalEvent.Type
 export const TerminalScrollState = Schema.Struct({
   type: Schema.Literal("terminal.scroll_state"),
   offsetFromBottom: Schema.NullOr(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
-  // How many `terminal.scroll` commands the connector had forwarded when it took the reading, so
-  // the client can re-apply the ones the reading does not cover yet.
+  // How many of the `terminal.scroll` commands the connector forwarded herdr had shown applied (a
+  // frame followed them) when the reading was taken, so the client can re-apply the rest.
   scrollCommands: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
 })
 export type TerminalScrollState = typeof TerminalScrollState.Type

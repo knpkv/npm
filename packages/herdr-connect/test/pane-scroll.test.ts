@@ -107,15 +107,19 @@ describe("pane scroll reporter", () => {
 })
 
 describe("pane scroll reporter coverage", () => {
-  it.effect("stamps each reading with the scrolls forwarded before it and reports the same offset again once more are covered", () =>
+  it.effect("stamps readings only with scrolls a frame showed applied, and reports the same offset again once more are", () =>
     Effect.scoped(Effect.gen(function*() {
       // A scroll clamped at the top leaves the offset unchanged, but the client already assumed it moved.
-      const { commands, reporter, seen } = yield* reporterWith([40, 40, 40])
+      const { calls, commands, reporter, seen } = yield* reporterWith([40, 40, 40])
       yield* reporter.request
       yield* TestClock.adjust("1 second")
+      // Forwarded but not yet shown applied: this read may predate it, so it must not claim it.
       yield* reporter.scrollForwarded
       yield* TestClock.adjust("1 second")
-      yield* reporter.request
+      expect(calls()).toBe(2)
+      expect(commands).toEqual([0])
+      // herdr's frame shows the scroll landed; the read after it covers it.
+      yield* reporter.frameSeen
       yield* TestClock.adjust("1 second")
       expect(seen).toEqual([40, 40])
       expect(commands).toEqual([0, 1])
@@ -133,7 +137,8 @@ describe("pane scroll reporter coverage", () => {
       // herdr renders the scroll: that frame asks for one more read, which sees the real position.
       yield* reporter.frameSeen
       yield* TestClock.adjust("1 second")
-      expect(seen).toEqual([0, 0, 12])
+      // The read before the frame repeats the opening one exactly, stamp included, so only the read after it is news.
+      expect(seen).toEqual([0, 12])
       // At the bottom with nothing forwarded since, frames ask for nothing.
       const before = calls()
       const quiet = yield* reporterWith([0])
