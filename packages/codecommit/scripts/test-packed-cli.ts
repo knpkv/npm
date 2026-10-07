@@ -22,6 +22,46 @@ const Manifest = Schema.fromJsonString(Schema.Struct({
   dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String))
 }))
 
+/**
+ * The production install's budget: 82 packages and 398,512 KiB measured once codecommit-web's client
+ * libraries and build tooling became devDependencies, plus about 10%. Raise it in review, for a
+ * dependency the CLI runs.
+ */
+const maxPackages = 90
+const maxKib = 440_000
+
+/**
+ * Packages a user never runs: build and test tooling (the web client ships prebuilt), and the model
+ * SDKs that Relay bundles what it needs from. A `@scope/*` entry covers the whole scope. `typescript`
+ * is absent on purpose: @opentui/core's bun-ffi-structs requires it as a peer, so every install gets it.
+ */
+const neverInstalled = [
+  "vite",
+  "rollup",
+  "esbuild",
+  "@esbuild/*",
+  "lightningcss",
+  "tailwindcss",
+  "@tailwindcss/*",
+  "@vitejs/plugin-react",
+  "vitest",
+  "@playwright/test",
+  "playwright",
+  "@anthropic-ai/sdk",
+  "openai",
+  "@google/genai",
+  "@aws-sdk/client-bedrock-runtime",
+  "@earendil-works/*"
+]
+const isNeverInstalled = (name: string) =>
+  neverInstalled.some((denied) => denied.endsWith("/*") ? name.startsWith(denied.slice(0, -1)) : name === denied)
+
+/** `@scope+name@1.2.3_peer@4` in node_modules/.pnpm is `@scope/name`. */
+const pnpmEntryName = (entry: string): string => {
+  const version = entry.indexOf("@", 1)
+  return (version === -1 ? entry : entry.slice(0, version)).replace("+", "/")
+}
+
 const tuiNeedsBun = "codecommit: the terminal UI needs Bun. Install it from https://bun.sh and run codecommit again, " +
   "or run `codecommit web` for the browser UI."
 
@@ -106,6 +146,42 @@ const program = Effect.scoped(
       Effect.mapError(() => new PackedCliError({ message: "Could not find the pnpm store" }))
     )).trim()
     yield* run("pnpm", ["install", "--prefer-offline", "--prod", "--store-dir", store], consumer)
+
+    // What a user downloads: nothing on the never-installed list, and a size within the budget.
+    const installed = path.join(consumer, "node_modules")
+    const packages = (yield* fs.readDirectory(path.join(installed, ".pnpm")))
+      .filter((entry) => entry !== "node_modules" && entry !== "lock.yaml")
+      .map(pnpmEntryName)
+    // Two `du` runs: one counts a file once across all its operands, so the total needs its own.
+    const du = (script: string) =>
+      spawner.string(ChildProcess.make("sh", ["-c", script], { cwd: installed })).pipe(
+        Effect.mapError(() => new PackedCliError({ message: "Could not measure the install" })),
+        Effect.map((output) =>
+          output.trim().split("\n").map((line) => {
+            const [size = "0", entry = ""] = line.split("\t")
+            return { kib: Number(size), name: pnpmEntryName(entry.replace(/^\.pnpm\/|\/$/gu, "")) }
+          })
+        )
+      )
+    const kib = (yield* du("du -sk ."))[0]?.kib
+    if (kib === undefined || !Number.isFinite(kib)) {
+      return yield* new PackedCliError({ message: "du printed no total for the install" })
+    }
+    const largest = (yield* du("du -sk .pnpm/*/ | sort -rn | head -n 10"))
+      .map(({ kib, name }) => `  ${String(kib).padStart(7)} KiB  ${name}`)
+    yield* Console.log(`codecommit installs ${packages.length} packages, ${kib} KiB. Largest:\n${largest.join("\n")}`)
+    const unwanted = [...new Set(packages.filter(isNeverInstalled))]
+    if (unwanted.length > 0) {
+      return yield* new PackedCliError({
+        message: `The install pulls in ${unwanted.join(", ")}, which a user never runs. Make it a devDependency.`
+      })
+    }
+    if (packages.length > maxPackages || kib > maxKib) {
+      return yield* new PackedCliError({
+        message: `The install is ${packages.length} packages, ${kib} KiB: over the budget of ${maxPackages} ` +
+          `packages, ${maxKib} KiB. Move what the CLI never runs to devDependencies, or raise the budget in review.`
+      })
+    }
 
     // A PATH with node and what pnpm's sh shim needs, and no Bun.
     const onlyNode = path.join(temporary, "bin")

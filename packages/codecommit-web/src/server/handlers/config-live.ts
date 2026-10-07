@@ -104,7 +104,12 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
               Effect.map(Option.getOrUndefined)
             )
             : undefined
-          return { path, exists, modifiedAt }
+          const base = { path, exists, modifiedAt }
+          // Without a home directory the sources are unknown, so they are left out rather than guessed.
+          return Option.match(yield* Effect.option(ConfigService.awsProfileSources), {
+            onNone: () => base,
+            onSome: (awsProfileSources) => ({ ...base, awsProfileSources })
+          })
         }).pipe(Effect.mapError((e) => new ApiError({ message: Predicate.isError(e) ? e.message : String(e) }))))
       .handle("database", () =>
         Effect.gen(function*() {

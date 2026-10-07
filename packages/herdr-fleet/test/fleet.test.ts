@@ -1851,12 +1851,19 @@ describe("fleet local authority", () => {
       ) => Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, ...change })._tag
       expect(decode({ reason: "r".repeat(1_024) })).toBe("Success")
       expect(decode({ reason: "line\nbreak" })).toBe("Failure")
-      const longName = "n".repeat(1_900)
+      // The summary carries both names and the reason; two of these cannot fit in 4,096 characters.
+      const longName = "n".repeat(2_100)
       expect(decode({ from: { id: "owner-a", name: longName }, to: { id: "owner-b", name: longName } })).toBe(
         "Failure"
       )
       expect(decode({ from: { id: "owner-a", name: "a" }, to: { id: "owner-b", name: longName } })).toBe("Success")
       expect(decode({ from: { id: "owner-a", name: "bad\u0007name" } })).toBe("Failure")
+      // Owner ids are not in the summary any more, but Work still cannot store these.
+      expect(decode({ to: { id: "owner-\ud800", name: "b" } })).toBe("Failure")
+      expect(decode({ from: { id: "owner-\u0007", name: "a" } })).toBe("Failure")
+      // Both ids are length-bounded on their own now that the summary no longer bounds them.
+      expect(decode({ from: { id: "o".repeat(257), name: "a" } })).toBe("Failure")
+      expect(decode({ from: { id: "o".repeat(256), name: "a" } })).toBe("Success")
     }))
 
   it.effect("binds every reassignment field and owner identity into approval", () =>

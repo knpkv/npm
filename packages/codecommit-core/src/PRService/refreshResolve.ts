@@ -12,7 +12,7 @@ import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import { type AppStatus, AwsRegion } from "../Domain.js"
-import type { AwsClientError } from "../Errors.js"
+import { type AwsClientError, describeAwsClientError } from "../Errors.js"
 import { applyIdentityEvent, IdentityEvent, type LookupFailureReason, startRefresh } from "../IdentityLifecycle.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
 import { enabledProfilesOf, retainEnabledAccountRows } from "./visibility.js"
@@ -107,7 +107,12 @@ const resolveIdentity = (
       return yield* notificationRepo.addSystem({
         type: "error",
         title: `${account.profile} (${region})`,
-        message: "Failed to get caller identity — session may have expired",
+        message: JSON.stringify({
+          operation: "getCallerIdentity",
+          profile: account.profile,
+          region,
+          cause: describeAwsClientError(lookup.failure)
+        }),
         profile: account.profile,
         deduplicate: true
       }).pipe(Effect.catch((error) => Effect.logWarning("caller identity notification failed", error)))

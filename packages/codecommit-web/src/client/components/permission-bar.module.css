@@ -1,0 +1,14 @@
+.bar {
+  margin-block-end: var(--rly-space-16);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+}
+
+.failure {
+  color: var(--rly-color-text-1);
+  font-weight: 600;
+}
