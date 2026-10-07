@@ -10,6 +10,7 @@
 import { Array as Arr, Cause, Effect, Option, Predicate, Ref, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import type { PullRequestDetail } from "../AwsClient/internal.js"
+import { isCredentialInvalidCause } from "../AwsCredentialErrors.js"
 import type { CacheError } from "../CacheService/CacheError.js"
 import { diffApprovalPools, diffPR } from "../CacheService/diff.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
@@ -25,34 +26,6 @@ import type { AwsClientError } from "../Errors.js"
 import { applyIdentityEvent, IdentityEvent } from "../IdentityLifecycle.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
-
-/**
- * Provider tags that mean the credentials themselves no longer work. Deliberately narrower than the
- * provider's own auth category, which also covers missing grants (AccessDenied, NotAuthorized) and
- * service opt-in (OptInRequired): there the credentials work and the identity still holds.
- */
-const credentialInvalidTags = new Set([
-  "ExpiredTokenException",
-  "ExpiredToken",
-  "UnrecognizedClientException",
-  "InvalidClientTokenId",
-  "InvalidSignatureException",
-  "IncompleteSignature",
-  "MissingAuthenticationToken",
-  "SignatureDoesNotMatch",
-  "AuthFailure"
-])
-
-const tagOf = <Value>(value: Value, key: "_tag" | "errorTag"): string =>
-  Predicate.hasProperty(value, key) && Predicate.isString(value[key]) ? value[key] : ""
-
-/**
- * Whether a provider error says the credentials are invalid: its tag, or, for an error the provider
- * client doesn't know, its wire tag.
- */
-const isCredentialInvalidCause = <Cause>(cause: Cause): boolean =>
-  credentialInvalidTags.has(tagOf(cause, "_tag")) ||
-  (tagOf(cause, "_tag") === "UnknownAwsError" && credentialInvalidTags.has(tagOf(cause, "errorTag")))
 
 /**
  * Whether a refresh failure means the account's credentials no longer work, decided from its type: a
