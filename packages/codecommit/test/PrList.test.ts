@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { AwsClient, ConfigService } from "@knpkv/codecommit-core"
+import { AwsClient, ConfigService, Errors } from "@knpkv/codecommit-core"
 import { Data, Effect, Layer, Option, Schema, Stream } from "effect"
 import { Command } from "effect/cli"
 import { TestConsole } from "effect/testing"
@@ -51,7 +51,8 @@ const configLayer = (
     readonly profile: string
     readonly regions: ReadonlyArray<string>
     readonly enabled: boolean
-  }>
+  }>,
+  awsProfiles: ReadonlyArray<{ readonly name: string; readonly region?: string }> = []
 ) => {
   const config = Schema.decodeSync(ConfigService.TuiConfig)({ accounts })
   return Layer.succeed(
@@ -59,7 +60,9 @@ const configLayer = (
     ConfigService.ConfigService.of({
       load: Effect.succeed(config),
       save: () => unused("save"),
-      detectProfiles: unused("detectProfiles"),
+      detectProfiles: Effect.succeed(
+        awsProfiles.map((profile) => Schema.decodeUnknownSync(ConfigService.DetectedProfile)(profile))
+      ),
       getConfigPath: unused("getConfigPath"),
       backup: unused("backup"),
       reset: unused("reset"),
@@ -104,7 +107,7 @@ const runListCommand = (
 ) =>
   Effect.gen(function*() {
     const exit = yield* Command.runWith(prListCommand, { version: "0.0.0-test" })(args).pipe(Effect.exit)
-    return { exit, stdout: yield* TestConsole.logLines }
+    return { exit, stdout: yield* TestConsole.logLines, stderr: yield* TestConsole.errorLines }
   }).pipe(
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(Layer.mergeAll(aws, config, NodeServices.layer))
@@ -166,15 +169,116 @@ describe("pr list --json", () => {
       expect(result.exit._tag).toBe("Success")
       expect(JSON.parse(result.stdout.join("\n"))).toEqual([])
     }))
+})
 
-  it.effect("emits parseable empty JSON when no accounts are enabled", () =>
+describe("pr list first run", () => {
+  // QA-J63: no enabled account is a setup gap, not an empty result. One line says where to fix it.
+  for (const args of [["--filter", "stale"], ["--filter", "stale", "--json"]]) {
+    it.effect(`fails with one line when no accounts are enabled (${args.join(" ")})`, () =>
+      Effect.gen(function*() {
+        const result = yield* runListCommand(
+          args,
+          emptyAwsLayer(),
+          configLayer([{ profile: "dev", regions: ["eu-west-1"], enabled: false }])
+        )
+        expect(result.exit._tag).toBe("Failure")
+        expect(result.stdout).toEqual([])
+        expect(result.stderr).toEqual([
+          "No CodeCommit accounts are enabled. Enable one in `codecommit web` (Settings, Accounts) or `codecommit tui`, then run this again."
+        ])
+      }))
+  }
+
+  // QA-J61: missing credentials name the profile and the two fixes, instead of a logged stack trace.
+  it.effect("names the profile and the fixes when AWS has no credentials", () =>
     Effect.gen(function*() {
+      const noCredentials = Layer.succeed(
+        AwsClient.AwsClient,
+        AwsClient.AwsClient.of({
+          getPullRequests: (account) =>
+            Stream.fail(
+              new Errors.AwsCredentialError({ profile: account.profile, region: account.region, cause: "none" })
+            ),
+          getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
+          getCallerIdentity: () => unused("getCallerIdentity"),
+          createPullRequest: () => unused("createPullRequest"),
+          listBranches: () => unused("listBranches"),
+          getCommentsForPullRequest: () => unused("getCommentsForPullRequest"),
+          updatePullRequestTitle: () => unused("updatePullRequestTitle"),
+          updatePullRequestDescription: () => unused("updatePullRequestDescription"),
+          getPullRequest: () => unused("getPullRequest"),
+          getDifferences: () => unused("getDifferences"),
+          createApprovalRule: () => unused("createApprovalRule"),
+          updateApprovalRule: () => unused("updateApprovalRule"),
+          deleteApprovalRule: () => unused("deleteApprovalRule")
+        })
+      )
       const result = yield* runListCommand(
-        ["--filter", "stale", "--json"],
-        emptyAwsLayer(),
-        configLayer([{ profile: "dev", regions: ["eu-west-1"], enabled: false }])
+        ["--profile", "dev", "--region", "eu-west-1"],
+        noCredentials,
+        configLayer([])
+      )
+      expect(result.exit._tag).toBe("Failure")
+      expect(result.stderr).toEqual([
+        "No AWS credentials for profile \"dev\" in eu-west-1. Sign in with `aws sso login --profile dev`, or pass --profile with one of the profiles `aws configure list-profiles` shows."
+      ])
+    }))
+
+  // QA-J64: "No all PRs found." read as a typo.
+  it.effect("says no pull requests were found with --all", () =>
+    Effect.gen(function*() {
+      const result = yield* runListCommand(["--all", "--region", "eu-west-1"], emptyAwsLayer(), configLayer([]))
+      expect(result.exit._tag).toBe("Success")
+      expect(result.stdout).toEqual([
+        "Fetching pull requests for default in eu-west-1...",
+        "No pull requests for default in eu-west-1. Pass --region to read another region."
+      ])
+    }))
+
+  // QA-J72: without --region the list silently read us-east-1, so a profile living elsewhere
+  // looked empty. It now reads the profile's own region and says which it read.
+  it.effect("reads the profile's region when --region is not given", () => {
+    const calls: Array<PullRequestCall> = []
+    return Effect.gen(function*() {
+      const result = yield* runListCommand(
+        ["--profile", "dev"],
+        emptyAwsLayer(calls),
+        configLayer([], [{ name: "dev", region: "eu-central-1" }])
       )
       expect(result.exit._tag).toBe("Success")
+      expect(calls.map((call) => call.region)).toEqual(["eu-central-1"])
+      expect(result.stdout.at(-1)).toBe(
+        "No open pull requests for dev in eu-central-1. Pass --region to read another region."
+      )
+    })
+  })
+
+  // QA-J73: a warning logged while listing went to stdout and broke the list (and --json).
+  it.effect("keeps logged warnings out of stdout", () => {
+    const warning = Layer.succeed(
+      AwsClient.AwsClient,
+      AwsClient.AwsClient.of({
+        getPullRequests: () =>
+          Stream.unwrap(Effect.logWarning("approval rule content could not be read").pipe(Effect.as(Stream.empty))),
+        getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
+        getCallerIdentity: () => unused("getCallerIdentity"),
+        createPullRequest: () => unused("createPullRequest"),
+        listBranches: () => unused("listBranches"),
+        getCommentsForPullRequest: () => unused("getCommentsForPullRequest"),
+        updatePullRequestTitle: () => unused("updatePullRequestTitle"),
+        updatePullRequestDescription: () => unused("updatePullRequestDescription"),
+        getPullRequest: () => unused("getPullRequest"),
+        getDifferences: () => unused("getDifferences"),
+        createApprovalRule: () => unused("createApprovalRule"),
+        updateApprovalRule: () => unused("updateApprovalRule"),
+        deleteApprovalRule: () => unused("deleteApprovalRule")
+      })
+    )
+    return Effect.gen(function*() {
+      const result = yield* runListCommand(["--json", "--region", "eu-west-1"], warning, configLayer([]))
+      expect(result.exit._tag).toBe("Success")
       expect(JSON.parse(result.stdout.join("\n"))).toEqual([])
-    }))
+      expect(result.stderr.join("\n")).toContain("approval rule content could not be read")
+    })
+  })
 })

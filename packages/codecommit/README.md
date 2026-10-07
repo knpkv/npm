@@ -17,7 +17,8 @@ CLI and TUI for AWS CodeCommit pull requests.
 
 ## Prerequisites
 
-- Bun for the `codecommit` executable; CI pins and exercises Bun 1.3.14.
+- Node 24 or later for the `codecommit` executable: `--help`, `pr` commands and `codecommit web` run on Node alone.
+- Bun for the terminal UI (`codecommit` or `codecommit tui`), which runs on OpenTUI. With Bun on `PATH`, running `codecommit` under Node hands the TUI to Bun; without it, the command says so in one line and suggests `codecommit web`. CI pins and exercises Bun 1.3.14.
 - AWS SSO configured (`~/.aws/config`)
 - Git and the AWS CLI. Exact-head checkout configures the AWS CodeCommit HTTPS
   credential helper per command for the selected profile; no global Git helper

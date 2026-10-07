@@ -2690,7 +2690,7 @@ describe("ServicesPage connection tests", () => {
       expect.any(AbortSignal)
     )
     expect(host.textContent).toContain("Verified AWS account 123456789012")
-    expect(host.textContent).toContain("CodePipeline access was denied")
+    expect(host.textContent).toContain("isn't allowed to list CodePipeline resources")
     const search = host.querySelector<HTMLInputElement>('input[type="search"]')
     if (search !== null) await setControlValue(search, "payments")
     expect(host.textContent).toContain("payments-api")
@@ -2862,7 +2862,7 @@ describe("ServicesPage connection tests", () => {
     )
     await act(async () => refresh?.click())
 
-    expect(host.textContent).toContain("CodePipeline access was denied")
+    expect(host.textContent).toContain("isn't allowed to list CodePipeline resources")
     expect(host.textContent).toContain("payments-production")
     const preservedChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
       .find(({ textContent }) => textContent?.includes("payments-production"))
