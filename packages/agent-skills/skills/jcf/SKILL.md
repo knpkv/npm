@@ -135,7 +135,12 @@ jcf sync reconcile --agent claude --day --calendar
   plus the issue `summary`. Sum `seconds`, not wall-clock bounds, for shared work.
 - In `--json`, `ownershipWithheld` keeps rows assigned to someone else or unassigned, with a
   `reason`; `withheld` remains the separate confidence-floor list. Neither list is offered to write.
-- `--json` and `--calendar` are agent-mode flags; passing either without `--agent` is a usage error.
+- `--only clockify` or `--only jira` reads and writes one system, for when the other is not
+  connected. `--json` names what was read in `sides` (`{ "clockify": true, "jira": false }`); a side
+  that was not read reports zero deltas, which does not mean it holds the time. Without `--only`, a
+  system that is not connected stops the run before anything is proposed.
+- `--json`, `--calendar` and `--only` are agent-mode flags; passing any without `--agent` is a usage
+  error.
 - Only messages the user typed count towards time; the agent's own output, its tool results, and
   prompts it sends its own subagents do not, so an unattended agent run credits at most the idle cap
   rather than the hour it ran for.

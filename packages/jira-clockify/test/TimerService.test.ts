@@ -137,7 +137,8 @@ const MockConfigLayer = Layer.succeed(ConfigService, {
     defaultBillable: true
   }),
   set: () => Effect.void,
-  configDir: Effect.succeed("/tmp/.jcf")
+  configDir: Effect.succeed("/tmp/.jcf"),
+  fileExists: Effect.succeed(true)
 })
 
 let writtenStates: Array<unknown> = []

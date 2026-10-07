@@ -75,6 +75,7 @@ test("labels an unknown approval and keeps it out of the approved filter", async
 
   // A conflict decides the verdict, but the detail page still says why approval is unknown.
   await page.goto("/accounts/production/prs/33?repository=example-repository&region=eu-west-1")
-  await expect(page.getByRole("heading", { name: "Resolve conflicts." })).toBeVisible()
+  // The verdict is the bold lead of the review-state sentence, not a heading.
+  await expect(page.getByRole("main").getByText("Resolve conflicts.", { exact: true })).toBeVisible()
   await expect(page.getByText("codecommit:EvaluatePullRequestApprovalRules")).toBeVisible()
 })

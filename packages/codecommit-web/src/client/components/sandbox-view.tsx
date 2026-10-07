@@ -225,7 +225,7 @@ export function SandboxViewContent({
               <span className={styles.sandboxId}>{sandbox.repositoryName}</span> / {sandbox.sourceBranch}
             </p>
             <p className={styles.workspaceMeta}>
-              PR #{sandbox.pullRequestId} · {sandbox.id}
+              Pull request {sandbox.pullRequestId}, sandbox {sandbox.id}
             </p>
           </div>
           <StateLabel label={statusLabel(sandbox.status)} size="compact" tone={statusTone(sandbox.status)} />

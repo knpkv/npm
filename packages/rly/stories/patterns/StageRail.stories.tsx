@@ -84,6 +84,8 @@ export const States: Story = {
     for (const connector of sixConnectors) {
       const box = connector.getBoundingClientRect()
       await expect(Math.min(box.width, box.height)).toBe(1)
+      // ...and a real line, not a collapsed 1×1 dot.
+      await expect(Math.max(box.width, box.height)).toBeGreaterThanOrEqual(8)
     }
     for (const marker of sixMarkers) await expect(marker.getBoundingClientRect().width).toBe(24)
     await expect(twenty.querySelectorAll("[data-rly-stage-id]")).toHaveLength(20)
@@ -109,7 +111,13 @@ export const CompactForcedColors: Story = {
     await expect(connectors).toHaveLength(5)
     await expect(canary.scrollWidth).toBeLessThanOrEqual(canary.clientWidth)
     for (const marker of markers) await expect(marker.getBoundingClientRect().width).toBe(24)
-    for (const connector of connectors) await expect(connector.getBoundingClientRect().width).toBe(1)
+    // A 1px rule on its cross axis, whichever way the rail lays out at this width.
+    for (const connector of connectors) {
+      const box = connector.getBoundingClientRect()
+      await expect(Math.min(box.width, box.height)).toBe(1)
+      // ...and a real line, not a collapsed 1×1 dot.
+      await expect(Math.max(box.width, box.height)).toBeGreaterThanOrEqual(8)
+    }
     for (let index = 1; index < stages.length; index += 1) {
       const previous = stages[index - 1]
       const current = stages[index]
