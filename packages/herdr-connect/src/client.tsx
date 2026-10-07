@@ -2,7 +2,7 @@ import { useAtom, useAtomMount, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { Cause, Effect, Fiber, Result, Schedule, Schema } from "effect"
+import { Cause, Effect, Fiber, Predicate, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
@@ -20,21 +20,29 @@ import {
   type TerminalClientCommand,
   TerminalServerSignal
 } from "./model.js"
+import { makePendingTerminalInput } from "./terminal-input.js"
 import {
-  makePendingTerminalInput,
-  makeTouchScrollGesture,
-  pageScrollCommand,
-  wheelScrollCommand
-} from "./terminal-input.js"
+  bindTerminalInteraction,
+  type TerminalInteraction,
+  type TerminalInteractionView
+} from "./terminal-interaction.js"
+import { TerminalTextLayer } from "./terminal-overlays.js"
 import {
   makeTerminalInputHandler,
   makeTerminalOutputBoundary,
   type TerminalOutputBoundary,
   writeTerminalOutput
 } from "./terminal-output.js"
-import { AgentDirectory, connectAgentKey, ConnectWorkspace, TerminalKeyRail, type AgentActivityFilter } from "./view.js"
+import {
+  AgentDirectory,
+  connectAgentKey,
+  ConnectSummary,
+  ConnectWorkspace,
+  TerminalKeyRail,
+  type AgentActivityFilter
+} from "./view.js"
 import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
-import { terminalBackground } from "./terminal-theme.js"
+import { terminalBackground, terminalForeground } from "./terminal-theme.js"
 import { bindTerminalDocumentLock, bindTerminalViewport, terminalViewportBindingActive } from "./terminal-viewport.js"
 import { type RememberedConnectPreference, resolveConnectPreferenceDecision } from "./target.js"
 import { nextConnectAgentIndex } from "./keyboard.js"
@@ -144,6 +152,12 @@ const storeRememberedAgent = (key: string) =>
       })
     )
   )
+
+/** One line for a failure a person reads: the error's own message, never a stack trace. */
+const causeSummary = (cause: Cause.Cause<unknown>): string => {
+  const error = Cause.squash(cause)
+  return Predicate.hasProperty(error, "message") && Predicate.isString(error.message) ? error.message : String(error)
+}
 
 const loadAgents = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient
@@ -260,6 +274,8 @@ type TerminalKeyboardCallbacks = {
   readonly reportError: (error: TerminalInputApplication) => void
   readonly setInputSender: (sendInput: (command: TerminalInputCommand) => boolean) => () => void
   readonly setCursorModeReader: (read: () => TerminalCursorMode) => () => void
+  readonly interactionView: TerminalInteractionView
+  readonly setInteraction: (interaction: TerminalInteraction) => () => void
 }
 
 const renderTerminalOutput = (
@@ -309,7 +325,7 @@ const terminalWorker = (
             fontSize: 13,
             theme: {
               background: terminalBackground,
-              foreground: "#e7e9ec",
+              foreground: terminalForeground,
               cursor: "#9dd6c5",
               selectionBackground: "#27433c"
             }
@@ -399,57 +415,30 @@ const terminalWorker = (
         }
         send(terminalResizeCommand({ cols, rows }))
       })
-      terminal.terminal.attachCustomWheelEventHandler((event) => {
-        const command = wheelScrollCommand(event, terminal.terminal.rows)
-        if (command === null) return false
-        if (ready) send(command)
-        return true
-      })
-      terminal.terminal.attachCustomKeyEventHandler((event) => {
-        const command = pageScrollCommand(event.key, terminal.terminal.rows)
-        if (command === null) return false
-        if (ready) send(command)
-        return true
-      })
-      const touchGesture = makeTouchScrollGesture({
-        blur: () => terminal.terminal.blur(),
-        rows: () => terminal.terminal.rows,
-        send: (command) => {
+      const interaction = bindTerminalInteraction(
+        terminal.terminal,
+        container,
+        (command) => {
           if (ready) send(command)
+        },
+        keyboard.interactionView
+      )
+      const releaseInteraction = keyboard.setInteraction(interaction)
+      terminal.terminal.attachCustomWheelEventHandler((event) => interaction.handleWheel(event))
+      terminal.terminal.attachCustomKeyEventHandler((event) => {
+        if (event.type === "keydown" && (event.key === "PageUp" || event.key === "PageDown")) {
+          interaction.pageScroll(event.key === "PageUp" ? "up" : "down")
+          return true
         }
+        return interaction.handleKey(event)
       })
-      const touchStart = (event: TouchEvent): void => {
-        if (event.touches.length !== 1) {
-          touchGesture.cancel()
-          return
-        }
-        const touch = event.touches.item(0)
-        if (touch === null) return
-        touchGesture.start(touch.clientY)
-      }
-      const touchMove = (event: TouchEvent): void => {
-        const touch = event.touches.item(0)
-        if (touch !== null && touchGesture.move(touch.clientY)) {
-          event.preventDefault()
-        }
-      }
-      const touchEnd = (event: TouchEvent): void => {
-        if (touchGesture.end()) event.preventDefault()
-      }
-      const touchCancel = (): void => touchGesture.cancel()
-      container.addEventListener("touchstart", touchStart, { passive: true })
-      container.addEventListener("touchmove", touchMove, { passive: false })
-      container.addEventListener("touchend", touchEnd, { passive: false })
-      container.addEventListener("touchcancel", touchCancel)
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           pendingInput.clear()
           input.dispose()
           resize.dispose()
-          container.removeEventListener("touchstart", touchStart)
-          container.removeEventListener("touchmove", touchMove)
-          container.removeEventListener("touchend", touchEnd)
-          container.removeEventListener("touchcancel", touchCancel)
+          releaseInteraction()
+          interaction.dispose()
         })
       )
       const connectedSocket = yield* Effect.acquireRelease(
@@ -491,6 +480,7 @@ const terminalWorker = (
               update({ _tag: "failed", agent, detail: error.detail })
               connectedSocket.close(4400, "terminal output could not be rendered")
             })
+            interaction.frameArrived(new Uint8Array(binary.success))
             return
           }
           const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(TerminalServerSignal))(event.data)
@@ -582,8 +572,18 @@ export const ConnectSurface = ({
   const terminalModifierRef = useRef<TerminalModifier | null>(null)
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
+  const terminalInteractionRef = useRef<TerminalInteraction | null>(null)
+  const [terminalLinesBack, setTerminalLinesBack] = useState(0)
+  const [terminalTextLines, setTerminalTextLines] = useState<ReadonlyArray<string> | null>(null)
   const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
   useAtomMount(atoms.agentsPoll)
+
+  const copyTerminalText = useCallback((text: string): void => {
+    navigator.clipboard.writeText(text).then(
+      () => setTerminalKeyError(null),
+      () => setTerminalKeyError("Copy was blocked by the browser.")
+    )
+  }, [])
 
   const releaseTerminalEntryLock = useCallback((): void => {
     const release = terminalEntryLockRef.current
@@ -734,6 +734,24 @@ export const ConnectSurface = ({
             terminalModifierRef.current = modifier
             setTerminalModifier((current) => (current === modifier ? current : modifier))
             setTerminalKeyError(null)
+          },
+          interactionView: {
+            onLinesBack: setTerminalLinesBack,
+            onSelectText: setTerminalTextLines,
+            openUrl: (url) => {
+              window.open(url, "_blank", "noopener,noreferrer")
+            },
+            copy: copyTerminalText,
+            focusKeyboard: () => terminalFocusRef.current()
+          },
+          setInteraction: (interaction) => {
+            terminalInteractionRef.current = interaction
+            return () => {
+              if (terminalInteractionRef.current !== interaction) return
+              terminalInteractionRef.current = null
+              setTerminalLinesBack(0)
+              setTerminalTextLines(null)
+            }
           }
         }
       )
@@ -744,7 +762,7 @@ export const ConnectSurface = ({
       Effect.runFork(Fiber.interrupt(fiber))
       container.replaceChildren()
     }
-  }, [connectionRequest, releaseTerminalEntryLock, setConnection])
+  }, [connectionRequest, copyTerminalText, releaseTerminalEntryLock, setConnection])
 
   const terminalVisible = connection._tag === "connected" || workspaceFocusFailure === "focus_rejected"
   const terminalViewportActive = terminalViewportBindingActive({
@@ -773,6 +791,12 @@ export const ConnectSurface = ({
       ? directory.previousSuccess.value.value
       : null
   const agents = current?.agents ?? []
+  // A failed refresh keeps the last good list; say how old it is rather than presenting it as live.
+  const staleSince =
+    directory._tag === "Failure" && directory.previousSuccess._tag === "Some"
+      ? directory.previousSuccess.value.timestamp
+      : null
+  const offlineHosts = (current?.failures ?? []).map((failure) => failure.host)
   const selected =
     agents.find((agent) => connectAgentKey(agent) === selectedKey) ??
     (connectionRequest !== null && connectAgentKey(connectionRequest.agent) === selectedKey
@@ -907,31 +931,20 @@ export const ConnectSurface = ({
     <>
       {embedded ? (
         <header className="connect-embedded-intro">
-          <div>
-            <Text variant="meta" tone="secondary">
-              Live fleet directory
-            </Text>
-            <Text as="h1" variant="page-title">
-              Connect to an agent
-            </Text>
-            <Text tone="secondary">Choose a worker, reviewer, or coordinator to open its exact terminal.</Text>
-          </div>
-          <StateLabel
-            label={current === null ? "Loading" : `${String(agents.length)} agents`}
-            size="compact"
-            tone={current === null ? "neutral" : "positive"}
+          <Text as="h1" variant="card-title">
+            Connect
+          </Text>
+          <ConnectSummary
+            agents={current === null ? null : agents}
+            offlineHosts={offlineHosts}
+            unavailable={current === null && directory._tag === "Failure"}
           />
         </header>
       ) : (
         <header className="connect-header">
-          <div>
-            <Text variant="meta" tone="secondary">
-              Herdr fleet
-            </Text>
-            <Text as="h1" variant="page-title">
-              Connect
-            </Text>
-          </div>
+          <Text as="h1" variant="page-title">
+            Connect
+          </Text>
           <nav className="fleet-app-nav" aria-label="Fleet applications">
             <a href="/">Approvals</a>
             <a href="/connect/" aria-current="page">
@@ -971,7 +984,9 @@ export const ConnectSurface = ({
         </label>
         {current === null ? (
           <Text tone="secondary">
-            {directory._tag === "Failure" ? Cause.pretty(directory.cause) : "Loading fleet agents…"}
+            {directory._tag === "Failure"
+              ? `Couldn't load the fleet directory: ${causeSummary(directory.cause)}. Retrying every 5 seconds.`
+              : "Loading fleet agents…"}
           </Text>
         ) : agents.length === 0 ? (
           <Text tone="secondary">No live agents.</Text>
@@ -991,28 +1006,35 @@ export const ConnectSurface = ({
           <small className="connect-status-message">Connecting to {connection.agent.name}…</small>
         ) : connection._tag === "failed" ? (
           <small className="connect-status-message" data-tone="critical">
-            {connection.agent.name} · {connection.detail}
+            {connection.agent.name}: {connection.detail}
           </small>
         ) : connection._tag === "closed" ? (
           <small className="connect-status-message">{connection.agent.name} disconnected.</small>
         ) : null}
         {remembered._tag === "Failure" ? (
           <small className="connect-preference-error">
-            Selection memory unavailable · {Cause.pretty(remembered.cause)}
+            Selection memory unavailable: {causeSummary(remembered.cause)}
           </small>
         ) : preferenceError === null ? null : (
-          <small className="connect-preference-error">Selection memory unavailable · {preferenceError}</small>
+          <small className="connect-preference-error">Selection memory unavailable: {preferenceError}</small>
         )}
         {workspaceFocusFailure === null || workspaceFocusFailure === "focus_rejected" ? null : (
           <small className="connect-status-message" data-tone="critical">
-            Terminal focus transition failed · {workspaceFocusFailure}
+            Terminal focus transition failed: {workspaceFocusFailure}
+          </small>
+        )}
+        {staleSince === null || directory._tag !== "Failure" ? null : (
+          <small className="connect-status-message" data-tone="caution">
+            Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
+            {new Date(staleSince).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; retrying every 5
+            seconds.
           </small>
         )}
         {(current?.failures.length ?? 0) === 0 ? null : (
           <div className="connect-failures">
             {current?.failures.map((failure) => (
               <small key={failure.host}>
-                {failure.host} · {failure.reason.replaceAll("_", " ")}
+                {failure.host}: {failure.reason.replaceAll("_", " ")}
               </small>
             ))}
           </div>
@@ -1033,7 +1055,7 @@ export const ConnectSurface = ({
           ) : (
             <ConnectAgentIdentity agent={selected} resolution={workGoalResolution} />
           )}
-          <small>{selected === null ? "Herdr terminal" : `${selected.host} · ${selected.kind}`}</small>
+          <small>{selected === null ? "Herdr terminal" : `${selected.kind} on ${selected.host}`}</small>
         </div>
         <StateLabel
           label={
@@ -1049,7 +1071,7 @@ export const ConnectSurface = ({
       </div>
       {workspaceFocusFailure === "focus_rejected" ? (
         <small className="connect-status-message" data-tone="critical" role="alert">
-          Terminal focus transition failed · {workspaceFocusFailure}
+          Terminal focus transition failed: {workspaceFocusFailure}
         </small>
       ) : null}
       <TerminalKeyRail
@@ -1059,12 +1081,24 @@ export const ConnectSurface = ({
         onFocusTerminal={() => terminalFocusRef.current()}
         onKey={sendTerminalRailKey}
         onModifierChange={changeTerminalModifier}
+        onSelectText={() => terminalInteractionRef.current?.selectText()}
+        onJumpToLatest={() => terminalInteractionRef.current?.jumpToLatest()}
+        linesBack={terminalLinesBack}
       />
-      <div
-        aria-label={selected === null ? "Agent terminal" : `${selected.name} terminal`}
-        className="ghostty-terminal"
-        ref={terminalRef}
-      />
+      <div className="terminal-viewport-stage">
+        <div
+          aria-label={selected === null ? "Agent terminal" : `${selected.name} terminal`}
+          className="ghostty-terminal"
+          ref={terminalRef}
+        />
+        {terminalTextLines === null ? null : (
+          <TerminalTextLayer
+            lines={terminalTextLines}
+            onCopy={copyTerminalText}
+            onDone={() => setTerminalTextLines(null)}
+          />
+        )}
+      </div>
     </Surface>
   )
 

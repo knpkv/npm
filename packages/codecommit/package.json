@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/codecommit",
-  "version": "0.13.3",
+  "version": "0.14.1",
   "description": "TUI for browsing AWS CodeCommit PRs",
   "type": "module",
   "main": "dist/index.js",
@@ -28,7 +28,8 @@
     "check": "tsc -b tsconfig.json",
     "test": "vitest",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
-    "docgen": "docgen"
+    "docgen": "docgen",
+    "test:pack": "pnpm --filter \"@knpkv/codecommit...\" --sort run build && tsx scripts/test-packed-cli.ts"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0",
@@ -54,5 +55,8 @@
     "@types/react": "^19.3.0",
     "storybook": "^10.6.1",
     "vitest": "catalog:"
+  },
+  "engines": {
+    "node": ">=24"
   }
 }

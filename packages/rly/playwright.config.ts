@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test"
 import { join } from "node:path"
 import { keepLastRunAt, playwrightPort, pruneStaleRunDirectories } from "../../playwright-ports.ts"
+import { COARSE_POINTER_LAUNCH_ARGS } from "./scripts/browser/coarse-pointer.js"
 
 // A free port per run, so this suite can run beside another copy of itself;
 // `pnpm storybook` and `pnpm storybook:serve` keep 6006 for people.
@@ -19,11 +20,11 @@ export default defineConfig({
   outputDir: `test-results/rly-visual-${port}`,
   projects: [
     { name: "fine", testIgnore: /\.coarse\.spec\.ts$/ },
-    // Blink pointer type 2 is coarse: the browser reports a touch-first device to `(pointer: coarse)`.
+    // A touch-first device: coarse pointer, no hover (scripts/browser/coarse-pointer.ts).
     {
       name: "coarse",
       testMatch: /\.coarse\.spec\.ts$/,
-      use: { launchOptions: { args: ["--blink-settings=primaryPointerType=2,availablePointerTypes=2"] } }
+      use: { launchOptions: { args: [...COARSE_POINTER_LAUNCH_ARGS] } }
     }
   ],
   reporter: "list",

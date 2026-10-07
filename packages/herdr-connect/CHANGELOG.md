@@ -1,5 +1,29 @@
 # @knpkv/herdr-connect
 
+## 0.5.0
+
+### Minor Changes
+
+- [#537](https://github.com/knpkv/npm/pull/537) [`d183858`](https://github.com/knpkv/npm/commit/d1838583e51cd683e167d6cb735ebbfe552bdb7f) Thanks [@konopkov](https://github.com/konopkov)! - Connect terminal: copy text, open links, and scroll like a native list on touch. Selecting with the mouse no longer writes the clipboard on its own: Cmd/Ctrl+C copies the selection and only sends ^C when nothing is selected, and triple-click selects a whole line. Cmd/Ctrl+click (or a tap on touch) opens http and https links in a new tab, and other schemes are never opened. On touch, the terminal follows the finger 1:1 and keeps moving after a flick, scrolling no longer brings up the keyboard, a long-press or the Select key shows the screen as selectable text with Copy buttons, and a Latest key always returns to the newest output, with an "Older output" note while you are known to be scrolled back.
+
+### Patch Changes
+
+- [#549](https://github.com/knpkv/npm/pull/549) [`21ab62a`](https://github.com/knpkv/npm/commit/21ab62a25400f61f27a5230553e4d4780034b899) Thanks [@konopkov](https://github.com/konopkov)! - Connect writes its status lines as phrases instead of joining facts with middots: "codex on SER8", "Work goal: …", "No Work goal linked", "Terminal focus transition failed: …". The middot ast-grep rule now covers Connect too.
+- Updated dependencies [[`b791563`](https://github.com/knpkv/npm/commit/b791563a328c0118c2716bda59294f7c606225c8), [`d266e4c`](https://github.com/knpkv/npm/commit/d266e4cccb601e0d8006ce50e48743b8f347f21e), [`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/herdr-fleet@0.6.1
+  - @knpkv/herdr-work@0.7.0
+  - @knpkv/rly@0.10.0
+
+## 0.4.5
+
+### Patch Changes
+
+- [#516](https://github.com/knpkv/npm/pull/516) [`bf3eb59`](https://github.com/knpkv/npm/commit/bf3eb599a06c5e6c2e7228ce4aaebd9d27f50ee9) Thanks [@konopkov](https://github.com/konopkov)! - Connect ignores an abandoned goal's ownership the same way it ignores a completed one.
+- Updated dependencies [[`934843b`](https://github.com/knpkv/npm/commit/934843bbcea57cbf3266fce950c020733046cac1), [`148daa6`](https://github.com/knpkv/npm/commit/148daa6be147dca74bc642bd552b603deb760eae), [`4e8f346`](https://github.com/knpkv/npm/commit/4e8f346b926b859ea2b3be07ec7dc6cb77ca8e76), [`e57bb6d`](https://github.com/knpkv/npm/commit/e57bb6db1b393dbff8e116573cf2db23992c1cf4), [`7df3dbb`](https://github.com/knpkv/npm/commit/7df3dbb9875ab31f369351df2de898b36d40e613), [`8924289`](https://github.com/knpkv/npm/commit/89242895271072b83185d6cc02376b2c56830f6a), [`f8d2612`](https://github.com/knpkv/npm/commit/f8d2612e09b20974dd8eccc8ff197bb072c40cbf), [`38c8af6`](https://github.com/knpkv/npm/commit/38c8af6a0094a1ebb5c6e673c74dc40c5733283f), [`18d5c8b`](https://github.com/knpkv/npm/commit/18d5c8b1bead309094021b0b54fb9d49b83fc50a), [`c037ee6`](https://github.com/knpkv/npm/commit/c037ee6bffca3178d82c5d29a3f203de26db146e), [`b0b385c`](https://github.com/knpkv/npm/commit/b0b385cbfa570e19dd4fa81cd553d3aaf957361f), [`8d051cb`](https://github.com/knpkv/npm/commit/8d051cb05a9b22d59d348346e1f45897fec187b3), [`bf3eb59`](https://github.com/knpkv/npm/commit/bf3eb599a06c5e6c2e7228ce4aaebd9d27f50ee9), [`aac9574`](https://github.com/knpkv/npm/commit/aac9574b6614cdf1f2be74d641c9a191b7e8c903)]:
+  - @knpkv/rly@0.9.0
+  - @knpkv/herdr-fleet@0.6.0
+  - @knpkv/herdr-work@0.6.0
+
 ## 0.4.4
 
 ### Patch Changes

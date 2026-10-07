@@ -9,7 +9,7 @@ Use the `jcf` binary to manage Jira-backed Clockify timers.
 
 ## Preconditions
 
-- Configure both services before timer operations: Jira OAuth and Clockify API key.
+- Connect the services a command needs: Jira with `jcf auth jira token` (an API token; OAuth is the advanced alternative) and Clockify with `jcf auth clockify setup`. A command that needs a missing one fails with that command and a non-zero exit.
 - Use `jcf auth status` to check readiness.
 - `jcf` uses the shared Jira CLI auth profile store; for multi-site Jira accounts, use `jira auth profiles` and `jira auth use <profile>` before timer operations when the `jira` binary is available. When the `atlassian` binary is available, prefer `atlassian profiles doctor` to confirm that Jira Clockify is using the intended `jira-cli` auth store and `atlassian auth refresh` for expired Jira tokens.
 - Timer operations write to Clockify and may write Jira worklogs; confirm ambiguous ticket keys, durations, dates, and comments before running them.
@@ -19,9 +19,7 @@ Use the `jcf` binary to manage Jira-backed Clockify timers.
 
 ```bash
 jcf auth status
-jcf auth jira create
-jcf auth jira configure
-jcf auth jira login
+jcf auth jira token
 jcf auth clockify setup
 
 atlassian profiles doctor
@@ -137,7 +135,12 @@ jcf sync reconcile --agent claude --day --calendar
   plus the issue `summary`. Sum `seconds`, not wall-clock bounds, for shared work.
 - In `--json`, `ownershipWithheld` keeps rows assigned to someone else or unassigned, with a
   `reason`; `withheld` remains the separate confidence-floor list. Neither list is offered to write.
-- `--json` and `--calendar` are agent-mode flags; passing either without `--agent` is a usage error.
+- `--only clockify` or `--only jira` reads and writes one system, for when the other is not
+  connected. `--json` names what was read in `sides` (`{ "clockify": true, "jira": false }`); a side
+  that was not read reports zero deltas, which does not mean it holds the time. Without `--only`, a
+  system that is not connected stops the run before anything is proposed.
+- `--json`, `--calendar` and `--only` are agent-mode flags; passing any without `--agent` is a usage
+  error.
 - Only messages the user typed count towards time; the agent's own output, its tool results, and
   prompts it sends its own subagents do not, so an unattended agent run credits at most the idle cap
   rather than the hour it ran for.
@@ -173,7 +176,7 @@ jcf watch claude --interval 60
 - Only one watch writes at a time, per machine. Starting a second one prints who holds the lease and
   exits; do not start one to "check" on a running watch. After an ungraceful process death, verify no
   watch remains before manually removing `~/.jcf/watch.lease`; the file is never auto-taken-over.
-- It stops itself if Jira rejects the login. Re-authenticate with `jcf auth jira login` and restart.
+- It stops itself if Jira rejects the login. Reconnect with `jcf auth jira token` and restart.
 
 ## Agent Workflow
 

@@ -54,4 +54,24 @@
       background: var(--rly-color-text-2);
     }
   }
+
+  /*
+   * Forced colours: a primary icon button is the system's selected pair, and opts out of
+   * adjustment, because Chromium paints a Canvas backplate behind adjusted text and icons.
+   */
+  @media (forced-colors: active) {
+    .primary {
+      background: Highlight;
+      border-color: Highlight;
+      color: HighlightText;
+      forced-color-adjust: none;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .primary {
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
 }

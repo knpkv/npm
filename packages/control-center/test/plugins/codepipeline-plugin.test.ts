@@ -32,7 +32,6 @@ import {
 import { CodePipelineReadClient } from "../../src/server/plugins/codepipeline/CodePipelineReadClient.js"
 import {
   callPinnedCodePipelineMutationProvider,
-  codePipelineCredentialProviderOptions,
   CodePipelineCredentialResolver,
   CodePipelinePreDispatchFailure,
   CodePipelinePreDispatchTimeoutFailure,
@@ -983,11 +982,6 @@ describe("CodePipelinePlugin", () => {
       assert.strictEqual(valid[0]?.checkpointAfterPage.length, 2_048)
     }))
 
-  it("uses the default provider chain while keeping named AWS profiles explicit", () => {
-    assert.deepStrictEqual(codePipelineCredentialProviderOptions("default"), {})
-    assert.deepStrictEqual(codePipelineCredentialProviderOptions("production"), { profile: "production" })
-  })
-
   it.effect("pins identity verification and mutation to one acquired credential snapshot", () =>
     Effect.gen(function*() {
       const runScenario = (identityEffect: Effect.Effect<unknown, unknown>) =>
@@ -1084,6 +1078,24 @@ describe("CodePipelinePlugin", () => {
       assert.strictEqual(sameRole.resolutionCalls, 1)
       assert.strictEqual(sameRole.mutationCalls, 1)
       assert.deepStrictEqual(sameRole.mutationAccessKeys, ["mutation-access-key"])
+    }))
+
+  it.effect("treats raw AWS SDK credential exceptions, identified by name, as authentication", () =>
+    Effect.gen(function*() {
+      const sdkExpired = yield* mapCodePipelineAwsFailure(
+        "codepipeline-get-pipeline-state",
+        Object.assign(new Error("The security token included in the request is expired"), {
+          name: "ExpiredTokenException"
+        })
+      ).pipe(Effect.flip)
+      const sdkRejected = yield* mapCodePipelineAwsFailure(
+        "codepipeline-get-pipeline-state",
+        Object.assign(new Error("The security token included in the request is invalid"), {
+          name: "UnrecognizedClientException"
+        })
+      ).pipe(Effect.flip)
+      assert.strictEqual(sdkExpired._tag, "PluginAuthenticationFailure")
+      assert.strictEqual(sdkRejected._tag, "PluginAuthenticationFailure")
     }))
 
   it.effect("maps AWS request-timeout tags separately from provider outages", () =>

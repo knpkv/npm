@@ -9,7 +9,7 @@
  * @module
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import { LogInIcon } from "lucide-react"
 import { useCallback, useMemo } from "react"
@@ -32,7 +32,7 @@ import {
 } from "./review-queue-state.js"
 import styles from "./review-queue.module.css"
 import { SearchBar } from "./search-bar.js"
-import { needsYourReview } from "./workbench-queue.js"
+import { callerOf, needsYourReview } from "./workbench-queue.js"
 
 type PullRequest = Domain.PullRequest
 
@@ -68,6 +68,7 @@ export function PRList() {
     [appState.enabledProfiles, appState.pullRequests]
   )
   const isLoading = appState.status === "loading"
+  const caller = useMemo(() => callerOf(appState), [appState.currentUser])
 
   const summary = useMemo(() => {
     let review = 0
@@ -77,12 +78,14 @@ export function PRList() {
     for (const pr of prs) {
       if (pr.status !== "OPEN") continue
       open += 1
-      if (pr.isApproved) approved += 1
-      else pending += 1
-      if (needsYourReview(pr, appState.currentUser)) review += 1
+      // An unknown approval counts as neither.
+      const approval = Domain.approvalOf(pr)._tag
+      if (approval === "Approved") approved += 1
+      else if (approval === "Pending") pending += 1
+      if (needsYourReview(pr, caller)) review += 1
     }
     return { approved, open, pending, review }
-  }, [appState.currentUser, prs])
+  }, [caller, prs])
 
   const sorted = useMemo(() => {
     if (prs.length === 0) return []
@@ -122,10 +125,10 @@ export function PRList() {
               : pr.creationDate.getTime()
           if (!isWithinQueueDateBounds(timestamp, fromMs, toMs)) return false
         }
-        return !review || needsYourReview(pr, appState.currentUser)
+        return !review || needsYourReview(pr, caller)
       })
       .sort((left, right) => right.lastModifiedDate.getTime() - left.lastModifiedDate.getTime())
-  }, [appState.currentUser, filterState, prs])
+  }, [caller, filterState, prs])
 
   const activeFacet = resolveQueueFacet(filterState)
 
@@ -335,7 +338,7 @@ export function PRList() {
       return (
         <Surface className={styles.queueSurface} padding="none" form="grouped">
           {sorted.map((pr) => (
-            <PRRow currentUser={appState.currentUser} key={prListKey(pr)} pr={pr} showUpdated to={prListHref(pr)} />
+            <PRRow caller={caller} key={prListKey(pr)} pr={pr} showUpdated to={prListHref(pr)} />
           ))}
         </Surface>
       )
@@ -363,7 +366,7 @@ export function PRList() {
             </div>
             <Surface className={styles.queueSurface} padding="none" form="grouped">
               {accountPrs.map((pr) => (
-                <PRRow currentUser={appState.currentUser} key={prListKey(pr)} pr={pr} to={prListHref(pr)} />
+                <PRRow caller={caller} key={prListKey(pr)} pr={pr} to={prListHref(pr)} />
               ))}
             </Surface>
           </section>

@@ -116,6 +116,8 @@
   .facts > div {
     display: grid;
     gap: var(--rly-space-8);
+    /* One bounded track, so a revision hash wraps inside the cell instead of widening it. */
+    grid-template-columns: minmax(var(--rly-space-0), 1fr);
     min-inline-size: var(--rly-space-0);
     padding: var(--rly-space-16) var(--rly-space-20);
   }

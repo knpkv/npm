@@ -18,6 +18,7 @@
  */
 import {
   Account,
+  ApprovalUnknownTag,
   AwsProfileName,
   AwsRegion,
   PRCommentLocationJson,
@@ -84,6 +85,8 @@ export const CachedPullRequestResponse = Schema.Struct({
   destinationBranch: Schema.String,
   isMergeable: Schema.Number,
   isApproved: Schema.Number,
+  /** Set when the last evaluation failed: `isApproved` is then only the last known value. */
+  approvalUnknownReason: Schema.optionalKey(Schema.NullOr(ApprovalUnknownTag)),
   commentCount: Schema.NullOr(Schema.Number),
   link: Schema.String,
   fetchedAt: Schema.String

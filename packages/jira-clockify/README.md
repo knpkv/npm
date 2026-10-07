@@ -18,19 +18,41 @@ cd packages/jira-clockify && pnpm link --global
 
 ## Setup
 
-### 1. Jira OAuth
+Run `jcf` with nothing set up and it asks about each system in turn; either can be skipped and
+added later. `jcf auth status` shows what is connected and what to run next. Every step below can
+also be run on its own.
+
+### 1. Jira
 
 ```bash
-jcf auth jira create      # Opens Atlassian console — create OAuth 2.0 app
+jcf auth jira token        # Site, email and an API token from https://id.atlassian.com/manage-profile/security/api-tokens
+```
+
+The token is checked against Jira before it is saved to `~/.jcf/jira.json` (owner-only, `0600`) and is
+never printed. Only Jira Cloud addresses (`*.atlassian.net`) are accepted, so a typo or look-alike
+domain never receives the token. Classic and scoped tokens both work: a scoped token, which the
+site itself refuses, is used through Atlassian's gateway for that site (`api.atlassian.com/ex/jira/<cloud id>`). A failed check says whether the site, the token or the network was
+the problem.
+
+Advanced: connect through your own Atlassian OAuth app instead.
+
+```bash
+jcf auth jira create       # Opens Atlassian console — create OAuth 2.0 app
 jcf auth jira configure    # Set client ID and secret
 jcf auth jira login        # Authenticate via browser
 ```
+
+When both exist, the API token is used. `jcf auth jira logout` removes both.
 
 ### 2. Clockify API Key
 
 ```bash
 jcf auth clockify setup    # Enter API key from https://app.clockify.me/manage-api-keys
+jcf auth clockify setup --api-key <key> --workspace <name>   # For scripts; the key is visible to other processes
 ```
+
+Commands that need a system that is not connected fail with one line naming the command that
+connects it, and exit non-zero.
 
 ### 3. Configure Defaults
 
@@ -38,7 +60,7 @@ jcf auth clockify setup    # Enter API key from https://app.clockify.me/manage-a
 jcf config set project     # Select default Clockify project
 jcf config set billable    # Set default billable flag
 jcf config set jql <jql>   # Set default JQL filter
-jcf config show            # Show current config
+jcf config show            # Show current config; marks values that are jcf's defaults
 jcf config reset           # Reset to defaults
 ```
 
@@ -96,7 +118,12 @@ jcf sync reconcile jira-to-clockify        # Fill Clockify from Jira
 jcf sync reconcile --agent claude             # Propose worklogs from local Claude Code sessions
 jcf sync reconcile --agent claude --calendar  # ...with an hour-by-hour grid of when it happened
 jcf sync reconcile --agent claude --json      # Reporting only: one JSON value, nothing logged
+jcf sync reconcile --agent claude --only clockify  # Read and write Clockify alone (or --only jira)
 ```
+
+An agent run reads both systems before it proposes anything, because a side it cannot read looks the
+same as a side with nothing recorded. If one is not connected the run stops before planning and says
+how to connect it, or to pass `--only` for the other one.
 
 `--agent claude` is for time _neither_ side recorded: it reads Claude Code and Codex transcripts,
 keeps work inside your session roots, and works out which issue each
@@ -319,12 +346,14 @@ Stored in `~/.jcf/`:
 ~/.jcf/
 ├── config.json      # JQL, project, billable defaults, session roots
 ├── clockify.json    # Clockify API key, workspace, user
+├── jira.json        # Jira site, cloud id, email, API token, account (0600)
 ├── poll.lock       # Kernel lock held by the active managed poll
 ├── poll.stamp      # Last managed poll attempt, including failures
 └── state.json       # Current timer state and polling authority
 ```
 
-Jira OAuth credentials stored via `@knpkv/atlassian-common` in `~/.config/atlassian/`.
+Jira OAuth credentials (the advanced path) are stored via `@knpkv/atlassian-common` in
+`~/.config/atlassian/`. That store holds OAuth logins only, so the API token lives in `~/.jcf/jira.json`.
 
 ## License
 

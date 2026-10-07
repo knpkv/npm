@@ -40,7 +40,8 @@
  * @category Domain
  * @module
  */
-import { Data, Effect, Schema, SchemaGetter, SchemaIssue } from "effect"
+import { Data, Effect, Match, Schema, SchemaGetter, SchemaIssue } from "effect"
+import type { IdentityLifecycle } from "./IdentityLifecycle.js"
 
 // ---------------------------------------------------------------------------
 // Branded Types
@@ -175,6 +176,39 @@ export class ApprovalRule extends Schema.Class<ApprovalRule>("ApprovalRule")({
 }) {}
 
 /**
+ * Why CodeCommit could not say whether a pull request's approval rules are satisfied. Reasons carry
+ * no provider text, which can include account paths; the account's notification keeps that.
+ *
+ * @category Domain
+ */
+export const ApprovalUnknownReason = Schema.TaggedUnion({
+  /** `codecommit:EvaluatePullRequestApprovalRules` is denied, typically a missing IAM grant. */
+  NotPermitted: {},
+  /** AWS was still throttling the evaluation after retries. */
+  Throttled: {},
+  /** Any other failure the provider returned; the provider's error is logged, not stored. */
+  ProviderFailed: {}
+})
+
+/**
+ * @category Domain
+ */
+export type ApprovalUnknownReason = typeof ApprovalUnknownReason.Type
+
+/**
+ * An {@link ApprovalUnknownReason} as its bare tag, for flat representations: the cache column and the
+ * cached-row API response.
+ *
+ * @category Domain
+ */
+export const ApprovalUnknownTag = Schema.Literals(["NotPermitted", "Throttled", "ProviderFailed"])
+
+/**
+ * @category Domain
+ */
+export type ApprovalUnknownTag = typeof ApprovalUnknownTag.Type
+
+/**
  * CodeCommit pull request.
  *
  * @category Domain
@@ -193,7 +227,10 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
   isMergeable: Schema.Boolean,
+  /** The last known approval. Read approval through {@link approvalOf}, which accounts for `approvalUnknown`. */
   isApproved: Schema.Boolean,
+  /** Set when the last evaluation failed: `isApproved` is then only the last known value. */
+  approvalUnknown: Schema.optionalKey(ApprovalUnknownReason),
   commentCount: Schema.optional(Schema.Number),
   healthScore: Schema.optional(Schema.Number),
   fetchedAt: Schema.optional(Schema.Date),
@@ -207,6 +244,50 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
     return codecommitConsoleUrl(this.account.region, this.repositoryName, this.id)
   }
 }
+
+/**
+ * A pull request's approval as a reader should treat it: unknown whenever the last evaluation failed,
+ * whatever the last known `isApproved` says.
+ *
+ * @category Domain
+ */
+export type Approval =
+  | { readonly _tag: "Approved" }
+  | { readonly _tag: "Pending" }
+  | { readonly _tag: "Unknown"; readonly reason: ApprovalUnknownReason }
+
+/**
+ * The single read path for approval. Works with domain instances, cache rows mapped to them, and plain
+ * wire objects.
+ *
+ * @category Domain
+ */
+export const approvalOf = (
+  pr: { readonly isApproved: boolean; readonly approvalUnknown?: ApprovalUnknownReason | undefined }
+): Approval =>
+  pr.approvalUnknown !== undefined
+    ? { _tag: "Unknown", reason: pr.approvalUnknown }
+    : pr.isApproved
+    ? { _tag: "Approved" }
+    : { _tag: "Pending" }
+
+/**
+ * The label every surface shows for an {@link Approval} of `Unknown`.
+ *
+ * @category Domain
+ */
+export const approvalUnknownLabel = "Approval unknown"
+
+/**
+ * The sentence every surface shows to explain an unknown approval.
+ *
+ * @category Domain
+ */
+export const approvalUnknownReasonText: (reason: ApprovalUnknownReason) => string = Match.valueTags({
+  NotPermitted: () => "Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules).",
+  Throttled: () => "AWS throttled the approval check; it is retried on the next refresh.",
+  ProviderFailed: () => "AWS could not evaluate the approval rules; refresh to retry. The provider error is in the log."
+})
 
 /**
  * Robust identity comparison for matching a caller against an author or
@@ -248,10 +329,16 @@ export const identityMatches = (callerUsername: string, prAuthor: string): boole
  * forms still match when they refer to the same user.
  */
 export const needsMyReview = (
-  pr: { readonly approvalRules: ReadonlyArray<ApprovalRule>; readonly approvedBy: ReadonlyArray<string> },
+  pr: {
+    readonly approvalRules: ReadonlyArray<ApprovalRule>
+    readonly approvedBy: ReadonlyArray<string>
+    readonly approvalUnknown?: ApprovalUnknownReason | undefined
+  },
   currentUser: string | undefined
 ): boolean => {
   if (currentUser === undefined || currentUser.length === 0) return false
+  // While approval is unknown, which rules are satisfied is only last known, so review is not certain.
+  if (pr.approvalUnknown !== undefined) return false
   if (pr.approvedBy.some((approver) => identityMatches(currentUser, approver))) return false
   return pr.approvalRules.some(
     (rule) => !rule.satisfied && rule.poolMembers.some((member) => identityMatches(currentUser, member))
@@ -597,6 +684,74 @@ export interface PullRequestRefreshScope {
 }
 
 /**
+ * Why the caller is unknown in one account: only the failures core can tell apart. An expired
+ * SSO login reaches core as a credential failure, with no expiry marker, so it is
+ * `CredentialsUnavailable`; `ExpiredToken` from STS itself is `StsRejected`. Reasons carry no
+ * message, because provider text can include profile paths; the account's notification explains.
+ *
+ * @category Domain
+ */
+export const CallerIdentityUnresolvedReason = Schema.TaggedUnion({
+  /** Credentials could not be acquired: profile missing, SSO login expired, provider timed out. */
+  CredentialsUnavailable: {},
+  /** STS answered GetCallerIdentity with an error, e.g. ExpiredToken or AccessDenied. */
+  StsRejected: {},
+  /** STS was still throttling after retries. */
+  Throttled: {},
+  /** The pull-request refresh hit an authentication error after the identity had resolved. */
+  RefreshAuthFailed: {},
+  /** `aws sso logout` succeeded and nothing has resolved since. */
+  SignedOut: {}
+})
+
+/** @category Domain */
+export type CallerIdentityUnresolvedReason = typeof CallerIdentityUnresolvedReason.Type
+
+/**
+ * Who the caller is in one configured account, from STS GetCallerIdentity on its primary region.
+ * `arn` is the raw STS Arn: for an SSO session its last segment is usually the person's email, so it
+ * is a client-visible identifier that only travels to its owner over the authenticated event stream.
+ *
+ * @category Domain
+ */
+export const CallerIdentityState = Schema.TaggedUnion({
+  Resolved: { accountId: Schema.String, arn: Schema.String, username: Schema.String },
+  Unresolved: { reason: CallerIdentityUnresolvedReason }
+})
+
+/** @category Domain */
+export type CallerIdentityState = typeof CallerIdentityState.Type
+
+/**
+ * The caller's identity per configured account, keyed by AWS profile (the same value as
+ * `PullRequest.account.profile`). A profile with no key is not enabled, or not resolved yet.
+ *
+ * @category Domain
+ */
+export const CallerIdentities = Schema.Record(Schema.String, CallerIdentityState)
+
+/** @category Domain */
+export type CallerIdentities = typeof CallerIdentities.Type
+
+/**
+ * A pull request the last refresh read but could not re-evaluate: its approval rules failed to
+ * evaluate, so its cached row is kept as it was and its account's refresh counts as partial.
+ *
+ * @category Domain
+ */
+export const UnevaluatedPullRequest = Schema.Struct({
+  profile: AwsProfileName,
+  region: AwsRegion,
+  pullRequestId: Schema.String,
+  repositoryName: Schema.String,
+  /** Names the failed operation and the provider's reason. */
+  message: Schema.String
+})
+
+/** @category Domain */
+export type UnevaluatedPullRequest = typeof UnevaluatedPullRequest.Type
+
+/**
  * Application state.
  *
  * @category Domain
@@ -609,6 +764,15 @@ export interface AppState {
   readonly error?: string | undefined
   readonly lastUpdated?: Date
   readonly currentUser?: string
+  /**
+   * Per-account caller identity; absent until something is known. Written only by
+   * `IdentityLifecycle.applyIdentityEvent`, like `currentUser`.
+   */
+  readonly callerIdentities?: CallerIdentities
+  /** The identity state machine's own slice; not sent to clients. */
+  readonly identityLifecycle?: IdentityLifecycle
+  /** Pull requests the last refresh kept from cache because their approval rules failed to evaluate. */
+  readonly unevaluatedPullRequests?: ReadonlyArray<UnevaluatedPullRequest>
   /**
    * Unused. codecommit-web no longer sets or reads it; its review count is the client-side
    * `yourReviewCount` (workbench-queue.ts). Kept for L2-7, which retires or replaces it.

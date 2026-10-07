@@ -124,12 +124,18 @@
   gap: var(--rly-space-24);
 }
 
+/* Heading, description, then the action on the card's last row, so actions line up across a row. */
+.previewCard {
+  grid-template-rows: auto 1fr auto;
+}
+
 .cardHeading,
 .cardAction {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: var(--rly-space-16);
+  gap: var(--rly-space-8) var(--rly-space-16);
 }
 
 .synchronization,
@@ -182,9 +188,10 @@
 .connectionIdentity {
   display: flex;
   flex: 1 1 auto;
+  flex-wrap: wrap;
   min-inline-size: 0;
   align-items: center;
-  gap: var(--rly-space-12);
+  gap: var(--rly-space-8) var(--rly-space-12);
 }
 
 /* The mark keeps its size; the title takes the rest and wraps between words, never inside one. */
@@ -192,8 +199,8 @@
   flex: none;
 }
 
+/* A title never shrinks below its longest word; the heading row wraps the state below it instead. */
 .connectionIdentity > h2 {
-  min-inline-size: 0;
   overflow-wrap: break-word;
 }
 
@@ -234,6 +241,11 @@
 
 .identifier {
   overflow-wrap: break-word;
+}
+
+/* An account id stays whole; its heading wraps before it instead. */
+.accountName {
+  white-space: nowrap;
 }
 
 @media (max-width: 32rem) {

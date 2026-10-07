@@ -13,11 +13,11 @@ import {
   configPathQueryAtom,
   configQueryAtom,
   configSaveAtom,
-  notificationsSsoLoginAtom,
-  notificationsSsoLogoutAtom
+  notificationsSsoLoginAtom
 } from "../atoms/app.js"
 import { Button, ButtonGroup } from "./ui/button.js"
 import { Input } from "./ui/input.js"
+import { SsoSignOutDialog } from "./sso-sign-out-dialog.js"
 import { Separator } from "./ui/separator.js"
 
 type StatusFilter = "all" | "on" | "off"
@@ -48,7 +48,7 @@ export function SettingsAccounts() {
   const appState = useAtomValue(appStateAtom)
   const saveConfig = useAtomSet(configSaveAtom)
   const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
-  const ssoLogout = useAtomSet(notificationsSsoLogoutAtom)
+  const [signOutOpen, setSignOutOpen] = useState(false)
   const [search, setSearch] = useState("")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
   const [overrides, setOverrides] = useState<Record<string, boolean>>({})
@@ -152,10 +152,11 @@ export function SettingsAccounts() {
                 /* invalid profile */
               }
             }}
-            onSsoLogout={() => ssoLogout({})}
+            onSsoLogout={() => setSignOutOpen(true)}
           />
         ))
         .render()}
+      <SsoSignOutDialog onOpenChange={setSignOutOpen} open={signOutOpen} />
     </div>
   )
 }
@@ -264,7 +265,8 @@ function AccountsList({
               variant="ghost"
               size="sm"
               className="h-6 px-1.5 text-xs"
-              title="SSO Logout"
+              aria-label="Sign out of AWS SSO on this machine"
+              title="Sign out of AWS SSO on this machine"
               onClick={() => onSsoLogout()}
             >
               <LogOutIcon className="size-3" />

@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/browser-pairing",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Typed browser pairing credentials and transport primitives",
   "license": "MIT",
   "repository": {
@@ -35,7 +35,7 @@
   },
   "scripts": {
     "build": "tsc -b tsconfig.build.json --force",
-    "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit && tsc -p test/tsconfig.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run"
   },

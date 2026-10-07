@@ -40,6 +40,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export type { CallerIdentity } from "./getCallerIdentity.js"
+export type { ApprovalEvaluationError } from "./getPullRequests.js"
 export type { DiffStats, GetDifferencesParams } from "./internal.js"
 
 // ---------------------------------------------------------------------------

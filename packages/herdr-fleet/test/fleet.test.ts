@@ -1308,6 +1308,14 @@ describe("fleet local authority", () => {
       reason: "Codex identities retired",
       expectedGoalEventId: "goal-event-7",
       expectedGoalUpdatedAt: 500
+    },
+    {
+      kind: "work.abandon",
+      goalId: "fix-iphone-live-ui-polish",
+      owner: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+      reason: "No PR, no branch, no owner",
+      expectedGoalEventId: "goal-event-7",
+      expectedGoalUpdatedAt: 500
     }
   ]
 
@@ -1788,6 +1796,43 @@ describe("fleet local authority", () => {
         })
     ).pipe(provideNodeServices)
   })
+
+  const abandonBaseline = {
+    kind: "work.abandon",
+    goalId: "fix-iphone-live-ui-polish",
+    owner: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+    reason: "abandoned by Andrey 2026-10-06: no PR, no branch, no owner",
+    expectedGoalEventId: "goal-event-7",
+    expectedGoalUpdatedAt: 500
+  }
+
+  it.effect("requires approval for an abandonment and bounds its recorded summary", () =>
+    Effect.sync(() => {
+      const decode = (change: { readonly reason?: string }) =>
+        Schema.decodeUnknownExit(JobPayload)({ ...abandonBaseline, ...change })._tag
+      expect(requiresApproval(Schema.decodeUnknownSync(JobPayload)(abandonBaseline))).toBe(true)
+      expect(decode({ reason: "r".repeat(1_024) })).toBe("Success")
+      expect(decode({ reason: "" })).toBe("Failure")
+      expect(decode({ reason: "line\nbreak" })).toBe("Failure")
+    }))
+
+  it.effect("binds every abandonment field into approval", () =>
+    Effect.gen(function*() {
+      const baseline = Schema.decodeUnknownSync(JobPayload)(abandonBaseline)
+      const original = yield* jobHash("SER8", "coord", baseline)
+      const changes = [
+        { goalId: "other-goal" },
+        { owner: { ...abandonBaseline.owner, id: "other-owner" } },
+        { owner: { ...abandonBaseline.owner, name: "Changed" } },
+        { reason: "Another reason" },
+        { expectedGoalEventId: "other-event" },
+        { expectedGoalUpdatedAt: 501 }
+      ]
+      for (const change of changes) {
+        const changed = Schema.decodeUnknownSync(JobPayload)({ ...abandonBaseline, ...change })
+        expect(yield* jobHash("SER8", "coord", changed)).not.toBe(original)
+      }
+    }).pipe(provideNodeServices))
 
   it.effect("rejects a reassignment to the same owner", () =>
     Effect.sync(() => {

@@ -120,7 +120,7 @@ export const AgentJob = ({
         </span>
         <span className={style("titleBlock")}>
           <span className={style("eyebrow")}>
-            {visibleProvider} · {visibleCapability}
+            {visibleProvider}, {visibleCapability}
           </span>
           <h2>{visibleHeading}</h2>
         </span>

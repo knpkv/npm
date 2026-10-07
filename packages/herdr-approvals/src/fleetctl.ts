@@ -33,6 +33,17 @@ import { fleetConfigPath } from "./internal/config-path.js"
 import { followJob } from "./internal/fleet-follow.js"
 import { withFleetRequestTimeout } from "./internal/fleet-request.js"
 import {
+  FleetctlUsageError,
+  formatUsageError,
+  oneLine,
+  parseInvocation,
+  unknownHostDetail,
+  unknownKindDetail,
+  usage,
+  workPayload,
+  workUsage
+} from "./internal/fleetctl-cli.js"
+import {
   workAdmissionPreflightUrl,
   workCheckpointFromJson,
   workCheckpointUrl,
@@ -53,7 +64,9 @@ const endpoint = Effect.fn("Fleetctl.endpoint")(function*(
 ) {
   const known = config.machines.find(({ host }) => host.toLowerCase() === target.toLowerCase())
   if (known === undefined) {
-    return yield* new FleetValidationError({ detail: `unknown host: ${target}` })
+    return yield* new FleetValidationError({
+      detail: unknownHostDetail(target, config.machines.map(({ host }) => host))
+    })
   }
   if (known.host.toLowerCase() === config.host.toLowerCase()) {
     return `http://127.0.0.1:${config.localPort}`
@@ -256,112 +269,38 @@ export const payloadFrom = Effect.fn("Fleetctl.payloadFrom")(function*(args: Rea
         )
       )
     }
-    case "work.reconcile": {
-      const body = args[1]
-      if (args.length !== 2 || body === undefined) {
-        return yield* new FleetValidationError({ detail: "work.reconcile requires one JSON payload" })
-      }
-      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
-        onExcessProperty: "error"
-      })(body).pipe(
-        Effect.mapError(() => new FleetValidationError({ detail: "work.reconcile payload is invalid" })),
-        Effect.filterOrFail(
-          (payload) => payload.kind === "work.reconcile",
-          () => new FleetValidationError({ detail: "work.reconcile payload kind does not match the command" })
-        )
-      )
-    }
-    case "work.admit": {
-      const body = args[1]
-      if (args.length !== 2 || body === undefined) {
-        return yield* new FleetValidationError({ detail: "work.admit requires one JSON payload" })
-      }
-      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
-        onExcessProperty: "error"
-      })(body).pipe(
-        Effect.mapError(() => new FleetValidationError({ detail: "work.admit payload is invalid" })),
-        Effect.filterOrFail(
-          (payload) => payload.kind === "work.admit",
-          () => new FleetValidationError({ detail: "work.admit payload kind does not match the command" })
-        )
-      )
-    }
-    case "work.recover": {
-      const body = args[1]
-      if (args.length !== 2 || body === undefined) {
-        return yield* new FleetValidationError({
-          detail: "work.recover requires one JSON payload"
-        })
-      }
-      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
-        onExcessProperty: "error"
-      })(body).pipe(
-        Effect.mapError(
-          () =>
-            new FleetValidationError({
-              detail: "work.recover payload is invalid"
-            })
-        ),
-        Effect.filterOrFail(
-          (payload) => payload.kind === "work.recover",
-          () =>
-            new FleetValidationError({
-              detail: "work.recover payload kind does not match the command"
-            })
-        )
-      )
-    }
-    case "work.reassign": {
-      const body = args[1]
-      if (args.length !== 2 || body === undefined) {
-        return yield* new FleetValidationError({ detail: "work.reassign requires one JSON payload" })
-      }
-      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
-        onExcessProperty: "error"
-      })(body).pipe(
-        Effect.mapError(() => new FleetValidationError({ detail: "work.reassign payload is invalid" })),
-        Effect.filterOrFail(
-          (payload) => payload.kind === "work.reassign",
-          () => new FleetValidationError({ detail: "work.reassign payload kind does not match the command" })
-        )
-      )
-    }
+    case "work.reconcile":
+      return yield* workPayload("work.reconcile", args)
+    case "work.admit":
+      return yield* workPayload("work.admit", args)
+    case "work.recover":
+      return yield* workPayload("work.recover", args)
+    case "work.reassign":
+      return yield* workPayload("work.reassign", args)
+    case "work.abandon":
+      return yield* workPayload("work.abandon", args)
     default:
-      return yield* new FleetValidationError({ detail: `unknown job kind: ${kind ?? ""}` })
+      return yield* new FleetValidationError({ detail: unknownKindDetail(kind) })
   }
 })
 
 const follow = (config: HostConfiguration, tailscale: TailscaleClient, host: string, id: string) =>
   followJob(getJob(config, tailscale, host, id))
 
-const usage = `fleetctl commands:
-  hosts
-  status HOST
-  history HOST [LIMIT]
-  job HOST ID
-  follow HOST ID
-  submit HOST nix.check
-  submit HOST nix.apply REF
-  submit HOST agent.delegate (consult|transition_summary|review|work) REPOSITORY PROMPT...
-  submit HOST agent.message SESSION MESSAGE...
-  submit HOST work.reconcile PAYLOAD_JSON
-  submit HOST work.admit PAYLOAD_JSON
-  submit HOST work.recover PAYLOAD_JSON
-  submit HOST work.reassign PAYLOAD_JSON
-  work record HOST CHECKPOINT_JSON
-  work snapshot [HOST]
-  work admission-preflight HOST TARGET_JSON
-  work recovery-preflight HOST TARGET_JSON
-  work recovery-context HOST GOAL_ID
-  apply-everywhere REF`
-
 const main = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
   const args = yield* stdio.args
+  // Help and usage mistakes are answered before the fleet configuration is read.
+  const invocation = parseInvocation(args)
+  if (invocation._tag === "FleetctlUsageError") return yield* invocation
+  if (invocation._tag === "Help") {
+    yield* Console.log(invocation.text)
+    return
+  }
+  const { command, rest } = invocation
   const configPath = yield* fleetConfigPath
   const config = yield* loadConfiguration(configPath)
   const tailscale = yield* makeTailscale(config.tailscaleCommand)
-  const [command, ...rest] = args
 
   switch (command) {
     case "hosts": {
@@ -410,7 +349,7 @@ const main = Effect.gen(function*() {
       const host = rest[0]
       const id = rest[1]
       if (host === undefined || id === undefined) {
-        return yield* new FleetValidationError({ detail: usage })
+        return yield* new FleetctlUsageError({ reason: "follow needs HOST and ID", usage })
       }
       const record = yield* follow(config, tailscale, host, id)
       yield* Console.log(JSON.stringify(record, null, 2))
@@ -419,7 +358,7 @@ const main = Effect.gen(function*() {
     case "submit": {
       const host = rest[0]
       if (host === undefined) {
-        return yield* new FleetValidationError({ detail: usage })
+        return yield* new FleetctlUsageError({ reason: "submit needs HOST and a job kind", usage })
       }
       const payload = yield* payloadFrom(rest.slice(1))
       const record = yield* submit(config, tailscale, host, payload)
@@ -438,7 +377,10 @@ const main = Effect.gen(function*() {
         const host = rest[1]
         const goalId = rest[2]
         if (host === undefined || goalId === undefined || rest.length !== 3) {
-          return yield* new FleetValidationError({ detail: usage })
+          return yield* new FleetctlUsageError({
+            reason: "work recovery-context needs HOST and GOAL_ID",
+            usage: workUsage
+          })
         }
         const url = yield* workRecoveryContextUrl(config, host, goalId)
         const context = yield* requestAt(url, WorkRecoveryContext)
@@ -449,7 +391,10 @@ const main = Effect.gen(function*() {
         const host = rest[1]
         const json = rest[2]
         if (host === undefined || json === undefined || rest.length !== 3) {
-          return yield* new FleetValidationError({ detail: usage })
+          return yield* new FleetctlUsageError({
+            reason: "work recovery-preflight needs HOST and TARGET_JSON",
+            usage: workUsage
+          })
         }
         const target = yield* Schema.decodeEffect(Schema.fromJsonString(WorkRecoveryTarget), {
           onExcessProperty: "error"
@@ -466,7 +411,10 @@ const main = Effect.gen(function*() {
         const host = rest[1]
         const json = rest[2]
         if (host === undefined || json === undefined || rest.length !== 3) {
-          return yield* new FleetValidationError({ detail: usage })
+          return yield* new FleetctlUsageError({
+            reason: "work admission-preflight needs HOST and TARGET_JSON",
+            usage: workUsage
+          })
         }
         const target = yield* Schema.decodeEffect(Schema.fromJsonString(WorkAdmissionTarget), {
           onExcessProperty: "error"
@@ -483,7 +431,10 @@ const main = Effect.gen(function*() {
         const host = rest[1]
         const json = rest[2]
         if (host === undefined || json === undefined || rest.length !== 3) {
-          return yield* new FleetValidationError({ detail: usage })
+          return yield* new FleetctlUsageError({
+            reason: "work record needs HOST and CHECKPOINT_JSON",
+            usage: workUsage
+          })
         }
         const checkpoint = yield* workCheckpointFromJson(json)
         const recorded = yield* recordWorkCheckpoint(config, host, checkpoint)
@@ -495,12 +446,19 @@ const main = Effect.gen(function*() {
         yield* Console.log(JSON.stringify(snapshot, null, 2))
         return
       }
-      return yield* new FleetValidationError({ detail: usage })
+      return yield* new FleetctlUsageError({
+        reason: operation === undefined
+          ? "work needs an operation"
+          : operation === "snapshot"
+          ? "work snapshot takes at most one HOST"
+          : `unknown work operation "${operation}"`,
+        usage: workUsage
+      })
     }
     case "apply-everywhere": {
       const ref = rest[0]
       if (ref === undefined) {
-        return yield* new FleetValidationError({ detail: usage })
+        return yield* new FleetctlUsageError({ reason: "apply-everywhere needs REF", usage })
       }
       if (!config.crossHost) {
         return yield* new FleetValidationError({ detail: "cross-host fleet control is disabled on this machine" })
@@ -546,7 +504,7 @@ const main = Effect.gen(function*() {
       return
     }
     default:
-      return yield* new FleetValidationError({ detail: usage })
+      return yield* new FleetctlUsageError({ reason: `unknown command "${command}"`, usage })
   }
 })
 
@@ -555,7 +513,11 @@ main.pipe(
   // @effect-diagnostics-next-line strictEffectProvide:off
   Effect.provide(Layer.merge(NodeServices.layer, NodeHttpClient.layerNodeHttp)),
   Effect.catch((error) =>
-    Console.error(`${error._tag}: ${"detail" in error ? error.detail : String(error)}`).pipe(
+    Console.error(
+      error._tag === "FleetctlUsageError"
+        ? formatUsageError(error)
+        : `fleetctl: ${oneLine("detail" in error ? error.detail : String(error))}`
+    ).pipe(
       Effect.andThen(Effect.fail(error))
     )
   ),

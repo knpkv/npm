@@ -600,6 +600,36 @@ describe("ServicesPage connection tests", () => {
     expect(currentLocation).toBe("/services")
   })
 
+  it("prints the provider name on a connection card only when the card's title doesn't already say it", async () => {
+    const namedLikeProvider = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(confluenceConnection),
+      displayName: "confluence"
+    })
+    const twoConnections = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      ...Schema.encodeSync(PluginOverviewResponse)(overview),
+      connections: [
+        Schema.encodeSync(PluginConnectionSummary)(connection),
+        Schema.encodeSync(PluginConnectionSummary)(namedLikeProvider)
+      ]
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve(twoConnections),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    const markIn = (title: string) =>
+      [...host.querySelectorAll<HTMLElement>("article")]
+        .find((card) => card.querySelector("h2")?.textContent === title)
+        ?.querySelector<HTMLElement>("[data-rly-service]")
+    // A renamed connection keeps its provider visible; one titled with the provider's name doesn't repeat it.
+    expect(markIn("Payments Jira")?.textContent).toBe("Jira")
+    expect(markIn("confluence")?.textContent).toBe("")
+    expect(markIn("confluence")?.getAttribute("aria-label")).toBe("Confluence")
+  })
+
   it("keeps provider-account renames independent across account cards", async () => {
     const firstAccountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000201")
     const secondAccountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000202")
@@ -686,6 +716,24 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("AWS account Secondary account")
   })
 
+  it("offers one retry for a page-wide connection failure, not one per card", async () => {
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      overview: () => Promise.reject(new Error("overview unavailable")),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => {
+      await Promise.resolve()
+    })
+    expect(host.textContent).toContain("Connections unavailable")
+    expect(host.querySelectorAll("article")).toHaveLength(5)
+    expect(host.querySelectorAll("article button")).toHaveLength(0)
+    expect([...host.querySelectorAll("button")].filter((button) => button.textContent === "Try again")).toHaveLength(1)
+  })
+
   it("keeps every service visible while the authenticated overview is still loading", async () => {
     const transport: ConnectionTestTransport = {
       create: vi.fn(),
@@ -702,7 +750,9 @@ describe("ServicesPage connection tests", () => {
     expect(host.textContent).toContain("Jira")
     expect(host.textContent).toContain("Confluence")
     expect(host.textContent).toContain("Clockify")
-    expect(host.textContent).toContain("Loading connections")
+    // Each card says it is loading in words; none offers an action until connections arrive.
+    expect(host.textContent?.match(/Loading/g)).toHaveLength(5)
+    expect(host.querySelectorAll("article button")).toHaveLength(0)
   })
 
   it("shows every available service before the browser is paired", async () => {
@@ -1020,7 +1070,10 @@ describe("ServicesPage connection tests", () => {
 
     expect(host.textContent).toContain("Connected accounts")
     expect(host.textContent).toContain("AWS account 123456789012")
-    expect(host.textContent).toContain("Verified identity · 123456789012")
+    // The account id is its own unbreakable token, so a narrow card wraps before it, never inside it.
+    const heading = [...host.querySelectorAll("h2")].find((element) => element.textContent?.startsWith("AWS account"))
+    expect(heading?.querySelector("span")?.textContent).toBe("123456789012")
+    expect(host.textContent).toContain("Verified identity: 123456789012")
     expect(host.textContent).toContain("payments")
     expect(host.textContent).toContain("payments-release")
     const resources = [...host.querySelectorAll<HTMLDetailsElement>("details")]
@@ -1236,7 +1289,7 @@ describe("ServicesPage connection tests", () => {
     await act(async () => undefined)
 
     expect(host.textContent).toContain("Atlassian site acme.atlassian.net")
-    expect(host.textContent).toContain("Verified identity · cloud-2")
+    expect(host.textContent).toContain("Verified identity: cloud-2")
     expect(host.textContent).toContain("Project · project-payments")
     expect(host.textContent).toContain("Space · space-payments")
     expect(host.textContent).toContain("Old Confluence setup")
@@ -2690,7 +2743,7 @@ describe("ServicesPage connection tests", () => {
       expect.any(AbortSignal)
     )
     expect(host.textContent).toContain("Verified AWS account 123456789012")
-    expect(host.textContent).toContain("CodePipeline access was denied")
+    expect(host.textContent).toContain("isn't allowed to list CodePipeline resources")
     const search = host.querySelector<HTMLInputElement>('input[type="search"]')
     if (search !== null) await setControlValue(search, "payments")
     expect(host.textContent).toContain("payments-api")
@@ -2862,7 +2915,7 @@ describe("ServicesPage connection tests", () => {
     )
     await act(async () => refresh?.click())
 
-    expect(host.textContent).toContain("CodePipeline access was denied")
+    expect(host.textContent).toContain("isn't allowed to list CodePipeline resources")
     expect(host.textContent).toContain("payments-production")
     const preservedChoice = [...host.querySelectorAll<HTMLLabelElement>("label")]
       .find(({ textContent }) => textContent?.includes("payments-production"))

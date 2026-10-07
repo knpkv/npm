@@ -4,6 +4,18 @@ import { findAccentStripes } from "../../scripts/tokens/accent-stripes.js"
 const declarations = (css: string) => findAccentStripes("x.css", css).map((violation) => violation.declaration)
 
 describe("findAccentStripes", () => {
+  it("allows a chevron drawn from two borders meeting at a corner, but not one coloured side", () => {
+    const chevron =
+      `.a::after { border-block-end: 1.5px solid currentColor; border-inline-end: 1.5px solid currentColor; transform: rotate(45deg); }`
+    expect(findAccentStripes("x.css", chevron)).toEqual([])
+    const side = `.a { border-inline-end: 1.5px solid currentColor; }`
+    expect(findAccentStripes("x.css", side)).toHaveLength(1)
+    // Three coloured edges are not a corner: the lone inline one still counts as the stripe it is.
+    const bracket =
+      `.a { border-block: 1px solid var(--rly-color-border-1); border-inline-start: 4px solid var(--rly-color-held-ink); }`
+    expect(findAccentStripes("x.css", bracket)).toHaveLength(1)
+  })
+
   it("flags a thick one-sided border used as a severity bar", () => {
     expect(declarations(".card { border-inline-start: 4px solid var(--rly-color-held-ink); }")).toEqual([
       "border-inline-start: 4px solid var(--rly-color-held-ink)"

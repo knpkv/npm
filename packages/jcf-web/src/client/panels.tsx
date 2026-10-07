@@ -15,10 +15,10 @@
  */
 import { Button, Field } from "@knpkv/rly/primitives"
 import { useAtomValue } from "@effect/atom-react"
-import { useEffect, useState } from "react"
+import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react"
 import type { UnattributedDayResponse, WeekRowResponse, WriteTargetsRequest } from "../server/Api.js"
 import { consumedFromWeekBlocks, prepareProposal } from "../shared/writePlanning.js"
-import { duration, formatDuration, parseDuration, signalMeaning, spanRange } from "./format.js"
+import { dayLabel, duration, formatDuration, parseDuration, signalMeaning, spanRange } from "./format.js"
 import type { RowDescriptionDraft } from "./rowDescriptions.js"
 
 /** Rly owns field labels, focus, input sizing and announced validation. */
@@ -33,6 +33,7 @@ const TextField = (props: {
   readonly maxLength?: number
   readonly loading?: boolean
   readonly multiline?: boolean
+  readonly textareaRef?: RefObject<HTMLTextAreaElement | null>
 }) => (
   <Field
     className={props.wide === true ? "jcf-field jcf-field-wide" : "jcf-field"}
@@ -43,6 +44,7 @@ const TextField = (props: {
       props.multiline === true ? (
         <textarea
           {...control}
+          ref={props.textareaRef}
           rows={4}
           onChange={(event) => props.onChange(event.target.value)}
           placeholder={props.placeholder}
@@ -142,6 +144,13 @@ export const ConfirmPanel = (props: {
     if (!props.descriptionDisabled && draft.status === "idle" && !draft.edited) void props.description.load()
   }, [props.description, props.descriptionDisabled, draft.status, draft.edited])
   const note = draft.text
+  // A suggestion that lands while the person is already in the field arrives selected, in the same
+  // task as its commit, so the next keystroke replaces it instead of being appended after it.
+  const noteRef = useRef<HTMLTextAreaElement>(null)
+  useLayoutEffect(() => {
+    const field = noteRef.current
+    if (draft.status === "ready" && !draft.edited && field !== null && document.activeElement === field) field.select()
+  }, [draft.status, draft.edited])
   const suggesting =
     !draft.edited && !props.descriptionDisabled && (draft.status === "loading" || draft.status === "idle")
   const [chosenTargets, setTargets] = useState({ jira: true, clockify: true })
@@ -191,7 +200,7 @@ export const ConfirmPanel = (props: {
   return (
     <section aria-label={`Confirm ${props.row.ticketKey} on ${props.row.day}`} className="jcf-panel">
       <h2>
-        {props.row.ticketKey} · {props.row.day} · {spanRange(block)}
+        {props.row.ticketKey}, {dayLabel(props.row.day)}, {spanRange(block)}
       </h2>
       {props.row.ticketTitle === null ? null : <p className="jcf-muted">{props.row.ticketTitle}</p>}
       <dl>
@@ -201,17 +210,17 @@ export const ConfirmPanel = (props: {
           {proposal.sessionCount === 1 ? "" : "s"} in {proposal.blocks.length} block
           {proposal.blocks.length === 1 ? "" : "s"}
           {proposal.activeSeconds > proposal.maxSeconds
-            ? ` · ${duration(proposal.activeSeconds)} active, shared with work on other tickets`
+            ? `, ${duration(proposal.activeSeconds)} active, shared with work on other tickets`
             : ""}
         </dd>
         <dt>Placed by</dt>
         <dd>
-          {proposal.signal} — {signalMeaning[proposal.signal] ?? "unknown signal"}
-          {proposal.confidence === null ? "" : ` · confidence ${proposal.confidence.toFixed(2)}`}
+          {proposal.signal}: {signalMeaning[proposal.signal] ?? "unknown signal"}
+          {proposal.confidence === null ? "" : `, confidence ${proposal.confidence.toFixed(2)}`}
         </dd>
         <dt>Already held</dt>
         <dd>
-          Clockify {duration(props.row.clockifySeconds)} · Jira {duration(props.row.jiraSeconds)}
+          Clockify {duration(props.row.clockifySeconds)}, Jira {duration(props.row.jiraSeconds)}
         </dd>
       </dl>
       <div className="jcf-fields">
@@ -230,6 +239,7 @@ export const ConfirmPanel = (props: {
           onChange={props.description.edit}
           placeholder={suggesting ? "Agent is writing a description…" : "Describe this work"}
           value={note}
+          textareaRef={noteRef}
           wide
         />
         <div className="jcf-field-wide jcf-muted" role="status" aria-label="Description suggestion">
@@ -273,7 +283,7 @@ export const ConfirmPanel = (props: {
       ) : null}
       {noTargets ? (
         <p className="jcf-note" data-tone="failure">
-          Pick at least one system — a write to neither is not a write.
+          Pick at least one system. A write to neither is not a write.
         </p>
       ) : null}
       {preview?._tag === "Write" ? (
@@ -284,7 +294,7 @@ export const ConfirmPanel = (props: {
               ? "Clockify 0s (held for review)"
               : `Clockify ${exactDuration(preview.clockify.seconds)}`
             : ""}
-          {targets.clockify && targets.jira ? " · " : ""}
+          {targets.clockify && targets.jira ? " and " : ""}
           {targets.jira ? `Jira ${exactDuration(preview.jira.seconds)}` : ""}.
           {(targets.clockify &&
             preview.clockify.refusal === undefined &&

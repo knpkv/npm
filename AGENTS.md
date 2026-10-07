@@ -85,6 +85,8 @@ This project adheres to a strict set of development standards to ensure code qua
 - **Comprehensive Tests**: All packages are expected to have comprehensive tests written with `@effect/vitest`.
 - **Test-Driven Development**: While not explicitly stated, the emphasis on testing suggests that TDD is a recommended practice.
 
+- **Typechecked Tests**: Every test file (`test/`, `e2e/`, `dtslint/`, `*.test.*`, `*.spec.*`) must be in a TypeScript project the package's `check` script typechecks, usually `test/tsconfig.json` run as `tsc -p test/tsconfig.json --noEmit`. `scripts/check-test-typecheck-coverage.mjs` (part of `pnpm lint`) enforces it; `scripts/test-typecheck-allowlist.json` names the packages still catching up and their owners, and only shrinks.
+
 ### Review Findings Become Guardrails
 
 Treat every confirmed review finding as both a defect to fix and a prevention opportunity. Before closing the finding, classify the most durable guardrail that would catch the same defect class earlier:
@@ -106,6 +108,10 @@ Make every **Prevention** note implementation-ready:
 - sketch the matcher or invariant precisely enough for the remediation agent to implement it;
 - name one invalid fixture that must fail and one nearby valid fixture that must continue to pass;
 - call out likely false positives, generated/vendor exclusions, and any cases that still require judgment.
+
+### Escape Ledger
+
+Every lint, type and Effect-diagnostics escape (`@effect-diagnostics*`, `@ts-expect-error`/`@ts-ignore`/`@ts-nocheck`, `eslint-disable*`, `oxlint-disable*`, `ast-grep-ignore`) in tracked source and tests is counted in the generated `docs/debt.md`, against `docs/debt.baseline.json`. `pnpm debt:check` (part of `pnpm lint`) fails when any package's count for a kind rises, when it falls without the baseline being tightened, or when a new directive has no reason. A reason is ` -- <reason>` on the directive, free text after `@ts-expect-error`, or a comment line directly above it. Directives that already lacked a reason when the ledger was introduced are grandfathered by exact file and text. Debt only shrinks: fix the cause rather than adding an escape. A deliberate raise is a separate, reviewed `pnpm debt:update` named in the PR body; never fold it into an unrelated change.
 
 Manual acceptance checklists must contain one explicit item for every manually named SC flow; a grouped
 row may cover several flows only when each is named, and a checklist cannot pass while any item is
@@ -204,6 +210,7 @@ For `packages/control-center/README.md`, `packages/control-center/src/api/**`, a
 - **Semantic Versioning**: The project uses [Changesets](https://github.com/changesets/changesets) to manage versioning and generate changelogs.
 - **Feature Classification**: In `.changeset/*.md`, exported or user-visible functionality added under publishable `packages/*/src` or `packages/*/package.json` requires a `minor` bump. This includes additive fields in exported interfaces and schemas, even when their producer or decoder is implemented privately. A new public option or application workspace is not a patch; dependency-only stabilization may remain a patch. Private, generated, and vendor packages are excluded, while internal-only features still require judgment.
 - **Breaking Classification**: An incompatible exported type or schema change requires at least a `minor` bump, with `major` retained for packages whose stability contract requires it. A `Stream<Uint8Array>` to `Uint8Array` change in an exported service result paired with `patch` is invalid; the same change in an unexported internal result may remain a patch. Private, generated, and vendor packages are excluded, while structurally exposed types still require judgment.
+- **Dependency Pins**: `effect` and the `@effect/*` runtime packages released with it are exact pins on the version vendored in `repos/effect`. Effect tooling (`@effect/language-service`, `@effect/tsgo`, `@effect/eslint-plugin`, `@effect/build-utils`) and other development tooling use caret ranges, and published packages may use caret ranges for their other runtime dependencies so consumers can dedupe.
 - **Automated Releases**: The CI/CD pipeline automates the release process. When a version PR is merged, the packages are automatically published to `npm`.
 
 Generated source exposed through a publishable package's `exports` remains a

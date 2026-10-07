@@ -5,13 +5,15 @@
  * @module
  */
 import { NodeRuntime } from "@effect/platform-node"
-import { Effect } from "effect"
+import { Console, Data, Effect } from "effect"
 import { Command } from "effect/cli"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
+import pkg from "../package.json" with { type: "json" }
 import { HeadlessLayer } from "./cli/layers.js"
 import { root } from "./cli/root.js"
 import { reportUnhandled } from "./cli/runtimeFailure.js"
+import { unknownCommandLine } from "./cli/unknownCommand.js"
 
 const processArgv = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
@@ -19,12 +21,24 @@ const processArgv = Effect.gen(function*() {
   return args
 })
 
-const cli = Command.runWith(root, {
-  version: "0.1.0"
-})
+const cli = Command.runWith(root, { version: pkg.version })
+
+/** An unknown command fails with one line, before effect/cli prints the whole help above it. */
+class UnknownCommand extends Data.TaggedError("UnknownCommand")<{}> {
+  override readonly [Runtime.errorReported] = false
+}
 
 const program = reportUnhandled(processArgv.pipe(
-  Effect.flatMap((argv) => cli(argv))
+  Effect.flatMap((argv) =>
+    Effect.gen(function*() {
+      const unknown = unknownCommandLine(argv, root)
+      if (unknown !== undefined) {
+        yield* Console.error(unknown)
+        return yield* new UnknownCommand()
+      }
+      return yield* cli(argv)
+    })
+  )
 )).pipe(
   // This *is* the entry point: the one place the whole layer graph is composed and provided.
   // @effect-diagnostics-next-line strictEffectProvide:off

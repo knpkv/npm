@@ -21,7 +21,7 @@ const calendarPosition = (page: Page) =>
   }))
 
 // Plus always queues, including in Review first. Undo must retain the visible time and never write.
-for (const mode of ["Review first", "Quick approve · 5s Undo"]) {
+for (const mode of ["Review first", "Quick approve"]) {
   test(`calendar + queues with Undo and preserves position in ${mode}`, async ({ page }) => {
     await open(page)
     await page.getByRole("button", { name: mode, exact: true }).click()
@@ -126,6 +126,8 @@ test("another + queues during a held write in Review first and totals refresh on
   const editor = page.getByRole("complementary", { name: "Time entry editor" })
   await expect(editor).toBeVisible()
   const note = editor.getByRole("textbox", { name: "What was done (optional)", exact: true })
+  // Edit after the row's suggestion has loaded; landing mid-edit is covered in descriptions.spec.
+  await expect(note).toHaveValue("Improved weekly time review and tested approval behavior")
   await note.fill("Review remains editable while the earlier block saves")
   await expect(note).toHaveValue("Review remains editable while the earlier block saves")
   await page.keyboard.press("Escape")
@@ -202,6 +204,7 @@ test("fifteen-minute + controls stay inside non-overlapping calendar cards", asy
         top: rect.top,
         bottom: rect.bottom,
         keyWidth: card.querySelector(".jcf-block-key")?.getBoundingClientRect().width,
+        reviewWidth: card.querySelector(".jcf-block-gap")?.getBoundingClientRect().width,
         sourceHidden: source !== null && getComputedStyle(source).display === "none",
         plus: action === undefined
           ? null
@@ -219,6 +222,8 @@ test("fifteen-minute + controls stay inside non-overlapping calendar cards", asy
   )
   for (const [index, card] of bounds.entries()) {
     expect(card.keyWidth).toBeGreaterThan(0)
+    // The review target keeps 24px beside the 32px quick action in the densest lane.
+    expect(card.reviewWidth).toBeGreaterThanOrEqual(24)
     expect(card.sourceHidden).toBe(true)
     expect(card.plus?.width).toBeGreaterThanOrEqual(24)
     expect(card.plus?.height).toBeGreaterThanOrEqual(24)

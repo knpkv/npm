@@ -8,7 +8,7 @@
  * to the client yet), *quiet* runs from the last modification. An unknown caller identity is
  * reported as `Unknown`, never as an empty queue.
  */
-import { identityMatches } from "@knpkv/codecommit-core/Domain.js"
+import { approvalOf, identityMatches } from "@knpkv/codecommit-core/Domain.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { Data } from "effect"
 
@@ -18,8 +18,9 @@ const DAY_MS = 86_400_000
 export const QUIET_AFTER_MS = 7 * DAY_MS
 
 /**
- * `pool` holds pull requests waiting on a wildcard role pool (`…/Reviewers/*`): the client knows
- * the caller only by user name, not role, so it cannot tell whether the caller is in that pool.
+ * `pool` holds pull requests waiting on a wildcard role pool (`…/Reviewers/*`) in an account where
+ * the caller is known only by user name, not role, so it cannot tell whether the caller is in that
+ * pool; once the account's identity resolves (`Caller.identities`) the ARN decides exactly.
  * `unsorted` holds every open pull request when no caller identity resolved: membership cannot
  * be decided, so nothing is presented as needing the user's review.
  */
@@ -57,6 +58,49 @@ export type WorkbenchSummary = Data.TaggedEnum<{
 
 /** Constructors and exhaustive `$match` for {@link WorkbenchSummary}. */
 export const WorkbenchSummary = Data.taggedEnum<WorkbenchSummary>()
+
+/**
+ * The caller in one account, as the server resolved it with STS: the subset of core's L2-8 (v3)
+ * `CallerIdentity` the queue reads, so core's value is assignable as is. The queue ignores the
+ * `Unresolved` reason; any unresolved account keeps the name fallback. `arn` can carry an email
+ * address (SSO session names): never log or persist it.
+ */
+export type CallerIdentity =
+  | { readonly _tag: "Resolved"; readonly arn: string; readonly username: string }
+  | { readonly _tag: "Unresolved" }
+
+/**
+ * Who the queue is for. `username` is the app-wide `currentUser`. `identities` is keyed by AWS
+ * profile (`pullRequest.account.profile`); `undefined` until the server publishes it. Only a
+ * `Resolved` identity decides pool membership exactly; every other case falls back to the name.
+ */
+export interface Caller {
+  readonly username: string | undefined
+  readonly identities: Readonly<Record<string, CallerIdentity>> | undefined
+}
+
+/**
+ * The queue's caller from app state. Reads only the user name until core publishes per-account
+ * identities (L2-8), so every pool decision keeps today's name fallback.
+ */
+export const callerOf = (state: { readonly currentUser?: string | undefined }): Caller => ({
+  identities: undefined,
+  username: state.currentUser
+})
+
+/** The caller as seen from one pull request's account: always a name, an ARN when resolved. */
+interface Viewer {
+  readonly name: string
+  readonly arn: string | undefined
+}
+
+const viewerOf = (caller: Caller, pullRequest: Domain.PullRequest): Viewer | undefined => {
+  const identity = caller.identities?.[pullRequest.account.profile]
+  if (identity?._tag === "Resolved") return { arn: identity.arn, name: identity.username }
+  return caller.username === undefined || caller.username.length === 0
+    ? undefined
+    : { arn: undefined, name: caller.username }
+}
 
 export interface WorkbenchQueue {
   readonly summary: WorkbenchSummary
@@ -157,20 +201,24 @@ const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule)
 }
 
 /**
- * Whether the caller, known only by user name, is in one rule's approval pool. `open` means the
- * rule has no pool, so any approval counts. `member` means an entry without a wildcard names the
- * caller by user name; the role and account in that entry are not checked, because the client has
- * no caller ARN. `maybe` means only a wildcard or role-only entry could match, and its fixed name
- * part does not rule the caller out.
+ * Whether the caller is in one rule's approval pool. `open` means the rule has no pool, so any
+ * approval counts. With the caller's ARN in this account and the rule's raw entries, the provider's
+ * own matching decides: `member` or `out`. Otherwise the caller is known only by user name:
+ * `member` means an entry without a wildcard names them (role and account unchecked); `maybe` means
+ * only a wildcard or role-only entry could match, and its fixed name part does not rule them out.
  *
- * This intentionally differs from core's `needsMyReview` (and so the pending-review count) in two
+ * This intentionally differs from core's `needsMyReview` (and so the TUI's review count) in two
  * cases: a rule with no pool is `open` here (core says no review needed), and a wildcard entry is
  * `maybe` here (core matches it by its tail name as a certain member).
  */
-const poolStanding = (rule: Domain.ApprovalRule, currentUser: string): "member" | "maybe" | "open" | "out" => {
+const poolStanding = (rule: Domain.ApprovalRule, viewer: Viewer): "member" | "maybe" | "open" | "out" => {
   const entries = poolEntries(rule)
   if (entries.length === 0) return "open"
-  const possible = entries.filter((entry) => nameCompatible(entry, currentUser))
+  const arn = viewer.arn
+  if (arn !== undefined && rule.poolMemberArns.length > 0) {
+    return rule.poolMemberArns.some((entry) => poolEntryMatches(entry, arn)) ? "member" : "out"
+  }
+  const possible = entries.filter((entry) => nameCompatible(entry, viewer.name))
   if (possible.some((entry) => !entry.includes("*") && !isRoleOnly(entry))) return "member"
   return possible.length > 0 ? "maybe" : "out"
 }
@@ -200,37 +248,52 @@ export const ruleProgress = (pullRequest: Domain.PullRequest): RuleProgress | un
 const stuckReason = (pullRequest: Domain.PullRequest, quietMs: number): StuckReason => {
   if (!pullRequest.isMergeable) return "conflicts"
   if (quietMs > QUIET_AFTER_MS) return "quiet"
+  const approval = approvalOf(pullRequest)
+  // An unknown approval has only last known rules, so it can be neither ready nor waiting on approvals.
+  if (approval._tag === "Unknown") return "unverified"
   if (pullRequest.approvalRules.length === 0) return "ready"
   if (!pullRequest.approvalRules.every((rule) => rule.satisfied)) return "approvals"
-  return pullRequest.isApproved ? "ready" : "unverified"
+  return approval._tag === "Approved" ? "ready" : "unverified"
 }
 
 /**
- * Whether the caller already approved toward this rule. With approver ARNs, only a same-name
- * approval that the rule's pool counts does, so `Operations/alice` approving leaves a
- * `Reviewers/*` rule open for alice; without ARNs, any same-name approval does.
+ * Whether the caller already approved toward this rule. With the caller's ARN and approver ARNs,
+ * only the caller's own ARN counts, so another session of the same role is not "you". With
+ * approver ARNs only, a same-name approval that the rule's pool counts does, so `Operations/alice`
+ * approving leaves a `Reviewers/*` rule open for alice; without ARNs, any same-name approval does.
  */
-const approvedToward = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule, currentUser: string): boolean => {
+const approvedToward = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule, viewer: Viewer): boolean => {
+  if (viewer.arn !== undefined && pullRequest.approvedByArns.length > 0) {
+    return pullRequest.approvedByArns.includes(viewer.arn)
+  }
   if (pullRequest.approvedByArns.length === 0 || rule.poolMemberArns.length === 0) {
-    return pullRequest.approvedBy.some((approver) => identityMatches(currentUser, approver))
+    return pullRequest.approvedBy.some((approver) => identityMatches(viewer.name, approver))
   }
   return pullRequest.approvedByArns.some(
-    (arn) => identityMatches(currentUser, arn) && rule.poolMemberArns.some((entry) => poolEntryMatches(entry, arn))
+    (arn) => identityMatches(viewer.name, arn) && rule.poolMemberArns.some((entry) => poolEntryMatches(entry, arn))
   )
 }
 
 /**
  * Yours first; then, for the unsatisfied rules the caller hasn't approved toward, `review` when one
  * certainly counts their approval (named member, or no pool at all) and `pool` when one only might.
+ * While approval is unknown, which rules are satisfied is only last known: any rule the caller could
+ * count toward makes it `pool`, never the certain `review`.
  */
-const groupOf = (pullRequest: Domain.PullRequest, currentUser: string): WorkbenchGroup | undefined => {
-  if (identityMatches(currentUser, pullRequest.author)) return "yours"
+const groupOf = (pullRequest: Domain.PullRequest, viewer: Viewer): WorkbenchGroup | undefined => {
+  if (identityMatches(viewer.name, pullRequest.author)) return "yours"
+  if (approvalOf(pullRequest)._tag === "Unknown") {
+    const couldCount = pullRequest.approvalRules
+      .filter((rule) => !approvedToward(pullRequest, rule, viewer))
+      .some((rule) => poolStanding(rule, viewer) !== "out")
+    if (couldCount) return "pool"
+  }
   const standings = pullRequest.approvalRules
-    .filter((rule) => !rule.satisfied && !approvedToward(pullRequest, rule, currentUser))
-    .map((rule) => poolStanding(rule, currentUser))
+    .filter((rule) => !rule.satisfied && !approvedToward(pullRequest, rule, viewer))
+    .map((rule) => poolStanding(rule, viewer))
   if (standings.some((standing) => standing === "member" || standing === "open")) return "review"
   if (standings.includes("maybe")) return "pool"
-  if (pullRequest.commentedBy.some((name) => identityMatches(currentUser, name))) return "watching"
+  if (pullRequest.commentedBy.some((name) => identityMatches(viewer.name, name))) return "watching"
   return undefined
 }
 
@@ -239,15 +302,16 @@ const groupOf = (pullRequest: Domain.PullRequest, currentUser: string): Workbenc
  * that the rail, the header badge, the review reminder and the pull request list's review filter
  * all count with, so their numbers agree.
  */
-export const needsYourReview = (pullRequest: Domain.PullRequest, currentUser: string | undefined): boolean =>
-  currentUser !== undefined && currentUser.length > 0 && pullRequest.status === "OPEN" &&
-  groupOf(pullRequest, currentUser) === "review"
+export const needsYourReview = (pullRequest: Domain.PullRequest, caller: Caller): boolean => {
+  const viewer = viewerOf(caller, pullRequest)
+  return viewer !== undefined && pullRequest.status === "OPEN" && groupOf(pullRequest, viewer) === "review"
+}
 
 /** How many of these pull requests need the user's review; pass the account-filtered queue. */
 export const yourReviewCount = (
   pullRequests: ReadonlyArray<Domain.PullRequest>,
-  currentUser: string | undefined
-): number => pullRequests.filter((pullRequest) => needsYourReview(pullRequest, currentUser)).length
+  caller: Caller
+): number => pullRequests.filter((pullRequest) => needsYourReview(pullRequest, caller)).length
 
 const groupOrder = { review: 0, pool: 1, yours: 2, watching: 3, unsorted: 4 } satisfies Readonly<
   Record<WorkbenchGroup, number>
@@ -255,19 +319,24 @@ const groupOrder = { review: 0, pool: 1, yours: 2, watching: 3, unsorted: 4 } sa
 
 /**
  * Builds the queue for one user. Only open pull requests take part; within a group the longest
- * open comes first. With no identity, every open pull request is listed under `unsorted` and the
- * summary is `Unknown`, because membership cannot be decided.
+ * open comes first. A pull request whose account has neither a resolved identity nor the user-name
+ * fallback is `unsorted`; with no identity at all the summary is `Unknown`, because membership
+ * cannot be decided.
  */
 export const workbenchQueue = (
   pullRequests: ReadonlyArray<Domain.PullRequest>,
-  currentUser: string | undefined,
+  caller: Caller,
   now: Date
 ): WorkbenchQueue => {
-  const known = currentUser !== undefined && currentUser.length > 0
+  // Known when some account can decide: an app-wide user name, or any account's resolved identity.
+  // A pull request whose own account cannot is still `unsorted`, the same rule `needsYourReview` uses.
+  const known = (caller.username !== undefined && caller.username.length > 0) ||
+    Object.values(caller.identities ?? {}).some((identity) => identity._tag === "Resolved")
   const rows = pullRequests
     .filter((pullRequest) => pullRequest.status === "OPEN")
     .flatMap((pullRequest): ReadonlyArray<WorkbenchRow> => {
-      const group = known ? groupOf(pullRequest, currentUser) : "unsorted"
+      const viewer = viewerOf(caller, pullRequest)
+      const group = viewer === undefined ? "unsorted" : groupOf(pullRequest, viewer)
       if (group === undefined) return []
       const quietMs = Math.max(0, now.getTime() - pullRequest.lastModifiedDate.getTime())
       return [
@@ -276,8 +345,13 @@ export const workbenchQueue = (
           openMs: Math.max(0, now.getTime() - pullRequest.creationDate.getTime()),
           pullRequest,
           quietMs,
-          rule: ruleProgress(pullRequest),
-          stuck: group === "yours" ? stuckReason(pullRequest, quietMs) : undefined
+          // While approval is unknown, rule progress is only last known, so the row says unknown instead.
+          rule: approvalOf(pullRequest)._tag === "Unknown" ? undefined : ruleProgress(pullRequest),
+          stuck: group === "yours"
+            ? stuckReason(pullRequest, quietMs)
+            : approvalOf(pullRequest)._tag === "Unknown"
+            ? "unverified"
+            : undefined
         }
       ]
     })

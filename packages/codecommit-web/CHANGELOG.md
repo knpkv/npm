@@ -1,5 +1,43 @@
 # @knpkv/codecommit-web
 
+## 0.22.0
+
+### Minor Changes
+
+- [#522](https://github.com/knpkv/npm/pull/522) [`da4b5eb`](https://github.com/knpkv/npm/commit/da4b5eb15e627c0dae13aa92a3ec0c848ab6225b) Thanks [@konopkov](https://github.com/konopkov)! - `AppState.callerIdentities` records who the caller is in every enabled account, keyed by AWS profile. Before, only `currentUser` existed, taken from the first enabled account alone. Each entry is `Resolved` (`accountId`, `arn`, `username`) or `Unresolved` with a typed `reason`: `CredentialsUnavailable`, `StsRejected` or `Throttled` from the identity lookup's error type, `RefreshAuthFailed` when a pull-request refresh hits an authentication error, or `SignedOut` after `aws sso logout`. `@knpkv/codecommit-core/Domain` exports the `CallerIdentityState`, `CallerIdentityUnresolvedReason` and `CallerIdentities` schemas, and `AwsClient.CallerIdentity` gains `arn`. The codecommit-web event stream sends `callerIdentities`, so the browser can match wildcard approval pools against the caller's exact ARN in each account. Identity is one state machine, `@knpkv/codecommit-core/IdentityLifecycle`: a single `transition` over identity events is the only writer, so a refresh, login or logout that happens meanwhile makes older in-flight work a no-op. SSO login and logout refresh right away. `currentUser` is now derived from the first enabled account's identity only, so signing in to another account no longer replaces it. `signInState` and `signOutState` move from `Domain` to `IdentityLifecycle`. The event stream also sends `unevaluatedPullRequests`: the pull requests the last refresh kept from cache because their approval rules failed to evaluate. `@knpkv/codecommit-core/Domain` exports it as an `UnevaluatedPullRequest` schema. Signing out of AWS SSO in codecommit-web now asks first: `aws sso logout` ends every SSO session on the machine, including other tools' sessions, and the confirmation says so and offers switching one account off instead. All three sign-out controls go through it. Success and failure are both notified; a failure names the command and its exit code or timeout. A failed `aws sso login` no longer counts as signed in.
+
+### Patch Changes
+
+- [#533](https://github.com/knpkv/npm/pull/533) [`df61da3`](https://github.com/knpkv/npm/commit/df61da3e1caf872125306e7912b5cb0cfc7d8de6) Thanks [@konopkov](https://github.com/konopkov)! - The `codecommit` executable starts with Node: `--help`, the `pr` commands and `codecommit web` no longer need Bun. Before, the executable's shebang was `#!/usr/bin/env bun`, so a Node-only install failed with `exec: bun: not found`. The terminal UI still runs on Bun, because OpenTUI does. With Bun on `PATH`, `codecommit` under Node hands the terminal UI to it. Without Bun, it exits with one line saying so and suggesting `codecommit web`. The web server now uses Node's HTTP server, which also runs under Bun.
+
+- [#509](https://github.com/knpkv/npm/pull/509) [`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc) Thanks [@konopkov](https://github.com/konopkov)! - Controls default to tool density: `Button`, `IconButton`, `Select`, and the `Field` control gain a `dense` size (32px, small radius, sized to text) and use it when no size is given (`ThemeSelect` and the `AgentJob` cancel action too), through new shared `--rly-control-height-*` tokens (`RLY_CONTROL_HEIGHT_TOKEN_NAMES`). Compact `IconButton` is 40px like the other compact controls (it was 44). `ToggleGroup` gains the same dense default, drawn as an outlined row with 1px dividers instead of a tinted track, and its `compact` and `default` sizes now follow the 40px and 48px control heights; the registry lists `dense` as the default size. Coarse pointers keep a 44px target. One-sided accent stripes are gone from rly: diff annotations, the file-tree error, stale findings, agent outcomes, thread evidence, verdict reasons, workset gaps, and the `StatePanel` rail now use an even border or a flat tint, and `lint:stripes`, now part of the repository lint gate, keeps them from coming back. The diff file tree marks the open file with an even ring and draws its guide lines in the neutral divider colour. A neutral `StatePanel` shows no icon unless `icon` names one. Control Center's header actions, Settings inputs and selects, and service setup fields move to the same dense height, so they line up with rly buttons.
+
+  `StateLabel` renders a state as its word and icon in the tone's ink, with no border, tint or padding, so it never reads as a status chip. rly text no longer uses `overflow-wrap: anywhere`: words wrap only between words, and only an unbreakable token breaks (`break-word`), so a squeezed row never splits a word. Control Center Services: the card header keeps the title whole beside its state, and resource rows and test evidence lose their one-sided stripes. Codecommit-web's pull-request state links keep the 32px control target now that the state is a plain word.
+
+- Updated dependencies [[`44b633d`](https://github.com/knpkv/npm/commit/44b633d87c8b98ddb3fd03225124fa996e563473), [`c01672d`](https://github.com/knpkv/npm/commit/c01672d8d55cd93580c06958e8cc202f5cde90c6), [`da4b5eb`](https://github.com/knpkv/npm/commit/da4b5eb15e627c0dae13aa92a3ec0c848ab6225b), [`6940d1b`](https://github.com/knpkv/npm/commit/6940d1b6c88c3b95a3d70ad84a13f011c6fa4017), [`702d855`](https://github.com/knpkv/npm/commit/702d8559efbd781f4f89131ddbe462137a85ba4d), [`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/codecommit-core@0.19.0
+  - @knpkv/review@0.4.0
+  - @knpkv/rly@0.10.0
+  - @knpkv/relay-product@0.2.4
+
+## 0.21.0
+
+### Minor Changes
+
+- [#493](https://github.com/knpkv/npm/pull/493) [`e45eba3`](https://github.com/knpkv/npm/commit/e45eba30991dc662b7a8b09506d2d85b878fec97) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/browser-pairing/owner-session` adds `serveWithBootstrapUrl(server, onReady)`. It runs a server layer, waits until it is listening, hands its bootstrap URL to `onReady`, and keeps serving. A launch that fails before it is listening fails without announcing a URL, and a failing `onReady` stops the server. `agent-usage serve`, `jcf-web` and `codecommit-web` now start their servers through it instead of three copies of that code. `@knpkv/codecommit-web` also exports `serveCodeCommit(options)` (`hostname`, `port`, `onReady`), the start sequence its own entry uses.
+
+### Patch Changes
+
+- [#495](https://github.com/knpkv/npm/pull/495) [`34cfd71`](https://github.com/knpkv/npm/commit/34cfd71a66f76a25313637036e5d5324982ee236) Thanks [@konopkov](https://github.com/konopkov)! - The queue rail stays below the app header at the bottom of a long pull request page; it used to slide under the header by the page's bottom padding.
+
+- [#507](https://github.com/knpkv/npm/pull/507) [`ceb59a9`](https://github.com/knpkv/npm/commit/ceb59a90f535a15c164c7e4e373366ab45acd699) Thanks [@konopkov](https://github.com/konopkov)! - The review queue model takes the caller's per-account identity, ready for the server to publish it: once an account's identity resolves, the caller's ARN decides wildcard role pools exactly, and an approval by another session of the same role no longer counts as yours. Until then nothing changes; every account keeps the user-name rules.
+- Updated dependencies [[`43ab828`](https://github.com/knpkv/npm/commit/43ab8288a02a03924c66b5488d20ac7576e348e1), [`934843b`](https://github.com/knpkv/npm/commit/934843bbcea57cbf3266fce950c020733046cac1), [`148daa6`](https://github.com/knpkv/npm/commit/148daa6be147dca74bc642bd552b603deb760eae), [`4e8f346`](https://github.com/knpkv/npm/commit/4e8f346b926b859ea2b3be07ec7dc6cb77ca8e76), [`e57bb6d`](https://github.com/knpkv/npm/commit/e57bb6db1b393dbff8e116573cf2db23992c1cf4), [`7df3dbb`](https://github.com/knpkv/npm/commit/7df3dbb9875ab31f369351df2de898b36d40e613), [`8924289`](https://github.com/knpkv/npm/commit/89242895271072b83185d6cc02376b2c56830f6a), [`f8d2612`](https://github.com/knpkv/npm/commit/f8d2612e09b20974dd8eccc8ff197bb072c40cbf), [`e45eba3`](https://github.com/knpkv/npm/commit/e45eba30991dc662b7a8b09506d2d85b878fec97)]:
+  - @knpkv/codecommit-core@0.18.0
+  - @knpkv/rly@0.9.0
+  - @knpkv/browser-pairing@0.4.0
+  - @knpkv/relay-product@0.2.3
+  - @knpkv/review@0.3.3
+
 ## 0.20.0
 
 ### Minor Changes

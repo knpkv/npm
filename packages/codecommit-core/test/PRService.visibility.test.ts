@@ -38,6 +38,10 @@ const cachedRow = (profile: string, id: string) =>
     destinationBranch: "main",
     isMergeable: 1,
     isApproved: 0,
+    approvalUnknownReason: null,
+    observationSeq: 0,
+    approvalVersion: "2026-08-02T00:00:00.000Z",
+    approvalObservationSeq: 0,
     commentCount: 0,
     healthScore: null,
     link: `https://example.invalid/pr/${id}`,
@@ -77,9 +81,14 @@ const layerWithConfig = (
       Layer.mergeAll(
         Layer.mock(AwsClient, {}),
         Layer.mock(EventsHub, {}),
-        Layer.mock(CommentRepo, {}),
+        Layer.mock(CommentRepo, {
+          find: () => Effect.succeed(Option.none())
+        }),
         Layer.mock(NotificationRepo, {}),
-        Layer.mock(PullRequestRepo, { findAll }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findAll
+        }),
         Layer.mock(SubscriptionRepo, {}),
         Layer.mock(SyncMetadataRepo, {}),
         Layer.mock(ConfigService, { load })
@@ -96,10 +105,16 @@ const syncDependencies = (
 ) =>
   Layer.mergeAll(
     Layer.mock(AwsClient, {
-      getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "123456789012" }),
+      getCallerIdentity: () =>
+        Effect.succeed({
+          username: "viewer",
+          accountId: "123456789012",
+          arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
+        }),
       getPullRequests: () => Stream.empty
     }),
     Layer.mock(PullRequestRepo, {
+      observe: () => Effect.succeed(1),
       findAll,
       findStaleOpen: () => Effect.succeed([]),
       refreshCommentedBy: () => Effect.void

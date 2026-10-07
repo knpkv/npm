@@ -6,9 +6,11 @@
  * what order services were consulted.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import { Command } from "effect/cli"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
@@ -204,6 +206,7 @@ const ReportProposal = Schema.Struct({
 
 const AgentReport = Schema.Struct({
   mode: Schema.optional(Schema.String),
+  sides: Schema.Struct({ clockify: Schema.Boolean, jira: Schema.Boolean }),
   proposals: Schema.Array(ReportProposal),
   ignored: Schema.Array(Schema.Struct({ ticketKey: Schema.String, day: Schema.String, seconds: Schema.Finite })),
   ignoredTickets: Schema.Array(Schema.String),
@@ -1673,9 +1676,11 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.jiraWorklogs).toEqual([])
     }))
 
-  it.effect("stops the run at the first Jira sign-in failure", () =>
+  // Jira's recorded time cannot be read signed out, so no proposal can be trusted: nothing is written,
+  // not even the Clockify half that used to land before the Jira half failed.
+  it.effect("writes nothing, even to Clockify, when Jira is not connected", () =>
     Effect.gen(function*() {
-      const { world } = yield* run(
+      const { exit, world } = yield* run(
         agent(),
         baseOptions({
           transcripts: {
@@ -1691,10 +1696,9 @@ describe("jcf sync reconcile --agent: proposals", () => {
           keep: [true, true]
         })
       )
-      // The first row's Clockify half still landed; the run then stopped rather than asking again.
-      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(exit._tag).toBe("Failure")
+      expect(world.createdClockifyEntries).toEqual([])
       expect(world.jiraWorklogs).toEqual([])
-      expect(output(world.stdout)).toContain("jcf auth jira login")
     }))
 
   it.effect("stops with a refresh remedy when Jira is logged in but cannot be verified", () =>
@@ -1719,7 +1723,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.createdClockifyEntries).toHaveLength(1)
       expect(world.jiraWorklogs).toEqual([])
       expect(printed).toContain("provider account for this session was not verified")
-      expect(printed).not.toContain("jcf auth jira login")
+      expect(printed).not.toContain("jcf auth jira token")
     }))
 
   it.effect("stops later rows when Jira verification fails after the first Clockify write", () =>
@@ -1753,7 +1757,7 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.jiraWorklogs).toEqual([])
       expect(world.jiraRequests.filter((request) => request.method === "POST")).toEqual([])
       expect(printed).toContain("provider account for this session was not verified")
-      expect(printed).not.toContain("jcf auth jira login")
+      expect(printed).not.toContain("jcf auth jira token")
     }))
 })
 
@@ -2271,6 +2275,108 @@ describe("jcf sync reconcile --agent: unreadable recorded state", () => {
       expect(world.createdClockifyEntries).toEqual([])
       expect(world.jiraWorklogs).toEqual([])
       expect(output(world.stderr)).toContain("Clockify returned an incomplete entry")
+    }))
+
+  // QA-J5: with Jira not connected there was no way to reconcile Clockify from the CLI.
+  const clockifyOnlyWorld = baseOptions({
+    jiraLoggedIn: false,
+    transcripts: {
+      "work-repo/s1.jsonl": transcript({
+        sessionId: "s1",
+        cwd: `${WORK_ROOT}/repo`,
+        gitBranch: "feat/PROJ-5662-review",
+        events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+      })
+    },
+    keep: [true]
+  })
+
+  it.effect("--only clockify reconciles Clockify alone while Jira is not connected", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(agent(["--only", "clockify"]), clockifyOnlyWorld)
+      expect(exit._tag).toBe("Success")
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.jiraWorklogs).toEqual([])
+    }))
+
+  // Before, it planned "+35m to both", wrote Clockify, then failed Jira: Jira's recorded time had
+  // never been read, so the plan could not be trusted. Now it stops first and names both ways forward.
+  it.effect("without --only, a missing Jira connection stops before planning and names both ways forward", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(agent(), clockifyOnlyWorld)
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(exit._tag === "Failure" ? Cause.prettyErrors(exit.cause)[0]?.message : "succeeded").toBe(
+        "Jira is not connected. Run jcf auth jira token, or pass --only clockify to reconcile Clockify alone."
+      )
+    }))
+
+  // Review of #563: `--only clockify` still read Jira for ownership and titles, so a slow or failing
+  // Jira delayed the run and Jira's assignment could withhold a Clockify-only proposal.
+  it.effect("--only clockify sends no Jira request and lets Jira's assignment withhold nothing", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(["--only", "clockify"]),
+        baseOptions({
+          config: { sessionRoots: [WORK_ROOT], sessionOwnership: "assigned" },
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5662-review",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+            })
+          },
+          issueAssignees: { "PROJ-5662": "acct-other" },
+          keep: [true]
+        })
+      )
+      expect(world.jiraRequests).toEqual([])
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(output(world.stdout)).toContain("Would add Clockify 35m 0s across 1 row(s).")
+      expect(output(world.stdout)).not.toContain("Jira 0s")
+    }))
+
+  // A side that was not read reports zero deltas; the report has to say it was not read, or an
+  // empty one-sided run reads as "both systems are complete".
+  const recordedInClockify = baseOptions({
+    transcripts: {
+      "work-repo/s1.jsonl": transcript({
+        sessionId: "s1",
+        cwd: `${WORK_ROOT}/repo`,
+        gitBranch: "feat/PROJ-5662-review",
+        events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+      })
+    },
+    clockifyEntries: [{
+      description: "[PROJ-5662] review",
+      start: iso(at(DAY.year, DAY.month, DAY.day, 10, 0)),
+      end: iso(at(DAY.year, DAY.month, DAY.day, 11, 0))
+    }]
+  })
+
+  it.effect("a one-sided --json report names the sides it read", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(agent(["--only", "clockify", "--json"]), recordedInClockify)
+      const report = decodeAgentReport(world.stdout.join("\n"))
+      expect(Option.map(report, (decoded) => decoded.sides)).toEqual(Option.some({ clockify: true, jira: false }))
+      expect(Option.map(report, (decoded) => decoded.proposals)).toEqual(Option.some([]))
+    }))
+
+  it.effect("a one-sided run with nothing to add says the other system was not read", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(agent(["--only", "clockify"]), recordedInClockify)
+      const printed = output(world.stdout)
+      expect(printed).toContain(
+        "Nothing to propose — Clockify already holds everything these sessions account for. Jira was not read."
+      )
+      expect(printed).not.toContain("both sides")
+    }))
+
+  it.effect("--only applies to --agent runs only", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(["sync", "reconcile", "--only", "clockify", ...SINCE], baseOptions())
+      expect(exit._tag).toBe("Failure")
+      expect(output(world.stderr)).toContain("--only applies to `--agent` runs only")
     }))
 
   it.effect("fails closed when the Jira account identity is unavailable", () =>
@@ -3821,7 +3927,7 @@ describe("jcf sync reconcile <direction>", () => {
         }))
 
         yield* TestClock.setTime(HISTORICAL_NOW)
-        yield* Command.runWith(root, { version: "0.0.0-test" })([
+        const exit = yield* Command.runWith(root, { version: "0.0.0-test" })([
           "sync",
           "reconcile",
           direction,
@@ -3830,7 +3936,10 @@ describe("jcf sync reconcile <direction>", () => {
 
         expect(fake.world.createdClockifyEntries).toEqual([])
         expect(fake.world.jiraWorklogs).toEqual([])
-        expect(output(fake.world.stdout)).toContain("Reconcile failed")
+        // QA-J5: a failed reconcile exits non-zero; the command boundary prints this one line.
+        expect(Exit.isFailure(exit) ? Cause.prettyErrors(exit.cause)[0]?.message : "succeeded").toContain(
+          "Reconcile failed"
+        )
       }))
   }
 

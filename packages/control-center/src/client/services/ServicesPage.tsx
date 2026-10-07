@@ -156,12 +156,15 @@ const ConnectionCard = ({
   onStartAtlassianOAuth,
   onSynchronize,
   onTest,
+  providerName,
   synchronizationState,
   testState
 }: {
   readonly canConfigure: boolean
   readonly canTest: boolean
   readonly connection: PluginConnectionSummary
+  /** The provider's catalog name; the mark prints it only when the connection's own name differs. */
+  readonly providerName: string | undefined
   readonly administrationState: ConnectionAdministrationViewState | undefined
   readonly enablementState: ConnectionEnablementState | undefined
   readonly onConfigure: () => void
@@ -186,7 +189,11 @@ const ConnectionCard = ({
     <Surface as="article" className={styles.card} padding="default" form="grouped">
       <div className={styles.cardHeading}>
         <div className={styles.connectionIdentity}>
-          <ServiceMark name="hidden" service={connection.providerId} size="compact" />
+          <ServiceMark
+            name={connection.displayName === providerName ? "hidden" : "visible"}
+            service={connection.providerId}
+            size="compact"
+          />
           <Text as="h2" variant="card-title">
             {connection.displayName}
           </Text>
@@ -461,22 +468,24 @@ const CatalogCard = ({
   )
 }
 
+/**
+ * One installed service before its connections load. `onEnable` adds the card's own action; while
+ * connections are loading or failed everywhere, the page shows one action, so cards carry none.
+ */
 const ServicePreviewCard = ({
   actionLabel = "Pair to enable",
-  isActionDisabled = false,
   onEnable,
   service,
   statusLabel = "Available",
   statusTone = "positive"
 }: {
   readonly actionLabel?: string
-  readonly isActionDisabled?: boolean
-  readonly onEnable: () => void
+  readonly onEnable?: () => void
   readonly service: FirstPartyServiceIdentity
   readonly statusLabel?: string
   readonly statusTone?: "critical" | "neutral" | "positive" | "progress"
 }): ReactElement => (
-  <Surface as="article" className={styles.card} padding="default" form="grouped">
+  <Surface as="article" className={`${styles.card} ${styles.previewCard}`} padding="default" form="grouped">
     <div className={styles.cardHeading}>
       <div className={styles.connectionIdentity}>
         <ServiceMark name="hidden" service={service.providerId} size="compact" />
@@ -489,11 +498,13 @@ const ServicePreviewCard = ({
     <Text tone="secondary" variant="body">
       {service.description}
     </Text>
-    <div className={styles.cardAction}>
-      <Button disabled={isActionDisabled} onClick={onEnable} variant="primary">
-        {actionLabel}
-      </Button>
-    </div>
+    {onEnable === undefined ? null : (
+      <div className={styles.cardAction}>
+        <Button onClick={onEnable} variant="primary">
+          {actionLabel}
+        </Button>
+      </div>
+    )}
   </Surface>
 )
 
@@ -1214,10 +1225,7 @@ export const ServicesPage = ({
         <div className={styles.grid}>
           {firstPartyServiceIdentities.map((service) => (
             <ServicePreviewCard
-              actionLabel="Loading connections"
-              isActionDisabled
               key={service.providerId}
-              onEnable={() => undefined}
               service={service}
               statusLabel="Loading"
               statusTone="progress"
@@ -1234,9 +1242,7 @@ export const ServicesPage = ({
           <div className={styles.grid}>
             {firstPartyServiceIdentities.map((service) => (
               <ServicePreviewCard
-                actionLabel="Retry connections"
                 key={service.providerId}
-                onEnable={() => setRequestRevision((revision) => revision + 1)}
                 service={service}
                 statusLabel="Installed"
                 statusTone="neutral"
@@ -1318,6 +1324,10 @@ export const ServicesPage = ({
               )
               const cards = standaloneConnections.map((connection) => (
                 <ConnectionCard
+                  providerName={
+                    connectionsState.overview.catalog.find(({ providerId }) => providerId === connection.providerId)
+                      ?.displayName
+                  }
                   administrationState={administrationStates.get(connection.pluginConnectionId)}
                   canConfigure={canConfigure}
                   canTest={canConfigure}

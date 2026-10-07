@@ -83,7 +83,9 @@ const ReleaseThreadHarness = (): ReactElement => {
       context={
         <div>
           <strong>Release 2.8.0 · Daring Dino</strong>
-          <p>Production · six Jira items · PR-184 and PR-191 · execution-1842</p>
+          <p>
+            Production · six Jira items · PR-{"\u2060"}184 and PR-{"\u2060"}191 · execution-1842
+          </p>
         </div>
       }
       heading="Release thread"

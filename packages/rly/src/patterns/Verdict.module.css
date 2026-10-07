@@ -1,5 +1,7 @@
 @layer rly.components {
   .root {
+    /* The verdict sizes to the column it sits in, not the viewport (see .verdict). */
+    container-type: inline-size;
     display: grid;
     gap: var(--rly-space-24);
     max-inline-size: 100%;
@@ -10,6 +12,11 @@
     color: var(--rly-color-text-1);
     font: var(--rly-type-verdict-weight) var(--rly-type-verdict-size) / var(--rly-type-verdict-line-height)
       var(--rly-type-verdict-font);
+    /*
+     * The token is viewport-fluid; a verdict in a narrow column (an entity shell, a preview) would
+     * then hold words wider than the column. Cap it at the container's width so every word fits.
+     */
+    font-size: clamp(var(--rly-type-card-title-size), 11cqi, var(--rly-type-verdict-size));
     letter-spacing: var(--rly-type-verdict-tracking);
     margin: var(--rly-space-0);
     max-inline-size: 100%;

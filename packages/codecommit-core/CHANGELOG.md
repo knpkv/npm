@@ -1,5 +1,25 @@
 # @knpkv/codecommit-core
 
+## 0.19.0
+
+### Minor Changes
+
+- [#550](https://github.com/knpkv/npm/pull/550) [`44b633d`](https://github.com/knpkv/npm/commit/44b633d87c8b98ddb3fd03225124fa996e563473) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/codecommit-core/AwsCredentialErrors.js` exports the credential-failure classifier that CodeCommit refresh already used. Control Center's CodeCommit and CodePipeline plugins and AWS discovery now use it too, so every adapter treats the same expired, unsigned or rejected sessions as a sign-in problem, including unknown provider errors carrying such a wire tag.
+
+- [#531](https://github.com/knpkv/npm/pull/531) [`c01672d`](https://github.com/knpkv/npm/commit/c01672d8d55cd93580c06958e8cc202f5cde90c6) Thanks [@konopkov](https://github.com/konopkov)! - AWS adapters resolve local profiles SSO-first, so old keys in `~/.aws/credentials` no longer shadow `aws sso login`. `@knpkv/codecommit-core/AwsProfileCredentials.js` exports the shared resolver. Control Center's CodePipeline adapter uses the shared resolver; AWS discovery reports sign-in failures as `authentication`, and the setup form asks users to check their profile's credentials or sign-in session instead of showing "unavailable (unavailable)". Failed connection tests and discovery failures are logged with their failure tag and available diagnostic code.
+
+- [#522](https://github.com/knpkv/npm/pull/522) [`da4b5eb`](https://github.com/knpkv/npm/commit/da4b5eb15e627c0dae13aa92a3ec0c848ab6225b) Thanks [@konopkov](https://github.com/konopkov)! - `AppState.callerIdentities` records who the caller is in every enabled account, keyed by AWS profile. Before, only `currentUser` existed, taken from the first enabled account alone. Each entry is `Resolved` (`accountId`, `arn`, `username`) or `Unresolved` with a typed `reason`: `CredentialsUnavailable`, `StsRejected` or `Throttled` from the identity lookup's error type, `RefreshAuthFailed` when a pull-request refresh hits an authentication error, or `SignedOut` after `aws sso logout`. `@knpkv/codecommit-core/Domain` exports the `CallerIdentityState`, `CallerIdentityUnresolvedReason` and `CallerIdentities` schemas, and `AwsClient.CallerIdentity` gains `arn`. The codecommit-web event stream sends `callerIdentities`, so the browser can match wildcard approval pools against the caller's exact ARN in each account. Identity is one state machine, `@knpkv/codecommit-core/IdentityLifecycle`: a single `transition` over identity events is the only writer, so a refresh, login or logout that happens meanwhile makes older in-flight work a no-op. SSO login and logout refresh right away. `currentUser` is now derived from the first enabled account's identity only, so signing in to another account no longer replaces it. `signInState` and `signOutState` move from `Domain` to `IdentityLifecycle`. The event stream also sends `unevaluatedPullRequests`: the pull requests the last refresh kept from cache because their approval rules failed to evaluate. `@knpkv/codecommit-core/Domain` exports it as an `UnevaluatedPullRequest` schema. Signing out of AWS SSO in codecommit-web now asks first: `aws sso logout` ends every SSO session on the machine, including other tools' sessions, and the confirmation says so and offers switching one account off instead. All three sign-out controls go through it. Success and failure are both notified; a failure names the command and its exit code or timeout. A failed `aws sso login` no longer counts as signed in.
+
+## 0.18.0
+
+### Minor Changes
+
+- [#496](https://github.com/knpkv/npm/pull/496) [`43ab828`](https://github.com/knpkv/npm/commit/43ab8288a02a03924c66b5488d20ac7576e348e1) Thanks [@konopkov](https://github.com/konopkov)! - A failed `EvaluatePullRequestApprovalRules` call no longer shows a pull request as "pending approval" with every rule unsatisfied.
+
+  - `AwsClient.getPullRequestRefresh` streams each pull request as `Fetched` or `EvaluationFailed` with a typed `ApprovalEvaluationError`. The refresh keeps a failed pull request's cached row, carries on with the account's other pull requests, and records the failure in `AppState.unevaluatedPullRequests`. The account's refresh then counts as partial rather than successful, and a notification says how many pull requests couldn't be re-evaluated.
+  - `getPullRequests` and the pull-request detail still fail with the typed error, because they can't report one pull request as unknown.
+  - The codecommit README now lists `codecommit:EvaluatePullRequestApprovalRules` and `codecommit:GetPullRequestApprovalStates` among the required IAM actions.
+
 ## 0.17.1
 
 ### Patch Changes

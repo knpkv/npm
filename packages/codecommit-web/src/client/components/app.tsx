@@ -15,7 +15,7 @@ import { PermissionBar } from "./permission-bar.js"
 import { PermissionModal } from "./permission-modal.js"
 import styles from "./app.module.css"
 import { useTheme } from "./theme-provider.js"
-import { yourReviewCount } from "./workbench-queue.js"
+import { callerOf, yourReviewCount } from "./workbench-queue.js"
 
 export function AppLayout() {
   const setAppState = useAtomSet(appStateAtom)
@@ -24,7 +24,7 @@ export function AppLayout() {
   const goToNotifications = useCallback((path?: string) => navigate(path ?? "/notifications"), [navigate])
   const { notify } = useDesktopNotification((path) => navigate(path))
   useSSE((s) => setAppState(s), goToNotifications, notify)
-  const reviewCount = useMemo(() => yourReviewCount(queuePullRequests(state), state.currentUser), [state])
+  const reviewCount = useMemo(() => yourReviewCount(queuePullRequests(state), callerOf(state)), [state])
   useReviewReminder(reviewCount)
   const isFullWidth = useFullWidthRoute()
   const isWide = useWideRoute()

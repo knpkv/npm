@@ -1,4 +1,5 @@
 import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
+import { isCredentialInvalidCause } from "@knpkv/codecommit-core/AwsCredentialErrors.js"
 import * as CodeCommit from "@knpkv/codecommit-core/ReadClient.js"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -57,13 +58,7 @@ const isAuthorizationCause = (cause: unknown): boolean =>
   hasAwsTag(cause, ["AccessDenied", "AccessDeniedException", "UnauthorizedException"])
 
 const isAuthenticationCause = (cause: unknown): boolean =>
-  hasAwsTag(cause, [
-    "CredentialsProviderError",
-    "ExpiredTokenException",
-    "InvalidClientTokenId",
-    "InvalidSignatureException",
-    "UnrecognizedClientException"
-  ])
+  isCredentialInvalidCause(cause) || hasAwsTag(cause, ["CredentialsProviderError"])
 
 const isTimeoutCause = (cause: unknown): boolean =>
   hasAwsTag(cause, ["TimeoutError", "RequestTimeoutException", "RequestExpired"])
@@ -99,7 +94,9 @@ const codeCommitFailureClass = (
     return "malformed-response"
   }
   if (Predicate.isTagged(failure, "AwsThrottleError")) return "rate-limit"
+  if (Predicate.isTagged(failure, "AwsCredentialError")) return "authentication"
   if (Predicate.isTagged(failure, "AwsApiError")) {
+    if (isAuthenticationCause(failure.cause)) return "authentication"
     if (isAuthorizationCause(failure.cause)) return "authorization"
     if (isRateLimitCause(failure.cause)) return "rate-limit"
     if (isTimeoutCause(failure.cause)) return "timeout"
@@ -111,6 +108,8 @@ const codePipelineFailureClass = (
   failure: CodePipelineProviderFailure | AwsResourcePaginationFailure
 ): AwsResourceFailureClass => {
   switch (failure._tag) {
+    case "PluginAuthenticationFailure":
+      return "authentication"
     case "PluginAuthorizationFailure":
       return "authorization"
     case "PluginMalformedResponseFailure":
@@ -121,7 +120,6 @@ const codePipelineFailureClass = (
     case "PluginTimeoutFailure":
       return "timeout"
     case "CodePipelineProviderNotFoundFailure":
-    case "PluginAuthenticationFailure":
     case "PluginCancellationFailure":
     case "PluginConfigurationFailure":
     case "PluginConflictFailure":
@@ -179,6 +177,26 @@ const collectCodePipelinePipelines = Effect.fn("AwsResourceDiscovery.collectCode
   return { names: normalizeNames(names), truncated: nextToken !== null || names.size > MAXIMUM_RESOURCE_NAMES }
 })
 
+/** Report a failed discovery and log only safe provider diagnostics. */
+const failed = Effect.fn("AwsResourceDiscovery.failed")(function*(
+  profile: string,
+  service: "codecommit" | "codepipeline",
+  failureClass: AwsResourceFailureClass,
+  failure: CodeCommit.CodeCommitReadError | CodePipelineProviderFailure | AwsResourcePaginationFailure
+) {
+  yield* Effect.logWarning("AWS resource discovery failed").pipe(
+    Effect.annotateLogs({
+      service,
+      profile,
+      failureClass,
+      failure: failure._tag,
+      ...("operation" in failure && { operation: failure.operation }),
+      ...("diagnosticCode" in failure && { diagnosticCode: failure.diagnosticCode })
+    })
+  )
+  return { _tag: "failed", failureClass } satisfies AwsServiceResourceDiscovery
+})
+
 const available = (collection: ResourceCollection): AwsServiceResourceDiscovery => ({
   _tag: "available",
   names: collection.names,
@@ -202,21 +220,15 @@ export const makeAwsResourceDiscovery = Effect.fn("AwsResourceDiscovery.make")(f
     const services = yield* Effect.all(
       {
         codeCommit: collectCodeCommitRepositories(codeCommit, account).pipe(
-          Effect.match({
-            onFailure: (failure): AwsServiceResourceDiscovery => ({
-              _tag: "failed",
-              failureClass: codeCommitFailureClass(failure)
-            }),
-            onSuccess: available
+          Effect.matchEffect({
+            onFailure: (failure) => failed(request.profile, "codecommit", codeCommitFailureClass(failure), failure),
+            onSuccess: (collection) => Effect.succeed(available(collection))
           })
         ),
         codePipeline: collectCodePipelinePipelines(codePipeline, pipelineAccount).pipe(
-          Effect.match({
-            onFailure: (failure): AwsServiceResourceDiscovery => ({
-              _tag: "failed",
-              failureClass: codePipelineFailureClass(failure)
-            }),
-            onSuccess: available
+          Effect.matchEffect({
+            onFailure: (failure) => failed(request.profile, "codepipeline", codePipelineFailureClass(failure), failure),
+            onSuccess: (collection) => Effect.succeed(available(collection))
           })
         )
       },

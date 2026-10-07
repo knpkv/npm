@@ -68,7 +68,8 @@ export const StateLabel = ({
       className
     )}
   >
-    <Icon decorative name={icon ?? toneIcons[tone]} size="small" />
+    {/* A neutral state is the word alone unless the caller names an icon; a lone dash read as a stray mark. */}
+    {icon === undefined && tone === "neutral" ? null : <Icon decorative name={icon ?? toneIcons[tone]} size="small" />}
     <span>{requireText(label, "StateLabel label")}</span>
   </span>
 )

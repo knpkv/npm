@@ -1,4 +1,5 @@
-import { StateLabel, Text } from "@knpkv/rly/primitives"
+import { Hero, HeroWord } from "@knpkv/rly/patterns"
+import { Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
 import { useId, useState, type ReactNode, type Ref } from "react"
 import type { ConnectAgent } from "./model.js"
@@ -89,21 +90,23 @@ const activityLabel = (activity: AgentActivity): string =>
 const activityFilterLabel = (activity: AgentActivityFilter): string =>
   activity === "all" ? "All" : activityLabel(activity)
 
-const workSummary = (agent: ConnectAgent): string => {
+/** What the agent is doing, before the name of its work. */
+const workPrefix = (agent: ConnectAgent): string => {
   switch (activityFor(agent.state)) {
     case "working":
-      return `Working in ${agent.work}`
+      return "Working in"
     case "ready":
-      return `Ready in ${agent.work}`
+      return "Ready in"
     case "attention":
-      return `Needs attention in ${agent.work}`
+      return "Needs attention in"
     case "finished":
-      return `Last active in ${agent.work}`
+      return "Last active in"
   }
 }
 
-const agentTone = (state: string): "positive" | "progress" | "neutral" =>
-  activityFor(state) === "working" ? "progress" : activityFor(state) === "ready" ? "positive" : "neutral"
+/** The agent's own state word, capitalised; only an agent needing attention takes ink. */
+const stateWord = (state: string): string =>
+  state.length === 0 ? "Unknown" : `${state.charAt(0).toLocaleUpperCase("en-US")}${state.slice(1)}`
 
 const matchesQuery = (agent: ConnectAgent, query: string): boolean => {
   const normalized = query.trim().toLocaleLowerCase("en-US")
@@ -165,16 +168,37 @@ export const connectLineageRows = (agents: ReadonlyArray<ConnectAgent>): Readonl
   return [...ordered, ...rows.filter((row) => !seen.has(keyOf(row.agent))).toSorted(compare)]
 }
 
-const relationLabel = (agent: ConnectAgent, issue: ConnectLineageIssue | null): string => {
+/** An agent id as a reader can scan it: the prefix and the first eight characters of its hash. */
+const shortAgentId = (id: string): string => (id.length > 14 ? `${id.slice(0, 14)}…` : id)
+
+/**
+ * How an agent relates to its parent, naming the parent by its name when the directory lists it
+ * (`names` maps agent id to name); an unlisted parent is shown by a short id, never the full hash.
+ */
+const relationLabel = (
+  agent: ConnectAgent,
+  issue: ConnectLineageIssue | null,
+  names: ReadonlyMap<string, string>
+): ReactNode => {
+  const parentAgentId = agent.relationship?.parentAgentId
+  const parentName = parentAgentId === undefined ? undefined : (names.get(parentAgentId) ?? shortAgentId(parentAgentId))
+  const parent = parentName === undefined ? undefined : <span className="connect-token">{parentName}</span>
   if (issue === "unknown_parent" || issue === "cross_host") {
-    const parentAgentId = agent.relationship?.parentAgentId
-    if (parentAgentId === undefined) return "Malformed relationship"
-    return issue === "unknown_parent" ? `Unknown parent ${parentAgentId}` : `Cross-host parent ${parentAgentId}`
+    if (parent === undefined) return "Malformed relationship"
+    return (
+      <>
+        {issue === "unknown_parent" ? "Unknown parent" : "Cross-host parent"} {parent}
+      </>
+    )
   }
   if (issue === "cycle") return "Cyclic relationship"
   if (issue === "ambiguous") return "Ambiguous ownership"
-  if (agent.relationship === undefined) return "Root agent"
-  return `${agent.relationship.relation} by ${agent.relationship.parentAgentId}`
+  if (agent.relationship === undefined || parent === undefined) return "Root agent"
+  return (
+    <>
+      {agent.relationship.relation} for {parent}
+    </>
+  )
 }
 
 interface CalendarParts {
@@ -275,6 +299,63 @@ type AgentDirectoryProps = {
   readonly timeZone?: string
 }
 
+const plural = (count: number, one: string, many: string): string => `${String(count)} ${count === 1 ? one : many}`
+
+/**
+ * The Connect directory's one sentence: how many agents are listed and how many are working, how
+ * many need attention, and which hosts could not be read. `agents` is null while the first list loads or when it failed.
+ */
+export const ConnectSummary = ({
+  agents,
+  offlineHosts,
+  unavailable
+}: {
+  readonly agents: ReadonlyArray<ConnectAgent> | null
+  readonly offlineHosts: ReadonlyArray<string>
+  readonly unavailable: boolean
+}) => {
+  const needAttention = agents?.filter((agent) => activityFor(agent.state) === "attention").length ?? 0
+  const working = agents?.filter((agent) => activityFor(agent.state) === "working").length ?? 0
+  const total = agents?.length ?? 0
+  return (
+    <>
+      <Hero
+        fact={
+          agents === null ? (
+            unavailable ? (
+              "The fleet directory is unavailable"
+            ) : (
+              "Loading the fleet…"
+            )
+          ) : (
+            <>
+              {plural(total, "agent", "agents")}, {String(working)} working
+              {needAttention === 0 ? null : (
+                <>
+                  ,{" "}
+                  <HeroWord tone="held">{`${String(needAttention)} need${needAttention === 1 ? "s" : ""} attention`}</HeroWord>
+                </>
+              )}
+              {offlineHosts.length === 0 ? null : (
+                <>
+                  ;{" "}
+                  <HeroWord tone="blocked">
+                    {/* A host name stays whole; it may only break where it truly cannot fit. */}
+                    {`${offlineHosts.map((host) => host.replaceAll("-", "\u2011")).join(", ")} offline`}
+                  </HeroWord>
+                </>
+              )}
+            </>
+          )
+        }
+        label="Connect summary"
+      />
+      {/* Connect's own caption, so narrow screens can drop it without reaching into the Hero's markup. */}
+      <p className="connect-intro-caption">Choose a worker, reviewer, or coordinator to open its exact terminal.</p>
+    </>
+  )
+}
+
 export const AgentDirectory = ({
   activityFilter,
   agents,
@@ -289,6 +370,9 @@ export const AgentDirectory = ({
   const hostFilterLabelId = useId()
   const statusFilterLabelId = useId()
   const hosts = connectAgentHosts(agents)
+  const names: ReadonlyMap<string, string> = new Map(agents.map((entry) => [String(entry.id), entry.name]))
+  // With one host the filter already names it; rows repeat it only when it tells agents apart.
+  const severalHosts = hosts.length > 1
   const rows = connectLineageRows(agents).filter(({ agent }) => {
     const activity = activityFor(agent.state)
     return (
@@ -335,6 +419,13 @@ export const AgentDirectory = ({
       </div>
       <div className="connect-agent-tree">
         {rows.length === 0 ? <Text tone="secondary">No agents match “{query.trim()}”.</Text> : null}
+        {rows.length === 0 ? null : (
+          <div aria-hidden="true" className="connect-list-head">
+            <span>Active</span>
+            <span>Agent</span>
+            <span>State</span>
+          </div>
+        )}
         <div className="connect-agent-list">
           {rows.map(({ agent, depth, issue }, index) => {
             const key = connectAgentKey(agent)
@@ -352,18 +443,27 @@ export const AgentDirectory = ({
                 onClick={() => onSelect(agent)}
               >
                 <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
+                  <span className="connect-visually-hidden">Last active at </span>
                   {timeLabel(agent.lastActivityAt, timeZone)}
                 </time>
-                <span className="agent-presence" data-activity={activity} aria-hidden="true" />
                 <span className="connect-agent-copy">
                   <Text as="strong" variant="label">
                     {agent.name}
                   </Text>
                   <Text as="small" variant="meta" tone="secondary">
-                    {agent.host} · {relationLabel(agent, issue)} · {workSummary(agent)}
+                    {/* Host and work names are identifiers: each moves to the next line whole rather than splitting at a hyphen. */}
+                    {severalHosts ? (
+                      <>
+                        <span className="connect-token">{agent.host}</span>,{" "}
+                      </>
+                    ) : null}
+                    {relationLabel(agent, issue, names)}, {workPrefix(agent)}{" "}
+                    <span className="connect-token">{agent.work}</span>
                   </Text>
                 </span>
-                <StateLabel label={agent.state} tone={agentTone(agent.state)} size="compact" />
+                <span className="connect-agent-state" data-activity={activity}>
+                  {stateWord(agent.state)}
+                </span>
               </button>
             )
           })}
@@ -418,6 +518,12 @@ type TerminalKeyRailProps = {
   readonly onKey: (key: TerminalRailKey) => void
   readonly error?: string | null
   readonly disabled?: boolean
+  /** Show the screen as selectable text; the touch counterpart of a mouse selection. */
+  readonly onSelectText?: () => void
+  /** Return to the newest output; always offered because the client may not know it is behind. */
+  readonly onJumpToLatest?: () => void
+  /** Lines this client knows it scrolled back; above 0 the rail says so beside Latest. */
+  readonly linesBack?: number
 }
 
 const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
@@ -426,19 +532,33 @@ const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctr
 export const TerminalKeyRail = ({
   disabled = false,
   error = null,
+  linesBack = 0,
   modifier,
   onFocusTerminal,
+  onJumpToLatest,
   onKey,
-  onModifierChange
+  onModifierChange,
+  onSelectText
 }: TerminalKeyRailProps) => {
   const [activeIndex, setActiveIndex] = useState(0)
   const modifierCount = terminalModifiers.length
   const terminalKeyAvailability = terminalKeyDescriptors.map(
     (descriptor) => serializeTerminalKey(descriptor.key, modifier)._tag === "supported"
   )
+  // View actions stay pinned at the rail's end, in reach while the keys scroll under them.
+  const viewActions = [
+    ...(onJumpToLatest === undefined
+      ? []
+      : [{ key: "latest", label: "Latest", ariaLabel: "Jump to latest output", onClick: onJumpToLatest }]),
+    ...(onSelectText === undefined
+      ? []
+      : [{ key: "select", label: "Select", ariaLabel: "Select terminal text to copy", onClick: onSelectText }])
+  ]
+  const viewActionStart = modifierCount + terminalKeyDescriptors.length
   const enabledRail = [
     ...terminalModifiers.map(() => !disabled),
-    ...terminalKeyAvailability.map((available) => !disabled && available)
+    ...terminalKeyAvailability.map((available) => !disabled && available),
+    ...viewActions.map(() => !disabled)
   ]
   const tabStopIndex = enabledRail[activeIndex] === true ? activeIndex : enabledRail.findIndex((enabled) => enabled)
   return (
@@ -515,6 +635,36 @@ export const TerminalKeyRail = ({
             )
           })}
         </div>
+        {viewActions.length === 0 ? null : (
+          <div aria-label="Terminal view" className="terminal-key-group terminal-key-group-pinned" role="group">
+            {linesBack > 0 ? (
+              <span
+                aria-label={`Older output, ${linesBack} ${linesBack === 1 ? "line" : "lines"} back`}
+                className="terminal-older-output"
+                role="status"
+              >
+                <span aria-hidden="true">{`${linesBack} ${linesBack === 1 ? "line" : "lines"} back`}</span>
+              </span>
+            ) : null}
+            {viewActions.map((action, index) => (
+              <button
+                aria-label={action.ariaLabel}
+                className="terminal-key"
+                data-behind={action.key === "latest" && linesBack > 0 ? "true" : undefined}
+                data-terminal-key={action.key}
+                disabled={disabled}
+                key={action.key}
+                onClick={action.onClick}
+                onFocus={() => setActiveIndex(viewActionStart + index)}
+                onPointerDown={(event) => event.preventDefault()}
+                tabIndex={tabStopIndex === viewActionStart + index ? 0 : -1}
+                type="button"
+              >
+                {action.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <small aria-live="polite" className="terminal-key-error">
         {error ?? ""}

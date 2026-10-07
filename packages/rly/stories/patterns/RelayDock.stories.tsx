@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { type ReactElement, type ReactNode, useState } from "react"
-import { expect, userEvent, waitFor } from "storybook/test"
+import { type CSSProperties, type ReactElement, type ReactNode, useState } from "react"
+import { expect, userEvent, waitFor, within } from "storybook/test"
+import { storyMedia } from "../storyMedia.js"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import {
   RelayDock,
@@ -14,6 +15,8 @@ import { Field } from "../../src/primitives/Field.js"
 import { Text } from "../../src/primitives/Text.js"
 import { pageStyle, stackStyle } from "../primitives/storyStyles.js"
 
+// The dock's own compact breakpoint (RelayDock.tsx compactViewportQuery): a sheet below it, a rail above.
+const compactDock = "(max-width: 40rem), (max-height: 40rem) and (pointer: coarse)"
 const profiles = [
   { label: "Review", value: "review" },
   { label: "Fast scan", value: "fast-scan" }
@@ -26,11 +29,7 @@ const models = [
 
 const ThreadMarker = (): ReactElement => {
   const [updates, setUpdates] = useState(0)
-  return (
-    <button onClick={() => setUpdates((count) => count + 1)} type="button">
-      Thread marker: {updates}
-    </button>
-  )
+  return <Button onClick={() => setUpdates((count) => count + 1)}>{`Thread marker: ${updates}`}</Button>
 }
 
 const readyState: RlyRelayDockState = {
@@ -57,6 +56,16 @@ const NestedDialogProbe = (): ReactElement => (
   </Dialog.Root>
 )
 
+// Story fixtures use rly controls: a disclosure summary is a full control target, and fieldsets
+// group without the browser's default frame.
+const disclosureSummary: CSSProperties = {
+  alignItems: "center",
+  cursor: "pointer",
+  display: "flex",
+  minBlockSize: "var(--rly-control-height-dense)"
+}
+const plainFieldset: CSSProperties = { border: 0, margin: 0, minInlineSize: 0, padding: 0 }
+
 const nestedDialogState: RlyRelayDockState = {
   content: <NestedDialogProbe />,
   status: "ready"
@@ -67,24 +76,22 @@ const richTextState: RlyRelayDockState = {
     <>
       <div aria-label="Rich Relay reply" contentEditable role="textbox" />
       <div style={{ display: "none" }}>
-        <button type="button">Hidden trailing reply action</button>
+        <Button>Hidden trailing reply action</Button>
       </div>
       <div style={{ visibility: "hidden" }}>
-        <button style={{ visibility: "visible" }} type="button">
-          Visible reply action
-        </button>
+        <Button style={{ visibility: "visible" }}>Visible reply action</Button>
       </div>
-      <fieldset>
-        <button type="button">Enabled fieldset action</button>
+      <fieldset style={plainFieldset}>
+        <Button>Enabled fieldset action</Button>
       </fieldset>
-      <fieldset disabled>
-        <button type="button">Disabled fieldset action</button>
+      <fieldset disabled style={plainFieldset}>
+        <Button>Disabled fieldset action</Button>
       </fieldset>
       <details open>
-        <summary>Expanded evidence</summary>
-        <button type="button">Expanded evidence action</button>
+        <summary style={disclosureSummary}>Expanded evidence</summary>
+        <Button>Expanded evidence action</Button>
       </details>
-      <fieldset>
+      <fieldset style={plainFieldset}>
         <legend>Review route</legend>
         <label>
           <input aria-label="Checked review route" defaultChecked name="review-route" type="radio" />
@@ -96,8 +103,8 @@ const richTextState: RlyRelayDockState = {
         </label>
       </fieldset>
       <details>
-        <summary>Collapsed evidence</summary>
-        <button type="button">Collapsed evidence action</button>
+        <summary style={disclosureSummary}>Collapsed evidence</summary>
+        <Button>Collapsed evidence action</Button>
       </details>
     </>
   ),
@@ -173,10 +180,10 @@ const RelayDockFixture = ({
       <main style={tall ? { ...pageStyle, minHeight: "200vh" } : pageStyle}>
         <div style={stackStyle}>
           <Text as="h1" variant="section-title">
-            PR #184 · Relay review
+            PR #184, Relay review
           </Text>
           <Text tone="secondary">The changed files stay usable when the non-modal rail is open.</Text>
-          <button type="button">Changed file: src/review.ts</button>
+          <Button>Changed file: src/review.ts</Button>
           <RelayDock
             context={[
               { id: "product", label: "Product", value: "CodeCommit" },
@@ -212,12 +219,22 @@ const IframeRelayDockFixture = (): ReactElement => {
           if (frameDocument === null) return
           const catalog = frame.closest<HTMLElement>("[data-rly-catalog]")
           if (catalog === null) return
-          const styleElement = frameDocument.createElement("style")
-          styleElement.dataset.rlyFrameStyles = ""
-          styleElement.textContent = [...frame.ownerDocument.styleSheets]
-            .flatMap((styleSheet) => [...styleSheet.cssRules].map((rule) => rule.cssText))
-            .join("\n")
-          frameDocument.head.append(styleElement)
+          // Linked sheets load by their absolute URL, so their relative font URLs still resolve; inline
+          // sheets are copied as text, in document order.
+          for (const styleSheet of frame.ownerDocument.styleSheets) {
+            if (styleSheet.href === null) {
+              const styleElement = frameDocument.createElement("style")
+              styleElement.dataset.rlyFrameStyles = ""
+              styleElement.textContent = [...styleSheet.cssRules].map((rule) => rule.cssText).join("\n")
+              frameDocument.head.append(styleElement)
+            } else {
+              const link = frameDocument.createElement("link")
+              link.dataset.rlyFrameStyles = ""
+              link.href = styleSheet.href
+              link.rel = "stylesheet"
+              frameDocument.head.append(link)
+            }
+          }
           for (const attribute of catalog.getAttributeNames()) {
             if (attribute !== "lang" && !attribute.startsWith("data-")) continue
             const value = catalog.getAttribute(attribute)
@@ -264,9 +281,16 @@ export const Interaction: Story = {
   render: () => <RelayDockFixture />
 }
 
+/** The rail on a desktop; a phone-sized viewport turns it into the modal sheet, which the play accepts. */
 export const DesktopRail: Story = {
-  play: async ({ canvas }) => {
-    await expect(canvas.getByRole("complementary", { name: /^Relay(?: \(.+\))?$/ })).toBeVisible()
+  play: async ({ canvas, canvasElement }) => {
+    const compact = storyMedia(canvasElement, compactDock)
+    const name = /^Relay(?: \(.+\))?$/
+    await expect(
+      compact
+        ? within(canvasElement.ownerDocument.body).getByRole("dialog", { name })
+        : canvas.getByRole("complementary", { name })
+    ).toBeVisible()
     await expect(canvas.getAllByRole("combobox")).toHaveLength(2)
   },
   render: () => <RelayDockFixture initiallyOpen presentation="rail" />
@@ -319,10 +343,17 @@ export const Loading: Story = {
   render: () => <RelayDockFixture initiallyOpen state={loadingState} />
 }
 
+/** The sheet on a phone. It pins mobile1; at a wider forced viewport the dock is a rail, which the play accepts. */
 export const MobileSheet: Story = {
   globals: { viewport: { isRotated: false, value: "mobile1" } },
-  play: async ({ canvas }) => {
-    await expect(canvas.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  play: async ({ canvas, canvasElement }) => {
+    const compact = storyMedia(canvasElement, compactDock)
+    const name = /^Relay(?: \(.+\))?$/
+    await expect(
+      compact
+        ? within(canvasElement.ownerDocument.body).getByRole("dialog", { name })
+        : canvas.getByRole("complementary", { name })
+    ).toBeVisible()
     await expect(canvas.getAllByRole("combobox")).toHaveLength(2)
   },
   render: () => <RelayDockFixture initiallyOpen presentation="rail" />

@@ -10,33 +10,25 @@
 import type { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
 import { ServiceMark } from "@knpkv/rly/patterns"
-import { StateLabel, Text, type RlyStateTone } from "@knpkv/rly/primitives"
+import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { Option } from "effect"
 import { ArrowRightIcon, MessageSquareIcon } from "lucide-react"
 import { useMemo } from "react"
 import { Link } from "react-router"
-import { pullRequestRowDecision, pullRequestRowTimeLabel, pullRequestRowTimestamp } from "./pr-row-presentation.js"
+import {
+  pullRequestRowDecision,
+  pullRequestRowStatus,
+  pullRequestRowTimeLabel,
+  pullRequestRowTimestamp
+} from "./pr-row-presentation.js"
 import styles from "./review-queue.module.css"
-import { needsYourReview } from "./workbench-queue.js"
+import { type Caller, needsYourReview } from "./workbench-queue.js"
 
 interface PRRowProps {
   readonly pr: PullRequest
   readonly to: string
   readonly showUpdated?: boolean
-  readonly currentUser?: string | undefined
-}
-
-interface StatusPresentation {
-  readonly label: string
-  readonly tone: RlyStateTone
-}
-
-const statusPresentation = (pr: PullRequest): StatusPresentation => {
-  if (pr.status === "MERGED") return { label: "Merged", tone: "progress" }
-  if (pr.status === "CLOSED") return { label: "Closed", tone: "neutral" }
-  if (!pr.isMergeable) return { label: "Conflict", tone: "critical" }
-  if (pr.isApproved) return { label: "Approved", tone: "positive" }
-  return { label: "Pending", tone: "caution" }
+  readonly caller: Caller
 }
 
 const scoreClassName = (tier: ReturnType<typeof getScoreTier>): string => {
@@ -50,13 +42,13 @@ const scoreClassName = (tier: ReturnType<typeof getScoreTier>): string => {
   }
 }
 
-export function PRRow({ currentUser, pr, showUpdated, to }: PRRowProps) {
-  const reviewRequested = needsYourReview(pr, currentUser)
+export function PRRow({ caller, pr, showUpdated, to }: PRRowProps) {
+  const reviewRequested = needsYourReview(pr, caller)
   const score: HealthScore | undefined = useMemo(
     () => Option.getOrUndefined(calculateHealthScore(pr, new Date())),
     [pr]
   )
-  const status = statusPresentation(pr)
+  const status = pullRequestRowStatus(pr)
   const decision = pullRequestRowDecision(pr)
   const description = pr.description?.split("\n").slice(0, 2).join(" ")
 

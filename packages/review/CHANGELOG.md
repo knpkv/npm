@@ -1,5 +1,24 @@
 # @knpkv/review
 
+## 0.4.0
+
+### Minor Changes
+
+- [#538](https://github.com/knpkv/npm/pull/538) [`702d855`](https://github.com/knpkv/npm/commit/702d8559efbd781f4f89131ddbe462137a85ba4d) Thanks [@konopkov](https://github.com/konopkov)! - The exported change guide stays inside a phone screen. Long identifiers in the title and chapter names now wrap, and on a phone the reading controls come first, then the guide, then the chapter list. Callouts are flat notes with an even border, named in sentence case. Diagrams sit in a framed, fixed-height panel with a caption bar, so drawing them no longer shifts the page. Their edge labels are readable in the dark theme. Scrolling code blocks can be reached from the keyboard. The Execution disclosure has its own control. Labels use commas and words instead of middots, and sizes come from rly type tokens.
+
+### Patch Changes
+
+- [#546](https://github.com/knpkv/npm/pull/546) [`6940d1b`](https://github.com/knpkv/npm/commit/6940d1b6c88c3b95a3d70ad84a13f011c6fa4017) Thanks [@konopkov](https://github.com/konopkov)! - On a phone, keyboard focus follows the page again: the guide comes first in the markup, then the chapter list, then the reading controls, so Tab from the top no longer jumps to the bottom of the page. On wide screens the chapter list is still the left column.
+- Updated dependencies [[`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/rly@0.10.0
+
+## 0.3.3
+
+### Patch Changes
+
+- Updated dependencies [[`934843b`](https://github.com/knpkv/npm/commit/934843bbcea57cbf3266fce950c020733046cac1), [`148daa6`](https://github.com/knpkv/npm/commit/148daa6be147dca74bc642bd552b603deb760eae), [`4e8f346`](https://github.com/knpkv/npm/commit/4e8f346b926b859ea2b3be07ec7dc6cb77ca8e76), [`e57bb6d`](https://github.com/knpkv/npm/commit/e57bb6db1b393dbff8e116573cf2db23992c1cf4), [`7df3dbb`](https://github.com/knpkv/npm/commit/7df3dbb9875ab31f369351df2de898b36d40e613), [`8924289`](https://github.com/knpkv/npm/commit/89242895271072b83185d6cc02376b2c56830f6a), [`f8d2612`](https://github.com/knpkv/npm/commit/f8d2612e09b20974dd8eccc8ff197bb072c40cbf)]:
+  - @knpkv/rly@0.9.0
+
 ## 0.3.2
 
 ### Patch Changes

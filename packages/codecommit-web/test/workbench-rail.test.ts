@@ -55,7 +55,7 @@ const draw = (pullRequests: ReadonlyArray<PullRequest>, currentUser: string | un
         createElement(WorkbenchRailView, {
           currentKey,
           currentUser,
-          queue: workbenchQueue(pullRequests, currentUser, NOW)
+          queue: workbenchQueue(pullRequests, { identities: undefined, username: currentUser }, NOW)
         })
       )
     )

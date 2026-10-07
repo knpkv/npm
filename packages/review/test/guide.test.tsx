@@ -223,7 +223,7 @@ describe("guide", () => {
           ]}
         />
       )
-      expect(html).toContain(`${displayed} · reported`)
+      expect(html).toContain(`${displayed}, reported`)
     }
   })
   it("keeps pre-existing context and open questions in separately labelled groups", async () => {
@@ -261,8 +261,15 @@ describe("guide", () => {
     }
   })
   it("identifies source pull requests with their supplied title or number", () => {
+    const { source: _source, ...withoutSource } = guide
     const render = (source: Guide["source"]) =>
-      renderToStaticMarkup(<GuidePage guide={{ ...guide, source }} patch={patch} findings={findings} />)
+      renderToStaticMarkup(
+        <GuidePage
+          guide={source === undefined ? withoutSource : { ...withoutSource, source }}
+          patch={patch}
+          findings={findings}
+        />
+      )
     const pr = { url: "https://example.invalid/pull/7", title: "Signed release approval" }
     expect(render({ pr })).toContain(">Signed release approval</a>")
     expect(render({ pr: { ...pr, number: 7 } })).toContain("PR 7")
@@ -327,8 +334,8 @@ describe("guide", () => {
         ]}
       />
     )
-    expect(html).toContain("USD 0 · reported")
-    expect(html).toContain("USD 328.2407 · estimated")
+    expect(html).toContain("USD 0, reported")
+    expect(html).toContain("USD 328.2407, estimated")
     expect(html).toContain("2m 5s")
     expect(html).toContain("Not recorded")
     expect(html).toContain("Provider usage receipt")

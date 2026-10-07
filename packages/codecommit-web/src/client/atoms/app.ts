@@ -11,7 +11,10 @@
  * @module
  */
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as Effect from "effect/Effect"
+import type { HttpApiClient } from "effect/http-api"
 import * as Atom from "effect/reactivity/Atom"
+import type { CodeCommitApi } from "../../server/Api.js"
 import { ApiClient } from "./runtime.js"
 
 /**
@@ -62,6 +65,16 @@ export interface AppState {
   readonly error?: string
   readonly lastUpdated?: Date
   readonly currentUser?: string
+  /**
+   * The caller per account, keyed by profile. A wildcard pool decides exactly only for a
+   * `Resolved` identity; absent, a missing key, or `Unresolved` means membership is unknown.
+   */
+  readonly callerIdentities?: Domain.CallerIdentities
+  /**
+   * Pull requests the last refresh kept from cache because their approval rules failed to
+   * evaluate; their approval state may be out of date. Absent before the first refresh.
+   */
+  readonly unevaluatedPullRequests?: ReadonlyArray<Domain.UnevaluatedPullRequest>
   readonly unreadNotificationCount?: number
   readonly notifications?: {
     readonly items: ReadonlyArray<NotificationItem>
@@ -211,8 +224,28 @@ export const statsSyncAtom = ApiClient.mutation("stats", "sync")
 // FTS search
 export const searchPrsAtom = ApiClient.mutation("prs", "search")
 
-// Refresh single PR
-export const refreshSinglePrAtom = ApiClient.mutation("prs", "refreshSingle")
+/** The request of one single-pull-request refresh. */
+export type RefreshSinglePrRequest = Parameters<HttpApiClient.ForApi<typeof CodeCommitApi>["prs"]["refreshSingle"]>[0]
+
+/**
+ * A function atom per key, on `runtime`. A function atom interrupts its own pending call when called
+ * again, so one shared atom lets a call for key B cancel key A's and hand A B's result; one per key,
+ * calls for different keys never interfere.
+ */
+export const perKeyFn = <R, ER, Arg, A, E>(
+  runtime: Atom.AtomRuntime<R, ER>,
+  run: (arg: Arg) => Effect.Effect<A, E, R>
+) => Atom.family((_key: string) => runtime.fn<Arg>()(run))
+
+// Refresh single PR, one atom per pull-request route key. Not `ApiClient.mutation`: it returns the
+// same atom for every caller of an endpoint, whatever family wraps it.
+export const refreshSinglePrAtom = perKeyFn(
+  ApiClient.runtime,
+  Effect.fnUntraced(function*(request: RefreshSinglePrRequest) {
+    const client = yield* ApiClient
+    return yield* client.prs.refreshSingle(request)
+  })
+)
 
 // Approval rule CRUD
 export const createApprovalRuleAtom = ApiClient.mutation("prs", "createApprovalRule")

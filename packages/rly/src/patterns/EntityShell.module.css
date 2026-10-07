@@ -65,7 +65,7 @@
   }
 
   .slotLabel {
-    color: var(--rly-color-text-2);
+    color: var(--rly-color-text-1);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     text-transform: uppercase;
@@ -101,10 +101,6 @@
   }
 
   @container (max-width: 44rem) {
-    .root {
-      gap: var(--rly-space-32);
-    }
-
     .header {
       gap: var(--rly-space-24);
       padding-block-end: var(--rly-space-32);

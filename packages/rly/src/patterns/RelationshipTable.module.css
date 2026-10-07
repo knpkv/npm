@@ -49,8 +49,9 @@
     inline-size: 28%;
   }
 
+  /* The relation column never drops below its longest phrase ("Implemented by"). */
   .head th:nth-child(2) {
-    inline-size: 24%;
+    inline-size: max(24%, 10rem);
   }
 
   .head th:nth-child(4) {

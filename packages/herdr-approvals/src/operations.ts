@@ -365,7 +365,9 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
               operation: "nix.apply"
             })
           )
-          : runCommand("nix.apply", [...config.applyCommand, payload.ref])
+          // The job id lets the apply command record this job's own outcome,
+          // which hostd reads to settle the job if the apply restarts it.
+          : runCommand("nix.apply", [...config.applyCommand, payload.ref, jobId])
       case "agent.delegate":
         return runCoordinatorCommand(
           "agent.delegate",
@@ -393,6 +395,7 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
       case "work.admit":
       case "work.recover":
       case "work.reassign":
+      case "work.abandon":
         return Effect.fail(
           new FleetOperationError({
             cause: payload.kind,

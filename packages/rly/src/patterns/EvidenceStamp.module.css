@@ -49,6 +49,8 @@
     min-inline-size: var(--rly-space-0);
     overflow-wrap: break-word;
     padding: var(--rly-space-4) var(--rly-space-8);
+    /* A wrapped hash splits into even lines, never leaving one character alone on the last. */
+    text-wrap: balance;
     white-space: normal;
   }
 }

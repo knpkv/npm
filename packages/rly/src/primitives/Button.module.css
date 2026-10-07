@@ -90,4 +90,26 @@
       background: var(--rly-color-text-2);
     }
   }
+
+  /*
+   * Forced colours repaint a primary or pressed button's fill and label to the same system colour,
+   * leaving a solid box. Draw them as the system's selected pair instead, so the label stays readable.
+   */
+  @media (forced-colors: active) {
+    .primary,
+    .root[aria-pressed="true"] {
+      background: Highlight;
+      border-color: Highlight;
+      color: HighlightText;
+      forced-color-adjust: none;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .primary,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-pressed="true"] {
+    background: Highlight;
+    border-color: Highlight;
+    color: HighlightText;
+    forced-color-adjust: none;
+  }
 }

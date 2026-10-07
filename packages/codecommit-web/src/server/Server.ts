@@ -1,4 +1,4 @@
-import { BunFileSystem, BunHttpServer, BunServices } from "@effect/platform-bun"
+import { NodeFileSystem, NodeHttpServer, NodeServices } from "@effect/platform-node"
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import {
   AwsClient,
@@ -23,6 +23,7 @@ import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import * as Path from "effect/Path"
 import * as Stdio from "effect/Stdio"
+import { createServer } from "node:http"
 import { coordinateRouterMaxParamLength } from "../pull-request-coordinates.js"
 import { CodeCommitApi } from "./Api.js"
 import {
@@ -64,8 +65,9 @@ const HandlersLive = Layer.mergeAll(
 ).pipe(Layer.provideMerge(BackgroundScopeLive))
 
 // Platform dependencies
+// Node's platform runs under both Node and Bun, so `codecommit web` starts with Node alone.
 const PlatformLive = Layer.mergeAll(
-  BunServices.layer,
+  NodeServices.layer,
   FetchHttpClient.layer
 )
 
@@ -255,7 +257,7 @@ const AllRoutes = Layer.mergeAll(ApiLive, OwnerSession.BootstrapRouter, StaticRo
 )
 
 // HttpPlatform + Etag — required by addHttpApi for OpenAPI/multipart support
-const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(BunFileSystem.layer))
+const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(NodeFileSystem.layer))
 
 export interface CodeCommitServerOptions {
   readonly hostname?: string
@@ -279,8 +281,8 @@ export const makeServer = (options: CodeCommitServerOptions) => {
           // characters; keep one bounded segment for the review route.
           routerConfig: { maxParamLength: coordinateRouterMaxParamLength }
         }).pipe(
-          // idleTimeout: 0 disables idle detection — required for long-lived SSE connections
-          Layer.provide(BunHttpServer.layer({ hostname, port: options.port, idleTimeout: 0 })),
+          // Node's default socket timeout is off, so server-sent events stay open as long as the page.
+          Layer.provide(NodeHttpServer.layer(createServer, { host: hostname, port: options.port })),
           Layer.provide(Etag.layer),
           Layer.provide(HttpPlatformLive),
           Layer.provide(Layer.succeed(OwnerSession.OwnerSession, options.security))

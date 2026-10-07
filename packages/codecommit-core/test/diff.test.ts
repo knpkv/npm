@@ -120,3 +120,34 @@ describe("diffPR", () => {
     expect(notifications.some(({ type }) => type === "pr_closed")).toBe(false)
   })
 })
+
+describe("diffPR approval while unknown", () => {
+  const pr = (isApproved: boolean, approvalUnknownReason: string | null): DiffablePR => ({
+    id: "1",
+    title: "Fix",
+    repositoryName: "repo",
+    accountProfile: "dev",
+    status: "OPEN",
+    isApproved,
+    approvalUnknownReason,
+    isMergeable: true
+  })
+  const approvalChanges = (cached: DiffablePR, fresh: DiffablePR) =>
+    diffPR(cached, fresh, "acc").filter((n) => n.type === "approval_changed")
+
+  it("reports no transition into an unknown approval", () => {
+    expect(approvalChanges(pr(true, null), pr(false, "NotPermitted"))).toEqual([])
+  })
+
+  // A pull request first seen while its evaluation fails is cached as not approved, a placeholder that
+  // looks like a last known value. Recovery can't tell them apart, so it announces nothing: no false
+  // "Approval granted", at the cost of not announcing a sign-off made while evaluation was failing.
+  it("announces nothing when evaluation recovers, whatever the cached value", () => {
+    expect(approvalChanges(pr(false, "NotPermitted"), pr(true, null))).toEqual([])
+    expect(approvalChanges(pr(true, "NotPermitted"), pr(false, null))).toEqual([])
+  })
+
+  it("still announces a transition between two known evaluations", () => {
+    expect(approvalChanges(pr(false, null), pr(true, null))).toHaveLength(1)
+  })
+})
