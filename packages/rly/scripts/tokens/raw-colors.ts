@@ -1,6 +1,6 @@
 import * as ts from "typescript"
 
-export type ColorPolicyRule = "raw-color" | "primitive-palette" | "local-theme"
+export type ColorPolicyRule = "raw-color" | "primitive-palette" | "local-theme" | "raw-focus-ring"
 
 export interface ColorPolicyViolation {
   readonly column: number
@@ -62,7 +62,9 @@ const cssViolations = (path: string, source: string): ReadonlyArray<ColorPolicyV
   const patterns: ReadonlyArray<readonly [RegExp, ColorPolicyRule]> = [
     [new RegExp(RAW_COLOR.source, "gi"), "raw-color"],
     [new RegExp(PRIMITIVE_PALETTE.source, "gi"), "primitive-palette"],
-    [/(?:data-theme|prefers-color-scheme|\bcolor-scheme\s*:)/gi, "local-theme"]
+    [/(?:data-theme|prefers-color-scheme|\bcolor-scheme\s*:)/gi, "local-theme"],
+    // One focus ring everywhere: an outline in the focus colour takes its width from the token.
+    [/\boutline\s*:(?![^;}]*--rly-focus-ring-width)[^;}]*var\(\s*--rly-color-focus\s*\)/gi, "raw-focus-ring"]
   ]
   for (const [pattern, rule] of patterns) {
     for (const match of comparable.matchAll(pattern)) {

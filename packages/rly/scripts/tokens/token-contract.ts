@@ -67,6 +67,9 @@ export const renderTokenCss = (): string => {
   const root = [
     declaration("font-ui", "\"Geist Variable\", \"Geist\", system-ui, sans-serif"),
     declaration("font-mono", "\"Geist Mono Variable\", \"Geist Mono\", ui-monospace, monospace"),
+    // One solid, high-contrast focus ring: 2px, drawn 2px outside the control (inset rings negate the width).
+    declaration("focus-ring-width", "2px"),
+    declaration("focus-ring-offset", "2px"),
     renderSchemeColors(),
     ...spaceTokenSource.map((token) => declaration(`space-${token.name}`, token.value)),
     ...radiusTokenSource.map((token) => declaration(`radius-${token.name}`, token.value)),

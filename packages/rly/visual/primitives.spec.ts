@@ -30,7 +30,7 @@ test("preserves deliberate control geometry and the shared focus treatment", asy
     const style = getComputedStyle(element)
     return { offset: style.outlineOffset, width: style.outlineWidth }
   })
-  expect(focus).toEqual({ offset: "2px", width: "3px" })
+  expect(focus).toEqual({ offset: "2px", width: "2px" })
 
   await page.goto(story("primitives-iconbutton--states"))
   for (const [name, size] of iconButtonSizes) {

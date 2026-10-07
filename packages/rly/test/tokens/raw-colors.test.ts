@@ -64,4 +64,22 @@ describe("component color policy", () => {
     `
     )).toEqual([])
   })
+
+  it("requires focus outlines to take their width from the focus-ring token", () => {
+    expect(rules(
+      "src/patterns/Row.module.css",
+      `
+      .a:focus-visible { outline: 3px solid var(--rly-color-focus); }
+      .b:focus-visible { outline: var(--rly-space-2) solid var(--rly-color-focus); outline-offset: 2px; }
+    `
+    )).toEqual(["raw-focus-ring", "raw-focus-ring"])
+    expect(rules(
+      "src/patterns/Row.module.css",
+      `
+      .a:focus-visible { outline: var(--rly-focus-ring-width) solid var(--rly-color-focus); }
+      .b { outline: none; }
+      .c { outline: 1px solid var(--rly-color-border-1); }
+    `
+    )).toEqual([])
+  })
 })

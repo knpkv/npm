@@ -37,8 +37,8 @@
   }
 
   .item:focus-visible {
-    outline: 2px solid var(--rly-color-focus);
-    outline-offset: -2px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(-1 * var(--rly-focus-ring-width));
   }
 
   /* Each option is at least as tall and as wide as its size token, which grows to the 44px touch
