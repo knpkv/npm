@@ -231,6 +231,7 @@ export const layer = Layer.effect(
         catch: () => ({})
       })
       return { ...defaultJcfConfig, ...parsed }
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     }).pipe(Effect.catch(() => Effect.succeed(defaultJcfConfig)))
 
     const write = (config: JcfConfig) =>
@@ -245,6 +246,7 @@ export const layer = Layer.effect(
         Effect.gen(function*() {
           const current = yield* read
           yield* write({ ...current, ...patch })
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         }).pipe(Effect.catch(() => Effect.void)),
       configDir: Effect.succeed(dir)
     }

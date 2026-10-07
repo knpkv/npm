@@ -60,6 +60,7 @@ export const makeBlobPublisher = (
               return openFailure(opened.failure)
             }
 
+            // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             yield* Effect.addFinalizer(() => fs.remove(temporary, { force: true }).pipe(Effect.ignore))
             // Every child path is descriptor-relative. Identity checks remain
             // defense in depth around the write and atomic publication.

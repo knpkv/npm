@@ -284,6 +284,7 @@ const root = Command.make("confluence-api-regenerate", { check, local }).pipe(
             const remote = yield* canonicalJson(upstream[version])
             const current = yield* readCommitted(version, versionPaths).pipe(
               Effect.flatMap(canonicalJson),
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.orElseSucceed(() => "")
             )
             return current === remote ? undefined : version

@@ -34,6 +34,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
       },
       pullRequestId: prId,
       repositoryName: row.repositoryName
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     }).pipe(Effect.catch(() => Effect.void.pipe(Effect.as(undefined))))
 
     if (locs !== undefined && awsAccountId !== "") {
@@ -53,6 +54,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
         )
       ) {
         const cachedComments = yield* commentRepo.find(awsAccountId, prId, coordinates).pipe(
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
         )
         if (Option.isSome(cachedComments)) {
@@ -65,12 +67,14 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
             row.accountRegion
           )
           yield* Effect.forEach(notifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.catch(() => Effect.void)
           )
         }
       }
       // Cache comments
       yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs), coordinates).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.void)
       )
     }
@@ -82,6 +86,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
         repositoryName: row.repositoryName,
         accountRegion: row.accountRegion
       }).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       )
       if (Option.isSome(cached)) {
@@ -140,6 +145,7 @@ export const enrichComments = (params: {
           onNone: () => Effect.void,
           onSome: ({ accountRegion, awsAccountId, commentCount, id, repositoryName }) =>
             prRepo.updateCommentCount(awsAccountId, id, commentCount, { repositoryName, accountRegion }).pipe(
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.catch(() => Effect.void)
             )
         }),
@@ -148,6 +154,7 @@ export const enrichComments = (params: {
 
     // Derive commented_by from cached pr_comments
     yield* prRepo.refreshCommentedBy().pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.void)
     )
   }).pipe(

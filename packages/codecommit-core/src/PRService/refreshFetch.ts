@@ -167,6 +167,7 @@ export const fetchAndUpsertPRs = (params: {
                   message,
                   profile: account.profile,
                   deduplicate: true
+                  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                 }).pipe(Effect.catch(() => Effect.void))
                 // Typed first (credential failure, or a provider auth error), with the older text match as fallback.
                 if (isAuthError) yield* markAuthFailed(account.profile)
@@ -248,6 +249,7 @@ export const fetchAndUpsertPRs = (params: {
               pr.repositoryName,
               pr.account.region
             ).pipe(
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
             )
             if (Option.isSome(cached)) {
@@ -266,6 +268,7 @@ export const fetchAndUpsertPRs = (params: {
               yield* Effect.forEach([...notifications, ...poolNotifications], (n) => notificationRepo.add(n), {
                 discard: true
               }).pipe(
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                 Effect.catch(() => Effect.void)
               )
             }
@@ -284,6 +287,7 @@ export const fetchAndUpsertPRs = (params: {
               yield* subscriptionRepo.subscribe(awsAccountId, pr.id, {
                 repositoryName: pr.repositoryName,
                 accountRegion: pr.account.region
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               }).pipe(Effect.catch(() => Effect.void))
               yield* Ref.update(
                 subscribedRef,
@@ -345,6 +349,7 @@ export const fetchAndUpsertPRs = (params: {
                         : prRepo.deleteOne(pr.awsAccountId, pr.id, {
                           repositoryName: pr.repositoryName,
                           accountRegion: pr.accountRegion
+                          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                         }).pipe(Effect.catch(() => Effect.void))
                     )
                   )
@@ -373,12 +378,14 @@ export const fetchAndUpsertPRs = (params: {
           } in ${regions} couldn't be re-evaluated and kept their cached approval state: ${first.message}`,
           profile: first.profile,
           replaceUnread: true
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         }).pipe(Effect.catch(() => Effect.void))
       },
       { discard: true }
     )
 
     // Propagate repoAccountId from any PR that has it to all PRs that don't
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     yield* prRepo.propagateRepoAccountId().pipe(Effect.catch(() => Effect.void))
 
     const partial = yield* Ref.get(partialScopes)

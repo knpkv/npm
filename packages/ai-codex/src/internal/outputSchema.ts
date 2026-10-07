@@ -96,6 +96,7 @@ export const makeStreamOutputSchemaFile = Effect.fn("CodexOutputSchema.makeStrea
   const schemaDirectory = yield* fileSystem.makeTempDirectory({
     prefix: "ai-codex-output-"
   }).pipe(Effect.mapError(mapTemporaryFileError))
+  // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   const cleanup = fileSystem.remove(schemaDirectory, { recursive: true }).pipe(Effect.ignore)
   const schemaFile = yield* fileSystem.makeTempFile({
     directory: schemaDirectory,

@@ -141,6 +141,7 @@ const resolveAccountFromCache = (
 
     // Fall back to config only when the requested region is configured.
     const configService = yield* ConfigService
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const config = yield* configService.load.pipe(Effect.catch(() => Effect.succeed({ accounts: [] })))
     const configAccount = config.accounts.find((a) => a.profile === awsAccountId && a.enabled)
     const region = coordinates !== undefined
@@ -200,6 +201,7 @@ export const makeRefreshSinglePR = (
         Effect.catchTag("CacheError", () => Effect.succeed(Option.none<CachedPullRequest>()))
       )
       : yield* prRepo.findByCoordinates(awsAccountId, prId, coordinates.repositoryName, coordinates.region).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
       )
 
@@ -269,6 +271,7 @@ export const makeRefreshSinglePR = (
       accountRegion: account.region
     }
     const isSubscribed = yield* subscriptionRepo.isSubscribed(durableAccountId, prId, identity).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(false))
     )
 
@@ -288,11 +291,13 @@ export const makeRefreshSinglePR = (
       yield* Effect.forEach([...prNotifications, ...poolNotifications], (n) => notificationRepo.add(n), {
         discard: true
       }).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.void)
       )
 
       // Diff comments
       const cachedComments = yield* commentRepo.find(durableAccountId, prId, identity).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       )
       if (Option.isSome(cachedComments)) {
@@ -305,6 +310,7 @@ export const makeRefreshSinglePR = (
           identity.accountRegion
         )
         yield* Effect.forEach(commentNotifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           Effect.catch(() => Effect.void)
         )
       }
@@ -312,6 +318,7 @@ export const makeRefreshSinglePR = (
 
     // Cache comments
     yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(locs), identity).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.void)
     )
 

@@ -1460,6 +1460,7 @@ export const makeRunner = Effect.fn("HostRunner.make")(function*(
             Effect.annotateLogs({ jobId })
           )
         ),
+        // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.ignore
       )
     )

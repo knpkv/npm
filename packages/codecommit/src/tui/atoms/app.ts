@@ -93,6 +93,7 @@ export const notificationsAtom = runtimeAtom.subscriptionRef(
     const ownerScope = yield* TuiApplicationScope
 
     const initial = yield* notificationRepo.findAll({ limit: 50 }).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catchIf(() => true, () => Effect.succeed(emptyNotifications))
     )
     const ref = yield* SubscriptionRef.make(initial)
@@ -105,6 +106,7 @@ export const notificationsAtom = runtimeAtom.subscriptionRef(
           Stream.runForEach(() =>
             notificationRepo.findAll({ limit: 50 }).pipe(
               Effect.flatMap((result) => SubscriptionRef.set(ref, result)),
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.catchIf(() => true, () => Effect.void)
             )
           )
