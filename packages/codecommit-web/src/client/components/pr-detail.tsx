@@ -210,6 +210,10 @@ const isTextInputTarget = (target: EventTarget | null): boolean => {
   return tagName === "INPUT" || tagName === "TEXTAREA"
 }
 
+/** The focused element's tag, read from a key event's target; null when the target is not an element. */
+const focusedElement = (target: EventTarget | null): Pick<Element, "tagName"> | null =>
+  Predicate.hasProperty(target, "tagName") && Predicate.isString(target.tagName) ? { tagName: target.tagName } : null
+
 /**
  * Whether someone other than the author signed off, as review evidence for time to first review. Any
  * sign-off counts: one of two required, or a voluntary one where no rules apply. An unknown approval
@@ -222,8 +226,8 @@ export const signedOffByOthers = (pr: Domain.PullRequest): boolean =>
  * True when Enter on the focused element already does something (follow a link, press a button),
  * so the page-wide Enter shortcut must not also fire. Used by the PR page's keydown handler.
  */
-export const ownsEnterKey = (target: EventTarget | null): boolean => {
-  const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
+export const ownsEnterKey = (target: Pick<Element, "tagName"> | null): boolean => {
+  const tagName = target?.tagName
   return tagName === "A" || tagName === "BUTTON" || tagName === "SELECT" || tagName === "SUMMARY"
 }
 
@@ -1326,7 +1330,10 @@ export function PRDetail() {
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")
-      } else if ((e.key === "o" || (e.key === "Enter" && !ownsEnterKey(e.target))) && consoleUrl.length > 0) {
+      } else if (
+        (e.key === "o" || (e.key === "Enter" && !ownsEnterKey(focusedElement(e.target)))) &&
+        consoleUrl.length > 0
+      ) {
         handleOpen()
       } else if (e.key === "." && pr !== null) {
         e.preventDefault()

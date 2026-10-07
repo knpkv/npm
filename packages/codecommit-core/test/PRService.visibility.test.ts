@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Ref, Schema, Stream, SubscriptionRef } from "effect"
+import { Effect, Layer, Option, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
 import type { CacheError } from "../src/CacheService/CacheError.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"

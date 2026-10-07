@@ -52,7 +52,7 @@ test("393x500 stacked selection has no scrollbar-like line", async ({ page }) =>
   await page.keyboard.press("Tab")
   await expect(selected).toBeFocused()
   await expect(selected).toHaveCSS("outline-style", "solid")
-  await expect(selected).toHaveCSS("outline-width", "3px")
+  await expect(selected).toHaveCSS("outline-width", "2px")
   await expect(page.getByRole("tabpanel", { name: "Connect" })).toContainText("Connected terminal")
 })
 

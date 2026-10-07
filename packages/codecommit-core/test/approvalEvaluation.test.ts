@@ -185,7 +185,7 @@ describe("approval evaluation", () => {
       Effect.gen(function*() {
         const prs = yield* Stream.runCollect(getPullRequests(account))
         expect(
-          [...prs].map((pr) => `${pr.id} ${pr.approvalUnknown?._tag ?? "evaluated"}`).toSorted()
+          [...prs].map((pr) => `${pr.id} ${pr.approvalUnknown?._tag ?? "evaluated"}`).sort()
         ).toEqual(["7 evaluated", "8 NotPermitted", "9 evaluated"])
       }))
   })

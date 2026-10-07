@@ -39,12 +39,12 @@ describe("diffApprovalPools", () => {
     const fresh = [makeRule({ poolMembers: ["alice"] })]
     const result = diffApprovalPools(cached, fresh, "alice", "42", "acc", "Fix bug", "dev")
     expect(result).toHaveLength(1)
-    expect(result[0].type).toBe("approval_requested")
-    expect(result[0].pullRequestId).toBe("42")
-    expect(result[0].awsAccountId).toBe("acc")
-    expect(result[0].title).toBe("Fix bug")
-    expect(result[0].profile).toBe("dev")
-    expect(result[0].message).toContain("#42")
+    expect(result[0]?.type).toBe("approval_requested")
+    expect(result[0]?.pullRequestId).toBe("42")
+    expect(result[0]?.awsAccountId).toBe("acc")
+    expect(result[0]?.title).toBe("Fix bug")
+    expect(result[0]?.profile).toBe("dev")
+    expect(result[0]?.message).toContain("#42")
   })
 
   it("returns approval_changed when user removed from pool", () => {
@@ -52,8 +52,8 @@ describe("diffApprovalPools", () => {
     const fresh = [makeRule({ poolMembers: [] })]
     const result = diffApprovalPools(cached, fresh, "alice", "1", "acc")
     expect(result).toHaveLength(1)
-    expect(result[0].type).toBe("approval_changed")
-    expect(result[0].message).toContain("no longer required")
+    expect(result[0]?.type).toBe("approval_changed")
+    expect(result[0]?.message).toContain("no longer required")
   })
 
   it("returns empty when both cached and fresh are empty", () => {
@@ -68,7 +68,7 @@ describe("diffApprovalPools", () => {
     ]
     const result = diffApprovalPools(cached, fresh, "alice", "1", "acc")
     expect(result).toHaveLength(1)
-    expect(result[0].type).toBe("approval_requested")
+    expect(result[0]?.type).toBe("approval_requested")
   })
 
   it("omits title/profile when not provided", () => {
@@ -76,8 +76,8 @@ describe("diffApprovalPools", () => {
     const fresh = [makeRule({ poolMembers: ["alice"] })]
     const result = diffApprovalPools(cached, fresh, "alice", "1", "acc")
     expect(result).toHaveLength(1)
-    expect(result[0].title).toBeUndefined()
-    expect(result[0].profile).toBeUndefined()
+    expect(result[0]?.title).toBeUndefined()
+    expect(result[0]?.profile).toBeUndefined()
   })
 })
 

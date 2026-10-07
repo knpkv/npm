@@ -7,7 +7,7 @@ import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
-import { ConfigService } from "../src/ConfigService/index.js"
+import { ConfigService, defaultReviewConfig, defaultSandboxConfig } from "../src/ConfigService/index.js"
 import { Domain } from "../src/index.js"
 import { makeRefreshSinglePR } from "../src/PRService/refreshSinglePR.js"
 
@@ -77,11 +77,11 @@ const secondPullRequest = Schema.decodeSync(Domain.PullRequest)({
   account: { ...pullRequest.account, region: "us-east-1" },
   repositoryName: "identity"
 })
-const secondCachedPullRequest = Schema.encodeSync(CachedPullRequest)({
+const secondCachedPullRequest: CachedPullRequest = {
   ...cachedPullRequest,
   accountRegion: "us-east-1",
-  repositoryName: "identity"
-})
+  repositoryName: Domain.RepositoryName.make("identity")
+}
 
 const foreignPullRequest = Schema.decodeSync(Domain.PullRequest)({
   ...pullRequest,
@@ -92,20 +92,20 @@ const foreignPullRequest = Schema.decodeSync(Domain.PullRequest)({
     repoAccountId: "111122223333"
   }
 })
-const foreignCachedPullRequest = Schema.encodeSync(CachedPullRequest)({
+const foreignCachedPullRequest: CachedPullRequest = {
   ...cachedPullRequest,
   awsAccountId: "999988887777",
   accountProfile: "foreign",
   repoAccountId: "111122223333"
-})
+}
 
 const config = {
   accounts: [],
   autoDetect: false,
   autoRefresh: false,
   refreshIntervalSeconds: 300,
-  review: ConfigService.defaultReviewConfig,
-  sandbox: ConfigService.defaultSandboxConfig
+  review: defaultReviewConfig,
+  sandbox: defaultSandboxConfig
 }
 
 const runWithLayer = <A, E, R>(
@@ -139,29 +139,33 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const result = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "eu-west-1",
-          repositoryName: "payments"
+          region: Domain.AwsRegion.make("eu-west-1"),
+          repositoryName: Domain.RepositoryName.make("payments")
         }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
             getPullRequest: ({ account }) =>
               Ref.update(providerCalls, (calls) => [...calls, { region: account.region, repositoryName: "payments" }])
                 .pipe(
-                  Effect.andThen(Effect.succeed({
-                    revisionId: "revision-2",
-                    sourceCommit: "b".repeat(40),
-                    title: "Coordinate refresh",
-                    author: "reviewer",
-                    status: "OPEN",
-                    repositoryName: "payments",
-                    sourceBranch: "feature",
-                    destinationBranch: "main",
-                    creationDate: new Date(0),
-                    lastActivityDate: new Date(2_000),
-                    approvedBy: [],
-                    approvedByArns: [],
-                    approvalRules: []
-                  }))
+                  Effect.andThen(Effect.succeed(
+                    new PullRequestDetail({
+                      isMergeable: true,
+                      isApproved: false,
+                      revisionId: "revision-2",
+                      sourceCommit: "b".repeat(40),
+                      title: "Coordinate refresh",
+                      author: "reviewer",
+                      status: "OPEN",
+                      repositoryName: "payments",
+                      sourceBranch: "feature",
+                      destinationBranch: "main",
+                      creationDate: new Date(0),
+                      lastActivityDate: new Date(2_000),
+                      approvedBy: [],
+                      approvedByArns: [],
+                      approvalRules: []
+                    })
+                  ))
                 ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
@@ -170,7 +174,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest]),
-            upsertRead: () => Effect.succeed({ row: true, approval: true })
+            upsertRead: () =>
+              Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.none() })
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -212,8 +217,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
         })
         yield* runWithLayer(
           makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
-            region: "eu-west-1",
-            repositoryName: "payments"
+            region: Domain.AwsRegion.make("eu-west-1"),
+            repositoryName: Domain.RepositoryName.make("payments")
           }),
           Layer.mergeAll(
             Layer.mock(AwsClient, {
@@ -246,9 +251,12 @@ describe("PRService.refreshSinglePR coordinates", () => {
               findByCoordinates: () => Effect.succeed(Option.some(approvedCache)),
               findAll: () => Effect.succeed([approvedCache]),
               upsertRead: (input) =>
-                Ref.update(upserted, (all) => [...all, [input.isApproved, input.approvalUnknownReason]]).pipe(
+                Ref.update(
+                  upserted,
+                  (all) => [...all, [input.isApproved, input.approvalUnknownReason] satisfies (typeof all)[number]]
+                ).pipe(
                   Effect.andThen(Ref.update(stored, (all) => [...all, input.lastModifiedDate])),
-                  Effect.as({ row: true, approval: true, versions: undefined })
+                  Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
                 )
             }),
             Layer.mock(CommentRepo, {
@@ -292,8 +300,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
         })
         yield* runWithLayer(
           makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
-            region: "eu-west-1",
-            repositoryName: "payments"
+            region: Domain.AwsRegion.make("eu-west-1"),
+            repositoryName: Domain.RepositoryName.make("payments")
           }),
           Layer.mergeAll(
             Layer.mock(AwsClient, {
@@ -349,7 +357,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
               find: () => Effect.succeed(Option.none()),
               upsert: () =>
                 Ref.update(commentWrites, (n) => n + 1).pipe(
-                  Effect.as({ row: true, approval: true, versions: undefined })
+                  Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
                 )
             }),
             Layer.mock(NotificationRepo, { add: (n) => Ref.update(added, (all) => [...all, n.type]) }),
@@ -372,8 +380,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const failure = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "us-east-1",
-          repositoryName: "payments"
+          region: Domain.AwsRegion.make("us-east-1"),
+          repositoryName: Domain.RepositoryName.make("payments")
         }).pipe(Effect.flip),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
@@ -399,8 +407,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
         )
       )
 
-      expect(failure._tag).toBe("RefreshError")
-      expect(failure.failedAccounts).toEqual(["111122223333"])
+      expect(failure).toMatchObject({ _tag: "RefreshError", failedAccounts: ["111122223333"] })
       expect(yield* Ref.get(providerCalls)).toBe(0)
     }))
 
@@ -416,28 +423,32 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "eu-west-1",
-          repositoryName: "payments"
+          region: Domain.AwsRegion.make("eu-west-1"),
+          repositoryName: Domain.RepositoryName.make("payments")
         }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
             getPullRequest: ({ account }) =>
               Ref.update(providerProfiles, (profiles) => [...profiles, account.profile]).pipe(
-                Effect.andThen(Effect.succeed({
-                  revisionId: "revision-exact",
-                  sourceCommit: "d".repeat(40),
-                  title: "Coordinate refresh",
-                  author: "reviewer",
-                  status: "OPEN",
-                  repositoryName: "payments",
-                  sourceBranch: "feature",
-                  destinationBranch: "main",
-                  creationDate: new Date(0),
-                  lastActivityDate: new Date(2_000),
-                  approvedBy: [],
-                  approvedByArns: [],
-                  approvalRules: []
-                }))
+                Effect.andThen(Effect.succeed(
+                  new PullRequestDetail({
+                    isMergeable: true,
+                    isApproved: false,
+                    revisionId: "revision-exact",
+                    sourceCommit: "d".repeat(40),
+                    title: "Coordinate refresh",
+                    author: "reviewer",
+                    status: "OPEN",
+                    repositoryName: "payments",
+                    sourceBranch: "feature",
+                    destinationBranch: "main",
+                    creationDate: new Date(0),
+                    lastActivityDate: new Date(2_000),
+                    approvedBy: [],
+                    approvedByArns: [],
+                    approvalRules: []
+                  })
+                ))
               ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
@@ -446,7 +457,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([foreignCachedPullRequest, cachedPullRequest]),
-            upsertRead: () => Effect.succeed({ row: true, approval: true })
+            upsertRead: () =>
+              Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.none() })
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -470,8 +482,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const failure = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "eu-west-1",
-          repositoryName: "other-repository"
+          region: Domain.AwsRegion.make("eu-west-1"),
+          repositoryName: Domain.RepositoryName.make("other-repository")
         }).pipe(Effect.flip),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
@@ -513,21 +525,25 @@ describe("PRService.refreshSinglePR coordinates", () => {
           Layer.mock(AwsClient, {
             getPullRequest: ({ account }) =>
               Ref.update(providerRegions, (regions) => [...regions, account.region]).pipe(
-                Effect.andThen(Effect.succeed({
-                  revisionId: "revision-legacy",
-                  sourceCommit: "c".repeat(40),
-                  title: "Coordinate refresh",
-                  author: "reviewer",
-                  status: "OPEN",
-                  repositoryName: "payments",
-                  sourceBranch: "feature",
-                  destinationBranch: "main",
-                  creationDate: new Date(0),
-                  lastActivityDate: new Date(2_000),
-                  approvedBy: [],
-                  approvedByArns: [],
-                  approvalRules: []
-                }))
+                Effect.andThen(Effect.succeed(
+                  new PullRequestDetail({
+                    isMergeable: true,
+                    isApproved: false,
+                    revisionId: "revision-legacy",
+                    sourceCommit: "c".repeat(40),
+                    title: "Coordinate refresh",
+                    author: "reviewer",
+                    status: "OPEN",
+                    repositoryName: "payments",
+                    sourceBranch: "feature",
+                    destinationBranch: "main",
+                    creationDate: new Date(0),
+                    lastActivityDate: new Date(2_000),
+                    approvedBy: [],
+                    approvedByArns: [],
+                    approvalRules: []
+                  })
+                ))
               ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
@@ -536,7 +552,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest]),
-            upsertRead: () => Effect.succeed({ row: true, approval: true })
+            upsertRead: () =>
+              Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.none() })
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -568,21 +585,25 @@ describe("PRService.refreshSinglePR coordinates", () => {
           Layer.mock(AwsClient, {
             getPullRequest: ({ account }) =>
               Ref.update(providerProfiles, (profiles) => [...profiles, account.profile]).pipe(
-                Effect.andThen(Effect.succeed({
-                  revisionId: "revision-legacy-collision",
-                  sourceCommit: "g".repeat(40),
-                  title: "Coordinate refresh",
-                  author: "reviewer",
-                  status: "OPEN",
-                  repositoryName: "payments",
-                  sourceBranch: "feature",
-                  destinationBranch: "main",
-                  creationDate: new Date(0),
-                  lastActivityDate: new Date(2_000),
-                  approvedBy: [],
-                  approvedByArns: [],
-                  approvalRules: []
-                }))
+                Effect.andThen(Effect.succeed(
+                  new PullRequestDetail({
+                    isMergeable: true,
+                    isApproved: false,
+                    revisionId: "revision-legacy-collision",
+                    sourceCommit: "g".repeat(40),
+                    title: "Coordinate refresh",
+                    author: "reviewer",
+                    status: "OPEN",
+                    repositoryName: "payments",
+                    sourceBranch: "feature",
+                    destinationBranch: "main",
+                    creationDate: new Date(0),
+                    lastActivityDate: new Date(2_000),
+                    approvedBy: [],
+                    approvedByArns: [],
+                    approvalRules: []
+                  })
+                ))
               ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
@@ -590,7 +611,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
             observe: () => Effect.succeed(1),
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([]),
-            upsertRead: () => Effect.succeed({ row: true, approval: true })
+            upsertRead: () =>
+              Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.none() })
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -618,8 +640,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const failure = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          repositoryName: "payments",
-          region: "eu-west-1",
+          repositoryName: Domain.RepositoryName.make("payments"),
+          region: Domain.AwsRegion.make("eu-west-1"),
           accountIdSource: "coordinate-token"
         }).pipe(Effect.flip),
         Layer.mergeAll(
@@ -683,7 +705,11 @@ describe("PRService.refreshSinglePR coordinates", () => {
           Layer.mock(ConfigService, {
             load: Effect.succeed({
               ...config,
-              accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }]
+              accounts: [{
+                profile: Domain.AwsProfileName.make("production"),
+                regions: [Domain.AwsRegion.make("eu-west-1")],
+                enabled: true
+              }]
             })
           }),
           Layer.mock(EventsHub, {})
@@ -700,32 +726,42 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const upserted = yield* Ref.make<string | undefined>(undefined)
       const service = makeRefreshSinglePR(state)
       yield* runWithLayer(
-        service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
+        service("production", pullRequest.id, {
+          repositoryName: Domain.RepositoryName.make("payments"),
+          region: Domain.AwsRegion.make("eu-west-1")
+        }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
             getPullRequest: () =>
-              Effect.succeed({
-                revisionId: "revision-profile",
-                sourceCommit: "e".repeat(40),
-                title: "Coordinate refresh",
-                author: "reviewer",
-                status: "OPEN",
-                repositoryName: "payments",
-                sourceBranch: "feature",
-                destinationBranch: "main",
-                creationDate: new Date(0),
-                lastActivityDate: new Date(2_000),
-                approvedBy: [],
-                approvedByArns: [],
-                approvalRules: []
-              }),
+              Effect.succeed(
+                new PullRequestDetail({
+                  isMergeable: true,
+                  isApproved: false,
+                  revisionId: "revision-profile",
+                  sourceCommit: "e".repeat(40),
+                  title: "Coordinate refresh",
+                  author: "reviewer",
+                  status: "OPEN",
+                  repositoryName: "payments",
+                  sourceBranch: "feature",
+                  destinationBranch: "main",
+                  creationDate: new Date(0),
+                  lastActivityDate: new Date(2_000),
+                  approvedBy: [],
+                  approvedByArns: [],
+                  approvalRules: []
+                })
+              ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
             observe: () => Effect.succeed(1),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest]),
-            upsertRead: (input) => Ref.set(upserted, input.awsAccountId).pipe(Effect.as({ row: true, approval: true }))
+            upsertRead: (input) =>
+              Ref.set(upserted, input.awsAccountId).pipe(
+                Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+              )
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -746,7 +782,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const upserted = yield* Ref.make<string | undefined>(undefined)
       const service = makeRefreshSinglePR(state)
       yield* runWithLayer(
-        service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
+        service("production", pullRequest.id, {
+          repositoryName: Domain.RepositoryName.make("payments"),
+          region: Domain.AwsRegion.make("eu-west-1")
+        }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
             getCallerIdentity: () =>
@@ -756,28 +795,35 @@ describe("PRService.refreshSinglePR coordinates", () => {
                 arn: "arn:aws:sts::111122223333:assumed-role/Viewer/viewer"
               }),
             getPullRequest: () =>
-              Effect.succeed({
-                revisionId: "revision-uncached-profile",
-                sourceCommit: "f".repeat(40),
-                title: "Coordinate refresh",
-                author: "reviewer",
-                status: "OPEN",
-                repositoryName: "payments",
-                sourceBranch: "feature",
-                destinationBranch: "main",
-                creationDate: new Date(0),
-                lastActivityDate: new Date(2_000),
-                approvedBy: [],
-                approvedByArns: [],
-                approvalRules: []
-              }),
+              Effect.succeed(
+                new PullRequestDetail({
+                  isMergeable: true,
+                  isApproved: false,
+                  revisionId: "revision-uncached-profile",
+                  sourceCommit: "f".repeat(40),
+                  title: "Coordinate refresh",
+                  author: "reviewer",
+                  status: "OPEN",
+                  repositoryName: "payments",
+                  sourceBranch: "feature",
+                  destinationBranch: "main",
+                  creationDate: new Date(0),
+                  lastActivityDate: new Date(2_000),
+                  approvedBy: [],
+                  approvedByArns: [],
+                  approvalRules: []
+                })
+              ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
             observe: () => Effect.succeed(1),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([]),
-            upsertRead: (input) => Ref.set(upserted, input.awsAccountId).pipe(Effect.as({ row: true, approval: true }))
+            upsertRead: (input) =>
+              Ref.set(upserted, input.awsAccountId).pipe(
+                Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+              )
           }),
           Layer.mock(CommentRepo, {
             find: () => Effect.succeed(Option.none()),
@@ -788,7 +834,11 @@ describe("PRService.refreshSinglePR coordinates", () => {
           Layer.mock(ConfigService, {
             load: Effect.succeed({
               ...config,
-              accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }]
+              accounts: [{
+                profile: Domain.AwsProfileName.make("production"),
+                regions: [Domain.AwsRegion.make("eu-west-1")],
+                enabled: true
+              }]
             })
           }),
           Layer.mock(EventsHub, {})

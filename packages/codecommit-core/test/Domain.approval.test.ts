@@ -36,7 +36,7 @@ describe("approval", () => {
   })
 
   it("names exactly the reasons' tags in the flat tag schema", () => {
-    expect([...ApprovalUnknownTag.literals].toSorted()).toEqual(Object.keys(ApprovalUnknownReason.cases).toSorted())
+    expect([...ApprovalUnknownTag.literals].sort()).toEqual(Object.keys(ApprovalUnknownReason.cases).sort())
   })
 
   it("does not claim a review is needed while approval is unknown", () => {
