@@ -85,9 +85,27 @@ export const SessionTool = Schema.Struct({
 })
 export interface SessionTool extends Schema.Schema.Type<typeof SessionTool> {}
 
-/** What the dock shows for a session: its tools, and the backend its next turn runs on. */
-export const SessionInfo = Schema.Struct({ tools: Schema.Array(SessionTool), backend: RelayBackendId })
+/**
+ * What the dock shows for a session: its tools, the backend its next turn runs on, and whether a run can
+ * be stopped (the dock offers Stop only when `cancel` is true).
+ */
+export const SessionInfo = Schema.Struct({
+  tools: Schema.Array(SessionTool),
+  backend: RelayBackendId,
+  cancel: Schema.Boolean
+})
 export interface SessionInfo extends Schema.Schema.Type<typeof SessionInfo> {}
+
+/**
+ * What a confirmed write did, as the product projects it: a display-safe line, the provider's id for what
+ * was made, and where to see it.
+ */
+export const WriteReceipt = Schema.Struct({
+  summary: Schema.String,
+  providerId: Schema.String,
+  link: Schema.optionalKey(Schema.String)
+})
+export interface WriteReceipt extends Schema.Schema.Type<typeof WriteReceipt> {}
 
 const Seq = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 
@@ -100,14 +118,32 @@ const RunIds = Schema.Array(Name)
 export const RelayEvent = Schema.TaggedUnion({
   Snapshot: {
     ...eventFields,
-    messages: Schema.Array(Schema.Struct({ role: Schema.Literals(["user", "relay"]), text: Schema.String })),
+    messages: Schema.Array(
+      Schema.Struct({ id: Name, role: Schema.Literals(["user", "relay"]), text: Schema.String })
+    ),
     /** The run in flight, empty when idle. */
     runIds: RunIds
   },
+  RunStarted: { ...eventFields, runIds: RunIds },
   TextDelta: { ...eventFields, text: Schema.String },
-  ToolStarted: { ...eventFields, call: Name, capability: Name, input: Schema.Json },
-  ToolFinished: { ...eventFields, call: Name, ok: Schema.Boolean, cites: Schema.Array(Capability.ObjectRef) },
+  /** `summary` is a server-built, display-safe line; `input` is the call's typed arguments. */
+  ToolStarted: { ...eventFields, call: Name, capability: Name, summary: Schema.String, input: Schema.Json },
+  /** `receipt` is set when a write completed and its capability projects one. */
+  ToolFinished: {
+    ...eventFields,
+    call: Name,
+    ok: Schema.Boolean,
+    summary: Schema.String,
+    cites: Schema.Array(Capability.ObjectRef),
+    receipt: Schema.optionalKey(WriteReceipt)
+  },
   ConfirmationRequired: { ...eventFields, call: Name, action: Capability.PendingAction, reversible: Schema.Boolean },
+  /** The server's outcome for a confirmation: the card turns to past tense only on this. */
+  ConfirmationResolved: {
+    ...eventFields,
+    call: Name,
+    decision: Schema.Literals(["confirmed", "declined", "expired"])
+  },
   ApprovalPending: { ...eventFields, call: Name, approvalId: Name },
   Cancelled: { ...eventFields, runIds: RunIds },
   RunFinished: { ...eventFields, runIds: RunIds },

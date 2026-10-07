@@ -28,7 +28,8 @@ export {
   RelayEvent,
   RelayProduct,
   SessionInfo,
-  SessionTool
+  SessionTool,
+  WriteReceipt
 } from "./model.js"
 export { register } from "./registry.js"
-export type { Gate, RegisteredCapability } from "./registry.js"
+export type { DisplayOptions, Gate, RegisteredCapability } from "./registry.js"

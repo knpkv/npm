@@ -42,7 +42,7 @@ const fakeHarness = (sent: Ref.Ref<ReadonlyArray<string>>): RelayHarnessService 
       })
     ),
   cancel: (_ref, runId) => runId === "req-live" ? Effect.void : Effect.fail(new RelayRunNotActive({ runId })),
-  session: () => Effect.succeed({ tools: [], backend: "claude-code" }),
+  session: () => Effect.succeed({ tools: [], backend: "claude-code", cancel: true }),
   backends: Effect.succeed([{
     _tag: "Unverified",
     backend: "claude-code",
@@ -110,7 +110,7 @@ describe("/api/relay", () => {
     it.effect("reports the session's backend and every backend's status", () =>
       Effect.gen(function*() {
         const client = yield* HttpApiTest.groups(CodeCommitApi, ["relay"])
-        expect(yield* client.relay.session({ query: ref })).toEqual({ tools: [], backend: "claude-code" })
+        expect(yield* client.relay.session({ query: ref })).toEqual({ tools: [], backend: "claude-code", cancel: true })
         expect(yield* client.relay.backends()).toMatchObject([{ _tag: "Unverified", version: "2.1.0 (Claude Code)" }])
       }))
   })

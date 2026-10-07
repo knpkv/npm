@@ -109,7 +109,11 @@ export const relayExtension = <Requirements>(
             message: modelVisibleFailure(capability.name, failure)
           })
         }
-        await api.details({ cites: exit.value.cites.map((ref) => ({ ...ref })) }, context)
+        const receipt = capability.receipt(exit.value)
+        await api.details({
+          cites: exit.value.cites.map((ref) => ({ ...ref })),
+          ...(receipt !== undefined && { receipt: { ...receipt } })
+        }, context)
         return { content: [{ type: "text", text: resultText(exit.value) }] }
       }
     })

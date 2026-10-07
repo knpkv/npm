@@ -55,7 +55,7 @@ import { AiError } from "effect/ai"
 import type { LanguageModel } from "effect/ai"
 import type { PlatformError } from "effect/PlatformError"
 import { libsqlDatabase } from "./libsqlDatabase.js"
-import { BackendUnavailableCause, DecisionState, objectRefKey, RelayBackendId } from "./model.js"
+import { BackendUnavailableCause, DecisionState, objectRefKey, RelayBackendId, WriteReceipt } from "./model.js"
 import type { BackendStatus, ObjectRef, RelayEvent, SessionInfo, SessionTool } from "./model.js"
 import { relayModels, relayProvider } from "./piProvider.js"
 import type { TurnRunner } from "./piProvider.js"
@@ -318,10 +318,19 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
           yield* PubSub.publish(confirmations, { conversationId: request.conversationId, event })
           return yield* Deferred.await(decision)
         }).pipe(
-          // A cancelled run aborts the call: the card goes away with it, answered or not.
-          Effect.ensuring(Effect.sync(() => {
+          // A cancelled run aborts the call: the card goes away with it, answered or not, and the dock
+          // hears how it ended.
+          Effect.ensuring(Effect.suspend(() => {
             pending.delete(request.callId)
-            if (!outcomes.has(request.callId)) outcomes.set(request.callId, { _tag: "Expired" })
+            const outcome = outcomes.get(request.callId) ?? { _tag: "Expired" }
+            outcomes.set(request.callId, outcome)
+            const event: Unsequenced = {
+              _tag: "ConfirmationResolved",
+              session: request.conversationId,
+              call: request.callId,
+              decision: outcome._tag === "Decided" ? (outcome.allow ? "confirmed" : "declined") : "expired"
+            }
+            return PubSub.publish(confirmations, { conversationId: request.conversationId, event })
           }))
         ),
         signal === undefined ? undefined : { signal }
@@ -368,6 +377,8 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
       return created
     }))
 
+  const byName = new Map(options.capabilities.map((capability) => [capability.name, capability]))
+  const display: Display = (capability) => byName.get(capability)
   const tools = options.capabilities.map((capability): SessionTool => ({
     name: capability.name,
     access: capability.gate?.access ?? "read",
@@ -392,7 +403,7 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
     events: (ref) =>
       Stream.unwrap(
         Effect.map(conversationFor(ref), (conversation) =>
-          sessionEvents(harness, conversation, confirmations, pendingFor))
+          sessionEvents(harness, conversation, confirmations, pendingFor, display))
       ),
     decide: (callId, allow) =>
       Effect.gen(function*() {
@@ -429,7 +440,7 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
         const conversation = yield* conversationFor(ref)
         const agent = yield* promise("read the session", () => conversation.agent(BACKGROUND_CONTEXT))
         const backend = Schema.decodeUnknownOption(RelayBackendId)(agent.model?.provider)
-        return { tools, backend: backend._tag === "Some" ? backend.value : defaultBackend }
+        return { tools, backend: backend._tag === "Some" ? backend.value : defaultBackend, cancel: true }
       }),
     backends: Ref.get(statuses)
   })
@@ -452,7 +463,13 @@ const entryText = (messages: ReadonlyArray<Message> | undefined): string =>
     .join("\n")
 
 /** The citations a capability call records in its Pi tool details. */
-const decodeCites = Schema.decodeUnknownOption(Schema.Struct({ cites: Schema.Array(Capability.ObjectRef) }))
+/** What a capability call records in its Pi tool details: citations, and a write's receipt. */
+const decodeDetails = Schema.decodeUnknownOption(
+  Schema.Struct({ cites: Schema.Array(Capability.ObjectRef), receipt: Schema.optionalKey(WriteReceipt) })
+)
+
+/** How the dock shows one capability's calls. */
+type Display = (capability: string) => Pick<RegisteredCapability<unknown>, "label" | "summarize"> | undefined
 
 /** A Relay event before the stream numbers it. */
 type Unsequenced = RelayEvent extends infer Event ? Event extends RelayEvent ? Omit<Event, "seq"> : never : never
@@ -461,8 +478,11 @@ const sessionEvents = (
   harness: Harness,
   conversation: Conversation,
   confirmations: PubSub.PubSub<{ readonly conversationId: string; readonly event: Unsequenced }>,
-  pendingFor: (session: string) => ReadonlyArray<Unsequenced>
+  pendingFor: (session: string) => ReadonlyArray<Unsequenced>,
+  display: Display
 ): Stream.Stream<RelayEvent, RelayStoreFailed> => {
+  const summarize = (capability: string, args: Schema.Json) => display(capability)?.summarize(args) ?? capability
+  const labelOf = (capability: string) => display(capability)?.label ?? capability
   const session = String(conversation.id)
   const fromPi = Stream.callback<AgentEvent, RelayStoreFailed>((queue) =>
     Effect.acquireRelease(
@@ -477,7 +497,10 @@ const sessionEvents = (
       (watch) => Effect.promise(() => watch.stop())
     )
   )
-  const cites = new Map<string, ReadonlyArray<Capability.ObjectRef>>()
+  const details = new Map<
+    string,
+    { readonly cites: ReadonlyArray<Capability.ObjectRef>; readonly receipt?: WriteReceipt }
+  >()
   // Text already shown per content block of the in-flight message, so each change emits only what's new.
   const sent = new Map<number, string>()
   const textFrom = (index: number, full: string): ReadonlyArray<Unsequenced> => {
@@ -509,6 +532,7 @@ const sessionEvents = (
           session,
           call: slot.callId,
           capability: slot.name,
+          summary: summarize(slot.name, calls.get(slot.callId) ?? {}),
           input: calls.get(slot.callId) ?? {}
         }]
     )
@@ -524,11 +548,11 @@ const sessionEvents = (
             runIds,
             messages: event.entries.flatMap((
               entry
-            ): ReadonlyArray<{ readonly role: "user" | "relay"; readonly text: string }> =>
+            ): ReadonlyArray<{ readonly id: string; readonly role: "user" | "relay"; readonly text: string }> =>
               entry.kind === "pi.user"
-                ? [{ role: "user", text: entryText(entry.model) }]
+                ? [{ id: String(entry.id), role: "user", text: entryText(entry.model) }]
                 : entry.kind === "pi.assistant"
-                ? [{ role: "relay", text: entryText(entry.model) }]
+                ? [{ id: String(entry.id), role: "relay", text: entryText(entry.model) }]
                 : []
             )
           },
@@ -561,15 +585,22 @@ const sessionEvents = (
           return []
         })
       case "tool_execution_start":
-        return [{ _tag: "ToolStarted", session, call: event.toolCallId, capability: event.toolName, input: event.args }]
+        return [{
+          _tag: "ToolStarted",
+          session,
+          call: event.toolCallId,
+          capability: event.toolName,
+          summary: summarize(event.toolName, event.args),
+          input: event.args
+        }]
       case "tool_execution_update": {
-        const decoded = decodeCites(event.details)
-        if (decoded._tag === "Some") cites.set(event.toolCallId, decoded.value.cites)
+        const decoded = decodeDetails(event.details)
+        if (decoded._tag === "Some") details.set(event.toolCallId, decoded.value)
         return []
       }
       case "tool_execution_end": {
-        const cited = cites.get(event.toolCallId) ?? []
-        cites.delete(event.toolCallId)
+        const recorded = details.get(event.toolCallId)
+        details.delete(event.toolCallId)
         // Pi writes a result entry for blocked, declined, failed and interrupted calls too; only a result
         // that is not an error is a success.
         const failed = (event.entry?.model ?? []).some((message) =>
@@ -580,7 +611,9 @@ const sessionEvents = (
           session,
           call: event.toolCallId,
           ok: event.entry !== undefined && !failed,
-          cites: cited
+          summary: recorded?.receipt?.summary ?? labelOf(event.toolName),
+          cites: recorded?.cites ?? [],
+          ...(recorded?.receipt !== undefined && { receipt: recorded.receipt })
         }]
       }
       case "task_failed":
@@ -642,7 +675,9 @@ const sessionEvents = (
       event.type === "run_end"
         ? Stream.fromEffect(runEnded(event.inputs).pipe(Effect.tap(() => Effect.sync(() => (active = [])))))
         : event.type === "run_start"
-        ? Stream.fromEffect(track(event.inputs)).pipe(Stream.drain)
+        ? Stream.fromEffect(track(event.inputs)).pipe(
+          Stream.map((runIds): Unsequenced => ({ _tag: "RunStarted", session, runIds }))
+        )
         : event.type === "snapshot"
         ? Stream.fromEffect(track(event.run?.inputs ?? [])).pipe(
           Stream.flatMap((runIds) => Stream.fromIterable(toRelay(event, runIds)))

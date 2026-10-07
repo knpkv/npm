@@ -126,7 +126,13 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         expect(tags[0]).toBe("Snapshot")
         expect(tags).toContain("ToolStarted")
         expect(tags).not.toContain("ConfirmationRequired")
-        expect(events.find((event) => event._tag === "ToolFinished")).toMatchObject({ ok: true, cites: [pr] })
+        expect(events.find((event) => event._tag === "ToolStarted")).toMatchObject({ summary: "get approvals" })
+        expect(events.find((event) => event._tag === "ToolFinished")).toMatchObject({
+          ok: true,
+          summary: "get approvals",
+          cites: [pr]
+        })
+        expect(events.find((event) => event._tag === "ToolFinished")).not.toHaveProperty("receipt")
         expect(events.flatMap((event) => (event._tag === "TextDelta" ? [event.text] : [])).join("")).toContain(
           "2 approvals"
         )
@@ -150,6 +156,8 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
           action: { verb: "post comment", args: { body: "LGTM" } },
           reversible: false
         })
+        // The card turns to past tense only on the server's outcome.
+        expect(events.find((event) => event._tag === "ConfirmationResolved")).toMatchObject({ decision: "declined" })
         expect(commentCalls).toEqual([])
       }).pipe(Effect.scoped))
 
@@ -352,6 +360,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
             event._tag === "ConfirmationRequired" ? relay.cancel(pr, "req-cancel").pipe(Effect.orDie) : Effect.void
         ).pipe(Effect.timeout("10 seconds"))
         expect(events.at(-1)).toMatchObject({ _tag: "Cancelled", runIds: ["req-cancel"] })
+        expect(events.find((event) => event._tag === "ConfirmationResolved")).toMatchObject({ decision: "expired" })
         expect(commentCalls).toEqual([])
         // The card went away with its run: a late answer learns it expired, and a finished run can't be cancelled.
         const card = events.find((event) => event._tag === "ConfirmationRequired")
@@ -404,6 +413,50 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         const events = yield* Fiber.join(late)
         expect(events[0]).toMatchObject({ _tag: "Snapshot", runIds: ["req-named"] })
         expect(events.at(-1)).toMatchObject({ _tag: "RunFinished", runIds: ["req-named"] })
+      }).pipe(Effect.scoped))
+
+    it.effect("announces the run, labels reads, and shows a confirmed write's receipt", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const model = toolThenAnswer("post_comment", { pr: "42", body: "Ship it" })
+        const relay = yield* relayIn(layer({
+          storePath: store,
+          instructions: "You are Relay.",
+          capabilities: [
+            register(approvals),
+            register(postComment, {
+              receipt: () => ({
+                summary: "Comment posted",
+                providerId: "comment-7",
+                link: "https://example.invalid/42"
+              })
+            })
+          ],
+          backends: [claude(model.layer)]
+        }))
+        expect(yield* relay.session(pr)).toMatchObject({ cancel: true })
+        const events = yield* sendAndCollect(
+          relay.events(pr),
+          relay.send(pr, "Comment Ship it", "req-receipt"),
+          (event) =>
+            event._tag === "ConfirmationRequired" ? relay.decide(event.call, true).pipe(Effect.orDie) : Effect.void
+        )
+        expect(events.find((event) => event._tag === "RunStarted")).toMatchObject({ runIds: ["req-receipt"] })
+        expect(events.find((event) => event._tag === "ConfirmationResolved")).toMatchObject({ decision: "confirmed" })
+        expect(events.find((event) => event._tag === "ToolStarted")).toMatchObject({ summary: "post comment" })
+        expect(events.find((event) => event._tag === "ToolFinished")).toMatchObject({
+          ok: true,
+          summary: "Comment posted",
+          receipt: { summary: "Comment posted", providerId: "comment-7", link: "https://example.invalid/42" }
+        })
+        // A reconnecting dock's Snapshot names each message, so it can key what it renders.
+        const reconnect = yield* relay.events(pr).pipe(Stream.take(1), Stream.runCollect)
+        expect(reconnect[0]).toMatchObject({
+          _tag: "Snapshot",
+          messages: expect.arrayContaining([
+            expect.objectContaining({ id: expect.any(String), role: "user", text: "Comment Ship it" })
+          ])
+        })
       }).pipe(Effect.scoped))
 
     it.effect("tells a repeated or unknown answer why it can't be applied", () =>

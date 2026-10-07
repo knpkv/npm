@@ -21,8 +21,10 @@ import {
   type PendingAction,
   type PlainSchema
 } from "@knpkv/capability"
-import type { Effect, Schema } from "effect"
+import { Option, Schema } from "effect"
+import type { Effect } from "effect"
 import type * as JsonSchema from "effect/JsonSchema"
+import type { WriteReceipt } from "./model.js"
 
 /** What a person must agree to before a gated capability runs. */
 export interface Gate {
@@ -39,6 +41,12 @@ export interface RegisteredCapability<Requirements> {
   readonly description: string
   /** `undefined` for a read: it runs without anyone agreeing first. */
   readonly gate: Gate | undefined
+  /** A short display name, for activity rows. */
+  readonly label: string
+  /** A display-safe line for one call: a write's action verb, or the label. */
+  readonly summarize: (args: Schema.Json) => string
+  /** What a completed call made, for writes whose product projects a receipt. */
+  readonly receipt: (result: InvocationResult) => WriteReceipt | undefined
   /** JSON Schema of the input, for the model's tool list and argument validation. */
   readonly parameters: JsonSchema.JsonSchema
   /** `args` is the model's JSON for this call; the capability decodes it at the boundary. */
@@ -51,7 +59,15 @@ export interface RegisteredCapability<Requirements> {
   >
 }
 
-/** Register a capability for Relay. */
+/** How the dock shows a capability's calls. Every field has a default. */
+export interface DisplayOptions<Output extends PlainSchema> {
+  /** Defaults to the capability name with spaces: `get_pull_request` is "get pull request". */
+  readonly label?: string
+  /** A write's receipt, from its decoded output: a display-safe line, the provider's id, a link. */
+  readonly receipt?: (output: Output["Type"]) => WriteReceipt
+}
+
+/** Register a capability for Relay, with how the dock shows its calls. */
 export const register = <
   Name extends string,
   Input extends InputSchema,
@@ -59,12 +75,24 @@ export const register = <
   Failure extends FailureSchema,
   Requirements
 >(
-  capability: Capability<Name, Input, Output, Failure, Requirements>
+  capability: Capability<Name, Input, Output, Failure, Requirements>,
+  display: DisplayOptions<Output> = {}
 ): RegisteredCapability<Requirements> => {
   const { contract } = capability
+  const label = display.label ?? contract.name.replaceAll("_", " ")
+  const decodeInput = Schema.decodeUnknownOption(contract.input)
+  const decodeOutput = Schema.decodeUnknownOption(contract.output)
+  const project = display.receipt
   return {
     name: contract.name,
     description: contract.description,
+    label,
+    summarize: (args) =>
+      contract.access === "read"
+        ? label
+        : Option.match(decodeInput(args), { onNone: () => label, onSome: (input) => contract.describe(input).verb }),
+    receipt: (result) =>
+      project === undefined ? undefined : Option.getOrUndefined(Option.map(decodeOutput(result.output), project)),
     gate: contract.access === "read"
       ? undefined
       : {

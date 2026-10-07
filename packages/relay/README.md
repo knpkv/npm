@@ -48,9 +48,14 @@ const RelayLive = Layer.unwrap(
 
 - `send(ref, text, requestId, backend?)`: `requestId` makes a retried send land once and names the run that
   answers it; `backend` switches the session from its next turn on (`RelayBackendNotConfigured` otherwise).
-- `events(ref)`: a `Snapshot` first (with the `runIds` of a run in flight), then `TextDelta`,
-  `ToolStarted`/`ToolFinished` with citations, `ConfirmationRequired`, and `RunFinished`/`RunFailed`/`Cancelled`
-  with the `runIds` the run answered.
+- `events(ref)`: a `Snapshot` first, with each message's `id` and the `runIds` of a run in flight. Then:
+  - `RunStarted { runIds }` and `TextDelta`.
+  - `ToolStarted` and `ToolFinished`, each with a server-built, display-safe `summary`. A finished call carries
+    its citations, and a write whose product projects one carries a `receipt { summary, providerId, link? }`
+    (`register(capability, { receipt })`).
+  - `ConfirmationRequired`, then `ConfirmationResolved { decision: confirmed | declined | expired }`. A card
+    turns to past tense only on the latter.
+  - `RunFinished`, `RunFailed` or `Cancelled`, with the `runIds` the run answered.
 - `decide(callId, allow)`: `RelayDecisionNotPending` says why an answer can't apply: `Decided`, `Expired` (the run
   ended first) or `Unknown`. Kept for the process's lifetime.
 - `cancel(ref, runId)`: withdraws a queued message alone, or stops the run in flight; `RelayRunNotActive` when no

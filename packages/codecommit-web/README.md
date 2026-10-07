@@ -43,7 +43,9 @@ unauthenticated routes. Profiles, credentials and provider ARNs never cross into
   events list in `runIds`. An unknown `backend` is 400.
 - `POST /cancel {ref, runId}` and `POST /decisions {ref, callId, allow}`: 204, or 409 with the state
   found: `NotRunning`, `Decided {allow}`, `Expired` or `Unknown`.
-- `GET /session?product&kind&id`: the session's tools and its current backend.
+- `GET /session?product&kind&id`: the session's tools, its current backend, and `cancel` (offer Stop
+  only when true). A posted comment's `ToolFinished.receipt` carries CodeCommit's operation id and the
+  pull request's console link.
   `GET /backends`: `Unverified`, `Ready` or `Unavailable` with a one-line fix.
 
 Sessions hold conversation content. They live in `~/.codecommit/relay/sessions.sqlite`, with an

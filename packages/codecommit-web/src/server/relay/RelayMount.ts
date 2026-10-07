@@ -14,7 +14,7 @@
  * @module
  */
 import type { CacheService, ConfigService, ReadClient } from "@knpkv/codecommit-core"
-import { RelayCapabilities } from "@knpkv/codecommit-core"
+import { Domain, RelayCapabilities } from "@knpkv/codecommit-core"
 import { claudeCodeBackend, codexCliBackend, make, register } from "@knpkv/relay"
 import type { RegisteredCapability, RelayHarnessService } from "@knpkv/relay"
 import { Config, Context, type Crypto, Effect, FileSystem, Layer, Path } from "effect"
@@ -69,7 +69,18 @@ export const relayMountLayer = Layer.effect(
     const registered: ReadonlyArray<RegisteredCapability<CapabilityServices>> = [
       register(capabilities.getPullRequest),
       register(capabilities.listPullRequests),
-      register(capabilities.postComment)
+      // The receipt the dock shows once a comment lands: CodeCommit's operation id and the PR in the console.
+      register(capabilities.postComment, {
+        receipt: (output) => ({
+          summary: output.summary,
+          providerId: output.operationId,
+          link: Domain.codecommitConsoleUrl(
+            output.pullRequest.region,
+            output.pullRequest.repositoryName,
+            output.pullRequest.pullRequestId
+          )
+        })
+      })
     ]
     const harness = yield* make({
       storePath: path.join(directory, "sessions.sqlite"),
