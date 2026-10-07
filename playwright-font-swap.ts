@@ -21,6 +21,7 @@
  */
 import type { Page, Route } from "@playwright/test"
 import { Data, Schema } from "effect"
+import { env } from "node:process"
 
 /** The faces rly's "Geist Fallback" and "Geist Mono Fallback" resolve to, as Chromium reports them. */
 export const FALLBACK_FAMILIES: ReadonlyArray<string> = [
@@ -33,12 +34,19 @@ export const FALLBACK_FAMILIES: ReadonlyArray<string> = [
 ]
 
 /**
+ * `FONT_SWAP_HINTED=1` measures a hinted renderer instead, for information: the specs launch with
+ * the browser's default hinting and the hinting check is skipped, so the sums show what a Linux
+ * desktop forced to full hinting would see. The budget applies to unhinted runs only.
+ */
+const HINTED = env.FONT_SWAP_HINTED === "1"
+
+/**
  * Launch options every font-swap spec uses (`test.use({ launchOptions: FONT_SWAP_LAUNCH_OPTIONS })`
  * at the top of its file). The headless shell hints the fallback fonts to whole-pixel advances, so
  * Liberation Mono's 0.6em runs 5% narrower than Geist Mono and lines re-wrap on the swap, a shift
  * desktop browsers, which position glyphs at subpixels, never show.
  */
-export const FONT_SWAP_LAUNCH_OPTIONS = { args: ["--font-render-hinting=none"] }
+export const FONT_SWAP_LAUNCH_OPTIONS = HINTED ? {} : { args: ["--font-render-hinting=none"] }
 
 /** The browser hints glyph advances to whole pixels, so fallback widths are not what users see. */
 export class FontSwapHintedRenderingError extends Data.TaggedError("FontSwapHintedRenderingError")<{
@@ -243,7 +251,7 @@ export const measureFontSwapShift = async (page: Page, options: FontSwapOptions)
     const probe = options.probe ?? options.ready
     // Liberation Mono's "0" is exactly 0.6em, so ten of them at 14px are 84px unless advances are hinted.
     const zeros = Schema.decodeUnknownSync(Schema.Number)(await page.evaluate(MEASURE_ZEROS))
-    if (Math.abs(zeros - 84) > 0.5) throw new FontSwapHintedRenderingError({ measured: zeros })
+    if (!HINTED && Math.abs(zeros - 84) > 0.5) throw new FontSwapHintedRenderingError({ measured: zeros })
     const fallback = await platformFamilies(page, probe)
     if (fontRequests === 0) throw new FontSwapNoFontError({ url: page.url() })
     // The stack itself must name the metric-matched face: where system-ui is Liberation Sans, a stack
