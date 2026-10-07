@@ -17,7 +17,7 @@ import { type CachedPullRequest, PullRequestRepo } from "../CacheService/repos/P
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import { approvalUnknownReasonText, type PullRequestRefreshScope, type UnevaluatedPullRequest } from "../Domain.js"
-import type { AwsClientError } from "../Errors.js"
+import { type AwsClientError, describeAwsClientError } from "../Errors.js"
 import { applyIdentityEvent, IdentityEvent } from "../IdentityLifecycle.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
 import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
@@ -111,9 +111,7 @@ export const fetchAndUpsertPRs = (params: {
               awsClient.getPullRequests({ profile: account.profile, region }).pipe(
                 Stream.map((pr) => ({ awsAccountId, label, observation, pr, profile: account.profile, region })),
                 Stream.catch((error) => {
-                  const causeStr = (Predicate.isError(error)
-                    ? error.name !== "Error" ? error.name : error.message
-                    : String(error)) || "Unknown error"
+                  const causeStr = describeAwsClientError(error)
                   const message = JSON.stringify({
                     operation: "getPullRequests",
                     profile: account.profile,
