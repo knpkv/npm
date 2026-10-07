@@ -82,7 +82,7 @@ export function SettingsConfig() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Configuration</h2>
+        <h1 className="text-lg font-semibold">Configuration</h1>
         <p className="text-sm text-muted-foreground">File locations, validation, and storage</p>
       </div>
       <Separator />
@@ -90,8 +90,7 @@ export function SettingsConfig() {
       <div className="space-y-1">
         {AsyncResult.builder(configPath)
           .onInitialOrWaiting(() => <p className="text-xs text-muted-foreground py-1">Loading config path...</p>)
-          .onError(() => <p className="text-xs text-destructive py-1">Failed to load config path</p>)
-          .onDefect(() => <p className="text-xs text-destructive py-1">Failed to load config path</p>)
+          .onFailure(() => <p className="text-xs text-destructive py-1">Failed to load config path</p>)
           .onSuccess((data) => {
             const validationDetail = AsyncResult.isSuccess(validation) ? ` · ${validation.value.status}` : ""
             const detail = data.exists
@@ -108,12 +107,11 @@ export function SettingsConfig() {
               />
             )
           })
-          .render()}
+          .exhaustive()}
 
         {AsyncResult.builder(validation)
           .onInitialOrWaiting(() => null)
-          .onError(() => null)
-          .onDefect(() => null)
+          .onFailure(() => null)
           .onSuccess((v) =>
             v.errors.length > 0 ? (
               <div className="ml-27 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
@@ -123,14 +121,13 @@ export function SettingsConfig() {
               </div>
             ) : null
           )
-          .render()}
+          .exhaustive()}
 
         <Separator />
 
         {AsyncResult.builder(databaseInfo)
           .onInitialOrWaiting(() => <p className="text-xs text-muted-foreground py-1">Loading database info...</p>)
-          .onError(() => <p className="text-xs text-destructive py-1">Failed to load database info</p>)
-          .onDefect(() => <p className="text-xs text-destructive py-1">Failed to load database info</p>)
+          .onFailure(() => <p className="text-xs text-destructive py-1">Failed to load database info</p>)
           .onSuccess((data) => {
             const detail = data.exists
               ? `${formatBytes(data.sizeBytes)} · ${fmtModified(data.modifiedAt)}`
@@ -146,7 +143,7 @@ export function SettingsConfig() {
               />
             )
           })
-          .render()}
+          .exhaustive()}
       </div>
 
       <Separator />

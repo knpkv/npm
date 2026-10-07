@@ -17,7 +17,7 @@ export function SettingsTheme() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Theme</h2>
+        <h1 className="text-lg font-semibold">Theme</h1>
         <p className="text-sm text-muted-foreground">Choose your preferred appearance</p>
       </div>
       <Separator />

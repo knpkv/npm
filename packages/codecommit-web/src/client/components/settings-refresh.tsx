@@ -68,13 +68,13 @@ export function SettingsRefresh() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Auto-refresh</h2>
+        <h1 className="text-lg font-semibold">Auto-refresh</h1>
         <p className="text-sm text-muted-foreground">Periodically fetch PR updates from AWS</p>
       </div>
       <Separator />
       {AsyncResult.builder(config)
         .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)
-        .onDefect(() => <p className="text-sm text-destructive">Failed to load config</p>)
+        .onFailure(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onSuccess((data) => {
           const autoRefresh = local.autoRefresh ?? data.autoRefresh
           const interval = local.refreshIntervalSeconds ?? data.refreshIntervalSeconds
@@ -115,7 +115,7 @@ export function SettingsRefresh() {
             </div>
           )
         })
-        .render()}
+        .exhaustive()}
     </div>
   )
 }

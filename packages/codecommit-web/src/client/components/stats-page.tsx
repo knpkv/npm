@@ -440,7 +440,7 @@ export function StatsPage() {
         <div className="ml-auto flex items-center gap-2">
           {AsyncResult.builder(statsResult)
             .onSuccess((data) => <StatsFilters data={data} repo={repo} author={author} setFilter={setFilter} />)
-            .render()}
+            .orNull()}
 
           <Button variant="outline" size="sm" onClick={handleSync} disabled={syncing}>
             <RefreshCwIcon className={`size-3 mr-1 ${syncing ? "animate-spin" : ""}`} />
@@ -482,12 +482,11 @@ export function StatsPage() {
             <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
           </div>
         ))
-        .onError(() => <div className="text-sm text-destructive py-4">Failed to load stats</div>)
-        .onDefect(() => <div className="text-sm text-destructive py-4">Failed to load stats</div>)
+        .onFailure(() => <div className="text-sm text-destructive py-4">Failed to load stats</div>)
         .onSuccess((data) => (
           <StatsContent data={data} navigate={navigate} goToPR={goToPR} handleSync={handleSync} syncing={syncing} />
         ))
-        .render()}
+        .exhaustive()}
     </div>
   )
 }

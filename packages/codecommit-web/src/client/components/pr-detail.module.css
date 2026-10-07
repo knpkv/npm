@@ -79,9 +79,12 @@
   gap: var(--rly-space-8);
 }
 
+/* The underline, not the colour, sets a link apart from the sentence around it. Stated in full here
+   because Tailwind's preflight resets `a` to `text-decoration: inherit`. */
 .textLink,
 .codeLink {
   color: var(--rly-color-text-1);
+  text-decoration-line: underline;
   text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
   text-decoration-thickness: 1px;
   text-underline-offset: var(--rly-space-4);

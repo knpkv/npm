@@ -82,13 +82,13 @@ export function SettingsAccounts() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Accounts</h2>
+        <h1 className="text-lg font-semibold">Accounts</h1>
         <p className="text-sm text-muted-foreground">AWS profiles configured for CodeCommit</p>
       </div>
       <Separator />
       {AsyncResult.builder(config)
         .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)
-        .onDefect(() => <p className="text-sm text-destructive">Failed to load config</p>)
+        .onFailure(() => <p className="text-sm text-destructive">Failed to load config</p>)
         .onSuccess((data) => (
           <AccountsList
             currentUser={appState.currentUser}
@@ -109,7 +109,7 @@ export function SettingsAccounts() {
             onSsoLogout={() => setSignOutOpen(true)}
           />
         ))
-        .render()}
+        .exhaustive()}
       <SsoSignOutDialog onOpenChange={setSignOutOpen} open={signOutOpen} />
     </div>
   )
