@@ -1,6 +1,6 @@
 import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { parsePatch, structuredPatch } from "diff"
-import { Effect, Schema } from "effect"
+import { Effect, Match, Schema } from "effect"
 import * as AiError from "effect/ai/AiError"
 import * as Predicate from "effect/Predicate"
 import { WorktreeError, type WorktreePlan, type WorktreeResult } from "../WorktreeService.js"
@@ -1234,8 +1234,12 @@ export const currentFileDiffOutcome = <A extends { readonly identity: FileDiffId
 ): A | null =>
   outcome !== null && expected !== null && fileDiffIdentityMatches(outcome.identity, expected) ? outcome : null
 
-export const humanReviewState = (pr: Pick<Domain.PullRequest, "isApproved" | "isMergeable">) => ({
-  approval: pr.isApproved ? "APPROVED" : "NEEDS REVIEW",
+export const humanReviewState = (pr: Pick<Domain.PullRequest, "isApproved" | "approvalUnknown" | "isMergeable">) => ({
+  approval: Match.valueTags(Domain.approvalOf(pr), {
+    Approved: () => "APPROVED",
+    Pending: () => "NEEDS REVIEW",
+    Unknown: () => Domain.approvalUnknownLabel.toUpperCase()
+  }),
   mergeability: pr.isMergeable ? "MERGEABLE" : "CONFLICTS"
 })
 

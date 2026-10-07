@@ -24,7 +24,7 @@ import { AuditLogRepo, type NewAuditLogEntry } from "../PermissionService/AuditL
 import { PermissionService } from "../PermissionService/index.js"
 import { getOperationMeta } from "../PermissionService/operations.js"
 import { PermissionGate } from "../PermissionService/PermissionGate.js"
-import { AwsClient, type AwsClientError, type PullRequestRefreshItem } from "./index.js"
+import { AwsClient, type AwsClientError } from "./index.js"
 
 // Layer composition: AwsClientLive → InnerAwsClient (rename) → AwsClientGated → AwsClient
 export class InnerAwsClient extends Context.Service<
@@ -200,14 +200,6 @@ export const AwsClientGatedLive: Layer.Layer<
           ({ account }) => `List PRs for ${account.profile}`,
           nested,
           ({ account, options }) => inner.getPullRequests(account, options)
-        )({ account, options }),
-      // The same provider read as getPullRequests, so the same permission and audit operation.
-      getPullRequestRefresh: (account, options) =>
-        gatedStream<GetPullRequestsInput, PullRequestRefreshItem>(
-          "getPullRequests",
-          ({ account }) => `List PRs for ${account.profile}`,
-          nested,
-          ({ account, options }) => inner.getPullRequestRefresh(account, options)
         )({ account, options }),
       getCallerIdentity: gated(
         "getCallerIdentity",

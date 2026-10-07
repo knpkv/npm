@@ -4,14 +4,9 @@
  * SQL write operations for the pull_requests table. Each function takes `sql`
  * and `publish` (change event) and returns the mutation implementations.
  *
- * Provides upsert (INSERT ON CONFLICT UPDATE with column-specific merge
- * strategy), stale cleanup, diff stats updates, status transitions,
- * comment count updates, health score updates, and commented-by refresh.
- *
- * **Gotchas**
- *
- * - approval_rules uses `= excluded` (no COALESCE) — always fresh from API
- * - repo_account_id uses COALESCE — preserves across partial updates
+ * Every write goes through `rowWrites`: provider reads write whole column groups under their versions
+ * (`upsert` for a listing, `writeRead` for a re-read), recomputed values go through `writeDerived`,
+ * which applies only to the row as it was read, and a not-found read deletes through `deleteOne`.
  *
  * @category CacheService
  */
@@ -19,8 +14,17 @@ import { Effect, Schema } from "effect"
 import type * as SqlClient from "effect/sql/SqlClient"
 import * as SqlSchema from "effect/sql/SqlSchema"
 import { type CommentThreadJson, decodeCommentLocationJson } from "../commentLocations.js"
-import { cacheError, joinApprovedBy, UpsertInput } from "./internal.js"
+import {
+  approvalGroupOfListing,
+  approvalGroupOfRead,
+  type ApprovalRead,
+  cacheError,
+  rowGroupOfListing,
+  rowGroupOfRead,
+  UpsertInput
+} from "./internal.js"
 import { PullRequestAmbiguityError } from "./queries.js"
+import { type DerivedColumns, type RowVersions, rowWrites } from "./rowWrites.js"
 
 export interface PullRequestCoordinates {
   readonly repositoryName: string
@@ -28,6 +32,7 @@ export interface PullRequestCoordinates {
 }
 
 export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>) => {
+  const writes = rowWrites(sql)
   const countByLegacyIdentity_ = SqlSchema.findOne({
     Result: Schema.Struct({ count: Schema.Number }),
     Request: Schema.Struct({ awsAccountId: Schema.String, id: Schema.String }),
@@ -57,67 +62,99 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       : sql`aws_account_id = ${awsAccountId} AND id = ${id}
         AND repository_name = ${coordinates.repositoryName}
         AND account_region = ${coordinates.accountRegion}`
-  const upsert_ = SqlSchema.void({
-    Request: UpsertInput,
-    execute: (req) => {
-      const approvedByStr = joinApprovedBy(req.approvedBy)
-      const approvedByArnsStr = joinApprovedBy(req.approvedByArns)
-      const approvalRulesJson = req.approvalRules !== undefined && req.approvalRules.length > 0
-        ? JSON.stringify(req.approvalRules)
-        : "[]"
-      return sql`INSERT INTO pull_requests
-        (id, aws_account_id, repo_account_id, account_profile, account_region, title, description,
-         author, repository_name, creation_date, last_modified_date, status,
-         source_branch, destination_branch, is_mergeable, is_approved,
-         comment_count, link, approved_by, approved_by_arns, approval_rules, fetched_at)
-        VALUES (${req.id}, ${req.awsAccountId}, ${req.repoAccountId}, ${req.accountProfile}, ${req.accountRegion},
-          ${req.title}, ${req.description}, ${req.author}, ${req.repositoryName},
-          ${req.creationDate}, ${req.lastModifiedDate}, ${req.status},
-          ${req.sourceBranch}, ${req.destinationBranch}, ${req.isMergeable}, ${req.isApproved},
-          ${req.commentCount}, ${req.link}, ${approvedByStr}, ${approvedByArnsStr}, ${approvalRulesJson}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-        ON CONFLICT (aws_account_id, id, repository_name, account_region) DO UPDATE SET
-          account_profile = excluded.account_profile,
-          account_region = excluded.account_region,
-          title = excluded.title,
-          description = excluded.description,
-          author = excluded.author,
-          repository_name = excluded.repository_name,
-          creation_date = excluded.creation_date,
-          last_modified_date = excluded.last_modified_date,
-          status = excluded.status,
-          source_branch = excluded.source_branch,
-          destination_branch = excluded.destination_branch,
-          is_mergeable = excluded.is_mergeable,
-          is_approved = excluded.is_approved,
-          comment_count = COALESCE(excluded.comment_count, pull_requests.comment_count),
-          health_score = pull_requests.health_score,
-          link = excluded.link,
-          approved_by = COALESCE(excluded.approved_by, pull_requests.approved_by),
-          approved_by_arns = COALESCE(excluded.approved_by_arns, pull_requests.approved_by_arns),
-          -- Always overwrite: rules are fetched fresh on every sync, unlike approved_by which accumulates
-          approval_rules = excluded.approval_rules,
-          repo_account_id = COALESCE(excluded.repo_account_id, pull_requests.repo_account_id),
-          fetched_at = excluded.fetched_at`
-    }
-  })
+  const encodeUpsert = Schema.encodeEffect(UpsertInput)
+  const upsert_ = (input: UpsertInput, observation: number) =>
+    encodeUpsert(input).pipe(
+      Effect.flatMap((req) => writes.upsert(req, rowGroupOfListing(input), approvalGroupOfListing(input), observation))
+    )
+  /** Publish a change only when a write applied. */
+  const publishIfApplied = (applied: boolean) => applied ? publish : Effect.void
 
   const deleteStale_ = SqlSchema.void({
     Request: Schema.Struct({ olderThan: Schema.String }),
-    execute: (req) => sql`DELETE FROM pull_requests WHERE fetched_at < ${req.olderThan}`
+    execute: (req) => writes.deleteFetchedBefore(req.olderThan, false)
   })
 
   const deleteStaleOpen_ = SqlSchema.void({
     Request: Schema.Struct({ olderThan: Schema.String }),
-    execute: (req) => sql`DELETE FROM pull_requests WHERE status = 'OPEN' AND fetched_at < ${req.olderThan}`
+    execute: (req) => writes.deleteFetchedBefore(req.olderThan, true)
   })
 
   const repo = {
-    upsert: (input: UpsertInput) => upsert_(input).pipe(Effect.tap(() => publish), cacheError("upsert")),
+    /** The next observation number: take it before the provider read whose results a write carries. */
+    observe: () => writes.observe().pipe(cacheError("observe")),
 
-    upsertMany: (prs: ReadonlyArray<UpsertInput>) =>
-      sql.withTransaction(Effect.forEach(prs, (pr) => upsert_(pr), { discard: true })).pipe(
+    /**
+     * Write a listed pull request observed by `observation`: its row and approval groups, each unless
+     * that group is newer. The result says which were written; a group not written means a newer read
+     * already reached it.
+     */
+    upsert: (input: UpsertInput, observation: number) =>
+      upsert_(input, observation).pipe(
+        Effect.tap((written) => publishIfApplied(written.row || written.approval)),
+        cacheError("upsert")
+      ),
+
+    /**
+     * Write a pull request read in full (a single-PR refresh): like `upsert`, but both groups come
+     * from `read`, so a merged or closed read carries its merger and closing time.
+     */
+    upsertRead: (
+      input: UpsertInput,
+      read: Parameters<typeof rowGroupOfRead>[0] & ApprovalRead,
+      observation: number
+    ) =>
+      encodeUpsert(input).pipe(
+        Effect.flatMap((req) => writes.upsert(req, rowGroupOfRead(read), approvalGroupOfRead(read), observation)),
+        Effect.tap((written) => publishIfApplied(written.row || written.approval)),
+        cacheError("upsertRead")
+      ),
+
+    upsertMany: (prs: ReadonlyArray<UpsertInput>, observation: number) =>
+      sql.withTransaction(Effect.forEach(prs, (pr) => upsert_(pr, observation), { discard: true })).pipe(
         Effect.tap(() => publish),
         cacheError("upsertMany")
+      ),
+
+    /**
+     * Write a provider re-read of a cached pull request, observed by `observation`: its whole row group
+     * (including a closed or merged status) and approval group, each unless that group is newer.
+     */
+    writeRead: (
+      awsAccountId: string,
+      id: string,
+      read: Parameters<typeof rowGroupOfRead>[0] & ApprovalRead,
+      observation: number,
+      coordinates?: PullRequestCoordinates
+    ) =>
+      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+        Effect.andThen(
+          writes.writeRead(
+            pullRequestWhere(awsAccountId, id, coordinates),
+            { lastActivity: read.lastActivityDate, observation },
+            rowGroupOfRead(read),
+            approvalGroupOfRead(read)
+          )
+        ),
+        Effect.tap((written) => publishIfApplied(written.row || written.approval)),
+        cacheError("writeRead")
+      ),
+
+    /**
+     * Write values recomputed from a cached row (diff stats, comment count, health score), only while
+     * the row still holds `observed`, the versions it was read at. True when written.
+     */
+    writeDerived: (
+      awsAccountId: string,
+      id: string,
+      observed: RowVersions,
+      columns: DerivedColumns,
+      coordinates?: PullRequestCoordinates
+    ) =>
+      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+        Effect.andThen(writes.writeDerived(pullRequestWhere(awsAccountId, id, coordinates), observed, columns)),
+        Effect.tap(publishIfApplied),
+        cacheError("writeDerived")
       ),
 
     deleteStale: (olderThan: string) =>
@@ -126,80 +163,15 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
     deleteStaleOpen: (olderThan: string) =>
       deleteStaleOpen_({ olderThan }).pipe(Effect.tap(() => publish), cacheError("deleteStaleOpen")),
 
-    deleteOne: (awsAccountId: string, id: string, coordinates?: PullRequestCoordinates) =>
+    /**
+     * Delete a row the provider answered "does not exist" for, in a read begun at `observation`,
+     * unless a read that began later has written it since. True when the row was deleted.
+     */
+    deleteOne: (awsAccountId: string, id: string, observation: number, coordinates?: PullRequestCoordinates) =>
       ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(sql`DELETE FROM pull_requests WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`),
-        Effect.asVoid,
-        Effect.tap(() => publish),
+        Effect.andThen(writes.deleteIfNotNewer(pullRequestWhere(awsAccountId, id, coordinates), observation)),
+        Effect.tap(publishIfApplied),
         cacheError("deleteOne")
-      ),
-
-    updateDiffStats: (
-      awsAccountId: string,
-      id: string,
-      filesAdded: number,
-      filesModified: number,
-      filesDeleted: number,
-      coordinates?: PullRequestCoordinates
-    ) =>
-      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(
-          sql`UPDATE pull_requests SET files_added = ${filesAdded}, files_modified = ${filesModified}, files_deleted = ${filesDeleted}
-          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
-        ),
-        Effect.asVoid,
-        Effect.tap(() => publish),
-        cacheError("updateDiffStats")
-      ),
-
-    updateStatusAndClosedAt: (
-      awsAccountId: string,
-      id: string,
-      status: string,
-      closedAt: string,
-      mergedBy?: string,
-      approvedBy?: ReadonlyArray<string>,
-      coordinates?: PullRequestCoordinates
-    ) => {
-      const approvedByStr = approvedBy !== undefined ? joinApprovedBy([...approvedBy]) : null
-      return ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(
-          sql`UPDATE pull_requests SET status = ${status}, closed_at = ${closedAt}, merged_by = ${mergedBy ?? null},
-          approved_by = COALESCE(${approvedByStr}, approved_by),
-          last_modified_date = ${closedAt}
-          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
-        ),
-        Effect.asVoid,
-        Effect.tap(() => publish),
-        cacheError("updateStatusAndClosedAt")
-      )
-    },
-
-    updateCommentCount: (
-      awsAccountId: string,
-      id: string,
-      count: number | null,
-      coordinates?: PullRequestCoordinates
-    ) =>
-      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(
-          sql`UPDATE pull_requests SET comment_count = ${count}
-          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
-        ),
-        Effect.asVoid,
-        Effect.tap(() => publish),
-        cacheError("updateCommentCount")
-      ),
-
-    updateHealthScore: (awsAccountId: string, id: string, score: number, coordinates?: PullRequestCoordinates) =>
-      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(
-          sql`UPDATE pull_requests SET health_score = ${score}
-          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
-        ),
-        Effect.asVoid,
-        Effect.tap(() => publish),
-        cacheError("updateHealthScore")
       ),
 
     refreshCommentedBy: () =>
@@ -213,10 +185,16 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
               accountRegion: string
               author: string
               locationsJson: string
+              rowAt: string
+              rowSeq: number
+              approvalAt: string
+              approvalSeq: number
             }
           >`
             SELECT c.aws_account_id AS awsAccountId, c.pull_request_id AS pullRequestId,
               p.repository_name AS repositoryName, p.account_region AS accountRegion,
+              p.last_modified_date AS rowAt, p.observation_seq AS rowSeq,
+              p.approval_version AS approvalAt, p.approval_observation_seq AS approvalSeq,
               p.author AS author, c.locations_json AS locationsJson
             FROM pr_comments c
             INNER JOIN pull_requests p
@@ -252,26 +230,24 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
             }
             for (const loc of parsed) walk(loc.comments)
             const commentedBy = commenters.size > 0 ? [...commenters].join(",") : null
-            yield* sql`UPDATE pull_requests SET commented_by = ${commentedBy}
-                        WHERE id = ${row.pullRequestId}
-                          AND aws_account_id = ${row.awsAccountId}
-                          AND repository_name = ${row.repositoryName}
-                          AND account_region = ${row.accountRegion}`
+            // Read and written in one transaction, so the versions it read still hold.
+            yield* writes.writeDerived(
+              pullRequestWhere(row.awsAccountId, row.pullRequestId, {
+                repositoryName: row.repositoryName,
+                accountRegion: row.accountRegion
+              }),
+              {
+                row: { lastActivity: new Date(row.rowAt), observation: row.rowSeq },
+                approval: { lastActivity: new Date(row.approvalAt), observation: row.approvalSeq }
+              },
+              { commentedBy }
+            )
           }
         })
       ).pipe(Effect.asVoid, cacheError("refreshCommentedBy")),
 
     propagateRepoAccountId: () =>
-      sql`UPDATE pull_requests
-          SET repo_account_id = (
-            SELECT p2.repo_account_id FROM pull_requests p2
-            WHERE p2.repo_account_id IS NOT NULL
-              AND p2.aws_account_id = pull_requests.aws_account_id
-              AND p2.repository_name = pull_requests.repository_name
-              AND p2.account_region = pull_requests.account_region
-            LIMIT 1
-          )
-          WHERE repo_account_id IS NULL`.pipe(
+      writes.fillRepoAccountIds().pipe(
         Effect.asVoid,
         cacheError("propagateRepoAccountId")
       )

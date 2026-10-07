@@ -9,13 +9,15 @@
  * - `CONNECT_FIXTURE_PORT`   listen port (0 picks a free one; the chosen port is printed)
  * - `CONNECT_FIXTURE_RTT_MS` delay before a scroll is rendered, standing in for the hub round trip
  * - `CONNECT_FIXTURE_TICK_MS` append one output line every N ms (0 = quiet pane)
+ * - `CONNECT_FIXTURE_AGENTS_FILE` serve this saved `/v1/connect/agents` body instead of the one fake
+ *   agent, to look at a real fleet's directory (a read-only snapshot, never committed)
  *
  * `GET /__test/commands` returns every client command received with its arrival time
  * (`Date.now()`); `POST /__test/reset` clears them. `GET /__test/screen` returns the latest
  * session's rows and size, so tests can aim at text and measurements can read the top line.
  */
-import { NodeRuntime } from "@effect/platform-node"
-import { Config, Console, Effect, Option, Schema } from "effect"
+import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { Config, Console, Effect, FileSystem, Option, Schema } from "effect"
 import { build } from "esbuild"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { fileURLToPath } from "node:url"
@@ -26,7 +28,8 @@ const root = fileURLToPath(new URL("../..", import.meta.url))
 const settings = Config.all({
   port: Config.Int("CONNECT_FIXTURE_PORT").pipe(Config.withDefault(0)),
   rttMs: Config.Int("CONNECT_FIXTURE_RTT_MS").pipe(Config.withDefault(40)),
-  tickMs: Config.Int("CONNECT_FIXTURE_TICK_MS").pipe(Config.withDefault(0))
+  tickMs: Config.Int("CONNECT_FIXTURE_TICK_MS").pipe(Config.withDefault(0)),
+  agentsFile: Config.option(Config.String("CONNECT_FIXTURE_AGENTS_FILE"))
 })
 
 /** How the fake herdr behaves: scroll round trip, and how often a streamed line is appended. */
@@ -169,7 +172,7 @@ const json = (response: ServerResponse, body: string): void => {
   response.end(body)
 }
 
-const handle = (request: IncomingMessage, response: ServerResponse): void => {
+const handle = (agentsBody: string) => (request: IncomingMessage, response: ServerResponse): void => {
   const url = new URL(request.url ?? "/", "http://fixture.test")
   if (url.pathname === "/") {
     response.writeHead(200, { "content-type": "text/html; charset=utf-8" })
@@ -181,7 +184,7 @@ const handle = (request: IncomingMessage, response: ServerResponse): void => {
     response.writeHead(200, { "content-type": "text/css" })
     response.end(styles)
   } else if (url.pathname === "/v1/connect/agents") {
-    json(response, JSON.stringify({ agents: [agent], failures: [], nextCursor: null }))
+    json(response, agentsBody)
   } else if (url.pathname === "/__test/screen") {
     json(response, JSON.stringify(latestScreen))
   } else if (url.pathname === "/__test/commands") {
@@ -198,8 +201,13 @@ const handle = (request: IncomingMessage, response: ServerResponse): void => {
 const ListeningAddress = Schema.Struct({ port: Schema.Number })
 
 const main = Effect.gen(function*() {
-  const { port, rttMs, tickMs } = yield* settings
-  const server = createServer(handle)
+  const { agentsFile, port, rttMs, tickMs } = yield* settings
+  const fileSystem = yield* FileSystem.FileSystem
+  const agentsBody = yield* Option.match(agentsFile, {
+    onNone: () => Effect.succeed(JSON.stringify({ agents: [agent], failures: [], nextCursor: null })),
+    onSome: (file) => fileSystem.readFileString(file)
+  })
+  const server = createServer(handle(agentsBody))
   const sockets = new WebSocketServer({ noServer: true })
   server.on("upgrade", (request, socket, head) => {
     const url = new URL(request.url ?? "/", "http://fixture.test")
@@ -230,4 +238,4 @@ const main = Effect.gen(function*() {
   return yield* Effect.never
 })
 
-NodeRuntime.runMain(main)
+NodeRuntime.runMain(main.pipe(Effect.provide(NodeServices.layer)))
