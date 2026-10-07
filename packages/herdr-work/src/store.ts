@@ -114,6 +114,7 @@ import {
   WorkLaneClaim,
   WorkLaneClaimed,
   WorkObservationEnvelope,
+  WorkObservationId,
   workObservationMaxSkewMillis,
   WorkObservationSubject,
   WorkObservedAdmission,
@@ -2049,7 +2050,7 @@ type PreparedObservation =
   | {
     readonly _tag: "fact"
     readonly subject: string
-    readonly observationId: string
+    readonly observationId: WorkObservationId
     readonly observedAt: number
     readonly record: string
   }
@@ -2150,13 +2151,19 @@ const writeObservations = (
     // Totals are read once and kept current as rows go, so eviction is one
     // indexed lookup and delete per row, not a full rescan per row.
     // A failure disputes its subject's fact while it is newer than that fact's
-    // confirmation; evicting such a failure evicts the fact with it, so a
-    // disputed fact never outlives the record of its dispute.
+    // confirmation. Undisputing failures are evicted first, so the record of a
+    // dispute survives (and keeps an older replay of the fact stale); only
+    // when nothing else is left to evict does a dispute go, taking its fact.
     const removeDisputedFact = database.prepare(
       `DELETE FROM work_observed_facts WHERE subject = ? AND confirmed_at <
          (SELECT last_at FROM work_observed_failures WHERE subject = ?)`
     )
-    const evict = (table: string, age: string, payload: string, beforeRemove?: (subject: string) => number): number => {
+    const evict = (
+      table: string,
+      age: string,
+      payload: string,
+      failures?: { readonly preferred: string; readonly beforeRemove: (subject: string) => number }
+    ): number => {
       const size = `length(CAST(subject AS BLOB)) + length(CAST(${payload} AS BLOB))`
       const totals = Schema.decodeUnknownSync(FactTotalsRow)(
         database.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${size}), 0) AS bytes FROM ${table}`).get()
@@ -2164,12 +2171,16 @@ const writeObservations = (
       const oldest = database.prepare(
         `SELECT subject, ${size} AS bytes FROM ${table} ORDER BY ${age} ASC, subject ASC LIMIT 1`
       )
+      const oldestPreferred = failures === undefined ? undefined : database.prepare(
+        `SELECT subject, ${size} AS bytes FROM ${table} WHERE ${failures.preferred}
+         ORDER BY ${age} ASC, subject ASC LIMIT 1`
+      )
       const remove = database.prepare(`DELETE FROM ${table} WHERE subject = ?`)
       let { bytes, count } = totals
       let evicted = 0
       while (count > workObservedFactMaxRecords || bytes > workObservedFactMaxBytes) {
-        const row = Schema.decodeUnknownSync(EvictionRow)(oldest.get())
-        evicted += beforeRemove?.(row.subject) ?? 0
+        const row = Schema.decodeUnknownSync(EvictionRow)(oldestPreferred?.get() ?? oldest.get())
+        evicted += failures?.beforeRemove(row.subject) ?? 0
         remove.run(row.subject)
         count -= 1
         bytes -= row.bytes
@@ -2180,9 +2191,10 @@ const writeObservations = (
     // The least recently read rows go first: a fact by its last confirmation,
     // a failure by its latest failed read.
     const evicted = evict("work_observed_facts", "confirmed_at", "record") +
-      evict("work_observed_failures", "last_at", "reason", (subject) => {
-        const changes = removeDisputedFact.run(subject, subject).changes
-        return Number(changes)
+      evict("work_observed_failures", "last_at", "reason", {
+        preferred: `NOT EXISTS (SELECT 1 FROM work_observed_facts AS fact
+          WHERE fact.subject = work_observed_failures.subject AND fact.confirmed_at < work_observed_failures.last_at)`,
+        beforeRemove: (subject) => Number(removeDisputedFact.run(subject, subject).changes)
       })
     // Reported last, after every write and eviction in this call: a stored or
     // unchanged fact that a later envelope replaced, or eviction removed, is no
@@ -5501,12 +5513,14 @@ export class WorkStore implements WorkStoreService {
           })
             .observation
         )
-        const digest = yield* cryptoService.digest("SHA-256", utf8.encode(record)).pipe(
+        const observationId = yield* cryptoService.digest("SHA-256", utf8.encode(record)).pipe(
+          Effect.map(Hex.encode),
+          Effect.flatMap(Schema.decodeUnknownEffect(WorkObservationId)),
           Effect.mapError(storeError("observe.digest"))
         )
         return {
           _tag: "fact",
-          observationId: Hex.encode(digest),
+          observationId,
           observedAt: Math.min(envelope.observedAt, clockNow),
           record,
           subject

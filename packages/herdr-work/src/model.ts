@@ -893,12 +893,24 @@ export const WorkObservationEnvelope = Schema.Struct({
 export interface WorkObservationEnvelope extends Schema.Schema.Type<typeof WorkObservationEnvelope> {}
 
 /**
+ * A stored observation's id, and what `reconcile` accepts as confirmation of
+ * it: lowercase hex of the SHA-256 of the UTF-8 bytes persisted in
+ * `work_observed_facts.record`. That record is the JSON of the encoded
+ * observation alone (a pull request's or an agent's fields, in schema field
+ * order) with its case-insensitive identity, the repository or host,
+ * ASCII-lowercased. `observedAt` is not an input, so the same facts read again
+ * keep their id.
+ */
+export const WorkObservationId = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)).pipe(
+  Schema.brand("WorkObservationId")
+)
+export type WorkObservationId = typeof WorkObservationId.Type
+
+/**
  * The latest stored fact for one subject. `observedAt` is when these exact
  * facts were first seen, so for a `gone` agent it is the time it went away;
  * `confirmedAt` is the last time a read returned them again.
  */
-/** A stored observation's id: the SHA-256 of its canonical record, in lowercase hex. */
-export const WorkObservationId = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
 
 export const WorkObservedFact = Schema.Struct({
   subject: WorkObservationSubject,

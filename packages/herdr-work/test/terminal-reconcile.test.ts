@@ -326,14 +326,12 @@ describe("terminal reconcile", () => {
       expect((yield* currentGoal(work))?.state).toBe("review")
     })))
 
-  it.effect("an old confirmation can't be replayed once its dispute is evicted: the disputed fact goes too", () =>
+  it.effect("a failed read that disputes a fact survives eviction pressure: no old confirmation or replay closes the goal", () =>
     Effect.scoped(Effect.gen(function*() {
       const { work } = yield* fixture
       yield* record(work, "goal-pr7.1", goal())
-      const closed = yield* work.observe([{
-        observation: pullRequest({ closedAt: 5_000, state: "closed" }),
-        observedAt: 6_000
-      }])
+      const closedRead = pullRequest({ closedAt: 5_000, state: "closed" })
+      const closed = yield* work.observe([{ observation: closedRead, observedAt: 6_000 }])
       yield* work.observe([{
         observation: {
           _tag: "unknown",
@@ -352,9 +350,9 @@ describe("terminal reconcile", () => {
         },
         observedAt: 8_000
       })))
-      expect(yield* Effect.result(work.reconcile({ confirmed: confirmedIn(closed) }))).toMatchObject({
-        failure: { _tag: "WorkStoreError", operation: "reconcile.confirmed" }
-      })
+      expect(yield* work.reconcile({ confirmed: confirmedIn(closed) })).toEqual([])
+      const replay = yield* work.observe([{ observation: closedRead, observedAt: 6_000 }])
+      expect(yield* work.reconcile({ confirmed: confirmedIn(replay) })).toEqual([])
       expect((yield* currentGoal(work))?.state).toBe("review")
     })))
 
