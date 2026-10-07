@@ -71,7 +71,10 @@
       color: ButtonFace;
       forced-color-adjust: none;
     }
-    .root[aria-expanded="true"] .mark {
+    /* forced-color-adjust: none is inherited, so every descendant needs its system colour here. */
+    .root[aria-expanded="true"] .mark,
+    .root[aria-expanded="true"] .hint {
+      border-color: ButtonFace;
       color: ButtonFace;
     }
   }
@@ -83,7 +86,9 @@
     border: 2px solid ButtonText;
     color: ButtonFace;
   }
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"] .mark {
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"] .mark,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"] .hint {
+    border-color: ButtonFace;
     color: ButtonFace;
   }
 }

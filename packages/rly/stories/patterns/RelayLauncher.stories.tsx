@@ -81,9 +81,14 @@ export const ForcedColors: Story = {
     const launcher = canvas.getByRole("button", { name: /Relay/ })
     await userEvent.click(launcher)
     await expect(getComputedStyle(launcher).borderTopWidth).toBe("2px")
-    await expect(getComputedStyle(launcher).backgroundColor).not.toBe(
-      getComputedStyle(launcher.parentElement ?? launcher).backgroundColor
-    )
+    const open = getComputedStyle(launcher)
+    await expect(open.backgroundColor).not.toBe(getComputedStyle(launcher.parentElement ?? launcher).backgroundColor)
+    // forced-color-adjust: none is inherited, so no descendant may keep an author colour on the fill.
+    for (const element of launcher.querySelectorAll("*")) {
+      const computed = getComputedStyle(element)
+      await expect(computed.color).toBe(open.color)
+      if (element.tagName === "KBD") await expect(computed.borderTopColor).toBe(open.color)
+    }
   },
   render: () => <HostHeader />
 }
