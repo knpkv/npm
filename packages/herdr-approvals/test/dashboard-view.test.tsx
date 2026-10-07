@@ -3,26 +3,25 @@ import { renderToStaticMarkup } from "react-dom/server"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
 import { approvalShortcutFor, DashboardView } from "../src/dashboard-view.js"
 
+/** The pending job every snapshot starts from. */
+const pendingRecord: DashboardSnapshot["records"][number] = {
+  actor: "submitter@example.com",
+  approvalExpiresAt: 61_000,
+  approvedAt: null,
+  approvedBy: null,
+  createdAt: 1_000,
+  expiredAt: null,
+  id: "job-1",
+  payload: { kind: "nix.apply", ref: "main" },
+  approvalAvailable: true,
+  rejectedAt: null,
+  rejectedBy: null,
+  status: "pending_approval",
+  updatedAt: 1_000
+}
+
 const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
-  const pending: DashboardSnapshot["records"][number] = {
-    actor: "submitter@example.com",
-    approvalExpiresAt: 61_000,
-    approvalNonce: "nonce-1",
-    approvedAt: null,
-    approvedBy: null,
-    createdAt: 1_000,
-    error: null,
-    expiredAt: null,
-    hash: "hash-1",
-    id: "job-1",
-    payload: { kind: "nix.apply", ref: "main" },
-    approvalAvailable: true,
-    rejectedAt: null,
-    rejectedBy: null,
-    result: null,
-    status: "pending_approval",
-    updatedAt: 1_000
-  }
+  const pending = pendingRecord
   return {
     approvalApp: {
       canonical: false,
@@ -86,13 +85,11 @@ const renderApprovalOnly = (): string =>
 
 const renderApprovedFailure = (): string => {
   const approved: DashboardSnapshot["records"][number] = {
-    ...snapshot(true).records[0],
+    ...pendingRecord,
     approvalExpiresAt: null,
-    approvalNonce: null,
     approvalAvailable: false,
     approvedAt: 2_000,
     approvedBy: "owner@example.com",
-    error: "hostd restarted while this job was running",
     status: "failed",
     updatedAt: 3_000
   }
@@ -162,7 +159,7 @@ describe("dashboard approval capability", () => {
   it("shows the existing-owner reconciliation title and summary", () => {
     const base = snapshot(true)
     const pending: DashboardSnapshot["records"][number] = {
-      ...base.records[0],
+      ...pendingRecord,
       payload: {
         kind: "work.reconcile",
         repository: "knpkv/npm",
@@ -208,7 +205,7 @@ describe("dashboard approval capability", () => {
   it("shows the goal reassignment title and summary", () => {
     const base = snapshot(true)
     const pending: DashboardSnapshot["records"][number] = {
-      ...base.records[0],
+      ...pendingRecord,
       payload: {
         kind: "work.reassign",
         goalId: "goal-ser8-control-surface",
@@ -263,7 +260,7 @@ describe("dashboard approval capability", () => {
 
   it("hides decisions when a pending record has no approval proof", () => {
     const base = snapshot(true)
-    const pending = { ...base.records[0], approvalAvailable: false, approvalNonce: null }
+    const pending = { ...pendingRecord, approvalAvailable: false }
     const html = renderToStaticMarkup(
       <DashboardView
         busyJobId={null}
@@ -289,7 +286,7 @@ describe("dashboard approval capability", () => {
 
   it("encodes schema-valid job identifiers in approval form actions", () => {
     const base = snapshot(true)
-    const pending = { ...base.records[0], id: "job/with-slash" }
+    const pending = { ...pendingRecord, id: "job/with-slash" }
     const html = renderToStaticMarkup(
       <DashboardView
         busyJobId={null}
@@ -320,9 +317,8 @@ describe("dashboard approval capability", () => {
   it("routes worker Connect links through the canonical hub", () => {
     const base = snapshot(false)
     const active: DashboardSnapshot["records"][number] = {
-      ...base.records[0],
+      ...pendingRecord,
       approvalExpiresAt: null,
-      approvalNonce: null,
       approvalAvailable: false,
       connectTarget: {
         agentId: "agent-worker",
