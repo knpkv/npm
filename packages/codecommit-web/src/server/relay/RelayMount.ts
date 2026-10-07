@@ -16,8 +16,9 @@
 import type { CacheService, ConfigService, ReadClient } from "@knpkv/codecommit-core"
 import { Domain, RelayCapabilities } from "@knpkv/codecommit-core"
 import { claudeCodeBackend, codexCliBackend, make, register } from "@knpkv/relay"
-import type { RegisteredCapability, RelayHarnessService, WriteReceipt } from "@knpkv/relay"
+import type { RegisteredCapability, RelayBackend, RelayHarnessService, WriteReceipt } from "@knpkv/relay"
 import { Config, Context, type Crypto, Effect, FileSystem, Layer, Path } from "effect"
+import type { ChildProcessSpawner } from "effect/process"
 import { RelayUnavailableError } from "../Api.js"
 import { RelayFindingPublisher } from "../review/RelayFindingPublisher.js"
 import { webCapabilities } from "./RelayWebCapabilities.js"
@@ -71,50 +72,71 @@ type CapabilityServices =
 const unavailable = (message: string, fix: string) =>
   Effect.succeed(RelayMount.of({ harness: Effect.fail(new RelayUnavailableError({ message, fix })) }))
 
-/** Start Relay for this server, or record why it can't run. */
-export const relayMountLayer = Layer.effect(
-  RelayMount,
-  Effect.gen(function*() {
-    const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
-    const home = yield* Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE")))
-    const directory = path.join(home, ".codecommit", "relay")
-    yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 })
+/** The backends Relay runs turns on, given the directory the CLIs start in. The first is the default. */
+export type RelayBackends<R> = (
+  directory: string
+) => Effect.Effect<readonly [RelayBackend, ...ReadonlyArray<RelayBackend>], never, R>
+
+/** Claude Code (the default for new sessions) and Codex, each on the user's own CLI login. */
+export const cliBackends: RelayBackends<ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem> = (
+  directory
+) =>
+  Effect.gen(function*(): Effect.fn.Return<
+    readonly [RelayBackend, ...ReadonlyArray<RelayBackend>],
+    never,
+    ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
+  > {
     const claude = yield* claudeCodeBackend({ cwd: directory })
     const codex = yield* codexCliBackend({ cwd: directory })
-    const capabilities = RelayCapabilities.capabilities
-    const registered: ReadonlyArray<RegisteredCapability<CapabilityServices>> = [
-      register(capabilities.getPullRequest),
-      register(capabilities.listPullRequests),
-      register(webCapabilities.getPullRequestDiff),
-      register(capabilities.postComment, { receipt: commentReceipt }),
-      register(webCapabilities.postLineComment, { receipt: commentReceipt })
-    ]
-    const harness = yield* make({
-      storePath: path.join(directory, "sessions.sqlite"),
-      instructions,
-      capabilities: registered,
-      // Claude Code is the default for new sessions; a session switches per message.
-      backends: [claude, codex]
-    })
-    return RelayMount.of({ harness: Effect.succeed(harness) })
-  }).pipe(
-    Effect.catchTags({
-      RelayStoreLocked: ({ message }) =>
-        unavailable(message, "Another codecommit web owns Relay's sessions. Stop it, then restart this one."),
-      RelayStoreFailed: ({ message }) =>
-        unavailable(message, "Check that ~/.codecommit/relay is owned by you and writable, then restart."),
-      ConfigError: () => unavailable("HOME is not set.", "Start codecommit web from a login shell.")
-    }),
-    Effect.catch((failure) =>
-      Effect.logWarning("Relay could not start", failure).pipe(
-        Effect.andThen(
-          unavailable(
-            "Relay could not create its data directory.",
-            "Check that ~/.codecommit is owned by you and writable, then restart."
+    return [claude, codex]
+  })
+
+/** Start Relay for this server with these backends, or record why it can't run. */
+export const relayMountLayerWith = <R>(backends: RelayBackends<R>) =>
+  Layer.effect(
+    RelayMount,
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE")))
+      const directory = path.join(home, ".codecommit", "relay")
+      yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 })
+      const available = yield* backends(directory)
+      const capabilities = RelayCapabilities.capabilities
+      const registered: ReadonlyArray<RegisteredCapability<CapabilityServices>> = [
+        register(capabilities.getPullRequest),
+        register(capabilities.listPullRequests),
+        register(webCapabilities.getPullRequestDiff),
+        register(capabilities.postComment, { receipt: commentReceipt }),
+        register(webCapabilities.postLineComment, { receipt: commentReceipt })
+      ]
+      const harness = yield* make({
+        storePath: path.join(directory, "sessions.sqlite"),
+        instructions,
+        capabilities: registered,
+        backends: available
+      })
+      return RelayMount.of({ harness: Effect.succeed(harness) })
+    }).pipe(
+      Effect.catchTags({
+        RelayStoreLocked: ({ message }) =>
+          unavailable(message, "Another codecommit web owns Relay's sessions. Stop it, then restart this one."),
+        RelayStoreFailed: ({ message }) =>
+          unavailable(message, "Check that ~/.codecommit/relay is owned by you and writable, then restart."),
+        ConfigError: () => unavailable("HOME is not set.", "Start codecommit web from a login shell.")
+      }),
+      Effect.catch((failure) =>
+        Effect.logWarning("Relay could not start", failure).pipe(
+          Effect.andThen(
+            unavailable(
+              "Relay could not create its data directory.",
+              "Check that ~/.codecommit is owned by you and writable, then restart."
+            )
           )
         )
       )
     )
   )
-)
+
+/** Start Relay for this server on the user's CLI logins, or record why it can't run. */
+export const relayMountLayer = relayMountLayerWith(cliBackends)
