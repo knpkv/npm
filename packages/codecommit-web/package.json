@@ -21,7 +21,7 @@
     "prebuild": "pnpm --filter @knpkv/browser-pairing build",
     "precheck": "pnpm --filter @knpkv/browser-pairing build",
     "build": "tsc -b && vite build",
-    "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit && tsc -p test/tsconfig.json --noEmit",
     "pretest": "pnpm --filter @knpkv/browser-pairing build",
     "test": "vitest",
     "test:relay-smoke:real": "vitest run --config vitest.real-smoke.config.ts",

@@ -9,7 +9,7 @@ const TEST_HOME = "/tmp/codecommit-permissions-test"
 const permissionPath = `${TEST_HOME}/.codecommit/permissions.json`
 
 const permissionLayer = (content: string) => {
-  const fileSystem = FileSystem.FileSystem.of({
+  const fileSystem = FileSystem.makeNoop({
     readFileString: (path) =>
       path === permissionPath
         ? Effect.succeed(content)

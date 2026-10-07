@@ -475,7 +475,7 @@ test("submits the configured default profile as soon as delayed profiles load", 
   await expect(page.getByText("Loading Relay profiles")).toBeVisible()
   const run = page.getByRole("button", { name: "Run Relay" })
   await expect(run).toBeDisabled()
-  await run.evaluate((button) => {
+  await run.evaluate((button: HTMLButtonElement) => {
     const observer = new MutationObserver(() => {
       if (button.disabled === true) return
       observer.disconnect()
@@ -715,7 +715,7 @@ test("waits for legacy session migration before persisting the first continuatio
 
   await page.evaluate(() => {
     window.releaseRelayMigration?.()
-    window.releaseRelayMigration = undefined
+    delete window.releaseRelayMigration
   })
   await expect.poll(async () =>
     page.evaluate((prefix) => {
