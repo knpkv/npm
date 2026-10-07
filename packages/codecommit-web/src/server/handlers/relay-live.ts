@@ -15,16 +15,31 @@
  */
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { RelayEvent } from "@knpkv/relay"
+import type { MessageContext } from "@knpkv/relay"
 import { Effect, Schedule, Schema, Stream } from "effect"
 import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import { ApiError, CodeCommitApi, RelayBadRequestError, RelayConflictError } from "../Api.js"
+import type { RelayReviewFindingsContext } from "../Api.js"
 import { RelayMount } from "../relay/RelayMount.js"
 
 const encoder = new TextEncoder()
 const encodeEvent = Schema.encodeEffect(Schema.fromJsonString(RelayEvent))
 const heartbeat = encoder.encode(": hb\n\n")
 const unauthorized = encoder.encode(`data: ${JSON.stringify({ _tag: "Unauthorized" })}\n\n`)
+
+/**
+ * A findings set as the model reads it: which head it was reviewed at, then each finding as JSON. The
+ * model is told the head may have moved, and post_line_comment refuses a revision that is no longer current.
+ */
+export const renderFindingsContext = (context: RelayReviewFindingsContext): MessageContext => ({
+  label: `${context.findings.length} review findings, reviewed at head ${context.reviewedHead.headCommit.slice(0, 7)}`,
+  body: [
+    `Reviewed head: ${JSON.stringify(context.reviewedHead)}.`,
+    "If the pull request's head has moved since, say these findings are from an older head.",
+    ...context.findings.map((finding) => JSON.stringify(finding))
+  ].join("\n")
+})
 
 const storeFailed = ({ message }: { readonly message: string }) => new ApiError({ message })
 
@@ -71,7 +86,10 @@ export const RelayLive = HttpApiBuilder.group(CodeCommitApi, "relay", (handlers)
       .handle("messages", ({ payload }) =>
         Effect.gen(function*() {
           const relay = yield* mount.harness
-          yield* relay.send(payload.ref, payload.text, payload.requestId, payload.backend).pipe(
+          yield* relay.send(payload.ref, payload.text, payload.requestId, {
+            backend: payload.backend,
+            context: (payload.context ?? []).map(renderFindingsContext)
+          }).pipe(
             Effect.catchTags({
               RelayBackendNotConfigured: ({ backend }) =>
                 Effect.fail(new RelayBadRequestError({ message: `Backend ${backend} is not offered here.` })),

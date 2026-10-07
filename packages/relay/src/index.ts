@@ -16,7 +16,7 @@ export {
   RelayStoreFailed,
   RelayStoreLocked
 } from "./harness.js"
-export type { RelayBackend, RelayHarnessOptions, RelayHarnessService } from "./harness.js"
+export type { MessageContext, RelayBackend, RelayHarnessOptions, RelayHarnessService, SendOptions } from "./harness.js"
 export {
   BackendStatus,
   BackendUnavailableCause,

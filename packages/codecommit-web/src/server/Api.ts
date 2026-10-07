@@ -1005,6 +1005,16 @@ const RelayName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), S
 export const RelayRef = Schema.Struct({ product: Schema.Literal("codecommit"), kind: RelayName, id: RelayName })
 export type RelayRef = typeof RelayRef.Type
 
+/**
+ * Review findings the person is looking at, attached to a message so Relay can discuss them. Findings
+ * live in the browser's review session in H1, so the dock sends the set with the head it was reviewed at.
+ */
+export const RelayReviewFindingsContext = Schema.TaggedStruct("ReviewFindings", {
+  reviewedHead: Schema.Struct({ revisionId: Schema.String, baseCommit: Schema.String, headCommit: Schema.String }),
+  findings: Schema.Array(RelayReviewFinding).check(Schema.isMaxLength(100))
+})
+export type RelayReviewFindingsContext = typeof RelayReviewFindingsContext.Type
+
 /** Relay could not start in this process: another one owns its store, or the store is unreadable. */
 export class RelayUnavailableError extends Schema.TaggedError<RelayUnavailableError>()(
   "RelayUnavailableError",
@@ -1038,7 +1048,9 @@ export class RelayGroup extends HttpApiGroup.make("relay")
         ref: RelayRef,
         text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(20_000)),
         requestId: RelayName,
-        backend: Schema.optionalKey(RelayBackendId)
+        backend: Schema.optionalKey(RelayBackendId),
+        // At most one findings set per message.
+        context: Schema.optionalKey(Schema.Array(RelayReviewFindingsContext).check(Schema.isMaxLength(1)))
       }),
       success: Schema.Struct({ runId: Schema.String }).pipe(HttpApiSchema.status(202)),
       error: [...relayErrors, RelayBadRequestError]

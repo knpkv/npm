@@ -29,10 +29,14 @@ const snapshot: RelayEvent = { _tag: "Snapshot", session: "s-1", seq: 0, message
 /** A harness that records what the routes asked of it and answers from fixed outcomes. */
 const fakeHarness = (sent: Ref.Ref<ReadonlyArray<string>>): RelayHarnessService => ({
   tools: [],
-  send: (_ref, text, requestId, backend) =>
-    backend === "codex-cli"
-      ? Effect.fail(new RelayBackendNotConfigured({ backend }))
-      : Ref.update(sent, (all) => [...all, `${requestId}:${text}`]),
+  send: (_ref, text, requestId, options) =>
+    options?.backend === "codex-cli"
+      ? Effect.fail(new RelayBackendNotConfigured({ backend: options.backend }))
+      : Ref.update(sent, (all) => [
+        ...all,
+        `${requestId}:${text}`,
+        ...(options?.context ?? []).map((context) => `${context.label}\n${context.body}`)
+      ]),
   events: () => Stream.concat(Stream.make(snapshot), Stream.never),
   decide: (callId) =>
     Effect.fail(
@@ -80,6 +84,40 @@ describe("/api/relay", () => {
         const accepted = yield* client.relay.messages({ payload: { ref, text: "Approvals?", requestId: "req-1" } })
         expect(accepted).toEqual({ runId: "req-1" })
         expect(yield* Ref.get(sent)).toEqual(["req-1:Approvals?"])
+      }))
+
+    it.effect("gives Relay attached findings with the head they were reviewed at", () =>
+      Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(CodeCommitApi, ["relay"])
+        yield* Ref.set(sent, [])
+        yield* client.relay.messages({
+          payload: {
+            ref,
+            text: "Is the P1 real?",
+            requestId: "req-findings",
+            context: [{
+              _tag: "ReviewFindings",
+              reviewedHead: { revisionId: "rev-7", baseCommit: "a".repeat(40), headCommit: "b".repeat(40) },
+              findings: [{
+                id: "F1",
+                priority: "P1",
+                title: "Unchecked null",
+                summary: "patch-reader reads a nullable field",
+                details: "The parser reads a field that can be null.",
+                recommendation: "Check for null first.",
+                verification: "A test with a null field.",
+                publicationTarget: "line-comment",
+                location: { scope: "line", filePath: "src/patch-reader.ts", line: 19, side: "after" }
+              }]
+            }]
+          }
+        })
+        const [message, context] = yield* Ref.get(sent)
+        expect(message).toBe("req-findings:Is the P1 real?")
+        expect(context).toContain("1 review findings, reviewed at head bbbbbbb")
+        expect(context).toContain(`"headCommit":"${"b".repeat(40)}"`)
+        expect(context).toContain("say these findings are from an older head")
+        expect(context).toContain(`"filePath":"src/patch-reader.ts"`)
       }))
 
     it.effect("refuses a backend this server doesn't offer with 400", () =>

@@ -39,8 +39,11 @@ unauthenticated routes. Profiles, credentials and provider ARNs never cross into
 - `GET /events?product&kind&id`: server-sent events, a `Snapshot` first, then `RelayEvent` frames.
   Every 15 seconds `: hb` re-checks the owner session. Once the session no longer holds, the stream
   sends `data: {"_tag":"Unauthorized"}` and ends.
-- `POST /messages {ref, text, requestId, backend?}`: 202 `{runId}`, the `requestId` that the run's
-  events list in `runIds`. An unknown `backend` is 400.
+- `POST /messages {ref, text, requestId, backend?, context?}`: 202 `{runId}`, the `requestId` that the
+  run's events list in `runIds`. An unknown `backend` is 400. `context` holds at most one
+  `ReviewFindings { reviewedHead, findings }`: the findings the person is looking at. Findings live in
+  the browser's review session, not on the server. Relay is told which head they were reviewed at, so it
+  can say when they come from an older head.
 - `POST /cancel {ref, runId}` and `POST /decisions {ref, callId, allow}`: 204, or 409 with the state
   found: `NotRunning`, `Decided {allow}`, `Expired` or `Unknown`.
 - `GET /session?product&kind&id`: the session's tools, its current backend, and `cancel` (offer Stop

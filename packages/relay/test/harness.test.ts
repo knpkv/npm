@@ -459,6 +459,27 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         })
       }).pipe(Effect.scoped))
 
+    it.effect("gives attached context to the model and keeps it out of the transcript", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        const relay = yield* relayIn(harnessLayer(model.layer, store))
+        yield* sendAndCollect(
+          relay.events(pr),
+          relay.send(pr, "Is P1 real?", "req-context", {
+            context: [{ label: "3 review findings at head bbbbbbb", body: "P1: unchecked null in patch-reader.ts" }]
+          })
+        )
+        const firstPrompt = JSON.stringify(model.requests[0]?.prompt.content)
+        expect(firstPrompt).toContain("3 review findings at head bbbbbbb")
+        expect(firstPrompt).toContain("P1: unchecked null in patch-reader.ts")
+        expect(firstPrompt.indexOf("unchecked null")).toBeLessThan(firstPrompt.indexOf("Is P1 real?"))
+        const reconnect = yield* relay.events(pr).pipe(Stream.take(1), Stream.runCollect)
+        const shown = reconnect[0]?._tag === "Snapshot" ? reconnect[0].messages.map((message) => message.text) : []
+        expect(shown).toContain("Is P1 real?")
+        expect(shown.join("\n")).not.toContain("unchecked null")
+      }).pipe(Effect.scoped))
+
     it.effect("tells a repeated or unknown answer why it can't be applied", () =>
       Effect.gen(function*() {
         commentCalls.length = 0
@@ -542,7 +563,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
           backends: [claude(claudeModel.layer), codex(codexModel.layer)]
         }))
         expect((yield* relay.session(pr)).backend).toBe("claude-code")
-        yield* sendAndCollect(relay.events(pr), relay.send(pr, "Hi", "req-codex", "codex-cli"))
+        yield* sendAndCollect(relay.events(pr), relay.send(pr, "Hi", "req-codex", { backend: "codex-cli" }))
         expect((yield* relay.session(pr)).backend).toBe("codex-cli")
         expect([claudeModel.calls(), codexModel.calls()]).toEqual([0, 1])
       }).pipe(Effect.scoped))
@@ -551,7 +572,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
       Effect.gen(function*() {
         const store = yield* tempStore
         const relay = yield* relayIn(harnessLayer(scripted([{ reply: "Hi." }]).layer, store))
-        const refused = yield* relay.send(pr, "Hi", "req-unconfigured", "codex-cli").pipe(Effect.flip)
+        const refused = yield* relay.send(pr, "Hi", "req-unconfigured", { backend: "codex-cli" }).pipe(Effect.flip)
         expect(refused).toMatchObject({ _tag: "RelayBackendNotConfigured", backend: "codex-cli" })
         expect((yield* relay.session(pr)).backend).toBe("claude-code")
       }).pipe(Effect.scoped))

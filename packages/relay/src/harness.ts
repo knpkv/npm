@@ -120,6 +120,22 @@ export interface RelayHarnessOptions<Requirements> {
   readonly backends: readonly [RelayBackend, ...ReadonlyArray<RelayBackend>]
 }
 
+/**
+ * Context the person attached to one message, as the product renders it for the model: `label` names
+ * what it is, `body` is the text the model reads. It reaches the model's context, never the transcript.
+ */
+export interface MessageContext {
+  readonly label: string
+  readonly body: string
+}
+
+export interface SendOptions {
+  /** Switch the session to this backend from its next turn on. */
+  readonly backend?: RelayBackendId | undefined
+  /** Attached context, placed just before the message. */
+  readonly context?: ReadonlyArray<MessageContext> | undefined
+}
+
 export interface RelayHarnessService {
   /**
    * Send a message to the session about `ref`. `requestId` makes a retried send land once and names the run
@@ -129,7 +145,7 @@ export interface RelayHarnessService {
     ref: ObjectRef,
     text: string,
     requestId: string,
-    backend?: RelayBackendId
+    options?: SendOptions
   ) => Effect.Effect<void, RelayStoreFailed | RelayBackendNotConfigured>
   /** The session's events: a `Snapshot` first, then every change. Ends when the scope closes. */
   readonly events: (ref: ObjectRef) => Stream.Stream<RelayEvent, RelayStoreFailed>
@@ -387,7 +403,7 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
 
   return RelayHarness.of({
     tools,
-    send: (ref, text, requestId, backend) =>
+    send: (ref, text, requestId, { backend, context = [] } = {}) =>
       Effect.gen(function*() {
         if (backend !== undefined && !options.backends.some((configured) => configured.id === backend)) {
           return yield* new RelayBackendNotConfigured({ backend })
@@ -397,6 +413,22 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
           yield* promise("switch the backend", () =>
             conversation.configure({ model: { provider: backend, modelId: "default" } }, BACKGROUND_CONTEXT))
         }
+        // Context goes in as its own entry: the model reads it, the transcript and Snapshot do not. Each entry
+        // is keyed by the message's requestId, so a retried send places it once.
+        yield* Effect.forEach(context, (item, index) =>
+          promise("attach the context", () =>
+            conversation.submit({
+              type: "write",
+              requestId: `${requestId}#context-${index}`,
+              entry: {
+                kind: "relay.context",
+                model: [{
+                  role: "user",
+                  content: `Context the person attached to their next message: ${item.label}\n${item.body}`,
+                  timestamp: now()
+                }]
+              }
+            }, BACKGROUND_CONTEXT)))
         yield* promise("send the message", () =>
           conversation.submit({ type: "input", content: text, requestId }, BACKGROUND_CONTEXT))
       }),

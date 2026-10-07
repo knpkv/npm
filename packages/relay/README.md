@@ -46,8 +46,10 @@ const RelayLive = Layer.unwrap(
 
 `RelayHarness` then offers:
 
-- `send(ref, text, requestId, backend?)`: `requestId` makes a retried send land once and names the run that
-  answers it; `backend` switches the session from its next turn on (`RelayBackendNotConfigured` otherwise).
+- `send(ref, text, requestId, { backend?, context? })`: `requestId` makes a retried send land once and names
+  the run that answers it. `backend` switches the session from its next turn on (`RelayBackendNotConfigured`
+  otherwise). `context` is what the person attached, as the product renders it (`{ label, body }`): it is
+  placed just before the message for the model, and never appears in the transcript or the Snapshot.
 - `events(ref)`: a `Snapshot` first, with each message's `id` and the `runIds` of a run in flight. Then:
   - `RunStarted { runIds }` and `TextDelta`.
   - `ToolStarted` and `ToolFinished`, each with a server-built, display-safe `summary`. A finished call carries
