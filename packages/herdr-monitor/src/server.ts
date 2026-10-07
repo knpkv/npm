@@ -1,5 +1,6 @@
 import { ByteSize, Clock, Effect, Ref, Schedule, Schema } from "effect"
 import { HttpIncomingMessage, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { failureStatus } from "./failure-status.js"
 import { BoardId, decodeSnapshot, MAX_BYTES, RETENTION_MS, Snapshot, STALE_MS } from "./model.js"
 
 /** The option that failed: a malformed value, or two keys that are the same. Carries no value. */
@@ -44,12 +45,6 @@ const headers = {
   "permissions-policy": "camera=(), microphone=(), geolocation=()"
 }
 const empty = (status: number) => HttpServerResponse.empty({ status, headers })
-
-/**
- * The status for a request the handler could not finish: a publish that stalls past the deadline is
- * a timeout (408); any other failure reading or decoding it is the publisher's request (400).
- */
-export const failureStatus = (error: { readonly _tag: string }): 400 | 408 => error._tag === "TimeoutError" ? 408 : 400
 
 /** Owns one in-memory board, its high-water sequence, rate limits and expiry. No upstream services. */
 export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorOptions, assets: WebAssets) {
@@ -124,7 +119,11 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
       Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Snapshot), { onExcessProperty: "error" })),
       Effect.result
     )
-    if (decoded._tag === "Failure") return empty(400)
+    if (decoded._tag === "Failure") {
+      // Logged by kind only, never the submitted body.
+      yield* Effect.logWarning(`monitor publish rejected: ${decoded.failure._tag}`)
+      return empty(400)
+    }
     const snapshot = yield* decodeSnapshot(decoded.success)
     if (
       snapshot.boardId !== config.boardId || snapshot.sourceAt > now + 30000 || snapshot.sourceAt < now - 300000 ||

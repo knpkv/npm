@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause } from "effect"
-import { failureStatus } from "../src/server.js"
+import { failureStatus } from "../src/failure-status.js"
 
 // The handler used to answer every failure 400 without a trace; a stalled publish is a timeout.
 describe("failureStatus", () => {
