@@ -1,5 +1,13 @@
 # @knpkv/rly
 
+## 0.11.0
+
+### Minor Changes
+
+- [#519](https://github.com/knpkv/npm/pull/519) [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5) Thanks [@konopkov](https://github.com/konopkov)! - `ServiceMark` takes a `name` variant: `visible` (default) prints the provider name, and `hidden` prints the glyph only, where an adjacent title already names the provider. The accessible name is present either way. The mark no longer draws a provider-coloured rail.
+
+  Control Center's Services cards use the hidden name, so the provider is no longer printed twice.
+
 ## 0.10.0
 
 ### Minor Changes
