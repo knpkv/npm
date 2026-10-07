@@ -265,6 +265,8 @@ export const measureFontSwapShift = async (page: Page, options: FontSwapOptions)
     if (!fallback.some((family) => FALLBACK_FAMILIES.includes(family))) {
       throw new FontSwapFallbackMissingError({ families: fallback, selector: probe })
     }
+    // Two presented frames first, so the fallback layout has been painted and a swap shift is measurable.
+    await page.evaluate("new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))")
     await page.evaluate("window.__rlyFontSwap.releasedAt = performance.now()")
     release()
     // Two frames after the fonts load, so the relayout after the last face loads has been observed.

@@ -7,7 +7,8 @@
  */
 import type { AccentStripeViolation } from "./accent-stripes.js"
 
-const GLYPH_UNIT = /(?<![\w.-])(\d*\.?\d+(?:ch|ex|cap|ic))(?![\w-])/gi
+// An optional sign belongs to the length (`-2ch`); a hyphen inside an identifier (`.icon-2ch`) does not.
+const GLYPH_UNIT = /(?<![\w.-])(-?\d*\.?\d+(?:ch|ex|cap|ic))(?![\w-])/gi
 
 /** Blank comments, strings and `url(...)` arguments, keeping offsets, so only real lengths match. */
 const stripNonLengths = (source: string): string =>
