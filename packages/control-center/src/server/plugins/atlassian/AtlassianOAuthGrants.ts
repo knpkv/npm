@@ -403,8 +403,8 @@ const tokenSupportsProducts = (token: TokenResponse, providers: AtlassianOAuthPr
 
 const captureFile = Effect.fn("AtlassianOAuthGrants.captureFile")(function*(filePath: string) {
   const fileSystem = yield* FileSystem.FileSystem
-  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-  const exists = yield* fileSystem.exists(filePath).pipe(Effect.catch(() => Effect.succeed(false)))
+  // An existence check that fails must stop the capture: a file recorded as absent is deleted on restore.
+  const exists = yield* fileSystem.exists(filePath)
   return {
     path: filePath,
     content: exists ? yield* fileSystem.readFileString(filePath) : null
@@ -423,8 +423,7 @@ const captureAuthStore = Effect.fn("AtlassianOAuthGrants.captureAuthStore")(func
 const restoreFile = Effect.fn("AtlassianOAuthGrants.restoreFile")(function*(snapshot: StoredFileSnapshot) {
   const fileSystem = yield* FileSystem.FileSystem
   if (snapshot.content !== null) return yield* writeSecureFile(snapshot.path, snapshot.content)
-  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-  const exists = yield* fileSystem.exists(snapshot.path).pipe(Effect.catch(() => Effect.succeed(false)))
+  const exists = yield* fileSystem.exists(snapshot.path)
   if (exists) yield* fileSystem.remove(snapshot.path)
 })
 
@@ -668,8 +667,9 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
           Effect.tapError(() =>
             restoreAuthStores(snapshots).pipe(
               Effect.provide(localStorageLayer),
-              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-              Effect.catch(() => Effect.void)
+              Effect.catch((error) =>
+                Effect.logError("Could not restore the Atlassian auth stores after a failed save", error)
+              )
             )
           ),
           Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
