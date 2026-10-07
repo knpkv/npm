@@ -26,7 +26,7 @@
     "pretest": "pnpm --filter @knpkv/browser-pairing build",
     "test": "vitest",
     "test:relay-smoke:real": "vitest run --config vitest.real-smoke.config.ts",
-    "test:browser": "pnpm --filter \"@knpkv/browser-pairing\" build && pnpm --filter \"@knpkv/relay-product...\" build && pnpm --filter \"@knpkv/review...\" build && pnpm build && playwright test --config playwright.config.ts",
+    "test:browser": "pnpm --filter \"@knpkv/browser-pairing\" build && pnpm --filter \"@knpkv/relay-product...\" build && pnpm --filter \"@knpkv/review...\" build && pnpm --filter \"@knpkv/codecommit-core...\" build && pnpm build && playwright test --config playwright.config.ts",
     "lint": "eslint \"{src,test,e2e}/**/*.{ts,tsx}\" playwright.config.ts",
     "docgen": "docgen"
   },
