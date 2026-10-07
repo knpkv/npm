@@ -84,7 +84,7 @@
     "test": "vitest run",
     "test:browser": "pnpm test:storybook && pnpm test:visual",
     "test:pack": "tsx scripts/test-packed-package.ts",
-    "test:storybook": "vitest run --config vitest.storybook.config.ts --project storybook && vitest run --config vitest.storybook.config.ts --project storybook-phone",
+    "test:storybook": "vitest run --config vitest.storybook.config.ts --project storybook && vitest run --config vitest.storybook.config.ts --project storybook-phone && vitest run --config vitest.storybook.config.ts --project storybook-touch",
     "test:visual": "pnpm storybook:build && playwright test --config playwright.config.ts",
     "validate:dist": "tsx scripts/validate-dist.ts",
     "validate:registry": "tsx scripts/validate-registry.ts",

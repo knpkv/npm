@@ -28,10 +28,16 @@
  *
  * @category CacheService
  */
-import { Effect } from "effect"
+import { Data, Effect } from "effect"
 import type * as SqlClient from "effect/sql/SqlClient"
 import type * as Statement from "effect/sql/Statement"
 import { joinApprovedBy, type UpsertInput } from "./internal.js"
+
+/**
+ * The `observation_sequence` row is missing, so no observation number can be taken. Without one, reads
+ * of the same revision can't be ordered; callers skip the read instead.
+ */
+export class ObservationSequenceMissing extends Data.TaggedError("ObservationSequenceMissing")<{}> {}
 
 /** A version: the provider last activity a read saw, and the observation it came from. */
 export interface RowVersion {
@@ -169,10 +175,15 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
   }
 
   return {
-    /** The next observation number, taken before a provider read. */
+    /** The next observation number, taken before a provider read. Fails when the sequence row is missing. */
     observe: () =>
       sql<{ readonly value: number }>`UPDATE observation_sequence SET value = value + 1 WHERE id = 1 RETURNING value`
-        .pipe(Effect.map((rows) => rows[0]?.value ?? 0)),
+        .pipe(
+          Effect.flatMap((rows) => {
+            const next = rows[0]
+            return next === undefined ? Effect.fail(new ObservationSequenceMissing()) : Effect.succeed(next.value)
+          })
+        ),
 
     /**
      * Insert a listed pull request, or write each of its groups unless that group is newer. A deleted

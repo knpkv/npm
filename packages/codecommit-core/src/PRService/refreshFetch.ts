@@ -200,50 +200,34 @@ export const fetchAndUpsertPRs = (params: {
     yield* Stream.mergeAll(streams, { concurrency: 2 }).pipe(
       Stream.runForEach(({ awsAccountId, label, observation, pr, profile, region }) =>
         Effect.gen(function*() {
-          // Diff subscribed PRs against cache. The notifications are sent only once the upsert applies:
-          // a listing older than the cached row changes nothing, so it announces nothing.
-          const pending: ReadonlyArray<NewNotification> = yield* Effect.gen(function*() {
-            const subscribed = yield* Ref.get(subscribedRef)
-            if (
-              awsAccountId !== "" &&
-              (yield* isSubscribedForCoordinates(
-                prRepo,
-                subscribed,
-                awsAccountId,
-                pr.id,
-                pr.repositoryName,
-                pr.account.region
-              ))
-            ) {
-              const cached = yield* prRepo.findByCoordinates(
-                awsAccountId,
-                pr.id,
-                pr.repositoryName,
-                pr.account.region
-              ).pipe(
-                Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
-              )
-              if (Option.isSome(cached)) {
-                const notifications = diffPR(cached.value, prToUpsertInput(pr, awsAccountId), awsAccountId)
-                // While approval is unknown the cache keeps its last known rules, so comparing them with
-                // the fresh ones would repeat the same notification every refresh; membership is compared
-                // once evaluation recovers.
-                const poolNotifications = pr.approvalUnknown !== undefined ? [] : diffApprovalPools(
-                  cached.value.approvalRules ?? [],
-                  pr.approvalRules,
-                  currentUser,
-                  pr.id,
-                  awsAccountId,
-                  pr.title,
-                  pr.account.profile,
-                  pr.repositoryName,
-                  pr.account.region
-                )
-                return [...notifications, ...poolNotifications]
-              }
-            }
-            return []
-          })
+          // Subscribed pull requests announce what changed: diffed after the write, against the row it
+          // replaced, and only for the groups it wrote. A snapshot read earlier could be one another
+          // write has changed since.
+          const subscribed = awsAccountId !== "" && (yield* isSubscribedForCoordinates(
+            prRepo,
+            yield* Ref.get(subscribedRef),
+            awsAccountId,
+            pr.id,
+            pr.repositoryName,
+            pr.account.region
+          ))
+          const transitions = (replaced: CachedPullRequest): ReadonlyArray<NewNotification> => [
+            ...diffPR(replaced, prToUpsertInput(pr, awsAccountId), awsAccountId),
+            // While approval is unknown the cache keeps its last known rules, so comparing them with the
+            // fresh ones would repeat the same notification every refresh; membership is compared once
+            // evaluation recovers.
+            ...(pr.approvalUnknown !== undefined ? [] : diffApprovalPools(
+              replaced.approvalRules ?? [],
+              pr.approvalRules,
+              currentUser,
+              pr.id,
+              awsAccountId,
+              pr.title,
+              pr.account.profile,
+              pr.repositoryName,
+              pr.account.region
+            ))
+          ]
 
           // Upsert to cache + auto-subscribe current user's PRs
           if (awsAccountId !== "") {
@@ -251,7 +235,7 @@ export const fetchAndUpsertPRs = (params: {
               Effect.tapError((e) => Effect.logWarning("cache upsert error", e)),
               Effect.catch(() =>
                 withholdScopeSuccess(pr.account.profile, pr.account.region).pipe(
-                  Effect.as({ row: false, approval: false })
+                  Effect.as({ row: false, approval: false, replaced: Option.none<CachedPullRequest>() })
                 )
               )
             )
@@ -270,6 +254,7 @@ export const fetchAndUpsertPRs = (params: {
               }])
               yield* Ref.update(partialScopes, (scopes) => new Set(scopes).add(accountRegionKey(profile, region)))
             }
+            const pending = subscribed ? Option.match(written.replaced, { onNone: () => [], onSome: transitions }) : []
             yield* Effect.forEach(notificationsFor(pending, written), (n) => notificationRepo.add(n), {
               discard: true
             }).pipe(Effect.catch(() => Effect.void))

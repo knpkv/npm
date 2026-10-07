@@ -43,11 +43,21 @@ describe("ServiceMark", () => {
       "confluence",
       "clockify"
     ])
+    expect(Object.keys(RLY_SERVICE_MARK_VARIANTS.name)).toEqual(["visible", "hidden"])
     expect(Object.keys(RLY_SERVICE_MARK_VARIANTS.size)).toEqual(["compact", "default"])
-    expect(RLY_SERVICE_MARK_DEFAULT_VARIANTS).toEqual({ size: "default" })
+    expect(RLY_SERVICE_MARK_DEFAULT_VARIANTS).toEqual({ name: "visible", size: "default" })
 
     const compact = render(<ServiceMark service="jira" size="compact" />)
     expect(compact?.className).toContain(RLY_SERVICE_MARK_VARIANTS.size.compact.className)
     expect(compact?.getAttribute("aria-label")).toBe("Jira")
+  })
+
+  it("keeps the accessible name when the printed name is hidden", () => {
+    const mark = render(<ServiceMark name="hidden" service="codecommit" />)
+    expect(mark?.getAttribute("role")).toBe("img")
+    expect(mark?.getAttribute("aria-label")).toBe("CodeCommit")
+    expect(mark?.textContent).toBe("")
+    expect(mark?.querySelector("svg")).not.toBeNull()
+    expect(mark?.className).toContain(RLY_SERVICE_MARK_VARIANTS.name.hidden.className)
   })
 })

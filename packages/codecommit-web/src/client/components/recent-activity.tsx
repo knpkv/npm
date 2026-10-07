@@ -110,9 +110,7 @@ export function RecentActivity({ notifications }: RecentActivityProps) {
                 </Text>
                 <Text tone="tertiary" variant="meta">
                   {DateUtils.formatRelativeTime(new Date(notification.createdAt), now)}
-                  {notification.profile !== undefined && notification.profile !== ""
-                    ? ` · ${notification.profile}`
-                    : ""}
+                  {notification.profile !== undefined && notification.profile !== "" ? `, ${notification.profile}` : ""}
                 </Text>
               </span>
             </>
