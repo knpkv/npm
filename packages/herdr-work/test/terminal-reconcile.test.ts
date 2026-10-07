@@ -326,6 +326,51 @@ describe("terminal reconcile", () => {
       expect((yield* currentGoal(work))?.state).toBe("review")
     })))
 
+  it.effect("an old confirmation can't be replayed once its dispute is evicted: the disputed fact goes too", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      const closed = yield* work.observe([{
+        observation: pullRequest({ closedAt: 5_000, state: "closed" }),
+        observedAt: 6_000
+      }])
+      yield* work.observe([{
+        observation: {
+          _tag: "unknown",
+          reason: "GitHub returned 502",
+          source: "github",
+          subject: "github:knpkv/npm#7"
+        },
+        observedAt: 7_000
+      }])
+      yield* work.observe(Array.from({ length: 4_096 }, (_, index): WorkObservationEnvelope => ({
+        observation: {
+          _tag: "unknown",
+          reason: "GitHub returned 502",
+          source: "github",
+          subject: `github:knpkv/other#${String(index + 1)}`
+        },
+        observedAt: 8_000
+      })))
+      expect(yield* Effect.result(work.reconcile({ confirmed: confirmedIn(closed) }))).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "reconcile.confirmed" }
+      })
+      expect((yield* currentGoal(work))?.state).toBe("review")
+    })))
+
+  it.effect("an identical read older than the stored confirmation confirms nothing", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture
+      yield* record(work, "goal-pr7.1", goal())
+      yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "closed" }), observedAt: 8_000 }])
+      const older = yield* work.observe([{
+        observation: pullRequest({ closedAt: 5_000, state: "closed" }),
+        observedAt: 7_000
+      }])
+      expect(older.outcomes.map(({ _tag }) => _tag)).toEqual(["stale"])
+      expect(confirmedIn(older)).toEqual([])
+    })))
+
   it.effect("records a pull request closed without merging as abandoned", () =>
     Effect.scoped(Effect.gen(function*() {
       const { store, work } = yield* fixture

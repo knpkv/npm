@@ -66,8 +66,9 @@ read and the store accepted: `confirmed` lists the `subject` and
 `observationId` of each `stored` or `unchanged` outcome from that `observe`. A
 read refused as stale, or one that failed, confirms nothing, so a fact stored
 earlier (the pull request may since have reopened) never closes a goal,
-including one the snapshot hides as superseded, and evicting old failure records
-can't change that. A confirmation that is no longer the subject's stored fact
+including one the snapshot hides as superseded. An identical read older than the
+stored confirmation confirms nothing, and evicting a failed read that disputes a
+fact evicts that fact too, so an old confirmation can't be replayed. A confirmation that is no longer the subject's stored fact
 fails with `WorkStoreError` (`reconcile.confirmed`), and a malformed one with
 `reconcile.options`. A failed read newer than a fact's confirmation is also
 checked, inside the write's transaction too, while that failure is retained. The checkpoint adds a `reconciler.` activity unless the goal's

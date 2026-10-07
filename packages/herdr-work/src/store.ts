@@ -2133,6 +2133,10 @@ const writeObservations = (
         recordFailure.run(item.subject, item.source, item.reason, item.observedAt, item.observedAt)
         return { _tag: "unknown", reason: item.reason, subject: item.subject }
       }
+      // The same facts read before the stored confirmation confirm nothing now.
+      if (stored?.observationId === item.observationId && stored.confirmedAt > item.observedAt) {
+        return { _tag: "stale", subject: item.subject }
+      }
       if (stored?.observationId === item.observationId) {
         confirmFact.run(item.observedAt, item.subject)
         endFailures.run(item.subject, item.observedAt)
@@ -2145,7 +2149,14 @@ const writeObservations = (
     })
     // Totals are read once and kept current as rows go, so eviction is one
     // indexed lookup and delete per row, not a full rescan per row.
-    const evict = (table: string, age: string, payload: string): number => {
+    // A failure disputes its subject's fact while it is newer than that fact's
+    // confirmation; evicting such a failure evicts the fact with it, so a
+    // disputed fact never outlives the record of its dispute.
+    const removeDisputedFact = database.prepare(
+      `DELETE FROM work_observed_facts WHERE subject = ? AND confirmed_at <
+         (SELECT last_at FROM work_observed_failures WHERE subject = ?)`
+    )
+    const evict = (table: string, age: string, payload: string, beforeRemove?: (subject: string) => number): number => {
       const size = `length(CAST(subject AS BLOB)) + length(CAST(${payload} AS BLOB))`
       const totals = Schema.decodeUnknownSync(FactTotalsRow)(
         database.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${size}), 0) AS bytes FROM ${table}`).get()
@@ -2158,6 +2169,7 @@ const writeObservations = (
       let evicted = 0
       while (count > workObservedFactMaxRecords || bytes > workObservedFactMaxBytes) {
         const row = Schema.decodeUnknownSync(EvictionRow)(oldest.get())
+        evicted += beforeRemove?.(row.subject) ?? 0
         remove.run(row.subject)
         count -= 1
         bytes -= row.bytes
@@ -2168,7 +2180,10 @@ const writeObservations = (
     // The least recently read rows go first: a fact by its last confirmation,
     // a failure by its latest failed read.
     const evicted = evict("work_observed_facts", "confirmed_at", "record") +
-      evict("work_observed_failures", "last_at", "reason")
+      evict("work_observed_failures", "last_at", "reason", (subject) => {
+        const changes = removeDisputedFact.run(subject, subject).changes
+        return Number(changes)
+      })
     database.exec("COMMIT")
     return { evicted, outcomes }
   } catch (cause) {
