@@ -17,7 +17,9 @@ const processArgv = Effect.gen(function*() {
   return args
 })
 
-const tui = Command.make("tui", {}, () => processArgv.pipe(Effect.flatMap(launchTuiOrSetup)))
+const tui = Command.make("tui", {}, () => processArgv.pipe(Effect.flatMap(launchTuiOrSetup))).pipe(
+  Command.withDescription("Open the terminal UI (the default; needs Bun)")
+)
 
 const skillsInstall = makeInstallCommand({
   description: "Install the Jira Clockify agent skill",
@@ -26,6 +28,7 @@ const skillsInstall = makeInstallCommand({
 })
 
 const skills = Command.make("skills", {}, () => Console.log("Usage: jcf skills install")).pipe(
+  Command.withDescription("Install jcf's skill for coding agents"),
   Command.withSubcommands([skillsInstall])
 )
 
@@ -49,5 +52,8 @@ export const root: Command.Command<
   {},
   () => processArgv.pipe(Effect.flatMap(launchTuiOrSetup))
 ).pipe(
+  Command.withDescription(
+    "Track time on Jira issues in Clockify. Run with no command to set up and open the terminal UI."
+  ),
   Command.withSubcommands([tui, AuthCommand.auth, timer, issue, sync, watch, config, skills])
 )
