@@ -146,7 +146,10 @@ describe("PRService.refresh", () => {
           findAll: () => Ref.get(rows),
           findStaleOpen: () => Effect.succeed([]),
           findMissingDiffStats: () => Effect.succeed([]),
-          upsert: () => Ref.set(rows, [cachedPR]).pipe(Effect.as({ row: true, approval: true, versions: undefined })),
+          upsert: () =>
+            Ref.set(rows, [cachedPR]).pipe(
+              Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+            ),
           writeDerived: () => Effect.succeed(true),
           refreshCommentedBy: () => Effect.void,
           propagateRepoAccountId: () => Effect.void

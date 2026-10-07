@@ -332,8 +332,6 @@ describe("sandbox security boundary", () => {
   })
 
   it.effect("pipes container environment without exposing secrets in process arguments", () =>
-    // The fake spawner intentionally supplies the runtime process boundary in this security test.
-    // @effect-diagnostics-next-line missingEffectContext:off
     Effect.gen(function*() {
       const commands: Array<ChildProcess.Command> = []
       const output = Stream.make("container-id\n").pipe(Stream.encodeText)
