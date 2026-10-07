@@ -106,7 +106,8 @@
   .standalone[aria-pressed="true"] {
     background: var(--rly-color-surface-3);
     color: var(--rly-color-text-1);
-    box-shadow: inset 0 -3px var(--rly-color-focus);
+    /* Pressed is marked in text ink; the focus colour is reserved for the focus ring. */
+    box-shadow: inset 0 -2px var(--rly-color-text-1);
   }
 
   .group button:hover,
@@ -117,8 +118,8 @@
 
   .group button:focus-visible,
   .standalone:focus-visible {
-    outline: 3px solid var(--rly-color-focus);
-    outline-offset: var(--rly-space-2);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
     position: relative;
     z-index: 1;
   }
