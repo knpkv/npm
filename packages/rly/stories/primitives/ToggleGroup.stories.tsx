@@ -35,6 +35,7 @@ export const Interaction: Story = {
     <div style={{ display: "grid", gap: "var(--rly-space-16)" }}>
       <Controlled aria-label={args["aria-label"]} initial="7d" items={args.items} />
       <Controlled aria-label={`${args["aria-label"]} (compact)`} initial="24h" items={args.items} size="compact" />
+      <Controlled aria-label={`${args["aria-label"]} (default)`} initial="30d" items={args.items} size="default" />
     </div>
   )
 }

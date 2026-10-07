@@ -53,7 +53,7 @@ const BoundedAnnotationCard = ({
 }): ReactElement => (
   <article data-bounded-annotation-status={status} style={cardStyle}>
     <strong>
-      {severity} · {confidence} confidence · {status}
+      {severity}, {confidence} confidence, {status}
     </strong>
     <span>{evidence}</span>
     {replacement === undefined ? null : <span>Replacement: {replacement}</span>}

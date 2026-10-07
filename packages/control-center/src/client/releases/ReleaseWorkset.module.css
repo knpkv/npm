@@ -82,7 +82,8 @@
 }
 
 .selectedFacts dd {
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .trace {
@@ -132,7 +133,8 @@
 
 .traceConnection a {
   color: var(--rly-color-text-1);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
   text-decoration-color: var(--rly-color-border-2);
   text-underline-offset: var(--rly-space-2);
 }

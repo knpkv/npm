@@ -57,7 +57,7 @@ const toneIcons = {
   progress: "loader"
 } satisfies Readonly<Record<RlyVerdictTone, RlyIconName>>
 
-/** Render a neutral giant verdict with explicit icon, semantic rail, and supplied reason. */
+/** Render a neutral giant verdict with an explicit icon, an even tone border and tint, and the supplied reason. */
 export const Verdict = ({ className, reason, tone, verdict, ...props }: VerdictProps): ReactElement => {
   const visibleReason = requireText(reason, "Verdict reason")
   const visibleVerdict = requireText(verdict, "Verdict verdict")

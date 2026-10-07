@@ -18,12 +18,25 @@ const concreteControlElements = new Set(["button", "input", "select", "textarea"
 
 export const RLY_FIELD_VARIANTS = defineVariants({
   size: {
-    compact: { className: style("compact"), purpose: "Dense form rows", tokens: ["space-40", "type-meta"] },
-    default: { className: style("defaultSize"), purpose: "Standard form controls", tokens: ["space-48", "type-label"] }
+    dense: {
+      className: style("dense"),
+      purpose: "Tool-density form controls; the default",
+      tokens: ["control-height-dense", "radius-tag"]
+    },
+    compact: {
+      className: style("compact"),
+      purpose: "Dense form rows",
+      tokens: ["control-height-compact", "type-meta"]
+    },
+    default: {
+      className: style("defaultSize"),
+      purpose: "Standard form controls",
+      tokens: ["control-height-default", "type-label"]
+    }
   }
 })
 
-export const RLY_FIELD_DEFAULT_VARIANTS = defineVariants({ size: "default" })
+export const RLY_FIELD_DEFAULT_VARIANTS = defineVariants({ size: "dense" })
 export type RlyFieldSize = keyof typeof RLY_FIELD_VARIANTS.size
 
 /** DOM-neutral semantics to spread onto an input, textarea, native select, or rly Select. */

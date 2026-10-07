@@ -24,9 +24,9 @@ import {
   ScrollTextIcon,
   SunIcon
 } from "lucide-react"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 import { Link, useLocation, useNavigate } from "react-router"
-import { appStateAtom, notificationsSsoLogoutAtom, refreshAtom } from "../atoms/app.js"
+import { appStateAtom, refreshAtom } from "../atoms/app.js"
 import { commandPaletteAtom } from "../atoms/ui.js"
 import { usePublishedBlockSize } from "../hooks/usePublishedBlockSize.js"
 import { queuePullRequests } from "../utils/queuePullRequests.js"
@@ -34,6 +34,7 @@ import { callerOf, yourReviewCount } from "./workbench-queue.js"
 import styles from "./header.module.css"
 import { useTheme } from "./theme-provider.js"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.js"
+import { SsoSignOutDialog } from "./sso-sign-out-dialog.js"
 import { Kbd } from "./ui/kbd.js"
 
 interface NavigationItem {
@@ -94,7 +95,7 @@ export function Header() {
   const headerRef = usePublishedBlockSize<HTMLElement>("--app-header-block-size")
   const state = useAtomValue(appStateAtom)
   const refresh = useAtomSet(refreshAtom)
-  const ssoLogout = useAtomSet(notificationsSsoLogoutAtom)
+  const [signOutOpen, setSignOutOpen] = useState(false)
   const setCommandPaletteOpen = useAtomSet(commandPaletteAtom)
   const navigate = useNavigate()
   const { pathname } = useLocation()
@@ -245,15 +246,16 @@ export function Header() {
             {state.currentUser ? (
               <>
                 <div className={styles.menuSeparator} role="separator" />
-                <DropdownMenuItem onSelect={() => ssoLogout({})}>
+                <DropdownMenuItem onSelect={() => setSignOutOpen(true)}>
                   <LogOutIcon />
-                  Log out
+                  Sign out of AWS SSO…
                 </DropdownMenuItem>
               </>
             ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
+      <SsoSignOutDialog onOpenChange={setSignOutOpen} open={signOutOpen} />
     </header>
   )
 }

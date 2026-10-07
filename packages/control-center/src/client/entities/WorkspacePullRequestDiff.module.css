@@ -80,7 +80,6 @@
 .overview > section > ul > li {
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-1);
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-text-3);
   border-radius: var(--rly-radius-field);
   gap: var(--rly-space-8);
   padding: var(--rly-space-16);
@@ -88,11 +87,11 @@
 
 .overview li[data-severity="P1"],
 .overview li[data-severity="P2"] {
-  border-inline-start-color: var(--rly-color-blocked-ink);
+  border-color: var(--rly-color-blocked-ink);
 }
 
 .overview li[data-severity="P3"] {
-  border-inline-start-color: var(--rly-color-held-ink);
+  border-color: var(--rly-color-held-ink);
 }
 
 .overview li > span,
@@ -111,7 +110,8 @@
 }
 
 .overview code {
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .viewerTarget > * {

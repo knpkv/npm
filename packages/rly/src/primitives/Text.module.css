@@ -2,7 +2,7 @@
   .root {
     margin: var(--rly-space-0);
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .verdict,

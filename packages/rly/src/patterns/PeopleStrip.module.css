@@ -33,17 +33,18 @@
   .overflow {
     align-items: center;
     appearance: none;
-    background: var(--rly-color-surface-2);
-    border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-round);
+    /* A rectangular dense control like a secondary button, the same in light and dark. */
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-tag);
+    min-block-size: var(--rly-control-height-dense);
     color: var(--rly-color-text-1);
     cursor: pointer;
     display: inline-flex;
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     justify-content: center;
-    min-block-size: var(--rly-space-40);
-    padding: var(--rly-space-8) var(--rly-space-12);
+    padding: var(--rly-space-4) var(--rly-space-12);
   }
 
   .overflow:hover {

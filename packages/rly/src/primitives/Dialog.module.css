@@ -55,7 +55,7 @@
       var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
     letter-spacing: var(--rly-type-section-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     text-wrap: balance;
   }
 
@@ -64,13 +64,13 @@
     font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
       var(--rly-type-body-large-font);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     text-wrap: pretty;
   }
 
   .body {
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .overlay[data-state="open"] {
