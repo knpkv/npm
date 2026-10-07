@@ -4,7 +4,7 @@ import test from "node:test"
 import {
   extensionsOf,
   languageFailures,
-  languageFor,
+  languagesFor,
   samplePath,
   smokeFiles
 } from "./check-ast-grep-rule-languages.mjs"
@@ -17,11 +17,30 @@ test("reads the extensions a files glob selects", () => {
   assert.equal(extensionsOf("packages/**/*"), undefined)
 })
 
-test("resolves languages through sgconfig languageGlobs before ast-grep's defaults", () => {
-  assert.equal(languageFor("ts", languageGlobs), "tsx")
-  assert.equal(languageFor("mjs", languageGlobs), "javascript")
-  assert.equal(languageFor("css", languageGlobs), "css")
-  assert.equal(languageFor("ts", {}), "typescript")
+test("resolves a path's language through sgconfig languageGlobs before ast-grep's defaults", () => {
+  assert.deepEqual(languagesFor("packages/a/src/x.ts", languageGlobs), ["tsx"])
+  assert.deepEqual(languagesFor("scripts/x.mjs", languageGlobs), ["javascript"])
+  assert.deepEqual(languagesFor("packages/a/src/x.css", languageGlobs), ["css"])
+  assert.deepEqual(languagesFor("x.ts", {}), ["typescript"])
+})
+
+test("resolves path-scoped languageGlobs by the whole path, not the extension", () => {
+  const scoped = { tsx: ["packages/**/*.ts"], typescript: ["scripts/**/*.ts"] }
+  assert.deepEqual(
+    languageFailures({ id: "script-rule", language: "typescript", files: ["scripts/**/*.ts"] }, scoped),
+    []
+  )
+  assert.deepEqual(
+    languageFailures({ id: "script-rule", language: "tsx", files: ["scripts/**/*.ts"] }, scoped).map(
+      ({ _tag }) => _tag
+    ),
+    ["LanguageMismatch"]
+  )
+  const overlapping = { tsx: ["**/*.ts"], typescript: ["packages/**/*.ts"] }
+  assert.deepEqual(
+    languageFailures({ id: "both", language: "tsx", files: ["packages/**/*.ts"] }, overlapping).map(({ _tag }) => _tag),
+    ["LanguageAmbiguous"]
+  )
 })
 
 test("fails a glob whose files sgconfig parses as another language", () => {
@@ -33,8 +52,8 @@ test("fails a glob whose files sgconfig parses as another language", () => {
         rule: "no-cast",
         ruleLanguage: "tsx",
         glob: "scripts/**/*.mjs",
-        language: "javascript",
-        extension: "mjs"
+        path: "scripts/smoke/no-cast-0.mjs",
+        language: "javascript"
       }
     ]
   )

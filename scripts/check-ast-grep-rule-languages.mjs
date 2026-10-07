@@ -1,5 +1,6 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import { posix } from "node:path"
 import { URL } from "node:url"
 import { parse } from "yaml"
 
@@ -52,12 +53,17 @@ export const extensionsOf = (glob) => {
   return extensions.every((extension) => extension !== undefined) ? [...new Set(extensions)] : undefined
 }
 
-/** The language ast-grep parses files with this extension as, under sgconfig's `languageGlobs`. */
-export const languageFor = (extension, languageGlobs) => {
-  for (const [language, globs] of Object.entries(languageGlobs ?? {})) {
-    if (globs.some((glob) => (extensionsOf(glob) ?? []).includes(extension))) return language
-  }
-  return defaultLanguages.get(extension)
+/**
+ * The languages ast-grep may parse a repository-relative path as: the `languageGlobs` entries whose globs match
+ * the whole path, or else ast-grep's default for its extension. More than one means the config is ambiguous.
+ */
+export const languagesFor = (relativePath, languageGlobs) => {
+  const overrides = Object.entries(languageGlobs ?? {})
+    .filter(([, globs]) => globs.flatMap(expandBraces).some((glob) => posix.matchesGlob(relativePath, glob)))
+    .map(([language]) => language)
+  if (overrides.length > 0) return overrides
+  const fallback = defaultLanguages.get(relativePath.match(/\.([A-Za-z0-9]+)$/u)?.[1] ?? "")
+  return fallback === undefined ? [] : [fallback]
 }
 
 /**
@@ -68,11 +74,13 @@ export const languageFailures = (rule, languageGlobs) =>
   (rule.files ?? []).flatMap((glob) => {
     const extensions = extensionsOf(glob)
     if (extensions === undefined) return [{ _tag: "LanguageUndetermined", rule: rule.id, glob }]
-    return extensions.flatMap((extension) => {
-      const language = languageFor(extension, languageGlobs)
-      return language === rule.language
+    return expandBraces(glob).flatMap((variant) => {
+      const path = samplePath(variant, rule.id, 0)
+      const languages = languagesFor(path, languageGlobs)
+      if (languages.length > 1) return [{ _tag: "LanguageAmbiguous", rule: rule.id, glob, path, languages }]
+      return languages[0] === rule.language
         ? []
-        : [{ _tag: "LanguageMismatch", rule: rule.id, ruleLanguage: rule.language, glob, language, extension }]
+        : [{ _tag: "LanguageMismatch", rule: rule.id, ruleLanguage: rule.language, glob, path, language: languages[0] }]
     })
   })
 
@@ -85,7 +93,10 @@ export const samplePath = (glob, ruleId, index) =>
     .replace(/\[[^\]]*\]/gu, (set) => set.replace(/^\[!?/u, "").charAt(0))
 
 const extensionFor = (language, languageGlobs) =>
-  [...defaultLanguages.keys()].find((extension) => languageFor(extension, languageGlobs) === language)
+  [...defaultLanguages.keys()].find((extension) => {
+    const languages = languagesFor(`smoke/sample.${extension}`, languageGlobs)
+    return languages.length === 1 && languages[0] === language
+  })
 
 /** The fixture files to scan: one per `files` glob, holding the rule's first invalid fixture. */
 export const smokeFiles = (rule, invalid, languageGlobs) => {
@@ -96,9 +107,9 @@ export const smokeFiles = (rule, invalid, languageGlobs) => {
 const describeFailure = (failure) => {
   switch (failure._tag) {
     case "LanguageMismatch":
-      return `${failure.rule}: files glob ${failure.glob} selects .${failure.extension} files, which sgconfig parses as ${
-        failure.language ?? "no language"
-      }, not ${failure.ruleLanguage}. The rule never runs on them. Fix: drop the glob or change the rule's language.`
+      return `${failure.rule}: files glob ${failure.glob} selects files such as ${failure.path}, which sgconfig parses as ${failure.language ?? "no language"}, not ${failure.ruleLanguage}. The rule never runs on them. Fix: drop the glob or change the rule's language.`
+    case "LanguageAmbiguous":
+      return `${failure.rule}: files glob ${failure.glob} selects files such as ${failure.path}, which several sgconfig languageGlobs entries claim (${failure.languages.join(", ")}). Fix: make the languageGlobs entries disjoint.`
     case "LanguageUndetermined":
       return `${failure.rule}: files glob ${failure.glob} does not end in a file extension, so its language cannot be checked. Fix: name the extension.`
     case "MissingFixture":
