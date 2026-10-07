@@ -100,4 +100,26 @@ describe("JiraApiClient credentials", () => {
       expect(requests[0]?.url).toBe("https://jira.test/rest/api/3/issue/PROJ-1")
       expect(requests.map((request) => request.headers.authorization)).toEqual([expected, expected])
     }))
+
+  // A resolver can hand back an API token for whichever site was connected since the client was
+  // built (jcf-web runs while `jcf auth jira token` changes the site), so the host travels with it.
+  it.effect("routes a resolved API token at its own site", () =>
+    Effect.gen(function*() {
+      const requests: Array<HttpClientRequest.HttpClientRequest> = []
+      const client = make(recording(requests), {
+        baseUrl: "",
+        auth: staleCredential,
+        resolveAuth: Effect.succeed({
+          type: "basic",
+          email: "user@example.com",
+          apiToken: Redacted.make("test-token"),
+          siteUrl: "https://team.atlassian.net"
+        })
+      })
+
+      yield* client.getIssue("PROJ-1", undefined)
+
+      expect(requests[0]?.url).toBe("https://team.atlassian.net/rest/api/3/issue/PROJ-1")
+      expect(requests[0]?.headers.authorization).toBe(`Basic ${Base64.encode("user@example.com:test-token")}`)
+    }))
 })

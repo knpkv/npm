@@ -114,6 +114,7 @@ import {
   WorkLaneClaim,
   WorkLaneClaimed,
   WorkObservationEnvelope,
+  WorkObservationId,
   workObservationMaxSkewMillis,
   WorkObservationSubject,
   WorkObservedAdmission,
@@ -123,6 +124,7 @@ import {
   WorkObservedFailure,
   WorkProspectiveAdmission,
   WorkPullRequestLink,
+  WorkReconcileOptions,
   workReconcilerHeadroom,
   WorkRecoveryTarget,
   workSnapshotMaxGoals
@@ -1313,7 +1315,8 @@ interface ReconcilerGuard {
   readonly reserve: number
 }
 
-const ObservationIdRow = Schema.Struct({ observationId: Schema.String })
+const ObservationIdRow = Schema.Struct({ observationId: Schema.String, confirmedAt: Schema.Number })
+const FailureLastAtRow = Schema.Struct({ lastAt: Schema.Number })
 type AppendDecision =
   | { readonly _tag: "inserted"; readonly changes: bigint | number }
   | { readonly _tag: "replayed"; readonly event: WorkGoalCheckpointType }
@@ -2003,7 +2006,7 @@ export interface WorkStoreService {
    * completed or abandoned, stamped with the close time. Only these terminal
    * facts are ever written to goal history; everything else stays an overlay.
    */
-  readonly reconcile: () => Effect.Effect<
+  readonly reconcile: (options: WorkReconcileOptions) => Effect.Effect<
     ReadonlyArray<WorkReconcileOutcome>,
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
@@ -2041,13 +2044,14 @@ const ObservedFactRow = Schema.Struct({
 
 const StoredFactRow = Schema.Struct({ observationId: Schema.String, confirmedAt: Schema.Number })
 const FactTotalsRow = Schema.Struct({ count: Schema.Number, bytes: Schema.Number })
-const EvictionRow = Schema.Struct({ subject: Schema.String, bytes: Schema.Number })
+const EvictionRow = Schema.Struct({ subject: Schema.String, bytes: Schema.Number, age: Schema.Number })
+const EvictedThroughRow = Schema.Struct({ evictedThrough: Schema.Number })
 
 type PreparedObservation =
   | {
     readonly _tag: "fact"
     readonly subject: string
-    readonly observationId: string
+    readonly observationId: WorkObservationId
     readonly observedAt: number
     readonly record: string
   }
@@ -2087,6 +2091,15 @@ const writeObservations = (
       `SELECT observation_id AS observationId, confirmed_at AS confirmedAt
        FROM work_observed_facts WHERE subject = ?`
     )
+    // The newest time of any row eviction has removed. A subject with no row
+    // may have had one, so a fact read no newer than this can't be shown to
+    // be current, and is stale: eviction never makes an old read new again.
+    const evictedRow = database.prepare(
+      "SELECT evicted_through AS evictedThrough FROM work_observed_eviction WHERE singleton = 1"
+    ).get()
+    const evictedThrough = evictedRow === undefined
+      ? Number.NEGATIVE_INFINITY
+      : Schema.decodeUnknownSync(EvictedThroughRow)(evictedRow).evictedThrough
     const upsertFact = database.prepare(
       `INSERT INTO work_observed_facts (subject, observation_id, observed_at, confirmed_at, record)
        VALUES (?, ?, ?, ?, ?)
@@ -2131,31 +2144,46 @@ const writeObservations = (
         recordFailure.run(item.subject, item.source, item.reason, item.observedAt, item.observedAt)
         return { _tag: "unknown", reason: item.reason, subject: item.subject }
       }
+      if (stored === undefined && item.observedAt <= evictedThrough) return { _tag: "stale", subject: item.subject }
+      // The same facts read before the stored confirmation confirm nothing now.
+      if (stored?.observationId === item.observationId && stored.confirmedAt > item.observedAt) {
+        return { _tag: "stale", subject: item.subject }
+      }
       if (stored?.observationId === item.observationId) {
         confirmFact.run(item.observedAt, item.subject)
         endFailures.run(item.subject, item.observedAt)
-        return { _tag: "unchanged", subject: item.subject }
+        return { _tag: "unchanged", observationId: item.observationId, subject: item.subject }
       }
       if (stored !== undefined && stored.confirmedAt >= item.observedAt) return { _tag: "stale", subject: item.subject }
       upsertFact.run(item.subject, item.observationId, item.observedAt, item.observedAt, item.record)
       endFailures.run(item.subject, item.observedAt)
-      return { _tag: "stored", subject: item.subject }
+      return { _tag: "stored", observationId: item.observationId, subject: item.subject }
     })
     // Totals are read once and kept current as rows go, so eviction is one
     // indexed lookup and delete per row, not a full rescan per row.
-    const evict = (table: string, age: string, payload: string): number => {
+    // A failure disputes its subject's fact while it is newer than that fact's
+    // confirmation; evicting such a failure evicts the fact with it, so a
+    // disputed fact never outlives the record of its dispute.
+    const removeDisputedFact = database.prepare(
+      `DELETE FROM work_observed_facts WHERE subject = ? AND confirmed_at <
+         (SELECT last_at FROM work_observed_failures WHERE subject = ?)`
+    )
+    let newestEvicted = Number.NEGATIVE_INFINITY
+    const evict = (table: string, age: string, payload: string, beforeRemove?: (subject: string) => number): number => {
       const size = `length(CAST(subject AS BLOB)) + length(CAST(${payload} AS BLOB))`
       const totals = Schema.decodeUnknownSync(FactTotalsRow)(
         database.prepare(`SELECT COUNT(*) AS count, COALESCE(SUM(${size}), 0) AS bytes FROM ${table}`).get()
       )
       const oldest = database.prepare(
-        `SELECT subject, ${size} AS bytes FROM ${table} ORDER BY ${age} ASC, subject ASC LIMIT 1`
+        `SELECT subject, ${size} AS bytes, ${age} AS age FROM ${table} ORDER BY ${age} ASC, subject ASC LIMIT 1`
       )
       const remove = database.prepare(`DELETE FROM ${table} WHERE subject = ?`)
       let { bytes, count } = totals
       let evicted = 0
       while (count > workObservedFactMaxRecords || bytes > workObservedFactMaxBytes) {
         const row = Schema.decodeUnknownSync(EvictionRow)(oldest.get())
+        newestEvicted = Math.max(newestEvicted, row.age)
+        evicted += beforeRemove?.(row.subject) ?? 0
         remove.run(row.subject)
         count -= 1
         bytes -= row.bytes
@@ -2166,9 +2194,36 @@ const writeObservations = (
     // The least recently read rows go first: a fact by its last confirmation,
     // a failure by its latest failed read.
     const evicted = evict("work_observed_facts", "confirmed_at", "record") +
-      evict("work_observed_failures", "last_at", "reason")
+      evict(
+        "work_observed_failures",
+        "last_at",
+        "reason",
+        (subject) => Number(removeDisputedFact.run(subject, subject).changes)
+      )
+    if (newestEvicted > evictedThrough) {
+      database.prepare(
+        `INSERT INTO work_observed_eviction (singleton, evicted_through) VALUES (1, ?)
+         ON CONFLICT (singleton) DO UPDATE SET evicted_through = max(evicted_through, excluded.evicted_through)`
+      ).run(newestEvicted)
+    }
+    // Reported last, after every write and eviction in this call: a stored or
+    // unchanged fact that a later envelope replaced, or eviction removed, is no
+    // longer the subject's fact and confirms nothing.
+    // Only a subject's last accepted read can still be its fact: an earlier one
+    // with the same content (A, B, A) was replaced in between.
+    const lastAccepted = new Map<string, number>()
+    outcomes.forEach((outcome, index) => {
+      if (outcome._tag === "stored" || outcome._tag === "unchanged") lastAccepted.set(outcome.subject, index)
+    })
+    const finalOutcomes = outcomes.map((outcome, index): WorkObserveOutcome => {
+      if (outcome._tag !== "stored" && outcome._tag !== "unchanged") return outcome
+      if (lastAccepted.get(outcome.subject) !== index) return { _tag: "stale", subject: outcome.subject }
+      const row = readFact.get(outcome.subject)
+      const current = row === undefined ? undefined : Schema.decodeUnknownSync(StoredFactRow)(row)
+      return current?.observationId === outcome.observationId ? outcome : { _tag: "stale", subject: outcome.subject }
+    })
     database.exec("COMMIT")
-    return { evicted, outcomes }
+    return { evicted, outcomes: finalOutcomes }
   } catch (cause) {
     if (database.isTransaction) database.exec("ROLLBACK")
     throw cause
@@ -2253,6 +2308,9 @@ export class WorkStore implements WorkStoreService {
           migrateLegacyAuthorityTables(database)
           const hadLaneOperationLedger = database.prepare(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_lane_operations'"
+          ).get() !== undefined
+          const hadEvictionWatermark = database.prepare(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_observed_eviction'"
           ).get() !== undefined
           database.exec(`
         CREATE TABLE IF NOT EXISTS work_goal_events (
@@ -2388,6 +2446,10 @@ export class WorkStore implements WorkStoreService {
         );
         CREATE INDEX IF NOT EXISTS work_observed_failures_age
           ON work_observed_failures (last_at, subject);
+        CREATE TABLE IF NOT EXISTS work_observed_eviction (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          evicted_through INTEGER NOT NULL
+        );
       `)
           requireUniqueSessionIndex(database)
           const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
@@ -2395,6 +2457,21 @@ export class WorkStore implements WorkStoreService {
           )
           if (!columns.some(({ name }) => name === "transaction_id")) {
             database.exec("ALTER TABLE work_goal_events ADD COLUMN transaction_id TEXT")
+          }
+          if (!hadEvictionWatermark) {
+            // Older stores evicted without a watermark, and may have kept a fact
+            // whose dispute they evicted. Their reads are a cache of the
+            // providers, so they are dropped and every one becomes stale; the
+            // next pass reads them again, newer.
+            database.exec(`
+          INSERT INTO work_observed_eviction (singleton, evicted_through)
+          SELECT 1, max(at) FROM (
+            SELECT confirmed_at AS at FROM work_observed_facts
+            UNION ALL SELECT last_at FROM work_observed_failures
+          ) HAVING max(at) IS NOT NULL;
+          DELETE FROM work_observed_facts;
+          DELETE FROM work_observed_failures;
+        `)
           }
           if (!hadLaneOperationLedger) {
             database.exec(`
@@ -3938,10 +4015,21 @@ export class WorkStore implements WorkStoreService {
               JSON.parse(Schema.decodeUnknownSync(StoredEventRow)(headRow).record)
             )
             const factRow = this.#database.prepare(
-              "SELECT observation_id AS observationId FROM work_observed_facts WHERE subject = ?"
+              `SELECT observation_id AS observationId, confirmed_at AS confirmedAt
+               FROM work_observed_facts WHERE subject = ?`
             ).get(guard.fact.subject)
             const fact = factRow === undefined ? null : Schema.decodeUnknownSync(ObservationIdRow)(factRow)
-            if (head?.eventId !== guard.head.eventId || fact?.observationId !== guard.fact.observationId) {
+            const failureRow = this.#database.prepare(
+              "SELECT last_at AS lastAt FROM work_observed_failures WHERE subject = ?"
+            ).get(guard.fact.subject)
+            const failedAt = failureRow === undefined
+              ? null
+              : Schema.decodeUnknownSync(FailureLastAtRow)(failureRow).lastAt
+            // A failed read recorded while the plan was made also makes it stale.
+            const stillFresh = fact !== null && (failedAt === null || failedAt <= fact.confirmedAt)
+            if (
+              head?.eventId !== guard.head.eventId || fact?.observationId !== guard.fact.observationId || !stillFresh
+            ) {
               return reject(
                 new WorkGoalRevisionConflictError({
                   actualEventId: head?.eventId ?? null,
@@ -5344,7 +5432,10 @@ export class WorkStore implements WorkStoreService {
     }
   })
 
-  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore) {
+  readonly reconcile = Effect.fn("WorkStore.reconcile")(function*(this: WorkStore, request: WorkReconcileOptions) {
+    const options = yield* Schema.decodeUnknownEffect(WorkReconcileOptions)(request).pipe(
+      Effect.mapError(storeError("reconcile.options"))
+    )
     const source = yield* this.snapshotInput()
     if (workHistoryMaxEvents - source.events.length < workReconcilerHeadroom) {
       return yield* new WorkProjectionError({
@@ -5353,6 +5444,13 @@ export class WorkStore implements WorkStoreService {
         reason: "capacity_exceeded"
       })
     }
+    // A confirmation names the fact the caller read; one that is no longer the
+    // subject's stored fact (replaced, evicted) is the caller's stale view.
+    const current = new Map(source.facts.map((fact) => [fact.subject, fact.observationId]))
+    const outdated = options.confirmed.filter(({ observationId, subject }) => current.get(subject) !== observationId)
+    if (outdated.length > 0) {
+      return yield* new WorkStoreError({ cause: outdated, operation: "reconcile.confirmed" })
+    }
     // A goal is stamped by the reconciler at most once, whatever its facts
     // look like later: a reopened goal stays the owner's.
     const stamped = new Map(source.reconcilerEvents.map(({ eventId, goalId }) => [goalId, eventId]))
@@ -5360,7 +5458,12 @@ export class WorkStore implements WorkStoreService {
     const now = yield* Clock.currentTimeMillis
     const appendAt = (checkpoint: WorkGoalCheckpointType, guard: ReconcilerGuard) => this.appendAt(checkpoint, guard)
     return yield* Effect.forEach(
-      terminalCandidates(source.events, source.facts),
+      terminalCandidates(
+        source.events,
+        source.facts,
+        source.failures,
+        new Set(options.confirmed.map(({ observationId, subject }) => `${subject}\u0000${observationId}`))
+      ),
       Effect.fnUntraced(function*(candidate): Effect.fn.Return<
         WorkReconcileOutcome,
         WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
@@ -5442,12 +5545,14 @@ export class WorkStore implements WorkStoreService {
           })
             .observation
         )
-        const digest = yield* cryptoService.digest("SHA-256", utf8.encode(record)).pipe(
+        const observationId = yield* cryptoService.digest("SHA-256", utf8.encode(record)).pipe(
+          Effect.map(Hex.encode),
+          Effect.flatMap(Schema.decodeUnknownEffect(WorkObservationId)),
           Effect.mapError(storeError("observe.digest"))
         )
         return {
           _tag: "fact",
-          observationId: Hex.encode(digest),
+          observationId,
           observedAt: Math.min(envelope.observedAt, clockNow),
           record,
           subject
