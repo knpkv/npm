@@ -102,6 +102,15 @@
     }
   }
 
+  /*
+   * In the hub, while the first directory loads, hold a screen of space: the list that arrives is
+   * usually taller than that, and anything below it (the coordinator chat) stays out of view
+   * instead of being pushed down (CLS 0.60 at 768 before).
+   */
+  .connect-shell-embedded .connect-agents[data-loading="true"] {
+    min-block-size: 100svh;
+  }
+
   .connect-agents {
     inline-size: min(100%, 76rem);
     justify-self: center;

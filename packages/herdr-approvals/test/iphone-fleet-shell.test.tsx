@@ -173,6 +173,8 @@ describe("iPhone fleet shell regressions", () => {
     expect(failure._tag).toBe("Failure")
     expect(failureWithContent._tag).toBe("Failure")
     expect(document.body.textContent).toContain("Loading Work")
+    // Each loading state holds a screen of space, so content below is not pushed down later.
+    expect(document.querySelectorAll(".fleet-work-loading")).toHaveLength(2)
     expect(document.body.textContent).toContain("Goals unavailable")
     expect(document.body.textContent).toContain("Work unavailable")
     expect(document.body.textContent).toContain("Work request failed. Refresh to retry.")

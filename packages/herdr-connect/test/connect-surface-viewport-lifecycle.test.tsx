@@ -82,6 +82,42 @@ afterAll(() => {
   }
 })
 
+describe("ConnectSurface directory loading", () => {
+  it("marks the directory as loading until the first list arrives, so the hub can hold its space", async () => {
+    // The directory request hangs: the first list has not arrived yet.
+    window.fetch = () => new Promise<Response>(() => {})
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const atoms = makeConnectAtoms()
+    await act(async () => {
+      root.render(
+        <RegistryProvider>
+          <ConnectSurface atoms={atoms} embedded />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    expect(host.querySelector(".connect-agents")?.getAttribute("data-loading")).toBe("true")
+
+    const loadedHost = document.createElement("div")
+    document.body.append(loadedHost)
+    const loadedRoot = createRoot(loadedHost)
+    roots.push(loadedRoot)
+    const loadedAtoms = makeConnectAtoms()
+    await act(async () => {
+      loadedRoot.render(
+        <RegistryProvider initialValues={[[loadedAtoms.agents, AsyncResult.success(agentPage)]]}>
+          <ConnectSurface atoms={loadedAtoms} embedded />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    expect(loadedHost.querySelector(".connect-agents")?.hasAttribute("data-loading")).toBe(false)
+  })
+})
+
 describe("ConnectSurface terminal viewport lifecycle", () => {
   it("retains geometry after rejected directory focus and removes it after a successful return", async () => {
     const host = document.createElement("div")

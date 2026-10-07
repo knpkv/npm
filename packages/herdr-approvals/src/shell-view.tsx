@@ -75,13 +75,17 @@ export const fleetWorkStateFromRequest = (request: FleetWorkRequestState): Fleet
 export const FleetWorkPanel = ({ state }: { readonly state: FleetWorkState }): ReactElement => {
   switch (state._tag) {
     case "Loading":
+      // Holds a screen of space, like the board that replaces it, so agents and history below
+      // stay out of view instead of being pushed down (CLS 0.48 at 1440 before).
       return (
-        <StatePanel
-          announce="polite"
-          description="Loading the latest durable goal projection."
-          title="Loading Work"
-          tone="progress"
-        />
+        <div className="fleet-work-loading">
+          <StatePanel
+            announce="polite"
+            description="Loading the latest durable goal projection."
+            title="Loading Work"
+            tone="progress"
+          />
+        </div>
       )
     case "Unavailable":
       return (

@@ -959,7 +959,12 @@ export const ConnectSurface = ({
           </nav>
         </header>
       )}
-      <section className="connect-agents" aria-label="Herdr agents" onKeyDown={moveAgentFocus}>
+      <section
+        aria-label="Herdr agents"
+        className="connect-agents"
+        data-loading={current === null && directory._tag !== "Failure" ? "true" : undefined}
+        onKeyDown={moveAgentFocus}
+      >
         <label className="connect-search">
           <span>Find agent</span>
           <input
