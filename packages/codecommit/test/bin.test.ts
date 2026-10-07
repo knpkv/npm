@@ -55,6 +55,20 @@ describe("codecommit CLI", () => {
     expect(result.stdout).toContain("codecommit <subcommand> [flags]")
     expect(result.stdout).not.toContain("dispatcher.destroy")
     expect(result.stderr).toBe("")
+    // QA-J65: every subcommand says what it does.
+    expect(result.stdout).toContain("Open the terminal UI")
+    expect(result.stdout).toContain("Serve the browser UI on this machine and open it")
+  })
+
+  // QA-J62: without a terminal the TUI says so in one line instead of drawing into a pipe.
+  it.skipIf(!bunAvailable)("refuses the TUI in one line when stdin and stdout are not a terminal", async () => {
+    const result = await runCodecommit([])
+
+    expect(result.code).toBe(1)
+    expect(result.stdout).toBe("")
+    expect(result.stderr.trim()).toBe(
+      "codecommit: the terminal UI needs an interactive terminal. Run `codecommit --help` for the commands that work in scripts."
+    )
   })
 
   it.skipIf(!bunAvailable)("routes non-TUI AWS commands through the configured mock boundary", async () => {

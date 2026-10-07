@@ -1,0 +1,23 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-unconfirmed-sso-logout
+language: tsx
+severity: error
+message: "Sign out through SsoSignOutDialog; `aws sso logout` ends every SSO session on the machine and needs the confirmation."
+
+rule:
+  pattern: notificationsSsoLogoutAtom
+
+files:
+  - "packages/codecommit-web/src/client/**/*.ts"
+  - "packages/codecommit-web/src/client/**/*.tsx"
+
+ignores:
+  # The atom's definition, and the one audited dialog that states the scope before running it.
+  - "packages/codecommit-web/src/client/atoms/app.ts"
+  - "packages/codecommit-web/src/client/components/sso-sign-out-dialog.tsx"
+
+note: |
+  `aws sso logout` takes no profile, so it revokes the SSO sessions of every tool and agent on the
+  machine. Open `SsoSignOutDialog` from a sign-out control instead of calling the mutation, so the
+  user sees that scope and confirms it.
