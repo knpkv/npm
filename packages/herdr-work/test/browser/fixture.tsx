@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import "@knpkv/rly/styles.css"
 import "../../src/styles.css"
 import { Schema } from "effect"
