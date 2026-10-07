@@ -1509,7 +1509,8 @@ esac
           canonical: true,
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
-          pushEnabled: true
+          pushEnabled: true,
+          workEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -1587,7 +1588,8 @@ esac
           canonical: true,
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
-          pushEnabled: true
+          pushEnabled: true,
+          workEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -1640,7 +1642,8 @@ esac
           canonical: true,
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
-          pushEnabled: true
+          pushEnabled: true,
+          workEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
