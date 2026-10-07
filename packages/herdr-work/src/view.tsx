@@ -333,19 +333,30 @@ const timelineFor = (goal: WorkGoal, observed: WorkGoalObserved | null): Readonl
 }
 
 /**
- * The DecisionBar for a request this page can decide, or `null` to keep its hub link. The bar stays
- * mounted once this page sent a decision for it, so the hub's answer is announced there even after
- * the request leaves the queue; the hub decides expiry, never this page's clock.
+ * How this page shows a request it can decide. `Bar` while there is something to decide or wait for;
+ * `Settled` once the snapshot proves the outcome, when buttons would decide nothing: the request
+ * then reads as its title and state word, and only a refusal adds a line. `Elsewhere` keeps the hub
+ * link. The hub decides expiry, never this page's clock.
  */
-const decisionBarFor = (request: WorkRequest, decisions: WorkRequestDecisions | undefined): ReactElement | null => {
+type RequestDecision =
+  | { readonly _tag: "Elsewhere" }
+  | { readonly _tag: "Bar"; readonly bar: ReactElement }
+  | { readonly _tag: "Settled"; readonly announcement: string; readonly refusal: string | null }
+
+const requestDecisionFor = (request: WorkRequest, decisions: WorkRequestDecisions | undefined): RequestDecision => {
   const decidability = workRequestDecidability(request, decisions)
-  if (decidability._tag === "Elsewhere" || decisions === undefined) return null
+  if (decidability._tag === "Elsewhere" || decisions === undefined) return { _tag: "Elsewhere" }
   const { expiresAt, jobId } = decidability
-  const pending = decisions.expiresAt(jobId) !== undefined && request.state === "open"
-  // Once the request has left the hub's queue, the snapshot's outcome is the proven one.
-  const proven = request.state !== "open"
-  const outcome = proven ? `${requestPresentation[request.state].label}.` : "Left the hub's queue."
   const answer = decisions.answer?.jobId === jobId ? decisions.answer : null
+  // Once the request has left the hub's queue, the snapshot's outcome is the proven one.
+  if (request.state !== "open") {
+    return {
+      _tag: "Settled",
+      announcement: `${request.summary}: ${requestPresentation[request.state].label}.`,
+      refusal: answer?.outcome === "refused" ? answer.text : null
+    }
+  }
+  const pending = decisions.expiresAt(jobId) !== undefined
   const state: RlyDecisionBarState =
     decisions.sending?.jobId === jobId
       ? { _tag: "sending", action: decisions.sending.decision }
@@ -356,26 +367,81 @@ const decisionBarFor = (request: WorkRequest, decisions: WorkRequestDecisions | 
           ? { _tag: "off", reason: "Waiting for the hub's queue to update." }
           : pending
             ? { _tag: "ready" }
-            : { _tag: "off", reason: outcome }
-  // The status adds only what the off reason doesn't say. Once the snapshot proves the outcome, the
-  // reason says it, so an accepted or uncertain answer has nothing to add; a refusal still explains itself.
-  const status = answer === null || (proven && !pending && answer.outcome !== "refused") ? undefined : answer.text
+            : { _tag: "off", reason: "Left the hub's queue." }
   const decide = (decision: "approve" | "reject") => () => {
     if (state._tag === "ready") decisions.onDecision({ decision, jobId })
   }
+  return {
+    _tag: "Bar",
+    bar: (
+      <DecisionBar
+        {...(expiresAt === null || !pending
+          ? {}
+          : {
+              clock: `${workRequestClockText(expiresAt, decisions.now)}${expiresAt > decisions.now ? " left" : ""}`
+            })}
+        onApprove={decide("approve")}
+        onReject={decide("reject")}
+        state={state}
+        {...(answer === null ? {} : { status: answer.text })}
+        target={request.summary}
+      />
+    )
+  }
+}
+
+/** One request in a goal's detail: its title once, then the bar, the hub link or the outcome. */
+const RequestItem = ({
+  decisions,
+  externalLinks,
+  request
+}: {
+  readonly decisions: WorkRequestDecisions | undefined
+  readonly externalLinks: "disabled" | "enabled"
+  readonly request: WorkRequest
+}): ReactElement => {
+  const decision = requestDecisionFor(request, externalLinks === "enabled" ? decisions : undefined)
+  const presentation = requestPresentation[request.state]
   return (
-    <DecisionBar
-      {...(expiresAt === null || !pending
-        ? {}
-        : {
-            clock: `${workRequestClockText(expiresAt, decisions.now)}${expiresAt > decisions.now ? " left" : ""}`
-          })}
-      onApprove={decide("approve")}
-      onReject={decide("reject")}
-      state={state}
-      {...(status === undefined ? {} : { status })}
-      target={request.summary}
-    />
+    <li>
+      {/* While a bar is shown its target names the request, so the heading would say it twice. */}
+      {decision._tag === "Bar" ? null : (
+        <span className="work-request-heading">
+          <Text>{request.summary}</Text>
+          <span className="work-row-state" data-tone={presentation.tone}>
+            {presentation.label}
+          </span>
+        </span>
+      )}
+      {decision._tag === "Bar" ? (
+        decision.bar
+      ) : decision._tag === "Settled" ? (
+        decision.refusal === null ? null : (
+          <Text tone="secondary" variant="meta">
+            {decision.refusal}
+          </Text>
+        )
+      ) : request.state !== "open" ? null : request.approvalTarget === null ? (
+        <Text tone="secondary" variant="meta">
+          No approval link recorded.
+        </Text>
+      ) : externalLinks === "disabled" ? (
+        <Text tone="secondary" variant="meta">
+          Approve this on the hub ({request.approvalTarget.host}).
+        </Text>
+      ) : (
+        exactLink(request.approvalTarget, `Approve on ${request.approvalTarget.host}`)
+      )}
+      {/*
+        Mounted from the bar onwards, so the outcome is announced when the bar gives way to it; the
+        heading's state word already shows it, so it is for screen readers only.
+      */}
+      {decision._tag === "Elsewhere" ? null : (
+        <p aria-atomic="true" className="work-request-announcement" role="status">
+          {decision._tag === "Settled" ? decision.announcement : ""}
+        </p>
+      )}
+    </li>
   )
 }
 
@@ -502,26 +568,7 @@ const GoalDetail = ({
         ) : (
           <ul className="work-detail-list">
             {requestsFor(goal).map((request) => (
-              <li key={request.id}>
-                <span className="work-request-heading">
-                  <Text>{request.summary}</Text>
-                  <span className="work-row-state" data-tone={requestPresentation[request.state].tone}>
-                    {requestPresentation[request.state].label}
-                  </span>
-                </span>
-                {decisionBarFor(request, externalLinks === "enabled" ? decisions : undefined) ??
-                  (request.state !== "open" ? null : request.approvalTarget === null ? (
-                    <Text tone="secondary" variant="meta">
-                      No approval link recorded.
-                    </Text>
-                  ) : externalLinks === "disabled" ? (
-                    <Text tone="secondary" variant="meta">
-                      Approve this on the hub ({request.approvalTarget.host}).
-                    </Text>
-                  ) : (
-                    exactLink(request.approvalTarget, `Approve on ${request.approvalTarget.host}`)
-                  ))}
-              </li>
+              <RequestItem decisions={decisions} externalLinks={externalLinks} key={request.id} request={request} />
             ))}
           </ul>
         )}

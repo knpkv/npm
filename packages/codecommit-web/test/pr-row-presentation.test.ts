@@ -52,7 +52,11 @@ describe("pull request row presentation", () => {
       }]
     } satisfies Partial<Parameters<typeof pullRequestRowStatus>[0]>
     expect(pullRequestRowStatus({ ...open, isApproved: true, approvalUnknown: { _tag: "NotPermitted" } }))
-      .toEqual({ label: "Approval unknown", tone: "neutral" })
+      .toEqual({
+        label: "Approval unknown",
+        reason: "Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules).",
+        tone: "neutral"
+      })
     expect(pullRequestRowStatus({ ...open, isApproved: true })).toEqual({ label: "Approved", tone: "positive" })
     expect(pullRequestRowStatus({ ...open, isApproved: false })).toEqual({ label: "Pending", tone: "caution" })
     expect(pullRequestRowStatus({ ...open, isApproved: true, approvalRules: [] }))

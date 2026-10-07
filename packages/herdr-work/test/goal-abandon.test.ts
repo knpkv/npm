@@ -86,10 +86,11 @@ describe("approved goal abandonment", () => {
       expect(result.checkpoint.goal.activity).toEqual([{
         id: request.approvalJobId,
         kind: "status",
-        summary:
-          `Abandoned: ${request.reason} (approved Fleet job ${request.approvalJobId}, hash ${request.approvalHash})`,
+        summary: `Abandoned: ${request.reason}`,
         occurredAt: 1_000
       }])
+      // The approval stays structured: the activity id is the job, provenance links it below.
+      expect(result.checkpoint.goal.activity?.[0]?.summary).not.toMatch(/[0-9a-f]{32,}/)
       const now = (yield* work.snapshots()).now
       expect(now.goals.find(({ id }) => id === original.goal.id)?.state).toBe("abandoned")
       expect(now.activityProvenance).toEqual([{
