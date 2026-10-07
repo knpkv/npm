@@ -85,9 +85,8 @@ export function ReviewProfileSkillPicker({
           />
           <span>
             <b>{skill.name}</b>
-            <small className="block text-muted-foreground">
-              {skill.description} · {skill.source}
-            </small>
+            <small className="block text-muted-foreground">{skill.description}</small>
+            <small className="block text-muted-foreground">Source: {skill.source}</small>
           </span>
         </label>
       ))}
@@ -268,7 +267,7 @@ export function SettingsRelayView({ config, onReload = () => undefined, saveConf
               <div>
                 <h3 className="text-sm font-semibold">{profile.name}</h3>
                 <p className="text-xs text-muted-foreground">
-                  {profile.provider} · {profile.harness} · {profile.model}
+                  {profile.model} on {profile.provider}, through {profile.harness}
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
