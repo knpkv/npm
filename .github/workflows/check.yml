@@ -156,7 +156,7 @@ jobs:
       contents: read
     # The vitest suite alone; packed-package checks run in test-pack so neither
     # pushes the other past its timeout.
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -173,8 +173,13 @@ jobs:
       # @knpkv/jira-clockify ships an nvim plugin whose specs run under
       # `nvim --headless`. Without the binary those specs skip, and the plugin's
       # single-flight and cache invariants would have no automated cover.
+      # A stalled apt mirror once held this step for the whole job budget, so it
+      # gets its own cap and apt gives up on dead connections instead of hanging.
       - name: Install neovim for nvim plugin specs
-        run: sudo apt-get update && sudo apt-get install -y neovim
+        timeout-minutes: 5
+        run: |
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 install -y neovim
       - run: pnpm build
       - run: pnpm test:unit
 
