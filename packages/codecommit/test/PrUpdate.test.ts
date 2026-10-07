@@ -12,7 +12,6 @@ const AwsLayer = Layer.succeed(
   AwsClient.AwsClient,
   AwsClient.AwsClient.of({
     getPullRequests: () => Stream.die("unexpected getPullRequests"),
-    getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
     getCallerIdentity: () => unused("getCallerIdentity"),
     createPullRequest: () => unused("createPullRequest"),
     listBranches: () => unused("listBranches"),

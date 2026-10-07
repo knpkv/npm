@@ -8,11 +8,11 @@
  * ```
  * codecommit.getPullRequest ─┬─► decodePullRequestDetail
  *                            ├─► fetchApprovers          → { names, arns }
- *                            ├─► fetchApprovalEvaluation → satisfiedNames
+ *                            ├─► evaluateApproval → satisfiedNames, or approval unknown
  *                            └─► fetchRepoAccountId      → repo account ID
  * ```
  *
- * - Shared: {@link buildApprovalRules}, {@link fetchApprovalEvaluation},
+ * - Shared: {@link buildApprovalRules}, {@link evaluateApproval},
  *   {@link fetchRepoAccountId} from getPullRequests.ts
  * - Runs inside {@link withAwsContext} (Credentials + Region + AwsClientConfig)
  *
@@ -25,7 +25,14 @@
  */
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Schema, SchemaGetter } from "effect"
-import { buildApprovalRules, fetchApprovalEvaluation, fetchApprovers, fetchRepoAccountId } from "./getPullRequests.js"
+import {
+  buildApprovalRules,
+  evaluateApproval,
+  fetchApprovers,
+  fetchMergeStatus,
+  fetchRepoAccountId,
+  MissingPullRequestResponse
+} from "./getPullRequests.js"
 import {
   type GetPullRequestParams,
   makeApiError,
@@ -109,21 +116,30 @@ const decodePullRequestDetail = <UnparsedInput>(raw: UnparsedInput) =>
 const callGetPullRequest = (params: GetPullRequestParams) =>
   Effect.gen(function*() {
     const resp = yield* codecommit.getPullRequest({ pullRequestId: params.pullRequestId })
-    const revisionId = resp.pullRequest?.revisionId ?? ""
-    const repoName = resp.pullRequest?.pullRequestTargets?.[0]?.repositoryName ?? ""
-    const [detail, approvers, evaluation, repoAccountId] = yield* Effect.all([
+    // Approval unknown is only truthful about a pull request that was read.
+    if (resp.pullRequest === undefined) {
+      return yield* new MissingPullRequestResponse({ pullRequestId: params.pullRequestId })
+    }
+    const revisionId = resp.pullRequest.revisionId ?? ""
+    const repoName = resp.pullRequest.pullRequestTargets?.[0]?.repositoryName ?? ""
+    const [detail, approvers, evaluation, repoAccountId, isMergeable] = yield* Effect.all([
       decodePullRequestDetail(resp),
       fetchApprovers(params.pullRequestId, revisionId),
-      fetchApprovalEvaluation(params.pullRequestId, revisionId),
-      fetchRepoAccountId(repoName)
-    ], { concurrency: 4 })
+      evaluateApproval(params.pullRequestId, revisionId),
+      fetchRepoAccountId(repoName),
+      // As the listing reads it, so a re-read writes the whole row, mergeability included.
+      fetchMergeStatus(repoName, resp.pullRequest.pullRequestTargets?.[0])
+    ], { concurrency: 5 })
     const approvalRules = yield* buildApprovalRules(resp.pullRequest?.approvalRules ?? [], evaluation.satisfiedNames)
     return new PullRequestDetail({
       ...detail,
       approvedBy: approvers.names,
       approvedByArns: approvers.arns,
       approvalRules,
-      repoAccountId: repoAccountId || undefined
+      repoAccountId: repoAccountId || undefined,
+      isMergeable,
+      isApproved: evaluation.isApproved,
+      approvalUnknown: evaluation.approvalUnknown
     })
   }).pipe(
     Effect.mapError((cause) => makeApiError("getPullRequest", params.account.profile, params.account.region, cause))

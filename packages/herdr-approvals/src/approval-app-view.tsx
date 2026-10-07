@@ -1,4 +1,4 @@
-import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
+import { Button, Surface, Text } from "@knpkv/rly/primitives"
 import { useState, type FormEvent } from "react"
 import { agentConnectTarget, type AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import type { ChatHistory, ChatMode, ChatState } from "@knpkv/herdr-coordinator/model"
@@ -31,21 +31,6 @@ export const submitChatDraft = async (
   submit: (mode: ChatMode, message: string) => Promise<boolean>
 ): Promise<ChatDraftResult> =>
   (await submit(mode, message)) ? { error: null, message: "" } : { error: "Message not sent. Try again.", message }
-
-const chatTone = (state: ChatState): "neutral" | "positive" | "critical" | "progress" => {
-  switch (state) {
-    case "pending":
-      return "neutral"
-    case "running":
-      return "progress"
-    case "failed":
-      return "critical"
-    case "interrupted":
-      return "neutral"
-    case "completed":
-      return "positive"
-  }
-}
 
 const chatLabel = (state: ChatState): string => {
   switch (state) {
@@ -90,23 +75,25 @@ export const CoordinatorChatPanel = ({
     <Surface as="section" padding="spacious" className="chat-panel">
       <div className="section-heading">
         <div>
-          <Text variant="meta" tone="secondary">
-            KNPKV-SER8
-          </Text>
-          <Text as="h2" variant="section-title">
+          <Text as="h2" variant="card-title">
             Coordinator chat
           </Text>
+          <Text tone="secondary" variant="meta">
+            Conversations are kept across restarts.
+          </Text>
         </div>
-        <StateLabel label="Persistent" tone="positive" size="compact" />
       </div>
-      <div className="chat-history" aria-live="polite">
+      {/* A scrollable log: focusable so a keyboard can scroll it, named for screen readers. */}
+      <div aria-label="Coordinator conversation" aria-live="polite" className="chat-history" role="log" tabIndex={0}>
         {history.entries.map((entry) => (
           <article className="chat-turn" key={entry.id}>
             <div className="chat-turn-heading">
               <Text variant="meta" tone="secondary">
-                You · {entry.mode === "ask" ? "Ask" : "Do work"}
+                {entry.mode === "ask" ? "You asked" : "You asked for work"}
               </Text>
-              <StateLabel label={chatLabel(entry.state)} tone={chatTone(entry.state)} size="compact" />
+              <span className="chat-turn-state" data-state={entry.state}>
+                {chatLabel(entry.state)}
+              </span>
             </div>
             <Text as="p">{entry.message}</Text>
             {entry.worker === undefined || entry.connectTarget === undefined ? null : (
@@ -187,13 +174,19 @@ export const CoordinatorChatPanel = ({
   )
 }
 
+/**
+ * Push notifications for approvals, as a status word and the one action that applies. `failure`
+ * is the cause when checking or enabling failed, shown as said, never as a stack.
+ */
 export const NotificationPanel = ({
   canonicalUrl,
+  failure,
   onDisable,
   onEnable,
   state
 }: {
   readonly canonicalUrl: string
+  readonly failure?: string | undefined
   readonly onDisable: (() => void) | undefined
   readonly onEnable: (() => void) | undefined
   readonly state: NotificationState
@@ -201,11 +194,9 @@ export const NotificationPanel = ({
   if (state === "enabled" || state === "loading") {
     return (
       <div className="notification-status" aria-label="Approval notifications">
-        <StateLabel
-          label={state === "enabled" ? "Notifications on" : "Checking notifications"}
-          tone={state === "enabled" ? "positive" : "neutral"}
-          size="compact"
-        />
+        <Text as="span" className="notification-word" variant="label">
+          {state === "enabled" ? "Notifications on" : "Checking notifications…"}
+        </Text>
         {state === "enabled" ? (
           <Button size="compact" variant="quiet" onClick={onDisable}>
             Turn off
@@ -216,33 +207,37 @@ export const NotificationPanel = ({
   }
   return (
     <div className="notification-status notification-status-action" aria-label="Approval notifications">
-      <StateLabel
-        label={state === "denied" ? "Notifications blocked" : "Notifications off"}
-        tone="neutral"
-        size="compact"
-      />
+      <Text as="span" className="notification-word" variant="label">
+        {state === "denied" ? "Notifications blocked" : "Notifications off"}
+      </Text>
       {state === "unsupported" ? (
         <Text as="small" className="notice" tone="secondary" variant="meta">
-          Install this page to the iPhone Home Screen to enable alerts.
+          This browser can't receive push alerts here. On iPhone, add this page to the Home Screen first.
         </Text>
       ) : state === "denied" ? (
         <Text as="small" className="notice" tone="secondary" variant="meta">
-          Re-enable in iPhone Settings.
+          This browser blocked notifications for the hub. Allow them in its site settings (on iPhone: Settings, then
+          Notifications), then come back.
         </Text>
       ) : state === "error" ? (
         <Text as="small" className="notice" tone="secondary" variant="meta">
-          Setup failed. Refresh and retry.
+          {failure === undefined ? "Couldn't check notifications." : `Couldn't check notifications: ${failure}.`} Then
+          press Enable again.
         </Text>
       ) : null}
-      <Button size="compact" variant="quiet" disabled={state === "unsupported"} onClick={onEnable}>
-        Enable
-      </Button>
+      {state === "unsupported" || state === "denied" ? null : (
+        <Button size="compact" variant="quiet" onClick={onEnable}>
+          Enable
+        </Button>
+      )}
       <details className="notification-help">
         <summary>Setup help</summary>
         <ol className="install-guidance">
           <li>Use iOS 16.4 or newer and connect Tailscale.</li>
-          <li>Open {canonicalUrl} in Safari.</li>
-          <li>Share → Add to Home Screen, then open the installed app.</li>
+          <li>
+            Open <span className="notification-url">{canonicalUrl}</span> in Safari.
+          </li>
+          <li>Share, then Add to Home Screen, then open the installed app.</li>
           <li>Tap Enable.</li>
         </ol>
       </details>

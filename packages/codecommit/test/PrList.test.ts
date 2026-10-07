@@ -19,7 +19,6 @@ const AwsLayer = Layer.succeed(
   AwsClient.AwsClient,
   AwsClient.AwsClient.of({
     getPullRequests: () => Stream.die("unexpected getPullRequests"),
-    getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
     getCallerIdentity: () => unused("getCallerIdentity"),
     createPullRequest: () => unused("createPullRequest"),
     listBranches: () => unused("listBranches"),
@@ -87,7 +86,6 @@ const emptyAwsLayer = (calls: Array<PullRequestCall> = []) =>
           calls.push({ options, profile: account.profile, region: account.region })
           return Stream.empty
         })),
-      getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
       getCallerIdentity: () => unused("getCallerIdentity"),
       createPullRequest: () => unused("createPullRequest"),
       listBranches: () => unused("listBranches"),
@@ -201,7 +199,6 @@ describe("pr list first run", () => {
             Stream.fail(
               new Errors.AwsCredentialError({ profile: account.profile, region: account.region, cause: "none" })
             ),
-          getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
           getCallerIdentity: () => unused("getCallerIdentity"),
           createPullRequest: () => unused("createPullRequest"),
           listBranches: () => unused("listBranches"),
@@ -262,7 +259,6 @@ describe("pr list first run", () => {
       AwsClient.AwsClient.of({
         getPullRequests: () =>
           Stream.unwrap(Effect.logWarning("approval rule content could not be read").pipe(Effect.as(Stream.empty))),
-        getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
         getCallerIdentity: () => unused("getCallerIdentity"),
         createPullRequest: () => unused("createPullRequest"),
         listBranches: () => unused("listBranches"),

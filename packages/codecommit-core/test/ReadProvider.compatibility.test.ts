@@ -19,9 +19,11 @@ describe("CodeCommitReadProvider compatibility", () => {
   it.effect("preserves distilled AWS retry delays with the pinned Effect version", () =>
     Effect.gen(function*() {
       const firstDelay = Effect.fn("ReadProviderCompatibility.firstDelay")(
-        function*<UnparsedInput>(error: UnparsedInput) {
-          const lastError = yield* Ref.make(error)
-          const step = yield* Schedule.toStepWithMetadata(AwsRetry.makeDefault(lastError).schedule)
+        function*<E>(error: E) {
+          const lastError = yield* Ref.make<unknown>(error)
+          const schedule = AwsRetry.makeDefault(lastError).schedule
+          if (schedule === undefined) return yield* Effect.die("the default retry policy has no schedule")
+          const step = yield* Schedule.toStepWithMetadata(schedule)
           const next = yield* step(error).pipe(Effect.forkChild)
           yield* TestClock.adjust(Duration.seconds(3))
           return Duration.toMillis((yield* Fiber.join(next)).duration)

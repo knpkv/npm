@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import * as Predicate from "effect/Predicate"
-import type * as Schema from "effect/Schema"
+import * as Schema from "effect/Schema"
 import * as yaml from "js-yaml"
 import { extractFrontMatter, serializeIssue } from "../src/internal/frontmatter.js"
 import type { Issue } from "../src/IssueService.js"
@@ -10,17 +9,17 @@ import type { Issue } from "../src/IssueService.js"
  * directly. We avoid gray-matter's default parser here because it calls the
  * removed `safeLoad` — the same incompatibility this module works around.
  */
+const FrontMatter = Schema.Record(Schema.String, Schema.Json)
+
 const parseFrontMatter = (output: string): Record<string, Schema.Json> => {
-  const match = output.match(/^---\n([\s\S]*?)\n---/)
-  const parsed = match ? yaml.load(match[1]) : {}
-  return parsed !== null && Predicate.isObjectOrArray(parsed) && !Array.isArray(parsed)
-    ? Object.fromEntries(Object.entries(parsed))
-    : {}
+  const match = /^---\n([\s\S]*?)\n---/.exec(output)
+  return Schema.decodeUnknownSync(FrontMatter)(match?.[1] === undefined ? {} : yaml.load(match[1]))
 }
 
 const makeIssue = (overrides: Partial<Issue> = {}): Issue => ({
   key: "OOB-81",
   id: "10081",
+  url: "https://example.atlassian.net/browse/OOB-81",
   summary: "Test ticket",
   status: "Done",
   type: "Story",
@@ -70,6 +69,7 @@ describe("frontmatter", () => {
           filename: "diagram.svg",
           url: "https://example.atlassian.net/rest/api/3/attachment/content/10001",
           mediaType: "application/octet-stream",
+          mimeType: "image/svg+xml",
           size: 42
         }]
       }))

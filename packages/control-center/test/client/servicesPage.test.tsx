@@ -600,6 +600,36 @@ describe("ServicesPage connection tests", () => {
     expect(currentLocation).toBe("/services")
   })
 
+  it("prints the provider name on a connection card only when the card's title doesn't already say it", async () => {
+    const namedLikeProvider = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(confluenceConnection),
+      displayName: "confluence"
+    })
+    const twoConnections = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      ...Schema.encodeSync(PluginOverviewResponse)(overview),
+      connections: [
+        Schema.encodeSync(PluginConnectionSummary)(connection),
+        Schema.encodeSync(PluginConnectionSummary)(namedLikeProvider)
+      ]
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve(twoConnections),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    const markIn = (title: string) =>
+      [...host.querySelectorAll<HTMLElement>("article")]
+        .find((card) => card.querySelector("h2")?.textContent === title)
+        ?.querySelector<HTMLElement>("[data-rly-service]")
+    // A renamed connection keeps its provider visible; one titled with the provider's name doesn't repeat it.
+    expect(markIn("Payments Jira")?.textContent).toBe("Jira")
+    expect(markIn("confluence")?.textContent).toBe("")
+    expect(markIn("confluence")?.getAttribute("aria-label")).toBe("Confluence")
+  })
+
   it("keeps provider-account renames independent across account cards", async () => {
     const firstAccountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000201")
     const secondAccountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000202")
