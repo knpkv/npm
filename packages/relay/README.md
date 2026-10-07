@@ -71,7 +71,12 @@ const RelayLive = Layer.unwrap(
 
 ## Dependency note
 
-pi-ai depends on the Anthropic, OpenAI, Google GenAI and Bedrock SDKs (about 57 MB installed). Relay
-registers none of their providers and none of them load at runtime; removing them from the install is an
-exit criterion of the Relay host phase (H3), through pi-ai subpath or peer dependencies upstream, or an
-Effect-native provider layer.
+Relay bundles the Pi modules it uses (pi-durable, chord, and pi-ai's core) into `dist/index.js`. Their MIT
+notice ships in `LICENSE-THIRD-PARTY.md`. Pi's packages declare the Anthropic, OpenAI, Google and Bedrock SDKs
+and esbuild as hard dependencies, but nothing Relay loads imports them. Bundling keeps all of that out of
+every product that mounts Relay. The installed dependencies are `typebox`, `@libsql/client`, `effect` and
+Relay's sibling `@knpkv` packages.
+
+`pnpm test:pack` holds the package to that: the bundle may import only declared dependencies and Node
+built-ins, and a dynamic import may reach nothing but a Node built-in. The bundle is temporary, until upstream
+makes those dependencies optional (ADR-0009, amendment of 2026-10-07).

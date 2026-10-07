@@ -6,6 +6,9 @@
  * `@knpkv` dependency overridden to its tarball. The installed bin then runs with a PATH that holds
  * `node` and the few POSIX tools pnpm's bin shim needs, but no Bun: `--help`, one read command
  * against a loopback CodeCommit stand-in, and the TUI, which must say in one line that it needs Bun.
+ *
+ * The install is also held to a budget: no provider SDK, bundler or Pi package may reach a user's
+ * install (Relay bundles what it uses from Pi), and the installed tree stays under a size ceiling.
  */
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
@@ -24,6 +27,20 @@ const Manifest = Schema.fromJsonString(Schema.Struct({
 
 const tuiNeedsBun = "codecommit: the terminal UI needs Bun. Install it from https://bun.sh and run codecommit again, " +
   "or run `codecommit web` for the browser UI."
+
+/** Installed package directories (pnpm's `.pnpm/<name>@<version>`) that must never ship with codecommit. */
+const forbiddenInstalls = [
+  "@anthropic-ai+sdk@",
+  "openai@",
+  "@google+genai@",
+  "@aws-sdk+client-bedrock-runtime@",
+  "esbuild@",
+  "@esbuild+",
+  "@earendil-works+"
+]
+
+/** Installed size ceiling in KiB: 700_000 measured with Relay mounted (2026-10-07), plus 5%. Raise it on purpose, never to pass. */
+const installBudgetKiB = 735_000
 
 /** A CodeCommit stand-in on a loopback port that knows no repositories and no pull requests. */
 const standIn = Effect.acquireRelease(
@@ -106,6 +123,26 @@ const program = Effect.scoped(
       Effect.mapError(() => new PackedCliError({ message: "Could not find the pnpm store" }))
     )).trim()
     yield* run("pnpm", ["install", "--prefer-offline", "--prod", "--store-dir", store], consumer)
+
+    const installed = yield* fs.readDirectory(path.join(consumer, "node_modules", ".pnpm")).pipe(
+      Effect.mapError(() => new PackedCliError({ message: "The install has no node_modules/.pnpm" }))
+    )
+    const forbidden = installed.filter((entry) => forbiddenInstalls.some((prefix) => entry.startsWith(prefix)))
+    if (forbidden.length > 0) {
+      return yield* new PackedCliError({ message: `The install ships forbidden packages: ${forbidden.join(", ")}` })
+    }
+    // `du` counts each file once and does not follow pnpm's symlinks.
+    const sizeKiB = Number(
+      (yield* spawner.string(ChildProcess.make("du", ["-sk", "node_modules"], { cwd: consumer })).pipe(
+        Effect.mapError(() => new PackedCliError({ message: "Could not measure the install" }))
+      )).split("\t", 1)[0]
+    )
+    yield* Console.log(`codecommit installs ${installed.length} packages, ${sizeKiB} KiB`)
+    if (!(sizeKiB > 0 && sizeKiB <= installBudgetKiB)) {
+      return yield* new PackedCliError({
+        message: `The install is ${sizeKiB} KiB, over its ${installBudgetKiB} KiB budget`
+      })
+    }
 
     // A PATH with node and what pnpm's sh shim needs, and no Bun.
     const onlyNode = path.join(temporary, "bin")

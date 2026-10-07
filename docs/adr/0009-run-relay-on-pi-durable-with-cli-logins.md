@@ -21,3 +21,18 @@ same service. Pi is pinned exactly, and a pinned version merges only after it ha
 release window. pi-ai's provider SDKs are an accepted install cost for the pilot and an H3 exit criterion.
 
 Control Center's review loop keeps `@knpkv/ai-runtime` (control-center ADR-0009); it is not migrated.
+
+## Amendment (2026-10-07): Relay bundles what it uses from Pi
+
+Mounting Relay in CodeCommit web would have put pi-ai's provider SDKs (Anthropic, OpenAI, Google, Bedrock) and
+chord's esbuild into every `codecommit` install, behind install scripts that pnpm refuses. Nothing Relay loads
+imports them: they are hard dependencies that Pi's packages declare but that only `pi-ai/providers/*` and
+`chord/node` use. So `@knpkv/relay` now bundles the Pi modules it reaches (pi-durable, chord, pi-ai's core) into
+its own `dist/index.js`, and ships their MIT notice in `LICENSE-THIRD-PARTY.md`. Pi stays pinned exactly, now
+as a dev dependency. Relay's pack test fails if the bundle imports any Pi package, provider SDK or esbuild, or if
+a dynamic import can reach anything but a Node built-in. `codecommit`'s pack test holds its install to a
+package denylist and a size budget.
+
+The bundle is temporary. It goes once upstream makes the SDKs optional peers of pi-ai and esbuild an optional
+peer of chord; a pull request upstream proposes that. If upstream declines, the fallback in the paragraph above
+still holds: an Effect-native store behind the same `RelayHarness` service.
