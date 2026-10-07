@@ -26,8 +26,12 @@ export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(
         // The release fiber must outlive scope close while the child process is being killed; its interruption is explicitly scheduled below.
         // ast-grep-ignore: no-unowned-detached-fiber
         const releaseFiber = yield* Effect.forkDetach( // eslint-disable-line local-rules/no-unowned-detached-fiber
-          // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-          release.pipe(Effect.ignore, Effect.andThen(exitCode), Effect.ignore),
+          // Cleanup must never fail the session, but a herdr that will not release or exit is worth a warning.
+          release.pipe(
+            Effect.ignore({ log: "Warn", message: "terminal release command could not be sent" }),
+            Effect.andThen(exitCode),
+            Effect.ignore({ log: "Warn", message: "terminal did not report an exit after release" })
+          ),
           { startImmediately: true, uninterruptible: false }
         )
         yield* Scope.addFinalizer(
@@ -38,9 +42,11 @@ export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(
           Effect.timeoutOption(terminalKillOptions.forceKillAfter)
         )
         if (Option.isNone(released)) {
+          yield* Effect.logWarning("terminal did not exit within the release timeout; killing it")
           yield* Effect.sync(() => releaseFiber.interruptUnsafe())
-          // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-          yield* kill.pipe(Effect.ignore)
+          yield* kill.pipe(
+            Effect.ignore({ log: "Warn", message: "terminal kill after the release timeout failed" })
+          )
         }
       }),
     (releaseScope, exit) => Scope.close(releaseScope, exit)
