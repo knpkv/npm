@@ -1,4 +1,4 @@
-import { dashboardRefreshTime, dashboardRefreshView } from "./internal/dashboard-refresh.js"
+import { dashboardRefreshView } from "./internal/dashboard-refresh.js"
 import { RegistryProvider, useAtom, useAtomMount, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
@@ -49,7 +49,7 @@ import type { DecisionStatus } from "./countdown-view.js"
 import { useHubNow } from "./hub-clock.js"
 import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
-import { Button, Notice } from "@knpkv/rly/primitives"
+import { RefreshStatus } from "./refresh-status.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -673,21 +673,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const workRequestState = fleetWorkRequestStateFromResult({ content: workContent, result: workResult })
   const workState = fleetWorkStateFromRequest(workRequestState)
   // A failed refresh keeps the page; this says so in the page gutter, under the masthead.
-  const refreshNotice = refreshFailed ? (
-    <Notice
-      action={
-        <Button onClick={refresh} size="dense" variant="quiet">
-          Try again
-        </Button>
-      }
-      announce="polite"
-      className="dashboard-refresh-failed"
-      tone="critical"
-    >
-      Couldn't refresh host activity. Showing the update from{" "}
-      <time dateTime={new Date(current.observedAt).toISOString()}>{dashboardRefreshTime(current.observedAt)}</time>.
-    </Notice>
-  ) : null
+  const refreshNotice = <RefreshStatus failed={refreshFailed} observedAt={current.observedAt} onRetry={refresh} />
   const dashboardView = (
     <DashboardView
       approvalOnly={canonical}
