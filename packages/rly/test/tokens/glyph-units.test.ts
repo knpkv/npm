@@ -19,5 +19,8 @@ describe("glyph-relative lengths", () => {
   it("leaves font-size-relative and absolute lengths, names and comments alone", () => {
     expect(units(".prose { max-width: 45.3em; inline-size: 12rem; } .tech { color: red; } /* 68ch */")).toEqual([])
     expect(units(".ch { inline-size: var(--rly-space-8); } .each-row { margin: 0; }")).toEqual([])
+    expect(units(".a::after { content: \"2ch\"; background: url(icons/3ch.svg); } .b { font-family: '5ch'; }")).toEqual(
+      []
+    )
   })
 })

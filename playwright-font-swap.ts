@@ -246,6 +246,14 @@ export const measureFontSwapShift = async (page: Page, options: FontSwapOptions)
     if (Math.abs(zeros - 84) > 0.5) throw new FontSwapHintedRenderingError({ measured: zeros })
     const fallback = await platformFamilies(page, probe)
     if (fontRequests === 0) throw new FontSwapNoFontError({ url: page.url() })
+    // The stack itself must name the metric-matched face: where system-ui is Liberation Sans, a stack
+    // without it renders the same family unadjusted, which the platform-font check alone would pass.
+    const stack = Schema.decodeUnknownSync(Schema.String)(
+      await page.evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(probe)})).fontFamily`)
+    )
+    if (!/Geist (?:Mono )?Fallback/.test(stack)) {
+      throw new FontSwapFallbackMissingError({ families: [stack], selector: probe })
+    }
     if (!fallback.some((family) => FALLBACK_FAMILIES.includes(family))) {
       throw new FontSwapFallbackMissingError({ families: fallback, selector: probe })
     }

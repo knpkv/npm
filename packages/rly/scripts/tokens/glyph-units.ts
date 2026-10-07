@@ -9,12 +9,16 @@ import type { AccentStripeViolation } from "./accent-stripes.js"
 
 const GLYPH_UNIT = /(?<![\w.-])(\d*\.?\d+(?:ch|ex|cap|ic))(?![\w-])/gi
 
-const stripComments = (source: string): string =>
-  source.replace(/\/\*[\s\S]*?\*\//g, (comment) => comment.replace(/[^\n]/g, " "))
+/** Blank comments, strings and `url(...)` arguments, keeping offsets, so only real lengths match. */
+const stripNonLengths = (source: string): string =>
+  source.replace(
+    /\/\*[\s\S]*?\*\/|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|url\([^)]*\)/gi,
+    (text) => text.replace(/[^\n]/g, " ")
+  )
 
 /** Every glyph-relative length, with its 1-based position. */
 export const findGlyphUnits = (path: string, source: string): ReadonlyArray<AccentStripeViolation> =>
-  [...stripComments(source).matchAll(GLYPH_UNIT)].map((match) => {
+  [...stripNonLengths(source).matchAll(GLYPH_UNIT)].map((match) => {
     const lines = source.slice(0, match.index).split("\n")
     return { column: (lines.at(-1)?.length ?? 0) + 1, declaration: match[1] ?? "", line: lines.length, path }
   })
