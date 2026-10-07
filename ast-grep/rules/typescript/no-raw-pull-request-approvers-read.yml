@@ -3,10 +3,16 @@
 id: no-raw-pull-request-approvers-read
 language: tsx
 severity: error
-message: "Read who approved through Domain.currentApprovers; `approvedBy` is only the last known list while approvers are unknown."
+message: "Read who approved through Domain.currentApprovers; `approvedBy` and `approvedByArns` are only the last known lists while approvers are unknown."
 
 rule:
-  pattern: $PR.approvedBy
+  any:
+    - pattern: $PR.approvedBy
+    - pattern: $PR?.approvedBy
+    - pattern: $PR["approvedBy"]
+    - pattern: $PR.approvedByArns
+    - pattern: $PR?.approvedByArns
+    - pattern: $PR["approvedByArns"]
 
 files:
   - "packages/codecommit-core/src/**/*.ts"
@@ -29,4 +35,5 @@ note: |
   `approversUnknown`; that list may still name an approval since revoked. Reading `approvedBy`
   directly shows it as current. `currentApprovers(pr)` is empty while approvers are unknown; show
   the state with `approversUnknownLabel`. A reader that checks `approversUnknown` itself carries an
-  `ast-grep-ignore` saying so.
+  `ast-grep-ignore` saying so. Destructuring (`const { approvedBy } = pr`) is not matched: telling a
+  pull request from any other object with that key needs types; reviews still judge it.

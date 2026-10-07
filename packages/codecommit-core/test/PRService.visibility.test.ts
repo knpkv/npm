@@ -119,6 +119,7 @@ const syncDependencies = (
       observe: () => Effect.succeed(1),
       findAll,
       findStaleOpen: () => Effect.succeed([]),
+      findClosedWithUnknownApprovers: () => Effect.succeed([]),
       refreshCommentedBy: () => Effect.void
     }),
     Layer.mock(ConfigService, { load })

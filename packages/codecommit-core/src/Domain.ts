@@ -314,6 +314,16 @@ export const currentApprovers = (
 ): ReadonlyArray<string> => pr.approversUnknown === true ? [] : pr.approvedBy
 
 /**
+ * Approver ARNs as far as is known now: none while the last approver read failed, like
+ * {@link currentApprovers}.
+ *
+ * @category Domain
+ */
+export const currentApproverArns = (
+  pr: { readonly approvedByArns: ReadonlyArray<string>; readonly approversUnknown?: true | undefined }
+): ReadonlyArray<string> => pr.approversUnknown === true ? [] : pr.approvedByArns
+
+/**
  * The sentence every surface shows to explain an unknown approval.
  *
  * @category Domain

@@ -47,10 +47,12 @@ const { lastActivityDate: _lastActivityDate, ...withoutActivity } = pullRequest
  * `"expired"`: one pull request whose evaluation fails because the session expired.
  * `"empty"`: GetPullRequest answers without a pull request, and evaluation fails.
  * `"approvers-failed"`: one approved pull request whose approval states can't be read.
+ * `"approvers-expired"`: one approved pull request whose approval-states read finds the session expired.
  * `"undated"`: one approved pull request that CodeCommit returns without a last-activity date.
  */
 type Evaluation =
   | "approvers-failed"
+  | "approvers-expired"
   | "undated"
   | "approved"
   | "denied"
@@ -125,6 +127,8 @@ const answer = (
     case "GetPullRequestApprovalStates":
       return evaluation === "approvers-failed"
         ? awsError("InvalidRevisionIdException", "revision is not valid")
+        : evaluation === "approvers-expired"
+        ? awsError("ExpiredTokenException", "The security token included in the request is expired")
         : json({ approvals: [] })
     case "GetMergeConflicts":
       return json({ mergeable: true })
@@ -136,6 +140,7 @@ const answer = (
         : evaluation === "expired"
         ? awsError("ExpiredTokenException", "The security token included in the request is expired")
         : evaluation === "approved" || evaluation === "undated" || evaluation === "approvers-failed" ||
+            evaluation === "approvers-expired" ||
             evaluation === "three-approved" ||
             (evaluation === "8-denied" && requestedPullRequestId(request.body) !== "8")
         ? json({ evaluation: { approved: true, approvalRulesSatisfied: ["two-reviewers"] } })
@@ -231,6 +236,23 @@ describe("approval evaluation", () => {
       Effect.gen(function*() {
         const exit = yield* Effect.exit(getPullRequest({ account, pullRequestId: "7" }))
         expect(Exit.findErrorOption(exit).pipe(Option.map(credentialFailure))).toEqual(Option.some(true))
+      }))
+  })
+
+  // Nor are approvers unknown when the session expired: the read fails with the provider's credential error.
+  it.layer(codeCommit("approvers-expired"))((it) => {
+    const signedOut = (error: AwsClientError): boolean =>
+      error._tag === "AwsApiError" && isCredentialInvalidCause(error.cause)
+    it.effect("fails the listing when the approver read finds the session expired", () =>
+      Effect.gen(function*() {
+        const exit = yield* Effect.exit(Stream.runCollect(getPullRequests(account)))
+        expect(Exit.findErrorOption(exit).pipe(Option.map(signedOut))).toEqual(Option.some(true))
+      }))
+
+    it.effect("fails the detail read when the approver read finds the session expired", () =>
+      Effect.gen(function*() {
+        const exit = yield* Effect.exit(getPullRequest({ account, pullRequestId: "7" }))
+        expect(Exit.findErrorOption(exit).pipe(Option.map(signedOut))).toEqual(Option.some(true))
       }))
   })
 

@@ -9,3 +9,11 @@ invalid:
     const count = pr.approvedBy.length
   - |
     return pullRequest.approvedBy.some((name) => name === viewer)
+  - |
+    const names = pr?.approvedBy ?? []
+  - |
+    const names = pr["approvedBy"]
+  - |
+    const mine = pr.approvedByArns.includes(arn)
+  - |
+    const arns = pr?.approvedByArns

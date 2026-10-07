@@ -117,6 +117,7 @@ describe("history sync approval evaluation", () => {
           observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed([cachedRow("kept-profile", "11")]),
           findStaleOpen: () => Effect.succeed([staleOpen(cachedRow("kept-profile", "11"))]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           writeRead: (_, __, evaluation) =>
             Ref.update(recorded, (all) => [...all, evaluation.approvalUnknown?._tag ?? "Evaluated"]).pipe(
               Effect.as({ row: true, approval: true, versions: undefined })
@@ -154,6 +155,7 @@ describe("history sync approval evaluation", () => {
           observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed([cachedRow("kept-profile", "11")]),
           findStaleOpen: () => Effect.succeed([staleOpen(cachedRow("kept-profile", "11"))]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           writeRead: () => Effect.fail(new CacheError({ operation: "recordApprovalEvaluation", cause: "disk full" })),
           refreshCommentedBy: () => Effect.void
         }),

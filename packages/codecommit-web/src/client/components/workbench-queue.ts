@@ -8,7 +8,7 @@
  * to the client yet), *quiet* runs from the last modification. An unknown caller identity is
  * reported as `Unknown`, never as an empty queue.
  */
-import { approvalOf, currentApprovers, identityMatches } from "@knpkv/codecommit-core/Domain.js"
+import { approvalOf, currentApproverArns, currentApprovers, identityMatches } from "@knpkv/codecommit-core/Domain.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { Data } from "effect"
 
@@ -179,10 +179,6 @@ export const poolEntryMatches = (entry: string, arn: string): boolean => {
 /** Raw pool entries when the provider sent them; the normalized names only for legacy rules. */
 const poolEntries = (rule: Domain.ApprovalRule): ReadonlyArray<string> =>
   rule.poolMemberArns.length > 0 ? rule.poolMemberArns : rule.poolMembers
-
-/** Approver ARNs as far as is known now: none while the approver read failed, like {@link currentApprovers}. */
-const currentApproverArns = (pullRequest: Domain.PullRequest): ReadonlyArray<string> =>
-  pullRequest.approversUnknown === true ? [] : pullRequest.approvedByArns
 
 /**
  * Approvals that count toward one rule. A satisfied rule is complete by definition; a rule with

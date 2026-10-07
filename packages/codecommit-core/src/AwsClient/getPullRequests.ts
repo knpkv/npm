@@ -252,15 +252,17 @@ const fetchPRDetails = (id: string, repoName: string) =>
   })
 
 /**
- * Fetch who approved a PR (ARN list of approvers with APPROVE state). None when the read fails: the
- * caller keeps the last known approvers rather than reading the failure as "nobody approved".
+ * Fetch who approved a PR (ARN list of approvers with APPROVE state). None when the read fails, logged:
+ * the caller keeps the last known approvers rather than reading the failure as "nobody approved".
+ * Credentials that stopped working are not unknown approvers: that failure stays typed, so the refresh
+ * marks the account signed out.
  */
 export const fetchApprovers = (
   pullRequestId: string,
   revisionId: string
 ): Effect.Effect<
   Option.Option<{ readonly names: Array<string>; readonly arns: Array<string> }>,
-  never,
+  Effect.Error<ReturnType<typeof codecommit.getPullRequestApprovalStates>>,
   AwsMethodEnv
 > =>
   throttleRetry(
@@ -276,11 +278,10 @@ export const fetchApprovers = (
         arns: approved.map((a) => a.userArn)
       })
     }),
-    Effect.catch((error) =>
+    Effect.catchIf((error) => !isCredentialInvalidCause(error), (error) =>
       Effect.logWarning("approver read failed; keeping the last known approvers", error).pipe(
         Effect.as(Option.none())
-      )
-    )
+      ))
   )
 
 /** A read's approver fields: the approvers, or an empty placeholder marked unknown when the read failed. */
