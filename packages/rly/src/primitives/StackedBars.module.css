@@ -43,8 +43,8 @@
     position: relative;
   }
   .plot:focus-visible {
-    outline: 2px solid var(--rly-color-focus);
-    outline-offset: 2px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
   /* The caption overlays the bars; clicks and taps go through it to the bar underneath. */
   .scale {
