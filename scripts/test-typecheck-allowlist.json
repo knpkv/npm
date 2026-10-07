@@ -10,9 +10,5 @@
   "herdr-coordinator": {
     "owner": "arch-b",
     "reason": "56 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"
-  },
-  "herdr-work": {
-    "owner": "arch-b",
-    "reason": "54 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"
   }
 }

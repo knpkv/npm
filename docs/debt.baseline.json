@@ -2151,6 +2151,13 @@
       "reasoned": true
     },
     {
+      "package": "herdr-work",
+      "kind": "typescript",
+      "file": "packages/herdr-work/test/terminal-reconcile.test.ts",
+      "text": "@ts-expect-error -- deliberately not a digest: reconcile must reject malformed options at runtime",
+      "reasoned": true
+    },
+    {
       "package": "jcf-web",
       "kind": "effect-diagnostics",
       "file": "packages/jcf-web/src/client/transport.ts",
