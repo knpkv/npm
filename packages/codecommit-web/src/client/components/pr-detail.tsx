@@ -215,8 +215,8 @@ export interface PullRequestLoadFailure {
 
 export const pullRequestLoadFailure = (cause: unknown): PullRequestLoadFailure => ({
   message: refreshFailureDescription(cause),
-  fixInSettings: Predicate.isTagged(cause, "AccountSwitchedOffApiError") ||
-    Predicate.isTagged(cause, "AccountUnknownApiError")
+  fixInSettings:
+    Predicate.isTagged(cause, "AccountSwitchedOffApiError") || Predicate.isTagged(cause, "AccountUnknownApiError")
 })
 
 const isTextInputTarget = (target: EventTarget | null): boolean => {
@@ -1469,14 +1469,14 @@ export function PRDetail() {
         <StatePanel
           action={
             <>
-              {loadFailure.fixInSettings
-                ? (
-                  <RlyButton onClick={() => navigate("/settings/accounts")} size="compact" variant="primary">
-                    Open Settings → Accounts
-                  </RlyButton>
-                )
-                : null}
-              <RlyButton onClick={retryLoad} size="compact">Try again</RlyButton>
+              {loadFailure.fixInSettings ? (
+                <RlyButton onClick={() => navigate("/settings/accounts")} size="compact" variant="primary">
+                  Open Settings → Accounts
+                </RlyButton>
+              ) : null}
+              <RlyButton onClick={retryLoad} size="compact">
+                Try again
+              </RlyButton>
             </>
           }
           announce="assertive"
