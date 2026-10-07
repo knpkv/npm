@@ -78,7 +78,7 @@ describe("writeOutcomeLines", () => {
 
   it("tells the user how to log in again", () => {
     const lines = writeOutcomeLines(outcome({ _tag: "Written", seconds: 600 }, { _tag: "NotLoggedIn" }))
-    expect(lines[1]).toContain("jcf auth jira login")
+    expect(lines[1]).toContain("jcf auth jira token")
   })
 })
 
@@ -160,7 +160,7 @@ describe("segmented writes", () => {
       expect(writeOutcomeLines(result)).toEqual([
         "· Clockify not asked for",
         "✓ posted 1m 0s to Jira",
-        expect.stringContaining("jcf auth jira login")
+        expect.stringContaining("jcf auth jira token")
       ])
       expect(descriptions).toEqual(["note", "note"])
       expect(descriptions.flatMap((description) => SourceConsumption.markers(description ?? ""))).toEqual([])
