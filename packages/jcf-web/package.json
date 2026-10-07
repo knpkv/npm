@@ -39,8 +39,8 @@
     "dist"
   ],
   "scripts": {
-    "start": "node ../../scripts/require-built.mjs @knpkv/jira-clockify && node dist/main.js",
-    "dev": "node ../../scripts/require-built.mjs @knpkv/jira-clockify && (JCF_WEB_PUBLIC_ORIGIN=http://localhost:5173 tsx watch src/main.ts & vite --clearScreen false)",
+    "start": "tsc -b ../jira-clockify && node ../../scripts/require-built.mjs @knpkv/jira-clockify && node dist/main.js",
+    "dev": "tsc -b ../jira-clockify && node ../../scripts/require-built.mjs @knpkv/jira-clockify && (tsc -b ../jira-clockify --watch --preserveWatchOutput & JCF_WEB_PUBLIC_ORIGIN=http://localhost:5173 tsx watch src/main.ts & vite --clearScreen false)",
     "build": "tsc -b && vite build",
     "prepack": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",

@@ -9,6 +9,7 @@
  */
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
+import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
@@ -86,14 +87,21 @@ const runCase = (binCase) =>
       }
       const home = yield* fs.makeTempDirectoryScoped({ prefix: `workspace-bin-${binCase.name}-` })
       const port = yield* freePort
+      const searchPath = yield* Config.String("PATH")
       const child = yield* Effect.acquireRelease(
         spawner.spawn(
           ChildProcess.make("node", [bin, ...binCase.args], {
-            // Run from outside the repository, as a globally linked executable is, with only home and
-            // port isolated from the caller's environment.
+            // Run from outside the repository, as a globally linked executable is, with nothing of the
+            // caller's environment but PATH: no AWS_*, JIRA_* or other credentials reach the probe.
             cwd: home,
-            env: { HOME: home, XDG_CONFIG_HOME: home, XDG_DATA_HOME: home, ...binCase.env?.(port) },
-            extendEnv: true,
+            env: {
+              PATH: searchPath,
+              HOME: home,
+              XDG_CONFIG_HOME: home,
+              XDG_DATA_HOME: home,
+              ...binCase.env?.(port)
+            },
+            extendEnv: false,
             stdout: "pipe",
             stderr: "pipe"
           })

@@ -54,7 +54,7 @@
     "build": "tsx scripts/run-build.ts",
     "check": "pnpm validate:boundaries && pnpm lint:rly-css-tokens && tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo node_modules/.cache",
-    "dev": "node ../../scripts/require-built.mjs @knpkv/codecommit-core && vite --host 127.0.0.1 --port 5173 --strictPort",
+    "dev": "tsc -b ../codecommit-core && node ../../scripts/require-built.mjs @knpkv/codecommit-core && (tsc -b ../codecommit-core --watch --preserveWatchOutput & vite --host 127.0.0.1 --port 5173 --strictPort)",
     "predev": "pnpm --filter @knpkv/browser-pairing build",
     "lint": "eslint \"{src,test,e2e,scripts}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts vitest.live.config.ts vitest.live-aws.config.ts playwright.config.ts playwright.atlassian-oauth.config.ts && pnpm lint:rly-css-tokens",
     "lint:rly-css-tokens": "tsx scripts/validateRlyCssTokens.ts",

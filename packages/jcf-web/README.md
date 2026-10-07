@@ -23,7 +23,8 @@ The printed URL carries a one-time code in its fragment. Opening it exchanges th
 cookie and strips it from the address bar; reloading afterwards works because the cookie is what
 authenticates. The code expires a minute after the server binds, so restart to get a fresh one.
 
-For development, `pnpm --filter @knpkv/jcf-web dev` runs the server and Vite together and prints a
+For development, `pnpm --filter @knpkv/jcf-web dev` rebuilds jcf whenever its source changes, so the
+server never runs an old build of it, and runs the server and Vite together. It prints a
 URL on the dev origin, which proxies the API and the bootstrap exchange so the browser stays on one
 origin.
 

@@ -16,7 +16,7 @@
     "skills"
   ],
   "scripts": {
-    "start": "node ../../scripts/require-built.mjs @knpkv/codecommit-core @knpkv/codecommit-web && bun src/bin.ts",
+    "start": "tsc -b ../codecommit-core ../codecommit-web && node ../../scripts/require-built.mjs @knpkv/codecommit-core @knpkv/codecommit-web && bun src/bin.ts",
     "start:web": "bun src/bin.ts web",
     "prebuild": "pnpm --filter @knpkv/browser-pairing build",
     "precheck": "pnpm --filter @knpkv/browser-pairing build",
