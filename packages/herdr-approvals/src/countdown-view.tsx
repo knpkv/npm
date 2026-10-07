@@ -27,12 +27,12 @@ import {
   type PendingItem,
   pendingItems,
   REVALIDATE_RETRY_MS,
-  tickInterval,
   urgencyOf,
   windowUsed
 } from "./countdown-model.js"
 import type { DashboardSnapshot, PendingApprovalFailure } from "./dashboard-model.js"
 import { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
+import { useHubNow } from "./hub-clock.js"
 
 /** The hub's answer to the last decision sent from this page, for the job it decided. */
 export interface DecisionStatus {
@@ -45,28 +45,10 @@ export interface DecisionStatus {
   /** `observedAt` of the snapshot on screen when the answer arrived. */
   readonly observedAt: number
   readonly text: string
-}
-
-/**
- * Wall-clock milliseconds, re-read after `delayFor(now)` while the page is visible and again
- * when it becomes visible. The clock is a framework boundary, so it reads the browser's time directly.
- */
-const useNow = (delayFor: (now: number) => number): number => {
-  const [now, setNow] = useState(() => Date.now())
-  const delay = delayFor(now)
-  useEffect(() => {
-    // No ticks while the page is hidden; becoming visible again re-reads the clock and resumes.
-    const timer = document.visibilityState === "hidden" ? undefined : window.setTimeout(() => setNow(Date.now()), delay)
-    const onVisible = () => {
-      if (document.visibilityState === "visible") setNow(Date.now())
-    }
-    document.addEventListener("visibilitychange", onVisible)
-    return () => {
-      window.clearTimeout(timer)
-      document.removeEventListener("visibilitychange", onVisible)
-    }
-  }, [delay, now])
-  return now
+  /** How the hub answered, in the Work board's words. */
+  readonly outcome: "accepted" | "refused" | "uncertain"
+  /** The decided request's expiry when the decision was sent, so a new request on the same job is told apart. */
+  readonly expiresAt: number | null | undefined
 }
 
 const failureText = (failure: PendingApprovalFailure): string => {
@@ -378,22 +360,11 @@ export const ApprovalsCountdown = ({
       ? [...facts, factsOf(selected, snapshot.host)]
       : facts
 
-  // Expiries are hub times, so the clock is the hub's: the snapshot's `observedAt` plus the time
-  // elapsed here since it arrived. A browser clock ahead of or behind the hub does not matter.
-  const [origin, setOrigin] = useState(() => ({
-    observedAt: snapshot.observedAt,
-    offset: snapshot.observedAt - Date.now()
-  }))
-  if (origin.observedAt !== snapshot.observedAt) {
-    setOrigin({ observedAt: snapshot.observedAt, offset: snapshot.observedAt - Date.now() })
-  }
-  const now =
-    useNow((at) =>
-      tickInterval(
-        tracked.map(({ expiresAt }) => expiresAt),
-        at + origin.offset
-      )
-    ) + origin.offset
+  // Expiries are hub times, so the clock is the hub's (see hub-clock.ts).
+  const now = useHubNow(
+    snapshot.observedAt,
+    tracked.map(({ expiresAt }) => expiresAt)
+  )
 
   const stateOf = (item: PendingItem, itemGone: Departure | null): RlyDecisionBarState => {
     if (onDecision === undefined) return { _tag: "off", reason: "Decisions are unavailable here." }
