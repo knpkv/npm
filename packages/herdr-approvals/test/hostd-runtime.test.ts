@@ -541,19 +541,31 @@ describe("hostd runtime operations injection", () => {
         })
         let compositionKeys: ReadonlyArray<string> = []
         let pendingCheck: Effect.Effect<boolean, unknown> = Effect.succeed(true)
+        let workerCheck: Effect.Effect<unknown, unknown> = Effect.succeed(null)
         yield* makeHostdOperations(
           config(root),
           (composition) =>
             Effect.sync(() => {
               compositionKeys = Object.keys(composition).sort()
               pendingCheck = composition.hasOutstandingWorkJob
+              workerCheck = composition.startedWorker("job-1")
               return composition.defaultOperations
             })
         )
-        expect(compositionKeys).toEqual(["config", "defaultOperations", "fork", "hasOutstandingWorkJob"])
-        // Composed without the job store, the question fails loudly instead of reading "none pending".
+        expect(compositionKeys).toEqual([
+          "config",
+          "defaultOperations",
+          "fork",
+          "hasOutstandingWorkJob",
+          "startedWorker"
+        ])
+        // Composed without the job store, each question fails loudly instead of
+        // reading "none pending" or "no worker".
         expect(yield* Effect.result(pendingCheck)).toMatchObject({
           failure: { _tag: "FleetStoreError", operation: "outstanding-work-job" }
+        })
+        expect(yield* Effect.result(workerCheck)).toMatchObject({
+          failure: { _tag: "FleetStoreError", operation: "started-worker" }
         })
         const jobs = yield* Effect.acquireRelease(
           JobStore.open(join(root, "pending-jobs.sqlite")),
@@ -564,11 +576,13 @@ describe("hostd runtime operations injection", () => {
           (composition) =>
             Effect.sync(() => {
               pendingCheck = composition.hasOutstandingWorkJob
+              workerCheck = composition.startedWorker("job-unknown")
               return composition.defaultOperations
             }),
           jobs
         )
         expect(yield* pendingCheck).toBe(false)
+        expect(yield* workerCheck).toBeNull()
 
         const invalid = yield* Effect.result(
           makeHostdOperations(

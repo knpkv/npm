@@ -1,5 +1,12 @@
 # @knpkv/review
 
+## 0.4.1
+
+### Patch Changes
+
+- Updated dependencies [[`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5)]:
+  - @knpkv/rly@0.11.0
+
 ## 0.4.0
 
 ### Minor Changes

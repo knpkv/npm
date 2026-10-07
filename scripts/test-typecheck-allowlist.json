@@ -3,22 +3,6 @@
     "owner": "arch2-b",
     "reason": "37 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"
   },
-  "atlassian-common": {
-    "owner": "qa-fix",
-    "reason": "43 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"
-  },
-  "codecommit-core": {
-    "owner": "arch2",
-    "reason": "114 type errors in tests when typechecked (after #525/#532); remove this entry in the PR that adds test/tsconfig.json to check"
-  },
-  "codecommit-web": {
-    "owner": "arch2",
-    "reason": "84 type errors in tests and e2e when typechecked (after #525/#532); remove this entry in the PR that adds test/tsconfig.json to check"
-  },
-  "confluence-to-markdown": {
-    "owner": "qa-fix",
-    "reason": "121 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"
-  },
   "herdr-approvals": {
     "owner": "arch-b",
     "reason": "82 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"
@@ -34,9 +18,5 @@
   "herdr-work": {
     "owner": "arch-b",
     "reason": "54 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"
-  },
-  "jira-cli": {
-    "owner": "qa-fix",
-    "reason": "25 type errors in tests when typechecked; remove this entry in the PR that adds test/tsconfig.json to check"
   }
 }
