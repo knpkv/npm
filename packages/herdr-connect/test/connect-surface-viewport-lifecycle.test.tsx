@@ -4,7 +4,7 @@ import { RegistryProvider } from "@effect/atom-react"
 import { AgentStableId } from "@knpkv/herdr-fleet/model"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { Schema } from "effect"
+import { Predicate, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectSurface, makeConnectAtoms } from "../src/client.js"
@@ -50,7 +50,10 @@ beforeEach(() => {
   document.body.style.cssText = "overflow: visible; touch-action: pan-x;"
   Object.defineProperty(window, "innerHeight", { configurable: true, value: 500 })
   window.fetch = async (input) => {
-    const url = new URL("href" in input ? input.href : "url" in input ? input.url : input, "http://localhost")
+    const url = new URL(
+      Predicate.isString(input) ? input : "href" in input ? input.href : input.url,
+      "http://localhost"
+    )
     const body = url.pathname === "/v1/connect/agents" ? agentPage : workSnapshots
     return new Response(JSON.stringify(body), { headers: { "content-type": "application/json" } })
   }
