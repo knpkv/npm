@@ -59,8 +59,8 @@
 .facet:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .facetLabel {
@@ -145,8 +145,8 @@
 
 .searchInput:focus {
   border-color: var(--rly-color-focus);
-  outline: 3px solid color-mix(in srgb, var(--rly-color-focus) 22%, transparent);
-  outline-offset: 0;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .searchInput::-webkit-search-cancel-button {
@@ -373,8 +373,8 @@
 .prRow:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .prMain {
@@ -638,8 +638,8 @@ a.activityItem:hover {
 a.activityItem:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .activityIcon {

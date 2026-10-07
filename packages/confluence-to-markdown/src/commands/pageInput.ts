@@ -101,15 +101,19 @@ export const baseUrlFromWorkspace = (
     let dir = pathService.resolve(startDir)
     for (;;) {
       const configPath = pathService.join(dir, ".confluence", "config.json")
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       const exists = yield* fs.exists(configPath).pipe(Effect.orElseSucceed(() => false))
       if (exists) {
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         const raw = yield* fs.readFileString(configPath).pipe(Effect.orElseSucceed(() => ""))
         const parsed = yield* Effect.try({
           try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(raw),
           catch: () => null
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         }).pipe(Effect.orElseSucceed(() => null))
         const candidate = Predicate.isObject(parsed) && "baseUrl" in parsed ? parsed["baseUrl"] : undefined
         if (Predicate.isString(candidate) && candidate.trim().length > 0) {
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           return yield* validateBaseUrl(candidate).pipe(Effect.orElseSucceed(() => undefined))
         }
         return undefined

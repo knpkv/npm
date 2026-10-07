@@ -41,6 +41,7 @@ const row = (profile: string, id: string, overrides: Partial<Record<string, stri
     isMergeable: 1,
     isApproved: 0,
     approvalUnknownReason: null,
+    approvalBaselineKnown: 1,
     observationSeq: 0,
     approvalVersion: "2026-08-02T00:00:00.000Z",
     approvalObservationSeq: 0,
@@ -64,7 +65,8 @@ const rows = [
   row("work", "42"),
   row("work", "41", { status: "MERGED", author: "Grace" }),
   row("switched-off", "40"),
-  row("work", "39", { isApproved: 1, approvalUnknownReason: "NotPermitted" })
+  row("work", "39", { isApproved: 1, approvalUnknownReason: "NotPermitted" }),
+  row("work", "38", { isApproved: 1 })
 ]
 
 const config = Schema.decodeSync(TuiConfig)({
@@ -150,6 +152,12 @@ layer(services())("CodeCommit Relay capabilities", (it) => {
       })
     }))
 
+  it.effect("says when no approval rules apply rather than calling it approved", () =>
+    Effect.gen(function*() {
+      const result = yield* invoke(getPullRequestCapability, { pullRequest: { ...pr42, pullRequestId: "38" } })
+      expect(result.output).toMatchObject({ approval: { _tag: "NotRequired" } })
+    }))
+
   it.effect("names the refresh when a pull request isn't cached", () =>
     Effect.gen(function*() {
       const exit = yield* Effect.exit(
@@ -162,7 +170,7 @@ layer(services())("CodeCommit Relay capabilities", (it) => {
   it.effect("lists like the queue: switched-off accounts hidden, filters applied, total before the limit", () =>
     Effect.gen(function*() {
       const all = yield* invoke(listPullRequestsCapability, { limit: 1 })
-      expect(all.output).toMatchObject({ total: 3, pullRequests: [{ pullRequest: { pullRequestId: "42" } }] })
+      expect(all.output).toMatchObject({ total: 4, pullRequests: [{ pullRequest: { pullRequestId: "42" } }] })
       const merged = yield* invoke(listPullRequestsCapability, { status: "MERGED", author: "grace", limit: 10 })
       expect(merged.output).toMatchObject({ total: 1, pullRequests: [{ pullRequest: { pullRequestId: "41" } }] })
       expect(merged.cites).toHaveLength(1)

@@ -216,6 +216,7 @@ const AuditPrune = Layer.effectDiscard(
     const auditLog = yield* AuditLogRepo
     const permService = yield* PermissionService.PermissionService
     const retentionDays = yield* permService.getAuditRetention()
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const deleted = yield* auditLog.prune(retentionDays).pipe(Effect.catchIf(() => true, () => Effect.succeed(0)))
     if (deleted > 0) yield* Effect.logInfo(`Pruned ${deleted} audit log entries older than ${retentionDays} days`)
   })

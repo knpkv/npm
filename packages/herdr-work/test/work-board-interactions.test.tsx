@@ -81,9 +81,9 @@ const mountBoard = async ({
   await act(async () =>
     root.render(
       <WorkBoard
-        initialGoalId={initialGoalId}
-        initialWindow={initialWindow}
-        navigation={navigation}
+        {...(initialGoalId === undefined ? {} : { initialGoalId })}
+        {...(initialWindow === undefined ? {} : { initialWindow })}
+        {...(navigation === undefined ? {} : { navigation })}
         snapshots={boardSnapshots}
       />
     )

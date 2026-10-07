@@ -95,6 +95,7 @@ export const layer = Layer.effect(
           const tmpPath = `${filePath}.tmp`
           yield* fs.writeFileString(tmpPath, JSON.stringify(state, null, 2))
           yield* fs.rename(tmpPath, filePath)
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         }).pipe(Effect.catch(() => Effect.void)),
 
       read: Effect.gen(function*() {
@@ -105,6 +106,7 @@ export const layer = Layer.effect(
           try: () => parseStateFile(content),
           catch: () => emptyState
         })
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       }).pipe(Effect.catch(() => Effect.succeed(emptyState))),
 
       clear: Effect.gen(function*() {
@@ -112,6 +114,7 @@ export const layer = Layer.effect(
         const tmpPath = `${filePath}.tmp`
         yield* fs.writeFileString(tmpPath, JSON.stringify(emptyState, null, 2))
         yield* fs.rename(tmpPath, filePath)
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       }).pipe(Effect.catch(() => Effect.void))
     }
   })

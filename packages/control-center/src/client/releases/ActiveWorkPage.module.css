@@ -61,8 +61,8 @@
 
 .releaseChoice:focus-visible {
   z-index: 1;
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: -2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .selectedRelease {

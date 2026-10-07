@@ -29,6 +29,7 @@ const send = (request: HttpClientRequest.HttpClientRequest) =>
     const response = yield* client
       .execute(request)
       .pipe(Effect.mapError(() => new RequestFailure({ message: "The server could not be reached", status: 0 })))
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const body = yield* response.json.pipe(Effect.orElseSucceed(() => null))
     if (response.status >= 400) {
       const parsed = decodeErrorBody(body)

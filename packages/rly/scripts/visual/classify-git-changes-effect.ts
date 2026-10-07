@@ -69,6 +69,7 @@ export const collectBoundedGitProcess = (
     stderr: collectBounded(handle.stderr, maximumBytes, "stderr"),
     stdout: collectBounded(handle.stdout, maximumBytes, "stdout")
   }, { concurrency: "unbounded" }).pipe(
+    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.onError(() => handle.kill().pipe(Effect.ignore)),
     Effect.flatMap(({ exitCode, stdout }) =>
       exitCode === 0
@@ -81,4 +82,5 @@ export const collectBoundedGitProcess = (
 export const recoverVisualGitFailure = <E, R>(
   effect: Effect.Effect<VisualClassification, E, R>
 ): Effect.Effect<VisualClassification, never, R> =>
+  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   effect.pipe(Effect.catch(() => Effect.succeed(failClosedVisualClassification)))

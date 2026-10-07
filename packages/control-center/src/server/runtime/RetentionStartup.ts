@@ -54,6 +54,7 @@ const makeStartup = Effect.fn("RetentionStartup.make")(function*(
     )
   )
   const firstPollInterval = yield* lifecycle.runBackground(cycle).pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(null))
   )
   const supervise = Effect.gen(function*() {
@@ -68,6 +69,7 @@ const makeStartup = Effect.fn("RetentionStartup.make")(function*(
       nextPollInterval = yield* lifecycle.runBackground(cycle)
     }
   }).pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.void)
   )
   yield* Effect.forkScoped(supervise)

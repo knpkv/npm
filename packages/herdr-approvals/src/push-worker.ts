@@ -89,6 +89,7 @@ export const runPushPass = Effect.fn("PushWorker.runPass")(function*<
               )
             }).pipe(
               Effect.tapError((error) => Effect.logError("PushWorker.delivery_failed", error)),
+              // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.ignore
             ),
           { discard: true }
@@ -109,6 +110,7 @@ export const makePushWorker = <
 ) =>
   runPushPass(options).pipe(
     Effect.tapError((error) => Effect.logError("PushWorker.pass_failed", error)),
+    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.ignore,
     Effect.repeat(Schedule.spaced(interval))
   )

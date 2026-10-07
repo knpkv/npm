@@ -126,6 +126,8 @@ const coordinatesOf = (row: CachedPullRequest): PullRequestCoordinates => ({
 /** A pull request's approval as the queue shows it; `explanation` is the queue's own sentence. */
 export const PullRequestApproval = Schema.TaggedUnion({
   Approved: {},
+  /** No approval rules apply: nothing to satisfy. */
+  NotRequired: {},
   Pending: {},
   Unknown: { reason: ApprovalUnknownTag, explanation: Schema.String }
 })
@@ -208,8 +210,8 @@ const findCached = Effect.fn("RelayCapabilities.findCached")(function*(coordinat
 export const getPullRequest = defineContract({
   name: "get_pull_request",
   description: "Title, description, author, status, branches, mergeability, approval, comment count and " +
-    "changed-file counts of one CodeCommit pull request, from the local cache. Approval is Approved, Pending, " +
-    "or Unknown with the reason it could not be evaluated.",
+    "changed-file counts of one CodeCommit pull request, from the local cache. Approval is Approved, NotRequired " +
+    "(no approval rules apply), Pending, or Unknown with the reason it could not be evaluated.",
   access: "read",
   input: Schema.Struct({ pullRequest: PullRequestCoordinates }),
   output: PullRequestSummary,

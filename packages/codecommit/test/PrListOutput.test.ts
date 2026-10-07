@@ -3,7 +3,13 @@ import { Domain } from "@knpkv/codecommit-core"
 import { Schema } from "effect"
 import { renderFlags } from "../src/PrListOutput.js"
 
-const pr = (approval: { readonly isApproved: boolean; readonly approvalUnknown?: Domain.ApprovalUnknownReason }) =>
+const rule = { ruleName: "reviewers", requiredApprovals: 1, poolMembers: [], satisfied: true }
+
+const pr = (approval: {
+  readonly isApproved: boolean
+  readonly approvalUnknown?: Domain.ApprovalUnknownReason
+  readonly rules?: ReadonlyArray<typeof rule>
+}) =>
   Schema.decodeSync(Domain.PullRequest)({
     id: "1",
     title: "Fix",
@@ -19,7 +25,9 @@ const pr = (approval: { readonly isApproved: boolean; readonly approvalUnknown?:
     isMergeable: true,
     approvedBy: [],
     commentedBy: [],
-    ...approval
+    isApproved: approval.isApproved,
+    ...(approval.approvalUnknown !== undefined && { approvalUnknown: approval.approvalUnknown }),
+    approvalRules: approval.rules ?? [rule]
   })
 
 describe("renderFlags", () => {
@@ -28,5 +36,7 @@ describe("renderFlags", () => {
       .toBe("approval unknown mergeable")
     expect(renderFlags(pr({ isApproved: true }))).toBe("approved mergeable")
     expect(renderFlags(pr({ isApproved: false }))).toBe("mergeable")
+    // No rules: CodeCommit reads "approved", but nobody signed off.
+    expect(renderFlags(pr({ isApproved: true, rules: [] }))).toBe("no approval required mergeable")
   })
 })

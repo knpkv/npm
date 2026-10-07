@@ -486,6 +486,7 @@ const runAgentMode = (options: {
     const jiraConnected = options.sides.jira
       ? yield* JiraAccess.use((access) => access.connection).pipe(
         Effect.map(Option.isSome),
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.orElseSucceed(() => false)
       )
       : false

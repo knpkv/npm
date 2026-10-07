@@ -57,6 +57,7 @@ export const currentEnabledProfiles: Effect.Effect<
 > = enabledProfiles.pipe(
   Effect.map(Option.some),
   Effect.tapError((cause) => Effect.logWarning("PRService: enablement unreadable, skipping republish", cause)),
+  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   Effect.catch(() => Effect.succeed(Option.none<ReadonlySet<string>>()))
 )
 

@@ -254,6 +254,9 @@ export const FleetShell = ({
           {approvals}
         </>
       ),
+      // Kept mounted while another tab shows: a decision's answer, its pinned request and the
+      // countdown's deadline reads must survive a look at Connect or Work.
+      forceMount: true,
       label: "Approvals",
       value: "approvals"
     },

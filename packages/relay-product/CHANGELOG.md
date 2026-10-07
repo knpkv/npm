@@ -1,5 +1,12 @@
 # @knpkv/relay-product
 
+## 0.2.6
+
+### Patch Changes
+
+- Updated dependencies [[`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6)]:
+  - @knpkv/rly@0.12.0
+
 ## 0.2.5
 
 ### Patch Changes

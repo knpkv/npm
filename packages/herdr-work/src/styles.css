@@ -58,8 +58,8 @@
   .work-exact-link:focus-visible,
   .work-connect-link:focus-visible,
   .work-load-more-link:focus-visible {
-    outline: 2px solid var(--rly-color-focus);
-    outline-offset: 2px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   /* Goals beside the open goal from a wide container; one column below that. */
@@ -163,6 +163,8 @@
   }
 
   .work-row-caption {
+    /* The clock ticks every second; even digits keep the line from re-wrapping each tick. */
+    font-variant-numeric: tabular-nums;
     grid-area: caption;
   }
 

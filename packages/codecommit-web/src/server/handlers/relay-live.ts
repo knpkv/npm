@@ -50,7 +50,11 @@ export const RelayLive = HttpApiBuilder.group(CodeCommitApi, "relay", (handlers)
             Stream.mapEffect(() =>
               session.authorizeHttp(credential).pipe(
                 Effect.as(heartbeat),
-                Effect.catch(() => Effect.succeed(unauthorized)),
+                // Expired, or no longer from the bound origin: either way this stream may not continue.
+                Effect.catchTags({
+                  OwnerSessionUnauthorizedError: () => Effect.succeed(unauthorized),
+                  OwnerSessionForbiddenError: () => Effect.succeed(unauthorized)
+                }),
                 Effect.provideService(HttpServerRequest.HttpServerRequest, request)
               )
             ),

@@ -1,5 +1,11 @@
 # @knpkv/rly
 
+## 0.12.0
+
+### Minor Changes
+
+- [#571](https://github.com/knpkv/npm/pull/571) [`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6) Thanks [@konopkov](https://github.com/konopkov)! - One focus ring everywhere: a solid 2px outline in the focus colour, 2px outside the control, from the new `--rly-focus-ring-width` and `--rly-focus-ring-offset` tokens. The base ring goes from 3px to 2px, and the diff, table, timeline, and toggle rings that used 3px or ad-hoc offsets now match. `lint:colors` rejects a focus outline with a raw width.
+
 ## 0.11.0
 
 ### Minor Changes

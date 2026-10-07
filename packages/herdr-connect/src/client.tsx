@@ -262,6 +262,7 @@ const socketUrl = (agent: ConnectAgent, dimensions: TerminalDimensions): string 
   url.searchParams.set("agent", agent.id)
   url.searchParams.set("cols", String(cols))
   url.searchParams.set("rows", String(rows))
+  url.searchParams.set("scrollState", "1")
   return url.toString()
 }
 
@@ -418,9 +419,7 @@ const terminalWorker = (
       const interaction = bindTerminalInteraction(
         terminal.terminal,
         container,
-        (command) => {
-          if (ready) send(command)
-        },
+        (command) => ready && send(command),
         keyboard.interactionView
       )
       const releaseInteraction = keyboard.setInteraction(interaction)
@@ -491,6 +490,10 @@ const terminalWorker = (
               detail: `invalid terminal server message: ${String(decoded.failure)}`
             })
             connectedSocket.close(4400, "invalid terminal server message")
+            return
+          }
+          if (decoded.success.type === "terminal.scroll_state") {
+            interaction.serverScrollState(decoded.success.offsetFromBottom, decoded.success.scrollsForwarded)
             return
           }
           if (decoded.success.type === "terminal.ready") {
@@ -574,6 +577,7 @@ export const ConnectSurface = ({
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
   const terminalInteractionRef = useRef<TerminalInteraction | null>(null)
   const [terminalLinesBack, setTerminalLinesBack] = useState(0)
+  const [terminalPositionUnconfirmed, setTerminalPositionUnconfirmed] = useState(false)
   const [terminalTextLines, setTerminalTextLines] = useState<ReadonlyArray<string> | null>(null)
   const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
   useAtomMount(atoms.agentsPoll)
@@ -737,6 +741,7 @@ export const ConnectSurface = ({
           },
           interactionView: {
             onLinesBack: setTerminalLinesBack,
+            onPositionUnconfirmed: setTerminalPositionUnconfirmed,
             onSelectText: setTerminalTextLines,
             openUrl: (url) => {
               window.open(url, "_blank", "noopener,noreferrer")
@@ -750,6 +755,7 @@ export const ConnectSurface = ({
               if (terminalInteractionRef.current !== interaction) return
               terminalInteractionRef.current = null
               setTerminalLinesBack(0)
+              setTerminalPositionUnconfirmed(false)
               setTerminalTextLines(null)
             }
           }
@@ -1084,6 +1090,7 @@ export const ConnectSurface = ({
         onSelectText={() => terminalInteractionRef.current?.selectText()}
         onJumpToLatest={() => terminalInteractionRef.current?.jumpToLatest()}
         linesBack={terminalLinesBack}
+        positionUnconfirmed={terminalPositionUnconfirmed}
       />
       <div className="terminal-viewport-stage">
         <div
