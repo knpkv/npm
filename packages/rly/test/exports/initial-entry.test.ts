@@ -112,6 +112,7 @@ describe("public entries", () => {
       "RLY_SKELETON_DEFAULT_VARIANTS",
       "RLY_SKELETON_VARIANTS",
       "Skeleton",
+      "StackedBars",
       "RLY_STATE_LABEL_DEFAULT_VARIANTS",
       "RLY_STATE_LABEL_VARIANTS",
       "StateLabel",

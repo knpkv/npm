@@ -57,7 +57,7 @@ jobs:
       # `nvim --headless`; its test suite fails in CI when the binary is absent.
       - name: Install neovim for nvim plugin specs
         if: steps.regenerate.outputs.updated == 'true'
-        run: sudo apt-get update && sudo apt-get install -y neovim
+        uses: ./.github/actions/setup-neovim
 
       - name: Run client and consumer tests
         if: steps.regenerate.outputs.updated == 'true'

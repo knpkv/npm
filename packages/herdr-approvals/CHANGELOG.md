@@ -1,5 +1,15 @@
 # @knpkv/herdr-approvals
 
+## 0.11.1
+
+### Patch Changes
+
+- Updated dependencies [[`16244c5`](https://github.com/knpkv/npm/commit/16244c58b41cd8dcee799fd8e8e058598df3fb90), [`0d6cc4d`](https://github.com/knpkv/npm/commit/0d6cc4df23eca64c5d29725bf50899776cc52435), [`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/herdr-connect@0.7.3
+  - @knpkv/herdr-work@0.9.0
+  - @knpkv/rly@0.13.0
+  - @knpkv/herdr-coordinator@0.3.6
+
 ## 0.11.0
 
 ### Minor Changes
