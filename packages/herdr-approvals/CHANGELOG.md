@@ -1,5 +1,26 @@
 # @knpkv/herdr-approvals
 
+## 0.10.0
+
+### Minor Changes
+
+- [#512](https://github.com/knpkv/npm/pull/512) [`f3e0012`](https://github.com/knpkv/npm/commit/f3e0012b6106b3d142b8469f327f366b9aa2ba1f) Thanks [@konopkov](https://github.com/konopkov)! - The Approvals tab is a countdown:
+
+  - It leads with the request that expires first ("4m 12s until Apply Nix configuration expires").
+  - Every pending request, from this host and others, is listed soonest first, with its time left.
+  - One decision bar sits on the selected request and names what it decides.
+
+  Decisions show the hub's answer, including a refusal, never an assumed success. A request becomes expired only when the hub says so; at zero its clock reads "expiring". Screen readers hear a request once as it enters its last minute and when it expires, not every tick. Keyboard shortcuts follow the same rules as the buttons, so a request decided on another host, or one already being sent, can't be decided by keyboard either.
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa), [`1ef72d9`](https://github.com/knpkv/npm/commit/1ef72d9317a37e8f28563cae113e9908d8242c3a), [`f8e842e`](https://github.com/knpkv/npm/commit/f8e842e901986b50edf55f98fa3591b742a7904e), [`30849c5`](https://github.com/knpkv/npm/commit/30849c598fdf6776a3a4a2c4061d276e843eaa8e)]:
+  - @knpkv/herdr-connect@0.7.1
+  - @knpkv/rly@0.12.1
+  - @knpkv/herdr-work@0.8.0
+  - @knpkv/herdr-coordinator@0.3.4
+
 ## 0.9.0
 
 ### Minor Changes

@@ -1,5 +1,14 @@
 # @knpkv/confluence-to-markdown
 
+## 2.5.2
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/atlassian-common@1.9.2
+  - @knpkv/confluence-api-client@2.0.1
+
 ## 2.5.1
 
 ### Patch Changes

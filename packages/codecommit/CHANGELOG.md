@@ -1,5 +1,17 @@
 # @knpkv/codecommit
 
+## 0.16.1
+
+### Patch Changes
+
+- [#587](https://github.com/knpkv/npm/pull/587) [`d6fb196`](https://github.com/knpkv/npm/commit/d6fb196aaaac44e83450474b345038879f88185a) Thanks [@konopkov](https://github.com/konopkov)! - Installing codecommit no longer downloads the web client's build tooling and browser libraries: the client ships prebuilt, so vite, tailwind, react-dom and the rest are devDependencies of codecommit-web, and codecommit drops an unused tslib.
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`0938903`](https://github.com/knpkv/npm/commit/0938903a17b6d2bdf13b96947471a1d49f10b42f), [`d6fb196`](https://github.com/knpkv/npm/commit/d6fb196aaaac44e83450474b345038879f88185a), [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/codecommit-core@0.22.0
+  - @knpkv/codecommit-web@0.25.0
+  - @knpkv/ai-codex@0.5.2
+
 ## 0.16.0
 
 ### Minor Changes
