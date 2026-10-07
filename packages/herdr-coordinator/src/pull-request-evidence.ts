@@ -157,5 +157,5 @@ const makePullRequestEvidenceProvider = Effect.gen(function*() {
 export const pullRequestEvidenceLayer: Layer.Layer<
   PullRequestEvidenceProvider,
   never,
-  PullRequestEvidenceSource | Clock.Clock
+  PullRequestEvidenceSource
 > = Layer.effect(PullRequestEvidenceProvider, makePullRequestEvidenceProvider)

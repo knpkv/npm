@@ -3295,6 +3295,13 @@
       "package": "herdr-coordinator",
       "kind": "effect-diagnostics",
       "file": "packages/herdr-coordinator/test/coordinator.test.ts",
+      "text": "@effect-diagnostics-next-line effectSucceedWithVoid:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/coordinator.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
       "reasoned": true
     },
@@ -3317,34 +3324,6 @@
       "kind": "effect-diagnostics",
       "file": "packages/herdr-coordinator/test/orchestrator.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
       "reasoned": false
     },
     {
