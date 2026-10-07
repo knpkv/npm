@@ -273,6 +273,19 @@ const neutral = (edge: Edge): boolean => NEUTRAL_COLOR.test(edge.color)
  * longhands draws it: the only visible inline edge when it is thick or coloured, or the one inline
  * edge thicker, or more colourful, than the other visible edges. Block edges alone are underlines.
  */
+/**
+ * Whether a rule draws exactly one inline edge and one block edge, meeting at a corner: a chevron or
+ * bracket shape (a disclosure arrow drawn with two borders and a rotation), not a one-sided stripe.
+ */
+const cornerShape = (rule: Rule): boolean => {
+  const edges = ruleEdges(rule)
+  const shown = EDGES.filter((name) => {
+    const edge = edges.get(name)
+    return edge !== undefined && visible(edge)
+  })
+  return shown.length === 2 && shown.some((name) => INLINE.has(name)) && shown.some((name) => !INLINE.has(name))
+}
+
 const edgeStripe = (rule: Rule): Declaration | undefined => {
   const edges = ruleEdges(rule)
   const shown = EDGES.flatMap((name) => {
@@ -337,6 +350,7 @@ export const findAccentStripes = (path: string, source: string): ReadonlyArray<A
   // Each declaration on its own (quoted strings and comments are never declarations here)...
   root.walkDecls((decl) => {
     if (decl.prop.startsWith("--") || !DECLARATION_NAME.test(decl.prop)) return
+    if (decl.parent?.type === "rule" && cornerShape(decl.parent)) return
     if (isStripe(decl.prop, decl.value.trim(), ownDeclarations(decl))) report(decl)
   })
   // ...and per rule and edge, so longhands (`border-style: none none none solid`) cannot assemble a stripe.

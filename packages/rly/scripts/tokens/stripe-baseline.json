@@ -124,66 +124,6 @@
     "path": "packages/herdr-monitor/src/client/styles.css"
   },
   {
-    "declaration": "border-left: 3px solid var(--rly-color-service-clockify)",
-    "path": "packages/jcf-web/src/client/week.css"
-  },
-  {
-    "declaration": "border-left: var(--rly-space-4) solid var(--rly-color-service-clockify)",
-    "path": "packages/jcf-web/src/client/week.css"
-  },
-  {
-    "declaration": "border-left: var(--rly-space-4) solid var(--rly-color-service-clockify)",
-    "path": "packages/jcf-web/src/client/week.css"
-  },
-  {
-    "declaration": "border-left: var(--rly-space-4) solid var(--rly-color-service-jira)",
-    "path": "packages/jcf-web/src/client/week.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/jcf-web/src/client/week.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/jcf-web/src/client/week.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/jcf-web/src/client/week.css"
-  },
-  {
-    "declaration": "word-break: break-word",
-    "path": "packages/jcf-web/src/client/week.css"
-  },
-  {
-    "declaration": "border-inline-start: 3px solid var(--rly-color-border-2)",
-    "path": "packages/review/src/guide/style.css"
-  },
-  {
-    "declaration": "border-left: 2px solid currentColor",
-    "path": "packages/review/src/guide/style.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/review/src/guide/style.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/review/src/guide/style.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/review/src/guide/style.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/review/src/guide/style.css"
-  },
-  {
-    "declaration": "overflow-wrap: anywhere",
-    "path": "packages/review/src/guide/style.css"
-  },
-  {
     "declaration": "inline-size: 3px",
     "path": "packages/rly/src/patterns/ServiceMark.module.css"
   }
