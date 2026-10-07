@@ -74,7 +74,7 @@ export const CachedPullRequest = Schema.Struct({
   destinationBranch: Schema.String,
   isMergeable: BooleanFromNumber,
   isApproved: BooleanFromNumber,
-  approvalUnknownReason: Schema.optionalKey(ApprovalUnknownColumn),
+  approvalUnknownReason: ApprovalUnknownColumn,
   commentCount: Schema.NullOr(Schema.Number),
   healthScore: Schema.NullOr(Schema.Number),
   link: Schema.String,

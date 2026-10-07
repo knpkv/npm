@@ -2,7 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, FileSystem, Layer, Option, Schema } from "effect"
 import { DatabaseLive } from "../src/CacheService/Database.js"
-import { PullRequestRepo, UpsertInput } from "../src/CacheService/repos/PullRequestRepo/index.js"
+import { CachedPullRequest, PullRequestRepo, UpsertInput } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { StatsRepo } from "../src/CacheService/repos/StatsRepo/index.js"
 import { approvalOf } from "../src/Domain.js"
 import { decodeCachedPR } from "../src/PRService/internal.js"
@@ -177,5 +177,75 @@ describe("PullRequestRepo approval unknown", () => {
         coordinates
       )
       expect((yield* read("48")).isApproved).toBe(true)
+    })))
+
+  // An accepted evaluation is as fresh as its read, so an older read that lands after it is dropped.
+  it.effect("drops an older read's evaluation that lands after a newer one", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
+      yield* repo.upsert(upsertInput("53", { isApproved: 0, satisfied: false, unknown: null }))
+      yield* repo.recordApprovalEvaluation(
+        "123456789012",
+        "53",
+        reread({ isApproved: false, lastActivityDate: "2026-10-07T00:00:00.000Z" }),
+        coordinates
+      )
+      yield* repo.recordApprovalEvaluation(
+        "123456789012",
+        "53",
+        reread({ isApproved: true, lastActivityDate: "2026-10-06T00:00:00.000Z" }),
+        coordinates
+      )
+      const row = yield* read("53")
+      expect([row.isApproved, row.lastModifiedDate.toISOString()]).toEqual([false, "2026-10-07T00:00:00.000Z"])
+    })))
+
+  // A stale CLOSED read must not rewind a newer row, which would then let its evaluation through.
+  it.effect("keeps a newer row when an older read closes it, and still closes it from a newer read", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
+      yield* repo.upsert(
+        Schema.decodeSync(UpsertInput)({
+          ...Schema.encodeSync(UpsertInput)(upsertInput("54", { isApproved: 0, satisfied: false, unknown: null })),
+          lastModifiedDate: "2026-10-06T00:00:00.000Z"
+        })
+      )
+      yield* repo.updateStatusAndClosedAt(
+        "123456789012",
+        "54",
+        "CLOSED",
+        "2026-10-05T12:00:00.000Z",
+        undefined,
+        [],
+        coordinates
+      )
+      const kept = yield* read("54")
+      expect([kept.status, kept.lastModifiedDate.toISOString()]).toEqual(["OPEN", "2026-10-06T00:00:00.000Z"])
+
+      yield* repo.updateStatusAndClosedAt(
+        "123456789012",
+        "54",
+        "CLOSED",
+        "2026-10-07T00:00:00.000Z",
+        undefined,
+        [],
+        coordinates
+      )
+      expect((yield* read("54")).status).toBe("CLOSED")
+    })))
+
+  // Every row has the column since migration 0022. A row without it is a projection that dropped it,
+  // and reading it as known would show a stale approval as current.
+  it.effect("rejects a cached row without its approval-unknown column, and accepts NULL", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      yield* repo.upsert(upsertInput("55", { isApproved: 1, satisfied: true, unknown: null }))
+      const { approvalUnknownReason, ...withoutColumn } = Schema.encodeSync(CachedPullRequest)(yield* read("55"))
+      expect(approvalUnknownReason).toBeNull()
+      expect(Schema.decodeUnknownExit(CachedPullRequest)(withoutColumn)._tag).toBe("Failure")
+      expect(Schema.decodeUnknownExit(CachedPullRequest)({ ...withoutColumn, approvalUnknownReason: null })._tag)
+        .toBe("Success")
     })))
 })

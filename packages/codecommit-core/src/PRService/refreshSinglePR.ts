@@ -239,8 +239,10 @@ export const makeRefreshSinglePR = (
       (account.profile === awsAccountId
         ? (yield* awsClient.getCallerIdentity(account)).accountId
         : awsAccountId)
+    // The later of the cached row and this read: a read newer than the row moves it forward, so the
+    // cache's revision guard drops an older read (the history sync's) that lands afterwards.
     const lastModifiedDate = cached !== undefined
-      ? cached.lastModifiedDate.toISOString()
+      ? new Date(Math.max(cached.lastModifiedDate.getTime(), detail.lastActivityDate.getTime())).toISOString()
       : yield* Clock.currentTimeMillis.pipe(Effect.map((nowMs) => new Date(nowMs).toISOString()))
     const freshUpsert: UpsertInput = {
       id: prId,

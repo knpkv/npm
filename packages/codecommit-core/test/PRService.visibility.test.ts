@@ -38,6 +38,7 @@ const cachedRow = (profile: string, id: string) =>
     destinationBranch: "main",
     isMergeable: 1,
     isApproved: 0,
+    approvalUnknownReason: null,
     commentCount: 0,
     healthScore: null,
     link: `https://example.invalid/pr/${id}`,

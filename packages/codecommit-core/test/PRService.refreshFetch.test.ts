@@ -475,6 +475,7 @@ describe("fetchAndUpsertPRs", () => {
     destinationBranch: "main",
     isMergeable: 1,
     isApproved: 0,
+    approvalUnknownReason: null,
     commentCount: null,
     healthScore: null,
     link: "https://example.invalid/pr/35",

@@ -161,6 +161,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
      * approval and rules are kept and only the reason is set; an evaluation replaces both and clears
      * the reason. A read older than the cached revision (its last activity is earlier) is not written:
      * the history sync runs outside the refresh lock, so a refresh may have stored a newer revision.
+     * An accepted read advances the row to its last activity, so an older read landing later is dropped.
      */
     recordApprovalEvaluation: (
       awsAccountId: string,
@@ -168,13 +169,14 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       read: ApprovalRead,
       coordinates?: PullRequestCoordinates
     ) => {
-      const where = sql`${pullRequestWhere(awsAccountId, id, coordinates)}
-        AND last_modified_date <= ${read.lastActivityDate.toISOString()}`
+      const readAt = read.lastActivityDate.toISOString()
+      const where = sql`${pullRequestWhere(awsAccountId, id, coordinates)} AND last_modified_date <= ${readAt}`
       return ensureUnambiguous(awsAccountId, id, coordinates).pipe(
         Effect.andThen(
           read.approvalUnknown !== undefined
-            ? sql`UPDATE pull_requests SET approval_unknown_reason = ${read.approvalUnknown._tag} WHERE ${where}`
-            : sql`UPDATE pull_requests SET is_approved = ${read.isApproved ? 1 : 0},
+            ? sql`UPDATE pull_requests SET approval_unknown_reason = ${read.approvalUnknown._tag},
+              last_modified_date = ${readAt} WHERE ${where}`
+            : sql`UPDATE pull_requests SET is_approved = ${read.isApproved ? 1 : 0}, last_modified_date = ${readAt},
               approval_unknown_reason = NULL,
               approval_rules = ${read.approvalRules.length > 0 ? JSON.stringify(read.approvalRules) : "[]"}
               WHERE ${where}`
@@ -185,6 +187,11 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       )
     },
 
+    /**
+     * Record a provider read that found the pull request closed or merged at `closedAt`, its last
+     * activity. A read older than the cached revision is not written, so a stale read can't re-close a
+     * row a refresh has since stored newer.
+     */
     updateStatusAndClosedAt: (
       awsAccountId: string,
       id: string,
@@ -200,7 +207,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
           sql`UPDATE pull_requests SET status = ${status}, closed_at = ${closedAt}, merged_by = ${mergedBy ?? null},
           approved_by = COALESCE(${approvedByStr}, approved_by),
           last_modified_date = ${closedAt}
-          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
+          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)} AND last_modified_date <= ${closedAt}`
         ),
         Effect.asVoid,
         Effect.tap(() => publish),

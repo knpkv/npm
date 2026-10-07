@@ -52,6 +52,7 @@ const cachedPullRequest = Schema.decodeSync(CachedPullRequest)({
   destinationBranch: "main",
   isMergeable: 1,
   isApproved: 0,
+  approvalUnknownReason: null,
   commentCount: 0,
   healthScore: null,
   link: "https://example.invalid/pr/42",
@@ -185,6 +186,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
         const initialState: Domain.AppState = { pullRequests: [pullRequest], accounts: [], status: "idle" }
         const state = yield* SubscriptionRef.make(initialState)
         const upserted = yield* Ref.make<ReadonlyArray<readonly [number, string | null]>>([])
+        const stored = yield* Ref.make<ReadonlyArray<string>>([])
         const approvedCache = Schema.decodeSync(CachedPullRequest)({
           ...Schema.encodeSync(CachedPullRequest)(cachedPullRequest),
           isApproved: 1
@@ -223,7 +225,9 @@ describe("PRService.refreshSinglePR coordinates", () => {
               findByCoordinates: () => Effect.succeed(Option.some(approvedCache)),
               findAll: () => Effect.succeed([approvedCache]),
               upsert: (input) =>
-                Ref.update(upserted, (all) => [...all, [input.isApproved, input.approvalUnknownReason]])
+                Ref.update(upserted, (all) => [...all, [input.isApproved, input.approvalUnknownReason]]).pipe(
+                  Effect.andThen(Ref.update(stored, (all) => [...all, input.lastModifiedDate]))
+                )
             }),
             Layer.mock(CommentRepo, { upsert: () => Effect.void }),
             Layer.mock(NotificationRepo, {}),
@@ -233,6 +237,9 @@ describe("PRService.refreshSinglePR coordinates", () => {
           )
         )
         expect(yield* Ref.get(upserted)).toEqual([expected])
+        // The read is newer than the cached row (2 s against 1 s), so the row moves to it: an older
+        // history read landing later is then dropped by the cache's revision guard.
+        expect(yield* Ref.get(stored)).toEqual([new Date(2_000).toISOString()])
       })
   )
 
