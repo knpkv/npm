@@ -46,7 +46,7 @@
 
   /* The surface clips overflow, so the scroll region's ring sits inside its edge to stay whole. */
   .dialogScroll:focus-visible {
-    outline-offset: calc(-1 * var(--rly-focus-ring-offset));
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
   }
 
   .summary {

@@ -80,10 +80,20 @@
       outline: 2px solid CanvasText;
       outline-offset: -2px;
     }
+    /* Focused and checked: the focus ring wins, in the system highlight and outside the checked ring. */
+    .item[data-state="checked"]:focus-visible {
+      outline: var(--rly-focus-ring-width) solid Highlight;
+      outline-offset: var(--rly-focus-ring-offset);
+    }
   }
 
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .item[data-state="checked"] {
     outline: 2px solid CanvasText;
     outline-offset: -2px;
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .item[data-state="checked"]:focus-visible {
+    outline: var(--rly-focus-ring-width) solid Highlight;
+    outline-offset: var(--rly-focus-ring-offset);
   }
 }

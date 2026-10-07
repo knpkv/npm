@@ -65,6 +65,23 @@ describe("component color policy", () => {
     )).toEqual([])
   })
 
+  it("requires an inset focus ring to negate the ring width, not the offset", () => {
+    expect(rules(
+      "src/patterns/Row.module.css",
+      `
+      .a:focus-visible { outline-offset: calc(-1 * var(--rly-focus-ring-offset)); }
+      .b:focus-visible { outline-offset: calc(var(--rly-focus-ring-offset) * -1); }
+    `
+    )).toEqual(["inset-focus-offset", "inset-focus-offset"])
+    expect(rules(
+      "src/patterns/Row.module.css",
+      `
+      .a:focus-visible { outline-offset: calc(var(--rly-focus-ring-width) * -1); }
+      .b:focus-visible { outline-offset: var(--rly-focus-ring-offset); }
+    `
+    )).toEqual([])
+  })
+
   it("requires focus outlines to take their width from the focus-ring token", () => {
     expect(rules(
       "src/patterns/Row.module.css",

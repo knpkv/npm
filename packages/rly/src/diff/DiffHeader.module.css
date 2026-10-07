@@ -106,7 +106,8 @@
   .standalone[aria-pressed="true"] {
     background: var(--rly-color-surface-3);
     color: var(--rly-color-text-1);
-    box-shadow: inset 0 -3px var(--rly-color-focus);
+    /* Pressed is marked in text ink; the focus colour is reserved for the focus ring. */
+    box-shadow: inset 0 calc(var(--rly-space-2) * -1) var(--rly-color-text-1);
   }
 
   .group button:hover,
