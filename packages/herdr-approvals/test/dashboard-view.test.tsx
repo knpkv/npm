@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
 import { approvalShortcutFor, DashboardView } from "../src/dashboard-view.js"
+import { dashboardPage } from "../src/internal/dashboard-page.js"
 
 /** The pending job every snapshot starts from. */
 const pendingRecord: DashboardSnapshot["records"][number] = {
@@ -27,7 +28,8 @@ const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
       canonical: false,
       canonicalUrl: "https://ser8.example.test/",
       chatEnabled: false,
-      pushEnabled: false
+      pushEnabled: false,
+      workEnabled: false
     },
     approvalsEnabled,
     chat: null,
@@ -437,5 +439,15 @@ describe("dashboard approval capability", () => {
     expect(markup).toContain('data-approval-job="job-1"')
     expect(markup).toContain('tabindex="0"')
     expect(markup).toContain('aria-label="Approval keyboard shortcuts"')
+  })
+})
+
+describe("host dashboard page", () => {
+  it("is server-rendered with the text-node separators hydration needs (React #418)", () => {
+    const page = dashboardPage(snapshot(true), "")
+    const root = page.slice(page.indexOf('<div id="fleet-dashboard-root">'), page.indexOf("</div>\n<script"))
+    // renderToString marks where adjacent text nodes meet; static markup merges them and the
+    // hydrating client then finds different text.
+    expect(root).toContain("<!-- -->")
   })
 })

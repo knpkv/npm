@@ -112,11 +112,11 @@ import {
   PendingApprovalSummary,
   type PendingApprovalTarget
 } from "./dashboard-model.js"
-import { DashboardView } from "./dashboard-view.js"
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { fontPreloadLink } from "./font-preload.js"
-import { dashboardDocumentTitle } from "./internal/html.js"
+import { dashboardPage } from "./internal/dashboard-page.js"
+import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
 import {
   isRelayedScrollState,
@@ -285,8 +285,6 @@ type Runner = {
   readonly close: () => Promise<void>
   readonly enqueue: (jobId: string) => Promise<boolean>
 }
-
-type ListenerMode = "local" | "tailnet" | "approval" | "serve" | "work" | "lan"
 
 type TlsCredentials = {
   readonly certificate: string
@@ -1176,48 +1174,6 @@ export const notificationCandidates = Effect.fn(
     pendingCount: aggregated.failures.length === 0 ? candidates.length : null
   } satisfies ApprovalNotificationBatch
 })
-
-const dashboardPage = (snapshot: DashboardSnapshot, fontPreload: string): string => {
-  const markup = snapshot.approvalApp.canonical ? "" : renderToStaticMarkup(
-    createElement(
-      "div",
-      { className: "dashboard-gesture" },
-      createElement(DashboardView, {
-        busyJobId: null,
-        chatBusy: false,
-        notificationState: "loading",
-        onChatSubmit: undefined,
-        onDecision: () => undefined,
-        onDisableNotifications: undefined,
-        onEnableNotifications: undefined,
-        onRefresh: () => undefined,
-        pull: { distance: 0, ready: false, refreshing: false },
-        snapshot
-      })
-    )
-  )
-  const data = JSON.stringify(snapshot).replaceAll("<", "\\u003c")
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#111418">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Approvals">
-<title>${dashboardDocumentTitle(snapshot.host)}</title>
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/assets/approval-icon.svg" type="image/svg+xml">
-${fontPreload}<link rel="stylesheet" href="/assets/index.css">
-</head>
-<body data-rly-root data-rly-theme="dark">
-<div id="fleet-dashboard-root">${markup}</div>
-<script id="fleet-dashboard-data" type="application/json">${data}</script>
-<script src="/assets/approval.js" defer></script>
-</body>
-</html>`
-}
 
 const connectPage = (fontPreload: string): string =>
   `<!doctype html>
@@ -2709,7 +2665,8 @@ export const startHttpServer = async (
                   canonical: mode === "serve",
                   canonicalUrl: config.approvalHub.url,
                   chatEnabled: mode === "serve",
-                  pushEnabled: mode === "serve"
+                  pushEnabled: mode === "serve",
+                  workEnabled: listenerServesWork(mode, config.crossHost)
                 },
                 chat: null,
                 work: null,
@@ -2805,7 +2762,7 @@ export const startHttpServer = async (
             return
           }
 
-          const servesWork = mode === "serve" || mode === "work" || (mode === "local" && !config.crossHost)
+          const servesWork = listenerServesWork(mode, config.crossHost)
           if (
             (mode === "serve" || (mode === "local" && !config.crossHost)) &&
             request.method === "GET" &&
