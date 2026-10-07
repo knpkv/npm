@@ -65,6 +65,8 @@ test("the matrix runs exactly the packages that declare a browser suite", () => 
   const buildStep = suiteJob.steps.findIndex((step) => step.run?.includes("${{ matrix.package }}^..."))
   const testStep = suiteJob.steps.findIndex((step) => step.run?.includes("run test:browser"))
   assert(buildStep !== -1 && buildStep < testStep, "each leg builds its own workspace dependencies first")
+  // A package whose workspace dependencies have no build script (rly) must not fail its leg here.
+  assert.match(suiteJob.steps[buildStep].run, /\s--if-present\s/u)
 })
 
 test("the required Browser check passes only when every leg succeeded", () => {

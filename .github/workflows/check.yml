@@ -237,7 +237,7 @@ jobs:
       - name: Install bounded Chromium runtime
         run: pnpm --filter @knpkv/rly exec playwright install --with-deps chromium
       - name: Build the package's workspace dependencies
-        run: pnpm --filter "@knpkv/${{ matrix.package }}^..." --sort run build
+        run: pnpm --filter "@knpkv/${{ matrix.package }}^..." --sort --if-present run build
       - name: Test the package's browser suite
         run: pnpm --filter "@knpkv/${{ matrix.package }}" run test:browser
       - name: Validate Control Center large-fixture contracts

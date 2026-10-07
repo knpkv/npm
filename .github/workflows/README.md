@@ -110,7 +110,7 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
   failure on the eligible class is a release-gate failure; other failures are
   never retried as noise.
 - **Commands** (per leg):
-  - `pnpm --filter "@knpkv/<package>^..." --sort run build`
+  - `pnpm --filter "@knpkv/<package>^..." --sort --if-present run build`
   - `pnpm --filter "@knpkv/<package>" run test:browser`
   - control-center leg: `pnpm --filter @knpkv/control-center benchmark:contracts` and `benchmark:validate-runtime`
 - Locally, `pnpm test:browser` still runs every suite one after another
