@@ -14,6 +14,13 @@ import {
   readPaneScrollOffset
 } from "../src/internal/pane-scroll.js"
 
+// Each test effect is an application boundary; @effect/vitest scopes its test layer.
+// @effect-diagnostics-next-line strictEffectProvide:off
+const provideTestClock = Effect.provide(TestClock.layer())
+// The reader tests spawn a real fake herdr, so they own the Node services for their lifetime.
+// @effect-diagnostics-next-line strictEffectProvide:off
+const provideNodeServices = Effect.provide(NodeServices.layer)
+
 describe("read window", () => {
   it("grants at most the limit within a second and frees as reads age out", () => {
     const window = makeReadWindow(2)
@@ -53,7 +60,7 @@ describe("pane scroll reporter", () => {
       expect(calls()).toBe(1)
       expect(seen).toEqual([12])
       expect(reporter.scrolledBack()).toBe(true)
-    })).pipe(Effect.provide(TestClock.layer())))
+    })).pipe(provideTestClock))
 
   it.effect("waits for the session window rather than dropping the read that ends a burst", () =>
     Effect.scoped(Effect.gen(function*() {
@@ -69,7 +76,7 @@ describe("pane scroll reporter", () => {
       yield* TestClock.adjust("1 second")
       expect(calls()).toBe(3)
       expect(seen).toEqual([3, 7, 9])
-    })).pipe(Effect.provide(TestClock.layer())))
+    })).pipe(provideTestClock))
 
   it.effect("drops reads past the host cap and keeps the last known position", () =>
     Effect.scoped(Effect.gen(function*() {
@@ -80,7 +87,7 @@ describe("pane scroll reporter", () => {
       yield* TestClock.adjust("200 millis")
       expect(calls()).toBe(1)
       expect(seen).toEqual([4])
-    })).pipe(Effect.provide(TestClock.layer())))
+    })).pipe(provideTestClock))
 
   it.effect("reports a failed read as unknown, never as the bottom, and repeats nothing unchanged", () =>
     Effect.scoped(Effect.gen(function*() {
@@ -91,7 +98,7 @@ describe("pane scroll reporter", () => {
       }
       expect(seen).toEqual([null, 5])
       expect(reporter.scrolledBack()).toBe(true)
-    })).pipe(Effect.provide(TestClock.layer())))
+    })).pipe(provideTestClock))
 })
 
 describe("readPaneScrollOffset", () => {
@@ -106,7 +113,7 @@ describe("readPaneScrollOffset", () => {
     Effect.gen(function*() {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
       return yield* Effect.result(readPaneScrollOffset(spawner, command, root, "w1:p9"))
-    }).pipe(Effect.provide(NodeServices.layer))
+    }).pipe(provideNodeServices)
 
   it.effect("reads offset_from_bottom from herdr pane get", () => {
     const { command, root } = fakeHerdr(
