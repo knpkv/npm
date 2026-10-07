@@ -66,10 +66,15 @@ test("desktop stacked selection keeps its indicator", async ({ page }) => {
   })
   const indicator = await selected.evaluate((element) => {
     const style = getComputedStyle(element, "::after")
-    return { content: style.content, height: style.height, position: style.position, width: style.width }
+    return {
+      content: style.content,
+      height: style.height,
+      position: style.position,
+      spansTab: Math.round(Number.parseFloat(style.width)) === Math.round(element.getBoundingClientRect().width)
+    }
   })
 
-  expect(indicator).toEqual({ content: "\"\"", height: "2px", position: "absolute", width: "297px" })
+  expect(indicator).toEqual({ content: "\"\"", height: "2px", position: "absolute", spansTab: true })
 })
 
 test("393x500 stacked selection keeps its forced-colors cue", async ({ page }) => {
@@ -148,3 +153,24 @@ for (const viewport of mobileViewports) {
     await expect(work).toHaveAttribute("aria-selected", "true")
   })
 }
+
+test("desktop tabs mark the selection once and size each tab to its label", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await page.goto(stackedStory)
+
+  const list = page.getByRole("tablist", { name: "Stacked sections" })
+  const selected = list.getByRole("tab", { selected: true })
+  await expect(list).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
+  await expect(selected).toHaveCSS("background-color", "rgba(0, 0, 0, 0)")
+  // Sized to their labels: no tab grows, so the row keeps its spare width instead of stretching tabs.
+  const { grows, spare } = await list.evaluate((element) => {
+    const tabs = [...element.querySelectorAll("[role='tab']")]
+    const used = tabs.reduce((sum, tab) => sum + tab.getBoundingClientRect().width, 0)
+    return {
+      grows: tabs.map((tab) => getComputedStyle(tab).flexGrow),
+      spare: element.getBoundingClientRect().width - used
+    }
+  })
+  expect(new Set(grows)).toEqual(new Set(["0"]))
+  expect(spare).toBeGreaterThan(0)
+})

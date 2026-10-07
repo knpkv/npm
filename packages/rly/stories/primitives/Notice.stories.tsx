@@ -36,10 +36,13 @@ const NoticeGallery = () => (
 )
 
 const NarrowAction = () => (
-  <main style={{ ...pageStyle, maxInlineSize: "20rem" }}>
-    <Notice action={<Button size="compact">Rescan sessions</Button>} tone="caution">
-      Directory mappings changed since the last read.
-    </Notice>
+  <main style={pageStyle}>
+    {/* The 20rem slot sits inside the page padding, so the notice gets 20rem at every viewport. */}
+    <div style={{ maxInlineSize: "20rem" }}>
+      <Notice action={<Button size="compact">Rescan sessions</Button>} tone="caution">
+        Directory mappings changed since the last read.
+      </Notice>
+    </div>
   </main>
 )
 

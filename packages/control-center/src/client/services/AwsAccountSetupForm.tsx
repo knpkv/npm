@@ -102,13 +102,33 @@ const profileDiscoveryMessage = (profileCount: number, state: "failed" | "idle" 
   }
 }
 
-const failureMessage = (service: "CodeCommit" | "CodePipeline", failureClass: string): string =>
-  failureClass === "authorization"
-    ? `${service} access was denied. Select names manually or update this profile's permissions.`
-    : `${service} discovery is unavailable (${failureClass}). Select names manually or refresh.`
+type DiscoveryFailure = Extract<AwsServiceResourceDiscovery, { readonly _tag: "failed" }>
+
+/** One sentence per failure: what went wrong for this service and profile, and what to do next. */
+export const discoveryFailureMessage = (
+  service: "CodeCommit" | "CodePipeline",
+  profile: string,
+  failure: DiscoveryFailure
+): string => {
+  switch (failure.failureClass) {
+    case "authentication":
+      return `Can't sign in to ${service} with ${profile}. Check this profile's credentials or sign-in session, then refresh.`
+    case "authorization":
+      return `${profile} isn't allowed to list ${service} resources. Enter names manually or update the profile's permissions.`
+    case "rate-limit":
+      return `AWS is limiting ${service} requests. Wait a minute, then refresh.`
+    case "timeout":
+      return `${service} didn't answer in time. Refresh to try again.`
+    case "malformed-response":
+      return `${service} sent a response Control Center can't read. Enter names manually.`
+    case "unavailable":
+      return `${service} couldn't be reached. Refresh to try again, or enter names manually.`
+  }
+}
 
 const ResourcePicker = ({
   label,
+  profile,
   query,
   selected,
   service,
@@ -116,6 +136,7 @@ const ResourcePicker = ({
   setSelected
 }: {
   readonly label: string
+  readonly profile: string
   readonly query: string
   readonly selected: ReadonlySet<string>
   readonly service: AwsServiceResourceDiscovery
@@ -133,7 +154,7 @@ const ResourcePicker = ({
           <StateLabel label={`${selected.size} selected`} size="compact" tone="neutral" />
         </div>
         <Text as="p" className={styles.error} role="status" variant="body">
-          {failureMessage(label === "Repositories" ? "CodeCommit" : "CodePipeline", service.failureClass)}
+          {discoveryFailureMessage(label === "Repositories" ? "CodeCommit" : "CodePipeline", profile, service)}
         </Text>
         {preservedNames.length === 0 ? null : (
           <>
@@ -177,7 +198,7 @@ const ResourcePicker = ({
         </Text>
       ) : (
         <>
-          <Field label={`Search ${label.toLocaleLowerCase()}`} size="compact">
+          <Field label={`Search ${label.toLocaleLowerCase()}`}>
             {(controlProps) => (
               <input
                 {...controlProps}
@@ -355,7 +376,7 @@ export const AwsAccountSetupForm = ({
           {profileDiscoveryMessage(awsProfiles.length, awsProfilesState)}
         </Text>
       </div>
-      <Field label="Account name" required size="compact">
+      <Field label="Account name" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -365,7 +386,7 @@ export const AwsAccountSetupForm = ({
           />
         )}
       </Field>
-      <Field label="AWS profile" required size="compact">
+      <Field label="AWS profile" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -382,7 +403,7 @@ export const AwsAccountSetupForm = ({
           />
         )}
       </Field>
-      <Field label="AWS region" required size="compact">
+      <Field label="AWS region" required>
         {(controlProps) => (
           <input
             {...controlProps}
@@ -413,6 +434,7 @@ export const AwsAccountSetupForm = ({
         <div className={styles.resources}>
           <ResourcePicker
             label="Repositories"
+            profile={profile.trim()}
             query={repositoryQuery}
             selected={selectedRepositories}
             service={discoveryState.response.codeCommit}
@@ -421,6 +443,7 @@ export const AwsAccountSetupForm = ({
           />
           <ResourcePicker
             label="Pipelines"
+            profile={profile.trim()}
             query={pipelineQuery}
             selected={selectedPipelines}
             service={discoveryState.response.codePipeline}
@@ -436,11 +459,7 @@ export const AwsAccountSetupForm = ({
       </div>
       {isManualEntryOpen ? (
         <div className={styles.resources}>
-          <Field
-            description="Comma or line separated. Maximum 20 including selected names."
-            label="Repository names"
-            size="compact"
-          >
+          <Field description="Comma or line separated. Maximum 20 including selected names." label="Repository names">
             {(controlProps) => (
               <textarea
                 {...controlProps}
@@ -451,11 +470,7 @@ export const AwsAccountSetupForm = ({
               />
             )}
           </Field>
-          <Field
-            description="Comma or line separated. Maximum 20 including selected names."
-            label="Pipeline names"
-            size="compact"
-          >
+          <Field description="Comma or line separated. Maximum 20 including selected names." label="Pipeline names">
             {(controlProps) => (
               <textarea
                 {...controlProps}

@@ -65,7 +65,7 @@ describe("DiffFinding", () => {
       </main>
     )
     expect(gallery?.querySelector("[data-rly-diff-finding-source='agent']")?.textContent).toContain(
-      "Agent finding · not an approval"
+      "Agent finding, not an approval"
     )
     expect(gallery?.querySelector("[data-rly-diff-finding-source='human']")?.textContent).toContain("Human finding")
     expect(gallery?.textContent).toContain("8fa21c7")

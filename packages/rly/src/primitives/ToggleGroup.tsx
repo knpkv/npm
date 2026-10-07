@@ -7,20 +7,25 @@ const style = (name: string): string => cssClass(styles, name)
 
 export const RLY_TOGGLE_GROUP_VARIANTS = defineVariants({
   size: {
+    dense: {
+      className: style("dense"),
+      purpose: "Tool-density choice beside dense controls; the default",
+      tokens: ["control-height-dense", "type-meta", "radius-tag"]
+    },
     compact: {
       className: style("compact"),
-      purpose: "Dense filter rows beside other controls",
-      tokens: ["type-meta", "space-32", "space-2"]
+      purpose: "Filter rows beside compact controls",
+      tokens: ["control-height-compact", "type-meta", "radius-tag"]
     },
     default: {
       className: style("defaultSize"),
       purpose: "Standard view and filter choices",
-      tokens: ["type-label", "space-40", "space-2"]
+      tokens: ["control-height-default", "type-label", "radius-tag"]
     }
   }
 })
 
-export const RLY_TOGGLE_GROUP_DEFAULT_VARIANTS = defineVariants({ size: "default" })
+export const RLY_TOGGLE_GROUP_DEFAULT_VARIANTS = defineVariants({ size: "dense" })
 export type RlyToggleGroupSize = keyof typeof RLY_TOGGLE_GROUP_VARIANTS.size
 
 /** One visibly labelled option. */
@@ -68,7 +73,7 @@ export const ToggleGroup = ({
   items,
   onValueChange,
   ref,
-  size = "default",
+  size = RLY_TOGGLE_GROUP_DEFAULT_VARIANTS.size,
   value,
   ...props
 }: ToggleGroupProps): ReactElement => {

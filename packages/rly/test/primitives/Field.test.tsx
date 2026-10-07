@@ -60,7 +60,7 @@ describe("Field", () => {
     expect(first).toContain('role="combobox"')
     expect(first).toContain('aria-labelledby="rly-field-_R_0_-label"')
     expect(first).toContain(RLY_FIELD_VARIANTS.size.compact.className)
-    expect(RLY_FIELD_DEFAULT_VARIANTS).toEqual({ size: "default" })
+    expect(RLY_FIELD_DEFAULT_VARIANTS).toEqual({ size: "dense" })
   })
 
   it("accepts an rly-owned control that preserves final DOM semantics", () => {

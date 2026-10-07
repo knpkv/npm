@@ -24,7 +24,7 @@ import { fromNodeProviderChain, fromSSO } from "@aws-sdk/credential-providers"
 import type { Duration } from "effect"
 import { Context, Layer } from "effect"
 
-import { makeProfileCredentialProvider } from "./AwsClientConfig/internal/ProfileCredentialProvider.js"
+import { makeProfileCredentialProvider } from "./AwsProfileCredentials.js"
 
 /** Credential material consumed only by the AWS signing layer. */
 export interface AwsCredentialIdentity {

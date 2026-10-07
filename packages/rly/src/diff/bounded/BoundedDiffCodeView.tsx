@@ -7,8 +7,9 @@ import {
   type Hunk,
   parseDiffFromFile
 } from "@pierre/diffs"
-import { Fragment, type ReactElement, type ReactNode, useRef } from "react"
+import { Fragment, type ReactElement, type ReactNode, useCallback, useRef } from "react"
 import { cssClass } from "../../internal/component.js"
+import { RLY_SPLIT_DIFF_MIN_WIDTH, useNarrowerThan } from "../../internal/useNarrowerThan.js"
 import { DiffCodeAnnotation, requireDiffCodeAnnotations } from "../annotation.js"
 import type { RlyDiffCodeAnnotation, RlyDiffCodeItem } from "../types.js"
 import styles from "./BoundedDiffCodeView.module.css"
@@ -368,14 +369,24 @@ export const BoundedDiffCodeView = ({
 }: BoundedDiffCodeViewProps): ReactNode => {
   requireDiffCodeAnnotations(annotations)
   const rootRef = useRef<HTMLDivElement>(null)
+  // A split view stacks in a narrow container, so neither side is clipped to a sliver.
+  const [narrow, measureRef] = useNarrowerThan<HTMLDivElement>(RLY_SPLIT_DIFF_MIN_WIDTH)
+  const attachRoot = useCallback(
+    (element: HTMLDivElement | null) => {
+      rootRef.current = element
+      return measureRef(element)
+    },
+    [measureRef]
+  )
+  const shown: BoundedDiffMode = mode === "split" && narrow ? "stacked" : mode
   if (initialItems.length === 0) return <p className={className}>{empty}</p>
 
   return (
     <div
-      ref={rootRef}
+      ref={attachRoot}
       className={className === undefined ? cssClass(styles, "root") : `${cssClass(styles, "root")} ${className}`}
       data-rly-diff-code-view=""
-      data-rly-diff-mode={mode}
+      data-rly-diff-mode={shown}
     >
       {initialItems.map((item) => {
         const diff = parseItem(item)
@@ -390,7 +401,7 @@ export const BoundedDiffCodeView = ({
           <section className={styles.file} key={item.id}>
             {initialItems.length > 1 ? <h3 className={styles.fileName}>{diff.name}</h3> : null}
             <div className={styles.scroller}>
-              {mode === "split"
+              {shown === "split"
                 ? renderSplit(diff, item.id, annotations, () => rootRef.current, wrap)
                 : renderUnified(diff, item.id, annotations, () => rootRef.current, wrap)}
             </div>
