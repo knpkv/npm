@@ -25,6 +25,14 @@ export const relayShortcut = (apple: boolean): RlyRelayShortcut =>
 const isApplePlatform = (): boolean => /Mac|iPhone|iPad/.test(navigator.platform)
 const noSubscription = (): (() => void) => () => undefined
 
+/**
+ * Ctrl/⌘+J for the browser's platform, for a host that binds it. The server renders the non-Apple
+ * form and an Apple browser switches to ⌘ after hydration without a mismatch. A host that binds the
+ * key must also prevent the browser's own Ctrl+J (Downloads in Chrome on Windows and Linux).
+ */
+export const useRelayShortcut = (): RlyRelayShortcut =>
+  relayShortcut(useSyncExternalStore(noSubscription, isApplePlatform, () => false))
+
 /** Inputs for the launcher. */
 export type RelayLauncherProps = Omit<ComponentPropsWithRef<"button">, "children" | "type"> & {
   /** Whether Relay is open; announced as the button's expanded state. */
@@ -32,10 +40,11 @@ export type RelayLauncherProps = Omit<ComponentPropsWithRef<"button">, "children
   /** The visible name, "Relay" unless the host names its Relay more specifically. */
   readonly label?: string
   /**
-   * The shortcut to advertise. Defaults to Ctrl/⌘+J for the browser's platform; pass `null` where
-   * the host does not bind it (a live terminal that keeps its own chords).
+   * The shortcut the host actually binds, usually `useRelayShortcut()`, or `null` when it binds none
+   * (a live terminal that keeps its own chords). Required, so a launcher never advertises a key that
+   * does nothing.
    */
-  readonly shortcut?: RlyRelayShortcut | null
+  readonly shortcut: RlyRelayShortcut | null
 }
 
 /**
@@ -50,24 +59,21 @@ export const RelayLauncher = ({
   shortcut,
   ...props
 }: RelayLauncherProps): ReactElement => {
-  // The server renders the non-Apple hint; the browser corrects it after hydration without a mismatch.
-  const apple = useSyncExternalStore(noSubscription, isApplePlatform, () => false)
-  const advertised = shortcut === undefined ? relayShortcut(apple) : shortcut
   return (
     <button
       {...props}
       aria-expanded={expanded}
-      aria-keyshortcuts={advertised === null ? undefined : advertised.keys}
+      aria-keyshortcuts={shortcut === null ? undefined : shortcut.keys}
       className={classNames(style("root"), className)}
       data-rly-relay-launcher=""
       type="button"
     >
       <RelayMark className={style("mark")} size={20} />
       <span className={style("label")}>{requireText(label, "RelayLauncher label")}</span>
-      {advertised === null ? null : (
+      {shortcut === null ? null : (
         // The hint repeats aria-keyshortcuts for sighted users, so assistive technology hears it once.
         <kbd aria-hidden="true" className={style("hint")}>
-          {requireText(advertised.hint, "RelayLauncher shortcut hint")}
+          {requireText(shortcut.hint, "RelayLauncher shortcut hint")}
         </kbd>
       )}
     </button>

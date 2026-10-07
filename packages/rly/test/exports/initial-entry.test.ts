@@ -60,6 +60,7 @@ describe("public entries", () => {
       "RelayDock",
       "RelayLauncher",
       "relayShortcut",
+      "useRelayShortcut",
       "RelayMark",
       "RLY_RELAY_MARK_SIZES",
       "RLY_RELAY_MARK_TILE_SIZES",

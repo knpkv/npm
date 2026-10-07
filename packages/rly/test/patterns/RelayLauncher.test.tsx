@@ -2,7 +2,10 @@
 
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { RelayLauncher, relayShortcut } from "../../src/patterns/RelayLauncher.js"
+import { createElement } from "react"
+import { RelayLauncher, relayShortcut, useRelayShortcut } from "../../src/patterns/RelayLauncher.js"
+
+const ctrlJ = relayShortcut(false)
 
 const parse = (markup: string): Element => {
   const host = document.createElement("div")
@@ -14,17 +17,20 @@ const parse = (markup: string): Element => {
 
 describe("RelayLauncher", () => {
   it("is a named button that reports whether Relay is open", () => {
-    const closed = parse(renderToStaticMarkup(<RelayLauncher expanded={false} />))
+    const closed = parse(renderToStaticMarkup(<RelayLauncher expanded={false} shortcut={ctrlJ} />))
     expect(closed.tagName).toBe("BUTTON")
     expect(closed.getAttribute("type")).toBe("button")
     expect(closed.getAttribute("aria-expanded")).toBe("false")
     expect(closed.textContent).toContain("Relay")
-    expect(parse(renderToStaticMarkup(<RelayLauncher expanded />)).getAttribute("aria-expanded")).toBe("true")
+    expect(parse(renderToStaticMarkup(<RelayLauncher expanded shortcut={ctrlJ} />)).getAttribute("aria-expanded")).toBe(
+      "true"
+    )
   })
 
-  it("advertises Ctrl/⌘+J once: aria-keyshortcuts for assistive technology, a hidden hint for sight", () => {
-    // The server snapshot is the non-Apple form; the browser switches to ⌘ after hydration.
-    const button = parse(renderToStaticMarkup(<RelayLauncher expanded={false} />))
+  it("advertises the bound shortcut once: aria-keyshortcuts for assistive technology, a hidden hint for sight", () => {
+    // useRelayShortcut's server snapshot is the non-Apple form; the browser switches to ⌘ after hydration.
+    const Host = () => <RelayLauncher expanded={false} shortcut={useRelayShortcut()} />
+    const button = parse(renderToStaticMarkup(createElement(Host)))
     expect(button.getAttribute("aria-keyshortcuts")).toBe("Control+J")
     const hint = button.querySelector("kbd")
     expect(hint?.textContent).toBe("Ctrl J")
@@ -39,9 +45,11 @@ describe("RelayLauncher", () => {
   })
 
   it("requires a visible label", () => {
-    expect(() => renderToStaticMarkup(<RelayLauncher expanded={false} label="" />)).toThrow(/visible text/)
-    expect(parse(renderToStaticMarkup(<RelayLauncher expanded={false} label="Ask Relay" />)).textContent).toContain(
-      "Ask Relay"
+    expect(() => renderToStaticMarkup(<RelayLauncher expanded={false} label="" shortcut={ctrlJ} />)).toThrow(
+      /visible text/
     )
+    expect(
+      parse(renderToStaticMarkup(<RelayLauncher expanded={false} label="Ask Relay" shortcut={null} />)).textContent
+    ).toContain("Ask Relay")
   })
 })

@@ -39,8 +39,12 @@
   .label {
     min-inline-size: 0;
   }
+  /* Wide enough for "Ctrl J", so the switch to "⌘J" after hydration never moves the header. */
   .hint {
     border: 1px solid var(--rly-color-border-2);
+    box-sizing: border-box;
+    min-inline-size: 4.5em;
+    text-align: center;
     border-radius: var(--rly-radius-tag);
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
@@ -57,15 +61,29 @@
     .mark {
       color: ButtonText;
     }
-    /* Highlight is the focus ring's colour there, so the open state is a heavier border instead. */
+    /*
+     * Highlight is the focus ring's colour there, so open is an inverted fill and a heavier border:
+     * two cues, neither of them a colour the system might also use for focus.
+     */
     .root[aria-expanded="true"] {
+      background: ButtonText;
       border: 2px solid ButtonText;
+      color: ButtonFace;
+      forced-color-adjust: none;
+    }
+    .root[aria-expanded="true"] .mark {
+      color: ButtonFace;
     }
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .mark {
     color: ButtonText;
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"] {
+    background: ButtonText;
     border: 2px solid ButtonText;
+    color: ButtonFace;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"] .mark {
+    color: ButtonFace;
   }
 }

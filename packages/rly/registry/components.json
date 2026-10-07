@@ -3695,6 +3695,10 @@
         {
           "kind": "type",
           "name": "RlyRelayShortcut"
+        },
+        {
+          "kind": "value",
+          "name": "useRelayShortcut"
         }
       ],
       "files": {

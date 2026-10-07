@@ -7,37 +7,40 @@
   .tile {
     align-items: center;
     background: var(--rly-color-agent);
-    block-size: 24px;
+    block-size: var(--rly-space-24);
     border-radius: var(--rly-radius-control);
     box-sizing: border-box;
     color: var(--rly-color-surface-1);
     display: inline-flex;
     flex: none;
-    inline-size: 24px;
+    inline-size: var(--rly-space-24);
     justify-content: center;
   }
   .tile[data-size="20"] {
-    block-size: 20px;
-    inline-size: 20px;
+    block-size: var(--rly-space-20);
+    inline-size: var(--rly-space-20);
   }
   .tile[data-size="32"] {
-    block-size: 32px;
-    inline-size: 32px;
+    block-size: var(--rly-space-32);
+    inline-size: var(--rly-space-32);
   }
   .tileGlyph {
     display: block;
   }
-  /* The agent fill is dropped by the system; an outline in the link colour keeps the tile's shape. */
+  /*
+   * The agent fill is dropped by the system; an outline keeps the tile's shape. It takes its context's
+   * colour: LinkText in a link, ButtonText in a button, CanvasText in running text.
+   */
   @media (forced-colors: active) {
     .tile {
       background: none;
-      border: 1px solid LinkText;
-      color: LinkText;
+      border: 1px solid currentColor;
+      color: inherit;
     }
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .tile {
     background: none;
-    border: 1px solid LinkText;
-    color: LinkText;
+    border: 1px solid currentColor;
+    color: inherit;
   }
 }

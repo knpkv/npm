@@ -452,7 +452,8 @@ confirmation is checked, and terminal outcomes remain visible after review.
 them. The bare mark is drawn in the current colour, so it follows its host's text in
 every theme and in forced colours; sizes are 16, 20 (default), 24 and 32px, and 16px
 stays legible in one colour. `RelayMark.Tile` sets it on the agent colour (20, 24 or
-32px); in forced colours the tile becomes a LinkText outline. Both are decorative
+32px); in forced colours the tile becomes an outline in its context's colour
+(LinkText in a link, ButtonText in a button). Both are decorative
 unless given a `label`. The same mark on its tile ships as `@knpkv/rly/relay-mark.svg`
 for a host's favicon.
 
@@ -460,13 +461,15 @@ for a host's favicon.
 ("Relay" unless the host names it) and the Ctrl/⌘+J hint. It sits in the host's header
 like any other control, never fixed over the page. `expanded` drives `aria-expanded`,
 and `aria-keyshortcuts` names the shortcut while the visible hint stays hidden from
-assistive technology; pass `shortcut={null}` where the host keeps Ctrl/⌘+J for itself.
+assistive technology. `shortcut` is required: pass `useRelayShortcut()` (Ctrl/⌘+J for
+the platform) only when the host binds that key and prevents the browser's own Ctrl+J,
+or `null` where it binds none, such as a live terminal that keeps its chords.
 The hint hides at 40rem and below, and the button is 32px tall, 44px for a coarse pointer.
 
 ```tsx
-import { RelayLauncher } from "@knpkv/rly/patterns"
+import { RelayLauncher, useRelayShortcut } from "@knpkv/rly/patterns"
 
-;<RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} />
+;<RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} shortcut={useRelayShortcut()} />
 ```
 
 `RelayDock` is the shared product frame for one adapter-owned Relay thread. It

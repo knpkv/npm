@@ -55,7 +55,7 @@ const Glyph = ({ size, ...props }: MarkBaseProps & { readonly size: number }): R
   </svg>
 )
 
-/** The mark on an agent-coloured tile; in forced colours the tile becomes a LinkText outline. */
+/** The mark on an agent-coloured tile; in forced colours the tile becomes an outline in its context's colour. */
 const RelayMarkTile = ({ className, label, size, ...props }: RelayMarkTileProps): ReactElement => {
   const pixels = size ?? 24
   return (

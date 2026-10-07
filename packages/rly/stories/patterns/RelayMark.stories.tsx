@@ -51,7 +51,7 @@ export const Sizes: Story = {
   render: () => <MarkCatalog />
 }
 
-/** Forced colours: the bare mark follows CanvasText and the tile keeps its shape as a LinkText outline. */
+/** Forced colours: the bare mark follows CanvasText and the tile keeps its shape as an outline in its context's colour. */
 export const ForcedColors: Story = {
   globals: { forcedColors: "active" },
   play: async ({ canvasElement }) => {
