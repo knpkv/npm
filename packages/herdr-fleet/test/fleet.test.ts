@@ -1851,7 +1851,8 @@ describe("fleet local authority", () => {
       ) => Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, ...change })._tag
       expect(decode({ reason: "r".repeat(1_024) })).toBe("Success")
       expect(decode({ reason: "line\nbreak" })).toBe("Failure")
-      const longName = "n".repeat(1_900)
+      // The summary carries both names and the reason; two of these cannot fit in 4,096 characters.
+      const longName = "n".repeat(2_100)
       expect(decode({ from: { id: "owner-a", name: longName }, to: { id: "owner-b", name: longName } })).toBe(
         "Failure"
       )

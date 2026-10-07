@@ -262,18 +262,18 @@ const workReassignOwnerIdMaxLength = 256
 const workReassignActivityMaxLength = 4_096
 const workReassignActivityText = /^[^\p{Cc}\p{Cs}]+$/u
 
-/** Activity text the Work store records for an approved reassignment. */
+/**
+ * Activity text the Work store records for an approved reassignment: the owners by name and the
+ * reason, written for people. Owner ids and the approval's job id and hash stay structured on the
+ * reassignment record, where they are evidence; in prose they were unreadable hex.
+ */
 export const workReassignActivitySummary = (
   payload: {
     readonly from: { readonly id: string; readonly name: string }
     readonly to: { readonly id: string; readonly name: string }
     readonly reason: string
-  },
-  approvalJobId: string,
-  approvalHash: string
-): string =>
-  `Reassigned from ${payload.from.name} (${payload.from.id}) to ${payload.to.name} (${payload.to.id}): ` +
-  `${payload.reason} (approved Fleet job ${approvalJobId}, hash ${approvalHash})`
+  }
+): string => `Reassigned from ${payload.from.name} to ${payload.to.name}: ${payload.reason}`
 
 /**
  * Accepts a reassignment only when its target owner and its longest possible
@@ -283,7 +283,7 @@ export const workReassignActivitySummary = (
 export const workReassignIsRecordable = (
   payload: Parameters<typeof workReassignActivitySummary>[0]
 ): boolean => {
-  const summary = workReassignActivitySummary(payload, "j".repeat(256), "0".repeat(64))
+  const summary = workReassignActivitySummary(payload)
   return payload.from.id !== payload.to.id &&
     payload.to.id.length <= workReassignOwnerIdMaxLength &&
     summary.length <= workReassignActivityMaxLength &&
@@ -310,12 +310,12 @@ export const WorkReassign = Schema.Struct({
 )
 export type WorkReassign = typeof WorkReassign.Type
 
-/** Activity text the Work store records for an approved abandonment. */
-export const workAbandonActivitySummary = (
-  payload: { readonly reason: string },
-  approvalJobId: string,
-  approvalHash: string
-): string => `Abandoned: ${payload.reason} (approved Fleet job ${approvalJobId}, hash ${approvalHash})`
+/**
+ * Activity text the Work store records for an approved abandonment: the reason, for people. The
+ * approval's job id and hash stay structured on the abandonment record.
+ */
+export const workAbandonActivitySummary = (payload: { readonly reason: string }): string =>
+  `Abandoned: ${payload.reason}`
 
 /**
  * Accepts an abandonment only when its longest possible activity summary fits
@@ -323,7 +323,7 @@ export const workAbandonActivitySummary = (
  * control characters.
  */
 export const workAbandonIsRecordable = (payload: Parameters<typeof workAbandonActivitySummary>[0]): boolean => {
-  const summary = workAbandonActivitySummary(payload, "j".repeat(256), "0".repeat(64))
+  const summary = workAbandonActivitySummary(payload)
   return summary.length <= workReassignActivityMaxLength && workReassignActivityText.test(summary)
 }
 
