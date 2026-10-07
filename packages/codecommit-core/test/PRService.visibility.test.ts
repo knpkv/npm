@@ -40,6 +40,8 @@ const cachedRow = (profile: string, id: string) =>
     isApproved: 0,
     approvalUnknownReason: null,
     observationSeq: 0,
+    approvalVersion: "2026-08-02T00:00:00.000Z",
+    approvalObservationSeq: 0,
     commentCount: 0,
     healthScore: null,
     link: `https://example.invalid/pr/${id}`,
@@ -79,7 +81,9 @@ const layerWithConfig = (
       Layer.mergeAll(
         Layer.mock(AwsClient, {}),
         Layer.mock(EventsHub, {}),
-        Layer.mock(CommentRepo, {}),
+        Layer.mock(CommentRepo, {
+          find: () => Effect.succeed(Option.none())
+        }),
         Layer.mock(NotificationRepo, {}),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),

@@ -9,7 +9,7 @@ import { diffComments } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo/index.js"
-import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
+import { PullRequestRepo, versionsOf } from "../CacheService/repos/PullRequestRepo/index.js"
 import { AwsProfileName, AwsRegion, type PRCommentLocation } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
 import { isSubscribedForCoordinates } from "./refreshResolve.js"
@@ -17,6 +17,11 @@ import { isSubscribedForCoordinates } from "./refreshResolve.js"
 const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
 const decodeAwsRegion = Schema.decodeSync(AwsRegion)
 
+/**
+ * Fetch one pull request's comments, then write their count and cache them, and announce what changed.
+ * The count is recomputed from the row as it was read, so it is written only while that row still
+ * holds the versions it was read at; the comment cache and the notifications follow only when it was.
+ */
 const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>) =>
   Effect.gen(function*() {
     const awsClient = yield* AwsClient
@@ -26,6 +31,8 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
 
     const awsAccountId = row.awsAccountId
     const prId = row.id
+    if (awsAccountId === "") return
+    const coordinates = { repositoryName: row.repositoryName, accountRegion: row.accountRegion }
 
     const locs = yield* awsClient.getCommentsForPullRequest({
       account: {
@@ -36,70 +43,35 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
       repositoryName: row.repositoryName
     }).pipe(Effect.catch(() => Effect.void.pipe(Effect.as(undefined))))
 
-    if (locs !== undefined && awsAccountId !== "") {
-      // Diff comments for subscribed PRs
-      const coordinates = {
-        repositoryName: row.repositoryName,
-        accountRegion: row.accountRegion
-      }
-      if (
-        yield* isSubscribedForCoordinates(
-          prRepo,
-          subscribedSnapshot,
-          awsAccountId,
-          prId,
-          row.repositoryName,
-          row.accountRegion
-        )
-      ) {
-        const cachedComments = yield* commentRepo.find(awsAccountId, prId, coordinates).pipe(
-          Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
-        )
-        if (Option.isSome(cachedComments)) {
-          const notifications = diffComments(
-            cachedComments.value,
-            locs,
-            prId,
-            awsAccountId,
-            row.repositoryName,
-            row.accountRegion
-          )
-          yield* Effect.forEach(notifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
-            Effect.catch(() => Effect.void)
-          )
-        }
-      }
-      // Cache comments
-      yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs), coordinates).pipe(
-        Effect.catch(() => Effect.void)
-      )
-    }
+    const cachedComments = yield* commentRepo.find(awsAccountId, prId, coordinates).pipe(
+      Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
+    )
+    // Without a fresh fetch, the count falls back to the cached comments.
+    const commentCount = locs !== undefined
+      ? countAllComments(locs)
+      : Option.match(cachedComments, { onNone: () => 0, onSome: countAllComments })
+    const subscribed = yield* isSubscribedForCoordinates(
+      prRepo,
+      subscribedSnapshot,
+      awsAccountId,
+      prId,
+      row.repositoryName,
+      row.accountRegion
+    )
+    const notifications = locs !== undefined && subscribed && Option.isSome(cachedComments)
+      ? diffComments(cachedComments.value, locs, prId, awsAccountId, row.repositoryName, row.accountRegion)
+      : []
 
-    // Fallback: use cached comment count from DB
-    let commentCount = locs !== undefined ? countAllComments(locs) : 0
-    if (locs === undefined && awsAccountId !== "") {
-      const cached = yield* commentRepo.find(awsAccountId, prId, {
-        repositoryName: row.repositoryName,
-        accountRegion: row.accountRegion
-      }).pipe(
-        Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
-      )
-      if (Option.isSome(cached)) {
-        commentCount = countAllComments(cached.value)
-      }
-    }
-
-    return awsAccountId !== ""
-      ? Option.some({
-        awsAccountId,
-        commentCount,
-        id: prId,
-        repositoryName: row.repositoryName,
-        accountRegion: row.accountRegion,
-        // The row's version when it was read: a newer write since makes this count stale.
-        version: { lastActivity: row.lastModifiedDate, observation: row.observationSeq }
-      })
-      : Option.none()
+    const written = yield* prRepo.writeDerived(awsAccountId, prId, versionsOf(row), { commentCount }, coordinates).pipe(
+      Effect.catch(() => Effect.succeed(false))
+    )
+    if (!written || locs === undefined) return
+    yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs), coordinates).pipe(
+      Effect.catch(() => Effect.void)
+    )
+    yield* Effect.forEach(notifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
+      Effect.catch(() => Effect.void)
+    )
   })
 
 export const enrichComments = (params: {
@@ -120,32 +92,18 @@ export const enrichComments = (params: {
       statusDetail: `fetching comments (0/${freshPRs.length})`
     }))
 
-    const enrichments = yield* Effect.forEach(
+    yield* Effect.forEach(
       freshPRs,
       (row) =>
         Effect.gen(function*() {
-          const result = yield* enrichSinglePR(row, subscribedSnapshot)
+          yield* enrichSinglePR(row, subscribedSnapshot)
           const n = yield* Ref.updateAndGet(enrichedRef, (v) => v + 1)
           yield* SubscriptionRef.update(state, (s) => ({
             ...s,
             statusDetail: `fetching comments (${n}/${freshPRs.length})`
           }))
-          return result
         }),
-      { concurrency: 2 }
-    )
-
-    yield* Effect.forEach(
-      enrichments,
-      (r) =>
-        Option.match(r, {
-          onNone: () => Effect.void,
-          onSome: ({ accountRegion, awsAccountId, commentCount, id, repositoryName, version }) =>
-            prRepo.updateCommentCount(awsAccountId, id, commentCount, version, { repositoryName, accountRegion }).pipe(
-              Effect.catch(() => Effect.void)
-            )
-        }),
-      { discard: true }
+      { concurrency: 2, discard: true }
     )
 
     // Derive commented_by from cached pr_comments

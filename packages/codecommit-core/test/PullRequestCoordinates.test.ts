@@ -127,9 +127,9 @@ describe("pull request coordinate migration", () => {
         { repositoryName: "payments", accountRegion: "eu-west-1", title: "Payments updated" }
       ])
 
-      const ambiguous = yield* repo.updateHealthScore("123456789012", "42", 0.5, {
-        lastActivity: new Date("2026-08-02T00:00:00.000Z"),
-        observation: 0
+      const version = { lastActivity: new Date("2026-08-02T00:00:00.000Z"), observation: 0 }
+      const ambiguous = yield* repo.writeDerived("123456789012", "42", { row: version, approval: version }, {
+        healthScore: 0.5
       })
         .pipe(
           Effect.flip
@@ -171,6 +171,8 @@ describe("pull request coordinate migration", () => {
         -- The row version every write compares against.
         last_modified_date TEXT NOT NULL DEFAULT '2026-08-02T00:00:00.000Z',
         observation_seq INTEGER NOT NULL DEFAULT 0,
+        approval_version TEXT NOT NULL DEFAULT '2026-08-02T00:00:00.000Z',
+        approval_observation_seq INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (aws_account_id, id, repository_name, account_region)
       )`
       yield* sql`INSERT INTO pr_comments (pull_request_id, aws_account_id, locations_json)

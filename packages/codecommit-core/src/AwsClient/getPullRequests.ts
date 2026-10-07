@@ -276,7 +276,7 @@ export const fetchApprovers = (
 /**
  * Check PR merge status.
  */
-const fetchMergeStatus = (
+export const fetchMergeStatus = (
   repoName: string,
   target?: { destinationCommit?: string; sourceCommit?: string }
 ) => {

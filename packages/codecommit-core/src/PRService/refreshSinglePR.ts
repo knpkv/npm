@@ -259,7 +259,8 @@ export const makeRefreshSinglePR = (
       status: decodePullRequestStatus(detail.status),
       sourceBranch: detail.sourceBranch,
       destinationBranch: detail.destinationBranch,
-      isMergeable: cached !== undefined ? (cached.isMergeable ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
+      // From this read, so its row group is whole: a cached value would carry an older revision's.
+      isMergeable: detail.isMergeable ? 1 : 0,
       // A failed evaluation keeps the last known approval: the upsert keeps the cached value.
       ...approvalColumnsOf(detail),
       commentCount: countAllComments(locs),
@@ -321,17 +322,25 @@ export const makeRefreshSinglePR = (
       Effect.mapError((cause) => new RefreshError({ failedAccounts: [durableAccountId], cause }))
     )
     // Everything below acts on what this read saw, so only for the groups the cache took: a group not
-    // written was older than the cache. Comments follow the row.
-    if (written.row) {
+    // written was older than the cache.
+    yield* Effect.forEach(notificationsFor(pending, written), (n) => notificationRepo.add(n), { discard: true }).pipe(
+      Effect.catch(() => Effect.void)
+    )
+    // The comment count is recomputed from this read, so it is written only to the row this refresh
+    // just wrote; the comment cache and its notifications follow only when it was.
+    const versions = written.versions
+    const commentsWritten = written.row && versions !== undefined
+      ? yield* prRepo.writeDerived(durableAccountId, prId, versions, { commentCount: countAllComments(locs) }, identity)
+        .pipe(Effect.catch(() => Effect.succeed(false)))
+      : false
+    if (commentsWritten) {
       yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(locs), identity).pipe(
         Effect.catch(() => Effect.void)
       )
+      yield* Effect.forEach(commentNotifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
+        Effect.catch(() => Effect.void)
+      )
     }
-    yield* Effect.forEach(
-      notificationsFor([...pending, ...commentNotifications], written),
-      (n) => notificationRepo.add(n),
-      { discard: true }
-    ).pipe(Effect.catch(() => Effect.void))
     return {
       revisionId: detail.revisionId,
       sourceCommit: detail.sourceCommit

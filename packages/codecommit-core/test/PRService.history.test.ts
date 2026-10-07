@@ -29,6 +29,8 @@ const cachedRow = (profile: string, id: string) =>
     isApproved: 0,
     approvalUnknownReason: null,
     observationSeq: 0,
+    approvalVersion: "2026-08-02T00:00:00.000Z",
+    approvalObservationSeq: 0,
     commentCount: 0,
     healthScore: null,
     link: `https://example.invalid/pr/${id}`,
@@ -67,6 +69,7 @@ const detail = (approvalUnknown: { readonly _tag: "NotPermitted" } | undefined) 
     lastActivityDate: new Date("2026-08-02T00:00:00.000Z"),
     approvedBy: [],
     approvedByArns: [],
+    isMergeable: true,
     approvalRules: [],
     isApproved: true,
     approvalUnknown
@@ -94,8 +97,10 @@ describe("history sync approval evaluation", () => {
           observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed([cachedRow("kept-profile", "11")]),
           findStaleOpen: () => Effect.succeed([cachedRow("kept-profile", "11")]),
-          recordApprovalEvaluation: (_, __, evaluation) =>
-            Ref.update(recorded, (all) => [...all, evaluation.approvalUnknown?._tag ?? "Evaluated"]),
+          writeRead: (_, __, evaluation) =>
+            Ref.update(recorded, (all) => [...all, evaluation.approvalUnknown?._tag ?? "Evaluated"]).pipe(
+              Effect.as({ row: true, approval: true, versions: undefined })
+            ),
           refreshCommentedBy: () => Effect.void
         }),
         Layer.mock(ConfigService, {
@@ -129,8 +134,7 @@ describe("history sync approval evaluation", () => {
           observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed([cachedRow("kept-profile", "11")]),
           findStaleOpen: () => Effect.succeed([cachedRow("kept-profile", "11")]),
-          recordApprovalEvaluation: () =>
-            Effect.fail(new CacheError({ operation: "recordApprovalEvaluation", cause: "disk full" })),
+          writeRead: () => Effect.fail(new CacheError({ operation: "recordApprovalEvaluation", cause: "disk full" })),
           refreshCommentedBy: () => Effect.void
         }),
         Layer.mock(ConfigService, {

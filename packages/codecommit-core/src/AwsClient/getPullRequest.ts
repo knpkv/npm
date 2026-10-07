@@ -29,6 +29,7 @@ import {
   buildApprovalRules,
   evaluateApproval,
   fetchApprovers,
+  fetchMergeStatus,
   fetchRepoAccountId,
   MissingPullRequestResponse
 } from "./getPullRequests.js"
@@ -121,12 +122,14 @@ const callGetPullRequest = (params: GetPullRequestParams) =>
     }
     const revisionId = resp.pullRequest.revisionId ?? ""
     const repoName = resp.pullRequest.pullRequestTargets?.[0]?.repositoryName ?? ""
-    const [detail, approvers, evaluation, repoAccountId] = yield* Effect.all([
+    const [detail, approvers, evaluation, repoAccountId, isMergeable] = yield* Effect.all([
       decodePullRequestDetail(resp),
       fetchApprovers(params.pullRequestId, revisionId),
       evaluateApproval(params.pullRequestId, revisionId),
-      fetchRepoAccountId(repoName)
-    ], { concurrency: 4 })
+      fetchRepoAccountId(repoName),
+      // As the listing reads it, so a re-read writes the whole row, mergeability included.
+      fetchMergeStatus(repoName, resp.pullRequest.pullRequestTargets?.[0])
+    ], { concurrency: 5 })
     const approvalRules = yield* buildApprovalRules(resp.pullRequest?.approvalRules ?? [], evaluation.satisfiedNames)
     return new PullRequestDetail({
       ...detail,
@@ -134,6 +137,7 @@ const callGetPullRequest = (params: GetPullRequestParams) =>
       approvedByArns: approvers.arns,
       approvalRules,
       repoAccountId: repoAccountId || undefined,
+      isMergeable,
       isApproved: evaluation.isApproved,
       approvalUnknown: evaluation.approvalUnknown
     })

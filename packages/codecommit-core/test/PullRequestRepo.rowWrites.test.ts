@@ -14,7 +14,9 @@ import {
   PullRequestRepo,
   type PullRequestRepoContract,
   type RowVersion,
-  UpsertInput
+  type RowVersions,
+  UpsertInput,
+  versionsOf
 } from "../src/CacheService/repos/PullRequestRepo/index.js"
 
 const account = "123456789012"
@@ -63,60 +65,73 @@ const listed = (lastActivity: Date, tag: Tag) =>
 type Writer = (repo: PullRequestRepoContract, version: RowVersion, tag: Tag) => Effect.Effect<unknown, unknown>
 type Group = "row" | "approval"
 
-/** Each writer, the column groups it touches, and what it writes (differing by `tag`) at `version`. */
+/** A provider re-read of the pull request, whole, at `lastActivity`. */
+const reread = (lastActivity: Date, tag: Tag, read: {
+  readonly status?: "OPEN" | "CLOSED"
+  readonly unknown?: "Throttled" | "NotPermitted"
+}) => ({
+  title: `Re-read ${tag}`,
+  author: "author",
+  status: read.status ?? "OPEN",
+  creationDate: t0,
+  lastActivityDate: lastActivity,
+  sourceBranch: "feature",
+  destinationBranch: "main",
+  isMergeable: tag !== "older",
+  approvedBy: [],
+  approvedByArns: [],
+  isApproved: tag !== "older",
+  approvalRules: [rule(tag !== "older")],
+  ...(read.unknown !== undefined && { approvalUnknown: { _tag: read.unknown } })
+})
+
+/** Each provider writer, the column groups it touches, and what it writes (differing by `tag`) at `version`. */
 const writers: ReadonlyArray<readonly [string, ReadonlyArray<Group>, Writer]> = [
   [
     "upsert",
     ["row", "approval"],
     (repo, version, tag) => repo.upsert(listed(version.lastActivity, tag), version.observation)
   ],
-  ["evaluated", ["approval"], (repo, version, tag) =>
-    repo.recordApprovalEvaluation(
+  [
+    "re-read",
+    ["row", "approval"],
+    (repo, version, tag) =>
+      repo.writeRead(account, "60", reread(version.lastActivity, tag, {}), version.observation, coordinates)
+  ],
+  ["unknown re-read", ["row", "approval"], (repo, version, tag) =>
+    repo.writeRead(
       account,
       "60",
-      { isApproved: tag !== "older", approvalRules: [rule(tag !== "older")] },
-      version,
-      coordinates
-    )],
-  ["unknown", ["approval"], (repo, version, tag) =>
-    repo.recordApprovalEvaluation(
-      account,
-      "60",
-      {
-        isApproved: false,
-        approvalRules: [],
-        approvalUnknown: { _tag: tag === "older" ? "Throttled" : "NotPermitted" }
-      },
-      version,
-      coordinates
-    )],
-  ["closed", ["row"], (repo, version, tag) =>
-    repo.updateStatusAndClosedAt(
-      account,
-      "60",
-      tag === "older" ? "CLOSED" : "MERGED",
-      version.lastActivity.toISOString(),
+      reread(version.lastActivity, tag, { unknown: tag === "older" ? "Throttled" : "NotPermitted" }),
       version.observation,
-      undefined,
-      [tag],
       coordinates
     )],
   [
-    "diffStats",
-    ["row"],
-    (repo, version, tag) => repo.updateDiffStats(account, "60", tag === "older" ? 1 : 5, 2, 3, version, coordinates)
-  ],
-  [
-    "commentCount",
-    ["row"],
-    (repo, version, tag) => repo.updateCommentCount(account, "60", tag === "older" ? 1 : 9, version, coordinates)
-  ],
-  [
-    "healthScore",
-    ["row"],
-    (repo, version, tag) => repo.updateHealthScore(account, "60", tag === "older" ? 1 : 7, version, coordinates)
+    "closed re-read",
+    ["row", "approval"],
+    (repo, version, tag) =>
+      repo.writeRead(
+        account,
+        "60",
+        reread(version.lastActivity, tag, { status: "CLOSED" }),
+        version.observation,
+        coordinates
+      )
   ],
   ["delete", ["row", "approval"], (repo, version) => repo.deleteOne(account, "60", version.observation, coordinates)]
+]
+
+/** Each recomputed writer, as a function of the versions it read. */
+const derivedWriters: ReadonlyArray<
+  readonly [string, (repo: PullRequestRepoContract, observed: RowVersions) => Effect.Effect<boolean, unknown>]
+> = [
+  [
+    "diff stats",
+    (repo, observed) =>
+      repo.writeDerived(account, "60", observed, { filesAdded: 5, filesModified: 2, filesDeleted: 3 }, coordinates)
+  ],
+  ["comment count", (repo, observed) => repo.writeDerived(account, "60", observed, { commentCount: 9 }, coordinates)],
+  ["health score", (repo, observed) => repo.writeDerived(account, "60", observed, { healthScore: 7 }, coordinates)]
 ]
 
 /**
@@ -163,6 +178,19 @@ const pairs: ReadonlyArray<Pair> = families.flatMap(([family, newerVersion, olde
   )
 })
 
+type Derive = (repo: PullRequestRepoContract, observed: RowVersions) => Effect.Effect<boolean, unknown>
+
+/** Every recomputed writer, with every provider write landing between its read and its write. */
+const interleavings: ReadonlyArray<readonly [string, Derive, Writer]> = derivedWriters.flatMap((
+  [derivedName, derive]
+) =>
+  writers.filter(([name]) => name !== "delete").map(([writerName, , write]): readonly [string, Derive, Writer] => [
+    `${derivedName} computed before a ${writerName} lands`,
+    derive,
+    write
+  ])
+)
+
 const withCache = <A, E>(body: Effect.Effect<A, E, PullRequestRepo>) =>
   Effect.gen(function*() {
     const node = yield* Layer.build(NodeServices.layer)
@@ -198,14 +226,14 @@ const groupOf = <Row extends object>(row: Option.Option<Row>, group: Group) =>
 
 const seed = (repo: PullRequestRepoContract) => repo.upsert(listed(t0, "seed"), 1)
 
-/** A full read of the `older` revision that saw conflicts and no approval. */
-const fullRead = Schema.decodeSync(UpsertInput)({
-  ...Schema.encodeSync(UpsertInput)(listed(older, "older")),
-  title: "Conflicting change",
-  isMergeable: 0
-})
+/** The row's versions as a read of it now sees them. */
+const observedNow = Effect.flatMap(
+  PullRequestRepo,
+  (repo) => repo.findByCoordinates(account, "60", coordinates.repositoryName, coordinates.accountRegion)
+).pipe(Effect.map((row) => versionsOf(Option.getOrThrow(row))))
 
 describe("pull-request row writes", () => {
+  // Rule 1: provider reads write whole groups, each under its own version.
   it.effect.each(pairs)(
     "%s: the older write leaves the newer write's groups alone",
     ([, newerWrite, newerVersion, olderWrite, olderVersion, touched]) =>
@@ -232,66 +260,106 @@ describe("pull-request row writes", () => {
       expect(yield* snapshot).not.toEqual(before)
     })))
 
-  // Cross-group: an approval re-read never makes the rest of the row look newer than it is. The
-  // reviewer's case: a full read and a later approval read of the same new revision, in either order.
-  it.effect.each([["the approval read lands first", true], ["the full read lands first", false]])(
-    "keeps a full read's row and a later approval read's approval of the same revision (%s)",
-    ([, approvalFirst]) =>
+  // Rule 2: a recomputed write applies only to the row as it was read, and moves no version.
+  it.effect.each(interleavings)(
+    "%s: the recomputed write is dropped",
+    ([, derive, write]) =>
       withCache(Effect.gen(function*() {
         const repo = yield* PullRequestRepo
         yield* seed(repo)
-        const full = yield* repo.observe()
-        const approvalRead = yield* repo.observe()
-        const writeFull = repo.upsert(fullRead, full)
-        const writeApproval = repo.recordApprovalEvaluation(
-          account,
-          "60",
-          { isApproved: true, approvalRules: [rule(true)] },
-          { lastActivity: older, observation: approvalRead },
-          coordinates
-        )
-        yield* approvalFirst
-          ? writeApproval.pipe(Effect.andThen(writeFull))
-          : writeFull.pipe(Effect.andThen(writeApproval))
-        const row = Option.getOrThrow(yield* snapshot)
-        expect([row.title, row.isMergeable, row.isApproved]).toEqual(["Conflicting change", 0, 1])
+        const observed = yield* observedNow
+        yield* write(repo, { lastActivity: newer, observation: 3 }, "newer")
+        const afterProvider = yield* snapshot
+        expect(yield* derive(repo, observed)).toBe(false)
+        expect(yield* snapshot).toEqual(afterProvider)
       }))
   )
 
-  it.effect("reports which groups an upsert wrote", () =>
+  it.effect.each(derivedWriters)(
+    "%s applies to an unchanged row and moves no version",
+    ([, derive]) =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        yield* seed(repo)
+        const observed = yield* observedNow
+        expect(yield* derive(repo, observed)).toBe(true)
+        expect(yield* observedNow).toEqual(observed)
+      }))
+  )
+
+  // Partial vs full, the round-13 case: a status re-read and a full listing of the same new revision.
+  // Both are whole now, so whichever began later wins and the row has the final details either way.
+  it.effect.each([["the status re-read lands first", true], ["the listing lands first", false]])(
+    "keeps the final details and status of a closed pull request (%s)",
+    ([, statusFirst]) =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        yield* seed(repo)
+        const listing = yield* repo.observe()
+        const statusRead = yield* repo.observe()
+        const final = Schema.decodeSync(UpsertInput)({
+          ...Schema.encodeSync(UpsertInput)(listed(older, "newer")),
+          title: "Final title",
+          description: "Final description"
+        })
+        const writeListing = repo.upsert(final, listing)
+        const writeStatus = repo.writeRead(
+          account,
+          "60",
+          {
+            ...reread(older, "newer", { status: "CLOSED" }),
+            title: "Final title",
+            description: "Final description"
+          },
+          statusRead,
+          coordinates
+        )
+        yield* statusFirst
+          ? writeStatus.pipe(Effect.andThen(writeListing))
+          : writeListing.pipe(Effect.andThen(writeStatus))
+        const row = Option.getOrThrow(yield* snapshot)
+        expect([row.title, row.description, row.status]).toEqual(["Final title", "Final description", "CLOSED"])
+      }))
+  )
+
+  // Cross-group: the health score depends on the approval, so an approval change drops it.
+  it.effect("drops a health score computed before the approval changed", () =>
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
       yield* seed(repo)
-      const full = yield* repo.observe()
-      yield* repo.recordApprovalEvaluation(
+      const observed = yield* observedNow
+      yield* repo.writeRead(
         account,
         "60",
-        { isApproved: true, approvalRules: [rule(true)] },
-        { lastActivity: older, observation: yield* repo.observe() },
+        reread(t0, "newer", { unknown: "NotPermitted" }),
+        2, /* after the seed's observation */
         coordinates
       )
-      expect(yield* repo.upsert(fullRead, full)).toEqual({ row: true, approval: false })
-      expect(yield* repo.upsert(listed(t0, "older"), 0)).toEqual({ row: false, approval: false })
+      expect(yield* repo.writeDerived(account, "60", observed, { healthScore: 9.5 }, coordinates)).toBe(false)
+    })))
+
+  it.effect("reports which groups an upsert wrote, and the versions the row holds", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      yield* seed(repo)
+      const written = yield* repo.upsert(listed(older, "older"), yield* repo.observe())
+      expect([written.row, written.approval]).toEqual([true, true])
+      expect(written.versions).toEqual(yield* observedNow)
+      expect(yield* repo.upsert(listed(t0, "older"), 0)).toEqual({
+        row: false,
+        approval: false,
+        versions: undefined
+      })
     })))
 
   // The case the provider date alone missed: approval turned unknown without the revision moving.
-  it.effect("keeps a newer unknown approval when an earlier read of the same revision evaluates later", () =>
+  it.effect("keeps a newer unknown approval when an earlier read of the same revision lands later", () =>
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
       yield* seed(repo)
       const slow = yield* repo.observe()
       const fast = yield* repo.observe()
-      yield* repo.recordApprovalEvaluation(
-        account,
-        "60",
-        {
-          isApproved: false,
-          approvalRules: [],
-          approvalUnknown: { _tag: "NotPermitted" }
-        },
-        { lastActivity: t0, observation: fast },
-        coordinates
-      )
+      yield* repo.writeRead(account, "60", reread(t0, "newer", { unknown: "NotPermitted" }), fast, coordinates)
       expect((yield* repo.upsert(listed(t0, "older"), slow)).approval).toBe(false)
       expect(Option.map(yield* snapshot, (row) => row.approvalUnknownReason)).toEqual(Option.some("NotPermitted"))
       // A read that began after both still recovers it.
@@ -306,7 +374,7 @@ describe("pull-request row writes", () => {
       expect([...numbers].sort((a, b) => a - b)).toEqual([1, 2, 3])
     })))
 
-  // The tombstone holds a deletion: only a read begun after it, of a revision no older, brings it back.
+  // Rule 3 and the tombstone: only a read begun after the deletion, of a revision no older, brings it back.
   it.effect("re-inserts a deleted pull request only from a read begun after the deletion", () =>
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo

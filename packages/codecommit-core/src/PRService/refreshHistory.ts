@@ -138,42 +138,22 @@ export const syncWeek = Effect.fn("syncWeek")(
                   Effect.flatMap((detail) => {
                     if (detail.repositoryName !== pr.repositoryName) return Effect.void
                     const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
-                    // The re-read's evaluation reaches the cache like the refresh's stale pass: an unknown one
-                    // marks the row, a successful one replaces the last known approval and clears the reason.
-                    const recordEvaluation = prRepo.recordApprovalEvaluation(
-                      pr.awsAccountId,
-                      pr.id,
-                      detail,
-                      { lastActivity: detail.lastActivityDate, observation },
-                      coordinates
-                    )
-                    if (detail.status !== "OPEN") {
-                      return prRepo
-                        .updateStatusAndClosedAt(
-                          pr.awsAccountId,
-                          pr.id,
-                          detail.status,
-                          detail.lastActivityDate.toISOString(),
-                          observation,
-                          detail.mergedBy,
-                          detail.approvedBy,
-                          coordinates
-                        )
-                        .pipe(
-                          Effect.andThen(recordEvaluation),
-                          Effect.tap(() =>
-                            Ref.updateAndGet(transitionedRef, (n) => n + 1).pipe(
-                              Effect.flatMap((n) =>
-                                SubscriptionRef.update(state, (s) => ({
-                                  ...s,
-                                  statusDetail: `syncing ${week} — ${n} status updates`
-                                }))
-                              )
+                    // The whole re-read reaches the cache, like the refresh's stale pass: status, details and
+                    // evaluation, each group unless the cache holds a newer one.
+                    return prRepo.writeRead(pr.awsAccountId, pr.id, detail, observation, coordinates).pipe(
+                      Effect.tap((written) =>
+                        written.row && detail.status !== "OPEN"
+                          ? Ref.updateAndGet(transitionedRef, (n) => n + 1).pipe(
+                            Effect.flatMap((n) =>
+                              SubscriptionRef.update(state, (s) => ({
+                                ...s,
+                                statusDetail: `syncing ${week} — ${n} status updates`
+                              }))
                             )
                           )
-                        )
-                    }
-                    return recordEvaluation
+                          : Effect.void
+                      )
+                    )
                   }),
                   // One pull request's failure doesn't stop the sync, but it is logged: a lost approval write
                   // leaves the cached approval republished as known.

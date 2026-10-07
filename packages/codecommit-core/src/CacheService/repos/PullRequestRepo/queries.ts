@@ -28,7 +28,9 @@ const StaleOpenRow = Schema.Struct({
   accountRegion: AwsRegion,
   /** The row's version when read (with `observationSeq`); a write based on this read compares against it. */
   lastModifiedDate: Schema.DateFromString,
-  observationSeq: Schema.Number
+  observationSeq: Schema.Number,
+  approvalVersion: Schema.DateFromString,
+  approvalObservationSeq: Schema.Number
 })
 
 export const findAll = (sql: SqlClient.SqlClient) => {
@@ -159,7 +161,8 @@ export const findStaleOpen = (sql: SqlClient.SqlClient) => {
     Result: StaleOpenRow,
     Request: Schema.Struct({ olderThan: Schema.String }),
     execute: (req) =>
-      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region, last_modified_date, observation_seq
+      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region, last_modified_date, observation_seq,
+            approval_version, approval_observation_seq
           FROM pull_requests
           WHERE status = 'OPEN' AND fetched_at < ${req.olderThan}`
   })
@@ -171,7 +174,8 @@ export const findOpenInRange = (sql: SqlClient.SqlClient) => {
     Result: StaleOpenRow,
     Request: Schema.Struct({ weekStart: Schema.String, weekEnd: Schema.String }),
     execute: (req) =>
-      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region, last_modified_date, observation_seq
+      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region, last_modified_date, observation_seq,
+            approval_version, approval_observation_seq
           FROM pull_requests
           WHERE status = 'OPEN'
             AND (

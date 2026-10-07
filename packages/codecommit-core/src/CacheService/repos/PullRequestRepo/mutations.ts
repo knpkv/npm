@@ -4,14 +4,9 @@
  * SQL write operations for the pull_requests table. Each function takes `sql`
  * and `publish` (change event) and returns the mutation implementations.
  *
- * Provides upsert (INSERT ON CONFLICT UPDATE with column-specific merge
- * strategy), stale cleanup, diff stats updates, status transitions,
- * comment count updates, health score updates, and commented-by refresh.
- *
- * **Gotchas**
- *
- * - approval_rules uses `= excluded` (no COALESCE) — always fresh from API
- * - repo_account_id uses COALESCE — preserves across partial updates
+ * Every write goes through `rowWrites`: provider reads write whole column groups under their versions
+ * (`upsert` for a listing, `writeRead` for a re-read), recomputed values go through `writeDerived`,
+ * which applies only to the row as it was read, and a not-found read deletes through `deleteOne`.
  *
  * @category CacheService
  */
@@ -19,9 +14,17 @@ import { Effect, Schema } from "effect"
 import type * as SqlClient from "effect/sql/SqlClient"
 import * as SqlSchema from "effect/sql/SqlSchema"
 import { type CommentThreadJson, decodeCommentLocationJson } from "../commentLocations.js"
-import { type ApprovalRead, cacheError, joinApprovedBy, UpsertInput } from "./internal.js"
+import {
+  approvalGroupOfListing,
+  approvalGroupOfRead,
+  type ApprovalRead,
+  cacheError,
+  rowGroupOfListing,
+  rowGroupOfRead,
+  UpsertInput
+} from "./internal.js"
 import { PullRequestAmbiguityError } from "./queries.js"
-import { type RowVersion, rowWrites } from "./rowWrites.js"
+import { type DerivedColumns, type RowVersions, rowWrites } from "./rowWrites.js"
 
 export interface PullRequestCoordinates {
   readonly repositoryName: string
@@ -61,8 +64,10 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         AND account_region = ${coordinates.accountRegion}`
   const encodeUpsert = Schema.encodeEffect(UpsertInput)
   const upsert_ = (input: UpsertInput, observation: number) =>
-    encodeUpsert(input).pipe(Effect.flatMap((req) => writes.upsert(req, observation)))
-  /** Publish a change only when a compare-and-set write applied. */
+    encodeUpsert(input).pipe(
+      Effect.flatMap((req) => writes.upsert(req, rowGroupOfListing(input), approvalGroupOfListing(input), observation))
+    )
+  /** Publish a change only when a write applied. */
   const publishIfApplied = (applied: boolean) => applied ? publish : Effect.void
 
   const deleteStale_ = SqlSchema.void({
@@ -80,9 +85,9 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
     observe: () => writes.observe().pipe(cacheError("observe")),
 
     /**
-     * Write a listed pull request observed by `observation`. The row and its approval are written
-     * each unless that group is newer; the result says which were, and a group not written means a
-     * newer read already reached it.
+     * Write a listed pull request observed by `observation`: its row and approval groups, each unless
+     * that group is newer. The result says which were written; a group not written means a newer read
+     * already reached it.
      */
     upsert: (input: UpsertInput, observation: number) =>
       upsert_(input, observation).pipe(
@@ -94,6 +99,47 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       sql.withTransaction(Effect.forEach(prs, (pr) => upsert_(pr, observation), { discard: true })).pipe(
         Effect.tap(() => publish),
         cacheError("upsertMany")
+      ),
+
+    /**
+     * Write a provider re-read of a cached pull request, observed by `observation`: its whole row group
+     * (including a closed or merged status) and approval group, each unless that group is newer.
+     */
+    writeRead: (
+      awsAccountId: string,
+      id: string,
+      read: Parameters<typeof rowGroupOfRead>[0] & ApprovalRead,
+      observation: number,
+      coordinates?: PullRequestCoordinates
+    ) =>
+      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+        Effect.andThen(
+          writes.writeRead(
+            pullRequestWhere(awsAccountId, id, coordinates),
+            { lastActivity: read.lastActivityDate, observation },
+            rowGroupOfRead(read),
+            approvalGroupOfRead(read)
+          )
+        ),
+        Effect.tap((written) => publishIfApplied(written.row || written.approval)),
+        cacheError("writeRead")
+      ),
+
+    /**
+     * Write values recomputed from a cached row (diff stats, comment count, health score), only while
+     * the row still holds `observed`, the versions it was read at. True when written.
+     */
+    writeDerived: (
+      awsAccountId: string,
+      id: string,
+      observed: RowVersions,
+      columns: DerivedColumns,
+      coordinates?: PullRequestCoordinates
+    ) =>
+      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+        Effect.andThen(writes.writeDerived(pullRequestWhere(awsAccountId, id, coordinates), observed, columns)),
+        Effect.tap(publishIfApplied),
+        cacheError("writeDerived")
       ),
 
     deleteStale: (olderThan: string) =>
@@ -113,114 +159,6 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         cacheError("deleteOne")
       ),
 
-    updateDiffStats: (
-      awsAccountId: string,
-      id: string,
-      filesAdded: number,
-      filesModified: number,
-      filesDeleted: number,
-      version: RowVersion,
-      coordinates?: PullRequestCoordinates
-    ) =>
-      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(
-          writes.compareAndSet(
-            pullRequestWhere(awsAccountId, id, coordinates),
-            version,
-            sql`files_added = ${filesAdded}, files_modified = ${filesModified}, files_deleted = ${filesDeleted}`
-          )
-        ),
-        Effect.tap(publishIfApplied),
-        cacheError("updateDiffStats")
-      ),
-
-    /**
-     * Record a provider re-read's approval evaluation on its row. While unknown, the last known
-     * approval and rules are kept and only the reason is set; an evaluation replaces both and clears
-     * the reason. A read older than the cached revision (its last activity is earlier) is not written:
-     * the history sync runs outside the refresh lock, so a refresh may have stored a newer revision.
-     * An accepted read advances the row to its last activity, so an older read landing later is dropped.
-     */
-    recordApprovalEvaluation: (
-      awsAccountId: string,
-      id: string,
-      read: ApprovalRead,
-      version: RowVersion,
-      coordinates?: PullRequestCoordinates
-    ) => {
-      const set = read.approvalUnknown !== undefined
-        ? sql`approval_unknown_reason = ${read.approvalUnknown._tag}`
-        : sql`is_approved = ${read.isApproved ? 1 : 0}, approval_unknown_reason = NULL,
-          approval_rules = ${read.approvalRules.length > 0 ? JSON.stringify(read.approvalRules) : "[]"}`
-      return ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(
-          writes.compareAndSetApproval(pullRequestWhere(awsAccountId, id, coordinates), version, set)
-        ),
-        Effect.tap(publishIfApplied),
-        cacheError("recordApprovalEvaluation")
-      )
-    },
-
-    /**
-     * Record a provider read that found the pull request closed or merged at `closedAt`, its last
-     * activity. A read older than the cached revision is not written, so a stale read can't re-close a
-     * row a refresh has since stored newer.
-     */
-    updateStatusAndClosedAt: (
-      awsAccountId: string,
-      id: string,
-      status: string,
-      closedAt: string,
-      observation: number,
-      mergedBy?: string,
-      approvedBy?: ReadonlyArray<string>,
-      coordinates?: PullRequestCoordinates
-    ) => {
-      const approvedByStr = approvedBy !== undefined ? joinApprovedBy([...approvedBy]) : null
-      return ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(
-          writes.compareAndSet(
-            pullRequestWhere(awsAccountId, id, coordinates),
-            { lastActivity: new Date(closedAt), observation },
-            sql`status = ${status}, closed_at = ${closedAt}, merged_by = ${mergedBy ?? null},
-              approved_by = COALESCE(${approvedByStr}, approved_by)`
-          )
-        ),
-        Effect.tap(publishIfApplied),
-        cacheError("updateStatusAndClosedAt")
-      )
-    },
-
-    updateCommentCount: (
-      awsAccountId: string,
-      id: string,
-      count: number | null,
-      version: RowVersion,
-      coordinates?: PullRequestCoordinates
-    ) =>
-      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(
-          writes.compareAndSet(pullRequestWhere(awsAccountId, id, coordinates), version, sql`comment_count = ${count}`)
-        ),
-        Effect.tap(publishIfApplied),
-        cacheError("updateCommentCount")
-      ),
-
-    updateHealthScore: (
-      awsAccountId: string,
-      id: string,
-      score: number,
-      version: RowVersion,
-      coordinates?: PullRequestCoordinates
-    ) =>
-      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
-        Effect.andThen(
-          writes.compareAndSet(pullRequestWhere(awsAccountId, id, coordinates), version, sql`health_score = ${score}`)
-        ),
-        Effect.tap(publishIfApplied),
-        cacheError("updateHealthScore")
-      ),
-
     refreshCommentedBy: () =>
       sql.withTransaction(
         Effect.gen(function*() {
@@ -232,13 +170,16 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
               accountRegion: string
               author: string
               locationsJson: string
-              version: string
-              observation: number
+              rowAt: string
+              rowSeq: number
+              approvalAt: string
+              approvalSeq: number
             }
           >`
             SELECT c.aws_account_id AS awsAccountId, c.pull_request_id AS pullRequestId,
               p.repository_name AS repositoryName, p.account_region AS accountRegion,
-              p.last_modified_date AS version, p.observation_seq AS observation,
+              p.last_modified_date AS rowAt, p.observation_seq AS rowSeq,
+              p.approval_version AS approvalAt, p.approval_observation_seq AS approvalSeq,
               p.author AS author, c.locations_json AS locationsJson
             FROM pr_comments c
             INNER JOIN pull_requests p
@@ -274,13 +215,17 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
             }
             for (const loc of parsed) walk(loc.comments)
             const commentedBy = commenters.size > 0 ? [...commenters].join(",") : null
-            yield* writes.compareAndSet(
+            // Read and written in one transaction, so the versions it read still hold.
+            yield* writes.writeDerived(
               pullRequestWhere(row.awsAccountId, row.pullRequestId, {
                 repositoryName: row.repositoryName,
                 accountRegion: row.accountRegion
               }),
-              { lastActivity: new Date(row.version), observation: row.observation },
-              sql`commented_by = ${commentedBy}`
+              {
+                row: { lastActivity: new Date(row.rowAt), observation: row.rowSeq },
+                approval: { lastActivity: new Date(row.approvalAt), observation: row.approvalSeq }
+              },
+              { commentedBy }
             )
           }
         })

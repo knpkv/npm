@@ -54,6 +54,8 @@ const cachedPullRequest = Schema.decodeSync(CachedPullRequest)({
   isApproved: 0,
   approvalUnknownReason: null,
   observationSeq: 0,
+  approvalVersion: "2026-08-02T00:00:00.000Z",
+  approvalObservationSeq: 0,
   commentCount: 0,
   healthScore: null,
   link: "https://example.invalid/pr/42",
@@ -169,7 +171,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findAll: () => Effect.succeed([cachedPullRequest]),
             upsert: () => Effect.succeed({ row: true, approval: true })
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -226,6 +231,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
                     lastActivityDate: new Date(readAt),
                     approvedBy: [],
                     approvedByArns: [],
+                    isMergeable: true,
                     approvalRules: [],
                     isApproved: false,
                     approvalUnknown
@@ -243,7 +249,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
                   Effect.andThen(Ref.update(stored, (all) => [...all, input.lastModifiedDate]))
                 ).pipe(Effect.as({ row: true, approval: true }))
             }),
-            Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+            Layer.mock(CommentRepo, {
+              find: () => Effect.succeed(Option.none()),
+              upsert: () => Effect.void
+            }),
             Layer.mock(NotificationRepo, {}),
             Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
             Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -293,6 +302,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
                     lastActivityDate: new Date(2_000),
                     approvedBy: [],
                     approvedByArns: [],
+                    isMergeable: true,
                     approvalRules: [],
                     isApproved: false
                   })
@@ -304,11 +314,25 @@ describe("PRService.refreshSinglePR coordinates", () => {
               findByAccountAndId: () => Effect.succeed(Option.none()),
               findByCoordinates: () => Effect.succeed(Option.some(approvedCache)),
               findAll: () => Effect.succeed([approvedCache]),
-              upsert: () => Effect.succeed({ row: applied, approval: applied })
+              upsert: () =>
+                Effect.succeed({
+                  row: applied,
+                  approval: applied,
+                  versions: applied
+                    ? {
+                      row: { lastActivity: new Date(2_000), observation: 1 },
+                      approval: { lastActivity: new Date(2_000), observation: 1 }
+                    }
+                    : undefined
+                }),
+              writeDerived: () => Effect.succeed(true)
             }),
             Layer.mock(CommentRepo, {
               find: () => Effect.succeed(Option.none()),
-              upsert: () => Ref.update(commentWrites, (n) => n + 1).pipe(Effect.as(true))
+              upsert: () =>
+                Ref.update(commentWrites, (n) => n + 1).pipe(
+                  Effect.as({ row: true, approval: true, versions: undefined })
+                )
             }),
             Layer.mock(NotificationRepo, { add: (n) => Ref.update(added, (all) => [...all, n.type]) }),
             Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(true) }),
@@ -347,7 +371,9 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest])
           }),
-          Layer.mock(CommentRepo, {}),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none())
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -404,7 +430,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findAll: () => Effect.succeed([foreignCachedPullRequest, cachedPullRequest]),
             upsert: () => Effect.succeed({ row: true, approval: true })
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -440,7 +469,9 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest])
           }),
-          Layer.mock(CommentRepo, {}),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none())
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -489,7 +520,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findAll: () => Effect.succeed([cachedPullRequest]),
             upsert: () => Effect.succeed({ row: true, approval: true })
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -540,7 +574,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findAll: () => Effect.succeed([]),
             upsert: () => Effect.succeed({ row: true, approval: true })
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -580,7 +617,9 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([tokenCollision])
           }),
-          Layer.mock(CommentRepo, {}),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none())
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -618,7 +657,9 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest, secondCachedPullRequest])
           }),
-          Layer.mock(CommentRepo, {}),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none())
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
           Layer.mock(ConfigService, {
@@ -668,7 +709,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findAll: () => Effect.succeed([cachedPullRequest]),
             upsert: (input) => Ref.set(upserted, input.awsAccountId).pipe(Effect.as({ row: true, approval: true }))
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -717,7 +761,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
             findAll: () => Effect.succeed([]),
             upsert: (input) => Ref.set(upserted, input.awsAccountId).pipe(Effect.as({ row: true, approval: true }))
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, {

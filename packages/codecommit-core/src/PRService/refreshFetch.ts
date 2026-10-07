@@ -13,11 +13,7 @@ import type { PullRequestDetail } from "../AwsClient/internal.js"
 import { isCredentialInvalidCause } from "../AwsCredentialErrors.js"
 import { diffApprovalPools, diffPR, notificationsFor } from "../CacheService/diff.js"
 import { type NewNotification, NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import {
-  type CachedPullRequest,
-  PullRequestRepo,
-  type PullRequestRepoContract
-} from "../CacheService/repos/PullRequestRepo/index.js"
+import { type CachedPullRequest, PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import { approvalUnknownReasonText, type PullRequestRefreshScope, type UnevaluatedPullRequest } from "../Domain.js"
@@ -41,29 +37,6 @@ const isAuthFailure = (error: AwsClientError): boolean =>
     (Predicate.isTagged(error.cause, "ApprovalEvaluationError") && Predicate.hasProperty(error.cause, "cause") &&
       isCredentialInvalidCause(error.cause.cause))
   ))
-
-/** Resolve a stale cached PR: retain contradictory OPEN evidence, update a definitive merged/closed status. */
-const resolveStaleStatus = (
-  prRepo: PullRequestRepoContract,
-  detail: PullRequestDetail,
-  awsAccountId: string,
-  id: string,
-  repositoryName: string,
-  accountRegion: string,
-  observation: number
-) =>
-  detail.status === "OPEN"
-    ? Effect.void
-    : prRepo.updateStatusAndClosedAt(
-      awsAccountId,
-      id,
-      detail.status,
-      detail.lastActivityDate.toISOString(),
-      observation,
-      detail.mergedBy,
-      detail.approvedBy,
-      { repositoryName, accountRegion }
-    )
 
 const accountRegionKey = (profile: string, region: string): string => `${profile}\0${region}`
 
@@ -183,10 +156,10 @@ export const fetchAndUpsertPRs = (params: {
     )
 
     const unevaluated = yield* Ref.make<ReadonlyArray<UnevaluatedPullRequest>>([])
-    // A stale row's re-read writes its evaluation back to the row: a successful one replaces the last
-    // known approval and clears any unknown reason; an unknown one marks the row, lists it as
-    // unevaluated, and counts its scope as partial, as for a listed pull request.
-    const recordStaleEvaluation = (
+    // A stale row's re-read writes back everything it read: a closed or merged status, the details,
+    // and the evaluation (a successful one replaces the last known approval; an unknown one marks the
+    // row, lists it as unevaluated, and counts its scope as partial, as for a listed pull request).
+    const recordStaleRead = (
       pr: {
         readonly awsAccountId: string
         readonly accountProfile: string
@@ -199,16 +172,11 @@ export const fetchAndUpsertPRs = (params: {
     ) =>
       Effect.gen(function*() {
         const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
-        const recorded = yield* prRepo.recordApprovalEvaluation(
-          pr.awsAccountId,
-          pr.id,
-          detail,
-          { lastActivity: detail.lastActivityDate, observation },
-          coordinates
-        )
+        // The whole read, each group unless the cache holds a newer one: status, details, approval.
+        const written = yield* prRepo.writeRead(pr.awsAccountId, pr.id, detail, observation, coordinates)
         const reason = detail.approvalUnknown
-        // A rejected write is older than the cached row: its unknown approval isn't current.
-        if (!recorded || reason === undefined) {
+        // An approval group not written was older than the cache: its unknown approval isn't current.
+        if (!written.approval || reason === undefined) {
           return
         }
         yield* Ref.update(
@@ -374,16 +342,7 @@ export const fetchAndUpsertPRs = (params: {
                       // the scope's success.
                       onSuccess: (detail) =>
                         detail.repositoryName === pr.repositoryName
-                          ? resolveStaleStatus(
-                            prRepo,
-                            detail,
-                            pr.awsAccountId,
-                            pr.id,
-                            pr.repositoryName,
-                            pr.accountRegion,
-                            observation
-                          ).pipe(
-                            Effect.andThen(recordStaleEvaluation(pr, detail, observation)),
+                          ? recordStaleRead(pr, detail, observation).pipe(
                             Effect.catch((error) =>
                               Effect.logWarning("stale pull request write failed", error).pipe(
                                 Effect.andThen(withholdScopeSuccess(pr.accountProfile, pr.accountRegion))

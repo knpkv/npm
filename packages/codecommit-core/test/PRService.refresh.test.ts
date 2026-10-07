@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Layer, Predicate, Ref, Schema, Stream, SubscriptionRef } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Predicate, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
 import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
@@ -23,7 +23,9 @@ const dependencies = (load: ConfigService["Service"]["load"]) =>
   Layer.mergeAll(
     Layer.mock(AwsClient, {}),
     Layer.mock(EventsHub, {}),
-    Layer.mock(CommentRepo, {}),
+    Layer.mock(CommentRepo, {
+      find: () => Effect.succeed(Option.none())
+    }),
     Layer.mock(NotificationRepo, {}),
     Layer.mock(PullRequestRepo, {
       observe: () => Effect.succeed(1),
@@ -101,6 +103,8 @@ describe("PRService.refresh", () => {
         isApproved: 0,
         approvalUnknownReason: null,
         observationSeq: 0,
+        approvalVersion: "2026-08-02T00:00:00.000Z",
+        approvalObservationSeq: 0,
         commentCount: 0,
         healthScore: null,
         link: "https://example.invalid/pr/35",
@@ -133,6 +137,7 @@ describe("PRService.refresh", () => {
           batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
         }),
         Layer.mock(CommentRepo, {
+          find: () => Effect.succeed(Option.none()),
           upsert: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -142,9 +147,8 @@ describe("PRService.refresh", () => {
           findStaleOpen: () => Effect.succeed([]),
           findMissingDiffStats: () => Effect.succeed([]),
           upsert: () => Ref.set(rows, [cachedPR]),
-          updateCommentCount: () => Effect.void,
+          writeDerived: () => Effect.succeed(true),
           refreshCommentedBy: () => Effect.void,
-          updateHealthScore: () => Effect.void,
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(SubscriptionRepo, {
@@ -318,6 +322,8 @@ describe("PRService.refresh", () => {
           isApproved: 0,
           approvalUnknownReason: null,
           observationSeq: 0,
+          approvalVersion: "2026-08-02T00:00:00.000Z",
+          approvalObservationSeq: 0,
           commentCount: 0,
           healthScore: null,
           link: `https://example.invalid/pr/${id}`,
@@ -360,16 +366,18 @@ describe("PRService.refresh", () => {
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(EventsHub, { batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(PullRequestRepo, {
             observe: () => Effect.succeed(1),
             findAll: () => Effect.succeed(rows),
             findStaleOpen: () => Effect.succeed([]),
             findMissingDiffStats: () => Effect.succeed([]),
-            updateCommentCount: () => Effect.void,
+            writeDerived: () => Effect.succeed(true),
             refreshCommentedBy: () => Effect.void,
-            updateHealthScore: () => Effect.void,
             propagateRepoAccountId: () => Effect.void
           }),
           Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
@@ -419,6 +427,8 @@ describe("PRService.refresh", () => {
           isApproved: 0,
           approvalUnknownReason: null,
           observationSeq: 0,
+          approvalVersion: "2026-08-02T00:00:00.000Z",
+          approvalObservationSeq: 0,
           commentCount: 0,
           healthScore: null,
           link: "https://example.invalid/pr/11",
@@ -461,16 +471,18 @@ describe("PRService.refresh", () => {
           getCommentsForPullRequest: () => Effect.succeed([])
         }),
         Layer.mock(EventsHub, { batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect }),
-        Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+        Layer.mock(CommentRepo, {
+          find: () => Effect.succeed(Option.none()),
+          upsert: () => Effect.void
+        }),
         Layer.mock(NotificationRepo, {}),
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed(rows),
           findStaleOpen: () => Effect.succeed([]),
           findMissingDiffStats: () => Effect.succeed([]),
-          updateCommentCount: () => Effect.void,
+          writeDerived: () => Effect.succeed(true),
           refreshCommentedBy: () => Effect.void,
-          updateHealthScore: () => Effect.void,
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),

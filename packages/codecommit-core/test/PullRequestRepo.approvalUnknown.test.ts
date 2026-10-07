@@ -48,20 +48,33 @@ const upsertInput = (
  * A provider re-read of the pull request at the cached revision (same last activity), evaluated or
  * with its approval unknown.
  */
+/**
+ * A provider re-read of the pull request, whole: the row as listed (OPEN unless `status` says
+ * otherwise) at `lastActivityDate` (the cached revision by default), evaluated or with its approval
+ * unknown.
+ */
 const reread = (
-  read: { readonly isApproved?: boolean; readonly unknown?: "Throttled"; readonly lastActivityDate?: string }
+  read: {
+    readonly isApproved?: boolean
+    readonly unknown?: "Throttled"
+    readonly lastActivityDate?: string
+    readonly status?: "OPEN" | "CLOSED"
+  }
 ) => ({
+  title: "Re-read",
+  author: "author",
+  status: read.status ?? "OPEN",
+  creationDate: new Date("2026-10-05T00:00:00.000Z"),
+  lastActivityDate: new Date(read.lastActivityDate ?? "2026-10-05T00:00:00.000Z"),
+  sourceBranch: "feature",
+  destinationBranch: "main",
+  isMergeable: true,
+  approvedBy: [],
+  approvedByArns: [],
   isApproved: read.isApproved ?? false,
   approvalRules: [rule(read.isApproved ?? false)],
   ...(read.unknown !== undefined && { approvalUnknown: { _tag: read.unknown } })
 })
-
-/** The version a re-read carries: its last activity (the cached revision by default) and a fresh observation. */
-const versionOf = (read: { readonly lastActivityDate?: string }) =>
-  Effect.map(Effect.flatMap(PullRequestRepo, (repo) => repo.observe()), (observation) => ({
-    lastActivity: new Date(read.lastActivityDate ?? "2026-10-05T00:00:00.000Z"),
-    observation
-  }))
 
 const withCache = <A, E>(
   body: Effect.Effect<A, E, PullRequestRepo | StatsRepo>
@@ -145,23 +158,11 @@ describe("PullRequestRepo approval unknown", () => {
       const repo = yield* PullRequestRepo
       const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
       yield* repo.upsert(upsertInput("46", { isApproved: 1, satisfied: true, unknown: null }), yield* repo.observe())
-      yield* repo.recordApprovalEvaluation(
-        "123456789012",
-        "46",
-        reread({ unknown: "Throttled" }),
-        yield* versionOf({ unknown: "Throttled" }),
-        coordinates
-      )
+      yield* repo.writeRead("123456789012", "46", reread({ unknown: "Throttled" }), yield* repo.observe(), coordinates)
       const unknown = yield* read("46")
       expect([unknown.isApproved, unknown.approvalUnknownReason]).toEqual([true, "Throttled"])
 
-      yield* repo.recordApprovalEvaluation(
-        "123456789012",
-        "46",
-        reread({ isApproved: false }),
-        yield* versionOf({ isApproved: false }),
-        coordinates
-      )
+      yield* repo.writeRead("123456789012", "46", reread({ isApproved: false }), yield* repo.observe(), coordinates)
       const evaluated = yield* read("46")
       expect([evaluated.isApproved, evaluated.approvalUnknownReason]).toEqual([false, null])
       expect(evaluated.approvalRules.map((r) => r.satisfied)).toEqual([false])
@@ -174,13 +175,7 @@ describe("PullRequestRepo approval unknown", () => {
       const repo = yield* PullRequestRepo
       const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
       yield* repo.upsert(upsertInput("47", { isApproved: 0, satisfied: false, unknown: null }), yield* repo.observe())
-      yield* repo.recordApprovalEvaluation(
-        "123456789012",
-        "47",
-        reread({ isApproved: true }),
-        yield* versionOf({ isApproved: true }),
-        coordinates
-      )
+      yield* repo.writeRead("123456789012", "47", reread({ isApproved: true }), yield* repo.observe(), coordinates)
       expect((yield* read("47")).approvalRules.map((r) => [r.ruleName, r.requiredApprovals, r.satisfied]))
         .toEqual([["two-reviewers", 2, true]])
     })))
@@ -198,29 +193,17 @@ describe("PullRequestRepo approval unknown", () => {
         }),
         yield* repo.observe()
       )
-      yield* repo.recordApprovalEvaluation(
-        "123456789012",
-        "48",
-        reread({ isApproved: true }),
-        yield* versionOf({ isApproved: true }),
-        coordinates
-      )
-      yield* repo.recordApprovalEvaluation(
-        "123456789012",
-        "48",
-        reread({ unknown: "Throttled" }),
-        yield* versionOf({ unknown: "Throttled" }),
-        coordinates
-      )
+      yield* repo.writeRead("123456789012", "48", reread({ isApproved: true }), yield* repo.observe(), coordinates)
+      yield* repo.writeRead("123456789012", "48", reread({ unknown: "Throttled" }), yield* repo.observe(), coordinates)
       const kept = yield* read("48")
       expect([kept.isApproved, kept.approvalUnknownReason]).toEqual([false, null])
 
       // A read of the newer revision is recorded.
-      yield* repo.recordApprovalEvaluation(
+      yield* repo.writeRead(
         "123456789012",
         "48",
         reread({ isApproved: true, lastActivityDate: "2026-10-06T00:00:00.000Z" }),
-        yield* versionOf({ isApproved: true, lastActivityDate: "2026-10-06T00:00:00.000Z" }),
+        yield* repo.observe(),
         coordinates
       )
       expect((yield* read("48")).isApproved).toBe(true)
@@ -232,23 +215,23 @@ describe("PullRequestRepo approval unknown", () => {
       const repo = yield* PullRequestRepo
       const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
       yield* repo.upsert(upsertInput("53", { isApproved: 0, satisfied: false, unknown: null }), yield* repo.observe())
-      yield* repo.recordApprovalEvaluation(
+      yield* repo.writeRead(
         "123456789012",
         "53",
         reread({ isApproved: false, lastActivityDate: "2026-10-07T00:00:00.000Z" }),
-        yield* versionOf({ isApproved: false, lastActivityDate: "2026-10-07T00:00:00.000Z" }),
+        yield* repo.observe(),
         coordinates
       )
-      yield* repo.recordApprovalEvaluation(
+      yield* repo.writeRead(
         "123456789012",
         "53",
         reread({ isApproved: true, lastActivityDate: "2026-10-06T00:00:00.000Z" }),
-        yield* versionOf({ isApproved: true, lastActivityDate: "2026-10-06T00:00:00.000Z" }),
+        yield* repo.observe(),
         coordinates
       )
       const row = yield* read("53")
-      // The newer evaluation wins; an evaluation moves only the approval group, so the row keeps its date.
-      expect([row.isApproved, row.lastModifiedDate.toISOString()]).toEqual([false, "2026-10-05T00:00:00.000Z"])
+      // The newer read wins, whole: its approval and its revision.
+      expect([row.isApproved, row.lastModifiedDate.toISOString()]).toEqual([false, "2026-10-07T00:00:00.000Z"])
     })))
 
   // A stale CLOSED read must not rewind a newer row, which would then let its evaluation through.
@@ -263,27 +246,21 @@ describe("PullRequestRepo approval unknown", () => {
         }),
         yield* repo.observe()
       )
-      yield* repo.updateStatusAndClosedAt(
+      yield* repo.writeRead(
         "123456789012",
         "54",
-        "CLOSED",
-        "2026-10-05T12:00:00.000Z",
+        reread({ status: "CLOSED", lastActivityDate: "2026-10-05T12:00:00.000Z" }),
         yield* repo.observe(),
-        undefined,
-        [],
         coordinates
       )
       const kept = yield* read("54")
       expect([kept.status, kept.lastModifiedDate.toISOString()]).toEqual(["OPEN", "2026-10-06T00:00:00.000Z"])
 
-      yield* repo.updateStatusAndClosedAt(
+      yield* repo.writeRead(
         "123456789012",
         "54",
-        "CLOSED",
-        "2026-10-07T00:00:00.000Z",
+        reread({ status: "CLOSED", lastActivityDate: "2026-10-07T00:00:00.000Z" }),
         yield* repo.observe(),
-        undefined,
-        [],
         coordinates
       )
       expect((yield* read("54")).status).toBe("CLOSED")
