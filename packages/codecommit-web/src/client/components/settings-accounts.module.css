@@ -36,8 +36,8 @@
 }
 
 .switch:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 @media (forced-colors: active) {
