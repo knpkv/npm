@@ -12,7 +12,14 @@ The publisher accepts a sanitized JSON file. It does not discover agents, read r
 
 Requires Node 26+. Build from this workspace with `pnpm --filter @knpkv/rly build` then `pnpm --filter @knpkv/herdr-monitor build`. The npm package includes the built browser assets.
 
-Provide configuration through your deployment's secret manager or a private process environment. Do not put keys in command arguments or URLs. Generate two independent random 32-byte base64url values, without padding. Prefix the publishing value with `publish_` and the viewing value with `view_`. The server rejects wrong prefixes, lengths, or equal random values.
+Provide configuration through your deployment's secret manager or a private process environment. Do not put keys in command arguments or URLs. `herdr-monitor init` generates both keys, two independent random 32-byte base64url values prefixed `publish_` and `view_`, into a file only you can read, and prints how to load it:
+
+```bash
+herdr-monitor init                      # writes $XDG_CONFIG_HOME/herdr-monitor/monitor.env (0600)
+set -a; . ~/.config/herdr-monitor/monitor.env; set +a
+```
+
+It never replaces a key file that exists; `--env-file <path>` writes elsewhere. The server rejects wrong prefixes, lengths, or equal random values.
 
 | Variable                | Meaning                                                   |
 | ----------------------- | --------------------------------------------------------- |
@@ -23,7 +30,7 @@ Provide configuration through your deployment's secret manager or a private proc
 | `MONITOR_BIND`          | Listener address, default `127.0.0.1`                     |
 | `MONITOR_PORT`          | Listener port, default `4319`                             |
 
-Run `herdr-monitor serve` in the isolated monitor environment. On the trusted publishing side run `herdr-monitor publish sanitized.json`. `herdr-monitor demo` publishes three synthetic agents using the same authenticated endpoint. It never reads live session data. Each successful command prints only a short acknowledgment; failures exit nonzero with a generic diagnostic.
+Run `herdr-monitor serve` in the isolated monitor environment. On the trusted publishing side run `herdr-monitor publish sanitized.json`. `herdr-monitor demo` publishes three synthetic agents using the same authenticated endpoint. It never reads live session data. Each successful command prints only a short acknowledgment. A failure exits nonzero with one line naming what to fix, such as `MONITOR_VIEW_TOKEN is not set`, `missing.json`, or the monitor's refusal (`HTTP 401: MONITOR_PUBLISH_TOKEN is not the server's publish key`). No line ever contains a key.
 
 The origin must be a valid canonical URL origin. Invalid ports and noncanonical spellings fail startup. Use `https://monitor.example`, without an explicit default `:443` port; nondefault ports such as `:8443` are supported.
 

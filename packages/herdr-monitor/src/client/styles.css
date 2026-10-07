@@ -16,20 +16,40 @@ body {
   margin: 0;
   padding: var(--rly-space-24);
 }
-/* Product name left, connection state and Lock right, a rule below. */
+/* Product name and Lock on the first row, the connection line on its own row below, a rule under
+   both. The rows keep their size whatever they hold: the title row is always as tall as the Lock
+   button, shown or not, and the connection line keeps room for two lines below 60rem, where the
+   longest one ("Offline: showing the snapshot from …; retrying …") wraps. So locking, opening and
+   going offline never move the board. */
 .masthead {
   align-items: center;
   border-bottom: 1px solid var(--rly-color-border-1);
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
   gap: var(--rly-space-8) var(--rly-space-16);
+  grid-template-columns: minmax(0, 1fr) auto;
   padding-bottom: var(--rly-space-16);
 }
 h1 {
+  align-items: center;
+  display: flex;
   font-size: var(--rly-type-section-title-size);
   font-weight: 600;
   letter-spacing: -0.02em;
-  margin: 0 auto 0 0;
+  margin: 0;
+  min-block-size: var(--rly-space-48);
+}
+#lock {
+  grid-column: 2;
+  grid-row: 1;
+}
+#connection {
+  grid-column: 1 / -1;
+  min-block-size: 2lh;
+}
+@media (min-width: 60rem) {
+  #connection {
+    min-block-size: 1lh;
+  }
 }
 h2 {
   font-size: var(--rly-type-card-title-size);
@@ -142,9 +162,10 @@ button {
   color: var(--rly-color-text-2);
   font-variant-numeric: tabular-nums;
 }
-/* Tiles share the full width, and a row is one band: equal heights, whatever each one lists. */
+/* Tiles share the full width; each is as tall as what it lists, so a short card leaves no blank
+   band under its facts. */
 #agents {
-  align-items: stretch;
+  align-items: start;
   display: grid;
   gap: var(--rly-space-16);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
@@ -190,6 +211,12 @@ dl {
 dd {
   font-variant-numeric: tabular-nums;
   margin: 0;
+}
+/* Identifiers break at their own separators (see breakSegments); break-word is the last resort for
+   one segment wider than the tile. */
+dd.identifier {
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 .unpublished {
   margin-top: var(--rly-space-8);

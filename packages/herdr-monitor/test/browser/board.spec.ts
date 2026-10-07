@@ -48,7 +48,8 @@ test("an outage keeps the last snapshot and says how old it is", async ({ page }
 })
 
 // ui-b: the board is read across a room. At 1920 it was a 780px column of 185px tiles with ~11px facts.
-test("on a wall display the tiles fill the width, rows are even and facts are large", async ({ page }) => {
+// QA-100: tiles stretched to the tallest in their row, leaving ~150px blank under a short card.
+test("on a wall display the tiles fill the width, each ends at its last fact and facts are large", async ({ page }) => {
   await openDemo(page, 1920)
   const tiles = await page.locator(".agent").evaluateAll((elements) =>
     elements.map((element) => {
@@ -58,8 +59,14 @@ test("on a wall display the tiles fill the width, rows are even and facts are la
   )
   const used = tiles.reduce((sum, tile) => sum + tile.width, 0)
   expect(used / 1920).toBeGreaterThan(0.8)
-  const firstRow = tiles.filter((tile) => tile.top === tiles[0]?.top)
-  expect(new Set(firstRow.map((tile) => tile.height)).size).toBe(1)
+  const blankBelow = await page.locator(".agent").evaluateAll((elements) =>
+    elements.map((element) => {
+      const last = element.lastElementChild?.getBoundingClientRect().bottom ?? 0
+      const padding = Number.parseFloat(getComputedStyle(element).paddingBottom)
+      return Math.round(element.getBoundingClientRect().bottom - padding - last)
+    })
+  )
+  expect(blankBelow.every((blank) => blank <= 1)).toBe(true)
   const fact = await page.locator(".agent dd").first().evaluate((element) =>
     Number.parseFloat(getComputedStyle(element).fontSize)
   )
@@ -72,3 +79,28 @@ test("a blocked card names its reason once, under its state word", async ({ page
   await expect(page.locator(".blocked .blocker")).toHaveText("Browser slot in use")
   await expect(page.locator("#connection")).toHaveText(/updated \d{2}:\d{2}$/u)
 })
+
+// QA-162: going offline wrapped the longer status line and pushed Lock and the whole board down
+// (CLS 0.17 at 390, 0.40 at 768, 0.59 at 200% zoom).
+for (
+  const { height, name, width } of [
+    { name: "390", width: 390, height: 844 },
+    { name: "768", width: 768, height: 1024 },
+    { name: "1280 at 200% zoom", width: 640, height: 450 }
+  ]
+) {
+  test(`going offline moves neither Lock nor the board at ${name}`, async ({ page }) => {
+    await page.clock.install()
+    await openDemo(page, width)
+    await page.setViewportSize({ width, height })
+    const positions = () =>
+      Promise.all([page.locator("#lock").boundingBox(), page.locator(".agent").first().boundingBox()]).then((boxes) =>
+        boxes.map((box) => box?.y)
+      )
+    const before = await positions()
+    await page.route("**/boards/**", (route) => route.abort("internetdisconnected"))
+    await page.clock.runFor(10_000)
+    await expect(page.locator("#connection")).toContainText(/^Offline: showing the snapshot from /u)
+    expect(await positions()).toEqual(before)
+  })
+}
