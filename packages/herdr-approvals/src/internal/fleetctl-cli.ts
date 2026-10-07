@@ -4,7 +4,17 @@
  *
  * @module
  */
-import { Data } from "effect"
+import {
+  FleetValidationError,
+  JobPayload,
+  WorkAbandon,
+  WorkAdmit,
+  type WorkJobKind,
+  WorkReassign,
+  WorkReconcile,
+  WorkRecover
+} from "@knpkv/herdr-fleet"
+import { Data, Effect, Predicate, Schema, SchemaIssue } from "effect"
 
 const workLines = [
   "  work record HOST CHECKPOINT_JSON",
@@ -120,3 +130,49 @@ export const unknownKindDetail = (kind: string | undefined): string =>
 
 /** Any error detail as one line: decoder messages span several lines, a terminal error should not. */
 export const oneLine = (detail: string): string => detail.trim().replace(/\s*\n\s*/gu, "; ")
+
+/**
+ * The one JSON payload a `work.*` command takes. Its `kind` may be left out and is the command's own;
+ * any other problem is reported in one line naming each failing field and what it expected.
+ */
+export const workPayload = Effect.fn("Fleetctl.workPayload")(function*(kind: WorkJobKind, args: ReadonlyArray<string>) {
+  const body = args[1]
+  if (args.length !== 2 || body === undefined) {
+    return yield* new FleetValidationError({ detail: `${kind} requires one JSON payload` })
+  }
+  const fields = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PayloadObject))(body).pipe(
+    Effect.mapError(() => new FleetValidationError({ detail: `${kind} payload is not a JSON object` }))
+  )
+  if (Predicate.hasProperty(fields, "kind") && fields["kind"] !== kind) {
+    return yield* new FleetValidationError({ detail: `${kind} payload kind does not match the command` })
+  }
+  const failed = (error: Schema.SchemaError) =>
+    new FleetValidationError({ detail: `${kind} payload: ${describeIssue(error.issue)}` })
+  // This command's own schema first, reporting every problem; then the job union the server takes.
+  yield* Schema.decodeUnknownEffect(workSchemas[kind], { onExcessProperty: "error", errors: "all" })({
+    ...fields,
+    kind
+  }).pipe(Effect.mapError(failed))
+  return yield* Schema.decodeUnknownEffect(JobPayload, { onExcessProperty: "error" })({ ...fields, kind }).pipe(
+    Effect.mapError(failed)
+  )
+})
+
+const PayloadObject = Schema.Record(Schema.String, Schema.Unknown)
+
+const workSchemas = {
+  "work.reconcile": WorkReconcile,
+  "work.admit": WorkAdmit,
+  "work.recover": WorkRecover,
+  "work.reassign": WorkReassign,
+  "work.abandon": WorkAbandon
+} satisfies Record<WorkJobKind, Schema.Top>
+
+/** `targetGoal: Missing key; reason: Expected string, got 3`: each failing field and what it expected. */
+const describeIssue = (issue: SchemaIssue.Issue): string =>
+  SchemaIssue.makeFormatterStandardSchemaV1()(issue).issues
+    .map(({ message, path }) => {
+      const at = (path ?? []).map((segment) => String(Predicate.hasProperty(segment, "key") ? segment.key : segment))
+      return `${at.length === 0 ? "" : `${at.join(".")}: `}${message.replaceAll(/\s+/gu, " ")}`
+    })
+    .join("; ")
