@@ -7,6 +7,7 @@ const makePR = (overrides: Partial<{
   creationDate: Date
   lastModifiedDate: Date
   isApproved: boolean
+  approvalUnknown: { readonly _tag: "NotPermitted" }
   isMergeable: boolean
   commentCount: number
   title: string
@@ -27,42 +28,65 @@ const makePR = (overrides: Partial<{
     destinationBranch: "main",
     isMergeable: overrides.isMergeable ?? true,
     isApproved: overrides.isApproved ?? false,
+    ...(overrides.approvalUnknown !== undefined && { approvalUnknown: overrides.approvalUnknown }),
     commentCount: overrides.commentCount,
     approvedBy: [],
-    commentedBy: []
+    commentedBy: [],
+    // One rule, so an approval is a real sign-off (with no rules CodeCommit reads "approved" too).
+    approvalRules: [{
+      ruleName: "reviewers",
+      requiredApprovals: 1,
+      poolMembers: [],
+      satisfied: overrides.isApproved ?? false
+    }]
   })
 
 describe("HealthScore", () => {
   describe("calculateHealthScore", () => {
-    it("brand new PR scores 10", () => {
+    it("brand new PR with nothing earned yet scores the base 8", () => {
       const now = new Date("2024-01-01")
       const pr = makePR({ creationDate: now, lastModifiedDate: now, commentCount: 0 })
-      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(10)
+      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(8)
     })
 
-    it("time decay: -1 per day since last activity", () => {
+    it("time decay: saturating, up to -6 for idleness", () => {
       const pr = makePR({
         creationDate: new Date("2024-01-01"),
         lastModifiedDate: new Date("2024-01-01"),
         commentCount: 0
       })
       const now = new Date("2024-01-04") // 3 days later
-      // 10 - 3*1.0 (time) - 3*0.5 (age) = 5.5
-      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(5.5)
+      // 8 - 6(1 - e^(-3/14)) - 2(1 - e^(-3/60)) = 6.7
+      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(6.7)
     })
 
-    it("age penalty: -0.5 per day since creation", () => {
+    it("age penalty: saturating, up to -2 for age", () => {
       const now = new Date("2024-01-05")
       const pr = makePR({ creationDate: new Date("2024-01-01"), lastModifiedDate: now, commentCount: 0 })
-      // 10 - 0 (time) - 4*0.5 (age) = 8
-      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(8)
+      // 8 - 2(1 - e^(-4/60)) = 7.9
+      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(7.9)
     })
 
-    it("comment bonus: +1 per comment", () => {
+    it("comment bonus: +0.5 per comment, counting up to 3", () => {
       const now = new Date("2024-01-01")
-      const pr = makePR({ creationDate: now, lastModifiedDate: now, commentCount: 3 })
-      // 10 + 3 = 13, capped at 10
-      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(10)
+      const score = (commentCount: number) =>
+        Option.getOrThrow(calculateHealthScore(makePR({ creationDate: now, lastModifiedDate: now, commentCount }), now))
+          .total
+      expect(score(3)).toBe(9.5)
+      expect(score(40)).toBe(9.5)
+    })
+
+    it("no approval bonus while approval is unknown, even with a last known approval", () => {
+      const now = new Date("2024-01-01")
+      const score = Option.getOrThrow(
+        calculateHealthScore(makePR({ isApproved: true, approvalUnknown: { _tag: "NotPermitted" } }), now)
+      )
+      expect(score.breakdown.find((b) => b.label === "Approval")?.value).toBe(0)
+      expect(score.categories.find((c) => c.label === "Approval")).toMatchObject({
+        status: "neutral",
+        statusLabel: "UNKNOWN",
+        description: expect.stringContaining("Approval unknown")
+      })
     })
 
     it("approval bonus: +2 when approved", () => {
@@ -73,20 +97,28 @@ describe("HealthScore", () => {
         isApproved: true,
         commentCount: 0
       })
-      // 10 - 5 - 2.5 + 2 = 4.5
-      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(4.5)
+      // 8 - 6(1 - e^(-5/14)) - 2(1 - e^(-5/60)) + 2 = 8.0
+      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(8)
     })
 
     it("conflict penalty: -3 when not mergeable", () => {
       const now = new Date("2024-01-01")
       const pr = makePR({ creationDate: now, lastModifiedDate: now, isMergeable: false, commentCount: 0 })
-      // 10 - 3 = 7
-      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(7)
+      // 8 - 3 = 5
+      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(5)
     })
 
     it("caps at 10", () => {
       const now = new Date("2024-01-01")
-      const pr = makePR({ creationDate: now, lastModifiedDate: now, commentCount: 50, isApproved: true })
+      const pr = makePR({
+        creationDate: now,
+        lastModifiedDate: now,
+        commentCount: 50,
+        isApproved: true,
+        title: "feat(x): y",
+        description: "why"
+      })
+      // 8 + 1.5 + 2 + 0.5 + 0.5 = 12.5, capped at 10
       expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(10)
     })
 
@@ -95,15 +127,16 @@ describe("HealthScore", () => {
       const pr = makePR({
         creationDate: new Date("2024-01-01"),
         lastModifiedDate: new Date("2024-01-01"),
-        commentCount: 0
+        commentCount: 0,
+        isMergeable: false
       })
       expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(0)
     })
 
-    it("treats missing commentCount as 0", () => {
+    it("treats missing commentCount as 0: a lower bound", () => {
       const now = new Date("2024-01-01")
       const pr = makePR({ creationDate: now, lastModifiedDate: now })
-      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(10)
+      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(8)
     })
 
     it("combined: approved + conflicts + comments + age", () => {
@@ -115,8 +148,8 @@ describe("HealthScore", () => {
         isMergeable: false,
         commentCount: 5
       })
-      // 10 - 5 (time) - 5 (age) + 5 (comments) + 2 (approved) - 3 (conflicts) = 4
-      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(4)
+      // 8 - 6(1 - e^(-5/14)) - 2(1 - e^(-10/60)) + 1.5 (3 comments counted) + 2 (approved) - 3 = 6.4
+      expect(Option.getOrThrow(calculateHealthScore(pr, now)).total).toBe(6.4)
     })
 
     it("breakdown contains all factors", () => {

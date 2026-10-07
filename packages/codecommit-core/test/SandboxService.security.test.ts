@@ -86,28 +86,24 @@ describe("sandbox security boundary", () => {
         yield* fileSystem.makeDirectory(safeMount, { recursive: true })
         yield* fileSystem.makeDirectory(outside, { recursive: true })
 
-        const safeConfig = {
-          ...validConfig,
-          volumeMounts: [
-            {
-              hostPath: safeMount,
-              containerPath: "/home/coder/.local/share/code-server/extensions",
-              readonly: false
-            }
-          ]
+        const safeVolume = {
+          hostPath: safeMount,
+          containerPath: "/home/coder/.local/share/code-server/extensions",
+          readonly: false
         }
+        const safeConfig = { ...validConfig, volumeMounts: [safeVolume] }
         yield* validateSandboxConfig(safeConfig, scopedHome)
         yield* validateSandboxConfig({
           ...safeConfig,
           volumeMounts: [{
-            ...safeConfig.volumeMounts[0],
+            ...safeVolume,
             containerPath: "/tmp/.local/share/code-server/extensions"
           }]
         }, scopedHome)
 
         const broadTemporaryMount = yield* validateSandboxConfig({
           ...safeConfig,
-          volumeMounts: [{ ...safeConfig.volumeMounts[0], containerPath: "/tmp/credentials" }]
+          volumeMounts: [{ ...safeVolume, containerPath: "/tmp/credentials" }]
         }, scopedHome).pipe(Effect.flip)
         expect(broadTemporaryMount._tag).toBe("SandboxConfigurationError")
 
@@ -115,7 +111,7 @@ describe("sandbox security boundary", () => {
         yield* fileSystem.symlink(outside, escapedMount)
         const escaped = yield* validateSandboxConfig({
           ...safeConfig,
-          volumeMounts: [{ ...safeConfig.volumeMounts[0], hostPath: escapedMount }]
+          volumeMounts: [{ ...safeVolume, hostPath: escapedMount }]
         }, scopedHome).pipe(Effect.flip)
         expect(escaped._tag).toBe("SandboxConfigurationError")
       })
@@ -336,8 +332,6 @@ describe("sandbox security boundary", () => {
   })
 
   it.effect("pipes container environment without exposing secrets in process arguments", () =>
-    // The fake spawner intentionally supplies the runtime process boundary in this security test.
-    // @effect-diagnostics-next-line missingEffectContext:off
     Effect.gen(function*() {
       const commands: Array<ChildProcess.Command> = []
       const output = Stream.make("container-id\n").pipe(Stream.encodeText)
@@ -354,7 +348,6 @@ describe("sandbox security boundary", () => {
               isRunning: Effect.succeed(false),
               kill: () => Effect.void,
               pid: ChildProcessSpawner.ProcessId(42),
-              reref: Effect.void,
               stderr: Stream.empty,
               stdin: Sink.drain,
               stdout: output,
@@ -385,15 +378,20 @@ describe("sandbox security boundary", () => {
 
       expect(commands).toHaveLength(1)
       const command = commands[0]
-      expect(ChildProcess.isStandardCommand(command)).toBe(true)
-      if (!ChildProcess.isStandardCommand(command)) return
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command === undefined || !ChildProcess.isStandardCommand(command)) return
       const processArguments = [command.command, ...command.args].join("\0")
       expect(processArguments).not.toContain("process-visible-secret")
       expect(processArguments).not.toContain("EDITOR_THEME=dark")
       const stdin = command.options.stdin
       expect(stdin).toBeTypeOf("object")
-      if (stdin === null || !Predicate.isObjectOrArray(stdin) || Predicate.isString(stdin.stream)) return
-      const chunks = yield* Stream.runCollect(stdin.stream)
+      // stdin is either the input itself or a config carrying it; the env file is a piped stream.
+      const input = stdin === undefined || Predicate.isString(stdin) || Stream.isStream(stdin) ? stdin : stdin.stream
+      // The secrets must arrive as a piped stream; anything else fails the test rather than skipping it.
+      if (input === undefined || Predicate.isString(input)) {
+        return yield* Effect.die("the container environment was not piped through stdin")
+      }
+      const chunks = yield* Stream.runCollect(input)
       const bytes = Uint8Array.from(chunks.flatMap((chunk) => Array.from(chunk)))
       const environment = new TextDecoder().decode(bytes)
       expect(environment).toContain("EDITOR_THEME=dark\n")
@@ -415,7 +413,6 @@ describe("sandbox security boundary", () => {
               isRunning: Effect.succeed(false),
               kill: () => Effect.void,
               pid: ChildProcessSpawner.ProcessId(44),
-              reref: Effect.void,
               stderr: Stream.empty,
               stdin: Sink.drain,
               stdout: output,
@@ -453,7 +450,6 @@ describe("sandbox security boundary", () => {
               isRunning: Effect.succeed(false),
               kill: () => Effect.void,
               pid: ChildProcessSpawner.ProcessId(45),
-              reref: Effect.void,
               stderr: Stream.empty,
               stdin: Sink.drain,
               stdout: output,
@@ -493,7 +489,6 @@ describe("sandbox security boundary", () => {
               isRunning: Effect.succeed(false),
               kill: () => Effect.void,
               pid: ChildProcessSpawner.ProcessId(46),
-              reref: Effect.void,
               stderr: Stream.empty,
               stdin: Sink.drain,
               stdout: output,

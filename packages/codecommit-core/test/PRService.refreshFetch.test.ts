@@ -4,15 +4,23 @@ import * as AwsErrors from "@distilled.cloud/aws/Errors"
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Layer, Option, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { ApprovalEvaluationError } from "../src/AwsClient/getPullRequests.js"
-import { AwsClient, type PullRequestRefreshItem } from "../src/AwsClient/index.js"
+import { AwsClient } from "../src/AwsClient/index.js"
 import { PullRequestDetail } from "../src/AwsClient/internal.js"
 import { CacheError } from "../src/CacheService/CacheError.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
-import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
+import {
+  type ApprovalRead,
+  CachedPullRequest,
+  PullRequestRepo,
+  type PullRequestRepoContract
+} from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 import { AccountConfig } from "../src/ConfigService/internal.js"
 import {
+  approvalUnknownReasonText,
   type AppState,
+  AwsProfileName,
+  AwsRegion,
   type CallerIdentityState,
   type CallerIdentityUnresolvedReason,
   PullRequest
@@ -27,9 +35,6 @@ import {
 } from "../src/IdentityLifecycle.js"
 import { fetchAndUpsertPRs } from "../src/PRService/refreshFetch.js"
 import { subscriptionKey } from "../src/PRService/refreshResolve.js"
-
-/** A provider pull request as the refresh stream delivers it. */
-const fetched = (pullRequest: PullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest })
 
 const lookupReason = (reason: CallerIdentityUnresolvedReason): LookupFailureReason | undefined =>
   reason._tag === "CredentialsUnavailable" || reason._tag === "StsRejected" || reason._tag === "Throttled"
@@ -56,6 +61,20 @@ const seeded = (identities: Readonly<Record<string, CallerIdentityState>>): AppS
   }, started)
 }
 
+// The stale-open read of a cached row: its coordinates and versions.
+const staleOpen = (row: CachedPullRequest): StaleOpen => ({
+  id: row.id,
+  awsAccountId: row.awsAccountId,
+  repositoryName: row.repositoryName,
+  accountProfile: AwsProfileName.make(row.accountProfile),
+  accountRegion: AwsRegion.make(row.accountRegion),
+  lastModifiedDate: row.lastModifiedDate,
+  observationSeq: row.observationSeq,
+  approvalVersion: row.approvalVersion,
+  approvalObservationSeq: row.approvalObservationSeq
+})
+type StaleOpen = Effect.Success<ReturnType<PullRequestRepoContract["findStaleOpen"]>>[number]
+
 describe("fetchAndUpsertPRs", () => {
   it.effect("keeps an identity's earlier lookup failure when its refresh then fails authentication", () =>
     Effect.gen(function*() {
@@ -68,12 +87,13 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () =>
+          getPullRequests: () =>
             Stream.fail(
               new AwsCredentialError({ profile: account.profile, region: account.regions[0]!, cause: "expired" })
             )
         }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -115,7 +135,7 @@ describe("fetchAndUpsertPRs", () => {
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
           // The login lands while this refresh is in flight, then the refresh's old session fails.
-          getPullRequestRefresh: () =>
+          getPullRequests: () =>
             Stream.fromEffect(SubscriptionRef.update(state, (s) => signInState(s, "test-profile", freshLogin))).pipe(
               Stream.flatMap(() =>
                 Stream.fail(
@@ -125,6 +145,7 @@ describe("fetchAndUpsertPRs", () => {
             )
         }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -145,10 +166,11 @@ describe("fetchAndUpsertPRs", () => {
       expect(after.callerIdentities?.["test-profile"]).toEqual({ _tag: "Resolved", ...freshLogin })
     }))
 
-  it.effect.each([
+  const authFailureCases: ReadonlyArray<readonly [string, string, string | undefined]> = [
     ["another account's", "beta", "alice"],
     ["the current-user account's own", "alpha", undefined]
-  ])(
+  ]
+  it.effect.each(authFailureCases)(
     "clears currentUser on %s auth failure only when that account owns it",
     ([, failing, expectedUser]) =>
       Effect.gen(function*() {
@@ -166,7 +188,7 @@ describe("fetchAndUpsertPRs", () => {
         )
         const dependencies = Layer.mergeAll(
           Layer.mock(AwsClient, {
-            getPullRequestRefresh: (account) =>
+            getPullRequests: (account) =>
               account.profile === failing
                 ? Stream.fail(
                   new AwsCredentialError({ profile: account.profile, region: account.region, cause: "expired" })
@@ -174,6 +196,7 @@ describe("fetchAndUpsertPRs", () => {
                 : Stream.empty
           }),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findStaleOpen: () => Effect.succeed([]),
             propagateRepoAccountId: () => Effect.void,
             upsertMany: () => Effect.void
@@ -215,25 +238,38 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () =>
-            Stream.make({
-              _tag: "EvaluationFailed",
-              pullRequestId: "36",
-              repositoryName: "example-repository",
-              error: new ApprovalEvaluationError({
-                pullRequestId: "36",
-                revisionId: "revision-36",
-                cause: kind === "expired"
-                  ? new AwsErrors.ExpiredTokenException({
-                    message: "The security token included in the request is expired"
+          // Expired credentials fail the listing (the evaluation's typed cause is kept); a missing grant
+          // only makes the approval unknown, and the pull request is listed.
+          getPullRequests: () =>
+            kind === "expired"
+              ? Stream.fail(
+                new AwsApiError({
+                  operation: "getPullRequests",
+                  profile: account.profile,
+                  region: account.regions[0]!,
+                  cause: new ApprovalEvaluationError({
+                    pullRequestId: "36",
+                    revisionId: "revision-36",
+                    cause: new AwsErrors.ExpiredTokenException({
+                      message: "The security token included in the request is expired"
+                    })
                   })
-                  : new AwsErrors.AccessDeniedException({ message: "not authorized" })
-              })
-            })
+                })
+              )
+              : Stream.make(
+                Schema.decodeSync(PullRequest)({
+                  ...Schema.encodeSync(PullRequest)(providerOpenPR),
+                  id: "36",
+                  approvalUnknown: { _tag: "NotPermitted" }
+                })
+              )
         }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
-          propagateRepoAccountId: () => Effect.void
+          propagateRepoAccountId: () => Effect.void,
+          upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.none(), versions: undefined }),
+          writeRead: () => Effect.succeed({ row: true, approval: true, versions: undefined })
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
         Layer.mock(SubscriptionRepo, {})
@@ -270,10 +306,11 @@ describe("fetchAndUpsertPRs", () => {
           regions: ["us-east-1"],
           enabled: true
         })
+        const deleted = yield* Ref.make(0)
         const dependencies = Layer.mergeAll(
           Layer.mock(AwsClient, {
             // The listing succeeds; credentials then expire while a stale row is re-read.
-            getPullRequestRefresh: () => Stream.empty,
+            getPullRequests: () => Stream.empty,
             getPullRequest: () =>
               Effect.fail(
                 kind === "credential"
@@ -291,8 +328,9 @@ describe("fetchAndUpsertPRs", () => {
               )
           }),
           Layer.mock(PullRequestRepo, {
-            findStaleOpen: () => Effect.succeed([staleOpenPR]),
-            deleteOne: () => Effect.void,
+            observe: () => Effect.succeed(1),
+            findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+            deleteOne: () => Ref.update(deleted, (n) => n + 1).pipe(Effect.as(true)),
             propagateRepoAccountId: () => Effect.void
           }),
           Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -313,6 +351,8 @@ describe("fetchAndUpsertPRs", () => {
           reason: { _tag: "RefreshAuthFailed" }
         })
         expect(after.currentUser).toBeUndefined()
+        // Expired credentials are no evidence the pull request is gone.
+        expect(yield* Ref.get(deleted)).toBe(0)
       })
   )
 
@@ -368,8 +408,9 @@ describe("fetchAndUpsertPRs", () => {
             : { _tag: "InternalFailure", message: "provider error" }
         })
       const dependencies = Layer.mergeAll(
-        Layer.mock(AwsClient, { getPullRequestRefresh: () => Stream.fail(failure) }),
+        Layer.mock(AwsClient, { getPullRequests: () => Stream.fail(failure) }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -396,11 +437,11 @@ describe("fetchAndUpsertPRs", () => {
       )
     }))
 
-  it.effect("keeps a stale cached PR when its re-read fails only on approval evaluation", () =>
+  it.effect("keeps a stale cached PR whose re-read finds it open with approval unknown, and records it", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
       const deleteCalls = yield* Ref.make(0)
-      const notifications = yield* Ref.make<Array<{ readonly type: string; readonly message: string }>>([])
+      const marked = yield* Ref.make<ReadonlyArray<readonly [string, string]>>([])
       const account = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
@@ -409,30 +450,27 @@ describe("fetchAndUpsertPRs", () => {
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
           // No open pull requests, so the scope succeeds and stale reconciliation runs.
-          getPullRequestRefresh: () => Stream.empty,
+          getPullRequests: () => Stream.empty,
           getPullRequest: () =>
-            Effect.fail(
-              new AwsApiError({
-                operation: "getPullRequest",
-                profile: account.profile,
-                region: account.regions[0]!,
-                cause: new ApprovalEvaluationError({
-                  pullRequestId: staleOpenPR.id,
-                  revisionId: "rev-1",
-                  cause: new Error("not authorized to perform codecommit:EvaluatePullRequestApprovalRules")
-                })
+            Effect.succeed(
+              new PullRequestDetail({
+                ...providerOpenDetail,
+                approvalUnknown: { _tag: "NotPermitted" }
               })
             )
         }),
         Layer.mock(PullRequestRepo, {
-          findStaleOpen: () => Effect.succeed([staleOpenPR]),
-          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
+          writeRead: (_, id, evaluation) =>
+            Ref.update(
+              marked,
+              (all) => [...all, [id, evaluation.approvalUnknown?._tag ?? "Evaluated"] satisfies (typeof all)[number]]
+            ).pipe(Effect.as({ row: true, approval: true, versions: undefined })),
           propagateRepoAccountId: () => Effect.void
         }),
-        Layer.mock(NotificationRepo, {
-          addSystem: (notification) =>
-            Ref.update(notifications, (all) => [...all, { type: notification.type, message: notification.message }])
-        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
         Layer.mock(SubscriptionRepo, {})
       )
 
@@ -446,15 +484,13 @@ describe("fetchAndUpsertPRs", () => {
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
-      // An enrichment failure is not evidence the pull request is gone.
+      // An unknown approval is not evidence the pull request is gone: it is still open, so its row stays,
+      // marked unknown, listed as unevaluated, and its scope is partial.
       expect(yield* Ref.get(deleteCalls)).toBe(0)
+      expect(yield* Ref.get(marked)).toEqual([[staleOpenPR.id, "NotPermitted"]])
       expect(successfulScopes).toEqual([])
-      const { unevaluatedPullRequests } = yield* SubscriptionRef.get(state)
-      expect(unevaluatedPullRequests?.map(({ pullRequestId }) => pullRequestId)).toEqual([staleOpenPR.id])
-      // Kept, but not silently: the account says why its queue is stale.
-      expect(yield* Ref.get(notifications)).toEqual([
-        { type: "error", message: expect.stringContaining("EvaluatePullRequestApprovalRules") }
-      ])
+      expect((yield* SubscriptionRef.get(state)).unevaluatedPullRequests?.map((u) => u.pullRequestId))
+        .toEqual([staleOpenPR.id])
     }))
 
   const staleOpenPR = Schema.decodeSync(CachedPullRequest)({
@@ -474,6 +510,11 @@ describe("fetchAndUpsertPRs", () => {
     destinationBranch: "main",
     isMergeable: 1,
     isApproved: 0,
+    approvalUnknownReason: null,
+    approvalBaselineKnown: 1,
+    observationSeq: 0,
+    approvalVersion: "2026-08-02T00:00:00.000Z",
+    approvalObservationSeq: 0,
     commentCount: null,
     healthScore: null,
     link: "https://example.invalid/pr/35",
@@ -519,9 +560,21 @@ describe("fetchAndUpsertPRs", () => {
     lastActivityDate: new Date("2026-08-02T00:00:00.000Z"),
     approvedBy: [],
     approvedByArns: [],
+    isMergeable: true,
     approvalRules: []
   })
-  const providerClosedDetail = new PullRequestDetail({ ...providerOpenDetail, status: "CLOSED" })
+  const providerClosedDetail = new PullRequestDetail({
+    ...providerOpenDetail,
+    status: "CLOSED"
+  })
+  const openPR = (id: string) =>
+    Schema.decodeSync(PullRequest)({ ...Schema.encodeSync(PullRequest)(providerOpenPR), id })
+  const unknownPR = (id: string) =>
+    Schema.decodeSync(PullRequest)({
+      ...Schema.encodeSync(PullRequest)(providerOpenPR),
+      id,
+      approvalUnknown: { _tag: "NotPermitted" }
+    })
 
   it.effect("preserves the original interruption from an account stream", () =>
     Effect.gen(function*() {
@@ -539,9 +592,11 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.fromEffect(Effect.failCause(interruption))
+          getPullRequests: () => Stream.fromEffect(Effect.failCause(interruption))
         }),
-        Layer.mock(PullRequestRepo, {}),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1)
+        }),
         Layer.mock(NotificationRepo, {}),
         Layer.mock(SubscriptionRepo, {})
       )
@@ -587,16 +642,21 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: ({ profile }) =>
-            profile === failedAccount.profile ? Stream.fail(new Error("provider unavailable")) : Stream.empty,
+          getPullRequests: ({ profile, region }) =>
+            profile === failedAccount.profile
+              ? Stream.fail(
+                new AwsApiError({ operation: "getPullRequests", profile, region, cause: "provider unavailable" })
+              )
+              : Stream.empty,
           getPullRequest: () =>
             Ref.update(detailCalls, (count) => count + 1).pipe(
               Effect.andThen(Effect.die("unexpected stale detail fetch"))
             )
         }),
         Layer.mock(PullRequestRepo, {
-          findStaleOpen: () => Effect.succeed([staleOpenPR]),
-          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {
@@ -636,11 +696,12 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.empty,
+          getPullRequests: () => Stream.empty,
           getPullRequest: () => Effect.die("foreign-account stale row must not be reconciled")
         }),
         Layer.mock(PullRequestRepo, {
-          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -677,9 +738,10 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.empty
+          getPullRequests: () => Stream.empty
         }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findStaleOpen: () =>
             Effect.fail(new CacheError({ operation: "find-stale-open", cause: new Error("database unavailable") })),
           propagateRepoAccountId: () => Effect.void
@@ -701,7 +763,7 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([])
     }))
 
-  it.effect("withholds scope success when a stale row cannot be refreshed or removed", () =>
+  it.effect("withholds scope success when a stale row the provider says is gone cannot be removed", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
       const subscribedRef = yield* Ref.make(new Set<string>())
@@ -712,11 +774,11 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.empty,
+          getPullRequests: () => Stream.empty,
           getPullRequest: () =>
             Effect.fail(
               new AwsApiError({
-                cause: new Error("provider unavailable"),
+                cause: { _tag: "PullRequestDoesNotExistException", message: "pull request 7 does not exist" },
                 operation: "getPullRequest",
                 profile: account.profile,
                 region: account.regions[0]!
@@ -724,7 +786,8 @@ describe("fetchAndUpsertPRs", () => {
             )
         }),
         Layer.mock(PullRequestRepo, {
-          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
           deleteOne: () =>
             Effect.fail(new CacheError({ operation: "delete-pull-request", cause: new Error("database unavailable") })),
           propagateRepoAccountId: () => Effect.void
@@ -746,7 +809,9 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([])
     }))
 
-  it.effect("withholds scope success when a failed stale read falls back to cache deletion", () =>
+  // A failed read is no evidence the pull request is gone: deleting it would leave a tombstone that
+  // hides a live pull request from every later listing at its version.
+  it.effect("keeps a stale row whose re-read fails for another reason, and withholds scope success", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
       const subscribedRef = yield* Ref.make(new Set<string>())
@@ -758,7 +823,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.empty,
+          getPullRequests: () => Stream.empty,
           getPullRequest: () =>
             Effect.fail(
               new AwsApiError({
@@ -770,8 +835,56 @@ describe("fetchAndUpsertPRs", () => {
             )
         }),
         Layer.mock(PullRequestRepo, {
-          findStaleOpen: () => Effect.succeed([staleOpenPR]),
-          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(yield* Ref.get(deleteCalls)).toBe(0)
+      expect(successfulScopes).toEqual([])
+    }))
+
+  it.effect("deletes a stale row the provider says no longer exists, and withholds scope success", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const deleteCalls = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () =>
+            Effect.fail(
+              new AwsApiError({
+                cause: { _tag: "PullRequestDoesNotExistException", message: "pull request 7 does not exist" },
+                operation: "getPullRequest",
+                profile: account.profile,
+                region: account.regions[0]!
+              })
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -804,12 +917,14 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.empty,
+          getPullRequests: () => Stream.empty,
           getPullRequest: () => Effect.succeed(providerOpenDetail)
         }),
         Layer.mock(PullRequestRepo, {
-          findStaleOpen: () => Effect.succeed([staleOpenPR]),
-          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
+          observe: () => Effect.succeed(1),
+          writeRead: () => Effect.succeed({ row: true, approval: true, versions: undefined }),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -832,7 +947,158 @@ describe("fetchAndUpsertPRs", () => {
       ])
     }))
 
-  it.effect("still reconciles an unrelated closed row when another pull request fails evaluation", () =>
+  it.effect("keeps a stale row the provider confirmed when writing its evaluation to the cache fails", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const deletes = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () => Effect.succeed(providerOpenDetail)
+        }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          writeRead: () =>
+            Effect.fail(new CacheError({ operation: "recordApprovalEvaluation", cause: new Error("disk full") })),
+          deleteOne: () => Ref.update(deletes, (n) => n + 1).pipe(Effect.as(true)),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+      // A failed cache write is no evidence the pull request is gone.
+      expect(yield* Ref.get(deletes)).toBe(0)
+      expect(successfulScopes).toEqual([])
+    }))
+
+  it.effect("writes a successful stale re-evaluation back, clearing an earlier unknown approval", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const recorded = yield* Ref.make<ReadonlyArray<readonly [string, ApprovalRead]>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const unknownRow = Schema.decodeSync(CachedPullRequest)({
+        ...Schema.encodeSync(CachedPullRequest)(staleOpenPR),
+        approvalUnknownReason: "NotPermitted"
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () =>
+            Effect.succeed(
+              new PullRequestDetail({
+                ...providerOpenDetail,
+                isApproved: true
+              })
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(unknownRow)]),
+          writeRead: (_, id, evaluation) =>
+            Ref.update(recorded, (all) => [...all, [id, evaluation] satisfies (typeof all)[number]]).pipe(
+              Effect.as({ row: true, approval: true, versions: undefined })
+            ),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+      expect((yield* Ref.get(recorded)).map(([id, read]) => [id, read.approvalUnknown, read.isApproved])).toEqual([
+        [staleOpenPR.id, undefined, true]
+      ])
+      // Evaluated, so nothing is unknown and the scope is not partial.
+      expect(successfulScopes).toEqual([{ profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }])
+    }))
+
+  it.effect("sends no pool notification while approval stays unknown across refreshes", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const notified = yield* Ref.make<ReadonlyArray<string>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const pool = (members: ReadonlyArray<string>) => [{
+        ruleName: "reviewers",
+        requiredApprovals: 1,
+        poolMembers: members,
+        poolMemberArns: [],
+        satisfied: false
+      }]
+      // The cache keeps its last known rules (alice not in the pool); the fresh rules add alice.
+      const cachedRow = Schema.decodeSync(CachedPullRequest)({
+        ...Schema.encodeSync(CachedPullRequest)(staleOpenPR),
+        id: "36",
+        approvalRules: JSON.stringify(pool([]))
+      })
+      const fresh = Schema.decodeSync(PullRequest)({
+        ...Schema.encodeSync(PullRequest)(unknownPR("36")),
+        approvalRules: pool(["alice"])
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, { getPullRequests: () => Stream.make(fresh) }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findByCoordinates: () => Effect.succeed(Option.some(cachedRow)),
+          upsert: () =>
+            Effect.succeed({ row: true, approval: true, replaced: Option.some(cachedRow), versions: undefined }),
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {
+          add: (n) => Ref.update(notified, (all) => [...all, n.type]),
+          addSystem: () => Effect.void
+        }),
+        Layer.mock(SubscriptionRepo, { subscribe: () => Effect.void })
+      )
+      const refresh = Effect.gen(function*() {
+        return yield* fetchAndUpsertPRs({
+          state,
+          enabledAccounts: [account],
+          accountIdMap: new Map([["test-profile", "123456789012"]]),
+          subscribedRef: yield* Ref.make(
+            new Set([subscriptionKey("123456789012", "36", "example-repository", "us-east-1")])
+          ),
+          currentUser: "alice",
+          identityGeneration: 1,
+          staleThreshold: "2026-08-03T00:00:00Z"
+        }).pipe(Effect.provide(dependencies))
+      })
+      yield* refresh
+      yield* refresh
+      expect((yield* Ref.get(notified)).filter((type) => type === "approval_requested")).toEqual([])
+    }))
+
+  it.effect("still reconciles an unrelated closed row when another pull request's approval is unknown", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
       const statusUpdates = yield* Ref.make(0)
@@ -842,31 +1108,22 @@ describe("fetchAndUpsertPRs", () => {
         regions: ["us-east-1"],
         enabled: true
       })
-      // PR 36 is listed open but fails evaluation, and its cached row is stale too.
-      const failedRow = Schema.decodeSync(CachedPullRequest)({
-        ...Schema.encodeSync(CachedPullRequest)(staleOpenPR),
-        id: "36"
-      })
-      const failed: PullRequestRefreshItem = {
-        _tag: "EvaluationFailed",
-        pullRequestId: "36",
-        repositoryName: failedRow.repositoryName,
-        error: new ApprovalEvaluationError({
-          pullRequestId: "36",
-          revisionId: "revision-36",
-          cause: new Error("denied")
-        })
-      }
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.make(failed),
+          getPullRequests: () => Stream.make(unknownPR("36")),
           getPullRequest: ({ pullRequestId }) =>
             Ref.update(detailReads, (ids) => [...ids, pullRequestId]).pipe(Effect.as(providerClosedDetail))
         }),
         Layer.mock(PullRequestRepo, {
-          // PR 35 closed at the provider; PR 36 is the one that failed evaluation.
-          findStaleOpen: () => Effect.succeed([staleOpenPR, failedRow]),
-          updateStatusAndClosedAt: () => Ref.update(statusUpdates, (count) => count + 1),
+          observe: () => Effect.succeed(1),
+          upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.none(), versions: undefined }),
+          // PR 35 closed at the provider; PR 36 was just listed, so it is not stale.
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          // A closed or merged re-read now arrives as a whole-row write.
+          writeRead: (_, __, read) =>
+            Ref.update(statusUpdates, (count) => read.status === "OPEN" ? count : count + 1).pipe(
+              Effect.as({ row: true, approval: true, versions: undefined })
+            ),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -883,10 +1140,10 @@ describe("fetchAndUpsertPRs", () => {
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
-      // The listing completed, so the unrelated closed row reconciles; the listed-open PR 36 is not re-read.
+      // The listing completed, so the unrelated closed row reconciles.
       expect(yield* Ref.get(detailReads)).toEqual([staleOpenPR.id])
       expect(yield* Ref.get(statusUpdates)).toBe(1)
-      // Still partial: one pull request could not be re-evaluated.
+      // Still partial: one pull request's approval is unknown.
       expect(successfulScopes).toEqual([])
     }))
 
@@ -902,12 +1159,17 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.empty,
+          getPullRequests: () => Stream.empty,
           getPullRequest: () => Effect.succeed(providerClosedDetail)
         }),
         Layer.mock(PullRequestRepo, {
-          findStaleOpen: () => Effect.succeed([staleOpenPR]),
-          updateStatusAndClosedAt: () => Ref.update(statusUpdates, (count) => count + 1),
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          // A closed or merged re-read now arrives as a whole-row write.
+          writeRead: (_, __, read) =>
+            Ref.update(statusUpdates, (count) => read.status === "OPEN" ? count : count + 1).pipe(
+              Effect.as({ row: true, approval: true, versions: undefined })
+            ),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -942,7 +1204,7 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.empty,
+          getPullRequests: () => Stream.empty,
           getPullRequest: () =>
             Effect.succeed(
               new PullRequestDetail({
@@ -952,8 +1214,13 @@ describe("fetchAndUpsertPRs", () => {
             )
         }),
         Layer.mock(PullRequestRepo, {
-          findStaleOpen: () => Effect.succeed([staleOpenPR]),
-          updateStatusAndClosedAt: () => Ref.update(statusUpdates, (count) => count + 1),
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          // A closed or merged re-read now arrives as a whole-row write.
+          writeRead: (_, __, read) =>
+            Ref.update(statusUpdates, (count) => read.status === "OPEN" ? count : count + 1).pipe(
+              Effect.as({ row: true, approval: true, versions: undefined })
+            ),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -985,14 +1252,15 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.make(fetched(providerOpenPR)),
+          getPullRequests: () => Stream.make(providerOpenPR),
           getPullRequest: () => Effect.die("stale reconciliation must not run for an uncertified scope")
         }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           upsert: () =>
             Effect.fail(new CacheError({ operation: "upsert-pull-request", cause: new Error("database unavailable") })),
-          findStaleOpen: () => Effect.succeed([staleOpenPR]),
-          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -1024,9 +1292,10 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.make(fetched(providerOpenPR))
+          getPullRequests: () => Stream.make(providerOpenPR)
         }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1047,34 +1316,29 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([])
     }))
 
-  it.effect("refreshes the other pull requests when one fails approval evaluation, and reports the account as partial", () =>
+  it.effect("lists a pull request whose approval is unknown, and reports the account as partial", () =>
     Effect.gen(function*() {
       const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
-      const upserted = yield* Ref.make<ReadonlyArray<string>>([])
+      const upserted = yield* Ref.make<ReadonlyArray<readonly [string, string | null]>>([])
       const notifications = yield* Ref.make<ReadonlyArray<string>>([])
       const account = Schema.decodeSync(AccountConfig)({
         profile: "test-profile",
         regions: ["us-east-1"],
         enabled: true
       })
-      const openPR = (id: string) =>
-        Schema.decodeSync(PullRequest)({ ...Schema.encodeSync(PullRequest)(providerOpenPR), id })
-      const evaluationFailed: PullRequestRefreshItem = {
-        _tag: "EvaluationFailed",
-        pullRequestId: "36",
-        repositoryName: "example-repository",
-        error: new ApprovalEvaluationError({
-          pullRequestId: "36",
-          revisionId: "revision-36",
-          cause: new Error("not authorized to perform codecommit:EvaluatePullRequestApprovalRules")
-        })
-      }
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.make(fetched(openPR("35")), evaluationFailed, fetched(openPR("37")))
+          getPullRequests: () => Stream.make(openPR("35"), unknownPR("36"), openPR("37"))
         }),
         Layer.mock(PullRequestRepo, {
-          upsert: (input) => Ref.update(upserted, (ids) => [...ids, input.id]),
+          observe: () => Effect.succeed(1),
+          upsert: (input) =>
+            Ref.update(
+              upserted,
+              (rows) => [...rows, [input.id, input.approvalUnknownReason] satisfies (typeof rows)[number]]
+            ).pipe(
+              Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+            ),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1094,8 +1358,8 @@ describe("fetchAndUpsertPRs", () => {
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
-      // The other two refreshed; the failed one kept its cached row (no upsert).
-      expect(yield* Ref.get(upserted)).toEqual(["35", "37"])
+      // All three are upserted; the unknown one carries its reason, so the cache keeps its last known approval.
+      expect(yield* Ref.get(upserted)).toEqual([["35", null], ["36", "NotPermitted"], ["37", null]])
       // Partial, not successful.
       expect(successfulScopes).toEqual([])
       const { unevaluatedPullRequests } = yield* SubscriptionRef.get(state)
@@ -1104,11 +1368,52 @@ describe("fetchAndUpsertPRs", () => {
         region: "us-east-1",
         pullRequestId: "36",
         repositoryName: "example-repository",
-        message: expect.stringContaining("EvaluatePullRequestApprovalRules")
+        message: approvalUnknownReasonText({ _tag: "NotPermitted" })
       }])
       expect(yield* Ref.get(notifications)).toEqual([
-        expect.stringMatching(/^1 pull request in us-east-1 couldn't be re-evaluated/)
+        expect.stringMatching(/^1 pull request in us-east-1 couldn't be re-evaluated, so their approval is unknown/)
       ])
+    }))
+
+  // A rejected write is an older read than the cached row: nothing it saw is current, so it marks
+  // nothing unevaluated, makes no scope partial, and subscribes no one.
+  it.effect("ignores an unknown approval, and subscribes no one, from a listing the cache rejected as older", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribed = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.make(unknownPR("36"))
+        }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          upsert: () => Effect.succeed({ row: false, approval: false, replaced: Option.none(), versions: undefined }),
+          findStaleOpen: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, { subscribe: () => Ref.update(subscribed, (n) => n + 1) })
+      )
+
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        // The listed pull request's author, so an applied write would auto-subscribe.
+        currentUser: unknownPR("36").author,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect((yield* SubscriptionRef.get(state)).unevaluatedPullRequests).toEqual([])
+      expect(successfulScopes).toHaveLength(1)
+      expect(yield* Ref.get(subscribed)).toBe(0)
     }))
 
   it.effect("sends one notification per profile, naming every region with unevaluated pull requests", () =>
@@ -1120,21 +1425,13 @@ describe("fetchAndUpsertPRs", () => {
         regions: ["us-east-1", "eu-west-1"],
         enabled: true
       })
-      const failedIn = (id: string): PullRequestRefreshItem => ({
-        _tag: "EvaluationFailed",
-        pullRequestId: id,
-        repositoryName: "example-repository",
-        error: new ApprovalEvaluationError({
-          pullRequestId: id,
-          revisionId: `revision-${id}`,
-          cause: new Error("denied")
-        })
-      })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: ({ region }) => Stream.make(failedIn(region === "us-east-1" ? "40" : "41"))
+          getPullRequests: ({ region }) => Stream.make(unknownPR(region === "us-east-1" ? "40" : "41"))
         }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.none(), versions: undefined }),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1175,10 +1472,14 @@ describe("fetchAndUpsertPRs", () => {
       })
       const dependencies = Layer.mergeAll(
         Layer.mock(AwsClient, {
-          getPullRequestRefresh: () => Stream.make(fetched(providerOpenPR))
+          getPullRequests: () => Stream.make(providerOpenPR)
         }),
         Layer.mock(PullRequestRepo, {
-          upsert: (input) => Ref.set(upsertedRepoAccountId, input.repoAccountId),
+          observe: () => Effect.succeed(1),
+          upsert: (input) =>
+            Ref.set(upsertedRepoAccountId, input.repoAccountId).pipe(
+              Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+            ),
           findStaleOpen: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1213,12 +1514,14 @@ describe("fetchAndUpsertPRs", () => {
         enabled: true
       })
       const dependencies = Layer.mergeAll(
-        Layer.mock(AwsClient, { getPullRequestRefresh: () => Stream.make(fetched(providerOpenPR)) }),
+        Layer.mock(AwsClient, { getPullRequests: () => Stream.make(providerOpenPR) }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findByAccountAndId: () => Effect.succeed(Option.some(staleOpenPR)),
           findByCoordinates: () => Effect.succeed(Option.some(staleOpenPR)),
           findStaleOpen: () => Effect.succeed([]),
-          upsert: () => Effect.void,
+          upsert: () =>
+            Effect.succeed({ row: true, approval: true, replaced: Option.some(staleOpenPR), versions: undefined }),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {
@@ -1238,5 +1541,134 @@ describe("fetchAndUpsertPRs", () => {
       }).pipe(Effect.provide(dependencies))
 
       expect(yield* Ref.get(notificationCalls)).toBeGreaterThan(0)
+    }))
+
+  // A listing older than the cached row changes nothing in the cache, so it must announce nothing:
+  const notificationCases: ReadonlyArray<readonly [string, boolean, number]> = [
+    ["accepted", true, 1],
+    ["rejected as older than the cached row", false, 0]
+  ]
+  // the diff against the cached row describes a change that didn't happen.
+  it.effect.each(notificationCases)(
+    "sends a subscribed pull request's notifications only when its upsert is %s",
+    ([, applied, expected]) =>
+      Effect.gen(function*() {
+        const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+        const subscribedRef = yield* Ref.make(new Set([subscriptionKey("123456789012", "35")]))
+        const added = yield* Ref.make<ReadonlyArray<string>>([])
+        const account = Schema.decodeSync(AccountConfig)({
+          profile: "test-profile",
+          regions: ["us-east-1"],
+          enabled: true
+        })
+        // The cached row is pending under a rule; the listing reads it approved.
+        const cachedPending = Schema.decodeSync(CachedPullRequest)({
+          ...Schema.encodeSync(CachedPullRequest)(staleOpenPR),
+          isApproved: 0,
+          approvalRules: JSON.stringify([{
+            ruleName: "r",
+            requiredApprovals: 1,
+            poolMembers: [],
+            poolMemberArns: [],
+            satisfied: false
+          }])
+        })
+        const listedApproved = Schema.decodeSync(PullRequest)({
+          ...Schema.encodeSync(PullRequest)(providerOpenPR),
+          isApproved: true,
+          approvalRules: [{ ruleName: "r", requiredApprovals: 1, poolMembers: [], poolMemberArns: [], satisfied: true }]
+        })
+        const dependencies = Layer.mergeAll(
+          Layer.mock(AwsClient, { getPullRequests: () => Stream.make(listedApproved) }),
+          Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
+            findByAccountAndId: () => Effect.succeed(Option.some(cachedPending)),
+            findByCoordinates: () => Effect.succeed(Option.some(cachedPending)),
+            findStaleOpen: () => Effect.succeed([]),
+            upsert: () =>
+              Effect.succeed({
+                row: applied,
+                approval: applied,
+                replaced: Option.some(cachedPending),
+                versions: undefined
+              }),
+            propagateRepoAccountId: () => Effect.void
+          }),
+          Layer.mock(NotificationRepo, {
+            add: (n) => Ref.update(added, (all) => [...all, n.type])
+          }),
+          Layer.mock(SubscriptionRepo, {})
+        )
+
+        yield* fetchAndUpsertPRs({
+          state,
+          enabledAccounts: [account],
+          accountIdMap: new Map([["test-profile", "123456789012"]]),
+          subscribedRef,
+          currentUser: undefined,
+          identityGeneration: 1,
+          staleThreshold: "2026-08-03T00:00:00Z"
+        }).pipe(Effect.provide(dependencies))
+
+        expect((yield* Ref.get(added)).filter((type) => type === "approval_changed")).toHaveLength(expected)
+      })
+  )
+
+  // A write that landed between an earlier snapshot and this write changed the row: the transition
+  // this read announces is from the value it actually replaced, not from the snapshot.
+  it.effect("announces the transition from the row its write replaced, not from an earlier snapshot", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set([subscriptionKey("123456789012", "35")]))
+      const added = yield* Ref.make<ReadonlyArray<string>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const rules = (satisfied: boolean) => [
+        { ruleName: "r", requiredApprovals: 1, poolMembers: [], poolMemberArns: [], satisfied }
+      ]
+      const cachedRow = (isApproved: 0 | 1) =>
+        Schema.decodeSync(CachedPullRequest)({
+          ...Schema.encodeSync(CachedPullRequest)(staleOpenPR),
+          isApproved,
+          approvalRules: JSON.stringify(rules(isApproved === 1))
+        })
+      const listedPending = Schema.decodeSync(PullRequest)({
+        ...Schema.encodeSync(PullRequest)(providerOpenPR),
+        isApproved: false,
+        approvalRules: rules(false)
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, { getPullRequests: () => Stream.make(listedPending) }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          // The earlier snapshot: pending, as this read also sees it.
+          findByAccountAndId: () => Effect.succeed(Option.some(cachedRow(0))),
+          findByCoordinates: () => Effect.succeed(Option.some(cachedRow(0))),
+          findStaleOpen: () => Effect.succeed([]),
+          // Meanwhile another read stored it approved; this write replaced that.
+          upsert: () =>
+            Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.some(cachedRow(1)) }),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { add: (n) => Ref.update(added, (all) => [...all, n.message]) }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect((yield* Ref.get(added)).filter((message) => message.startsWith("Approval"))).toEqual([
+        expect.stringMatching(/^Approval revoked on #35/)
+      ])
     }))
 })

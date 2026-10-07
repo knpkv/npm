@@ -1,5 +1,21 @@
 # @knpkv/herdr-approvals
 
+## 0.8.0
+
+### Minor Changes
+
+- [#572](https://github.com/knpkv/npm/pull/572) [`74429d4`](https://github.com/knpkv/npm/commit/74429d4719b471ab7aaae230ad594f6c5e1755fb) Thanks [@konopkov](https://github.com/konopkov)! - The hostd composer receives `startedWorker(jobId)`, the worker Fleet's job record says that job started, or null when the job is unknown or started none. A background writer that acts on an agent can check its identity against this record instead of pane metadata, which any local agent can write. A job store that can't be read, or a composition without one, fails with `FleetStoreError`, never null.
+
+### Patch Changes
+
+- [#559](https://github.com/knpkv/npm/pull/559) [`8171e47`](https://github.com/knpkv/npm/commit/8171e47d54136a7f1b48572e3fc5c5a184bc7250) Thanks [@konopkov](https://github.com/konopkov)! - `fleetctl submit HOST work.* <json>` says what is wrong with the payload, in one line: each failing field and what it expected, for example `work.abandon payload: goalId: Missing key; reason: Expected string`. The payload's `kind` may be left out; it is the command's own. Before, any problem printed only "work.abandon payload is invalid".
+
+- [#557](https://github.com/knpkv/npm/pull/557) [`d215ab8`](https://github.com/knpkv/npm/commit/d215ab87781bd00f9199f3c04b0c3a901075efbb) Thanks [@konopkov](https://github.com/konopkov)! - The coordinator chat no longer shows a hard-coded host name or a "Persistent" chip; turns read "You asked" or "You asked for work" with their state as a word, and the scrolling history is a named log a keyboard can reach. The notifications panel explains a blocked or unsupported browser instead of offering an Enable button that cannot work, names the cause when checking fails, and keeps its setup help inside the panel.
+- Updated dependencies [[`d215ab8`](https://github.com/knpkv/npm/commit/d215ab87781bd00f9199f3c04b0c3a901075efbb), [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5)]:
+  - @knpkv/herdr-connect@0.6.0
+  - @knpkv/rly@0.11.0
+  - @knpkv/herdr-work@0.7.1
+
 ## 0.7.0
 
 ### Minor Changes

@@ -94,7 +94,7 @@ const fixtureLayer = (failures: number) =>
         }),
         Layer.mock(CacheService.SandboxRepo, { findAll: () => Effect.succeed([]) }),
         Layer.mock(CacheService.EventsHub, { subscribe: Stream.never }),
-        Layer.mock(PermissionGateLiveTag, { getFirstPending: () => Effect.void })
+        Layer.mock(PermissionGateLiveTag, { getFirstPending: () => Effect.undefined })
       )
     })
   )

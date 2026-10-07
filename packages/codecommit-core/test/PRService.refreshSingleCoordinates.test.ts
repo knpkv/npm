@@ -1,12 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Ref, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
+import { PullRequestDetail } from "../src/AwsClient/internal.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
+import { decodeCommentLocations } from "../src/CacheService/repos/commentLocations.js"
 import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
 import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
-import { ConfigService } from "../src/ConfigService/index.js"
+import { ConfigService, defaultReviewConfig, defaultSandboxConfig } from "../src/ConfigService/index.js"
+import { AwsApiError } from "../src/Errors.js"
 import { Domain } from "../src/index.js"
 import { makeRefreshSinglePR } from "../src/PRService/refreshSinglePR.js"
 
@@ -51,6 +54,11 @@ const cachedPullRequest = Schema.decodeSync(CachedPullRequest)({
   destinationBranch: "main",
   isMergeable: 1,
   isApproved: 0,
+  approvalUnknownReason: null,
+  approvalBaselineKnown: 1,
+  observationSeq: 0,
+  approvalVersion: "2026-08-02T00:00:00.000Z",
+  approvalObservationSeq: 0,
   commentCount: 0,
   healthScore: null,
   link: "https://example.invalid/pr/42",
@@ -71,11 +79,11 @@ const secondPullRequest = Schema.decodeSync(Domain.PullRequest)({
   account: { ...pullRequest.account, region: "us-east-1" },
   repositoryName: "identity"
 })
-const secondCachedPullRequest = Schema.encodeSync(CachedPullRequest)({
+const secondCachedPullRequest: CachedPullRequest = {
   ...cachedPullRequest,
   accountRegion: "us-east-1",
-  repositoryName: "identity"
-})
+  repositoryName: Domain.RepositoryName.make("identity")
+}
 
 const foreignPullRequest = Schema.decodeSync(Domain.PullRequest)({
   ...pullRequest,
@@ -86,20 +94,20 @@ const foreignPullRequest = Schema.decodeSync(Domain.PullRequest)({
     repoAccountId: "111122223333"
   }
 })
-const foreignCachedPullRequest = Schema.encodeSync(CachedPullRequest)({
+const foreignCachedPullRequest: CachedPullRequest = {
   ...cachedPullRequest,
   awsAccountId: "999988887777",
   accountProfile: "foreign",
   repoAccountId: "111122223333"
-})
+}
 
 const config = {
   accounts: [],
   autoDetect: false,
   autoRefresh: false,
   refreshIntervalSeconds: 300,
-  review: ConfigService.defaultReviewConfig,
-  sandbox: ConfigService.defaultSandboxConfig
+  review: defaultReviewConfig,
+  sandbox: defaultSandboxConfig
 }
 
 const runWithLayer = <A, E, R>(
@@ -113,6 +121,15 @@ const runWithLayer = <A, E, R>(
     })
   )
 
+const singleRefreshApprovalCases: ReadonlyArray<
+  readonly [string, Domain.ApprovalUnknownReason | undefined, readonly [number, Domain.ApprovalUnknownTag | null]]
+> = [
+  ["an evaluated approval replaces the cached one and clears the reason", undefined, [0, null]],
+  // While unknown the input's approval is a placeholder: the upsert keeps the cached value
+  // (PullRequestRepo.approvalUnknown.test.ts proves that against the database).
+  ["an unknown approval stores the reason, with a placeholder approval", { _tag: "NotPermitted" }, [0, "NotPermitted"]]
+]
+
 describe("PRService.refreshSinglePR coordinates", () => {
   it.effect("uses the selected repository and region for the provider refresh", () =>
     Effect.gen(function*() {
@@ -124,15 +141,175 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const result = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "eu-west-1",
-          repositoryName: "payments"
+          region: Domain.AwsRegion.make("eu-west-1"),
+          repositoryName: Domain.RepositoryName.make("payments")
         }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
             getPullRequest: ({ account }) =>
               Ref.update(providerCalls, (calls) => [...calls, { region: account.region, repositoryName: "payments" }])
                 .pipe(
-                  Effect.andThen(Effect.succeed({
+                  Effect.andThen(Effect.succeed(
+                    new PullRequestDetail({
+                      isMergeable: true,
+                      isApproved: false,
+                      revisionId: "revision-2",
+                      sourceCommit: "b".repeat(40),
+                      title: "Coordinate refresh",
+                      author: "reviewer",
+                      status: "OPEN",
+                      repositoryName: "payments",
+                      sourceBranch: "feature",
+                      destinationBranch: "main",
+                      creationDate: new Date(0),
+                      lastActivityDate: new Date(2_000),
+                      approvedBy: [],
+                      approvedByArns: [],
+                      approvalRules: []
+                    })
+                  ))
+                ),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
+            findByAccountAndId: () => Effect.succeed(Option.none()),
+            findByCoordinates: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([cachedPullRequest]),
+            upsertRead: () =>
+              Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+          }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
+          Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+
+      expect(result).toEqual({ revisionId: "revision-2", sourceCommit: "b".repeat(40) })
+      expect(yield* Ref.get(providerCalls)).toEqual([{ region: "eu-west-1", repositoryName: "payments" }])
+    }))
+
+  // The read is newer or older than the cached row (1 s). Either way the upsert carries the read's own
+  // version, so the cache's compare-and-set rejects the older one instead of storing it as current.
+  it.effect.each(
+    singleRefreshApprovalCases.flatMap(([name, unknown, expected]) =>
+      [2_000, 500].map((readAt): readonly [string, typeof unknown, typeof expected, number] => [
+        `${name} (read at ${readAt} ms)`,
+        unknown,
+        expected,
+        readAt
+      ])
+    )
+  )(
+    "on a single refresh, %s",
+    ([, approvalUnknown, expected, readAt]) =>
+      Effect.gen(function*() {
+        const initialState: Domain.AppState = { pullRequests: [pullRequest], accounts: [], status: "idle" }
+        const state = yield* SubscriptionRef.make(initialState)
+        const upserted = yield* Ref.make<ReadonlyArray<readonly [number, string | null]>>([])
+        const stored = yield* Ref.make<ReadonlyArray<string>>([])
+        const approvedCache = Schema.decodeSync(CachedPullRequest)({
+          ...Schema.encodeSync(CachedPullRequest)(cachedPullRequest),
+          isApproved: 1
+        })
+        yield* runWithLayer(
+          makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
+            region: Domain.AwsRegion.make("eu-west-1"),
+            repositoryName: Domain.RepositoryName.make("payments")
+          }),
+          Layer.mergeAll(
+            Layer.mock(AwsClient, {
+              getPullRequest: () =>
+                Effect.succeed(
+                  new PullRequestDetail({
+                    revisionId: "revision-2",
+                    sourceCommit: "b".repeat(40),
+                    title: "Coordinate refresh",
+                    author: "reviewer",
+                    status: "OPEN",
+                    repositoryName: "payments",
+                    sourceBranch: "feature",
+                    destinationBranch: "main",
+                    creationDate: new Date(0),
+                    lastActivityDate: new Date(readAt),
+                    approvedBy: [],
+                    approvedByArns: [],
+                    isMergeable: true,
+                    approvalRules: [],
+                    isApproved: false,
+                    approvalUnknown
+                  })
+                ),
+              getCommentsForPullRequest: () => Effect.succeed([])
+            }),
+            Layer.mock(PullRequestRepo, {
+              observe: () => Effect.succeed(1),
+              findByAccountAndId: () => Effect.succeed(Option.none()),
+              findByCoordinates: () => Effect.succeed(Option.some(approvedCache)),
+              findAll: () => Effect.succeed([approvedCache]),
+              upsertRead: (input) =>
+                Ref.update(
+                  upserted,
+                  (all) => [...all, [input.isApproved, input.approvalUnknownReason] satisfies (typeof all)[number]]
+                ).pipe(
+                  Effect.andThen(Ref.update(stored, (all) => [...all, input.lastModifiedDate])),
+                  Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+                )
+            }),
+            Layer.mock(CommentRepo, {
+              find: () => Effect.succeed(Option.none()),
+              upsert: () => Effect.void
+            }),
+            Layer.mock(NotificationRepo, {}),
+            Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
+            Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+            Layer.mock(EventsHub, {})
+          )
+        )
+        expect(yield* Ref.get(upserted)).toEqual([expected])
+        expect(yield* Ref.get(stored)).toEqual([new Date(readAt).toISOString()])
+      })
+  )
+
+  // A read older than the cached row changes nothing in the cache, so it announces nothing.
+  // The last case: an earlier snapshot saw it pending, but the write replaced an approval stored
+  // meanwhile, so the revocation is announced from the replaced row.
+  const singleRefreshWriteCases: ReadonlyArray<readonly [string, boolean, number, boolean]> = [
+    ["accepted", true, 1, true],
+    ["rejected as older than the cached row", false, 0, true],
+    ["accepted over an approval its snapshot didn't see", true, 1, false]
+  ]
+  it.effect.each(singleRefreshWriteCases)(
+    "sends a subscribed single refresh's notifications only when its upsert is %s",
+    ([, applied, expected, snapshotApproved]) =>
+      Effect.gen(function*() {
+        const initialState: Domain.AppState = { pullRequests: [pullRequest], accounts: [], status: "idle" }
+        const state = yield* SubscriptionRef.make(initialState)
+        const added = yield* Ref.make<ReadonlyArray<string>>([])
+        const commentWrites = yield* Ref.make(0)
+        const approvedCache = Schema.decodeSync(CachedPullRequest)({
+          ...Schema.encodeSync(CachedPullRequest)(cachedPullRequest),
+          isApproved: 1,
+          // A rule on both sides: without one, nobody signed off and no approval change is announced.
+          approvalRules: JSON.stringify([
+            { ruleName: "r", requiredApprovals: 1, poolMembers: [], poolMemberArns: [], satisfied: true }
+          ])
+        })
+        yield* runWithLayer(
+          makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
+            region: Domain.AwsRegion.make("eu-west-1"),
+            repositoryName: Domain.RepositoryName.make("payments")
+          }),
+          Layer.mergeAll(
+            Layer.mock(AwsClient, {
+              getPullRequest: () =>
+                Effect.succeed(
+                  new PullRequestDetail({
                     revisionId: "revision-2",
                     sourceCommit: "b".repeat(40),
                     title: "Coordinate refresh",
@@ -145,27 +322,164 @@ describe("PRService.refreshSinglePR coordinates", () => {
                     lastActivityDate: new Date(2_000),
                     approvedBy: [],
                     approvedByArns: [],
-                    approvalRules: []
-                  }))
+                    isMergeable: true,
+                    approvalRules: [{
+                      ruleName: "r",
+                      requiredApprovals: 1,
+                      poolMembers: [],
+                      poolMemberArns: [],
+                      satisfied: false
+                    }],
+                    isApproved: false
+                  })
                 ),
-            getCommentsForPullRequest: () => Effect.succeed([])
-          }),
-          Layer.mock(PullRequestRepo, {
-            findByAccountAndId: () => Effect.succeed(Option.none()),
-            findByCoordinates: () => Effect.succeed(Option.none()),
-            findAll: () => Effect.succeed([cachedPullRequest]),
-            upsert: () => Effect.void
-          }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
-          Layer.mock(NotificationRepo, {}),
-          Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
-          Layer.mock(ConfigService, { load: Effect.succeed(config) }),
-          Layer.mock(EventsHub, {})
+              getCommentsForPullRequest: () => Effect.succeed([])
+            }),
+            Layer.mock(PullRequestRepo, {
+              observe: () => Effect.succeed(1),
+              findByAccountAndId: () => Effect.succeed(Option.none()),
+              findByCoordinates: () =>
+                Effect.succeed(Option.some(snapshotApproved ? approvedCache : { ...approvedCache, isApproved: false })),
+              findAll: () => Effect.succeed([approvedCache]),
+              upsertRead: () =>
+                Effect.succeed({
+                  row: applied,
+                  approval: applied,
+                  versions: applied
+                    ? {
+                      row: { lastActivity: new Date(2_000), observation: 1 },
+                      approval: { lastActivity: new Date(2_000), observation: 1 }
+                    }
+                    : undefined,
+                  replaced: Option.some(approvedCache)
+                }),
+              writeDerived: () => Effect.succeed(true)
+            }),
+            Layer.mock(CommentRepo, {
+              find: () => Effect.succeed(Option.none()),
+              upsert: () =>
+                Ref.update(commentWrites, (n) => n + 1).pipe(
+                  Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+                )
+            }),
+            Layer.mock(NotificationRepo, { add: (n) => Ref.update(added, (all) => [...all, n.type]) }),
+            Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(true) }),
+            Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+            Layer.mock(EventsHub, {})
+          )
         )
-      )
+        expect((yield* Ref.get(added)).filter((type) => type === "approval_changed")).toHaveLength(expected)
+        // The comment cache moves with the pull request's row: a rejected read leaves it alone.
+        expect(yield* Ref.get(commentWrites)).toBe(expected)
+      })
+  )
 
-      expect(result).toEqual({ revisionId: "revision-2", sourceCommit: "b".repeat(40) })
-      expect(yield* Ref.get(providerCalls)).toEqual([{ region: "eu-west-1", repositoryName: "payments" }])
+  // A failed comment fetch is not "no comments": it leaves the count and the comment cache as they were,
+  // so the next successful fetch diffs against the real cache and announces nothing it already did.
+  it.effect("keeps the comment cache and count through a failed comment fetch, and re-announces nothing", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<Domain.AppState>({
+        pullRequests: [pullRequest],
+        accounts: [],
+        status: "idle"
+      })
+      const comment = {
+        root: new Domain.PRComment({
+          id: Domain.CommentId.make("c1"),
+          content: "Looks good",
+          author: "alice",
+          creationDate: new Date(1_000),
+          deleted: false
+        }),
+        replies: []
+      }
+      const cachedComments: ReadonlyArray<Domain.PRCommentLocation> = [{ comments: [comment] }]
+      // The row's count agrees with its cached comments, as after an earlier successful fetch.
+      const cachedWithComment: CachedPullRequest = { ...cachedPullRequest, commentCount: 1 }
+      const stored = yield* Ref.make(cachedComments)
+      const commentCounts = yield* Ref.make<ReadonlyArray<number | null | undefined>>([])
+      const added = yield* Ref.make<ReadonlyArray<string>>([])
+      const fetches = yield* Ref.make(0)
+      const layer = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequest: () =>
+            Effect.succeed(
+              new PullRequestDetail({
+                revisionId: "revision-2",
+                sourceCommit: "b".repeat(40),
+                title: "Coordinate refresh",
+                author: "reviewer",
+                status: "OPEN",
+                repositoryName: "payments",
+                sourceBranch: "feature",
+                destinationBranch: "main",
+                creationDate: new Date(0),
+                lastActivityDate: new Date(2_000),
+                approvedBy: [],
+                approvedByArns: [],
+                isMergeable: true,
+                approvalRules: [],
+                isApproved: false
+              })
+            ),
+          // The first fetch fails; the second sees the same comment as before.
+          getCommentsForPullRequest: () =>
+            Ref.getAndUpdate(fetches, (n) => n + 1).pipe(
+              Effect.flatMap((n) =>
+                n === 0
+                  ? Effect.fail(
+                    new AwsApiError({
+                      operation: "getCommentsForPullRequest",
+                      profile: Domain.AwsProfileName.make("production"),
+                      region: Domain.AwsRegion.make("eu-west-1"),
+                      cause: "throttled"
+                    })
+                  )
+                  : Effect.succeed([...cachedComments])
+              )
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findByAccountAndId: () => Effect.succeed(Option.none()),
+          findByCoordinates: () => Effect.succeed(Option.some(cachedWithComment)),
+          findAll: () => Effect.succeed([cachedPullRequest]),
+          upsertRead: (input) =>
+            Ref.update(commentCounts, (all) => [...all, input.commentCount]).pipe(
+              Effect.as({
+                row: true,
+                approval: true,
+                versions: {
+                  row: { lastActivity: new Date(2_000), observation: 1 },
+                  approval: { lastActivity: new Date(2_000), observation: 1 }
+                },
+                replaced: Option.some(cachedWithComment)
+              })
+            ),
+          writeDerived: (_, __, ___, columns) =>
+            Ref.update(commentCounts, (all) => [...all, columns.commentCount]).pipe(Effect.as(true))
+        }),
+        Layer.mock(CommentRepo, {
+          find: () => Ref.get(stored).pipe(Effect.map(Option.some)),
+          upsert: (_, __, json) => decodeCommentLocations(json).pipe(Effect.flatMap((all) => Ref.set(stored, all)))
+        }),
+        Layer.mock(NotificationRepo, { add: (n) => Ref.update(added, (all) => [...all, n.type]) }),
+        Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(true) }),
+        Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+        Layer.mock(EventsHub, {})
+      )
+      const refresh = makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
+        region: Domain.AwsRegion.make("eu-west-1"),
+        repositoryName: Domain.RepositoryName.make("payments")
+      })
+      yield* runWithLayer(refresh, layer)
+      // Not loaded: no count written, and the cached comments are untouched.
+      expect(yield* Ref.get(commentCounts)).toEqual([null])
+      expect(yield* Ref.get(stored)).toEqual(cachedComments)
+      yield* runWithLayer(refresh, layer)
+      const commentTypes = new Set(["new_comment", "comment_edited", "comment_deleted"])
+      expect((yield* Ref.get(added)).filter((type) => commentTypes.has(type))).toEqual([])
+      expect((yield* Ref.get(commentCounts)).at(-1)).toBe(1)
     }))
 
   it.effect("rejects a same-id refresh with a different provider region", () =>
@@ -176,8 +490,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const failure = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "us-east-1",
-          repositoryName: "payments"
+          region: Domain.AwsRegion.make("us-east-1"),
+          repositoryName: Domain.RepositoryName.make("payments")
         }).pipe(Effect.flip),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
@@ -188,11 +502,14 @@ describe("PRService.refreshSinglePR coordinates", () => {
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest])
           }),
-          Layer.mock(CommentRepo, {}),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none())
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -200,8 +517,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
         )
       )
 
-      expect(failure._tag).toBe("RefreshError")
-      expect(failure.failedAccounts).toEqual(["111122223333"])
+      expect(failure).toMatchObject({ _tag: "RefreshError", failedAccounts: ["111122223333"] })
       expect(yield* Ref.get(providerCalls)).toBe(0)
     }))
 
@@ -217,38 +533,47 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "eu-west-1",
-          repositoryName: "payments"
+          region: Domain.AwsRegion.make("eu-west-1"),
+          repositoryName: Domain.RepositoryName.make("payments")
         }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
             getPullRequest: ({ account }) =>
               Ref.update(providerProfiles, (profiles) => [...profiles, account.profile]).pipe(
-                Effect.andThen(Effect.succeed({
-                  revisionId: "revision-exact",
-                  sourceCommit: "d".repeat(40),
-                  title: "Coordinate refresh",
-                  author: "reviewer",
-                  status: "OPEN",
-                  repositoryName: "payments",
-                  sourceBranch: "feature",
-                  destinationBranch: "main",
-                  creationDate: new Date(0),
-                  lastActivityDate: new Date(2_000),
-                  approvedBy: [],
-                  approvedByArns: [],
-                  approvalRules: []
-                }))
+                Effect.andThen(Effect.succeed(
+                  new PullRequestDetail({
+                    isMergeable: true,
+                    isApproved: false,
+                    revisionId: "revision-exact",
+                    sourceCommit: "d".repeat(40),
+                    title: "Coordinate refresh",
+                    author: "reviewer",
+                    status: "OPEN",
+                    repositoryName: "payments",
+                    sourceBranch: "feature",
+                    destinationBranch: "main",
+                    creationDate: new Date(0),
+                    lastActivityDate: new Date(2_000),
+                    approvedBy: [],
+                    approvedByArns: [],
+                    approvalRules: []
+                  })
+                ))
               ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([foreignCachedPullRequest, cachedPullRequest]),
+            upsertRead: () =>
+              Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+          }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
             upsert: () => Effect.void
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -267,8 +592,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const failure = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          region: "eu-west-1",
-          repositoryName: "other-repository"
+          region: Domain.AwsRegion.make("eu-west-1"),
+          repositoryName: Domain.RepositoryName.make("other-repository")
         }).pipe(Effect.flip),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
@@ -279,11 +604,14 @@ describe("PRService.refreshSinglePR coordinates", () => {
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest])
           }),
-          Layer.mock(CommentRepo, {}),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none())
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -307,31 +635,40 @@ describe("PRService.refreshSinglePR coordinates", () => {
           Layer.mock(AwsClient, {
             getPullRequest: ({ account }) =>
               Ref.update(providerRegions, (regions) => [...regions, account.region]).pipe(
-                Effect.andThen(Effect.succeed({
-                  revisionId: "revision-legacy",
-                  sourceCommit: "c".repeat(40),
-                  title: "Coordinate refresh",
-                  author: "reviewer",
-                  status: "OPEN",
-                  repositoryName: "payments",
-                  sourceBranch: "feature",
-                  destinationBranch: "main",
-                  creationDate: new Date(0),
-                  lastActivityDate: new Date(2_000),
-                  approvedBy: [],
-                  approvedByArns: [],
-                  approvalRules: []
-                }))
+                Effect.andThen(Effect.succeed(
+                  new PullRequestDetail({
+                    isMergeable: true,
+                    isApproved: false,
+                    revisionId: "revision-legacy",
+                    sourceCommit: "c".repeat(40),
+                    title: "Coordinate refresh",
+                    author: "reviewer",
+                    status: "OPEN",
+                    repositoryName: "payments",
+                    sourceBranch: "feature",
+                    destinationBranch: "main",
+                    creationDate: new Date(0),
+                    lastActivityDate: new Date(2_000),
+                    approvedBy: [],
+                    approvedByArns: [],
+                    approvalRules: []
+                  })
+                ))
               ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest]),
+            upsertRead: () =>
+              Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+          }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
             upsert: () => Effect.void
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -358,30 +695,39 @@ describe("PRService.refreshSinglePR coordinates", () => {
           Layer.mock(AwsClient, {
             getPullRequest: ({ account }) =>
               Ref.update(providerProfiles, (profiles) => [...profiles, account.profile]).pipe(
-                Effect.andThen(Effect.succeed({
-                  revisionId: "revision-legacy-collision",
-                  sourceCommit: "g".repeat(40),
-                  title: "Coordinate refresh",
-                  author: "reviewer",
-                  status: "OPEN",
-                  repositoryName: "payments",
-                  sourceBranch: "feature",
-                  destinationBranch: "main",
-                  creationDate: new Date(0),
-                  lastActivityDate: new Date(2_000),
-                  approvedBy: [],
-                  approvedByArns: [],
-                  approvalRules: []
-                }))
+                Effect.andThen(Effect.succeed(
+                  new PullRequestDetail({
+                    isMergeable: true,
+                    isApproved: false,
+                    revisionId: "revision-legacy-collision",
+                    sourceCommit: "g".repeat(40),
+                    title: "Coordinate refresh",
+                    author: "reviewer",
+                    status: "OPEN",
+                    repositoryName: "payments",
+                    sourceBranch: "feature",
+                    destinationBranch: "main",
+                    creationDate: new Date(0),
+                    lastActivityDate: new Date(2_000),
+                    approvedBy: [],
+                    approvedByArns: [],
+                    approvalRules: []
+                  })
+                ))
               ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([]),
+            upsertRead: () =>
+              Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+          }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
             upsert: () => Effect.void
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -404,8 +750,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const service = makeRefreshSinglePR(state)
       const failure = yield* runWithLayer(
         service("111122223333", pullRequest.id, {
-          repositoryName: "payments",
-          region: "eu-west-1",
+          repositoryName: Domain.RepositoryName.make("payments"),
+          region: Domain.AwsRegion.make("eu-west-1"),
           accountIdSource: "coordinate-token"
         }).pipe(Effect.flip),
         Layer.mergeAll(
@@ -417,10 +763,13 @@ describe("PRService.refreshSinglePR coordinates", () => {
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([tokenCollision])
           }),
-          Layer.mock(CommentRepo, {}),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none())
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -453,17 +802,24 @@ describe("PRService.refreshSinglePR coordinates", () => {
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findByAccountAndId: () => Effect.succeed(Option.none()),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest, secondCachedPullRequest])
           }),
-          Layer.mock(CommentRepo, {}),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none())
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
           Layer.mock(ConfigService, {
             load: Effect.succeed({
               ...config,
-              accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }]
+              accounts: [{
+                profile: Domain.AwsProfileName.make("production"),
+                regions: [Domain.AwsRegion.make("eu-west-1")],
+                enabled: true
+              }]
             })
           }),
           Layer.mock(EventsHub, {})
@@ -480,33 +836,47 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const upserted = yield* Ref.make<string | undefined>(undefined)
       const service = makeRefreshSinglePR(state)
       yield* runWithLayer(
-        service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
+        service("production", pullRequest.id, {
+          repositoryName: Domain.RepositoryName.make("payments"),
+          region: Domain.AwsRegion.make("eu-west-1")
+        }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
             getPullRequest: () =>
-              Effect.succeed({
-                revisionId: "revision-profile",
-                sourceCommit: "e".repeat(40),
-                title: "Coordinate refresh",
-                author: "reviewer",
-                status: "OPEN",
-                repositoryName: "payments",
-                sourceBranch: "feature",
-                destinationBranch: "main",
-                creationDate: new Date(0),
-                lastActivityDate: new Date(2_000),
-                approvedBy: [],
-                approvedByArns: [],
-                approvalRules: []
-              }),
+              Effect.succeed(
+                new PullRequestDetail({
+                  isMergeable: true,
+                  isApproved: false,
+                  revisionId: "revision-profile",
+                  sourceCommit: "e".repeat(40),
+                  title: "Coordinate refresh",
+                  author: "reviewer",
+                  status: "OPEN",
+                  repositoryName: "payments",
+                  sourceBranch: "feature",
+                  destinationBranch: "main",
+                  creationDate: new Date(0),
+                  lastActivityDate: new Date(2_000),
+                  approvedBy: [],
+                  approvedByArns: [],
+                  approvalRules: []
+                })
+              ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest]),
-            upsert: (input) => Ref.set(upserted, input.awsAccountId)
+            upsertRead: (input) =>
+              Ref.set(upserted, input.awsAccountId).pipe(
+                Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+              )
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, { load: Effect.succeed(config) }),
@@ -522,7 +892,10 @@ describe("PRService.refreshSinglePR coordinates", () => {
       const upserted = yield* Ref.make<string | undefined>(undefined)
       const service = makeRefreshSinglePR(state)
       yield* runWithLayer(
-        service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
+        service("production", pullRequest.id, {
+          repositoryName: Domain.RepositoryName.make("payments"),
+          region: Domain.AwsRegion.make("eu-west-1")
+        }),
         Layer.mergeAll(
           Layer.mock(AwsClient, {
             getCallerIdentity: () =>
@@ -532,35 +905,50 @@ describe("PRService.refreshSinglePR coordinates", () => {
                 arn: "arn:aws:sts::111122223333:assumed-role/Viewer/viewer"
               }),
             getPullRequest: () =>
-              Effect.succeed({
-                revisionId: "revision-uncached-profile",
-                sourceCommit: "f".repeat(40),
-                title: "Coordinate refresh",
-                author: "reviewer",
-                status: "OPEN",
-                repositoryName: "payments",
-                sourceBranch: "feature",
-                destinationBranch: "main",
-                creationDate: new Date(0),
-                lastActivityDate: new Date(2_000),
-                approvedBy: [],
-                approvedByArns: [],
-                approvalRules: []
-              }),
+              Effect.succeed(
+                new PullRequestDetail({
+                  isMergeable: true,
+                  isApproved: false,
+                  revisionId: "revision-uncached-profile",
+                  sourceCommit: "f".repeat(40),
+                  title: "Coordinate refresh",
+                  author: "reviewer",
+                  status: "OPEN",
+                  repositoryName: "payments",
+                  sourceBranch: "feature",
+                  destinationBranch: "main",
+                  creationDate: new Date(0),
+                  lastActivityDate: new Date(2_000),
+                  approvedBy: [],
+                  approvedByArns: [],
+                  approvalRules: []
+                })
+              ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([]),
-            upsert: (input) => Ref.set(upserted, input.awsAccountId)
+            upsertRead: (input) =>
+              Ref.set(upserted, input.awsAccountId).pipe(
+                Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+              )
           }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
           Layer.mock(ConfigService, {
             load: Effect.succeed({
               ...config,
-              accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }]
+              accounts: [{
+                profile: Domain.AwsProfileName.make("production"),
+                regions: [Domain.AwsRegion.make("eu-west-1")],
+                enabled: true
+              }]
             })
           }),
           Layer.mock(EventsHub, {})

@@ -50,7 +50,6 @@
   max-inline-size: 68rem;
 }
 
-.eyebrow,
 .heroMeta,
 .actionHeading,
 .approverHeading,
@@ -67,15 +66,9 @@
   flex-wrap: wrap;
 }
 
-.eyebrow {
-  gap: var(--rly-space-12);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
 .title {
-  max-inline-size: 22ch;
-  overflow-wrap: anywhere;
+  max-inline-size: 40ch;
+  overflow-wrap: break-word;
   text-wrap: balance;
 }
 
@@ -108,8 +101,8 @@
 .suggestedApprover:focus-visible,
 .removeApprover:focus-visible,
 .approverInput:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .decisionWorkspace {
@@ -140,7 +133,7 @@
 
 .actionGroup {
   gap: var(--rly-space-8);
-  grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
 }
 
 .actionButton {
@@ -148,6 +141,7 @@
   inline-size: 100%;
   justify-content: flex-start;
   min-inline-size: var(--rly-space-0);
+  white-space: nowrap;
 }
 
 .actionGroup > :last-child {
@@ -155,10 +149,10 @@
   justify-content: center;
 }
 
+/* A flat panel like the others: no provider-coloured edge or tint; the CodeCommit mark says whose it is. */
 .revisionCard {
-  background: color-mix(in srgb, var(--rly-color-service-codecommit) 9%, var(--rly-color-surface-2));
-  border: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 42%, var(--rly-color-border-1));
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-codecommit);
+  background: var(--rly-color-surface-2);
+  border: 1px solid var(--rly-color-border-1);
   box-shadow: none;
   gap: var(--rly-space-24);
   min-inline-size: var(--rly-space-0);
@@ -167,7 +161,10 @@
 .revisionHeading {
   align-items: start;
   gap: var(--rly-space-16);
-  grid-template-columns: minmax(var(--rly-space-0), 1fr) auto;
+}
+
+.revisionHeading > div {
+  justify-items: start;
 }
 
 .revisionHeading > div {
@@ -177,7 +174,7 @@
 }
 
 .revisionHeading h2 {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .branchPair {
@@ -224,7 +221,7 @@
 
 .facts > dt,
 .facts > dd {
-  border-block-start: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 18%, var(--rly-color-border-1));
+  border-block-start: 1px solid var(--rly-color-border-1);
   margin: var(--rly-space-0);
   min-inline-size: var(--rly-space-0);
   padding-block: var(--rly-space-12);
@@ -245,7 +242,7 @@
   color: var(--rly-color-text-1);
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .factStates {
@@ -290,7 +287,7 @@
 .markdown {
   color: var(--rly-color-text-1);
   max-inline-size: 68ch;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .description {
@@ -468,7 +465,7 @@
 
 .approverMember {
   max-inline-size: 100%;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .removeApprover {
@@ -594,7 +591,7 @@
 
 .commentPath {
   color: var(--rly-color-service-codecommit);
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .comment,
@@ -606,15 +603,14 @@
 .commentReply[data-active="true"] {
   background: color-mix(in srgb, var(--rly-color-action-background) 8%, var(--rly-color-surface-2));
   border-radius: var(--rly-radius-control);
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-4);
   padding-inline: var(--rly-space-12);
 }
 
+/* A reply is indented under its comment; the indent alone shows the thread. */
 .commentReply {
-  border-inline-start: 2px solid var(--rly-color-border-1);
-  margin-inline-start: var(--rly-space-16);
-  padding-inline-start: var(--rly-space-16);
+  margin-inline-start: var(--rly-space-32);
 }
 
 .commentBody {
@@ -652,8 +648,8 @@
 }
 
 .commentJump:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 @container pr-column (width <= 64rem) {
@@ -697,7 +693,7 @@
   }
 
   .facts > dt:not(:first-child) {
-    border-block-start: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 18%, var(--rly-color-border-1));
+    border-block-start: 1px solid var(--rly-color-border-1);
     margin-block-start: var(--rly-space-8);
     padding-block-start: var(--rly-space-12);
   }
@@ -750,11 +746,5 @@
 
   .page :global(.animate-spin) {
     animation: none;
-  }
-}
-
-@media (forced-colors: active) {
-  .revisionCard {
-    border-inline-start-color: LinkText;
   }
 }

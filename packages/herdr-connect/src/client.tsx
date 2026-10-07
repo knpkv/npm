@@ -2,7 +2,7 @@ import { useAtom, useAtomMount, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { Cause, Effect, Fiber, Result, Schedule, Schema } from "effect"
+import { Cause, Effect, Fiber, Predicate, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
@@ -33,7 +33,14 @@ import {
   type TerminalOutputBoundary,
   writeTerminalOutput
 } from "./terminal-output.js"
-import { AgentDirectory, connectAgentKey, ConnectWorkspace, TerminalKeyRail, type AgentActivityFilter } from "./view.js"
+import {
+  AgentDirectory,
+  connectAgentKey,
+  ConnectSummary,
+  ConnectWorkspace,
+  TerminalKeyRail,
+  type AgentActivityFilter
+} from "./view.js"
 import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
 import { terminalBackground, terminalForeground } from "./terminal-theme.js"
 import { bindTerminalDocumentLock, bindTerminalViewport, terminalViewportBindingActive } from "./terminal-viewport.js"
@@ -146,6 +153,12 @@ const storeRememberedAgent = (key: string) =>
     )
   )
 
+/** One line for a failure a person reads: the error's own message, never a stack trace. */
+const causeSummary = (cause: Cause.Cause<unknown>): string => {
+  const error = Cause.squash(cause)
+  return Predicate.hasProperty(error, "message") && Predicate.isString(error.message) ? error.message : String(error)
+}
+
 const loadAgents = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient
   const agents: Array<ConnectAgent> = []
@@ -249,6 +262,7 @@ const socketUrl = (agent: ConnectAgent, dimensions: TerminalDimensions): string 
   url.searchParams.set("agent", agent.id)
   url.searchParams.set("cols", String(cols))
   url.searchParams.set("rows", String(rows))
+  url.searchParams.set("scrollState", "1")
   return url.toString()
 }
 
@@ -405,9 +419,7 @@ const terminalWorker = (
       const interaction = bindTerminalInteraction(
         terminal.terminal,
         container,
-        (command) => {
-          if (ready) send(command)
-        },
+        (command) => ready && send(command),
         keyboard.interactionView
       )
       const releaseInteraction = keyboard.setInteraction(interaction)
@@ -478,6 +490,10 @@ const terminalWorker = (
               detail: `invalid terminal server message: ${String(decoded.failure)}`
             })
             connectedSocket.close(4400, "invalid terminal server message")
+            return
+          }
+          if (decoded.success.type === "terminal.scroll_state") {
+            interaction.serverScrollState(decoded.success.offsetFromBottom, decoded.success.scrollsForwarded)
             return
           }
           if (decoded.success.type === "terminal.ready") {
@@ -561,6 +577,7 @@ export const ConnectSurface = ({
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
   const terminalInteractionRef = useRef<TerminalInteraction | null>(null)
   const [terminalLinesBack, setTerminalLinesBack] = useState(0)
+  const [terminalPositionUnconfirmed, setTerminalPositionUnconfirmed] = useState(false)
   const [terminalTextLines, setTerminalTextLines] = useState<ReadonlyArray<string> | null>(null)
   const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
   useAtomMount(atoms.agentsPoll)
@@ -724,6 +741,7 @@ export const ConnectSurface = ({
           },
           interactionView: {
             onLinesBack: setTerminalLinesBack,
+            onPositionUnconfirmed: setTerminalPositionUnconfirmed,
             onSelectText: setTerminalTextLines,
             openUrl: (url) => {
               window.open(url, "_blank", "noopener,noreferrer")
@@ -737,6 +755,7 @@ export const ConnectSurface = ({
               if (terminalInteractionRef.current !== interaction) return
               terminalInteractionRef.current = null
               setTerminalLinesBack(0)
+              setTerminalPositionUnconfirmed(false)
               setTerminalTextLines(null)
             }
           }
@@ -778,6 +797,12 @@ export const ConnectSurface = ({
       ? directory.previousSuccess.value.value
       : null
   const agents = current?.agents ?? []
+  // A failed refresh keeps the last good list; say how old it is rather than presenting it as live.
+  const staleSince =
+    directory._tag === "Failure" && directory.previousSuccess._tag === "Some"
+      ? directory.previousSuccess.value.timestamp
+      : null
+  const offlineHosts = (current?.failures ?? []).map((failure) => failure.host)
   const selected =
     agents.find((agent) => connectAgentKey(agent) === selectedKey) ??
     (connectionRequest !== null && connectAgentKey(connectionRequest.agent) === selectedKey
@@ -912,31 +937,20 @@ export const ConnectSurface = ({
     <>
       {embedded ? (
         <header className="connect-embedded-intro">
-          <div>
-            <Text variant="meta" tone="secondary">
-              Live fleet directory
-            </Text>
-            <Text as="h1" variant="page-title">
-              Connect to an agent
-            </Text>
-            <Text tone="secondary">Choose a worker, reviewer, or coordinator to open its exact terminal.</Text>
-          </div>
-          <StateLabel
-            label={current === null ? "Loading" : `${String(agents.length)} agents`}
-            size="compact"
-            tone={current === null ? "neutral" : "positive"}
+          <Text as="h1" variant="card-title">
+            Connect
+          </Text>
+          <ConnectSummary
+            agents={current === null ? null : agents}
+            offlineHosts={offlineHosts}
+            unavailable={current === null && directory._tag === "Failure"}
           />
         </header>
       ) : (
         <header className="connect-header">
-          <div>
-            <Text variant="meta" tone="secondary">
-              Herdr fleet
-            </Text>
-            <Text as="h1" variant="page-title">
-              Connect
-            </Text>
-          </div>
+          <Text as="h1" variant="page-title">
+            Connect
+          </Text>
           <nav className="fleet-app-nav" aria-label="Fleet applications">
             <a href="/">Approvals</a>
             <a href="/connect/" aria-current="page">
@@ -976,7 +990,9 @@ export const ConnectSurface = ({
         </label>
         {current === null ? (
           <Text tone="secondary">
-            {directory._tag === "Failure" ? Cause.pretty(directory.cause) : "Loading fleet agents…"}
+            {directory._tag === "Failure"
+              ? `Couldn't load the fleet directory: ${causeSummary(directory.cause)}. Retrying every 5 seconds.`
+              : "Loading fleet agents…"}
           </Text>
         ) : agents.length === 0 ? (
           <Text tone="secondary">No live agents.</Text>
@@ -1003,7 +1019,7 @@ export const ConnectSurface = ({
         ) : null}
         {remembered._tag === "Failure" ? (
           <small className="connect-preference-error">
-            Selection memory unavailable: {Cause.pretty(remembered.cause)}
+            Selection memory unavailable: {causeSummary(remembered.cause)}
           </small>
         ) : preferenceError === null ? null : (
           <small className="connect-preference-error">Selection memory unavailable: {preferenceError}</small>
@@ -1011,6 +1027,13 @@ export const ConnectSurface = ({
         {workspaceFocusFailure === null || workspaceFocusFailure === "focus_rejected" ? null : (
           <small className="connect-status-message" data-tone="critical">
             Terminal focus transition failed: {workspaceFocusFailure}
+          </small>
+        )}
+        {staleSince === null || directory._tag !== "Failure" ? null : (
+          <small className="connect-status-message" data-tone="caution">
+            Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
+            {new Date(staleSince).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; retrying every 5
+            seconds.
           </small>
         )}
         {(current?.failures.length ?? 0) === 0 ? null : (
@@ -1067,6 +1090,7 @@ export const ConnectSurface = ({
         onSelectText={() => terminalInteractionRef.current?.selectText()}
         onJumpToLatest={() => terminalInteractionRef.current?.jumpToLatest()}
         linesBack={terminalLinesBack}
+        positionUnconfirmed={terminalPositionUnconfirmed}
       />
       <div className="terminal-viewport-stage">
         <div

@@ -1,0 +1,9 @@
+{
+  "$schema": "http://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

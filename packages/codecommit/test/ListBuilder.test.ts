@@ -52,7 +52,9 @@ const pr4 = decodePR({
   title: "chore(deps): bump",
   account: acc2,
   isApproved: true,
-  isMergeable: false
+  isMergeable: false,
+  // A rule, so the approval is a real sign-off (no rules reads "No approval required").
+  approvalRules: [{ ruleName: "reviewers", requiredApprovals: 1, poolMembers: [], satisfied: true }]
 })
 
 const accs = (enabled1 = true, enabled2 = true): Domain.AppState["accounts"] => [
@@ -214,6 +216,37 @@ describe("buildListItems", () => {
       const prs = items.filter((i) => i.type === "pr")
       expect(prs).toHaveLength(1)
       expect(prs[0]!.type === "pr" && prs[0]!.pr.isApproved).toBe(true)
+    })
+
+    // An unknown approval is neither approved nor pending, whatever its last known value.
+    it.each(["approved", "pending"])("leaves a PR with unknown approval out of status %s", (value) => {
+      const unknown = decodePR({
+        ...base,
+        id: "5",
+        title: "feat: unknown",
+        account: acc1,
+        isApproved: true,
+        approvalUnknown: { _tag: "NotPermitted" }
+      })
+      const qf: QuickFilter = { type: "status", value, currentUser: "" }
+      const ids = buildListItems(state([unknown], accs()), "prs", "", [], qf)
+        .flatMap((i) => i.type === "pr" ? [i.pr.id] : [])
+      expect(ids).toEqual([])
+    })
+
+    it("filters by status unknown, listing only PRs whose approval is unknown", () => {
+      const unknown = decodePR({
+        ...base,
+        id: "5",
+        title: "feat: unknown",
+        account: acc1,
+        isApproved: true,
+        approvalUnknown: { _tag: "NotPermitted" }
+      })
+      const qf: QuickFilter = { type: "status", value: "unknown", currentUser: "" }
+      const ids = buildListItems(state([unknown, pr1], accs()), "prs", "", [], qf)
+        .flatMap((i) => i.type === "pr" ? [i.pr.id] : [])
+      expect(ids).toEqual(["5"])
     })
 
     // Status "conflicts" shows only non-mergeable PRs.

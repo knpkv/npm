@@ -7,6 +7,7 @@ import {
   type CallerIdentity,
   formatSpan,
   globMatches,
+  needsYourReview,
   poolEntryMatches,
   ruleProgress,
   workbenchQueue,
@@ -119,6 +120,45 @@ describe("workbenchQueue", () => {
     )
     expect(queue.rows.map((row) => row.pullRequest.id)).toEqual(["old", "fresh", "yours"])
     expect(queue.summary._tag === "Waiting" ? formatSpan(queue.summary.oldest.openMs) : "").toBe("3d")
+  })
+
+  it("puts another's PR with unknown approval in the pool, never needing review, even with a last known open rule", () => {
+    const pullRequest = make({
+      approvalRules: [rule("Approvals", 1, ["andrey"], false)],
+      approvalUnknown: { _tag: "NotPermitted" },
+      id: "p"
+    })
+    const queue = workbenchQueue([pullRequest], byName("andrey"), NOW)
+    expect(queue.rows.map((row) => row.group)).toEqual(["pool"])
+    expect(needsYourReview(pullRequest, byName("andrey"))).toBe(false)
+  })
+
+  it("keeps another's PR with unknown approval in view even when its last known rules are satisfied", () => {
+    const pullRequest = make({
+      approvalRules: [rule("Approvals", 1, ["andrey"], true)],
+      approvalUnknown: { _tag: "NotPermitted" },
+      id: "s"
+    })
+    const [row] = workbenchQueue([pullRequest], byName("andrey"), NOW).rows
+    expect(row?.group).toBe("pool")
+    // The last known "1/1 Approvals" must not show: the row says approval is unknown instead.
+    expect(row?.rule).toBeUndefined()
+    expect(row?.stuck).toBe("unverified")
+  })
+
+  it("calls an own PR with unknown approval unverified, never ready, even with last known satisfied rules", () => {
+    const row = workbenchQueue(
+      [make({
+        author: "andrey",
+        approvalRules: [rule("Approvals", 1, ["ana"], true)],
+        approvalUnknown: { _tag: "Throttled" },
+        id: "u",
+        isApproved: true
+      })],
+      byName("andrey"),
+      NOW
+    ).rows[0]
+    expect(row?.stuck).toBe("unverified")
   })
 
   it("names the worst reason an own PR is stuck: conflicts before quiet before approvals", () => {

@@ -9,8 +9,7 @@
  * @module
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
-import { ServiceMark } from "@knpkv/rly/patterns"
+import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import { LogInIcon } from "lucide-react"
 import { useCallback, useMemo } from "react"
@@ -74,8 +73,10 @@ export function PRList() {
     for (const pr of prs) {
       if (pr.status !== "OPEN") continue
       open += 1
-      if (pr.isApproved) approved += 1
-      else pending += 1
+      // An unknown approval counts as neither.
+      const approval = Domain.approvalOf(pr)._tag
+      if (approval === "Approved") approved += 1
+      else if (approval === "Pending") pending += 1
       if (needsYourReview(pr, caller)) review += 1
     }
     return { approved, open, pending, review }
@@ -284,12 +285,6 @@ export function PRList() {
   return (
     <div className={styles.page}>
       <header className={styles.hero}>
-        <div className={styles.eyebrow}>
-          <ServiceMark service="codecommit" size="compact" />
-          <Text tone="secondary" variant="meta">
-            Review queue
-          </Text>
-        </div>
         <Text as="h1" className={styles.title} variant="page-title">
           What needs a decision.
         </Text>
@@ -322,7 +317,7 @@ export function PRList() {
           </Text>
           <Text aria-live="polite" tone="tertiary" variant="meta">
             {sorted.length} {sorted.length === 1 ? "result" : "results"}
-            {accountCount > 0 ? ` · ${accountCount} ${accountCount === 1 ? "AWS account" : "AWS accounts"}` : ""}
+            {accountCount > 0 ? `, ${accountCount} ${accountCount === 1 ? "AWS account" : "AWS accounts"}` : ""}
           </Text>
         </div>
 

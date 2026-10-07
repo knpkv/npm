@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
 import { ContentHash, PageId } from "../src/Brand.js"
 import { parseMarkdown, serializeMarkdown, serializeNewPageMarkdown } from "../src/internal/frontmatter.js"
+import { PageFrontMatterSchema } from "../src/Schemas.js"
 
 describe("frontmatter serialization", () => {
   it.effect("serializes existing page frontmatter without gray-matter safeDump", () =>
@@ -46,7 +48,9 @@ describe("frontmatter serialization", () => {
       expect(serialized).toContain("roundTrip: unsafe")
 
       const parsed = yield* parseMarkdown("page.md", serialized)
-      expect(parsed.frontMatter?.roundTrip).toBe("unsafe")
+      expect(Schema.is(PageFrontMatterSchema)(parsed.frontMatter) ? parsed.frontMatter.roundTrip : "not a page").toBe(
+        "unsafe"
+      )
     }))
 
   it.effect("omits the flag for an ordinary page", () =>
@@ -65,7 +69,8 @@ describe("frontmatter serialization", () => {
       expect(serialized).not.toContain("roundTrip")
 
       const parsed = yield* parseMarkdown("page.md", serialized)
-      expect(parsed.frontMatter?.roundTrip).toBeUndefined()
+      expect(Schema.is(PageFrontMatterSchema)(parsed.frontMatter) ? parsed.frontMatter.roundTrip : "not a page")
+        .toBeUndefined()
     }))
 
   it("serializes new page frontmatter", () => {

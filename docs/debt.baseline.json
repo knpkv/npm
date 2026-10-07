@@ -641,27 +641,6 @@
     {
       "package": "codecommit-core",
       "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/PRService.callerIdentities.test.ts",
-      "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
       "file": "packages/codecommit-core/test/PRService.refresh.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
       "reasoned": true
@@ -784,13 +763,6 @@
       "file": "packages/codecommit-core/test/SandboxService.security.test.ts",
       "text": "@effect-diagnostics strictEffectProvide:skip-file",
       "reasoned": false
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "effect-diagnostics",
-      "file": "packages/codecommit-core/test/SandboxService.security.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": true
     },
     {
       "package": "codecommit-core",
@@ -2176,6 +2148,13 @@
       "kind": "eslint",
       "file": "packages/herdr-work/test/work.test.ts",
       "text": "eslint-disable-next-line local-rules/require-immediate-work-store-cleanup",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-work",
+      "kind": "typescript",
+      "file": "packages/herdr-work/test/terminal-reconcile.test.ts",
+      "text": "@ts-expect-error -- deliberately not a digest: reconcile must reject malformed options at runtime",
       "reasoned": true
     },
     {
