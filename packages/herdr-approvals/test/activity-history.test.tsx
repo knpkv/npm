@@ -218,7 +218,7 @@ describe("activity history", () => {
   })
 
   it("leaves J and K to any field inside the list and to modified keys", () => {
-    const plain = { altKey: false, ctrlKey: false, metaKey: false }
+    const plain = { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false }
     expect(activityKeyBelongsElsewhere({ ...plain, target: { nodeName: "BUTTON" } })).toBe(false)
     for (const nodeName of ["INPUT", "TEXTAREA", "SELECT"]) {
       expect(activityKeyBelongsElsewhere({ ...plain, target: { nodeName } })).toBe(true)
@@ -227,6 +227,7 @@ describe("activity history", () => {
     expect(activityKeyBelongsElsewhere({ ...plain, ctrlKey: true, target: { nodeName: "BUTTON" } })).toBe(true)
     expect(activityKeyBelongsElsewhere({ ...plain, metaKey: true, target: { nodeName: "BUTTON" } })).toBe(true)
     expect(activityKeyBelongsElsewhere({ ...plain, altKey: true, target: { nodeName: "BUTTON" } })).toBe(true)
+    expect(activityKeyBelongsElsewhere({ ...plain, shiftKey: true, target: { nodeName: "BUTTON" } })).toBe(true)
   })
 
   it("renders filters, search, expandable rows, and bounded loading", () => {

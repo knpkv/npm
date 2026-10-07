@@ -264,6 +264,7 @@ export interface ActivityKeySource {
   readonly ctrlKey: boolean
   readonly metaKey: boolean
   readonly altKey: boolean
+  readonly shiftKey: boolean
 }
 
 /**
@@ -271,7 +272,8 @@ export interface ActivityKeySource {
  * a select, any editable text) or pressed with a modifier belongs to that field or the browser.
  */
 export const activityKeyBelongsElsewhere = (event: ActivityKeySource): boolean => {
-  if (event.ctrlKey || event.metaKey || event.altKey) return true
+  // Shift too: Shift+arrows extend a text selection, and Shift+J/K is not list navigation.
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return true
   const target = event.target
   if (Predicate.hasProperty(target, "isContentEditable") && target.isContentEditable === true) return true
   return (
