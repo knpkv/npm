@@ -518,6 +518,48 @@ describe("StackedBars", () => {
     }
   })
 
+  it("starts a fresh touch span when the owner replaces the selection after the first tap", async () => {
+    vi.stubGlobal("ResizeObserver", TestResizeObserver)
+    const onSelectionChange = vi.fn()
+    const container = document.createElement("div")
+    document.body.append(container)
+    const root = createRoot(container)
+    roots.push(root)
+    const view = (selection: RlyChartSelection | null) => (
+      <StackedBars {...props} onSelectionChange={onSelectionChange} selection={selection} />
+    )
+    await act(async () => root.render(view(null)))
+    const bar = (index: number): Element | undefined => container.querySelectorAll("svg:not([class*='band']) g")[index]
+    const tap = (index: number): void =>
+      act(() => {
+        bar(index)?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "touch" }))
+        bar(index)?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+      })
+    tap(1)
+    // The owner swaps in a disjoint range; the first tap no longer anchors anything.
+    await act(async () => root.render(view({ from: 4, to: 5 })))
+    tap(2)
+    expect(onSelectionChange).toHaveBeenLastCalledWith({ from: 2, to: 2 })
+  })
+
+  it("draws band levels as finite percentages and rejects a non-finite near mark", () => {
+    const band = (near: number, level: number) => ({
+      id: "5h",
+      label: "5-hour window",
+      near: { label: "Near the limit", level: near },
+      segments: [{ from: 0, level, to: 6 * hour }]
+    })
+    const line = (near: number) => render({ bands: [band(near, 40)] }).querySelector("[data-band] line")
+    expect(line(80)?.getAttribute("y1")).toBe("20")
+    expect(line(150)?.getAttribute("y1")).toBe("0")
+    expect(line(-10)?.getAttribute("y1")).toBe("100")
+    expect(() => render({ bands: [band(Number.NaN, 40)] })).toThrow("finite")
+    // A non-finite reading is no reading, so the key must name it.
+    expect(() => render({ bands: [band(80, Number.NaN)] })).toThrow("noReadingLabel")
+    const unread = render({ bands: [band(80, Number.POSITIVE_INFINITY)], noReadingLabel: "No reading" })
+    expect(unread.querySelector("[data-band] [class*='unknown']")).not.toBeNull()
+  })
+
   it("announces a settled selection even while its owner keeps re-rendering", async () => {
     vi.stubGlobal("ResizeObserver", TestResizeObserver)
     vi.useFakeTimers()

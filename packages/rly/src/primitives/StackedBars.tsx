@@ -120,6 +120,15 @@ interface AxisSpan {
   readonly width: number
 }
 
+/** A band level as a drawable percentage: clamped to 0–100, and a non-finite reading is no reading. */
+const percent = (level: number): number | null => (Number.isFinite(level) ? Math.min(100, Math.max(0, level)) : null)
+
+/** A near mark must be a finite percentage; it is clamped onto the band so its line stays drawable. */
+const nearLevel = (level: number): number => {
+  if (!Number.isFinite(level)) throw new Error("StackedBars near level must be a finite percentage")
+  return Math.min(100, Math.max(0, level))
+}
+
 /** Where an instant falls on the time axis, from 0 to 1, clamped to the drawn range. */
 const axisFraction = (at: number, from: number, to: number): number =>
   Math.max(0, Math.min(1, (at - from) / Math.max(1, to - from)))
@@ -136,7 +145,7 @@ const Band = ({
   readonly window: RlyChartWindow | undefined
 }) => {
   const x = (at: number): number => axisFraction(at, from, to) * 1000
-  const near = band.near?.level
+  const near = band.near === undefined ? undefined : nearLevel(band.near.level)
   return (
     <div className={style("band")} data-band={band.id}>
       <span className={style("bandLabel")}>{requireText(band.label, "StackedBars band label")}</span>
@@ -154,10 +163,11 @@ const Band = ({
           const left = x(segment.from)
           const width = x(segment.to) - left
           if (width <= 0) return null
-          if (segment.level === null) {
+          const reading = segment.level === null ? null : percent(segment.level)
+          if (reading === null) {
             return <rect className={style("unknown")} height={100} key={segment.from} width={width} x={left} />
           }
-          const level = Math.min(100, Math.max(0, segment.level))
+          const level = reading
           return (
             <rect
               className={style("level")}
@@ -229,7 +239,9 @@ export const StackedBars = ({
       bands.flatMap((band) => (band.near === undefined ? [] : [requireText(band.near.label, "StackedBars near label")]))
     )
   ]
-  const hasNoReading = bands.some((band) => band.segments.some((segment) => segment.level === null))
+  const hasNoReading = bands.some((band) =>
+    band.segments.some((segment) => segment.level === null || percent(segment.level) === null)
+  )
   const noReading = hasNoReading
     ? requireText(noReadingLabel ?? "", "StackedBars noReadingLabel (a band has a stretch with no reading)")
     : undefined
@@ -343,6 +355,9 @@ export const StackedBars = ({
                     (touch &&
                       selection !== null &&
                       pendingTap !== null &&
+                      // The first tap must still anchor the live selection; a replaced one starts over.
+                      pendingTap >= selection.from &&
+                      pendingTap <= selection.to &&
                       (pendingTap < bin.first || pendingTap > bin.last))
                   onSelectionChange(selectBin(selection, bins, index, extend))
                   setCursor(bin.first)

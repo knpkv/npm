@@ -185,4 +185,33 @@
       border-style: dotted;
     }
   }
+
+  /* The Storybook forced-colours toolbar draws the same overrides as the real mode. */
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .segment {
+    stroke: Canvas;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .window,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .windowEdge,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .selection {
+    fill: none;
+    stroke: CanvasText;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .windowSwatch {
+    background: none;
+    border-color: CanvasText;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .unknown {
+    fill: none;
+    stroke: CanvasText;
+    stroke-dasharray: 1 3;
+    vector-effect: non-scaling-stroke;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .nearSwatch,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .unknownSwatch {
+    border-color: CanvasText;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .unknownSwatch {
+    background: none;
+    border-style: dotted;
+  }
 }
