@@ -53,7 +53,8 @@ const dashboardFor = (record: JobRecord): DashboardSnapshot => ({
     canonical: true,
     canonicalUrl: "https://ser8.example.test/",
     chatEnabled: true,
-    pushEnabled: true
+    pushEnabled: true,
+    workEnabled: false
   },
   approvalsEnabled: true,
   chat: null,

@@ -32,7 +32,13 @@ const record = (id: string, overrides: Partial<JobRecord> = {}): JobRecord => ({
 })
 
 const snapshot = (overrides: Partial<DashboardSnapshot> = {}): DashboardSnapshot => ({
-  approvalApp: { canonical: true, canonicalUrl: "https://hub.example.test/", chatEnabled: false, pushEnabled: false },
+  approvalApp: {
+    canonical: true,
+    canonicalUrl: "https://hub.example.test/",
+    chatEnabled: false,
+    pushEnabled: false,
+    workEnabled: false
+  },
   approvalsEnabled: true,
   chat: null,
   directory: null,

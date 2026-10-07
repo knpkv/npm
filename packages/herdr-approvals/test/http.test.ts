@@ -1506,7 +1506,7 @@ esac
     expect(title).not.toContain("<script")
     expect(title).not.toContain(host)
     expect(title).toBe(
-      "Host activity · SER8&lt;/title&gt;&lt;script data-xss=&quot;true&quot;&gt;alert(1)&lt;/script&gt;"
+      "Host activity on SER8&lt;/title&gt;&lt;script data-xss=&quot;true&quot;&gt;alert(1)&lt;/script&gt;"
     )
   })
 
@@ -1517,7 +1517,8 @@ esac
           canonical: true,
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
-          pushEnabled: true
+          pushEnabled: true,
+          workEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -1595,7 +1596,8 @@ esac
           canonical: true,
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
-          pushEnabled: true
+          pushEnabled: true,
+          workEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -1648,7 +1650,8 @@ esac
           canonical: true,
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
-          pushEnabled: true
+          pushEnabled: true,
+          workEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
