@@ -122,4 +122,21 @@ describe("PullRequestRepo approval unknown", () => {
       expect([evaluated.isApproved, evaluated.approvalUnknownReason]).toEqual([false, null])
       expect(evaluated.approvalRules.map((r) => r.satisfied)).toEqual([false])
     })))
+
+  // The write contract takes complete rules: a partial one would decode to no rules on the next read,
+  // silently dropping the approval requirements.
+  it.effect("persists an evaluation's complete rules and reads them back", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
+      yield* repo.upsert(upsertInput("47", { isApproved: 0, satisfied: false, unknown: null }))
+      yield* repo.recordApprovalEvaluation(
+        "123456789012",
+        "47",
+        { _tag: "Evaluated", isApproved: true, approvalRules: [rule(true)] },
+        coordinates
+      )
+      expect((yield* read("47")).approvalRules.map((r) => [r.ruleName, r.requiredApprovals, r.satisfied]))
+        .toEqual([["two-reviewers", 2, true]])
+    })))
 })

@@ -169,7 +169,8 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         | {
           readonly _tag: "Evaluated"
           readonly isApproved: boolean
-          readonly approvalRules: ReadonlyArray<{ readonly ruleName: string }>
+          // Complete rules, as the upsert takes them: a partial rule would decode to none on the next read.
+          readonly approvalRules: UpsertInput["approvalRules"]
         },
       coordinates?: PullRequestCoordinates
     ) =>
