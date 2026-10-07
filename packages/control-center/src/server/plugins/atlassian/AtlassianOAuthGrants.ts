@@ -656,6 +656,9 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
         const plan = decision.plan
         const snapshots = yield* Effect.forEach([CONTROL_CENTER_AUTH_STORE_NAME], captureAuthStore).pipe(
           Effect.provide(localStorageLayer),
+          Effect.tapError((error) =>
+            Effect.logWarning("Could not snapshot the Atlassian auth store before saving", error)
+          ),
           Effect.tapError(() => restoreGrantAfterSaveFailure(grants, grantId, pending)),
           Effect.mapError(unavailable)
         )
