@@ -123,8 +123,7 @@ export const statusCommand = Command.make("status", {}, () =>
       const gitStatus = yield* git.status()
       const commitCount = yield* git.log({ n: 1 }).pipe(
         Effect.map((commits) => commits.length > 0 ? "has commits" : "no commits"),
-        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        Effect.catchIf(() => true, () => Effect.succeed("unknown"))
+        Effect.catch((error) => Effect.logDebug("git log failed", error).pipe(Effect.as("unknown")))
       )
       yield* Console.log(`Git: initialized (${commitCount})`)
       if (gitStatus.hasChanges) {
