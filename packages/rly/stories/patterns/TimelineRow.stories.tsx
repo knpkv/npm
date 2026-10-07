@@ -102,6 +102,13 @@ export const ActorKinds: Story = {
       await expect(timeline.querySelectorAll("[data-rly-timeline-event-id]")).toHaveLength(count)
       await expect(timeline.querySelectorAll("[data-rly-timeline-connector]")).toHaveLength(Math.max(0, count - 1))
     }
+    // The title leads: detail sits under it in smaller type, and the actor kind is a plain word, not an eyebrow.
+    const row = canvasElement.querySelector("[data-rly-timeline-actor='agent']")
+    const fontSize = (selector: string): number =>
+      Number.parseFloat(getComputedStyle(row?.querySelector(selector) ?? canvasElement).fontSize)
+    await expect(fontSize("h2")).toBeGreaterThan(fontSize("article p"))
+    const kind = [...(row?.querySelectorAll("span") ?? [])].find(({ textContent }) => textContent === "Agent")
+    await expect(kind === undefined ? "missing" : getComputedStyle(kind).textTransform).toBe("none")
     await userEvent.tab()
     await expect(canvasElement.ownerDocument.activeElement?.tagName).toBe("A")
     canvasElement.dataset.timelineRowActorKindsPlayComplete = "true"
