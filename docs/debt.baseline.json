@@ -3728,13 +3728,6 @@
     {
       "package": "jira-clockify",
       "kind": "effect-diagnostics",
-      "file": "packages/jira-clockify/test/configAndKeyWrites.test.ts",
-      "text": "@effect-diagnostics strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "jira-clockify",
-      "kind": "effect-diagnostics",
       "file": "packages/jira-clockify/test/fetchTicket.test.ts",
       "text": "@effect-diagnostics multipleEffectProvide:off",
       "reasoned": false
