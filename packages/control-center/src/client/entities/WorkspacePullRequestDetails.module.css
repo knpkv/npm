@@ -282,7 +282,7 @@
 }
 
 .reviewPresetList input:focus-visible + span {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 
@@ -467,8 +467,8 @@
 .revisionEditor select:focus-visible,
 .revisionEditor textarea:focus-visible {
   border-color: var(--rly-color-focus);
-  outline: 2px solid color-mix(in srgb, var(--rly-color-focus) 24%, transparent);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .revisionEditor textarea {
@@ -717,8 +717,8 @@
 
 .publicationEditor textarea:focus-visible {
   border-color: var(--rly-color-focus);
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .publicationFooter {
@@ -797,8 +797,8 @@
 
 .reviewThreadTranscript:focus-visible {
   border-color: var(--rly-color-focus);
-  outline: 2px solid color-mix(in srgb, var(--rly-color-focus) 24%, transparent);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .reviewThreadTranscript > button {
@@ -930,8 +930,8 @@
 
 .reviewThreadComposer textarea:focus-visible {
   border-color: var(--rly-color-focus);
-  outline: 2px solid color-mix(in srgb, var(--rly-color-focus) 24%, transparent);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .reviewThreadComposerFooter {
@@ -988,7 +988,7 @@
 }
 
 .filesLink:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-4);
 }
 

@@ -75,6 +75,7 @@
     "codegen:check": "tsx scripts/generate-contract.ts check",
     "lint": "eslint \"{src,test,scripts,generated,manifest,stories,visual,.storybook}/**/*.{ts,tsx}\" component-manifest.ts vite.config.ts vite.bounded.config.ts vitest.config.ts vitest.storybook.config.ts playwright.config.ts && pnpm lint:colors && pnpm lint:stripes",
     "lint:colors": "tsx scripts/tokens/lint-colors.ts",
+    "lint:focus-rings": "tsx scripts/tokens/lint-focus-rings.ts",
     "lint:stripes": "tsx scripts/tokens/lint-stripes.ts",
     "prepack": "pnpm build",
     "scaffold": "tsx scripts/scaffold-component.ts",

@@ -102,7 +102,7 @@
 
 .sandboxOpen:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 3px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-4);
 }
 
@@ -302,7 +302,7 @@
 }
 
 .credentialButton:focus-visible {
-  outline: 3px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 

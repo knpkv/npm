@@ -61,23 +61,30 @@ const cssComparable = (source: string): string => {
   return output.replace(/url\([^)]*\)/gi, (value) => value.replace(/[^\n]/g, " "))
 }
 
-const cssViolations = (path: string, source: string): ReadonlyArray<ColorPolicyViolation> => {
+/**
+ * The focus-ring rules, shared by rly's colour policy and the repo-wide focus-ring lint: an outline
+ * in the focus colour takes its width from the token, and an inset ring negates the width.
+ */
+const FOCUS_RING_PATTERNS: ReadonlyArray<readonly [RegExp, ColorPolicyRule]> = [
+  // One focus ring everywhere: an outline in the focus colour takes its width from the token.
+  [/\boutline\s*:(?![^;}]*--rly-focus-ring-width)[^;}]*var\(\s*--rly-color-focus\s*\)/gi, "raw-focus-ring"],
+  // An inset ring is the ring's width pulled inside; negating the offset token only matches while both are 2px.
+  // It also flags `calc(var(--rly-focus-ring-offset) - 1px)`; offset arithmetic belongs on the width token.
+  [
+    /\boutline-offset\s*:[^;}]*--rly-focus-ring-offset[^;}]*-\s*1|\boutline-offset\s*:[^;}]*-\s*1[^;}]*--rly-focus-ring-offset|\boutline-offset\s*:\s*calc\(\s*-\s*var\(\s*--rly-focus-ring-offset/gi,
+    "inset-focus-offset"
+  ]
+]
+
+const patternViolations = (
+  path: string,
+  source: string,
+  patterns: ReadonlyArray<readonly [RegExp, ColorPolicyRule]>
+): ReadonlyArray<ColorPolicyViolation> => {
   const comparable = cssComparable(source)
   const violations: Array<ColorPolicyViolation> = []
-  const patterns: ReadonlyArray<readonly [RegExp, ColorPolicyRule]> = [
-    [new RegExp(RAW_COLOR.source, "gi"), "raw-color"],
-    [new RegExp(PRIMITIVE_PALETTE.source, "gi"), "primitive-palette"],
-    [/(?:data-theme|prefers-color-scheme|\bcolor-scheme\s*:)/gi, "local-theme"],
-    // One focus ring everywhere: an outline in the focus colour takes its width from the token.
-    [/\boutline\s*:(?![^;}]*--rly-focus-ring-width)[^;}]*var\(\s*--rly-color-focus\s*\)/gi, "raw-focus-ring"],
-    // An inset ring is the ring's width pulled inside; negating the offset token only matches while both are 2px.
-    [
-      /\boutline-offset\s*:[^;}]*--rly-focus-ring-offset[^;}]*-\s*1|\boutline-offset\s*:[^;}]*-\s*1[^;}]*--rly-focus-ring-offset|\boutline-offset\s*:\s*calc\(\s*-\s*var\(\s*--rly-focus-ring-offset/gi,
-      "inset-focus-offset"
-    ]
-  ]
   for (const [pattern, rule] of patterns) {
-    for (const match of comparable.matchAll(pattern)) {
+    for (const match of comparable.matchAll(new RegExp(pattern.source, pattern.flags))) {
       const offset = match.index
       if (offset === undefined) continue
       violations.push({ ...position(source, offset), path, rule })
@@ -85,6 +92,18 @@ const cssViolations = (path: string, source: string): ReadonlyArray<ColorPolicyV
   }
   return violations
 }
+
+const cssViolations = (path: string, source: string): ReadonlyArray<ColorPolicyViolation> =>
+  patternViolations(path, source, [
+    [new RegExp(RAW_COLOR.source, "gi"), "raw-color"],
+    [new RegExp(PRIMITIVE_PALETTE.source, "gi"), "primitive-palette"],
+    [/(?:data-theme|prefers-color-scheme|\bcolor-scheme\s*:)/gi, "local-theme"],
+    ...FOCUS_RING_PATTERNS
+  ])
+
+/** Focus-ring violations only, for product stylesheets that keep their own colours. */
+export const findFocusRingViolations = (path: string, source: string): ReadonlyArray<ColorPolicyViolation> =>
+  patternViolations(path, source, FOCUS_RING_PATTERNS)
 
 const propertyName = (node: ts.PropertyName | ts.BindingName): string | undefined => {
   if (ts.isIdentifier(node) || ts.isStringLiteral(node) || ts.isNumericLiteral(node)) return node.text

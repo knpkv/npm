@@ -53,7 +53,7 @@
 .itemLink:focus-visible,
 .membershipChoices a:focus-visible,
 .shareLink:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 
@@ -221,7 +221,7 @@
 
 .shareForm select:focus-visible,
 .shareResult a:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 

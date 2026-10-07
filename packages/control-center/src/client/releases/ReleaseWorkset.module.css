@@ -148,13 +148,13 @@
 
 .traceDetails:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 
 .traceConnection a:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 
@@ -176,7 +176,7 @@
 
 .runbook:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 

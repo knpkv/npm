@@ -88,7 +88,7 @@
 .findingBody:focus-visible,
 .findingActions button:focus-visible,
 .conversation textarea:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 
@@ -205,7 +205,7 @@
 }
 
 .lineComment[data-active="true"] {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: calc(-1 * var(--rly-space-2));
 }
 
@@ -240,7 +240,7 @@
 }
 
 .lineComment button:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 
@@ -402,7 +402,7 @@
 }
 
 .findingDetails summary:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 
@@ -595,7 +595,7 @@
 }
 
 .conversation > header > button:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 

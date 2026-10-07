@@ -26,7 +26,7 @@
 }
 
 .releaseAction:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-4);
 }
 

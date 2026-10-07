@@ -58,7 +58,7 @@
 }
 
 .tab:focus-visible {
-  outline: 3px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: var(--rly-space-2);
 }
 

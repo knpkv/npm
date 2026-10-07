@@ -471,7 +471,7 @@
   }
 
   .remote-approval-link:focus-visible {
-    outline: var(--rly-space-2) solid var(--rly-color-focus);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
     outline-offset: var(--rly-space-2);
   }
 
@@ -857,8 +857,8 @@
   }
 
   .chat-history:focus-visible {
-    outline: 2px solid var(--rly-color-focus);
-    outline-offset: 2px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .chat-turn-heading {
