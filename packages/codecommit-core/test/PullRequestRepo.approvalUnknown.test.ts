@@ -53,9 +53,15 @@ const reread = (
 ) => ({
   isApproved: read.isApproved ?? false,
   approvalRules: [rule(read.isApproved ?? false)],
-  ...(read.unknown !== undefined && { approvalUnknown: { _tag: read.unknown } }),
-  lastActivityDate: new Date(read.lastActivityDate ?? "2026-10-05T00:00:00.000Z")
+  ...(read.unknown !== undefined && { approvalUnknown: { _tag: read.unknown } })
 })
+
+/** The version a re-read carries: its last activity (the cached revision by default) and a fresh observation. */
+const versionOf = (read: { readonly lastActivityDate?: string }) =>
+  Effect.map(Effect.flatMap(PullRequestRepo, (repo) => repo.observe()), (observation) => ({
+    lastActivity: new Date(read.lastActivityDate ?? "2026-10-05T00:00:00.000Z"),
+    observation
+  }))
 
 const withCache = <A, E>(
   body: Effect.Effect<A, E, PullRequestRepo | StatsRepo>
@@ -89,8 +95,11 @@ describe("PullRequestRepo approval unknown", () => {
   it.effect("keeps the last known approval and rules while unknown, and a later evaluation replaces and clears them", () =>
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
-      yield* repo.upsert(upsertInput("42", { isApproved: 1, satisfied: true, unknown: null }))
-      yield* repo.upsert(upsertInput("42", { isApproved: 0, satisfied: false, unknown: "NotPermitted" }))
+      yield* repo.upsert(upsertInput("42", { isApproved: 1, satisfied: true, unknown: null }), yield* repo.observe())
+      yield* repo.upsert(
+        upsertInput("42", { isApproved: 0, satisfied: false, unknown: "NotPermitted" }),
+        yield* repo.observe()
+      )
 
       const unknown = yield* read("42")
       expect(unknown.isApproved).toBe(true)
@@ -98,7 +107,7 @@ describe("PullRequestRepo approval unknown", () => {
       expect(unknown.approvalRules.map((r) => r.satisfied)).toEqual([true])
       expect(approvalOf(decodeCachedPR(unknown))).toEqual({ _tag: "Unknown", reason: { _tag: "NotPermitted" } })
 
-      yield* repo.upsert(upsertInput("42", { isApproved: 0, satisfied: false, unknown: null }))
+      yield* repo.upsert(upsertInput("42", { isApproved: 0, satisfied: false, unknown: null }), yield* repo.observe())
       const evaluated = yield* read("42")
       expect(evaluated.approvalUnknownReason).toBeNull()
       expect(evaluated.approvalRules.map((r) => r.satisfied)).toEqual([false])
@@ -108,7 +117,10 @@ describe("PullRequestRepo approval unknown", () => {
   it.effect("stores a never-cached pull request whose evaluation failed, reading as Unknown", () =>
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
-      yield* repo.upsert(upsertInput("43", { isApproved: 0, satisfied: false, unknown: "NotPermitted" }))
+      yield* repo.upsert(
+        upsertInput("43", { isApproved: 0, satisfied: false, unknown: "NotPermitted" }),
+        yield* repo.observe()
+      )
       expect(approvalOf(decodeCachedPR(yield* read("43"))))
         .toEqual({ _tag: "Unknown", reason: { _tag: "NotPermitted" } })
     })))
@@ -117,9 +129,12 @@ describe("PullRequestRepo approval unknown", () => {
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
       const stats = yield* StatsRepo
-      yield* repo.upsert(upsertInput("44", { isApproved: 1, satisfied: true, unknown: null }))
-      yield* repo.upsert(upsertInput("45", { isApproved: 1, satisfied: true, unknown: null }))
-      yield* repo.upsert(upsertInput("45", { isApproved: 0, satisfied: false, unknown: "NotPermitted" }))
+      yield* repo.upsert(upsertInput("44", { isApproved: 1, satisfied: true, unknown: null }), yield* repo.observe())
+      yield* repo.upsert(upsertInput("45", { isApproved: 1, satisfied: true, unknown: null }), yield* repo.observe())
+      yield* repo.upsert(
+        upsertInput("45", { isApproved: 0, satisfied: false, unknown: "NotPermitted" }),
+        yield* repo.observe()
+      )
       const health = yield* stats.healthIndicators("2026-10-01T00:00:00.000Z", "2026-10-08T00:00:00.000Z", {})
       expect(health.total).toBe(2)
       expect(health.approved).toBe(1)
@@ -129,12 +144,24 @@ describe("PullRequestRepo approval unknown", () => {
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
       const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
-      yield* repo.upsert(upsertInput("46", { isApproved: 1, satisfied: true, unknown: null }))
-      yield* repo.recordApprovalEvaluation("123456789012", "46", reread({ unknown: "Throttled" }), coordinates)
+      yield* repo.upsert(upsertInput("46", { isApproved: 1, satisfied: true, unknown: null }), yield* repo.observe())
+      yield* repo.recordApprovalEvaluation(
+        "123456789012",
+        "46",
+        reread({ unknown: "Throttled" }),
+        yield* versionOf({ unknown: "Throttled" }),
+        coordinates
+      )
       const unknown = yield* read("46")
       expect([unknown.isApproved, unknown.approvalUnknownReason]).toEqual([true, "Throttled"])
 
-      yield* repo.recordApprovalEvaluation("123456789012", "46", reread({ isApproved: false }), coordinates)
+      yield* repo.recordApprovalEvaluation(
+        "123456789012",
+        "46",
+        reread({ isApproved: false }),
+        yield* versionOf({ isApproved: false }),
+        coordinates
+      )
       const evaluated = yield* read("46")
       expect([evaluated.isApproved, evaluated.approvalUnknownReason]).toEqual([false, null])
       expect(evaluated.approvalRules.map((r) => r.satisfied)).toEqual([false])
@@ -146,8 +173,14 @@ describe("PullRequestRepo approval unknown", () => {
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
       const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
-      yield* repo.upsert(upsertInput("47", { isApproved: 0, satisfied: false, unknown: null }))
-      yield* repo.recordApprovalEvaluation("123456789012", "47", reread({ isApproved: true }), coordinates)
+      yield* repo.upsert(upsertInput("47", { isApproved: 0, satisfied: false, unknown: null }), yield* repo.observe())
+      yield* repo.recordApprovalEvaluation(
+        "123456789012",
+        "47",
+        reread({ isApproved: true }),
+        yield* versionOf({ isApproved: true }),
+        coordinates
+      )
       expect((yield* read("47")).approvalRules.map((r) => [r.ruleName, r.requiredApprovals, r.satisfied]))
         .toEqual([["two-reviewers", 2, true]])
     })))
@@ -162,10 +195,23 @@ describe("PullRequestRepo approval unknown", () => {
         Schema.decodeSync(UpsertInput)({
           ...Schema.encodeSync(UpsertInput)(upsertInput("48", { isApproved: 0, satisfied: false, unknown: null })),
           lastModifiedDate: "2026-10-06T00:00:00.000Z"
-        })
+        }),
+        yield* repo.observe()
       )
-      yield* repo.recordApprovalEvaluation("123456789012", "48", reread({ isApproved: true }), coordinates)
-      yield* repo.recordApprovalEvaluation("123456789012", "48", reread({ unknown: "Throttled" }), coordinates)
+      yield* repo.recordApprovalEvaluation(
+        "123456789012",
+        "48",
+        reread({ isApproved: true }),
+        yield* versionOf({ isApproved: true }),
+        coordinates
+      )
+      yield* repo.recordApprovalEvaluation(
+        "123456789012",
+        "48",
+        reread({ unknown: "Throttled" }),
+        yield* versionOf({ unknown: "Throttled" }),
+        coordinates
+      )
       const kept = yield* read("48")
       expect([kept.isApproved, kept.approvalUnknownReason]).toEqual([false, null])
 
@@ -174,6 +220,7 @@ describe("PullRequestRepo approval unknown", () => {
         "123456789012",
         "48",
         reread({ isApproved: true, lastActivityDate: "2026-10-06T00:00:00.000Z" }),
+        yield* versionOf({ isApproved: true, lastActivityDate: "2026-10-06T00:00:00.000Z" }),
         coordinates
       )
       expect((yield* read("48")).isApproved).toBe(true)
@@ -184,17 +231,19 @@ describe("PullRequestRepo approval unknown", () => {
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
       const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
-      yield* repo.upsert(upsertInput("53", { isApproved: 0, satisfied: false, unknown: null }))
+      yield* repo.upsert(upsertInput("53", { isApproved: 0, satisfied: false, unknown: null }), yield* repo.observe())
       yield* repo.recordApprovalEvaluation(
         "123456789012",
         "53",
         reread({ isApproved: false, lastActivityDate: "2026-10-07T00:00:00.000Z" }),
+        yield* versionOf({ isApproved: false, lastActivityDate: "2026-10-07T00:00:00.000Z" }),
         coordinates
       )
       yield* repo.recordApprovalEvaluation(
         "123456789012",
         "53",
         reread({ isApproved: true, lastActivityDate: "2026-10-06T00:00:00.000Z" }),
+        yield* versionOf({ isApproved: true, lastActivityDate: "2026-10-06T00:00:00.000Z" }),
         coordinates
       )
       const row = yield* read("53")
@@ -210,13 +259,15 @@ describe("PullRequestRepo approval unknown", () => {
         Schema.decodeSync(UpsertInput)({
           ...Schema.encodeSync(UpsertInput)(upsertInput("54", { isApproved: 0, satisfied: false, unknown: null })),
           lastModifiedDate: "2026-10-06T00:00:00.000Z"
-        })
+        }),
+        yield* repo.observe()
       )
       yield* repo.updateStatusAndClosedAt(
         "123456789012",
         "54",
         "CLOSED",
         "2026-10-05T12:00:00.000Z",
+        yield* repo.observe(),
         undefined,
         [],
         coordinates
@@ -229,6 +280,7 @@ describe("PullRequestRepo approval unknown", () => {
         "54",
         "CLOSED",
         "2026-10-07T00:00:00.000Z",
+        yield* repo.observe(),
         undefined,
         [],
         coordinates
@@ -241,7 +293,7 @@ describe("PullRequestRepo approval unknown", () => {
   it.effect("rejects a cached row without its approval-unknown column, and accepts NULL", () =>
     withCache(Effect.gen(function*() {
       const repo = yield* PullRequestRepo
-      yield* repo.upsert(upsertInput("55", { isApproved: 1, satisfied: true, unknown: null }))
+      yield* repo.upsert(upsertInput("55", { isApproved: 1, satisfied: true, unknown: null }), yield* repo.observe())
       const { approvalUnknownReason, ...withoutColumn } = Schema.encodeSync(CachedPullRequest)(yield* read("55"))
       expect(approvalUnknownReason).toBeNull()
       expect(Schema.decodeUnknownExit(CachedPullRequest)(withoutColumn)._tag).toBe("Failure")

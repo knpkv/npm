@@ -9,7 +9,7 @@ import migration0018 from "../src/CacheService/migrations/0018_pull_request_coor
 import migration0019 from "../src/CacheService/migrations/0019_dependent_pr_coordinates.js"
 import migration0020 from "../src/CacheService/migrations/0020_notification_coordinates.js"
 import migration0022 from "../src/CacheService/migrations/0022_pull_request_approval_unknown.js"
-import migration0023 from "../src/CacheService/migrations/0023_pull_request_tombstones.js"
+import migration0023 from "../src/CacheService/migrations/0023_pull_request_row_versions.js"
 import { UpsertInput } from "../src/CacheService/repos/PullRequestRepo/internal.js"
 import { mutations } from "../src/CacheService/repos/PullRequestRepo/mutations.js"
 
@@ -101,9 +101,9 @@ describe("pull request coordinate migration", () => {
       yield* migration0023.pipe(Effect.provideService(SqlClient.SqlClient, sql))
       yield* insertPullRequest(sql, "orders", "us-east-1")
       const repo = mutations(sql, Effect.void)
-      yield* repo.upsert(upsertInput("orders", "us-east-1", "Orders updated"))
-      yield* repo.upsert(upsertInput("payments", "eu-west-1", "Payments updated"))
-      yield* repo.upsert(upsertInput("orders", "us-east-1", "Another orders PR", "43"))
+      yield* repo.upsert(upsertInput("orders", "us-east-1", "Orders updated"), 1)
+      yield* repo.upsert(upsertInput("payments", "eu-west-1", "Payments updated"), 2)
+      yield* repo.upsert(upsertInput("orders", "us-east-1", "Another orders PR", "43"), 3)
       yield* sql`UPDATE pull_requests SET repo_account_id = 'repository-account'
         WHERE aws_account_id = '123456789012' AND id = '42'
           AND repository_name = 'orders' AND account_region = 'us-east-1'`
@@ -127,7 +127,10 @@ describe("pull request coordinate migration", () => {
         { repositoryName: "payments", accountRegion: "eu-west-1", title: "Payments updated" }
       ])
 
-      const ambiguous = yield* repo.updateHealthScore("123456789012", "42", 0.5, new Date("2026-08-02T00:00:00.000Z"))
+      const ambiguous = yield* repo.updateHealthScore("123456789012", "42", 0.5, {
+        lastActivity: new Date("2026-08-02T00:00:00.000Z"),
+        observation: 0
+      })
         .pipe(
           Effect.flip
         )
@@ -167,6 +170,7 @@ describe("pull request coordinate migration", () => {
         commented_by TEXT,
         -- The row version every write compares against.
         last_modified_date TEXT NOT NULL DEFAULT '2026-08-02T00:00:00.000Z',
+        observation_seq INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (aws_account_id, id, repository_name, account_region)
       )`
       yield* sql`INSERT INTO pr_comments (pull_request_id, aws_account_id, locations_json)

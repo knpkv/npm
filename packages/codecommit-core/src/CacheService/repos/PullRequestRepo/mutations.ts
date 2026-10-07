@@ -59,10 +59,11 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       : sql`aws_account_id = ${awsAccountId} AND id = ${id}
         AND repository_name = ${coordinates.repositoryName}
         AND account_region = ${coordinates.accountRegion}`
-  const upsert_ = SqlSchema.void({
-    Request: UpsertInput,
-    execute: (req) => writes.upsert(req)
-  })
+  const encodeUpsert = Schema.encodeEffect(UpsertInput)
+  const upsert_ = (input: UpsertInput, observation: number) =>
+    encodeUpsert(input).pipe(Effect.flatMap((req) => writes.upsert(req, observation)))
+  /** Publish a change only when a compare-and-set write applied. */
+  const publishIfApplied = (applied: boolean) => applied ? publish : Effect.void
 
   const deleteStale_ = SqlSchema.void({
     Request: Schema.Struct({ olderThan: Schema.String }),
@@ -75,10 +76,18 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
   })
 
   const repo = {
-    upsert: (input: UpsertInput) => upsert_(input).pipe(Effect.tap(() => publish), cacheError("upsert")),
+    /** The next observation number: take it before the provider read whose results a write carries. */
+    observe: () => writes.observe().pipe(cacheError("observe")),
 
-    upsertMany: (prs: ReadonlyArray<UpsertInput>) =>
-      sql.withTransaction(Effect.forEach(prs, (pr) => upsert_(pr), { discard: true })).pipe(
+    /**
+     * Write a listed pull request observed by `observation`, unless its row is newer. True when the
+     * row was written; a false result means a newer read already reached it.
+     */
+    upsert: (input: UpsertInput, observation: number) =>
+      upsert_(input, observation).pipe(Effect.tap(publishIfApplied), cacheError("upsert")),
+
+    upsertMany: (prs: ReadonlyArray<UpsertInput>, observation: number) =>
+      sql.withTransaction(Effect.forEach(prs, (pr) => upsert_(pr, observation), { discard: true })).pipe(
         Effect.tap(() => publish),
         cacheError("upsertMany")
       ),
@@ -93,8 +102,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
     deleteOne: (awsAccountId: string, id: string, version: RowVersion, coordinates?: PullRequestCoordinates) =>
       ensureUnambiguous(awsAccountId, id, coordinates).pipe(
         Effect.andThen(writes.deleteIfNotNewer(pullRequestWhere(awsAccountId, id, coordinates), version)),
-        Effect.asVoid,
-        Effect.tap(() => publish),
+        Effect.tap(publishIfApplied),
         cacheError("deleteOne")
       ),
 
@@ -115,8 +123,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
             sql`files_added = ${filesAdded}, files_modified = ${filesModified}, files_deleted = ${filesDeleted}`
           )
         ),
-        Effect.asVoid,
-        Effect.tap(() => publish),
+        Effect.tap(publishIfApplied),
         cacheError("updateDiffStats")
       ),
 
@@ -131,6 +138,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       awsAccountId: string,
       id: string,
       read: ApprovalRead,
+      version: RowVersion,
       coordinates?: PullRequestCoordinates
     ) => {
       const set = read.approvalUnknown !== undefined
@@ -139,10 +147,9 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
           approval_rules = ${read.approvalRules.length > 0 ? JSON.stringify(read.approvalRules) : "[]"}`
       return ensureUnambiguous(awsAccountId, id, coordinates).pipe(
         Effect.andThen(
-          writes.compareAndSet(pullRequestWhere(awsAccountId, id, coordinates), read.lastActivityDate, set)
+          writes.compareAndSet(pullRequestWhere(awsAccountId, id, coordinates), version, set)
         ),
-        Effect.asVoid,
-        Effect.tap(() => publish),
+        Effect.tap(publishIfApplied),
         cacheError("recordApprovalEvaluation")
       )
     },
@@ -157,6 +164,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       id: string,
       status: string,
       closedAt: string,
+      observation: number,
       mergedBy?: string,
       approvedBy?: ReadonlyArray<string>,
       coordinates?: PullRequestCoordinates
@@ -166,13 +174,12 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         Effect.andThen(
           writes.compareAndSet(
             pullRequestWhere(awsAccountId, id, coordinates),
-            new Date(closedAt),
+            { lastActivity: new Date(closedAt), observation },
             sql`status = ${status}, closed_at = ${closedAt}, merged_by = ${mergedBy ?? null},
               approved_by = COALESCE(${approvedByStr}, approved_by)`
           )
         ),
-        Effect.asVoid,
-        Effect.tap(() => publish),
+        Effect.tap(publishIfApplied),
         cacheError("updateStatusAndClosedAt")
       )
     },
@@ -188,8 +195,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         Effect.andThen(
           writes.compareAndSet(pullRequestWhere(awsAccountId, id, coordinates), version, sql`comment_count = ${count}`)
         ),
-        Effect.asVoid,
-        Effect.tap(() => publish),
+        Effect.tap(publishIfApplied),
         cacheError("updateCommentCount")
       ),
 
@@ -204,8 +210,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
         Effect.andThen(
           writes.compareAndSet(pullRequestWhere(awsAccountId, id, coordinates), version, sql`health_score = ${score}`)
         ),
-        Effect.asVoid,
-        Effect.tap(() => publish),
+        Effect.tap(publishIfApplied),
         cacheError("updateHealthScore")
       ),
 
@@ -221,11 +226,12 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
               author: string
               locationsJson: string
               version: string
+              observation: number
             }
           >`
             SELECT c.aws_account_id AS awsAccountId, c.pull_request_id AS pullRequestId,
               p.repository_name AS repositoryName, p.account_region AS accountRegion,
-              p.last_modified_date AS version,
+              p.last_modified_date AS version, p.observation_seq AS observation,
               p.author AS author, c.locations_json AS locationsJson
             FROM pr_comments c
             INNER JOIN pull_requests p
@@ -266,7 +272,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
                 repositoryName: row.repositoryName,
                 accountRegion: row.accountRegion
               }),
-              new Date(row.version),
+              { lastActivity: new Date(row.version), observation: row.observation },
               sql`commented_by = ${commentedBy}`
             )
           }

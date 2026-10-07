@@ -216,7 +216,10 @@ export const makeRefreshSinglePR = (
 
     if (account === undefined) return yield* new RefreshError({ failedAccounts: [awsAccountId] })
 
-    // Fetch fresh PR details
+    // Fetch fresh PR details, after taking the observation number: a read that began later wins.
+    const observation = yield* prRepo.observe().pipe(
+      Effect.mapError((cause) => new RefreshError({ failedAccounts: [awsAccountId], cause }))
+    )
     const detail = yield* awsClient.getPullRequest({
       account,
       pullRequestId: prId
@@ -276,26 +279,26 @@ export const makeRefreshSinglePR = (
       Effect.catch(() => Effect.succeed(false))
     )
 
-    if (isSubscribed && Option.isSome(cachedPR)) {
-      const prNotifications = diffPR(cachedPR.value, freshUpsert, durableAccountId)
-      // The cache keeps its last known rules while approval is unknown; compare once it recovers.
-      const poolNotifications = detail.approvalUnknown !== undefined ? [] : diffApprovalPools(
-        cachedPR.value.approvalRules ?? [],
-        freshUpsert.approvalRules,
-        currentState.currentUser,
-        prId,
-        durableAccountId,
-        detail.title,
-        account.profile,
-        identity.repositoryName,
-        identity.accountRegion
-      )
-      yield* Effect.forEach([...prNotifications, ...poolNotifications], (n) => notificationRepo.add(n), {
-        discard: true
-      }).pipe(
-        Effect.catch(() => Effect.void)
-      )
+    // Sent only once the upsert applies: a read older than the cached row changes nothing.
+    const pending = isSubscribed && Option.isSome(cachedPR)
+      ? [
+        ...diffPR(cachedPR.value, freshUpsert, durableAccountId),
+        // The cache keeps its last known rules while approval is unknown; compare once it recovers.
+        ...(detail.approvalUnknown !== undefined ? [] : diffApprovalPools(
+          cachedPR.value.approvalRules ?? [],
+          freshUpsert.approvalRules,
+          currentState.currentUser,
+          prId,
+          durableAccountId,
+          detail.title,
+          account.profile,
+          identity.repositoryName,
+          identity.accountRegion
+        ))
+      ]
+      : []
 
+    if (isSubscribed && Option.isSome(cachedPR)) {
       // Diff comments
       const cachedComments = yield* commentRepo.find(durableAccountId, prId, identity).pipe(
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
@@ -321,9 +324,14 @@ export const makeRefreshSinglePR = (
     )
 
     // Always upsert fresh data to cache
-    yield* prRepo.upsert(freshUpsert).pipe(
+    const applied = yield* prRepo.upsert(freshUpsert, observation).pipe(
       Effect.mapError((cause) => new RefreshError({ failedAccounts: [durableAccountId], cause }))
     )
+    if (applied) {
+      yield* Effect.forEach(pending, (n) => notificationRepo.add(n), { discard: true }).pipe(
+        Effect.catch(() => Effect.void)
+      )
+    }
     return {
       revisionId: detail.revisionId,
       sourceCommit: detail.sourceCommit

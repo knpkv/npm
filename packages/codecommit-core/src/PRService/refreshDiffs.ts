@@ -41,7 +41,7 @@ const enrichSingleDiff = Effect.fn("enrichSingleDiff")(
       repositoryName: row.repositoryName,
       accountRegion: row.accountRegion,
       // The row's version when it was read: a newer write since makes these stats stale.
-      version: row.lastModifiedDate,
+      version: { lastActivity: row.lastModifiedDate, observation: row.observationSeq },
       ...stats
     }
   },

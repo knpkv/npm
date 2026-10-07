@@ -89,6 +89,8 @@ export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
       isMergeable: pr.isMergeable,
       isApproved: pr.isApproved,
       approvalUnknownReason: pr.approvalUnknown?._tag ?? null,
+      // A domain pull request carries no observation: the row version of a fresh, unwritten read.
+      observationSeq: 0,
       commentCount: pr.commentCount ?? null,
       healthScore: pr.healthScore ?? null,
       link: pr.link,

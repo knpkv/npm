@@ -39,6 +39,7 @@ const cachedRow = (profile: string, id: string) =>
     isMergeable: 1,
     isApproved: 0,
     approvalUnknownReason: null,
+    observationSeq: 0,
     commentCount: 0,
     healthScore: null,
     link: `https://example.invalid/pr/${id}`,
@@ -80,7 +81,10 @@ const layerWithConfig = (
         Layer.mock(EventsHub, {}),
         Layer.mock(CommentRepo, {}),
         Layer.mock(NotificationRepo, {}),
-        Layer.mock(PullRequestRepo, { findAll }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findAll
+        }),
         Layer.mock(SubscriptionRepo, {}),
         Layer.mock(SyncMetadataRepo, {}),
         Layer.mock(ConfigService, { load })
@@ -106,6 +110,7 @@ const syncDependencies = (
       getPullRequests: () => Stream.empty
     }),
     Layer.mock(PullRequestRepo, {
+      observe: () => Effect.succeed(1),
       findAll,
       findStaleOpen: () => Effect.succeed([]),
       refreshCommentedBy: () => Effect.void

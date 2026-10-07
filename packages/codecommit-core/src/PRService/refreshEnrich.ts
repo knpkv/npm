@@ -97,7 +97,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
         repositoryName: row.repositoryName,
         accountRegion: row.accountRegion,
         // The row's version when it was read: a newer write since makes this count stale.
-        version: row.lastModifiedDate
+        version: { lastActivity: row.lastModifiedDate, observation: row.observationSeq }
       })
       : Option.none()
   })

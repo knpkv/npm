@@ -69,6 +69,8 @@ export const CachedPullRequest = Schema.Struct({
   repositoryName: RepositoryName,
   creationDate: Schema.DateFromString,
   lastModifiedDate: Schema.DateFromString,
+  /** With `lastModifiedDate`, the row's version: the observation that last wrote it. */
+  observationSeq: Schema.Number,
   status: PullRequestStatus,
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
@@ -127,21 +129,19 @@ export type UpsertInput = typeof UpsertInput.Type
 
 /**
  * A provider read's approval, as `recordApprovalEvaluation` and `approvalColumnsOf` take it: the
- * evaluated value and its complete rules, or the reason evaluation failed, and when the read's
- * revision last changed. A `PullRequestDetail` is one.
+ * evaluated value and its complete rules, or the reason evaluation failed. A `PullRequestDetail` is one.
  */
 export interface ApprovalRead {
   readonly isApproved: boolean
   readonly approvalRules: UpsertInput["approvalRules"]
   readonly approvalUnknown?: ApprovalUnknownReason | undefined
-  readonly lastActivityDate: Date
 }
 
 /**
  * The approval columns an upsert writes for a provider read. While approval is unknown, `isApproved`
  * is a placeholder: the upsert keeps an existing row's last known value.
  */
-export const approvalColumnsOf = (read: Omit<ApprovalRead, "lastActivityDate">) => ({
+export const approvalColumnsOf = (read: ApprovalRead) => ({
   isApproved: read.approvalUnknown === undefined && read.isApproved ? 1 : 0,
   approvalUnknownReason: read.approvalUnknown?._tag ?? null
 })

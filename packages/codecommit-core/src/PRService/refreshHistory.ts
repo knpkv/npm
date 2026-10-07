@@ -82,12 +82,14 @@ export const syncWeek = Effect.fn("syncWeek")(
                 Effect.catchIf(() => true, () => Effect.succeed(fallbackIdentity(account.profile)))
               )
             const awsAccountId = identity.accountId
+            // One observation for the listing, before it starts: a later read of the same revision wins.
+            const observation = yield* prRepo.observe()
 
             yield* awsClient
               .getPullRequests({ profile: account.profile, region })
               .pipe(
                 Stream.runForEach((pr) =>
-                  prRepo.upsert(prToUpsertInput(pr, awsAccountId)).pipe(
+                  prRepo.upsert(prToUpsertInput(pr, awsAccountId), observation).pipe(
                     Effect.tap(() =>
                       Ref.updateAndGet(fetchedRef, (n) => n + 1).pipe(
                         Effect.flatMap((n) =>
@@ -124,54 +126,69 @@ export const syncWeek = Effect.fn("syncWeek")(
       yield* Effect.forEach(
         openPRs,
         (pr) =>
-          awsClient
-            .getPullRequest({
-              account: { profile: pr.accountProfile, region: pr.accountRegion },
-              pullRequestId: pr.id
-            })
-            .pipe(
-              Effect.flatMap((detail) => {
-                if (detail.repositoryName !== pr.repositoryName) return Effect.void
-                const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
-                // The re-read's evaluation reaches the cache like the refresh's stale pass: an unknown one
-                // marks the row, a successful one replaces the last known approval and clears the reason.
-                const recordEvaluation = prRepo.recordApprovalEvaluation(pr.awsAccountId, pr.id, detail, coordinates)
-                if (detail.status !== "OPEN") {
-                  return prRepo
-                    .updateStatusAndClosedAt(
+          // The observation is taken before the read, so a read that began later wins in the cache.
+          prRepo.observe().pipe(
+            Effect.flatMap((observation) =>
+              awsClient
+                .getPullRequest({
+                  account: { profile: pr.accountProfile, region: pr.accountRegion },
+                  pullRequestId: pr.id
+                })
+                .pipe(
+                  Effect.flatMap((detail) => {
+                    if (detail.repositoryName !== pr.repositoryName) return Effect.void
+                    const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
+                    // The re-read's evaluation reaches the cache like the refresh's stale pass: an unknown one
+                    // marks the row, a successful one replaces the last known approval and clears the reason.
+                    const recordEvaluation = prRepo.recordApprovalEvaluation(
                       pr.awsAccountId,
                       pr.id,
-                      detail.status,
-                      detail.lastActivityDate.toISOString(),
-                      detail.mergedBy,
-                      detail.approvedBy,
+                      detail,
+                      { lastActivity: detail.lastActivityDate, observation },
                       coordinates
                     )
-                    .pipe(
-                      Effect.andThen(recordEvaluation),
-                      Effect.tap(() =>
-                        Ref.updateAndGet(transitionedRef, (n) => n + 1).pipe(
-                          Effect.flatMap((n) =>
-                            SubscriptionRef.update(state, (s) => ({
-                              ...s,
-                              statusDetail: `syncing ${week} — ${n} status updates`
-                            }))
+                    if (detail.status !== "OPEN") {
+                      return prRepo
+                        .updateStatusAndClosedAt(
+                          pr.awsAccountId,
+                          pr.id,
+                          detail.status,
+                          detail.lastActivityDate.toISOString(),
+                          observation,
+                          detail.mergedBy,
+                          detail.approvedBy,
+                          coordinates
+                        )
+                        .pipe(
+                          Effect.andThen(recordEvaluation),
+                          Effect.tap(() =>
+                            Ref.updateAndGet(transitionedRef, (n) => n + 1).pipe(
+                              Effect.flatMap((n) =>
+                                SubscriptionRef.update(state, (s) => ({
+                                  ...s,
+                                  statusDetail: `syncing ${week} — ${n} status updates`
+                                }))
+                              )
+                            )
                           )
                         )
-                      )
+                    }
+                    return recordEvaluation
+                  }),
+                  // One pull request's failure doesn't stop the sync, but it is logged: a lost approval write
+                  // leaves the cached approval republished as known.
+                  Effect.catch((error) =>
+                    Effect.logWarning(
+                      `syncWeek ${week}: status check of #${pr.id} (${pr.repositoryName}, ${pr.accountProfile} ${pr.accountRegion}) failed; the cached row is kept`,
+                      error
                     )
-                }
-                return recordEvaluation
-              }),
-              // One pull request's failure doesn't stop the sync, but it is logged: a lost approval write
-              // leaves the cached approval republished as known.
-              Effect.catch((error) =>
-                Effect.logWarning(
-                  `syncWeek ${week}: status check of #${pr.id} (${pr.repositoryName}, ${pr.accountProfile} ${pr.accountRegion}) failed; the cached row is kept`,
-                  error
+                  )
                 )
-              )
             ),
+            Effect.catch((error) =>
+              Effect.logWarning(`syncWeek ${week}: #${pr.id} not checked, no observation number`, error)
+            )
+          ),
         { concurrency: 5, discard: true }
       )
 

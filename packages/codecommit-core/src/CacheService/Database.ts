@@ -34,7 +34,7 @@ import migration0019 from "./migrations/0019_dependent_pr_coordinates.js"
 import migration0020 from "./migrations/0020_notification_coordinates.js"
 import migration0021 from "./migrations/0021_sandbox_legacy_retirement.js"
 import migration0022 from "./migrations/0022_pull_request_approval_unknown.js"
-import migration0023 from "./migrations/0023_pull_request_tombstones.js"
+import migration0023 from "./migrations/0023_pull_request_row_versions.js"
 
 export { ensurePrivateDatabasePath } from "./internal/PrivateDatabasePathNode.js"
 
@@ -83,7 +83,7 @@ export const MigrationsLive = LibsqlMigrator.layer({
     "0020_notification_coordinates": migration0020,
     "0021_sandbox_legacy_retirement": migration0021,
     "0022_pull_request_approval_unknown": migration0022,
-    "0023_pull_request_tombstones": migration0023
+    "0023_pull_request_row_versions": migration0023
   })
 })
 

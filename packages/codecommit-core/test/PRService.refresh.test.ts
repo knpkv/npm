@@ -26,6 +26,7 @@ const dependencies = (load: ConfigService["Service"]["load"]) =>
     Layer.mock(CommentRepo, {}),
     Layer.mock(NotificationRepo, {}),
     Layer.mock(PullRequestRepo, {
+      observe: () => Effect.succeed(1),
       findAll: () => Effect.succeed([])
     }),
     Layer.mock(SubscriptionRepo, {}),
@@ -99,6 +100,7 @@ describe("PRService.refresh", () => {
         isMergeable: 1,
         isApproved: 0,
         approvalUnknownReason: null,
+        observationSeq: 0,
         commentCount: 0,
         healthScore: null,
         link: "https://example.invalid/pr/35",
@@ -131,10 +133,11 @@ describe("PRService.refresh", () => {
           batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
         }),
         Layer.mock(CommentRepo, {
-          upsert: () => Effect.void
+          upsert: () => Effect.succeed(true)
         }),
         Layer.mock(NotificationRepo, {}),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findAll: () => Ref.get(rows),
           findStaleOpen: () => Effect.succeed([]),
           findMissingDiffStats: () => Effect.succeed([]),
@@ -314,6 +317,7 @@ describe("PRService.refresh", () => {
           isMergeable: 1,
           isApproved: 0,
           approvalUnknownReason: null,
+          observationSeq: 0,
           commentCount: 0,
           healthScore: null,
           link: `https://example.invalid/pr/${id}`,
@@ -356,9 +360,10 @@ describe("PRService.refresh", () => {
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(EventsHub, { batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, { upsert: () => Effect.succeed(true) }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findAll: () => Effect.succeed(rows),
             findStaleOpen: () => Effect.succeed([]),
             findMissingDiffStats: () => Effect.succeed([]),
@@ -413,6 +418,7 @@ describe("PRService.refresh", () => {
           isMergeable: 1,
           isApproved: 0,
           approvalUnknownReason: null,
+          observationSeq: 0,
           commentCount: 0,
           healthScore: null,
           link: "https://example.invalid/pr/11",
@@ -455,9 +461,10 @@ describe("PRService.refresh", () => {
           getCommentsForPullRequest: () => Effect.succeed([])
         }),
         Layer.mock(EventsHub, { batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect }),
-        Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+        Layer.mock(CommentRepo, { upsert: () => Effect.succeed(true) }),
         Layer.mock(NotificationRepo, {}),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed(rows),
           findStaleOpen: () => Effect.succeed([]),
           findMissingDiffStats: () => Effect.succeed([]),

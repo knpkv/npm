@@ -28,6 +28,7 @@ const cachedRow = (profile: string, id: string) =>
     isMergeable: 1,
     isApproved: 0,
     approvalUnknownReason: null,
+    observationSeq: 0,
     commentCount: 0,
     healthScore: null,
     link: `https://example.invalid/pr/${id}`,
@@ -90,6 +91,7 @@ describe("history sync approval evaluation", () => {
           getPullRequest: () => Effect.succeed(detail(approvalUnknown))
         }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed([cachedRow("kept-profile", "11")]),
           findStaleOpen: () => Effect.succeed([cachedRow("kept-profile", "11")]),
           recordApprovalEvaluation: (_, __, evaluation) =>
@@ -124,6 +126,7 @@ describe("history sync approval evaluation", () => {
           getPullRequest: () => Effect.succeed(detail({ _tag: "NotPermitted" }))
         }),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed([cachedRow("kept-profile", "11")]),
           findStaleOpen: () => Effect.succeed([cachedRow("kept-profile", "11")]),
           recordApprovalEvaluation: () =>

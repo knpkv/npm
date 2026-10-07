@@ -27,7 +27,10 @@ export const calculateHealthScores = (
       const pr = decodeCachedPR(row)
       const score = scoreTotalOr(pr, scoreNow, 0)
       // Versioned by the row it was computed from: a newer write since makes the score stale.
-      return prRepo.updateHealthScore(row.awsAccountId, row.id, score, row.lastModifiedDate, {
+      return prRepo.updateHealthScore(row.awsAccountId, row.id, score, {
+        lastActivity: row.lastModifiedDate,
+        observation: row.observationSeq
+      }, {
         repositoryName: row.repositoryName,
         accountRegion: row.accountRegion
       }).pipe(
