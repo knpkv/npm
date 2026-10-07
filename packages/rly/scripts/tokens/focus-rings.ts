@@ -14,8 +14,8 @@ export interface FocusRingViolation {
 
 const FOCUS_SELECTOR = /:focus(?:-visible|-within)?(?![\w-])/
 const FORCED_COLOURS_SELECTOR = /data-(?:rly-)?forced-colors/
-const WIDTH = /var\(\s*--rly-focus-ring-width\s*\)/
-const COLOUR = /var\(\s*--rly-color-focus\s*\)/
+const WIDTH = /var\(\s*--rly-focus-ring-width\s*[,)]/
+const COLOUR = /var\(\s*--rly-color-focus\s*[,)]/
 const NO_OUTLINE = /^(?:none|0|0px)$/i
 // A custom property reference, with optional spaces and fallback: `var( --ring , red)`.
 const VAR_REFERENCE = /var\(\s*(--[\w-]+)\s*[,)]/g

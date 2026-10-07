@@ -65,6 +65,7 @@ describe("focus ring policy", () => {
   // ui-b AU1b S1: a chart window drawn in the focus colour read as a second focus ring.
   it("reserves the focus colour for focus rules", () => {
     expect(rules(".window { stroke: var(--rly-color-focus); }")).toEqual(["focus-colour"])
+    expect(rules(".window { stroke: var(--rly-color-focus, blue); }")).toEqual(["focus-colour"])
     expect(rules(".plot:focus-visible { outline-color: var(--rly-color-focus); }")).toEqual([])
     // An alias is checked where it is used, and forced colours draw their own system colours.
     expect(rules(":root { --ring: var(--rly-color-focus); }")).toEqual([])
