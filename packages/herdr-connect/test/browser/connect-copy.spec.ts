@@ -338,7 +338,7 @@ test.describe("scroll position from the hub", () => {
     // herdr keeps the reader's place, so 10 new lines put the pane 60 back before any reading says so.
     await page.request.post("/__test/grow?lines=10")
     await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
-    await expect.poll(() => downs(page)).toEqual([50, 10])
+    await expect.poll(() => downs(page)).toEqual([50, 400])
     await expect(olderOutput(page)).toHaveCount(0)
     await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith("310 "))).toBe(true)
   })
@@ -389,11 +389,14 @@ test.describe("scroll position from the hub", () => {
   })
 
   test("Latest converges to 0 under continuous output: it keeps going until a quiet reading says 0", async ({ page }) => {
-    await open(page, { mode: "known", start: 50, chase: 10 })
+    // Output never stops: 5 lines land before every page applies, however many pages there are.
+    await open(page, { mode: "known", start: 50, chase: 1_000 })
     await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
-    // 50, then the 5 lines that arrived during each of the ten pages after it.
-    await expect.poll(() => downs(page), { timeout: 15_000 }).toEqual([50, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5])
+    // The exact 50, then one whole page: herdr clamps it at the bottom, where the pane follows output.
+    await expect.poll(() => downs(page), { timeout: 15_000 }).toEqual([50, 400])
     await expect(olderOutput(page)).toHaveCount(0)
+    await page.waitForTimeout(1_000)
+    expect(await downs(page)).toEqual([50, 400])
   })
 
   test("Latest waits for a slow reading before it decides the pane is at the bottom", async ({ page }) => {
@@ -402,7 +405,7 @@ test.describe("scroll position from the hub", () => {
     // The opening reading is just as slow.
     await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back", { timeout: 10_000 })
     await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
-    await expect.poll(() => downs(page), { timeout: 15_000 }).toEqual([50, 5])
+    await expect.poll(() => downs(page), { timeout: 15_000 }).toEqual([50, 400])
     await expect(olderOutput(page)).toHaveCount(0, { timeout: 10_000 })
   })
 
@@ -512,7 +515,7 @@ test.describe("scroll position from the hub", () => {
     await latest.click()
     await expect.poll(() => downs(page)).toEqual([50])
     await latest.click()
-    await expect.poll(() => downs(page), { timeout: 10_000 }).toEqual([50, 5])
+    await expect.poll(() => downs(page), { timeout: 10_000 }).toEqual([50, 400])
     await expect(olderOutput(page)).toHaveCount(0)
   })
 

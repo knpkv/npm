@@ -441,7 +441,9 @@ export const bindTerminalInteraction = (
         // to probing, 0 ends the jump, anything else is output that arrived meanwhile.
         if (serverPosition._tag === "Unknown") frameStep(null, 0)
         else if (serverPosition.offset === 0) endJump()
-        else knownStep(serverPosition.offset)
+        // A correction sends a whole page, not the offset just read: output may land again before
+        // it applies, and an exact amount would then trail it forever. herdr clamps at the bottom.
+        else knownStep(maximumLinesPerCommand)
       }
       draw()
     },
