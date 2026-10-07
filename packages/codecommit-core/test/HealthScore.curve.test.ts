@@ -20,6 +20,7 @@ interface Inputs {
   readonly rules: number
   readonly scoped: boolean
   readonly described: boolean
+  readonly approvedBy?: ReadonlyArray<string>
 }
 
 const pullRequest = (inputs: Inputs) =>
@@ -39,7 +40,7 @@ const pullRequest = (inputs: Inputs) =>
     isMergeable: inputs.isMergeable,
     isApproved: inputs.isApproved,
     ...(inputs.commentCount !== undefined && { commentCount: inputs.commentCount }),
-    approvedBy: [],
+    approvedBy: inputs.approvedBy ?? [],
     commentedBy: [],
     approvalRules: Array.from({ length: inputs.rules }, (_, i) => ({
       ruleName: `rule-${i}`,
@@ -261,6 +262,15 @@ describe("health curve A", () => {
     const base = table[0]![1]
     expect(total({ ...base, lastModifiedDate: new Date(0).toISOString() })).toEqual(Option.none())
     expect(total({ ...base, creationDate: new Date(0).toISOString() })).toEqual(Option.none())
+  })
+
+  // No rules means nothing to satisfy, not that nobody signed off: a voluntary sign-off isn't denied.
+  it("describes a pull request without rules without denying a voluntary sign-off", () => {
+    const approval = (approvedBy: ReadonlyArray<string>) =>
+      Option.getOrThrow(calculateHealthScore(pullRequest({ ...table[1]![1], isMergeable: true, approvedBy }), now))
+        .categories.find((category) => category.label === "Approval")?.description
+    expect([approval(["alice"]), approval([])].map((description) => description?.includes("nobody")))
+      .toEqual([false, false])
   })
 
   it("names the date CodeCommit left out when the score is Unknown", () => {

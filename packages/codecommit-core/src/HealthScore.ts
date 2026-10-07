@@ -157,7 +157,7 @@ export const calculateHealthScore = (pr: PullRequest, now: Date): Option.Option<
           statusLabel: "APPROVED"
         }),
         NotRequired: (): ApprovalCategory => ({
-          description: `+1: ${approvalNotRequiredLabel.toLowerCase()}, and nobody signed off`,
+          description: `+1: ${approvalNotRequiredLabel.toLowerCase()} (no rules to satisfy)`,
           status: "neutral",
           statusLabel: "NOT REQUIRED"
         }),

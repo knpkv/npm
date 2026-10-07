@@ -143,14 +143,15 @@ const credentialFailure = (error: AwsClientError): boolean =>
   Predicate.hasProperty(error.cause, "cause") && isCredentialInvalidCause(error.cause.cause)
 
 describe("approval evaluation", () => {
-  // A missing last-activity date stays missing on both reads, so health reads Unknown either way
-  // instead of the detail read inventing one from the creation date.
+  // A missing last-activity date falls back to the creation date on both reads: activity is never
+  // earlier than creation, so it is a safe floor, and the row's version stays comparable across reads.
   it.layer(codeCommit("undated"))((it) => {
-    it.effect("leaves a missing last-activity date missing on the list and the detail read alike", () =>
+    it.effect("reads a missing last-activity date as the creation date on the list and the detail read alike", () =>
       Effect.gen(function*() {
         const [listed] = yield* Stream.runCollect(getPullRequests(account))
         const detail = yield* getPullRequest({ account, pullRequestId: "7" })
-        expect([listed?.lastModifiedDate.getTime(), detail.lastActivityDate.getTime()]).toEqual([0, 0])
+        const created = new Date(pullRequest.creationDate * 1000).getTime()
+        expect([listed?.lastModifiedDate.getTime(), detail.lastActivityDate.getTime()]).toEqual([created, created])
       }))
   })
 

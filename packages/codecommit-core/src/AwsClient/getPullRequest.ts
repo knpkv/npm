@@ -84,8 +84,9 @@ const RawToPullRequestDetail = RawGetPullRequestResponse.pipe(
         sourceBranch: target?.sourceReference?.replace(/^refs\/heads\//, "") ?? "",
         destinationBranch: target?.destinationReference?.replace(/^refs\/heads\//, "") ?? "",
         creationDate: pr?.creationDate ?? EpochFallback,
-        // A missing date stays missing, as on the list read: health reads Unknown rather than a guess.
-        lastActivityDate: pr?.lastActivityDate ?? EpochFallback,
+        // Without a last-activity date, the creation date: activity is never earlier, so it is a safe
+        // floor, and both reads give the row the same comparable version.
+        lastActivityDate: pr?.lastActivityDate ?? pr?.creationDate ?? EpochFallback,
         approvedBy: [],
         mergedBy: mergedByArn ? normalizeAuthor(mergedByArn) : undefined
       }

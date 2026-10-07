@@ -80,7 +80,7 @@ export const diffPR = (
   // Only a real change is announced: the fresh evaluation is known, and so is what it is compared with
   // (a known cached evaluation, or the last known value an unknown row keeps over a known baseline; a
   // pull request first seen while its evaluation fails holds a placeholder instead). Without rules on
-  // either side, nobody signed off or withdrew, so a flip of the evaluation is not announced either.
+  // either side, no rule was satisfied or withdrawn, so a flip of the evaluation is not announced either.
   const ruleBacked = (pr: DiffablePR) => (pr.approvalRules?.length ?? 0) > 0
   const cachedKnown = cached.approvalUnknownReason == null || isEnabled(cached.approvalBaselineKnown ?? false)
   if (

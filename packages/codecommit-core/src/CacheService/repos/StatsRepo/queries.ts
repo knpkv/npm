@@ -157,7 +157,7 @@ export const healthIndicators =
         COUNT(*) as total,
         COUNT(CASE WHEN comment_count > 0 THEN 1 END) as with_comments,
         -- A row whose last evaluation failed has only a last known approval, so it is not counted; nor
-        -- is one with no rules, which CodeCommit evaluates as approved though nobody signed off.
+        -- is one with no rules, which CodeCommit evaluates as approved with nothing to satisfy.
         COUNT(CASE WHEN is_approved = 1 AND approval_unknown_reason IS NULL
           AND json_array_length(COALESCE(approval_rules, '[]')) > 0 THEN 1 END) as approved
       FROM pull_requests

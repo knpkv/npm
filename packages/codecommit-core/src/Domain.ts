@@ -253,7 +253,7 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
  */
 export type Approval =
   | { readonly _tag: "Approved" }
-  /** CodeCommit evaluates no approval rules as approved: nothing to satisfy, and nobody signed off. */
+  /** CodeCommit evaluates no approval rules as approved: nothing to satisfy (a sign-off is voluntary). */
   | { readonly _tag: "NotRequired" }
   | { readonly _tag: "Pending" }
   | { readonly _tag: "Unknown"; readonly reason: ApprovalUnknownReason }
