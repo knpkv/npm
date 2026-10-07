@@ -233,6 +233,7 @@ export const layer = Layer.effect(
           const jiraProject = ticket.key.split("-")[0] ?? ""
           const clockifyProjectName = cfg.projectMap[jiraProject] ?? jiraProject
           const project = yield* clockify.getProjectByName(workspaceId, clockifyProjectName).pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.orElseSucceed(() => null)
           )
           if (project !== null && project !== undefined) projectId = project.id
@@ -252,6 +253,7 @@ export const layer = Layer.effect(
             continue
           }
           const tag = yield* clockify.findOrCreateTag(workspaceId, tagName).pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.orElseSucceed(() => null)
           )
           if (tag !== undefined && tag !== null) {
@@ -271,6 +273,7 @@ export const layer = Layer.effect(
       comment?: string
     ): Effect.Effect<JiraWorklogOutcome> =>
       Effect.gen(function*() {
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         const connection = yield* jiraAccess.connection.pipe(Effect.orElseSucceed(() => Option.none()))
         if (Option.isNone(connection)) {
           yield* Effect.logDebug("Jira worklog skipped: Jira is not connected")
@@ -319,6 +322,7 @@ export const layer = Layer.effect(
         let projectName: string | null = cfg.defaultProjectName ?? null
         if (projectId !== null && projectId !== "" && (projectName === null || projectName === "")) {
           const projects = yield* clockify.getProjects(auth.workspaceId).pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.orElseSucceed(() => [])
           )
           projectName = projects.find((p) => p.id === projectId)?.name ?? null
@@ -406,6 +410,7 @@ export const layer = Layer.effect(
         // Stop via PUT — preserve existing tagIds from the entry
         if (current.clockifyEntryId !== null) {
           const existing = yield* clockify.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.orElseSucceed(() => null)
           )
           const tagIds = existing?.tagIds ?? []
@@ -557,6 +562,7 @@ export const layer = Layer.effect(
         let resolvedProjectName: string | null = null
         if (running.projectId !== undefined && running.projectId !== null) {
           const projects = yield* clockify.getProjects(auth.workspaceId).pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.orElseSucceed(() => [])
           )
           resolvedProjectName = projects.find((p) => p.id === running.projectId)?.name ?? null

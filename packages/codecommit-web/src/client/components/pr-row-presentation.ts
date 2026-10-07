@@ -1,9 +1,15 @@
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
-import { approvalOf, approvalUnknownLabel, type PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import {
+  approvalNotRequiredLabel,
+  approvalOf,
+  approvalUnknownLabel,
+  approvalUnknownReasonText,
+  type PullRequest
+} from "@knpkv/codecommit-core/Domain.js"
 import type { RlyStateTone } from "@knpkv/rly/primitives"
 
 type DecisionFacts = Pick<PullRequest, "approvedBy" | "isMergeable" | "status">
-type StatusFacts = Pick<PullRequest, "approvalUnknown" | "isApproved" | "isMergeable" | "status">
+type StatusFacts = Pick<PullRequest, "approvalUnknown" | "approvalRules" | "isApproved" | "isMergeable" | "status">
 type TimestampFacts = Pick<PullRequest, "creationDate" | "lastModifiedDate">
 
 export interface PullRequestRowDecision {
@@ -41,6 +47,8 @@ export const pullRequestRowTimeLabel = (pr: TimestampFacts, showUpdated: boolean
 export interface PullRequestRowStatus {
   readonly label: string
   readonly tone: RlyStateTone
+  /** Why the label says what it does, when the word alone can't: an unknown approval's reason. */
+  readonly reason?: string
 }
 
 /** The row's state label. An unknown approval is labelled as such, never as approved or pending. */
@@ -49,7 +57,10 @@ export const pullRequestRowStatus = (pr: StatusFacts): PullRequestRowStatus => {
   if (pr.status === "CLOSED") return { label: "Closed", tone: "neutral" }
   if (!pr.isMergeable) return { label: "Conflict", tone: "critical" }
   const approval = approvalOf(pr)
-  if (approval._tag === "Unknown") return { label: approvalUnknownLabel, tone: "neutral" }
+  if (approval._tag === "Unknown") {
+    return { label: approvalUnknownLabel, reason: approvalUnknownReasonText(approval.reason), tone: "neutral" }
+  }
+  if (approval._tag === "NotRequired") return { label: approvalNotRequiredLabel, tone: "neutral" }
   if (approval._tag === "Approved") return { label: "Approved", tone: "positive" }
   return { label: "Pending", tone: "caution" }
 }

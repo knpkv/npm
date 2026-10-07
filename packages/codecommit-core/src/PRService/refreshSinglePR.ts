@@ -145,6 +145,7 @@ const resolveAccountFromCache = (
 
     // Fall back to config only when the requested region is configured.
     const configService = yield* ConfigService
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const config = yield* configService.load.pipe(Effect.catch(() => Effect.succeed({ accounts: [] })))
     const configAccount = config.accounts.find((a) => a.profile === awsAccountId && a.enabled)
     const region = coordinates !== undefined
@@ -204,6 +205,7 @@ export const makeRefreshSinglePR = (
         Effect.catchTag("CacheError", () => Effect.succeed(Option.none<CachedPullRequest>()))
       )
       : yield* prRepo.findByCoordinates(awsAccountId, prId, coordinates.repositoryName, coordinates.region).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
       )
 
@@ -229,12 +231,18 @@ export const makeRefreshSinglePR = (
       return yield* new RefreshError({ failedAccounts: [awsAccountId] })
     }
 
-    // Fetch fresh comments
-    const locs = yield* awsClient.getCommentsForPullRequest({
+    // Fresh comments, or none when the fetch failed. A failure is not "no comments": the count stays
+    // not loaded and the comment cache untouched, so the next successful fetch re-announces nothing.
+    const fetched = yield* awsClient.getCommentsForPullRequest({
       account,
       pullRequestId: prId,
       repositoryName: detail.repositoryName
-    }).pipe(Effect.catch(() => Effect.succeed<Array<PRCommentLocation>>([])))
+    }).pipe(
+      Effect.map(Option.some),
+      Effect.tapError((e) => Effect.logWarning("comment fetch failed; keeping the cached comments", e)),
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
+      Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
+    )
 
     // Build fresh upsert — PullRequestDetail lacks some fields, fall back to cache
     const cached = Option.isSome(cachedPR) ? cachedPR.value : undefined
@@ -263,7 +271,7 @@ export const makeRefreshSinglePR = (
       isMergeable: detail.isMergeable ? 1 : 0,
       // A failed evaluation keeps the last known approval: the upsert keeps the cached value.
       ...approvalColumnsOf(detail),
-      commentCount: countAllComments(locs),
+      commentCount: Option.match(fetched, { onNone: () => null, onSome: countAllComments }),
       link: cached?.link ?? pr?.link ??
         codecommitConsoleUrl(account.region, coordinates?.repositoryName ?? detail.repositoryName, prId),
       approvedBy: detail.approvedBy,
@@ -277,38 +285,22 @@ export const makeRefreshSinglePR = (
       accountRegion: account.region
     }
     const isSubscribed = yield* subscriptionRepo.isSubscribed(durableAccountId, prId, identity).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(false))
     )
 
-    // Sent only once the upsert applies: a read older than the cached row changes nothing.
-    const pending = isSubscribed && Option.isSome(cachedPR)
-      ? [
-        ...diffPR(cachedPR.value, freshUpsert, durableAccountId),
-        // The cache keeps its last known rules while approval is unknown; compare once it recovers.
-        ...(detail.approvalUnknown !== undefined ? [] : diffApprovalPools(
-          cachedPR.value.approvalRules ?? [],
-          freshUpsert.approvalRules,
-          currentState.currentUser,
-          prId,
-          durableAccountId,
-          detail.title,
-          account.profile,
-          identity.repositoryName,
-          identity.accountRegion
-        ))
-      ]
-      : []
-
     // Diff comments against the cache before it is written, for the same subscribed pull requests.
-    const commentNotifications: ReadonlyArray<NewNotification> = isSubscribed && Option.isSome(cachedPR)
+    const commentNotifications: ReadonlyArray<NewNotification> = isSubscribed && Option.isSome(cachedPR) &&
+        Option.isSome(fetched)
       ? yield* commentRepo.find(durableAccountId, prId, identity).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>())),
         Effect.map(Option.match({
           onNone: () => [],
           onSome: (cachedComments) =>
             diffComments(
               cachedComments,
-              locs,
+              fetched.value,
               prId,
               durableAccountId,
               identity.repositoryName,
@@ -322,23 +314,53 @@ export const makeRefreshSinglePR = (
     const written = yield* prRepo.upsertRead(freshUpsert, detail, observation).pipe(
       Effect.mapError((cause) => new RefreshError({ failedAccounts: [durableAccountId], cause }))
     )
-    // Everything below acts on what this read saw, so only for the groups the cache took: a group not
+    // Announced from the row this write replaced, read in the same transaction: an earlier snapshot
+    // could be one another write has changed since. Only for the groups the cache took; a group not
     // written was older than the cache.
+    const pending = isSubscribed
+      ? Option.match(written.replaced, {
+        onNone: () => [],
+        onSome: (replaced) => [
+          ...diffPR(replaced, freshUpsert, durableAccountId),
+          // The cache keeps its last known rules while approval is unknown; compare once it recovers.
+          ...(detail.approvalUnknown !== undefined ? [] : diffApprovalPools(
+            replaced.approvalRules ?? [],
+            freshUpsert.approvalRules,
+            currentState.currentUser,
+            prId,
+            durableAccountId,
+            detail.title,
+            account.profile,
+            identity.repositoryName,
+            identity.accountRegion
+          ))
+        ]
+      })
+      : []
     yield* Effect.forEach(notificationsFor(pending, written), (n) => notificationRepo.add(n), { discard: true }).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.void)
     )
     // The comment count is recomputed from this read, so it is written only to the row this refresh
     // just wrote; the comment cache and its notifications follow only when it was.
     const versions = written.versions
-    const commentsWritten = written.row && versions !== undefined
-      ? yield* prRepo.writeDerived(durableAccountId, prId, versions, { commentCount: countAllComments(locs) }, identity)
-        .pipe(Effect.catch(() => Effect.succeed(false)))
+    const commentsWritten = written.row && versions !== undefined && Option.isSome(fetched)
+      ? yield* prRepo.writeDerived(
+        durableAccountId,
+        prId,
+        versions,
+        { commentCount: countAllComments(fetched.value) },
+        identity
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
+      ).pipe(Effect.catch(() => Effect.succeed(false)))
       : false
-    if (commentsWritten) {
-      yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(locs), identity).pipe(
+    if (commentsWritten && Option.isSome(fetched)) {
+      yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(fetched.value), identity).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.void)
       )
       yield* Effect.forEach(commentNotifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.void)
       )
     }

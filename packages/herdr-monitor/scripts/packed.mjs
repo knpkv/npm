@@ -125,7 +125,8 @@ void [publication, monitor];`
       for (const secret of [privatePath, publishToken, viewToken, invalidOrigin]) {
         assert.ok(!(result.stdout + result.stderr).includes(secret))
       }
-      assert.match(result.stderr, /Monitor failed/)
+      // One line naming the setting or argument to fix (QA-J50), never its value.
+      assert.match(result.stderr, /^[^\n]+\n?$/u)
     }
   })
   await test("packed server remains listening after ready and restarts empty", async () => {

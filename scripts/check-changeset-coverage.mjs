@@ -320,6 +320,11 @@ const packageCompilerOptions = (
   return compilerOptionsFromConfig(selectedConfigPath, selectedConfigText, normalizedConfigFiles)
 }
 
+// Compiler options compared by content: each entry point reads its configuration into a fresh object, and
+// keying analyses by object identity kept one full analysis alive per entry point (codecommit-core: 250, ~4 GB).
+const compilerOptionsKey = (compilerOptions) =>
+  JSON.stringify(Object.entries(compilerOptions).toSorted(([left], [right]) => left.localeCompare(right)))
+
 const analyzeSources = (
   sources,
   recursiveDeclarations = new Set(),
@@ -327,7 +332,7 @@ const analyzeSources = (
 ) => {
   const cachedByFactory = sourceAnalysisCache.get(sources)
   const cachedByOptions = cachedByFactory?.get(programFactory)
-  const cached = cachedByOptions?.get(compilerOptions)
+  const cached = cachedByOptions?.get(compilerOptionsKey(compilerOptions))
   if (cached !== undefined) {
     return cached.recursiveDeclarations === recursiveDeclarations ? cached : { ...cached, recursiveDeclarations }
   }
@@ -485,7 +490,7 @@ const analyzeSources = (
   const analysis = { getChecker, modules, recursiveDeclarations, releaseChecker, sources }
   const analyses = cachedByFactory ?? new Map()
   const analysesByOptions = cachedByOptions ?? new Map()
-  analysesByOptions.set(compilerOptions, analysis)
+  analysesByOptions.set(compilerOptionsKey(compilerOptions), analysis)
   analyses.set(programFactory, analysesByOptions)
   sourceAnalysisCache.set(sources, analyses)
   return analysis
@@ -4714,6 +4719,16 @@ const validatePublicCallableChangesets = (changes, releaseTypes) =>
   ].toSorted()
 
 const runSelfTest = () => {
+  // Entry points read their configuration into fresh but equal option objects; they must share one analysis,
+  // or a package with many entry points keeps one analysis per entry alive (codecommit-core: ~4 GB).
+  const sharedSources = new Map([["packages/public/src/index.ts", "export const shared = 1\n"]])
+  const sharedDeclarations = new Set()
+  assert.equal(
+    analyzeSources(sharedSources, sharedDeclarations, { compilerOptions: { ...defaultCompilerOptions } }).modules,
+    analyzeSources(sharedSources, sharedDeclarations, {
+      compilerOptions: Object.fromEntries(Object.entries(defaultCompilerOptions).toReversed())
+    }).modules
+  )
   const records = [
     {
       changedReleaseManifest: false,
@@ -9658,6 +9673,11 @@ const resolveMergeBase = Effect.fn("ChangesetCoverage.resolveMergeBase")(
         if (explicitPendingBase) {
           return yield* fail(`Selected base ${candidate} must exactly match pending merge head ${pendingMergeHead}`)
         }
+        // Another worktree's fetch can advance the base branch while a merge is pending. A head the base
+        // branch already contains is still released code, so compare against the head itself; a head the
+        // base branch does not contain (an unreleased feature branch) keeps failing.
+        const released = yield* gitOption(git, ["merge-base", "--is-ancestor", pendingMergeHead, candidateCommit])
+        if (released !== undefined) return pendingMergeHead
         continue
       }
       // The pending tree already contains this base's released changes. Compare the
@@ -10173,6 +10193,15 @@ const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelf
   yield* git(["branch", "-m", "main", "release/x"])
   const noExactImplicitBase = yield* resolveMergeBase(git, undefined, undefined, pending).pipe(Effect.flip)
   yield* equal(noExactImplicitBase.reason.includes("exact pending merge head"), true)
+  // Another lane's fetch advances origin/main past the pending head: the head is still released code.
+  const advanced = yield* git(["commit-tree", `${released}^{tree}`, "-p", released, "-m", "advanced upstream"])
+  yield* git(["update-ref", "refs/remotes/origin/main", advanced])
+  yield* equal(yield* resolveMergeBase(git, undefined, undefined, pending), released)
+  yield* equal(yield* resolveMergeBase(git, undefined, "main", pending), released)
+  // An explicit base still has to name the pending head exactly.
+  const explicitAdvanced = yield* resolveMergeBase(git, "origin/main", undefined, pending).pipe(Effect.flip)
+  yield* equal(explicitAdvanced.reason.includes("must exactly match"), true)
+  yield* git(["update-ref", "refs/remotes/origin/main", initial])
   const missingBase = yield* resolveMergeBase(git, "missing", undefined, pending).pipe(Effect.flip)
   yield* equal(missingBase.reason.includes("Could not resolve"), true)
   // Non-main release baselines require an explicit choice, preserving coverage

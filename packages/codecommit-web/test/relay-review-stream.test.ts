@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
-import { afterEach, describe, expect, it } from "@effect/vitest"
+import { afterEach, describe, expect, it, vi } from "@effect/vitest"
+import { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import type {
   PullRequestRelayReviewResponse,
   RelayReviewStreamEvent,
@@ -23,7 +24,7 @@ const request: RelayReviewStreamRequest = {
 }
 
 const completedReview: PullRequestRelayReviewResponse = {
-  pullRequestId: "42",
+  pullRequestId: PullRequestId.make("42"),
   revisionId: "revision-1",
   baseCommit: "a".repeat(40),
   headCommit: "b".repeat(40),
@@ -44,13 +45,13 @@ describe("Relay review NDJSON transport", () => {
         streamController = controller
       }
     })
-    const originalFetch = window.fetch
-    window.fetch = (input) =>
+    const fetchSpy = vi.spyOn(window, "fetch").mockImplementation((input) =>
       Promise.resolve(
         new Response(input === "/api/session/current" ? null : body, {
           status: input === "/api/session/current" ? 204 : 200
         })
       )
+    )
     const events: Array<RelayReviewStreamEvent> = []
     const firstEvent = Promise.withResolvers<void>()
     const encoder = new TextEncoder()
@@ -71,7 +72,7 @@ describe("Relay review NDJSON transport", () => {
       await running
       expect(events[1]).toEqual({ type: "complete", review: completedReview })
     } finally {
-      window.fetch = originalFetch
+      fetchSpy.mockRestore()
     }
   })
 
@@ -85,13 +86,13 @@ describe("Relay review NDJSON transport", () => {
         controller.close()
       }
     })
-    const originalFetch = window.fetch
-    window.fetch = (input) =>
+    const fetchSpy = vi.spyOn(window, "fetch").mockImplementation((input) =>
       Promise.resolve(
         new Response(input === "/api/session/current" ? null : body, {
           status: input === "/api/session/current" ? 204 : 200
         })
       )
+    )
     try {
       const { runRelayReviewStream } = await import("../src/client/relay-review-stream.js")
       await expect(runRelayReviewStream("/review", request, () => undefined)).rejects.toMatchObject({
@@ -99,7 +100,7 @@ describe("Relay review NDJSON transport", () => {
         message: "Relay progress stream ended before a terminal event"
       })
     } finally {
-      window.fetch = originalFetch
+      fetchSpy.mockRestore()
     }
   })
 
@@ -113,13 +114,13 @@ describe("Relay review NDJSON transport", () => {
         controller.enqueue(encoder.encode(terminal + terminal))
       }
     })
-    const originalFetch = window.fetch
-    window.fetch = (input) =>
+    const fetchSpy = vi.spyOn(window, "fetch").mockImplementation((input) =>
       Promise.resolve(
         new Response(input === "/api/session/current" ? null : body, {
           status: input === "/api/session/current" ? 204 : 200
         })
       )
+    )
     try {
       const { runRelayReviewStream } = await import("../src/client/relay-review-stream.js")
       await expect(runRelayReviewStream("/review", request, () => undefined)).rejects.toMatchObject({
@@ -128,7 +129,7 @@ describe("Relay review NDJSON transport", () => {
       })
       expect(cancel).toHaveBeenCalledOnce()
     } finally {
-      window.fetch = originalFetch
+      fetchSpy.mockRestore()
     }
   })
 })

@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-monitor",
-  "version": "0.2.0",
+  "version": "0.3.1",
   "description": "Explicitly published, isolated read-only agent status boards",
   "license": "MIT",
   "author": "knpkv",
@@ -44,7 +44,7 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force && vite build",
-    "check": "tsc -b",
+    "check": "tsc -b && tsc -p test/tsconfig.json --noEmit",
     "lint": "eslint \"{src,test,scripts}/**/*.{ts,tsx,mjs}\" playwright.config.ts",
     "test": "vitest run",
     "test:pack": "node scripts/packed.mjs",

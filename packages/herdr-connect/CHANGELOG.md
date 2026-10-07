@@ -1,5 +1,49 @@
 # @knpkv/herdr-connect
 
+## 0.7.2
+
+### Patch Changes
+
+- Updated dependencies [[`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26), [`bfba87c`](https://github.com/knpkv/npm/commit/bfba87c566ca21d267c0626da60b431757dc5e32)]:
+  - @knpkv/herdr-fleet@0.7.0
+  - @knpkv/herdr-work@0.8.1
+
+## 0.7.1
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+
+- [#586](https://github.com/knpkv/npm/pull/586) [`1ef72d9`](https://github.com/knpkv/npm/commit/1ef72d9317a37e8f28563cae113e9908d8242c3a) Thanks [@konopkov](https://github.com/konopkov)! - The herdr-connect test suite, browser fixtures included, is now typechecked as part of `check`, and the package leaves the test-typecheck allowlist.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa), [`f8e842e`](https://github.com/knpkv/npm/commit/f8e842e901986b50edf55f98fa3591b742a7904e), [`30849c5`](https://github.com/knpkv/npm/commit/30849c598fdf6776a3a4a2c4061d276e843eaa8e)]:
+  - @knpkv/rly@0.12.1
+  - @knpkv/herdr-work@0.8.0
+
+## 0.7.0
+
+### Minor Changes
+
+- [#548](https://github.com/knpkv/npm/pull/548) [`0125a64`](https://github.com/knpkv/npm/commit/0125a6414d23989eae1d89ab0523dd09a1a7b5e1) Thanks [@konopkov](https://github.com/konopkov)! - Connect knows where a terminal is really scrolled to. The hub reads herdr's scroll position for the open pane (at most twice a second per session and ten times a second across the host) and sends it to the browser, so a pane someone left scrolled back opens with "Older output, N lines back", and Latest returns in exactly that many lines, one command per frame, until a fresh reading says the pane is at the bottom. Readings are taken only while no scroll is in flight and carry the number of scrolls they cover, so the browser uses only those that already include every scroll it sent. Hosts send it only to clients that ask for it, so hubs and hosts can be upgraded in any order. When the position can't be read it is shown as unknown, never as the bottom, and Connect falls back to its previous behaviour.
+
+### Patch Changes
+
+- [#575](https://github.com/knpkv/npm/pull/575) [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c) Thanks [@konopkov](https://github.com/konopkov)! - Focus rings match rly's: a solid 2px outline in the focus colour, 2px outside the control, from `--rly-focus-ring-width` and `--rly-focus-ring-offset`. Hand-rolled 1px to 3px rings, rings in agent, service or text colours, tinted halos and box-shadow rings are gone. Rings inside clipped containers pull the ring width inside.
+- Updated dependencies [[`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c), [`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6)]:
+  - @knpkv/herdr-work@0.7.2
+  - @knpkv/rly@0.12.0
+
+## 0.6.0
+
+### Minor Changes
+
+- [#557](https://github.com/knpkv/npm/pull/557) [`d215ab8`](https://github.com/knpkv/npm/commit/d215ab87781bd00f9199f3c04b0c3a901075efbb) Thanks [@konopkov](https://github.com/konopkov)! - The Connect tab leads with one sentence ("19 agents live, 1 needs attention; GAMMA offline") under a plain page title, instead of a display headline, an eyebrow and a count chip. Host and status filters are words with the current one underlined, each a full-height target. Rows show the agent's state as a word (ink only when it needs attention) without presence dots or status chips, name a parent agent by its name instead of its full id, keep host and work names whole, and wrap long lines instead of cutting them off; the selected row is filled and outlined rather than marked by a side bar. A directory that fails to load or refresh says why in one line and keeps the last list with its age, never a stack trace.
+
+### Patch Changes
+
+- Updated dependencies [[`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5)]:
+  - @knpkv/rly@0.11.0
+  - @knpkv/herdr-work@0.7.1
+
 ## 0.5.0
 
 ### Minor Changes

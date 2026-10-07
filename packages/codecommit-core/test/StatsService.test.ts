@@ -26,14 +26,24 @@ const makeDetail = (prId: string, durationMs: number) => ({
 })
 
 type Detail = ReturnType<typeof makeDetail>
-const emptyHealth = { total: 0, withComments: 0, approved: 0 }
+const emptyHealth = { total: 0, withComments: 0, approved: 0, ruleBacked: 0 }
 const emptySize = { small: 0, medium: 0, large: 0, extraLarge: 0 }
 const emptyFilterOpts = {
   repos: [],
   authors: [],
   accounts: []
 } satisfies { repos: Array<string>; authors: Array<string>; accounts: Array<string> }
-const emptyReviewer = {
+type ReviewerData = {
+  topReviewers: Array<{ author: string; commentCount: number }>
+  topApprovers: Array<{ author: string; approvalCount: number }>
+  avgTimeToFirstReview: number | null
+  avgTimeToMerge: null
+  avgTimeToAddressFeedback: number | null
+  firstReviewDetails: Array<Detail>
+  feedbackDetails: Array<Detail>
+}
+
+const emptyReviewer: ReviewerData = {
   topReviewers: [],
   topApprovers: [],
   avgTimeToFirstReview: null,
@@ -41,14 +51,6 @@ const emptyReviewer = {
   avgTimeToAddressFeedback: null,
   firstReviewDetails: [],
   feedbackDetails: []
-} satisfies {
-  topReviewers: Array<{ author: string; commentCount: number }>
-  topApprovers: Array<{ author: string; approvalCount: number }>
-  avgTimeToFirstReview: number | null
-  avgTimeToMerge: number | null
-  avgTimeToAddressFeedback: number | null
-  firstReviewDetails: Array<Detail>
-  feedbackDetails: Array<Detail>
 }
 
 /** Build a mock StatsRepo with overridable query results */
@@ -57,9 +59,9 @@ const mockStatsRepo = (overrides: Partial<{
   contributors: Array<{ author: string; prCount: number }>
   mostActivePRs: WeeklyStats["mostActivePRs"]
   stalePRs: WeeklyStats["stalePRs"]
-  health: { total: number; withComments: number; approved: number }
+  health: { total: number; withComments: number; approved: number; ruleBacked: number }
   mergeDetails: Array<Detail>
-  reviewerData: typeof emptyReviewer
+  reviewerData: ReviewerData
 }> = {}) =>
   Layer.succeed(
     StatsRepo,
@@ -86,7 +88,7 @@ const testLayer = (overrides?: Parameters<typeof mockStatsRepo>[0]) =>
   StatsService.Default.pipe(
     Layer.provide(Layer.mergeAll(
       mockStatsRepo(overrides),
-      Layer.mock(PullRequestRepo, { _tag: "PullRequestRepo" }),
+      Layer.mock(PullRequestRepo, {}),
       Layer.mock(ConfigService, {}),
       Layer.mock(AwsClient, {})
     ))
@@ -107,7 +109,7 @@ describe("StatsService", () => {
       const svc = yield* StatsService
       const stats = yield* svc.getWeeklyStats("2026-W10", {})
       expect(stats.reviewCoverage).toBe(0.8)
-    }).pipe(Effect.provide(testLayer({ health: { total: 10, withComments: 8, approved: 6 } }))))
+    }).pipe(Effect.provide(testLayer({ health: { total: 10, withComments: 8, approved: 6, ruleBacked: 10 } }))))
 
   // approvalRate = approved / total — fraction of PRs formally approved
   it.effect("computes approvalRate from health indicators", () =>
@@ -115,7 +117,15 @@ describe("StatsService", () => {
       const svc = yield* StatsService
       const stats = yield* svc.getWeeklyStats("2026-W10", {})
       expect(stats.approvalRate).toBe(0.6)
-    }).pipe(Effect.provide(testLayer({ health: { total: 10, withComments: 8, approved: 6 } }))))
+    }).pipe(Effect.provide(testLayer({ health: { total: 10, withComments: 8, approved: 6, ruleBacked: 10 } }))))
+
+  // A pull request without rules is neither approved nor pending: it leaves the approval rate alone.
+  it.effect("computes approvalRate over the pull requests that have approval rules", () =>
+    Effect.gen(function*() {
+      const svc = yield* StatsService
+      const stats = yield* svc.getWeeklyStats("2026-W10", {})
+      expect(stats.approvalRate).toBe(1)
+    }).pipe(Effect.provide(testLayer({ health: { total: 2, withComments: 0, approved: 1, ruleBacked: 1 } }))))
 
   // Both metrics must be null when no PRs exist — avoids division by zero
   it.effect("returns null coverage and approval for zero PRs", () =>

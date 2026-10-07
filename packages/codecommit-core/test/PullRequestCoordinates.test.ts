@@ -10,6 +10,7 @@ import migration0019 from "../src/CacheService/migrations/0019_dependent_pr_coor
 import migration0020 from "../src/CacheService/migrations/0020_notification_coordinates.js"
 import migration0022 from "../src/CacheService/migrations/0022_pull_request_approval_unknown.js"
 import migration0023 from "../src/CacheService/migrations/0023_pull_request_row_versions.js"
+import migration0024 from "../src/CacheService/migrations/0024_pull_request_approval_baseline.js"
 import { UpsertInput } from "../src/CacheService/repos/PullRequestRepo/internal.js"
 import { mutations } from "../src/CacheService/repos/PullRequestRepo/mutations.js"
 
@@ -59,7 +60,11 @@ describe("pull request coordinate migration", () => {
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-pr-coordinates-" })
-      const context = yield* Layer.build(LibsqlClient.layer({ url: `file:${root}/cache.db` }))
+      // The production client's camelCase column transform: the repository's row reads rely on it.
+      const context = yield* Layer.build(LibsqlClient.layer({
+        url: `file:${root}/cache.db`,
+        transformResultNames: (name: string) => name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase())
+      }))
       const sql = Context.get(context, SqlClient.SqlClient)
 
       yield* sql`CREATE TABLE pull_requests (
@@ -99,7 +104,22 @@ describe("pull request coordinate migration", () => {
       // The repository writes the approval column added later.
       yield* migration0022.pipe(Effect.provideService(SqlClient.SqlClient, sql))
       yield* migration0023.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      yield* insertPullRequest(sql, "billing", "eu-west-1")
+      yield* sql`UPDATE pull_requests SET approval_unknown_reason = 'Throttled'`
+      yield* sql`UPDATE pull_requests SET is_approved = 1 WHERE repository_name = 'billing'`
+      yield* migration0024.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      // An unknown row not approved may be a first-seen placeholder, so its baseline starts unknown; an
+      // unknown approved one kept an earlier successful evaluation (placeholders are stored unapproved).
+      expect(
+        yield* sql<{ repository: string; known: number }>`
+          SELECT repository_name AS repository, approval_baseline_known AS known FROM pull_requests ORDER BY 1`
+      ).toEqual([{ repository: "billing", known: 1 }, { repository: "payments", known: 0 }])
+      yield* sql`DELETE FROM pull_requests WHERE repository_name = 'billing'`
+      yield* sql`UPDATE pull_requests SET approval_unknown_reason = NULL, approval_baseline_known = 1`
       yield* insertPullRequest(sql, "orders", "us-east-1")
+      // A raw insert after migration 0023 leaves the approval version at its empty default; the
+      // repository's own writes always set it.
+      yield* sql`UPDATE pull_requests SET approval_version = last_modified_date WHERE approval_version = ''`
       const repo = mutations(sql, Effect.void)
       yield* repo.upsert(upsertInput("orders", "us-east-1", "Orders updated"), 1)
       yield* repo.upsert(upsertInput("payments", "eu-west-1", "Payments updated"), 2)

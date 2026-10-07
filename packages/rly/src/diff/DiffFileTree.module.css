@@ -139,8 +139,8 @@
   }
 
   .directoryButton:focus-visible {
-    outline: 3px solid var(--rly-color-focus);
-    outline-offset: -3px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
   }
 
   .chevron {
@@ -212,8 +212,8 @@
   }
 
   .file:focus-visible {
-    outline: 3px solid var(--rly-color-focus);
-    outline-offset: -3px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
   }
 
   .pathBlock {

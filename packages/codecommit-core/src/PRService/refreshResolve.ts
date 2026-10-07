@@ -12,7 +12,7 @@ import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import { type AppStatus, AwsRegion } from "../Domain.js"
-import type { AwsClientError } from "../Errors.js"
+import { type AwsClientError, describeAwsClientError } from "../Errors.js"
 import { applyIdentityEvent, IdentityEvent, type LookupFailureReason, startRefresh } from "../IdentityLifecycle.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
 import { enabledProfilesOf, retainEnabledAccountRows } from "./visibility.js"
@@ -42,6 +42,7 @@ export const isSubscribedForCoordinates = (
       onNone: () => false,
       onSome: (row) => row.repositoryName === repositoryName && row.accountRegion === accountRegion
     })),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(false))
   )
 }
@@ -106,7 +107,12 @@ const resolveIdentity = (
       return yield* notificationRepo.addSystem({
         type: "error",
         title: `${account.profile} (${region})`,
-        message: "Failed to get caller identity — session may have expired",
+        message: JSON.stringify({
+          operation: "getCallerIdentity",
+          profile: account.profile,
+          region,
+          cause: describeAwsClientError(lookup.failure)
+        }),
         profile: account.profile,
         deduplicate: true
       }).pipe(Effect.catch((error) => Effect.logWarning("caller identity notification failed", error)))
@@ -132,6 +138,7 @@ export const resolveAccounts = (state: PRState) =>
     const config = yield* configService.load.pipe(Effect.orDie)
     const enabled = enabledProfilesOf(config.accounts)
     const cachedPRs = retainEnabledAccountRows(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       yield* prRepo.findAll().pipe(Effect.catchIf(() => true, () => Effect.succeed([]))),
       enabled
     )
@@ -145,6 +152,7 @@ export const resolveAccounts = (state: PRState) =>
       ...((cachedPRs.length > 0) && { statusDetail: "loading from cache..." })
     }))
 
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const detected = yield* configService.detectProfiles.pipe(Effect.catchIf(() => true, () => Effect.succeed([])))
 
     const accountsState = detected.map((d) => {
@@ -199,6 +207,7 @@ export const resolveAccounts = (state: PRState) =>
     const accountIdMap = yield* Ref.get(accountIdRef)
 
     // Load subscriptions for diff
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const subscriptions = yield* subscriptionRepo.findAll().pipe(Effect.catchIf(() => true, () => Effect.succeed([])))
     const subscribedRef = yield* Ref.make(
       new Set(

@@ -10,8 +10,8 @@ import {
 const pullRequest = new Domain.PullRequest({
   account: new Domain.Account({
     awsAccountId: "credential-account",
-    profile: "production",
-    region: "eu-west-1",
+    profile: Domain.AwsProfileName.make("production"),
+    region: Domain.AwsRegion.make("eu-west-1"),
     repoAccountId: "repository-account"
   }),
   approvalRules: [],
@@ -45,16 +45,16 @@ const sandbox = {
 describe("PR detail provider coordinates", () => {
   it("keeps recovery requests distinct when only repository or region changes", () => {
     const base = pullRequestRefreshKey("credential-account", "42", {
-      region: "eu-west-1",
+      region: Domain.AwsRegion.make("eu-west-1"),
       repositoryName: "payments"
     })
 
     expect(pullRequestRefreshKey("credential-account", "42", {
-      region: "us-east-1",
+      region: Domain.AwsRegion.make("us-east-1"),
       repositoryName: "payments"
     })).not.toBe(base)
     expect(pullRequestRefreshKey("credential-account", "42", {
-      region: "eu-west-1",
+      region: Domain.AwsRegion.make("eu-west-1"),
       repositoryName: "other"
     })).not.toBe(base)
     expect(pullRequestRefreshKey("credential-account", "42", undefined)).not.toBe(base)
@@ -71,8 +71,8 @@ describe("PR detail provider coordinates", () => {
     expect(pullRequestSandboxAccountId(
       new Domain.Account({
         awsAccountId: undefined,
-        profile: "production",
-        region: "eu-west-1",
+        profile: Domain.AwsProfileName.make("production"),
+        region: Domain.AwsRegion.make("eu-west-1"),
         repoAccountId: "repository-account"
       })
     )).toBe("production")

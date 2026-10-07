@@ -27,10 +27,12 @@ import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
 import {
+  approvalNotRequiredLabel,
   approvalOf,
   approvalUnknownLabel,
   approvalUnknownReasonText,
   AwsRegion,
+  identityMatches,
   PullRequestId
 } from "@knpkv/codecommit-core/Domain.js"
 import {
@@ -38,33 +40,26 @@ import {
   type CategoryStatus,
   getScoreTier,
   type HealthScore,
-  type HealthScoreCategory
+  type HealthScoreCategory,
+  healthUnknownReason
 } from "@knpkv/codecommit-core/HealthScore.js"
-import { ServiceMark, Verdict, type RlyVerdictTone } from "@knpkv/rly/patterns"
+import { ServiceMark } from "@knpkv/rly/patterns"
 import {
   Button as RlyButton,
   Field,
+  Notice,
   StateLabel,
   StatePanel,
   Surface,
   Text,
+  type RlyNoticeTone,
   type RlyStateTone
 } from "@knpkv/rly/primitives"
 import { Exit, Option } from "effect"
+import * as Cause from "effect/Cause"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
-import {
-  ArrowRightIcon,
-  BellIcon,
-  BellOffIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  CodeIcon,
-  LoaderIcon,
-  PlusIcon,
-  RefreshCwIcon,
-  TrashIcon
-} from "lucide-react"
+import { ArrowRightIcon, CheckIcon, ChevronDownIcon, CodeIcon, LoaderIcon, PlusIcon, TrashIcon } from "lucide-react"
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
 import { Link, useNavigate, useParams, useSearchParams } from "react-router"
@@ -74,6 +69,7 @@ import { toast } from "sonner"
 import {
   appStateAtom,
   createApprovalRuleAtom,
+  deleteApprovalRuleAtom,
   createSandboxAtom,
   openPrAtom,
   refreshSinglePrAtom,
@@ -99,6 +95,7 @@ import {
 } from "../review-comment-navigation.js"
 import { StorageKeys } from "../storage-keys.js"
 import { extractScope } from "../utils/extractScope.js"
+import { makeInFlight, pullRequestRefreshKey } from "../utils/inFlight.js"
 import { Badge } from "./ui/badge.js"
 import { Button } from "./ui/button.js"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "./ui/dialog.js"
@@ -215,26 +212,54 @@ const isTextInputTarget = (target: EventTarget | null): boolean => {
   return tagName === "INPUT" || tagName === "TEXTAREA"
 }
 
+/** The focused element's tag, read from a key event's target; null when the target is not an element. */
+const focusedElement = (target: EventTarget | null): Pick<Element, "tagName"> | null =>
+  Predicate.hasProperty(target, "tagName") && Predicate.isString(target.tagName) ? { tagName: target.tagName } : null
+
+/**
+ * Whether someone other than the author signed off, as review evidence for time to first review. Any
+ * sign-off counts: one of two required, or a voluntary one where no rules apply. An unknown approval
+ * holds only a last known one, so it doesn't.
+ */
+export const signedOffByOthers = (pr: Domain.PullRequest): boolean =>
+  approvalOf(pr)._tag !== "Unknown" && pr.approvedBy.some((approver) => !identityMatches(approver, pr.author))
+
 /**
  * True when Enter on the focused element already does something (follow a link, press a button),
  * so the page-wide Enter shortcut must not also fire. Used by the PR page's keydown handler.
  */
-export const ownsEnterKey = (target: EventTarget | null): boolean => {
-  const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
+export const ownsEnterKey = (target: Pick<Element, "tagName"> | null): boolean => {
+  const tagName = target?.tagName
   return tagName === "A" || tagName === "BUTTON" || tagName === "SELECT" || tagName === "SUMMARY"
 }
+
+/**
+ * True when a key event's path (`event.composedPath()`) crosses an open dialog, native `<dialog
+ * open>` or an ARIA `role="dialog"` (Radix and rly Sheet render those): Esc there closes the
+ * dialog, so the PR page's own shortcuts (Esc back to the queue, Enter/o console, `.` sandbox)
+ * must stay out of it.
+ */
+export const insideOpenDialog = (path: ReadonlyArray<EventTarget>): boolean =>
+  path.some(
+    (node) =>
+      (Predicate.hasProperty(node, "tagName") &&
+        node.tagName === "DIALOG" &&
+        Predicate.hasProperty(node, "open") &&
+        node.open === true) ||
+      (Predicate.hasProperty(node, "role") && (node.role === "dialog" || node.role === "alertdialog"))
+  )
 
 const formatRelativeDate = (dateStr: string): string => {
   const date = new Date(dateStr)
   const abs = date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
   const diffMs = Date.now() - date.getTime()
   const diffMins = Math.floor(diffMs / 60_000)
-  if (diffMins < 1) return `${abs} · just now`
-  if (diffMins < 60) return `${abs} · ${diffMins}m ago`
+  if (diffMins < 1) return `${abs}, just now`
+  if (diffMins < 60) return `${abs}, ${diffMins}m ago`
   const diffHours = Math.floor(diffMins / 60)
-  if (diffHours < 24) return `${abs} · ${diffHours}h ago`
+  if (diffHours < 24) return `${abs}, ${diffHours}h ago`
   const diffDays = Math.floor(diffHours / 24)
-  return `${abs} · ${diffDays}d ago`
+  return `${abs}, ${diffDays}d ago`
 }
 
 const earliestDate = (loc: { readonly comments: ReadonlyArray<CommentThreadJsonEncoded> }): number => {
@@ -276,17 +301,24 @@ function CommentsCountReporter({
 }
 
 function ScoreBadge({ score }: { readonly score: HealthScore | undefined }) {
-  if (score === undefined) return null
+  // Unknown reads as a dash, never a red 0: the breakdown says which date is missing.
+  if (score === undefined) return <StateLabel label="Health —" size="compact" tone="neutral" />
   const tier = getScoreTier(score.total)
 
   return <StateLabel label={`Health ${score.total.toFixed(1)} / 10`} size="compact" tone={healthTone(tier)} />
 }
 
-function ScoreBreakdown({ score }: { readonly score: HealthScore | undefined }) {
+function ScoreBreakdown({
+  score,
+  unknownReason
+}: {
+  readonly score: HealthScore | undefined
+  readonly unknownReason: Option.Option<string>
+}) {
   if (score === undefined) {
     return (
       <Text tone="secondary" variant="meta">
-        Waiting for comment count…
+        {`Not enough data to score: ${Option.getOrElse(unknownReason, () => "no dates")}.`}
       </Text>
     )
   }
@@ -375,9 +407,10 @@ function CommentThread({
     >
       <div className={styles.commentBody}>
         <div className={styles.commentMeta}>
-          <strong>{thread.root.author}</strong>
-          <span aria-hidden="true">·</span>
-          <time dateTime={thread.root.creationDate}>{formatRelativeDate(thread.root.creationDate)}</time>
+          <span>
+            <strong>{thread.root.author}</strong>,{" "}
+            <time dateTime={thread.root.creationDate}>{formatRelativeDate(thread.root.creationDate)}</time>
+          </span>
           {target === null ? null : (
             <button className={styles.commentJump} onClick={() => onNavigateToDiff(target)} type="button">
               <CodeIcon aria-hidden="true" /> View in diff
@@ -527,7 +560,7 @@ function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
     const firstComment = allComments.find((c) => c.author !== pr.author)
     const commentMs = firstComment !== undefined ? firstComment.date.getTime() - pr.creationDate.getTime() : null
     // Approval as review fallback: use lastModifiedDate as proxy for approval time
-    const hasNonAuthorApproval = approvalOf(pr)._tag === "Approved" && pr.approvedBy.some((a) => a !== pr.author)
+    const hasNonAuthorApproval = signedOffByOthers(pr)
     const approvalMs = hasNonAuthorApproval ? pr.lastModifiedDate.getTime() - pr.creationDate.getTime() : null
     const ttfr = commentMs != null && approvalMs != null ? Math.min(commentMs, approvalMs) : (commentMs ?? approvalMs)
 
@@ -632,9 +665,20 @@ interface ApproversCardProps {
   readonly currentUser: string | undefined
   readonly repoAccountId: string
   readonly onSetApprovers: (arns: ReadonlyArray<string>) => void
-  readonly onRefresh: () => void
+  /**
+   * Deletes this card's own rule (never a template rule), then refreshes the pull request. Says which
+   * step failed: a failed refresh is retried with `onRefresh`, never by deleting again.
+   */
+  readonly onRemoveRule: () => Promise<RuleRemoval>
+  readonly onRefresh: () => Promise<boolean>
   readonly permissionPrompt: boolean
 }
+
+/** How removing a rule ended. */
+type RuleRemoval =
+  | { readonly _tag: "Removed" }
+  | { readonly _tag: "DeleteFailed"; readonly reason: string }
+  | { readonly _tag: "RefreshFailed" }
 
 function ApproversCard({
   approvalRules,
@@ -643,6 +687,7 @@ function ApproversCard({
   currentUser,
   knownUserArns,
   onRefresh,
+  onRemoveRule,
   onSetApprovers,
   permissionPrompt,
   repoAccountId,
@@ -660,6 +705,11 @@ function ApproversCard({
     onRefresh
   })
   const { pendingAdd, pendingRemove } = optimistic
+  // Removing stays on until the refreshed rules drop the rule (the button goes with it), so it can't be
+  // clicked again against a rule that is already gone.
+  const [removal, setRemoval] = useState<{ readonly _tag: "Idle" } | { readonly _tag: "Removing" } | RuleRemoval>({
+    _tag: "Idle"
+  })
 
   // Pool members for THIS card: template rules + this card's managed rule (not other managed rules)
   const allPoolMembers = useMemo(() => {
@@ -676,6 +726,18 @@ function ApproversCard({
   const managedRule = approvalRules.find((r) => r.ruleName === ruleName && r.fromTemplate === undefined)
   const managedArns = managedRule?.poolMemberArns ?? []
   const managedMembers = managedRule?.poolMembers ?? []
+  const hasManagedRule = managedRule !== undefined
+  useEffect(() => {
+    if (!hasManagedRule) setRemoval({ _tag: "Idle" })
+  }, [hasManagedRule])
+  const removeRule = () => {
+    setRemoval({ _tag: "Removing" })
+    void onRemoveRule().then(setRemoval)
+  }
+  const refreshAfterRemoval = () => {
+    setRemoval({ _tag: "Removing" })
+    void onRefresh().then((refreshed) => setRemoval(refreshed ? { _tag: "Removed" } : { _tag: "RefreshFailed" }))
+  }
 
   // Users available to add (have known ARN + not already in pool)
   const addable = useMemo(
@@ -708,7 +770,7 @@ function ApproversCard({
     <Surface as="section" className={styles.approverCard} padding="default" form="grouped" tone="secondary">
       <header className={styles.approverHeading}>
         <div className={styles.approverTitle}>
-          <Text as="h3" variant="card-title">
+          <Text as="h3" variant="label">
             {title}
           </Text>
           {required &&
@@ -731,7 +793,32 @@ function ApproversCard({
         >
           <PlusIcon className="size-4" />
         </Button>
+        {managedRule === undefined ? null : (
+          // Only the rule this page created can be removed; template rules belong to the repository.
+          <RlyButton
+            // Removed and waiting for the refreshed rules to drop it: no second delete.
+            disabled={removal._tag === "Removed" || removal._tag === "RefreshFailed"}
+            loading={removal._tag === "Removing"}
+            onClick={removeRule}
+            size="compact"
+            variant="quiet"
+          >
+            Remove rule
+          </RlyButton>
+        )}
       </header>
+      {removal._tag === "DeleteFailed" ? (
+        <p className={styles.removeFailure} role="alert">
+          Couldn't remove the rule: {removal.reason}
+        </p>
+      ) : removal._tag === "RefreshFailed" ? (
+        <p className={styles.removeFailure} role="alert">
+          Removed the rule, but this page couldn't refresh to show it.{" "}
+          <RlyButton onClick={refreshAfterRemoval} size="compact" variant="quiet">
+            Refresh
+          </RlyButton>
+        </p>
+      ) : null}
       <div className={styles.approverBody}>
         {showPicker && (
           <div className={styles.approverPicker}>
@@ -789,7 +876,7 @@ function ApproversCard({
         )}
         {!showPicker && prefix.length > 0 && addable.length > 0 && (
           <div className={styles.suggestedApprovers}>
-            <Text tone="tertiary" variant="meta">
+            <Text tone="secondary" variant="meta">
               Suggested
             </Text>
             {addable.slice(0, 5).map(([name, arn]) => (
@@ -845,7 +932,7 @@ function ApproversCard({
 
 interface PullRequestDecisionPresentation {
   readonly reason: string
-  readonly tone: RlyVerdictTone
+  readonly tone: RlyNoticeTone
   readonly verdict: string
 }
 
@@ -896,7 +983,10 @@ const pullRequestDecision = (pr: Domain.PullRequest): PullRequestDecisionPresent
         }
       }
       return {
-        reason: "CodeCommit reports a clean merge and the provider approval is satisfied.",
+        reason:
+          approval._tag === "NotRequired"
+            ? "CodeCommit reports a clean merge, and no approval rules apply to this pull request."
+            : "CodeCommit reports a clean merge and the provider approval is satisfied.",
         tone: "positive",
         verdict: "Ready to merge."
       }
@@ -911,10 +1001,23 @@ export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
   const [searchParams] = useSearchParams()
   const state = useAtomValue(appStateAtom)
-  const refreshSingle = useAtomSet(refreshSinglePrAtom)
-  const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom, { mode: "promise" })
+  // The pull request as the route names it: these never change while the page shows it, unlike the
+  // account id and coordinates the loaded PR supplies later.
+  const refreshKey = pullRequestRefreshKey(
+    accountId,
+    prId ?? "",
+    searchParams.get("repository") ?? undefined,
+    searchParams.get("region") ?? undefined
+  )
+  const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom(refreshKey), { mode: "promise" })
+  // One refresh per pull request at a time: overlapping triggers share it instead of cancelling it.
+  // Scoped to the route: leaving a pull request releases its refresh atom, which can interrupt a
+  // pending call whose promise then never settles, so a later visit starts from a fresh map rather
+  // than wait on it.
+  const shareRefresh = useMemo(() => makeInFlight<Awaited<ReturnType<typeof refreshSingleWithResult>>>(), [refreshKey])
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
+  const deleteRule = useAtomSet(deleteApprovalRuleAtom, { mode: "promiseExit" })
   const fetchedRef = useRef<string | null>(null)
   const routeSelection = useMemo(() => {
     const route = pullRequestRouteCoordinates(accountId, prId, searchParams)
@@ -928,6 +1031,22 @@ export function PRDetail() {
   const refreshAccountId = pr === null ? accountId : reviewApiAccountId(pr)
   const refreshRepositoryName = pr === null ? (searchParams.get("repository") ?? undefined) : String(pr.repositoryName)
   const refreshRegion = pr === null ? (searchParams.get("region") ?? undefined) : String(pr.account.region)
+  // Keyed by the route, so the mount refresh and a later click share one request even after the
+  // loaded PR replaces the account id and coordinates the request uses. `fresh` waits for a pending
+  // request (it may have read the state before a change) and then reads again.
+  const requestRefresh = useCallback(
+    (requestAccountId: string, id: string, policy: "share" | "fresh" = "share") =>
+      shareRefresh[policy](refreshKey, () =>
+        refreshSingleWithResult({
+          params: { awsAccountId: requestAccountId, prId: PullRequestId.make(id) },
+          query:
+            refreshRepositoryName !== undefined && refreshRegion !== undefined
+              ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
+              : {}
+        })
+      ),
+    [refreshKey, refreshRegion, refreshRepositoryName, refreshSingleWithResult, shareRefresh]
+  )
 
   // Collect ALL known users from all PRs (authors, approvers, commenters, pool members)
   // Build CodeCommitApprovers:REPO_ACCT:username directly — no ARN needed
@@ -967,19 +1086,14 @@ export function PRDetail() {
     const key = `${refreshAccountId}:${prId}:${refreshRepositoryName ?? ""}:${refreshRegion ?? ""}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    refreshSingle({
-      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
-      query:
-        refreshRepositoryName !== undefined && refreshRegion !== undefined
-          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
-          : {}
-    })
-  }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingle, routeAmbiguous])
+    void requestRefresh(refreshAccountId, prId).catch(() => {})
+  }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, requestRefresh, routeAmbiguous])
 
   const score: HealthScore | undefined = useMemo(
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
     [pr]
   )
+  const scoreUnknownReason = useMemo(() => (pr !== null ? healthUnknownReason(pr) : Option.none<string>()), [pr])
   const navigate = useNavigate()
   const openPr = useAtomSet(openPrAtom)
   const granted = useDismissable(StorageKeys.grantedDismissed)
@@ -1137,20 +1251,19 @@ export function PRDetail() {
     },
     [commentNavigationIdentity, pr?.commentCount]
   )
-  const refreshAfterApprovalMutation = useCallback(() => {
+  /** Re-reads this pull request after an approval change; resolves with whether the refresh succeeded. */
+  const refreshAfterApprovalMutation = useCallback((): Promise<boolean> => {
     if (refreshAccountId === undefined || refreshAccountId.length === 0 || prId === undefined || prId.length === 0)
-      return
-    void refreshSingleWithResult({
-      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
-      query:
-        refreshRepositoryName !== undefined && refreshRegion !== undefined
-          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
-          : {}
-    }).then(
-      (refreshed) => invalidateReview(refreshed, false),
-      () => {}
+      return Promise.resolve(false)
+    // A refresh already in flight may have read the rules before this change, so read again after it.
+    return requestRefresh(refreshAccountId, prId, "fresh").then(
+      (refreshed) => {
+        invalidateReview(refreshed, false)
+        return true
+      },
+      () => false
     )
-  }, [invalidateReview, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingleWithResult])
+  }, [invalidateReview, prId, refreshAccountId, requestRefresh])
   const handleRefresh = useCallback(() => {
     if (
       refreshAccountId === undefined ||
@@ -1161,13 +1274,7 @@ export function PRDetail() {
     )
       return
     setIsRefreshing(true)
-    void refreshSingleWithResult({
-      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
-      query:
-        refreshRepositoryName !== undefined && refreshRegion !== undefined
-          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
-          : {}
-    }).then(
+    void requestRefresh(refreshAccountId, prId).then(
       (refreshed) => {
         invalidateReview(refreshed, true)
         setIsRefreshing(false)
@@ -1179,15 +1286,7 @@ export function PRDetail() {
         })
       }
     )
-  }, [
-    invalidateReview,
-    isRefreshing,
-    prId,
-    refreshAccountId,
-    refreshRegion,
-    refreshRepositoryName,
-    refreshSingleWithResult
-  ])
+  }, [invalidateReview, isRefreshing, prId, refreshAccountId, requestRefresh])
 
   // Copy console URL
   const consoleUrl =
@@ -1304,11 +1403,14 @@ export function PRDetail() {
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isTextInputTarget(e.target)) return
+      if (isTextInputTarget(e.target) || insideOpenDialog(e.composedPath())) return
       if (e.key === "Escape") {
         e.preventDefault()
         navigate("/")
-      } else if ((e.key === "o" || (e.key === "Enter" && !ownsEnterKey(e.target))) && consoleUrl.length > 0) {
+      } else if (
+        (e.key === "o" || (e.key === "Enter" && !ownsEnterKey(focusedElement(e.target)))) &&
+        consoleUrl.length > 0
+      ) {
         handleOpen()
       } else if (e.key === "." && pr !== null) {
         e.preventDefault()
@@ -1358,32 +1460,31 @@ export function PRDetail() {
       </nav>
 
       <header className={styles.hero}>
-        <div className={styles.eyebrow}>
-          <ServiceMark service="codecommit" size="compact" />
-          <Text tone="secondary" variant="label">
-            Pull request {pr.id}
-          </Text>
-        </div>
-        <Text as="h1" className={styles.title} variant="page-title">
+        <Text as="h1" className={styles.title} variant="section-title">
           {pr.title}
         </Text>
         <div className={styles.heroMeta}>
-          <Link className={styles.textLink} to={`/?f=author:${encodeURIComponent(pr.author)}`}>
-            {pr.author}
-          </Link>
-          <span aria-hidden="true">·</span>
-          <time dateTime={pr.creationDate.toISOString()}>{DateUtils.formatDate(pr.creationDate)}</time>
-          {pr.fetchedAt && (
-            <>
-              <span aria-hidden="true">·</span>
-              <span>{DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}</span>
-            </>
-          )}
+          <ServiceMark service="codecommit" size="compact" />
+          <span>
+            Pull request {pr.id} by{" "}
+            <Link className={styles.textLink} to={`/?f=author:${encodeURIComponent(pr.author)}`}>
+              {pr.author}
+            </Link>
+            , opened <time dateTime={pr.creationDate.toISOString()}>{DateUtils.formatDate(pr.creationDate)}</time>.
+            {pr.fetchedAt !== undefined ? (
+              <> {DateUtils.formatRelativeTime(pr.fetchedAt, new Date(), "Fetched")}.</>
+            ) : null}
+          </span>
         </div>
       </header>
 
       <section aria-label="Pull request decision and actions" className={styles.decisionWorkspace}>
-        <Verdict className={styles.verdict} reason={decision.reason} tone={decision.tone} verdict={decision.verdict} />
+        {/* The review state is a sentence under the title, not the largest thing on the page. */}
+        <Notice className={styles.verdict} tone={decision.tone}>
+          <Text as="span" tone="inherit" variant="body-large">
+            <strong>{decision.verdict}</strong> {decision.reason}
+          </Text>
+        </Notice>
         <aside className={styles.actionRail}>
           <div className={styles.actionHeading}>
             <Text tone="secondary" variant="label">
@@ -1392,31 +1493,27 @@ export function PRDetail() {
             <StateLabel label={statusLabel} size="compact" tone={pullRequestStatusTone(pr.status)} />
           </div>
           <div className={styles.actionGroup}>
-            <Button
-              className={styles.actionButton}
-              disabled={isRefreshing}
-              onClick={handleRefresh}
-              size="sm"
-              variant="outline"
-            >
-              <RefreshCwIcon className={`size-3.5 ${isRefreshing ? "animate-spin" : ""}`} />
-              Refresh
-            </Button>
-            <Button className={styles.actionButton} onClick={handleSubscriptionToggle} size="sm" variant="outline">
-              {isSubscribed ? <BellOffIcon className="size-3.5" /> : <BellIcon className="size-3.5" />}
-              {isSubscribed ? "Unsubscribe" : "Subscribe"}
-            </Button>
-            <Button className={styles.actionButton} onClick={handleSandbox} size="sm" variant="outline">
-              <CodeIcon className="size-3.5" />
-              {stoppingSandbox !== undefined ? "Stopping…" : existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
-            </Button>
             <RlyButton
               className={styles.actionButton}
-              leadingIcon={copied ? "check" : "link"}
-              onClick={handleCopy}
+              loading={isRefreshing}
+              onClick={handleRefresh}
               size="compact"
               variant="secondary"
             >
+              Refresh
+            </RlyButton>
+            <RlyButton
+              className={styles.actionButton}
+              onClick={handleSubscriptionToggle}
+              size="compact"
+              variant="secondary"
+            >
+              {isSubscribed ? "Unsubscribe" : "Subscribe"}
+            </RlyButton>
+            <RlyButton className={styles.actionButton} onClick={handleSandbox} size="compact" variant="secondary">
+              {stoppingSandbox !== undefined ? "Stopping…" : existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
+            </RlyButton>
+            <RlyButton className={styles.actionButton} onClick={handleCopy} size="compact" variant="secondary">
               {copied ? "Copied" : "Copy Link"}
             </RlyButton>
             <RlyButton
@@ -1429,8 +1526,8 @@ export function PRDetail() {
               Open in Console
             </RlyButton>
           </div>
-          <Text tone="tertiary" variant="meta">
-            Enter or O opens CodeCommit · . opens the sandbox · Esc returns to the list
+          <Text tone="secondary" variant="meta">
+            Enter or O opens CodeCommit. Period opens the sandbox. Esc returns to the list.
           </Text>
         </aside>
       </section>
@@ -1441,11 +1538,12 @@ export function PRDetail() {
             <Text tone="secondary" variant="label">
               Current revision
             </Text>
-            <Text as="h2" variant="section-title">
+            <Text as="h2" variant="card-title">
               {pr.repositoryName}
             </Text>
+            {/* In the text flow, not the corner, so the floating Relay dock can't cover it. */}
+            <ScoreBadge score={score} />
           </div>
-          <ScoreBadge score={score} />
         </header>
 
         <div aria-label={`${pr.sourceBranch} into ${pr.destinationBranch}`} className={styles.branchPair}>
@@ -1511,6 +1609,8 @@ export function PRDetail() {
               <>
                 {approvalOf(pr)._tag === "Unknown" ? (
                   <StateLabel label={approvalUnknownLabel} size="compact" tone="neutral" />
+                ) : approvalOf(pr)._tag === "NotRequired" ? (
+                  <StateLabel label={approvalNotRequiredLabel} size="compact" tone="neutral" />
                 ) : (
                   <Link
                     className={styles.stateLink}
@@ -1574,7 +1674,7 @@ export function PRDetail() {
           {pr.description && (
             <Surface as="section" className={styles.contentSection} padding="spacious" form="grouped">
               <header className={styles.sectionHeading}>
-                <Text as="h2" variant="section-title">
+                <Text as="h2" variant="card-title">
                   Description
                 </Text>
                 <Text tone="secondary" variant="meta">
@@ -1614,7 +1714,7 @@ export function PRDetail() {
         <aside className={styles.evidenceColumn}>
           <section className={styles.approvalSection}>
             <header className={styles.sectionHeading}>
-              <Text as="h2" variant="section-title">
+              <Text as="h2" variant="card-title">
                 Decision evidence
               </Text>
               <Text tone="secondary" variant="meta">
@@ -1659,6 +1759,22 @@ export function PRDetail() {
                     })
                   }
                 }}
+                onRemoveRule={() =>
+                  deleteRule({
+                    payload: { account: pr.account, approvalRuleName: card.ruleName, pullRequestId: pr.id }
+                  }).then((exit): Promise<RuleRemoval> | RuleRemoval => {
+                    if (Exit.isSuccess(exit)) {
+                      return refreshAfterApprovalMutation().then((refreshed) =>
+                        refreshed ? { _tag: "Removed" } : { _tag: "RefreshFailed" }
+                      )
+                    }
+                    const error = Cause.squash(exit.cause)
+                    return {
+                      _tag: "DeleteFailed",
+                      reason: Predicate.isError(error) ? error.message : "the server didn't answer."
+                    }
+                  })
+                }
                 permissionPrompt={state.permissionPrompt !== undefined}
                 repoAccountId={currentAcct}
                 required={card.required}
@@ -1669,7 +1785,7 @@ export function PRDetail() {
           </section>
 
           <CollapsibleSection title="Health Score Breakdown">
-            {() => <ScoreBreakdown score={score} />}
+            {() => <ScoreBreakdown score={score} unknownReason={scoreUnknownReason} />}
           </CollapsibleSection>
         </aside>
       </div>

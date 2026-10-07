@@ -1,6 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import type { Duration } from "effect"
+import { Deferred, Effect, Fiber, Layer, Predicate, Schema, Stream } from "effect"
 import * as LanguageModel from "effect/ai/LanguageModel"
+import type * as Prompt from "effect/ai/Prompt"
 import type * as Response from "effect/ai/Response"
 import * as Tool from "effect/ai/Tool"
 import * as Toolkit from "effect/ai/Toolkit"
@@ -87,11 +89,13 @@ const inspectionLayer = (execute: (path: string) => Effect.Effect<{ readonly con
     })
   })
 
-const successfulOptions = (
+const budget: Duration.Input = "2 minutes"
+
+const successfulOptions = <Tools extends Record<string, Tool.Any>>(
   model: LanguageModel.LanguageModel,
-  toolkit: Toolkit.WithHandler<typeof InspectionTools.tools>
+  toolkit: Toolkit.WithHandler<Tools>
 ) => ({
-  budget: "2 minutes",
+  budget,
   context,
   instructions: "Inspect the complete project and return evidence.",
   model,
@@ -721,9 +725,8 @@ describe("runToolAgent", () => {
         ...successfulOptions(model, toolkit),
         artifactSink
       }).pipe(Stream.runCollect)
-      const replayedResult = fake.requests[1]?.prompt.content
-        .filter((message) => Array.isArray(message.content))
-        .flatMap((message) => message.content)
+      const replayedResult = (fake.requests[1]?.prompt.content ?? [])
+        .flatMap((message): ReadonlyArray<Prompt.Part> => (Predicate.isString(message.content) ? [] : message.content))
         .find((part) => part.type === "tool-result" && part.id === "provider-large")
 
       expect(fake.requests).toHaveLength(2)
@@ -1075,7 +1078,7 @@ describe("runToolAgent", () => {
             Effect.acquireRelease(
               Deferred.succeed(acquired, void 0),
               () => Deferred.succeed(released, void 0)
-            ).pipe(Effect.flatMap(() => Effect.never))
+            ).pipe(Effect.flatMap(() => Effect.never), Effect.scoped)
           )
         ))
       )

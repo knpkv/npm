@@ -16,7 +16,7 @@ import {
   type SettingsRelayViewProps,
   updateReviewProfileSkills
 } from "../src/client/components/settings-relay.js"
-import { ReviewSkillResponse } from "../src/server/Api.js"
+import { ApiError, ReviewSkillResponse } from "../src/server/Api.js"
 
 Object.assign(window, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -149,7 +149,7 @@ describe("Relay review profile skill selection", () => {
     expect(select.disabled).toBe(true)
 
     await act(async () => {
-      save.resolve(Exit.fail({ _tag: "ApiError", message: "Config write rejected" }))
+      save.resolve(Exit.fail(new ApiError({ message: "Config write rejected" })))
       await save.promise
     })
     expect(rendered.host.querySelector("[role=\"alert\"]")?.textContent).toContain("Config write rejected")
@@ -204,7 +204,7 @@ describe("Relay review profile skill selection", () => {
 
     expect(saveConfig).toHaveBeenCalledOnce()
     expect(JSON.stringify(saveConfig.mock.calls[0]?.[0])).toContain("\"model\":\"gpt-5.6-luna\"")
-    expect(saveConfig.mock.calls[0]?.[0].reactivityKeys).toEqual(["config"])
+    expect(saveConfig.mock.calls[0]?.[0]).toMatchObject({ reactivityKeys: ["config"] })
     await act(async () => rendered.root.unmount())
   })
 
@@ -229,7 +229,7 @@ describe("Relay review profile skill selection", () => {
     await act(async () => saveButton.click())
 
     const input = saveConfig.mock.calls[0]?.[0]
-    expect(input?.reactivityKeys).toEqual(["config"])
+    expect(input).toMatchObject({ reactivityKeys: ["config"] })
     expect(JSON.stringify(input)).toContain("\"provider\":\"claude\"")
     expect(JSON.stringify(input)).toContain("\"harness\":\"native-claude\"")
     await act(async () => rendered.root.unmount())
@@ -279,7 +279,8 @@ describe("Relay review profile skill selection", () => {
       const current = Array.from(host.querySelectorAll("label")).find((label) =>
         label.textContent?.includes("Current skill")
       )
-      expect(current?.textContent).toContain("Still installed · environment")
+      expect(current?.textContent).toContain("Still installed")
+      expect(current?.textContent).toContain("Source: environment")
     } finally {
       await act(async () => root.unmount())
     }

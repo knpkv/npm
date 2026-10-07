@@ -7,7 +7,8 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, FileSystem, Layer, Option, Schema } from "effect"
+import { ConfigProvider, Effect, FileSystem, Layer, Option, Predicate, Schema } from "effect"
+import * as SqlClient from "effect/sql/SqlClient"
 import { DatabaseLive } from "../src/CacheService/Database.js"
 import {
   CachedPullRequest,
@@ -191,7 +192,7 @@ const interleavings: ReadonlyArray<readonly [string, Derive, Writer]> = derivedW
   ])
 )
 
-const withCache = <A, E>(body: Effect.Effect<A, E, PullRequestRepo>) =>
+const withCache = <A, E>(body: Effect.Effect<A, E, PullRequestRepo | SqlClient.SqlClient>) =>
   Effect.gen(function*() {
     const node = yield* Layer.build(NodeServices.layer)
     return yield* Effect.gen(function*() {
@@ -351,11 +352,8 @@ describe("pull-request row writes", () => {
       const written = yield* repo.upsert(listed(older, "older"), yield* repo.observe())
       expect([written.row, written.approval]).toEqual([true, true])
       expect(written.versions).toEqual(yield* observedNow)
-      expect(yield* repo.upsert(listed(t0, "older"), 0)).toEqual({
-        row: false,
-        approval: false,
-        versions: undefined
-      })
+      const rejected = yield* repo.upsert(listed(t0, "older"), 0)
+      expect([rejected.row, rejected.approval, rejected.versions]).toEqual([false, false, undefined])
     })))
 
   // The case the provider date alone missed: approval turned unknown without the revision moving.
@@ -371,6 +369,18 @@ describe("pull-request row writes", () => {
       // A read that began after both still recovers it.
       expect((yield* repo.upsert(listed(t0, "newest"), yield* repo.observe())).approval).toBe(true)
       expect(Option.map(yield* snapshot, (row) => row.approvalUnknownReason)).toEqual(Option.some(null))
+    })))
+
+  // Without the sequence row every read would get the same number and stop being ordered, so
+  // observe fails, typed, rather than hand out a fallback number.
+  it.effect("fails, typed, when the observation sequence row is missing", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      const sql = yield* SqlClient.SqlClient
+      yield* sql`DELETE FROM observation_sequence`
+      const failure = yield* Effect.flip(repo.observe())
+      expect(failure._tag).toBe("CacheError")
+      expect(Predicate.isTagged(failure.cause, "ObservationSequenceMissing")).toBe(true)
     })))
 
   it.effect("hands out strictly increasing observation numbers", () =>
@@ -470,5 +480,15 @@ describe("pull-request row writes", () => {
       yield* repo.upsertRead(listed(older, "newer"), merged, yield* repo.observe())
       const row = Option.getOrThrow(yield* snapshot)
       expect([row.status, row.mergedBy, row.closedAt]).toEqual(["MERGED", "merger", older.toISOString()])
+    })))
+
+  // A notification diffs against the row a write replaced, read in the same transaction.
+  it.effect("reports the row an upsert replaced, and none for a pull request seen for the first time", () =>
+    withCache(Effect.gen(function*() {
+      const repo = yield* PullRequestRepo
+      const first = yield* repo.upsert(listed(t0, "seed"), yield* repo.observe())
+      expect(Option.isNone(first.replaced)).toBe(true)
+      const second = yield* repo.upsert(listed(older, "older"), yield* repo.observe())
+      expect(Option.map(second.replaced, (row) => [row.title, row.isApproved])).toEqual(Option.some(["PR seed", true]))
     })))
 })

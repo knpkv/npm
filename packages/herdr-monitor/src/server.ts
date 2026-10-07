@@ -2,8 +2,12 @@ import { ByteSize, Clock, Effect, Ref, Schedule, Schema } from "effect"
 import { HttpIncomingMessage, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { BoardId, decodeSnapshot, MAX_BYTES, RETENTION_MS, Snapshot, STALE_MS } from "./model.js"
 
+/** The option that failed: a malformed value, or two keys that are the same. Carries no value. */
+export const MonitorSetting = Schema.Literals(["boardId", "origin", "publishToken", "viewToken", "independentTokens"])
+export type MonitorSetting = typeof MonitorSetting.Type
+
 export class MonitorConfigurationError
-  extends Schema.TaggedError<MonitorConfigurationError>()("MonitorConfigurationError", {})
+  extends Schema.TaggedError<MonitorConfigurationError>()("MonitorConfigurationError", { setting: MonitorSetting })
 {}
 
 /** Credentials are board-scoped and credential-bearing. Never serialize or log this configuration. */
@@ -22,16 +26,14 @@ const Origin = Schema.String.check(
   Schema.isMaxLength(256),
   Schema.isPattern(/^https:\/\/[a-z0-9.-]+(?::[0-9]{1,5})?$|^http:\/\/127\.0\.0\.1:[0-9]{1,5}$/)
 )
-const Configuration = Schema.Struct({
-  boardId: BoardId,
-  origin: Origin,
-  publishToken: Schema.String.check(Schema.isPattern(/^publish_[A-Za-z0-9_-]{43}$/)),
-  viewToken: Schema.String.check(Schema.isPattern(/^view_[A-Za-z0-9_-]{43}$/))
-}).check(
-  Schema.makeFilter((value) => value.publishToken.slice(8) !== value.viewToken.slice(5), {
-    expected: "independent credentials"
-  })
-)
+const PublishToken = Schema.String.check(Schema.isPattern(/^publish_[A-Za-z0-9_-]{43}$/))
+const ViewToken = Schema.String.check(Schema.isPattern(/^view_[A-Za-z0-9_-]{43}$/))
+
+/** One option against its schema, failing with the option's name only. */
+const setting = <A>(name: MonitorSetting, schema: Schema.Codec<A, string>, value: string) =>
+  Schema.decodeUnknownEffect(schema)(value).pipe(
+    Effect.mapError(() => new MonitorConfigurationError({ setting: name }))
+  )
 const headers = {
   "cache-control": "no-store",
   "content-security-policy":
@@ -45,13 +47,17 @@ const empty = (status: number) => HttpServerResponse.empty({ status, headers })
 
 /** Owns one in-memory board, its high-water sequence, rate limits and expiry. No upstream services. */
 export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorOptions, assets: WebAssets) {
-  const config = yield* Schema.decodeUnknownEffect(Configuration)(options).pipe(
-    Effect.mapError(() => new MonitorConfigurationError())
-  )
-  const origin = yield* Schema.decodeUnknownEffect(Schema.URLFromString)(config.origin).pipe(
-    Effect.mapError(() => new MonitorConfigurationError())
-  )
-  if (origin.origin !== config.origin) return yield* new MonitorConfigurationError()
+  const config = {
+    boardId: yield* setting("boardId", BoardId, options.boardId),
+    origin: yield* setting("origin", Origin, options.origin),
+    publishToken: yield* setting("publishToken", PublishToken, options.publishToken),
+    viewToken: yield* setting("viewToken", ViewToken, options.viewToken)
+  }
+  if (config.publishToken.slice(8) === config.viewToken.slice(5)) {
+    return yield* new MonitorConfigurationError({ setting: "independentTokens" })
+  }
+  const origin = yield* setting("origin", Schema.URLFromString, config.origin)
+  if (origin.origin !== config.origin) return yield* new MonitorConfigurationError({ setting: "origin" })
   const state = yield* Ref.make<
     { readonly snapshot: Snapshot | null; readonly sequence: number; readonly receivedAt: number }
   >({ snapshot: null, sequence: -1, receivedAt: 0 })
@@ -130,6 +136,7 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
   }).pipe(
     Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_BYTES)),
     Effect.timeout("5 seconds"),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(empty(400)))
   )
   return { handler }

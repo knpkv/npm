@@ -39,6 +39,10 @@ export interface DiffablePR {
   readonly isApproved: boolean | number
   /** Set (non-null) when the approval evaluation failed: `isApproved` is then only the last known value. */
   readonly approvalUnknownReason?: string | null | undefined
+  /** Whether the cached `isApproved` came from a successful evaluation, rather than a first-seen placeholder. */
+  readonly approvalBaselineKnown?: boolean | number | null | undefined
+  /** With no rules, CodeCommit's "approved" means nothing needed sign-off, not that anyone approved. */
+  readonly approvalRules?: ReadonlyArray<object> | null | undefined
   readonly isMergeable: boolean | number
   readonly commentCount?: number | null | undefined
 }
@@ -73,18 +77,23 @@ export const diffPR = (
   const freshMergeable = isEnabled(fresh.isMergeable)
   const cachedMergeable = isEnabled(cached.isMergeable)
 
-  // Only a change between two known evaluations is announced. An unknown fresh approval is no
-  // transition, and neither is recovery: a pull request first seen while its evaluation fails is cached
-  // as not approved, a placeholder indistinguishable from a last known value.
-  if (
-    fresh.approvalUnknownReason == null && cached.approvalUnknownReason == null &&
-    freshApproved !== cachedApproved
-  ) {
+  // Only a real change is announced: the fresh evaluation is known, and so is what it is compared with
+  // (a known cached evaluation, or the last known value an unknown row keeps over a known baseline; a
+  // pull request first seen while its evaluation fails holds a placeholder instead). Approval is
+  // compared as a state, not a flag: only reaching rule-backed Approved is a grant, and only leaving it
+  // for rule-backed Pending a revocation. Without rules nothing was approved, so adding or removing
+  // rules, or a flip of the evaluation with none, is not announced.
+  const ruleBacked = (pr: DiffablePR) => (pr.approvalRules?.length ?? 0) > 0
+  const approvedByRules = (pr: DiffablePR, approved: boolean) => ruleBacked(pr) && approved
+  const cachedKnown = cached.approvalUnknownReason == null || isEnabled(cached.approvalBaselineKnown ?? false)
+  const granted = approvedByRules(fresh, freshApproved) && !approvedByRules(cached, cachedApproved)
+  const revoked = approvedByRules(cached, cachedApproved) && ruleBacked(fresh) && !freshApproved
+  if (fresh.approvalUnknownReason == null && cachedKnown && (granted || revoked)) {
     notifications.push({
       ...base,
       type: "approval_changed",
       title: fresh.title,
-      message: `Approval ${freshApproved ? "granted" : "revoked"} on ${label}`
+      message: `Approval ${granted ? "granted" : "revoked"} on ${label}`
     })
   }
 

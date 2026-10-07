@@ -115,6 +115,7 @@ export const decodePullRequestCoordinates = (
                 ),
                 // A profile alias may decode as JSON while still not being a coordinate tuple.
                 // Leave it to the ordinary account lookup rather than reserving that alias.
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                 Effect.catch(() => Effect.succeed(Option.none()))
               )
           })

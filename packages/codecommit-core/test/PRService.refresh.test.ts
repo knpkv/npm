@@ -102,6 +102,7 @@ describe("PRService.refresh", () => {
         isMergeable: 1,
         isApproved: 0,
         approvalUnknownReason: null,
+        approvalBaselineKnown: 1,
         observationSeq: 0,
         approvalVersion: "2026-08-02T00:00:00.000Z",
         approvalObservationSeq: 0,
@@ -146,7 +147,10 @@ describe("PRService.refresh", () => {
           findAll: () => Ref.get(rows),
           findStaleOpen: () => Effect.succeed([]),
           findMissingDiffStats: () => Effect.succeed([]),
-          upsert: () => Ref.set(rows, [cachedPR]),
+          upsert: () =>
+            Ref.set(rows, [cachedPR]).pipe(
+              Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+            ),
           writeDerived: () => Effect.succeed(true),
           refreshCommentedBy: () => Effect.void,
           propagateRepoAccountId: () => Effect.void
@@ -321,6 +325,7 @@ describe("PRService.refresh", () => {
           isMergeable: 1,
           isApproved: 0,
           approvalUnknownReason: null,
+          approvalBaselineKnown: 1,
           observationSeq: 0,
           approvalVersion: "2026-08-02T00:00:00.000Z",
           approvalObservationSeq: 0,
@@ -426,6 +431,7 @@ describe("PRService.refresh", () => {
           isMergeable: 1,
           isApproved: 0,
           approvalUnknownReason: null,
+          approvalBaselineKnown: 1,
           observationSeq: 0,
           approvalVersion: "2026-08-02T00:00:00.000Z",
           approvalObservationSeq: 0,

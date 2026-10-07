@@ -1,11 +1,12 @@
 import { NodeServices } from "@effect/platform-node"
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it, vi } from "@effect/vitest"
 import {
   connectAgentPageMaxRecords,
   FleetConnectAgentPage,
   terminalCommandMaxPayloadBytes,
   type TerminalConnector,
   terminalFrameMaxEncodedBytes,
+  TerminalSelection,
   type TerminalSession
 } from "@knpkv/herdr-connect"
 import { ChatHistory, chatHistoryMaxEntries, ChatStore, type StoredChatTurn } from "@knpkv/herdr-coordinator"
@@ -62,7 +63,14 @@ import {
   startHttpServer
 } from "../src/http.js"
 import { dashboardDocumentTitle } from "../src/internal/html.js"
-import { relayTerminalCloseCode, terminalBufferCanAccept, terminalBufferLimitBytes } from "../src/internal/websocket.js"
+import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "../src/internal/terminal-selection.js"
+import {
+  isRelayedScrollState,
+  makeLatestSignalSender,
+  relayTerminalCloseCode,
+  terminalBufferCanAccept,
+  terminalBufferLimitBytes
+} from "../src/internal/websocket.js"
 import { commandOutputMaxBytes } from "../src/operations.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
@@ -2499,6 +2507,105 @@ esac
     expect(terminalBufferCanAccept(terminalBufferLimitBytes - 1, 1)).toBe(true)
   })
 
+  it("passes the scroll-state opt-in through the hub only when the client sent it", () => {
+    const decode = Schema.decodeUnknownSync(TerminalSelection)
+    const base = { host: "SER9", agentId: "agent-1", cols: 100, rows: 30 }
+    const browser = new URL("wss://hub.example.test/v1/connect/session?host=SER9&agent=agent-1&cols=100&rows=30")
+    // An older client never asked, so the remote host must stay silent toward it.
+    const legacy = decode(terminalSelectionInput(browser))
+    expect(legacy).toEqual(base)
+    expect(remoteTerminalUrl("wss://ser9.example.test/v1/connect/terminal", legacy).searchParams.has("scrollState"))
+      .toBe(false)
+    browser.searchParams.set("scrollState", "1")
+    const current = decode(terminalSelectionInput(browser))
+    expect(current).toEqual({ ...base, scrollState: true })
+    const remote = remoteTerminalUrl("wss://ser9.example.test/v1/connect/terminal", current)
+    expect(remote.searchParams.get("scrollState")).toBe("1")
+    expect(decode(terminalSelectionInput(remote))).toEqual(current)
+  })
+
+  it("relays scroll states only to a client that opted in, whatever produced them", () => {
+    const relayed: Array<string> = []
+    const base = { host: "SER9", agentId: "agent-1", cols: 100, rows: 30 }
+    relayScrollState(base, "legacy", (payload) => relayed.push(payload))
+    relayScrollState({ ...base, scrollState: false }, "declined", (payload) => relayed.push(payload))
+    relayScrollState({ ...base, scrollState: true }, "opted in", (payload) => relayed.push(payload))
+    expect(relayed).toEqual(["opted in"])
+  })
+
+  it("tells a remote host's scroll states from its frames and other signals", () => {
+    const text = (value: string) => Buffer.from(value)
+    expect(
+      isRelayedScrollState(
+        text(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 3, scrollsForwarded: 0 })),
+        false
+      )
+    )
+      .toBe(true)
+    // The same bytes as a binary frame, other signals, and junk keep the close-on-backpressure rule.
+    expect(
+      isRelayedScrollState(
+        text(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 3, scrollsForwarded: 0 })),
+        true
+      )
+    )
+      .toBe(false)
+    expect(isRelayedScrollState(text(JSON.stringify({ type: "terminal.ready" })), false)).toBe(false)
+    expect(isRelayedScrollState(text("not json"), false)).toBe(false)
+    expect(
+      isRelayedScrollState([
+        text("{\"type\":\"terminal.scroll_state\","),
+        text("\"offsetFromBottom\":null,\"scrollsForwarded\":2}")
+      ], false)
+    )
+      .toBe(true)
+  })
+
+  it("holds the newest scroll state under backpressure and sends it once the socket drains", () => {
+    vi.useFakeTimers()
+    try {
+      let buffered = terminalBufferLimitBytes
+      const sent: Array<string> = []
+      const signals = makeLatestSignalSender({
+        bufferedAmount: () => buffered,
+        isOpen: () => true,
+        send: (payload) => sent.push(payload)
+      }, 100)
+      signals.offer("offset 7")
+      signals.offer("offset 0")
+      vi.advanceTimersByTime(1_000)
+      expect(sent).toEqual([])
+      buffered = 0
+      vi.advanceTimersByTime(100)
+      expect(sent).toEqual(["offset 0"])
+      signals.offer("offset 3")
+      expect(sent).toEqual(["offset 0", "offset 3"])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("stops retrying a held scroll state once the socket closes", () => {
+    vi.useFakeTimers()
+    try {
+      let buffered = terminalBufferLimitBytes
+      const sent: Array<string> = []
+      const signals = makeLatestSignalSender({
+        bufferedAmount: () => buffered,
+        isOpen: () => true,
+        send: (payload) => sent.push(payload)
+      }, 100)
+      signals.offer("offset 7")
+      signals.dispose()
+      buffered = 0
+      vi.advanceTimersByTime(1_000)
+      expect(sent).toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it.effect("pages pending approvals below the peer response limit", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-pending-page-test-"))
     const tailscaleCommand = join(root, "tailscale-test")
@@ -3963,7 +4070,7 @@ esac
             events: attempt === 2
               ? Stream.empty
               : attempt === 4
-              ? Stream.make({
+              ? Stream.make({ type: "terminal.scroll_state", offsetFromBottom: 42, scrollsForwarded: 0 }, {
                 bytes: Buffer.alloc((terminalFrameMaxEncodedBytes / 4) * 3).toString("base64"),
                 encoding: "ansi",
                 full: true,
@@ -4100,19 +4207,28 @@ esac
             expect(sends).toBe(1)
 
             let maximumFrameBytes = 0
+            const signals: Array<string> = []
+            // This client opted in to scroll states; a legacy one would get none.
+            const optedIn = new URL(url)
+            optedIn.searchParams.set("scrollState", "1")
             const maximumFrameClose = yield* Effect.promise(
               () =>
                 new Promise<number>((resolve, reject) => {
-                  const socket = new WebSocketClient(url)
+                  const socket = new WebSocketClient(optedIn)
                   socket.once("error", reject)
                   socket.on("message", (data, isBinary) => {
                     if (isBinary) maximumFrameBytes = Buffer.byteLength(data)
+                    else signals.push(data.toString())
                   })
                   socket.once("close", (code) => resolve(code))
                 })
             )
             expect(maximumFrameClose).toBe(1_000)
             expect(maximumFrameBytes).toBe((terminalFrameMaxEncodedBytes / 4) * 3)
+            // The scroll position is relayed as a signal and does not end the session.
+            expect(signals).toContain(
+              JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 42, scrollsForwarded: 0 })
+            )
 
             const held = yield* Effect.promise(
               () =>

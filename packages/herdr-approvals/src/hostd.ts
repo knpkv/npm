@@ -1,10 +1,11 @@
-import type { FleetStoreError, HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
+import type { AgentWorkerIdentity, FleetStoreError, HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { FleetOperationError, JobStore, loadConfiguration, makeFleetService } from "@knpkv/herdr-fleet"
 import { Console, Effect, FileSystem, Path, Redacted, Scope } from "effect"
 import type { HostdOperationsCompositionError } from "./errors.js"
 import { startHttpServer, type UiAssets } from "./http.js"
 import { fleetConfigPath } from "./internal/config-path.js"
 import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-job.js"
+import { noStartedWorkerStore, startedWorker } from "./internal/started-worker.js"
 import { makeHostOperations } from "./operations.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
@@ -25,6 +26,12 @@ export interface HostdOperationsComposition {
    * writes while this is true.
    */
   readonly hasOutstandingWorkJob: Effect.Effect<boolean, FleetStoreError>
+  /**
+   * The worker Fleet recorded as started for a job, or null when the job is
+   * unknown or started none. The authority for which agent a job started;
+   * fails with `FleetStoreError` when the job store can't be read.
+   */
+  readonly startedWorker: (jobId: string) => Effect.Effect<AgentWorkerIdentity | null, FleetStoreError>
 }
 
 export type HostdOperationsComposer = (
@@ -73,7 +80,8 @@ export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
     config,
     defaultOperations,
     fork,
-    hasOutstandingWorkJob: jobs === undefined ? noJobStore : hasOutstandingWorkJob(jobs)
+    hasOutstandingWorkJob: jobs === undefined ? noJobStore : hasOutstandingWorkJob(jobs),
+    startedWorker: jobs === undefined ? noStartedWorkerStore : (jobId) => startedWorker(jobs, jobId)
   })
 })
 

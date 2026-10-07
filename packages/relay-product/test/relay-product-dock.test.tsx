@@ -21,12 +21,12 @@ import {
 
 Object.defineProperty(window, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true })
 
-const selection = {
+const selection = Schema.decodeUnknownSync(RelaySelectorState)({
   modelId: "configured-default",
   models: [{ id: "configured-default", label: "Configured default" }],
   profileId: "security",
   profiles: [{ id: "security", label: "Security review" }]
-}
+})
 
 const host: RelayProductDockHost = {
   context: [{ id: "product", label: "Product", value: "CodeCommit" }],
@@ -323,12 +323,12 @@ describe("RelayProductDock", () => {
       await click(queryRequired(rendered.portal, '[role="option"]:nth-of-type(2)'))
       expect(
         relaySelectionMatchesRegistration(
-          {
+          Schema.decodeUnknownSync(RelaySelectorState)({
             modelId: "architecture",
             models: conversation.selection.models,
             profileId: "architecture",
             profiles: conversation.selection.profiles
-          },
+          }),
           registration
         )
       ).toBe(true)

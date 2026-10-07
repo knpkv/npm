@@ -30,6 +30,7 @@ import { Button, ButtonGroup } from "./ui/button.js"
 import { SsoSignOutDialog } from "./sso-sign-out-dialog.js"
 import { Separator } from "./ui/separator.js"
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group.js"
+import { failedOperationText } from "../notification-copy.js"
 
 const isAuthError = (message: string) =>
   /ExpiredToken|Unauthorized|AuthFailure|SSO|token|credentials|expired/i.test(message)
@@ -68,17 +69,13 @@ const decodeJsonMessage: (message: string) => Option.Option<Message> = Schema.de
 const parseStructured = (message: string): Option.Option<Message> =>
   Option.orElse(decodeJsonMessage(message), () => Option.some({ cause: message }))
 
-/** Extract a human-readable summary */
-const formatMessage = (message: string): string => {
-  const opt = parseStructured(message)
-  if (Option.isNone(opt)) return message
-  const { cause, error, message: msg, operation } = opt.value
-  const reason = cause ?? error ?? msg
-  const parts: Array<string> = []
-  if (operation !== undefined) parts.push(operation)
-  if (reason !== undefined) parts.push(reason)
-  return parts.length > 0 ? parts.join(" — ") : message
-}
+/** What failed, its cause and the fix, for a structured failure; other messages as written. */
+const formatMessage = (message: string): string =>
+  Option.match(decodeJsonMessage(message), {
+    onNone: () => message,
+    onSome: ({ cause, error, message: detail, operation, profile, region }) =>
+      failedOperationText({ cause: cause ?? error ?? detail, operation, profile, region })
+  })
 
 const formatTime = (ts: string) => {
   const d = new Date(ts)
@@ -194,7 +191,8 @@ export function NotificationsPage() {
               const summary = formatMessage(item.message)
               const expanded = expandedIds.has(item.id)
               return (
-                <div key={item.id} className={`flex ${item.read === 0 ? "border-l-2 border-l-blue-500" : ""}`}>
+                // Unread is said by weight and the count above, not a coloured edge.
+                <div key={item.id} className="flex">
                   <div className="flex-1 min-w-0">
                     <div
                       className="flex items-start gap-3 px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors"
@@ -215,7 +213,9 @@ export function NotificationsPage() {
                           </span>
                           <span className="shrink-0 text-xs text-muted-foreground">{formatTime(item.createdAt)}</span>
                         </div>
-                        {!expanded && <p className="mt-0.5 text-xs text-muted-foreground line-clamp-1">{summary}</p>}
+                        {!expanded && (
+                          <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2 break-words">{summary}</p>
+                        )}
                       </div>
                     </div>
                     {expanded && (

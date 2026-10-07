@@ -499,7 +499,7 @@ describe("Work control app", () => {
     const v2 = makeGoal("goal-connect-v2", "Connect terminal special keys v2", "blocked", "V2 blocker")
     const v3 = makeGoal("goal-connect-v3", "Connect terminal special keys v3", "working", null)
     const relationAt = 1_000
-    const events = [
+    const events: ReadonlyArray<WorkGoalCheckpointType> = [
       v1,
       v2,
       v3,

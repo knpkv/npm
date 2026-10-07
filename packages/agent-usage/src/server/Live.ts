@@ -39,9 +39,11 @@ const live = Effect.gen(function*() {
   const write = yield* socket.writer
   const reader = yield* socket.reader
   // Messages from the page are not expected; reading only notices that it went away.
+  // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
   const closed = Effect.forever(reader.pull).pipe(Effect.ignore)
   const pushing = SubscriptionRef.changes(state.versions).pipe(
     Stream.runForEach((versions) => write.write(encodeVersions(versions))),
+    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.ignore
   )
   yield* Effect.raceFirst(pushing, closed)

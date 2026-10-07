@@ -620,6 +620,7 @@ const awsHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
     )
   }).pipe(
     Effect.catchTag("MockOperationError", (error) => Effect.succeed(awsErrorResponse(error))),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "mock-handler-failed" }, { status: 500 })))
   )
 
@@ -672,6 +673,7 @@ const adminPushHandler = (
   }).pipe(
     Effect.catchTag("MockFixtureTransitionError", () =>
       Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "git-fixture-transition-failed" }, { status: 500 }))),
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() =>
       Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "invalid-push-request" }, { status: 400 }))
     )
@@ -704,6 +706,7 @@ const adminCommentHandler = (stateRef: Ref.Ref<CodeCommitMockState>) =>
     }
     return HttpServerResponse.jsonUnsafe({ commentId: comment.commentId })
   }).pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() =>
       Effect.succeed(HttpServerResponse.jsonUnsafe({ error: "invalid-comment-request" }, { status: 400 }))
     )

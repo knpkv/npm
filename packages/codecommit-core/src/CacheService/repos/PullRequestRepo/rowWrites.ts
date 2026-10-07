@@ -6,7 +6,8 @@
  *
  * - the row group (title, description, author, status, branches, mergeability, approvers, merge and
  *   close details), versioned by `last_modified_date`/`observation_seq`;
- * - the approval group (`is_approved`, `approval_unknown_reason`, `approval_rules`), versioned by
+ * - the approval group (`is_approved`, `approval_unknown_reason`, `approval_rules`,
+ *   `approval_baseline_known`), versioned by
  *   `approval_version`/`approval_observation_seq`;
  * - recomputed columns (diff stats, comment count, health score, commenters), which carry no version.
  *
@@ -28,10 +29,16 @@
  *
  * @category CacheService
  */
-import { Effect } from "effect"
+import { Data, Effect } from "effect"
 import type * as SqlClient from "effect/sql/SqlClient"
 import type * as Statement from "effect/sql/Statement"
 import { joinApprovedBy, type UpsertInput } from "./internal.js"
+
+/**
+ * The `observation_sequence` row is missing, so no observation number can be taken. Without one, reads
+ * of the same revision can't be ordered; callers skip the read instead.
+ */
+export class ObservationSequenceMissing extends Data.TaggedError("ObservationSequenceMissing")<{}> {}
 
 /** A version: the provider last activity a read saw, and the observation it came from. */
 export interface RowVersion {
@@ -160,6 +167,8 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
       approvalSet("is_approved", known ? (approval.isApproved ? 1 : 0) : keep("is_approved")),
       approvalSet("approval_rules", known ? rulesJson(approval.approvalRules) : keep("approval_rules")),
       approvalSet("approval_unknown_reason", approval.unknownReason),
+      // A successful evaluation makes the baseline known; an unknown one keeps whatever it was.
+      approvalSet("approval_baseline_known", known ? 1 : keep("approval_baseline_known")),
       // SQLite evaluates every SET expression on the row as it was, so each guard sees the old versions.
       approvalSet("approval_version", at),
       approvalSet("approval_observation_seq", version.observation),
@@ -169,10 +178,15 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
   }
 
   return {
-    /** The next observation number, taken before a provider read. */
+    /** The next observation number, taken before a provider read. Fails when the sequence row is missing. */
     observe: () =>
       sql<{ readonly value: number }>`UPDATE observation_sequence SET value = value + 1 WHERE id = 1 RETURNING value`
-        .pipe(Effect.map((rows) => rows[0]?.value ?? 0)),
+        .pipe(
+          Effect.flatMap((rows) => {
+            const next = rows[0]
+            return next === undefined ? Effect.fail(new ObservationSequenceMissing()) : Effect.succeed(next.value)
+          })
+        ),
 
     /**
      * Insert a listed pull request, or write each of its groups unless that group is newer. A deleted
@@ -186,14 +200,16 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
           (id, aws_account_id, repo_account_id, account_profile, account_region, title, description,
            author, repository_name, creation_date, last_modified_date, status,
            source_branch, destination_branch, is_mergeable, is_approved, approval_unknown_reason,
-           comment_count, link, approved_by, approved_by_arns, approval_rules, merged_by, closed_at, fetched_at,
+           approval_baseline_known, comment_count, link, approved_by, approved_by_arns, approval_rules, merged_by, closed_at, fetched_at,
            observation_seq, approval_version, approval_observation_seq)
           SELECT ${req.id}, ${req.awsAccountId}, ${req.repoAccountId}, ${req.accountProfile}, ${req.accountRegion},
             ${row.title}, ${row.description}, ${row.author}, ${req.repositoryName},
             ${row.creationDate}, ${req.lastModifiedDate}, ${row.status},
             ${row.sourceBranch}, ${row.destinationBranch}, ${row.isMergeable ? 1 : 0},
             ${approval.isApproved ? 1 : 0}, ${approval.unknownReason},
-            ${req.commentCount}, ${req.link}, ${joinApprovedBy([...row.approvedBy])},
+            ${approval.unknownReason === null ? 1 : 0}, ${req.commentCount}, ${req.link}, ${
+        joinApprovedBy([...row.approvedBy])
+      },
             ${joinApprovedBy([...row.approvedByArns])}, ${rulesJson(approval.approvalRules)},
             ${row.mergedBy}, ${row.closedAt}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
             ${observation}, ${req.lastModifiedDate}, ${observation}

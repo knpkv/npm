@@ -131,6 +131,28 @@ describe("shared queue filter contract", () => {
   })
 })
 
+describe("approval filters with no approval rules", () => {
+  // A pull request without rules is its own approval status: filterable, and kept by the composite
+  // All open group instead of falling out of the approval axis.
+  it("matches status not-required, and stays in the composite All open group", () => {
+    const noRules = Schema.decodeSync(PullRequest)({
+      ...Schema.encodeSync(PullRequest)(pullRequest),
+      isApproved: true,
+      approvalRules: []
+    })
+    expect(matchesQueueFilter(noRules, { key: "status", value: "not-required" })).toBe(true)
+    expect(matchesQueueFilter(noRules, { key: "status", value: "approved" })).toBe(false)
+    expect(queueFilterOptions([noRules]).status).toContain("not-required")
+    const allOpen = [...openSubStatuses].map((value): FilterEntry => ({ key: "status", value }))
+    expect(resolveQueueFacet({ filters: allOpen, review: false })).toBe("open")
+    expect(
+      [...groupQueueFilters(allOpen).values()].every((group) =>
+        group.some((entry) => matchesQueueFilter(noRules, entry))
+      )
+    ).toBe(true)
+  })
+})
+
 describe("approval filters with an unknown approval", () => {
   it("lists an unknown approval as neither approved nor pending", () => {
     const unknown = Schema.decodeSync(PullRequest)({

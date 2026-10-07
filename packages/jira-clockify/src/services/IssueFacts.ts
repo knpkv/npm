@@ -290,6 +290,7 @@ export const layer = Layer.effect(
       if (!exists) return emptyCache
       const content = yield* fs.readFileString(filePath)
       return yield* Effect.try({ catch: () => emptyCache, try: () => parseIssueCache(content) })
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     }).pipe(Effect.orElseSucceed(() => emptyCache))
 
     const writeCache = (cache: IssueCache) =>
@@ -297,6 +298,7 @@ export const layer = Layer.effect(
         const exists = yield* fs.exists(dir)
         if (!exists) yield* fs.makeDirectory(dir, { recursive: true })
         yield* fs.writeFileString(filePath, serializeIssueCache(cache))
+        // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       }).pipe(Effect.ignore)
 
     /** My own account id. Failure or an unrecognised answer cannot authorize cached ownership. */
@@ -342,9 +344,11 @@ export const layer = Layer.effect(
           // A logged-out Jira resolves an empty cloudId into a URL Atlassian answers with a 404,
           // which would otherwise look exactly like "none of these issues exist" — and mark every
           // ticket as somebody else's.
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           const connection = yield* access.connection.pipe(Effect.orElseSucceed(() => Option.none()))
           if (Option.isNone(connection)) return { checked: false, facts: new Map<string, IssueFact>() }
 
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           const mine = yield* accountId.pipe(Effect.orElseSucceed(() => null))
           const cloudId = connection.value.cloudId
           if (mine === null || cloudId === "") return { checked: false, facts: new Map<string, IssueFact>() }
@@ -359,6 +363,7 @@ export const layer = Layer.effect(
 
           const batches = yield* Effect.all(searchBatches(stale).map(search), { concurrency: 2 }).pipe(
             Effect.map((results) => results.flat()),
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.orElseSucceed(() => null)
           )
           // Jira refused. What is cached still stands; what is not stays unknown.

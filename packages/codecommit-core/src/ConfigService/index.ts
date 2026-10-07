@@ -36,7 +36,12 @@ export {
   ReviewProvider,
   reviewProviderOptions
 } from "../ReviewProfile.js"
-export { discoverAwsProfiles } from "./detectProfiles.js"
+export {
+  type AwsProfileSources,
+  awsProfileSources,
+  awsProfileSourcesIn,
+  discoverAwsProfiles
+} from "./detectProfiles.js"
 export {
   AccountConfig,
   defaultSandboxConfig,

@@ -1,5 +1,25 @@
 # @knpkv/rly
 
+## 0.12.1
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+
+## 0.12.0
+
+### Minor Changes
+
+- [#571](https://github.com/knpkv/npm/pull/571) [`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6) Thanks [@konopkov](https://github.com/konopkov)! - One focus ring everywhere: a solid 2px outline in the focus colour, 2px outside the control, from the new `--rly-focus-ring-width` and `--rly-focus-ring-offset` tokens. The base ring goes from 3px to 2px, and the diff, table, timeline, and toggle rings that used 3px or ad-hoc offsets now match. `lint:colors` rejects a focus outline with a raw width.
+
+## 0.11.0
+
+### Minor Changes
+
+- [#519](https://github.com/knpkv/npm/pull/519) [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5) Thanks [@konopkov](https://github.com/konopkov)! - `ServiceMark` takes a `name` variant: `visible` (default) prints the provider name, and `hidden` prints the glyph only, where an adjacent title already names the provider. The accessible name is present either way. The mark no longer draws a provider-coloured rail.
+
+  Control Center's Services cards use the hidden name, so the provider is no longer printed twice.
+
 ## 0.10.0
 
 ### Minor Changes

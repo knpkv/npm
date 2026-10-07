@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import {
+  approvalNotRequiredLabel,
   approvalOf,
   ApprovalRule,
   ApprovalUnknownReason,
@@ -10,11 +11,22 @@ import {
 } from "../src/Domain.js"
 
 describe("approval", () => {
+  const rules = [
+    Schema.decodeSync(ApprovalRule)({ ruleName: "r", requiredApprovals: 1, poolMembers: [], satisfied: true })
+  ]
+
   it("reads Unknown whenever the last evaluation failed, whatever the last known approval says", () => {
-    expect(approvalOf({ isApproved: true, approvalUnknown: { _tag: "Throttled" } }))
+    expect(approvalOf({ isApproved: true, approvalRules: rules, approvalUnknown: { _tag: "Throttled" } }))
       .toEqual({ _tag: "Unknown", reason: { _tag: "Throttled" } })
-    expect(approvalOf({ isApproved: true })).toEqual({ _tag: "Approved" })
-    expect(approvalOf({ isApproved: false })).toEqual({ _tag: "Pending" })
+    expect(approvalOf({ isApproved: true, approvalRules: rules })).toEqual({ _tag: "Approved" })
+    expect(approvalOf({ isApproved: false, approvalRules: rules })).toEqual({ _tag: "Pending" })
+  })
+
+  // CodeCommit evaluates a pull request with no approval rules as approved: nothing to satisfy, and
+  // nobody signed off. That is not "Approved".
+  it("reads NotRequired for an approved evaluation with no approval rules", () => {
+    expect(approvalOf({ isApproved: true, approvalRules: [] })).toEqual({ _tag: "NotRequired" })
+    expect(approvalNotRequiredLabel).toBe("No approval required")
   })
 
   it("explains every reason in its own words", () => {
@@ -24,7 +36,7 @@ describe("approval", () => {
   })
 
   it("names exactly the reasons' tags in the flat tag schema", () => {
-    expect([...ApprovalUnknownTag.literals].toSorted()).toEqual(Object.keys(ApprovalUnknownReason.cases).toSorted())
+    expect([...ApprovalUnknownTag.literals].sort()).toEqual(Object.keys(ApprovalUnknownReason.cases).sort())
   })
 
   it("does not claim a review is needed while approval is unknown", () => {
