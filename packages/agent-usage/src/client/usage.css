@@ -143,7 +143,7 @@
   font-size: var(--rly-type-card-title-size);
   font-variant-numeric: tabular-nums;
   font-weight: var(--rly-type-card-title-weight);
-  min-inline-size: 3.5ch;
+  min-inline-size: 2.3em;
   text-align: end;
 }
 

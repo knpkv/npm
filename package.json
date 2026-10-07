@@ -57,6 +57,7 @@
     "@effect/vitest": "4.0.0",
     "@eslint/js": "^10.0.1",
     "@oxlint/plugins": "1.86.0",
+    "@playwright/test": "1.63.0",
     "@types/node": "^26.6.4",
     "@typescript/native": "npm:typescript@7.0.2",
     "@vitest/coverage-v8": "^5.0.3",
@@ -77,6 +78,7 @@
     "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.71.0",
+    "vite": "^8.3.2",
     "vitest": "catalog:",
     "yaml": "2.9.1"
   }
