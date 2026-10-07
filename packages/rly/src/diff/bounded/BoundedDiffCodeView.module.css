@@ -55,7 +55,8 @@
 
 .lineNumber {
   width: 3.25rem;
-  padding-inline: var(--rly-space-2) !important;
+  /* Room either side of the number, so the column rule reads as one rule, not a box per line. */
+  padding-inline: var(--rly-space-8) var(--rly-space-6) !important;
   border-right: 1px solid var(--rly-color-border-1);
   color: var(--rly-color-text-3);
   text-align: right;
@@ -79,7 +80,17 @@
 
 .wrappedCode {
   white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+}
+
+/*
+ * In an auto-sized table a long token would widen its column rather than wrap. Capping the wrapped
+ * code cell at zero and letting it take the remaining width bounds it to the viewport, so
+ * break-word can wrap a 200-character string; unwrapped views keep their horizontal scroll.
+ */
+.table td:has(> .wrappedCode) {
+  inline-size: 100%;
+  max-inline-size: 0;
 }
 
 .deletion > td,
@@ -120,7 +131,8 @@
 
 .annotation {
   background: var(--rly-color-held-tint);
-  border-inline-start: var(--rly-space-2) solid var(--rly-color-held-ink);
+  border: 1px solid color-mix(in oklab, var(--rly-color-held-ink) 35%, transparent);
+  border-radius: var(--rly-radius-tag);
   color: var(--rly-color-text-1);
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
@@ -138,4 +150,30 @@
   [data-rly-diff-line]:focus-visible {
     forced-color-adjust: auto;
   }
+}
+
+/*
+ * Forced colours drop the add/remove tints. Split cells have no marker column, so a changed cell
+ * gets its sign drawn before the code (hidden from assistive technology, which reads the column).
+ */
+@media (forced-colors: active) {
+  .change .deletionCode > :is(.code, .wrappedCode)::before {
+    content: "− " / "";
+  }
+  .change .additionCode > :is(.code, .wrappedCode)::before {
+    content: "+ " / "";
+  }
+}
+
+:where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+  .change
+  .deletionCode
+  > :is(.code, .wrappedCode)::before {
+  content: "− " / "";
+}
+:where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+  .change
+  .additionCode
+  > :is(.code, .wrappedCode)::before {
+  content: "+ " / "";
 }

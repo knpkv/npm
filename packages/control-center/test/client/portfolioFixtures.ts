@@ -11,6 +11,7 @@ export type PortfolioFixtureState =
   | "disabled"
   | "dual-role"
   | "empty"
+  | "connected-empty"
   | "missing-source"
   | "six-state"
   | "stale"
@@ -215,7 +216,7 @@ export const makePortfolioSnapshot = (
   state: PortfolioFixtureState = "current",
   eventCursor = 10
 ): PortfolioSnapshot => {
-  const releases = state === "empty"
+  const releases = state === "empty" || state === "connected-empty"
     ? []
     : state === "six-state"
     ? referenceReleases
@@ -259,6 +260,15 @@ export const makePortfolioSnapshot = (
     }]
   const plugins = state === "empty" || state === "missing-source"
     ? []
+    : state === "connected-empty"
+    ? [{
+      displayName: "dev / cc-release-e2e-kan-3",
+      health: healthyPlugin,
+      isEnabled: true,
+      pluginConnectionId,
+      providerId: "codecommit",
+      updatedAt: "2026-07-14T10:15:00.000Z"
+    }]
     : [{
       displayName: "Payments Jira",
       health: state === "stale" || state === "unavailable" || state === "unhealthy"

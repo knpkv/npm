@@ -880,6 +880,46 @@ test("shows a paired session and recovers its mutation proof in a new tab", asyn
   await newTab.close()
 })
 
+test("keeps every service card's title and state whole-word at the narrowest card widths", async ({ context, page }) => {
+  const csrfToken = "cd".repeat(32)
+  await context.addCookies([{ name: "cc_session", value: "ab".repeat(32), url: "http://127.0.0.1:4173" }])
+  await page.addInitScript((token) => sessionStorage.setItem("cc_csrf", token), csrfToken)
+  // Connections fail, so every card shows its installed fallback state ("Installed").
+  await context.route("**/api/v1/**", (route) => route.fulfill({ status: 503 }))
+  await context.route("**/api/v1/session/current", (route) =>
+    route.fulfill({
+      body: JSON.stringify({ csrfToken, session: pairedSession }),
+      contentType: "application/json",
+      status: 200
+    }))
+  // A sweep across phones, tablets and desktops, including the 1261 where a mark's provider name once
+  // broke ("Confluen|ce"); 640 at device scale 2 stands in for 200% zoom at 1280.
+  for (const width of [320, 360, 390, 480, 640, 768, 900, 1024, 1100, 1180, 1261, 1280, 1440, 1600, 1920]) {
+    await page.setViewportSize({ height: 900, width })
+    await page.goto("/services")
+    await expect(page.getByText("Installed").first()).toBeVisible()
+    // Every word in a card's title and state sits on one line: wrapping only happens between words.
+    const split = await page.evaluate(
+      `[...document.querySelectorAll("article h2, article [class*='status'], article [data-rly-service]")].flatMap((element) => {
+      const words = []
+      const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+      for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+        for (const match of (node.textContent ?? "").matchAll(/\\S+/g)) {
+          const range = document.createRange()
+          range.setStart(node, match.index)
+          range.setEnd(node, match.index + match[0].length)
+          if (new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size > 1) words.push(match[0])
+        }
+      }
+      return words
+    })`
+    )
+    expect(split, `at ${width}px`).toEqual([])
+    // The state is a word, not a bordered chip.
+    await expect(page.locator("article [class*='status']").first()).toHaveCSS("border-top-style", "none")
+  }
+})
+
 test("routes an authenticated releases entry to the live workspace portfolio", async ({ context, page }) => {
   const csrfToken = "cd".repeat(32)
   await context.addCookies([

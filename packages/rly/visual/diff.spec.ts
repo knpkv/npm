@@ -151,7 +151,7 @@ test("keeps the six-file bird-eye review, people, and stale evidence visible", a
   await expect(workbench.locator("[data-rly-diff-finding-source='human']")).toHaveCount(1)
   await expect(workbench.locator("[data-rly-diff-finding-source='agent']")).toHaveCount(2)
   await expect(workbench.locator("[data-rly-diff-finding-anchor='stale']")).toHaveCount(1)
-  await expect(workbench.getByText("Agent finding · not an approval").first()).toBeVisible()
+  await expect(workbench.getByText("Agent finding, not an approval").first()).toBeVisible()
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("diff-workbench.png") })
 })
@@ -190,7 +190,7 @@ test("shows the complete 500-file inventory and compact forced-color states", as
   await expect(page.locator("[data-rly-diff-file-id='inventory-file-1']")).toBeVisible()
   await expect(page.locator("[data-rly-diff-file-id='inventory-file-500']")).toBeAttached()
   await expect(page.locator("[data-rly-catalog] pre")).toHaveCount(0)
-  await expect(page.getByText("500/500")).toBeVisible()
+  await expect(page.getByText("500 files", { exact: true })).toBeVisible()
 
   await page.setViewportSize({ height: 1_100, width: 320 })
   await page.goto(story("diff-difffiletree--compact-forced-colors", "active"))
@@ -202,4 +202,93 @@ test("shows the complete 500-file inventory and compact forced-color states", as
   }
   await expectNoHorizontalOverflow(page)
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("diff-inventory-320.png") })
+})
+
+test("turns the directory chevron toward the inline end, mirrored in right-to-left text", async ({ page }) => {
+  await page.goto(story("diff-difffiletree--file-states"))
+  const button = page.locator("button[aria-expanded]").first()
+  const chevron = button.locator("[class*=\"chevron\"]")
+  await expect(chevron).toBeAttached()
+  // Which edges are drawn and how far the square turns decides where the corner points.
+  const chevronTurn = () =>
+    chevron.evaluate((element) => {
+      const style = getComputedStyle(element)
+      const matrix = new DOMMatrixReadOnly(style.transform)
+      return {
+        angle: Math.round((Math.atan2(matrix.b, matrix.a) * 180) / Math.PI),
+        leftEdge: Number.parseFloat(style.borderLeftWidth) > 0
+      }
+    })
+  const states = async () => {
+    const first = { expanded: await button.getAttribute("aria-expanded"), ...(await chevronTurn()) }
+    await button.click()
+    await page.waitForTimeout(300)
+    const second = { expanded: await button.getAttribute("aria-expanded"), ...(await chevronTurn()) }
+    await button.click()
+    await page.waitForTimeout(300)
+    return [first, second].sort((left, right) => String(left.expanded).localeCompare(String(right.expanded)))
+  }
+  // LTR: right and bottom edges; open turns 45° (points down), shut turns -45° (points right).
+  expect(await states()).toEqual([
+    { angle: -45, expanded: "false", leftEdge: false },
+    { angle: 45, expanded: "true", leftEdge: false }
+  ])
+  await page.evaluate(() => {
+    document.documentElement.dir = "rtl"
+  })
+  // RTL: left and bottom edges; open turns -45° (points down), shut turns 45° (points left).
+  expect(await states()).toEqual([
+    { angle: 45, expanded: "false", leftEdge: true },
+    { angle: -45, expanded: "true", leftEdge: true }
+  ])
+  // An LTR tree inside an RTL page follows its own, nearer direction.
+  await button.evaluate((element) => element.closest("nav")?.setAttribute("dir", "ltr"))
+  expect(await states()).toEqual([
+    { angle: -45, expanded: "false", leftEdge: false },
+    { angle: 45, expanded: "true", leftEdge: false }
+  ])
+})
+
+test("split patch cells keep their add and remove signs in forced colours", async ({ page }) => {
+  const signs = () =>
+    page.evaluate(() => {
+      // Every distinct ::before across a column's code cells; context rows contribute "none".
+      const before = (selector: string) =>
+        [
+          ...new Set([...document.querySelectorAll(selector)].map((code) => getComputedStyle(code, "::before").content))
+        ].sort()
+      return {
+        added: before("[data-rly-patch-diff] tr td:nth-child(4) > code"),
+        removed: before("[data-rly-patch-diff] tr td:nth-child(2) > code")
+      }
+    })
+
+  await page.goto(story("diff-patchdiffview--split"))
+  await expect(page.locator("[data-rly-patch-diff] table")).toBeVisible()
+  expect(await signs()).toEqual({ added: ["none"], removed: ["none"] })
+
+  await page.emulateMedia({ forcedColors: "active" })
+  await page.goto(story("diff-patchdiffview--split", "active"))
+  await expect(page.locator("[data-rly-patch-diff] table")).toBeVisible()
+  expect(await signs()).toEqual({ added: ["\"+ \" / \"\"", "none"], removed: ["\"− \" / \"\"", "none"] })
+})
+
+test("keeps the indexed count clear of the title in the compact diff header", async ({ page }) => {
+  for (const width of [390, 1280]) {
+    await page.setViewportSize({ height: 900, width })
+    await page.goto(story("diff-diffheader--compact-forced-colors"))
+    const header = page.locator("#storybook-root header[data-rly-diff-layout]").first()
+    await expect(header).toBeVisible()
+    const overlap = await header.evaluate((element) => {
+      const title = element.querySelector("h1")?.getBoundingClientRect()
+      const count = element.querySelector("progress")?.previousElementSibling?.getBoundingClientRect()
+      if (title === undefined || count === undefined) return true
+      return !(count.bottom <= title.top || count.top >= title.bottom || count.right <= title.left ||
+        count.left >= title.right)
+    })
+    expect(overlap, `at ${width}px`).toBe(false)
+    expect(await header.evaluate((element) => element.scrollWidth <= element.clientWidth + 1), `at ${width}px`).toBe(
+      true
+    )
+  }
 })

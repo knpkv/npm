@@ -26,6 +26,7 @@ import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
 import { fileURLToPath } from "node:url"
 import pkg from "../package.json" with { type: "json" }
+import { reportFailure } from "./CliFailure.js"
 import { prCreateCommand } from "./PrCreate.js"
 import { prExportCommand } from "./PrExport.js"
 import { prListCommand } from "./PrList.js"
@@ -59,6 +60,12 @@ const tuiNeedsBunMessage =
  */
 const launchTui = Effect.gen(function*() {
   if (process.versions.bun !== undefined) {
+    // A pipe or a script gets one line instead of a full-screen UI it cannot show.
+    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+      return yield* reportFailure(
+        "codecommit: the terminal UI needs an interactive terminal. Run `codecommit --help` for the commands that work in scripts."
+      )
+    }
     const { default: program } = yield* Effect.promise(() => import("./main.js"))
     return yield* program
   }
@@ -72,12 +79,17 @@ const launchTui = Effect.gen(function*() {
   if (code !== 0) return yield* new TuiExited({ code })
 })
 
-const tui = Command.make("tui", {}, () => launchTui)
+const tui = Command.make("tui", {}, () => launchTui).pipe(
+  Command.withDescription("Open the terminal UI (needs Bun and an interactive terminal)")
+)
 
 // Web Command
 const web = Command.make("web", {
-  port: Options.Int("port").pipe(Options.withDefault(3000)),
-  hostname: Options.String("hostname").pipe(Options.withDefault("127.0.0.1"))
+  port: Options.Int("port").pipe(Options.withDescription("Port to listen on"), Options.withDefault(3000)),
+  hostname: Options.String("hostname").pipe(
+    Options.withDescription("Loopback address to listen on, such as 127.0.0.1 or ::1"),
+    Options.withDefault("127.0.0.1")
+  )
 }, ({ hostname, port }) =>
   Effect.gen(function*() {
     yield* requireLoopbackHostname(hostname)
@@ -88,7 +100,7 @@ const web = Command.make("web", {
       onReady: (url) => openBrowser(url).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
       port
     })
-  }))
+  })).pipe(Command.withDescription("Serve the browser UI on this machine and open it"))
 
 /** Best effort: the URL is already printed, so a missing browser leaves nothing unfinished. */
 const openBrowser = (url: string) => {

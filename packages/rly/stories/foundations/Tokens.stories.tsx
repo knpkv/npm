@@ -53,9 +53,8 @@ const Tokens = () => (
       <div className="tokenStory__states">
         {states.map((state) => (
           <article className="tokenStory__state" data-state={state} key={state}>
-            <span aria-hidden="true" className="tokenStory__stateRail" />
             <strong>{state}</strong>
-            <span>State always keeps its word, rail, and tint together.</span>
+            <span>State always keeps its word, even border, and tint together.</span>
           </article>
         ))}
       </div>
@@ -109,6 +108,14 @@ export const Overview: Story = {
     await expect(canvas.getByRole("heading", { name: "Meaning before color." })).toBeVisible()
     await expect(canvas.getAllByText("provenance")).toHaveLength(5)
     await expect(canvas.getByText("success", { selector: "strong" })).toBeVisible()
+    // State cards carry their state in a word, an even border and a tint, never a side rail.
+    for (const card of canvasElement.querySelectorAll<HTMLElement>(".tokenStory__state")) {
+      const border = getComputedStyle(card)
+      await expect(card.querySelector("[class*='Rail']")).toBeNull()
+      await expect(
+        new Set([border.borderTopWidth, border.borderRightWidth, border.borderBottomWidth, border.borderLeftWidth]).size
+      ).toBe(1)
+    }
   },
   render: () => (
     <div data-registry-state="overview">

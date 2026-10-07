@@ -4,55 +4,57 @@
     min-inline-size: var(--rly-space-0);
   }
 
+  /*
+   * One row of tabs above a hairline. The selected tab is marked once, by text ink and a 2px
+   * underline on the hairline; no grey track, no card. Tabs size to their label, so a count stays
+   * beside its words.
+   */
   .list {
     align-items: stretch;
-    background: var(--rly-color-surface-2);
-    border-radius: var(--rly-radius-field);
+    border-block-end: 1px solid var(--rly-color-border-1);
     display: flex;
     flex-wrap: wrap;
-    gap: var(--rly-space-2);
+    gap: var(--rly-space-4);
     max-inline-size: 100%;
-    padding: var(--rly-space-4);
   }
 
   .trigger {
     appearance: none;
-    background: var(--rly-color-surface-2);
+    background: transparent;
     border: var(--rly-space-0);
-    border-radius: var(--rly-radius-tag);
+    border-radius: var(--rly-radius-tag) var(--rly-radius-tag) var(--rly-space-0) var(--rly-space-0);
     color: var(--rly-color-text-2);
     cursor: pointer;
-    flex: 1 1 10rem;
+    flex: 0 1 auto;
     max-inline-size: 100%;
     min-inline-size: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     padding: var(--rly-space-8) var(--rly-space-12);
     position: relative;
-    text-align: center;
+    text-align: start;
   }
 
   .trigger::after {
-    background: var(--rly-color-action-background);
+    background: var(--rly-color-text-1);
     block-size: var(--rly-space-2);
-    border-radius: var(--rly-radius-round);
     content: "";
-    inset-block-end: var(--rly-space-2);
-    inset-inline: var(--rly-space-12);
+    inset-block-end: -1px;
+    inset-inline: var(--rly-space-0);
     opacity: 0;
     position: absolute;
   }
 
   .trigger[data-state="active"] {
-    background: var(--rly-color-surface-1);
     color: var(--rly-color-text-1);
   }
 
   .trigger[data-state="active"]::after {
     opacity: 1;
   }
+  /* Disabled stays readable (tertiary ink keeps 4.5:1); the cursor says it cannot be chosen. */
   .trigger:disabled {
+    color: var(--rly-color-text-3);
     cursor: not-allowed;
-    opacity: 0.58;
   }
 
   .defaultSize .trigger {
@@ -76,12 +78,31 @@
 
   @media (hover: hover) {
     .trigger:not(:disabled, [data-state="active"]):hover {
-      background: var(--rly-color-surface-3);
       color: var(--rly-color-text-1);
     }
   }
 
+  /* Forced colours keep the underline as a system-colour bar. */
+  @media (forced-colors: active) {
+    .trigger::after {
+      background: CanvasText;
+    }
+  }
+
+  /*
+   * Stacked on a phone, a full-width underline reads as a scrollbar, so the selected row is marked by
+   * a quiet fill instead; still one treatment per layout. Forced colours keep the underline.
+   */
   @media (max-width: 30rem) {
+    .root:not([data-mobile-layout="single-row"]) .trigger {
+      border-radius: var(--rly-radius-tag);
+      flex: 1 1 100%;
+    }
+
+    .root:not([data-mobile-layout="single-row"]) .trigger[data-state="active"] {
+      background: var(--rly-color-surface-2);
+    }
+
     .root:not([data-mobile-layout="single-row"]) .trigger[data-state="active"]::after {
       content: none;
     }

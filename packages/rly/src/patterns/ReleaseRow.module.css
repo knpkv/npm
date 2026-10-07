@@ -34,7 +34,7 @@
       var(--rly-type-code-font);
     letter-spacing: var(--rly-type-label-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .verdictBlock {
@@ -46,16 +46,17 @@
       var(--rly-type-card-title-font);
     letter-spacing: var(--rly-type-card-title-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
+  /* Body copy: body weight in secondary ink; weight is reserved for the title above it. */
   .reason {
     color: var(--rly-color-text-2);
-    font: var(--rly-type-card-title-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
       var(--rly-type-body-font);
     letter-spacing: var(--rly-type-body-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .people {
@@ -94,9 +95,9 @@
   }
 
   .fact {
-    border-inline-start: 1px solid var(--rly-color-border-1);
     gap: var(--rly-space-4);
-    padding-inline-start: var(--rly-space-12);
+    /* One bounded track, so an unbreakable value (a commit hash) wraps instead of widening the row. */
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .fact dd {
@@ -104,7 +105,7 @@
       var(--rly-type-label-font);
     letter-spacing: var(--rly-type-label-tracking);
     margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
   }
 
   .actions {

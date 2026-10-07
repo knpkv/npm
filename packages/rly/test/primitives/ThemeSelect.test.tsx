@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import { type RlyTheme, ThemeProvider, useStoredTheme } from "../../src/foundations/ThemeProvider.js"
+import { RLY_SELECT_VARIANTS } from "../../src/primitives/Select.js"
 import { ThemeSelect } from "../../src/primitives/ThemeSelect.js"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
@@ -25,6 +26,14 @@ describe("ThemeSelect", () => {
     expect(markup).toContain('role="combobox"')
     expect(markup).toContain("aria-labelledby=")
     expect(markup).toContain(">System<")
+  })
+
+  it("is dense by default, so it lines up with the header actions beside it", () => {
+    const markup = renderToStaticMarkup(
+      <ThemeSelect labelVisibility="hidden" onValueChange={() => undefined} value="system" />
+    )
+    expect(markup).toContain(RLY_SELECT_VARIANTS.size.dense.className)
+    expect(markup).not.toContain(RLY_SELECT_VARIANTS.size.compact.className)
   })
 
   it("names a hidden-label control through aria-label for compact headers", () => {

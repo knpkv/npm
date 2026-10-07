@@ -27,7 +27,8 @@
 
 .richText,
 .commentBody {
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .richText {
@@ -57,7 +58,7 @@
 
 .richText blockquote,
 .commentBody blockquote {
-  border-inline-start: 2px solid var(--rly-color-border-2);
+  border-inline-start: 1px solid var(--rly-color-border-2);
   margin-inline: var(--rly-space-0);
   padding-inline-start: var(--rly-space-16);
 }
@@ -68,7 +69,8 @@
 }
 
 .criteria {
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-service-jira);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
   padding: var(--rly-space-8) var(--rly-space-24);
 }
 
@@ -126,7 +128,8 @@
   font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
     var(--rly-type-body-font);
   margin: var(--rly-space-0);
-  overflow-wrap: anywhere;
+  min-inline-size: 0;
+  overflow-wrap: break-word;
 }
 
 .related {

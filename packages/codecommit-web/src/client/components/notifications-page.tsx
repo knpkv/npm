@@ -19,8 +19,7 @@ import {
   markAllNotificationsReadAtom,
   markNotificationReadAtom,
   markNotificationUnreadAtom,
-  notificationsSsoLoginAtom,
-  notificationsSsoLogoutAtom
+  notificationsSsoLoginAtom
 } from "../atoms/app.js"
 import { useInfiniteNotifications } from "../hooks/use-infinite-notifications.js"
 import { codeCommitPullRequestHref } from "../codecommit-route.js"
@@ -28,6 +27,7 @@ import { useIntersectionObserver } from "../hooks/useIntersectionObserver.js"
 import { useOptimisticSet } from "../hooks/useOptimistic.js"
 import { Badge } from "./ui/badge.js"
 import { Button, ButtonGroup } from "./ui/button.js"
+import { SsoSignOutDialog } from "./sso-sign-out-dialog.js"
 import { Separator } from "./ui/separator.js"
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group.js"
 
@@ -108,7 +108,7 @@ export function NotificationsPage() {
   const markUnread = useAtomSet(markNotificationUnreadAtom)
   const markAllRead = useAtomSet(markAllNotificationsReadAtom)
   const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
-  const ssoLogout = useAtomSet(notificationsSsoLogoutAtom)
+  const [signOutOpen, setSignOutOpen] = useState(false)
   const [readIds, addReadId, setAllReadIds] = useOptimisticSet<number>(rawItems[0]?.id)
   const [unreadIds, addUnreadId, , removeUnreadId] = useOptimisticSet<number>(rawItems[0]?.id)
 
@@ -304,11 +304,9 @@ export function NotificationsPage() {
                                 variant="ghost"
                                 size="sm"
                                 className="h-7 px-2.5 text-xs"
-                                onClick={() => {
-                                  ssoLogout({})
-                                }}
+                                onClick={() => setSignOutOpen(true)}
                               >
-                                Logout
+                                Sign out of AWS SSO…
                               </Button>
                             </>
                           )}
@@ -337,6 +335,7 @@ export function NotificationsPage() {
           </div>
         )}
       </div>
+      <SsoSignOutDialog onOpenChange={setSignOutOpen} open={signOutOpen} />
     </div>
   )
 }
