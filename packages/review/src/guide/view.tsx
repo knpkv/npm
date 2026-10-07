@@ -249,56 +249,6 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
       <a className="review-skip" href={`#${fragmentId("content")}`}>
         Skip to changes
       </a>
-      <div className="review-side">
-        <nav className="review-nav" aria-label="Guide chapters">
-          <Text as="p" className="review-nav-title" variant="label">
-            {humane(guide.title)}
-          </Text>
-          <ol>
-            {hasFindings ? (
-              <li>
-                <a href={`#${fragmentId("reading")}`} onClick={() => setReading("review")}>
-                  Review
-                </a>
-              </li>
-            ) : null}
-            {guide.sections.map((section, index) => (
-              <li key={index}>
-                <a href={`#${fragmentId(`s${index + 1}`)}`}>{humane(section.title)}</a>
-              </li>
-            ))}
-            {guide.unplacedFiles.length > 0 ? (
-              <li>
-                <a href={`#${fragmentId("rest")}`}>Other files</a>
-              </li>
-            ) : null}
-            {general.length > 0 ? (
-              <li>
-                <a href={`#${fragmentId("general")}`}>Outside the diff</a>
-              </li>
-            ) : null}
-          </ol>
-        </nav>
-        <div className="review-controls">
-          <Button size="compact" variant="secondary" onClick={() => setMode(mode === "split" ? "stacked" : "split")}>
-            {mode === "split" ? "Unified view" : "Split view"}
-          </Button>
-          <label className="review-checkbox">
-            <input type="checkbox" checked={wrap} onChange={(event) => setWrap(event.target.checked)} /> Wrap code
-          </label>
-          <div className="review-theme" role="group" aria-label="Theme">
-            <Button size="compact" variant="quiet" aria-pressed={theme === "light"} onClick={() => setTheme("light")}>
-              Light
-            </Button>
-            <Button size="compact" variant="quiet" aria-pressed={theme === "system"} onClick={() => setTheme("system")}>
-              System
-            </Button>
-            <Button size="compact" variant="quiet" aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>
-              Dark
-            </Button>
-          </div>
-        </div>
-      </div>
       <main className="review-content" id={fragmentId("content")}>
         <header className="review-header">
           <div className="review-inline review-muted">
@@ -487,6 +437,58 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
           source wording.
         </footer>
       </main>
+      {/* After the guide in the DOM, so keyboard order matches the phone layout; the desktop grid
+          still draws it as the left column. */}
+      <div className="review-side">
+        <nav className="review-nav" aria-label="Guide chapters">
+          <Text as="p" className="review-nav-title" variant="label">
+            {humane(guide.title)}
+          </Text>
+          <ol>
+            {hasFindings ? (
+              <li>
+                <a href={`#${fragmentId("reading")}`} onClick={() => setReading("review")}>
+                  Review
+                </a>
+              </li>
+            ) : null}
+            {guide.sections.map((section, index) => (
+              <li key={index}>
+                <a href={`#${fragmentId(`s${index + 1}`)}`}>{humane(section.title)}</a>
+              </li>
+            ))}
+            {guide.unplacedFiles.length > 0 ? (
+              <li>
+                <a href={`#${fragmentId("rest")}`}>Other files</a>
+              </li>
+            ) : null}
+            {general.length > 0 ? (
+              <li>
+                <a href={`#${fragmentId("general")}`}>Outside the diff</a>
+              </li>
+            ) : null}
+          </ol>
+        </nav>
+        <div className="review-controls">
+          <Button size="compact" variant="secondary" onClick={() => setMode(mode === "split" ? "stacked" : "split")}>
+            {mode === "split" ? "Unified view" : "Split view"}
+          </Button>
+          <label className="review-checkbox">
+            <input type="checkbox" checked={wrap} onChange={(event) => setWrap(event.target.checked)} /> Wrap code
+          </label>
+          <div className="review-theme" role="group" aria-label="Theme">
+            <Button size="compact" variant="quiet" aria-pressed={theme === "light"} onClick={() => setTheme("light")}>
+              Light
+            </Button>
+            <Button size="compact" variant="quiet" aria-pressed={theme === "system"} onClick={() => setTheme("system")}>
+              System
+            </Button>
+            <Button size="compact" variant="quiet" aria-pressed={theme === "dark"} onClick={() => setTheme("dark")}>
+              Dark
+            </Button>
+          </div>
+        </div>
+      </div>
     </ThemeProvider>
   )
 }

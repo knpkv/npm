@@ -16,8 +16,11 @@ html[data-review-fonts="loading"] body {
   color: inherit;
   text-underline-offset: 0.2em;
 }
-/* The side column: chapter links, then the reading controls. */
+/* The side column: chapter links, then the reading controls. It follows the guide in the DOM, so the
+   grid places both explicitly. */
 .review-side {
+  grid-column: 1;
+  grid-row: 1;
   position: sticky;
   top: 0;
   height: 100vh;
@@ -139,6 +142,8 @@ html[data-review-fonts="loading"] body {
 /* The column divider runs the full page height on the content side; the sticky side column is
    only as tall as the window. */
 .review-content {
+  grid-column: 2;
+  grid-row: 1;
   border-inline-start: 1px solid var(--rly-color-border-1);
   min-width: 0;
   padding: var(--rly-space-48) clamp(1rem, 4vw, 4rem);
@@ -462,8 +467,8 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
 .review-skip:focus {
   top: 1rem;
 }
-/* Phone: the guide first, its title and summary on the first screen, then the chapter list, then the
-   reading controls. */
+/* Phone: one column in DOM order — the guide, its title and summary on the first screen, then the
+   chapter list, then the reading controls — so what is read and what is tabbed through agree. */
 @media (max-width: 800px) {
   .review-guide {
     grid-template-columns: minmax(0, 1fr);
@@ -472,7 +477,6 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
     display: contents;
   }
   .review-controls {
-    order: 3;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -482,10 +486,10 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   }
   .review-content {
     border-inline-start: 0;
-    order: 1;
+    grid-column: auto;
+    grid-row: auto;
   }
   .review-nav {
-    order: 2;
     border-top: 1px solid var(--rly-color-border-1);
     padding: var(--rly-space-24) var(--rly-space-16);
   }

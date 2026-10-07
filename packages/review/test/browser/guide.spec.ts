@@ -15,7 +15,7 @@ const longPath = "packages/codecommit-web/src/client/components/sandbox-workspac
  * chapter, and renames a diffed file to a long path, as real patches have in every file header.
  */
 const guideHtml = (longIdentifiers = false) => {
-  const rename = (text: string) => longIdentifiers ? text.replaceAll("src/release.ts", longPath) : text
+  const rename = (text: string) => (longIdentifiers ? text.replaceAll("src/release.ts", longPath) : text)
   const guide = JSON.parse(rename(readFileSync("examples/approval-guide/guide.json", "utf8")))
   if (longIdentifiers) {
     guide.title = "Bind CodeCommitRevisionIdentifiersForSignedApprovalReleases to the approved revision"
@@ -158,23 +158,28 @@ for (const width of [1024, 1440]) {
     await diagramDrawn(page)
     await page.waitForTimeout(300)
     // Buffered entries include every shift since navigation, before and after the diagram drew.
-    const entries = await page.evaluate(() =>
-      new Promise<Array<unknown>>((resolve) => {
-        new PerformanceObserver((list, observer) => {
-          observer.disconnect()
-          resolve(
-            list.getEntries().map((entry) => ({
-              ...entry.toJSON(),
-              // Which elements moved, for the failure message.
-              moved: ("sources" in entry && Array.isArray(entry.sources) ? entry.sources : []).map((source) =>
-                String(source?.node?.nodeName ?? "") + "." + String(source?.node?.className ?? "") + " " +
-                JSON.stringify([source?.previousRect?.y, source?.previousRect?.height, source?.currentRect?.y])
-              )
-            }))
-          )
-        }).observe({ type: "layout-shift", buffered: true })
-        setTimeout(() => resolve([]), 500)
-      })
+    const entries = await page.evaluate(
+      () =>
+        new Promise<Array<unknown>>((resolve) => {
+          new PerformanceObserver((list, observer) => {
+            observer.disconnect()
+            resolve(
+              list.getEntries().map((entry) => ({
+                ...entry.toJSON(),
+                // Which elements moved, for the failure message.
+                moved: ("sources" in entry && Array.isArray(entry.sources) ? entry.sources : []).map(
+                  (source) =>
+                    String(source?.node?.nodeName ?? "") +
+                    "." +
+                    String(source?.node?.className ?? "") +
+                    " " +
+                    JSON.stringify([source?.previousRect?.y, source?.previousRect?.height, source?.currentRect?.y])
+                )
+              }))
+            )
+          }).observe({ type: "layout-shift", buffered: true })
+          setTimeout(() => resolve([]), 500)
+        })
     )
     const total = Schema.decodeUnknownSync(Schema.Array(LayoutShift))(entries).reduce(
       (sum, entry) => sum + entry.value,
@@ -198,36 +203,35 @@ test("an added file is one column with no mode line", async ({ page }, testInfo)
 
 for (const width of [390, 1280]) {
   // ui-b: an identifier heading left one letter on its own line, or split mid-word.
-  test(
-    `identifier headings break between words, never leaving a lone letter at ${width}px`,
-    async ({ page }, testInfo) => {
-      await page.setViewportSize({ width, height: 900 })
-      await load(page, await guideHtml(true), testInfo)
-      const shortestLastLine = await page.locator("h1, h2, .review-nav a, .review-roadmap a").evaluateAll((elements) =>
-        elements.flatMap((element) => {
-          const text = element.textContent ?? ""
-          if (text.length < 16) return []
-          // Characters on the heading's last rendered line.
-          const range = document.createRange()
-          const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
-          const tops: Array<number> = []
-          for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-            for (let at = 0; at < (node.textContent ?? "").length; at++) {
-              range.setStart(node, at)
-              range.setEnd(node, at + 1)
-              const rect = range.getBoundingClientRect()
-              if (rect.width > 0) tops.push(Math.round(rect.top))
-            }
+  test(`identifier headings break between words, never leaving a lone letter at ${width}px`, async ({
+    page
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    await load(page, await guideHtml(true), testInfo)
+    const shortestLastLine = await page.locator("h1, h2, .review-nav a, .review-roadmap a").evaluateAll((elements) =>
+      elements.flatMap((element) => {
+        const text = element.textContent ?? ""
+        if (text.length < 16) return []
+        // Characters on the heading's last rendered line.
+        const range = document.createRange()
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT)
+        const tops: Array<number> = []
+        for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+          for (let at = 0; at < (node.textContent ?? "").length; at++) {
+            range.setStart(node, at)
+            range.setEnd(node, at + 1)
+            const rect = range.getBoundingClientRect()
+            if (rect.width > 0) tops.push(Math.round(rect.top))
           }
-          // Collapsed (e.g. inside a closed <details>): nothing is drawn, so nothing can be orphaned.
-          if (tops.length === 0) return []
-          const last = Math.max(...tops)
-          return [{ text: text.slice(0, 30), lastLine: tops.filter((top) => Math.abs(top - last) < 4).length }]
-        })
-      )
-      expect(shortestLastLine.filter((heading) => heading.lastLine < 3)).toEqual([])
-    }
-  )
+        }
+        // Collapsed (e.g. inside a closed <details>): nothing is drawn, so nothing can be orphaned.
+        if (tops.length === 0) return []
+        const last = Math.max(...tops)
+        return [{ text: text.slice(0, 30), lastLine: tops.filter((top) => Math.abs(top - last) < 4).length }]
+      })
+    )
+    expect(shortestLastLine.filter((heading) => heading.lastLine < 3)).toEqual([])
+  })
 }
 
 // ui-b: at phone widths the view controls came before the guide's title.
@@ -237,4 +241,24 @@ test("on a phone the title comes before the view controls", async ({ page }, tes
   const title = await page.getByRole("heading", { level: 1 }).boundingBox()
   const controls = await page.locator(".review-controls").boundingBox()
   expect(title !== null && controls !== null && title.y < controls.y).toBe(true)
+})
+
+// Review finding: on phones the guide was moved above the sidebar with CSS order while the DOM kept the
+// sidebar first, so Tab from the top jumped to the chapter list and controls at the bottom of the page.
+test("on a phone keyboard focus starts in the guide, at the top of the page", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await load(page, await guideHtml(), testInfo)
+  await page.keyboard.press("Tab")
+  await page.keyboard.press("Tab")
+  const focused = await page.evaluate(() => {
+    const element = document.activeElement
+    return element === null
+      ? null
+      : {
+        top: element.getBoundingClientRect().top + window.scrollY,
+        inGuide: element.closest(".review-content") !== null
+      }
+  })
+  expect(focused?.inGuide).toBe(true)
+  expect(focused?.top ?? Number.POSITIVE_INFINITY).toBeLessThan(800)
 })
