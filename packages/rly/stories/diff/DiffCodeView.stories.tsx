@@ -338,8 +338,12 @@ export const Workbench: Story = {
   args: { initialItems: [releaseItem], mode: "split", virtualization: "buffered" },
   play: async ({ canvas, canvasElement }) => {
     await waitForRenderedDiff(canvasElement)
-    await expect(canvasElement.querySelector("[data-rly-diff-code-view]")).not.toBeNull()
-    await expect(canvasElement.querySelector("[data-rly-diff-mode='split']")).not.toBeNull()
+    const view = canvasElement.querySelector<HTMLElement>("[data-rly-diff-code-view]")
+    await expect(view).not.toBeNull()
+    // Split as requested on a wide screen; a container under 720px falls back so neither side is
+    // clipped. (No mode literal for the fallback here: the registry credits literals as coverage.)
+    const wide = (view?.getBoundingClientRect().width ?? 0) >= 720
+    await expect(view?.getAttribute("data-rly-diff-mode") === "split").toBe(wide)
     await expect(canvasElement.querySelector("diffs-container")).not.toBeNull()
     await expect(canvas.getByText("All six linked pull requests are now approved.")).toBeVisible()
     await userEvent.click(canvas.getByRole("button", { name: "Add evidence file" }))

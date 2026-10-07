@@ -1001,28 +1001,28 @@ export const ConnectSurface = ({
           <small className="connect-status-message">Connecting to {connection.agent.name}…</small>
         ) : connection._tag === "failed" ? (
           <small className="connect-status-message" data-tone="critical">
-            {connection.agent.name} · {connection.detail}
+            {connection.agent.name}: {connection.detail}
           </small>
         ) : connection._tag === "closed" ? (
           <small className="connect-status-message">{connection.agent.name} disconnected.</small>
         ) : null}
         {remembered._tag === "Failure" ? (
           <small className="connect-preference-error">
-            Selection memory unavailable · {Cause.pretty(remembered.cause)}
+            Selection memory unavailable: {Cause.pretty(remembered.cause)}
           </small>
         ) : preferenceError === null ? null : (
-          <small className="connect-preference-error">Selection memory unavailable · {preferenceError}</small>
+          <small className="connect-preference-error">Selection memory unavailable: {preferenceError}</small>
         )}
         {workspaceFocusFailure === null || workspaceFocusFailure === "focus_rejected" ? null : (
           <small className="connect-status-message" data-tone="critical">
-            Terminal focus transition failed · {workspaceFocusFailure}
+            Terminal focus transition failed: {workspaceFocusFailure}
           </small>
         )}
         {(current?.failures.length ?? 0) === 0 ? null : (
           <div className="connect-failures">
             {current?.failures.map((failure) => (
               <small key={failure.host}>
-                {failure.host} · {failure.reason.replaceAll("_", " ")}
+                {failure.host}: {failure.reason.replaceAll("_", " ")}
               </small>
             ))}
           </div>
@@ -1043,7 +1043,7 @@ export const ConnectSurface = ({
           ) : (
             <ConnectAgentIdentity agent={selected} resolution={workGoalResolution} />
           )}
-          <small>{selected === null ? "Herdr terminal" : `${selected.host} · ${selected.kind}`}</small>
+          <small>{selected === null ? "Herdr terminal" : `${selected.kind} on ${selected.host}`}</small>
         </div>
         <StateLabel
           label={
@@ -1059,7 +1059,7 @@ export const ConnectSurface = ({
       </div>
       {workspaceFocusFailure === "focus_rejected" ? (
         <small className="connect-status-message" data-tone="critical" role="alert">
-          Terminal focus transition failed · {workspaceFocusFailure}
+          Terminal focus transition failed: {workspaceFocusFailure}
         </small>
       ) : null}
       <TerminalKeyRail
