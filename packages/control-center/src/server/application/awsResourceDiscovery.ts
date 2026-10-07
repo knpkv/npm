@@ -1,4 +1,5 @@
 import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
+import { isCredentialInvalidCause } from "@knpkv/codecommit-core/AwsCredentialErrors.js"
 import * as CodeCommit from "@knpkv/codecommit-core/ReadClient.js"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
@@ -57,13 +58,7 @@ const isAuthorizationCause = (cause: unknown): boolean =>
   hasAwsTag(cause, ["AccessDenied", "AccessDeniedException", "UnauthorizedException"])
 
 const isAuthenticationCause = (cause: unknown): boolean =>
-  hasAwsTag(cause, [
-    "CredentialsProviderError",
-    "ExpiredTokenException",
-    "InvalidClientTokenId",
-    "InvalidSignatureException",
-    "UnrecognizedClientException"
-  ])
+  isCredentialInvalidCause(cause) || hasAwsTag(cause, ["CredentialsProviderError"])
 
 const isTimeoutCause = (cause: unknown): boolean =>
   hasAwsTag(cause, ["TimeoutError", "RequestTimeoutException", "RequestExpired"])

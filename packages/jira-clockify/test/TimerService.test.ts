@@ -15,6 +15,8 @@ import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
 import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
 import { ConfigService, defaultJcfConfig } from "../src/services/ConfigService.js"
+import { HomeDirectory } from "../src/services/HomeDirectory.js"
+import { layer as jiraAccessLayer } from "../src/services/JiraAccess.js"
 import { StateWriter } from "../src/services/StateWriter.js"
 import type { JiraTicket } from "../src/services/TicketService.js"
 import { layer as timerLayer, TimerError, TimerService } from "../src/services/TimerService.js"
@@ -168,6 +170,22 @@ const mockJiraAuthProfileMethods = {
   removeProfile: () => Effect.succeed(null)
 }
 
+/** The active OAuth profile holding `token`, so access reads token and site from one profile. */
+const profileWith = (token: string) => ({
+  id: "profile",
+  name: "Profile",
+  token: {
+    access_token: token,
+    refresh_token: "refresh",
+    expires_at: 4_102_444_800_000,
+    scope: "write:jira-work",
+    cloud_id: "cloud-1",
+    site_url: "https://test.atlassian.net"
+  },
+  created_at: "2026-01-01T00:00:00.000Z",
+  updated_at: "2026-01-01T00:00:00.000Z"
+})
+
 const MockJiraAuthLayer = Layer.succeed(JiraAuth, {
   configure: () => Effect.void,
   isConfigured: () => Effect.succeed(true),
@@ -178,6 +196,7 @@ const MockJiraAuthLayer = Layer.succeed(JiraAuth, {
   getSiteUrl: () => Effect.succeed("https://test.atlassian.net"),
   getCurrentUser: () => Effect.succeed(null),
   ...mockJiraAuthProfileMethods,
+  getActiveProfile: () => Effect.succeed(profileWith("jira-token")),
   isLoggedIn: () => Effect.succeed(true)
 })
 
@@ -252,12 +271,21 @@ const makeFlakyHttpClientLayer = (failures: number) => {
   )
 }
 
+/** Jira reached through the OAuth login: the home holds no API-token file. */
+const oauthAccess = (jiraAuthLayer: Layer.Layer<JiraAuth>, httpLayer: Layer.Layer<HttpClient.HttpClient>) =>
+  jiraAccessLayer.pipe(
+    Layer.provide(jiraAuthLayer),
+    Layer.provide(Layer.succeed(HomeDirectory, { path: "/nonexistent/jcf-test-home" })),
+    Layer.provide(httpLayer),
+    Layer.provide(NodeServices.layer)
+  )
+
 const TestLayer = timerLayer.pipe(
   Layer.provide(MockClockifyLayer),
   Layer.provide(MockClockifyAuthLayer),
   Layer.provide(MockConfigLayer),
   Layer.provide(MockStateWriterLayer),
-  Layer.provide(MockJiraAuthLayer),
+  Layer.provide(oauthAccess(MockJiraAuthLayer, MockHttpClientLayer)),
   Layer.provide(MockHttpClientLayer),
   Layer.provide(NodeServices.layer)
 )
@@ -273,7 +301,7 @@ const makeTestLayer = (
     Layer.provide(MockClockifyAuthLayer),
     Layer.provide(MockConfigLayer),
     Layer.provide(MockStateWriterLayer),
-    Layer.provide(jiraAuthLayer),
+    Layer.provide(oauthAccess(jiraAuthLayer, httpLayer)),
     Layer.provide(httpLayer),
     Layer.provide(NodeServices.layer)
   )
@@ -756,6 +784,8 @@ describe("TimerService", () => {
         getSiteUrl: () => Effect.succeed("https://test.atlassian.net"),
         getCurrentUser: () => Effect.succeed(null),
         ...mockJiraAuthProfileMethods,
+        // A refresh persists the new token to the same profile.
+        getActiveProfile: () => Effect.succeed(profileWith(`jira-token-${accessTokenCalls}`)),
         isLoggedIn: () => Effect.succeed(true)
       })
       const httpLayer = Layer.succeed(

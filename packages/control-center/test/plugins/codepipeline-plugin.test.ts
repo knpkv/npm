@@ -1080,6 +1080,24 @@ describe("CodePipelinePlugin", () => {
       assert.deepStrictEqual(sameRole.mutationAccessKeys, ["mutation-access-key"])
     }))
 
+  it.effect("treats raw AWS SDK credential exceptions, identified by name, as authentication", () =>
+    Effect.gen(function*() {
+      const sdkExpired = yield* mapCodePipelineAwsFailure(
+        "codepipeline-get-pipeline-state",
+        Object.assign(new Error("The security token included in the request is expired"), {
+          name: "ExpiredTokenException"
+        })
+      ).pipe(Effect.flip)
+      const sdkRejected = yield* mapCodePipelineAwsFailure(
+        "codepipeline-get-pipeline-state",
+        Object.assign(new Error("The security token included in the request is invalid"), {
+          name: "UnrecognizedClientException"
+        })
+      ).pipe(Effect.flip)
+      assert.strictEqual(sdkExpired._tag, "PluginAuthenticationFailure")
+      assert.strictEqual(sdkRejected._tag, "PluginAuthenticationFailure")
+    }))
+
   it.effect("maps AWS request-timeout tags separately from provider outages", () =>
     Effect.gen(function*() {
       const requestTimeout = yield* mapCodePipelineAwsFailure(

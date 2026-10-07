@@ -1,5 +1,21 @@
 # @knpkv/herdr-approvals
 
+## 0.7.0
+
+### Minor Changes
+
+- [#544](https://github.com/knpkv/npm/pull/544) [`6971fa1`](https://github.com/knpkv/npm/commit/6971fa10f21e1ec2739d2f9b83ecb63b8de74b47) Thanks [@konopkov](https://github.com/konopkov)! - The default operations now run `nix.apply` as the apply command followed by the ref and then the Fleet job id, so the apply command can record that job's own outcome. A host that restarts mid-apply can then settle the job from that record. An apply command that takes only the ref must ignore the second argument.
+
+### Patch Changes
+
+- [#529](https://github.com/knpkv/npm/pull/529) [`b791563`](https://github.com/knpkv/npm/commit/b791563a328c0118c2716bda59294f7c606225c8) Thanks [@konopkov](https://github.com/konopkov)! - `fleetctl --help`, `fleetctl help` and `fleetctl work --help` now print plain usage and exit 0, even on a machine without a fleet configuration. A mistake now gets one line naming its cause, and a non-zero exit. That covers an unknown command, missing arguments, an unknown host (the line lists the known hosts) and an unknown job kind (it lists the kinds). Usage mistakes print the usage that applies after that line, with no `FleetValidationError:` prefix. A missing configuration file is reported as `no fleet configuration at PATH; create it, or set FLEET_CONFIG_PATH to an existing file` instead of a platform error.
+- Updated dependencies [[`d183858`](https://github.com/knpkv/npm/commit/d1838583e51cd683e167d6cb735ebbfe552bdb7f), [`21ab62a`](https://github.com/knpkv/npm/commit/21ab62a25400f61f27a5230553e4d4780034b899), [`b791563`](https://github.com/knpkv/npm/commit/b791563a328c0118c2716bda59294f7c606225c8), [`d266e4c`](https://github.com/knpkv/npm/commit/d266e4cccb601e0d8006ce50e48743b8f347f21e), [`c93baf2`](https://github.com/knpkv/npm/commit/c93baf29bba9d67ffc4938ce0b0ada533260fddc)]:
+  - @knpkv/herdr-connect@0.5.0
+  - @knpkv/herdr-fleet@0.6.1
+  - @knpkv/herdr-work@0.7.0
+  - @knpkv/rly@0.10.0
+  - @knpkv/herdr-coordinator@0.3.3
+
 ## 0.6.0
 
 ### Minor Changes
