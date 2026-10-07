@@ -282,7 +282,8 @@ const approvedToward = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRu
  */
 const groupOf = (pullRequest: Domain.PullRequest, viewer: Viewer): WorkbenchGroup | undefined => {
   if (identityMatches(viewer.name, pullRequest.author)) return "yours"
-  if (approvalOf(pullRequest)._tag === "Unknown") {
+  // Unknown approval or unknown approvers: the user may count, or may already have approved.
+  if (approvalOf(pullRequest)._tag === "Unknown" || pullRequest.approversUnknown === true) {
     const couldCount = pullRequest.approvalRules
       .filter((rule) => !approvedToward(pullRequest, rule, viewer))
       .some((rule) => poolStanding(rule, viewer) !== "out")

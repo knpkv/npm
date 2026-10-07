@@ -51,6 +51,20 @@ const rule = (
 ) => ({ poolMemberArns, poolMembers, requiredApprovals, ruleName, satisfied })
 
 describe("workbenchQueue", () => {
+  // Approvers that couldn't be read may already include the user: possibly waiting, not certainly.
+  it("puts a PR whose approvers couldn't be read in the pool, not in Needs your review", () => {
+    const queue = workbenchQueue(
+      [make({
+        approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], false)],
+        approversUnknown: true,
+        id: "1"
+      })],
+      byName("andrey"),
+      NOW
+    )
+    expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["1", "pool"]])
+  })
+
   it("puts a PR in Needs your review when the user is in an unsatisfied pool and has not approved", () => {
     const queue = workbenchQueue(
       [make({ approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], false)], id: "1" })],

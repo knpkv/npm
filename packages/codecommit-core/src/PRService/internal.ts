@@ -67,6 +67,7 @@ export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
       fetchedAt: row.fetchedAt ? new Date(row.fetchedAt) : undefined,
       approvedBy: row.approvedBy,
       approvedByArns: row.approvedByArns,
+      ...(row.approversUnknown && { approversUnknown: true }),
       commentedBy: row.commentedBy,
       approvalRules: row.approvalRules,
       filesChanged: sumFileChanges(row.filesAdded, row.filesModified, row.filesDeleted)
@@ -91,6 +92,7 @@ export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
       approvalUnknownReason: pr.approvalUnknown?._tag ?? null,
       // A domain pull request carries no baseline: known only when its evaluation succeeded.
       approvalBaselineKnown: pr.approvalUnknown === undefined,
+      approversUnknown: pr.approversUnknown === true,
       // A domain pull request carries no observation: the versions of a fresh, unwritten read.
       observationSeq: 0,
       approvalVersion: pr.lastModifiedDate,

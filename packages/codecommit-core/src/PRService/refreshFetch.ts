@@ -174,15 +174,17 @@ export const fetchAndUpsertPRs = (params: {
         const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
         // The whole read, each group unless the cache holds a newer one: status, details, approval.
         const written = yield* prRepo.writeRead(pr.awsAccountId, pr.id, detail, observation, coordinates)
-        const reason = detail.approvalUnknown
-        // An approval group not written was older than the cache: its unknown approval isn't current.
-        if (!written.approval || reason === undefined) {
-          return
-        }
-        yield* Ref.update(
+        // An approval group not written was older than the cache: nothing unknown in it is current.
+        if (!written.approval) return
+        const markPartial = Ref.update(
           partialScopes,
           (scopes) => new Set(scopes).add(accountRegionKey(pr.accountProfile, pr.accountRegion))
         )
+        // Approvers that couldn't be read kept their cached value: partial, as for a listed pull request.
+        if (detail.approversUnknown === true) yield* markPartial
+        const reason = detail.approvalUnknown
+        if (reason === undefined) return
+        yield* markPartial
         // A stale row is reconciled only for an enabled account's scope, which supplies its typed profile and region.
         for (const account of enabledAccounts.filter((a) => a.profile === pr.accountProfile)) {
           for (const region of (account.regions ?? []).filter((r) => r === pr.accountRegion)) {

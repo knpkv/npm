@@ -11,6 +11,7 @@ import migration0020 from "../src/CacheService/migrations/0020_notification_coor
 import migration0022 from "../src/CacheService/migrations/0022_pull_request_approval_unknown.js"
 import migration0023 from "../src/CacheService/migrations/0023_pull_request_row_versions.js"
 import migration0024 from "../src/CacheService/migrations/0024_pull_request_approval_baseline.js"
+import migration0025 from "../src/CacheService/migrations/0025_pull_request_approvers_unknown.js"
 import { UpsertInput } from "../src/CacheService/repos/PullRequestRepo/internal.js"
 import { mutations } from "../src/CacheService/repos/PullRequestRepo/mutations.js"
 
@@ -108,6 +109,7 @@ describe("pull request coordinate migration", () => {
       yield* sql`UPDATE pull_requests SET approval_unknown_reason = 'Throttled'`
       yield* sql`UPDATE pull_requests SET is_approved = 1 WHERE repository_name = 'billing'`
       yield* migration0024.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      yield* migration0025.pipe(Effect.provideService(SqlClient.SqlClient, sql))
       // An unknown row not approved may be a first-seen placeholder, so its baseline starts unknown; an
       // unknown approved one kept an earlier successful evaluation (placeholders are stored unapproved).
       expect(

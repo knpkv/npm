@@ -512,6 +512,7 @@ describe("fetchAndUpsertPRs", () => {
     isApproved: 0,
     approvalUnknownReason: null,
     approvalBaselineKnown: 1,
+    approversUnknown: 0,
     observationSeq: 0,
     approvalVersion: "2026-08-02T00:00:00.000Z",
     approvalObservationSeq: 0,
@@ -983,6 +984,42 @@ describe("fetchAndUpsertPRs", () => {
       }).pipe(Effect.provide(dependencies))
       // A failed cache write is no evidence the pull request is gone.
       expect(yield* Ref.get(deletes)).toBe(0)
+      expect(successfulScopes).toEqual([])
+    }))
+
+  // A stale re-read whose approvers couldn't be read kept the cached ones: partial, like a listed one.
+  it.effect("reports a stale re-read whose approvers couldn't be read as partial", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () =>
+            Effect.succeed(new PullRequestDetail({ ...providerOpenDetail, isApproved: true, approversUnknown: true }))
+        }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          writeRead: () => Effect.succeed({ row: true, approval: true, versions: undefined }),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
       expect(successfulScopes).toEqual([])
     }))
 

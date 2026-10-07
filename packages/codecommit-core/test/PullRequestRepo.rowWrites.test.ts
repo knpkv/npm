@@ -19,6 +19,7 @@ import {
   UpsertInput,
   versionsOf
 } from "../src/CacheService/repos/PullRequestRepo/index.js"
+import { decodeCachedPR } from "../src/PRService/internal.js"
 
 const account = "123456789012"
 const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
@@ -499,6 +500,10 @@ describe("pull-request row writes", () => {
       PullRequestRepo,
       (repo) => repo.findByCoordinates(account, "60", coordinates.repositoryName, coordinates.accountRegion)
     ).pipe(Effect.map(Option.map((row) => [row.approvedBy, row.approvedByArns])))
+    const stored = Effect.flatMap(
+      PullRequestRepo,
+      (repo) => repo.findByCoordinates(account, "60", coordinates.repositoryName, coordinates.accountRegion)
+    )
     const withApprovers = (lastActivity: Date, names: ReadonlyArray<string>, unknown = false) => ({
       ...listed(lastActivity, "seed"),
       approvedBy: [...names],
@@ -520,6 +525,13 @@ describe("pull-request row writes", () => {
         yield* repo.upsert(withApprovers(t0, ["alice"]), yield* repo.observe())
         yield* repo.upsert(withApprovers(older, [], true), yield* repo.observe())
         expect(yield* approvers).toEqual(Option.some([["alice"], ["arn:aws:iam::123456789012:user/alice"]]))
+        // The published pull request still says the approvers are only last known.
+        const published = Option.map(yield* stored, decodeCachedPR)
+        expect(Option.map(published, (pr) => pr.approversUnknown)).toEqual(Option.some(true))
+        // A later read that fetched them clears the marker.
+        yield* repo.upsert(withApprovers(newer, ["alice"]), yield* repo.observe())
+        expect(Option.map(Option.map(yield* stored, decodeCachedPR), (pr) => pr.approversUnknown))
+          .toEqual(Option.some(undefined))
       })))
 
     // Approvers move with approval's version: a read whose approval is older than the stored one writes

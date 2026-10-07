@@ -168,6 +168,7 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
           onSome: ({ names }) => joinApprovedBy(names)
         })
       ),
+      approvalSet("approvers_unknown", Option.isNone(approval.approvers) ? 1 : 0),
       approvalSet(
         "approved_by_arns",
         Option.match(approval.approvers, {
@@ -213,14 +214,16 @@ export const rowWrites = (sql: SqlClient.SqlClient) => {
           (id, aws_account_id, repo_account_id, account_profile, account_region, title, description,
            author, repository_name, creation_date, last_modified_date, status,
            source_branch, destination_branch, is_mergeable, is_approved, approval_unknown_reason,
-           approval_baseline_known, comment_count, link, approved_by, approved_by_arns, approval_rules, merged_by, closed_at, fetched_at,
+           approval_baseline_known, approvers_unknown, comment_count, link, approved_by, approved_by_arns, approval_rules, merged_by, closed_at, fetched_at,
            observation_seq, approval_version, approval_observation_seq)
           SELECT ${req.id}, ${req.awsAccountId}, ${req.repoAccountId}, ${req.accountProfile}, ${req.accountRegion},
             ${row.title}, ${row.description}, ${row.author}, ${req.repositoryName},
             ${row.creationDate}, ${req.lastModifiedDate}, ${row.status},
             ${row.sourceBranch}, ${row.destinationBranch}, ${row.isMergeable ? 1 : 0},
             ${approval.isApproved ? 1 : 0}, ${approval.unknownReason},
-            ${approval.unknownReason === null ? 1 : 0}, ${req.commentCount}, ${req.link}, ${insertedApprovers.names},
+            ${approval.unknownReason === null ? 1 : 0}, ${
+        Option.isNone(approval.approvers) ? 1 : 0
+      }, ${req.commentCount}, ${req.link}, ${insertedApprovers.names},
             ${insertedApprovers.arns}, ${rulesJson(approval.approvalRules)},
             ${row.mergedBy}, ${row.closedAt}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
             ${observation}, ${req.lastModifiedDate}, ${observation}

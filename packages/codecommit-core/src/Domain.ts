@@ -350,12 +350,14 @@ export const needsMyReview = (
     readonly approvalRules: ReadonlyArray<ApprovalRule>
     readonly approvedBy: ReadonlyArray<string>
     readonly approvalUnknown?: ApprovalUnknownReason | undefined
+    readonly approversUnknown?: true | undefined
   },
   currentUser: string | undefined
 ): boolean => {
   if (currentUser === undefined || currentUser.length === 0) return false
-  // While approval is unknown, which rules are satisfied is only last known, so review is not certain.
-  if (pr.approvalUnknown !== undefined) return false
+  // While approval is unknown, which rules are satisfied is only last known, so review is not certain;
+  // nor while approvers are unknown, since the user may already be one of them.
+  if (pr.approvalUnknown !== undefined || pr.approversUnknown === true) return false
   if (pr.approvedBy.some((approver) => identityMatches(currentUser, approver))) return false
   return pr.approvalRules.some(
     (rule) => !rule.satisfied && rule.poolMembers.some((member) => identityMatches(currentUser, member))

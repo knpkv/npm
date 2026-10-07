@@ -83,6 +83,8 @@ export const CachedPullRequest = Schema.Struct({
   approvalUnknownReason: ApprovalUnknownColumn,
   /** The `approval_baseline_known` column: whether `isApproved` came from a successful evaluation. */
   approvalBaselineKnown: BooleanFromNumber,
+  /** Set when the last approver read failed: `approvedBy` is then only the last known list. */
+  approversUnknown: BooleanFromNumber,
   commentCount: Schema.NullOr(Schema.Number),
   healthScore: Schema.NullOr(Schema.Number),
   link: Schema.String,
