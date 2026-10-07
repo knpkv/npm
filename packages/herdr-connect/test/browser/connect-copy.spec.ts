@@ -138,11 +138,15 @@ test.describe("touch", () => {
       client.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x: start.x, y }] })
     await touch("touchStart", start.y)
     for (let step = 1; step <= 10; step++) await touch("touchMove", start.y + step * 6)
-    const transform = await page.locator(".ghostty-terminal canvas").evaluate((canvas) =>
-      new DOMMatrixReadOnly(getComputedStyle(canvas).transform).m42
-    )
-    expect(transform).toBeGreaterThan(0)
-    await touch("touchEnd", start.y + 60)
+    // 61 px is never a whole number of lines, so the part of a line the server cannot scroll stays
+    // drawn under the finger even after every requested line has landed.
+    await touch("touchMove", start.y + 61)
+    await expect.poll(() =>
+      page.locator(".ghostty-terminal canvas").evaluate((canvas) =>
+        new DOMMatrixReadOnly(getComputedStyle(canvas).transform).m42
+      )
+    ).toBeGreaterThan(0)
+    await touch("touchEnd", start.y + 61)
     await expect.poll(async () =>
       (await commands(page)).filter((command) => command.type === "terminal.scroll" && command.direction === "up")
         .reduce((sum, command) => sum + (command.lines ?? 0), 0)
