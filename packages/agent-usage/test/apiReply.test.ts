@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
 import { HttpClientRequest, HttpClientResponse } from "effect/http"
-import { readReply, RequestFailure } from "../src/client/reply.js"
+import { readReply } from "../src/client/reply.js"
 
 const reply = (body: string, status: number) =>
   readReply(
@@ -18,8 +18,11 @@ describe("readReply", () => {
   it.effect("fails a success whose body is not JSON, instead of returning nothing", () =>
     Effect.gen(function*() {
       const failure = yield* Effect.flip(reply("<html>proxy</html>", 200))
-      expect(failure).toBeInstanceOf(RequestFailure)
-      expect(failure).toMatchObject({ message: "The server sent a reply this page cannot read", status: 200 })
+      expect(failure).toMatchObject({
+        _tag: "RequestFailure",
+        message: "The server sent a reply this page cannot read",
+        status: 200
+      })
     }))
 
   it.effect("names a failure by the server's message, or by its status when the body is not JSON", () =>

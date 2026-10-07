@@ -142,9 +142,10 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
   }).pipe(
     Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_BYTES)),
     Effect.timeout("5 seconds"),
-    // Logged, so a broken or stalling publisher shows in the server log.
+    // Logged by kind only, so a broken or stalling publisher shows in the server log without its
+    // payload: a decode error would otherwise echo the submitted snapshot into the log.
     Effect.catch((error) =>
-      Effect.logWarning("monitor request failed", error).pipe(Effect.as(empty(failureStatus(error))))
+      Effect.logWarning(`monitor request failed: ${error._tag}`).pipe(Effect.as(empty(failureStatus(error))))
     )
   )
   return { handler }

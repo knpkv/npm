@@ -192,7 +192,10 @@ const answer = (secrets: OwnerSessionService, listening: Effect.Effect<void>) =>
     const url = yield* mintBootstrapUrl(secrets)
     yield* write.write(`${encodeReply({ url })}\n`)
     // One client's exchange failing (it hung up, or missed the deadline) must not stop the socket; log it.
-  })).pipe(Effect.timeout(EXCHANGE_DEADLINE), Effect.ignore({ log: true }))
+  })).pipe(
+    Effect.timeout(EXCHANGE_DEADLINE),
+    Effect.ignore({ log: "Warn", message: "agent-usage control socket: a mint exchange failed" })
+  )
 
 /**
  * Takes the store's exclusive lock for the life of the scope: an SQLite database opened in exclusive
