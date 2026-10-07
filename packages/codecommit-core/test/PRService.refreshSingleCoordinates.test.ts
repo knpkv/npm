@@ -383,6 +383,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
         replies: []
       }
       const cachedComments: ReadonlyArray<Domain.PRCommentLocation> = [{ comments: [comment] }]
+      // The row's count agrees with its cached comments, as after an earlier successful fetch.
+      const cachedWithComment: CachedPullRequest = { ...cachedPullRequest, commentCount: 1 }
       const stored = yield* Ref.make(cachedComments)
       const commentCounts = yield* Ref.make<ReadonlyArray<number | null | undefined>>([])
       const added = yield* Ref.make<ReadonlyArray<string>>([])
@@ -429,7 +431,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findByAccountAndId: () => Effect.succeed(Option.none()),
-          findByCoordinates: () => Effect.succeed(Option.some(cachedPullRequest)),
+          findByCoordinates: () => Effect.succeed(Option.some(cachedWithComment)),
           findAll: () => Effect.succeed([cachedPullRequest]),
           upsertRead: (input) =>
             Ref.update(commentCounts, (all) => [...all, input.commentCount]).pipe(
@@ -440,7 +442,7 @@ describe("PRService.refreshSinglePR coordinates", () => {
                   row: { lastActivity: new Date(2_000), observation: 1 },
                   approval: { lastActivity: new Date(2_000), observation: 1 }
                 },
-                replaced: Option.some(cachedPullRequest)
+                replaced: Option.some(cachedWithComment)
               })
             ),
           writeDerived: (_, __, ___, columns) =>
@@ -464,7 +466,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
       expect(yield* Ref.get(commentCounts)).toEqual([null])
       expect(yield* Ref.get(stored)).toEqual(cachedComments)
       yield* runWithLayer(refresh, layer)
-      expect((yield* Ref.get(added)).filter((type) => type.startsWith("comment"))).toEqual([])
+      const commentTypes = new Set(["new_comment", "comment_edited", "comment_deleted"])
+      expect((yield* Ref.get(added)).filter((type) => commentTypes.has(type))).toEqual([])
       expect((yield* Ref.get(commentCounts)).at(-1)).toBe(1)
     }))
 
