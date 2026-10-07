@@ -1,7 +1,6 @@
 @layer rly.components {
+  /* `--rly-stacked-bars-gap` colours the gap between bars; a chart on another surface sets it to that background. */
   .root {
-    /* The gap between bars and stacked segments; a chart on another surface sets its own background here. */
-    --rly-stacked-bars-gap: var(--rly-color-surface-1);
     display: grid;
     gap: var(--rly-space-8);
     min-inline-size: 0;
@@ -56,7 +55,7 @@
   }
   /* A 2px background-coloured edge (1px each side) separates neighbouring bars and stacked segments at any scale. */
   .segment {
-    stroke: var(--rly-stacked-bars-gap);
+    stroke: var(--rly-stacked-bars-gap, var(--rly-color-surface-1));
     stroke-width: 2px;
     vector-effect: non-scaling-stroke;
   }
@@ -74,7 +73,7 @@
   .selectionHalo {
     fill: none;
     pointer-events: none;
-    stroke: var(--rly-stacked-bars-gap);
+    stroke: var(--rly-stacked-bars-gap, var(--rly-color-surface-1));
     stroke-width: 6px;
     vector-effect: non-scaling-stroke;
   }
