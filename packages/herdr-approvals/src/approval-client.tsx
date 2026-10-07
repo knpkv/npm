@@ -389,7 +389,7 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
     dashboard: browserRuntime.atom(loadDashboard, { initialValue: initial }),
     decision: browserRuntime.fn(decide),
     notification: browserRuntime.atom<NotificationState, NotificationLoadError>(
-      served.push ? loadNotificationState : Effect.succeed("unsupported"),
+      served.push ? loadNotificationState : Effect.succeed<NotificationState>("unsupported"),
       {
         initialValue: "loading"
       }
