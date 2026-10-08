@@ -1,7 +1,7 @@
 /**
  * @title Read permission bar: answers a read prompt without blocking the page
  *
- * CodeCommit asks before every AWS call (zero-trust). A read prompt shows here, inline above the page,
+ * CodeCommit asks before every AWS call (zero-trust). A read prompt shows here, docked at the bottom edge,
  * so the reader can see what's waiting on it. "Allow every read" grants the whole read category once;
  * writes keep their per-call modal.
  *
@@ -15,6 +15,7 @@ import * as Predicate from "effect/Predicate"
 import { useState } from "react"
 import type { AppState } from "../atoms/app.js"
 import { permissionRespondAtom, permissionsCategoryUpdateAtom } from "../atoms/app.js"
+import { usePublishedBlockSize } from "../hooks/usePublishedBlockSize.js"
 import styles from "./permission-bar.module.css"
 
 /**
@@ -42,6 +43,8 @@ export function PermissionBar({
   readonly prompt: NonNullable<AppState["permissionPrompt"]>
 }) {
   const waiting = pendingReads === undefined ? null : waitingReadsText(pendingReads)
+  // Shared with the Relay chip, which sits above the bar instead of on its actions.
+  const publishBlockSize = usePublishedBlockSize<HTMLDivElement>("--app-bottom-inset")
   const respond = useAtomSet(permissionRespondAtom)
   const grantCategory = useAtomSet(permissionsCategoryUpdateAtom, { mode: "promiseExit" })
   const [failure, setFailure] = useState<string | null>(null)
@@ -59,8 +62,10 @@ export function PermissionBar({
   }
 
   return (
+    // Docked to the bottom edge: a prompt arriving after the page has painted must not push it down.
+    // Its height is published, and the page keeps that much room at its end so nothing hides under it.
     // Marked so a modal drawer steps aside for it: the page behind a modal is inert.
-    <div data-needs-answer="">
+    <div className={styles.dock} data-needs-answer="" ref={publishBlockSize}>
       <Notice
         action={
           <div className={styles.actions}>
@@ -80,17 +85,11 @@ export function PermissionBar({
           </div>
         }
         announce="polite"
-        className={styles.bar}
         tone="caution"
       >
-        {waiting === null ? (
-          <>CodeCommit asks before reading from AWS: {prompt.context}.</>
-        ) : (
-          // More than one read waits: name them, so "Allow every read" is plainly the one answer for all.
-          <>CodeCommit asks before reading from AWS. {waiting}</>
-        )}{" "}
-        Allowing every read covers pull requests, approval status and identity for all profiles; changes still ask each
-        time.
+        {/* Short enough for a phone: what waits, then what "every read" means. */}
+        {waiting === null ? <>Allow CodeCommit to read from AWS: {prompt.context}?</> : waiting} Every read covers pull
+        requests, approvals and identity; changes still ask.
         {failure === null ? null : <span className={styles.failure}> {failure}</span>}
       </Notice>
     </div>

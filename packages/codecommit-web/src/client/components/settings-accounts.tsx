@@ -197,6 +197,7 @@ export function SettingsAccounts() {
         .onSuccess((data) => (
           <AccountsList
             callerIdentities={appState.callerIdentities}
+            identityWaitsForPermission={appState.permissionPrompt?.category === "read"}
             currentUser={appState.currentUser}
             autoDetect={autoDetectChoice ?? data.autoDetect}
             data={data}
@@ -337,6 +338,7 @@ function AccountsList({
   callerIdentities,
   currentUser,
   data,
+  identityWaitsForPermission,
   onSsoLogin,
   onSsoLogout,
   overrides,
@@ -351,6 +353,8 @@ function AccountsList({
   readonly autoDetect: boolean
   /** Per enabled profile once its identity read finished; a missing key means it hasn't yet. */
   readonly callerIdentities: AppState["callerIdentities"]
+  /** A read waits for permission (the identity read, or one queued ahead of it): say that, not "signed out". */
+  readonly identityWaitsForPermission: boolean
   readonly currentUser: string | undefined
   readonly data: ConfigData
   readonly overrides: Record<string, boolean>
@@ -408,7 +412,13 @@ function AccountsList({
           </>
         ) : (
           <>
-            <span className="text-muted-foreground">{checking ? "Checking sign-in…" : "Not logged in"}</span>
+            <span className="text-muted-foreground">
+              {identityWaitsForPermission
+                ? "Waiting for read permission"
+                : checking
+                  ? "Checking sign-in…"
+                  : "Not logged in"}
+            </span>
             {enabledAccounts[0] &&
               (() => {
                 const profile = enabledAccounts[0].profile

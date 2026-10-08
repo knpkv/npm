@@ -400,7 +400,10 @@ export const RelayProductDockChrome = ({ host }: { readonly host: RelayProductDo
     <div
       data-relay-product-dock-chrome=""
       style={{
-        insetBlockEnd: "max(var(--rly-space-16), env(safe-area-inset-bottom, 0px))",
+        // A host app with its own bottom-docked bar publishes its height as --app-bottom-inset, so the
+        // chip sits above it rather than on top of its actions.
+        insetBlockEnd:
+          "calc(max(var(--rly-space-16), env(safe-area-inset-bottom, 0px)) + var(--app-bottom-inset, 0px))",
         insetInlineEnd: "max(var(--rly-space-16), env(safe-area-inset-right, 0px))",
         position: "fixed",
         zIndex: 80
