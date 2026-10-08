@@ -8,6 +8,7 @@ import {
   FleetShell,
   FleetWorkPanel,
   fleetWorkRequestStateFromResult,
+  type FleetWorkState,
   fleetWorkStateFromRequest
 } from "../src/shell-view.js"
 
@@ -240,6 +241,9 @@ describe("iPhone fleet shell regressions", () => {
     expect(failure._tag).toBe("Failure")
     expect(failureWithContent._tag).toBe("Failure")
     expect(document.body.textContent).toContain("Loading Work")
+    // Both loading states and the failure before any board hold a screen of space, so content
+    // below is not pushed down later; Unavailable and the failure with a board release it.
+    expect(document.querySelectorAll(".fleet-work-reserved")).toHaveLength(3)
     expect(document.body.textContent).toContain("Goals unavailable")
     expect(document.body.textContent).toContain("Work unavailable")
     expect(document.body.textContent).toContain("Work request failed. Refresh to retry.")
@@ -270,5 +274,29 @@ describe("iPhone fleet shell regressions", () => {
     )
 
     expect(mounted).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("Work footprint across the first request", () => {
+  it("keeps the reserved slot from Loading through a failed first request, and releases it for an empty board", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const render = async (state: FleetWorkState) => {
+      await act(async () => root.render(<FleetWorkPanel state={state} />))
+      return host.querySelector(".fleet-work-reserved")
+    }
+
+    const loading = await render({ _tag: "Loading" })
+    const failed = await render(
+      fleetWorkStateFromRequest({ _tag: "Failure", content: null, detail: "Work request failed.", waiting: false })
+    )
+    expect(loading).not.toBeNull()
+    // The same node: the panels below never see the slot collapse between the two states.
+    expect(failed).toBe(loading)
+
+    // A settled empty answer releases the space; that upward move is the documented remaining shift.
+    expect(await render({ _tag: "Ready", content: <p>No goals</p> })).toBeNull()
   })
 })
