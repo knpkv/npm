@@ -16,7 +16,7 @@ const rlyCssTokenSourceRoots: (
   function*(fileSystem, path, workspaceRoot) {
     const packages = path.join(workspaceRoot, "packages")
     const roots: Array<string> = []
-    for (const entry of (yield* fileSystem.readDirectory(packages)).toSorted()) {
+    for (const entry of [...(yield* fileSystem.readDirectory(packages))].sort()) {
       // packages/ also holds loose files, such as notes; only a directory is a package.
       if ((yield* fileSystem.stat(path.join(packages, entry))).type !== "Directory") continue
       const source = path.join(packages, entry, "src")
