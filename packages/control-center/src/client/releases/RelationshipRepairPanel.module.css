@@ -54,6 +54,7 @@
 .proposal {
   gap: var(--rly-space-20);
   overflow: clip;
+  min-inline-size: 0;
   padding: var(--rly-space-24);
 }
 

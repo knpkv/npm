@@ -33,6 +33,7 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   overflow: clip;
+  min-inline-size: 0;
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-group);
 }

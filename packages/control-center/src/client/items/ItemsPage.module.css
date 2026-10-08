@@ -168,6 +168,7 @@
 
 .itemLink strong {
   overflow: clip;
+  min-inline-size: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

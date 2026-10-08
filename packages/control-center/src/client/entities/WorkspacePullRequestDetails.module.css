@@ -59,6 +59,7 @@
   border-radius: var(--rly-radius-control);
   gap: var(--rly-space-24);
   overflow: clip;
+  min-inline-size: 0;
   padding: var(--rly-space-32);
 }
 
@@ -108,6 +109,7 @@
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
   overflow: clip;
+  min-inline-size: 0;
   padding: var(--rly-space-12);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -220,6 +222,7 @@
   margin-block-start: var(--rly-space-4);
   min-block-size: var(--rly-space-4);
   overflow: clip;
+  min-inline-size: 0;
   position: relative;
 }
 
@@ -342,6 +345,7 @@
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
   overflow: clip;
+  min-inline-size: 0;
   text-overflow: ellipsis;
 }
 

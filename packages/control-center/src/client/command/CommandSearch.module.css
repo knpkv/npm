@@ -84,6 +84,7 @@
 
 .resultCopy strong {
   overflow: clip;
+  min-inline-size: 0;
   font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
     var(--rly-type-card-title-font);
   text-overflow: ellipsis;

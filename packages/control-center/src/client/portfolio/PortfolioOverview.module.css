@@ -107,6 +107,7 @@
 
 .releaseList {
   overflow: clip;
+  min-inline-size: 0;
   border-block-start: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-group);
   background: var(--rly-color-surface-1);

@@ -31,6 +31,7 @@
   border-radius: var(--rly-radius-control);
   grid-template-columns: minmax(13rem, 0.42fr) minmax(var(--rly-space-0), 1fr);
   overflow: clip;
+  min-inline-size: 0;
 }
 
 .total {
