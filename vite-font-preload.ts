@@ -16,7 +16,7 @@ import { Data } from "effect"
 import type { HtmlTagDescriptor, Plugin } from "vite"
 
 /** The rly woff2 files a shell preloads, as Fontsource names them: every face rly's fonts.css loads. */
-export const RLY_PRELOADED_FONTS: ReadonlyArray<string> = [
+export const RLY_PRELOADED_FONTS: readonly [string, string] = [
   "geist-latin-wght-normal.woff2",
   "geist-mono-latin-wght-normal.woff2"
 ]

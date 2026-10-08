@@ -54,7 +54,7 @@ describe("rly font preload", () => {
   it("preloads every face styles.css loads", () => {
     const fonts = readFileSync(join(repoRoot, "packages/rly/src/styles/fonts.css"), "utf8")
     const loaded = [...fonts.matchAll(/url\("[^"]*\/([^"/]+\.woff2)"\)/g)].map(([, file]) => file)
-    expect(loaded.toSorted()).toEqual([...RLY_PRELOADED_FONTS].toSorted())
+    expect([...loaded].sort()).toEqual([...RLY_PRELOADED_FONTS].sort())
   })
 
   // Guardrail: a Vite shell that loads rly styles without the plugin paints its first text in the fallback.
