@@ -7,12 +7,39 @@
   }
 
   /*
-   * Block containers may shrink below their content as flex and grid items, so a long child can't push a
-   * layout wider. Inline content (svg, img, span, button, input) keeps its automatic minimum, so marks,
-   * icons and labels never collapse; a component that needs it to shrink says so.
+   * Block containers (headings, lists, quotes and figures included) may shrink below their content as flex
+   * and grid items, so a long child can't push a layout wider; their long words then wrap (overflow-wrap).
+   * Inline content (svg, img, span, button, input) keeps its automatic minimum, so marks, icons and labels
+   * never collapse; a component that needs it to shrink says so.
    */
   :where([data-rly-root], [data-rly-catalog])
-    :where(div, section, article, main, aside, header, footer, nav, ul, ol, li, form, fieldset, p) {
+    :where(
+      div,
+      section,
+      article,
+      main,
+      aside,
+      header,
+      footer,
+      nav,
+      ul,
+      ol,
+      li,
+      dl,
+      dt,
+      dd,
+      figure,
+      blockquote,
+      form,
+      fieldset,
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6
+    ) {
     min-inline-size: 0;
   }
 
