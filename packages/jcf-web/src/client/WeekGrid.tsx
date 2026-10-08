@@ -26,6 +26,7 @@ import {
   type GridBlock,
   minimumBlockPixels,
   minutePixels,
+  connectedLayers,
   projectCalendar,
   type ProposableBlock
 } from "./calendarProjection.js"
@@ -225,6 +226,8 @@ const Block = (props: {
 }
 
 export const WeekGrid = (props: {
+  /** A system that is not connected has no saved layer to show; its chip is left out. */
+  readonly connected: { readonly jira: boolean; readonly clockify: boolean }
   readonly layers: CalendarLayers
   readonly onToggleLayer: (layer: keyof CalendarLayers | "all") => void
   readonly writing: boolean
@@ -241,7 +244,7 @@ export const WeekGrid = (props: {
   readonly onOpenRow: (rowId: string, blockIndex: number) => void
   readonly onOpenSlot: (day: string, clock: string) => void
 }) => {
-  const { layers } = props
+  const layers = useMemo(() => connectedLayers(props.layers, props.connected), [props.layers, props.connected])
   const [view, setView] = useState<"auto" | "calendar" | "agenda">("auto")
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 900px)").matches)
   useEffect(() => {
@@ -314,7 +317,8 @@ export const WeekGrid = (props: {
                 {group.choices
                   .filter(
                     ({ key }) =>
-                      (key !== "jira" && key !== "clockify") || props.plan.scope === "both" || props.plan.scope === key
+                      (key !== "jira" && key !== "clockify") ||
+                      (props.connected[key] && (props.plan.scope === "both" || props.plan.scope === key))
                   )
                   .map(({ detail, key, label }) => {
                     const selected =
