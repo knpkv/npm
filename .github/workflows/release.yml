@@ -39,13 +39,13 @@ jobs:
       # changesets/action publishes only when no changeset is pending; otherwise it
       # versions. A Version Packages merge that lands after newer changesets reached
       # main would then publish nothing (#589). So this step asks npm which versions
-      # on main are ready and not yet published (see check-version-bumps.mjs: a new
-      # package a pending changeset still names is held, its version a placeholder).
-      # When some are ready it sets the pending changesets aside and marks held
-      # packages private in this checkout, so the next step publishes exactly the
-      # ready versions; restore then puts both back from git. Asking npm, not this
-      # push's diff, keeps a release ready through skipped or failed runs. A failed
-      # publish fails its step and the job.
+      # on main it lacks. When every one was produced by Version Packages (its
+      # CHANGELOG has the version's heading), it sets the pending changesets aside
+      # and the next step publishes them, then they are restored for versioning.
+      # When any is not versioned yet (a new package awaiting its changeset), it
+      # warns and leaves the release to the action's usual choice, since a partial
+      # publish is unsafe. Asking npm, not this push's diff, keeps a release ready
+      # through skipped or failed runs. A failed publish fails its step and the job.
       - name: Prepare versions ready to publish
         id: released
         run: node scripts/check-version-bumps.mjs --prepare-release
@@ -59,9 +59,9 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.TOKEN_NPM }}
           HUSKY: 0
-      - name: Restore pending changesets and held packages
+      - name: Restore pending changesets
         if: steps.released.outputs.outstanding == 'true'
-        run: git checkout HEAD -- .changeset packages
+        run: git checkout HEAD -- .changeset
       # With nothing outstanding this is the action's usual choice: version pending changesets, or
       # publish when none are pending. After a release it only versions what is pending.
       - name: Create Release Pull Request or Publish

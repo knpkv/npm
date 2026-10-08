@@ -25,7 +25,7 @@ const released = "steps.released.outputs.outstanding == 'true'"
 test("ready versions publish before pending changesets are versioned", () => {
   const prepare = stepIndex("Prepare versions ready to publish")
   const publish = stepIndex("Publish the released versions")
-  const restore = stepIndex("Restore pending changesets and held packages")
+  const restore = stepIndex("Restore pending changesets")
   const usual = stepIndex("Create Release Pull Request or Publish")
   assert.ok(prepare >= 0 && prepare < publish && publish < restore && restore < usual)
   assert.deepEqual(
@@ -37,13 +37,13 @@ test("ready versions publish before pending changesets are versioned", () => {
   assert.equal(steps[prepare].run, "node scripts/check-version-bumps.mjs --prepare-release")
 
   // Only ready versions take the publish-first path. With no changeset in view the action can only publish,
-  // and it fails the step when publishing fails. Restore brings back the changesets and held manifests.
+  // and it fails the step when publishing fails. Restore brings back the changesets.
   assert.equal(steps[publish].if, released)
   assert.equal(steps[publish].with["version-script"], undefined)
   assert.equal(steps[publish].with["publish-script"], "pnpm changeset:publish")
   assert.equal(steps[publish]["continue-on-error"], undefined)
   assert.equal(steps[restore].if, released)
-  assert.equal(steps[restore].run, "git checkout HEAD -- .changeset packages")
+  assert.equal(steps[restore].run, "git checkout HEAD -- .changeset")
 
   // Otherwise the action makes its usual choice; after a release it runs only to version what is pending.
   assert.equal(

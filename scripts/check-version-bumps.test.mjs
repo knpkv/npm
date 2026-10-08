@@ -13,7 +13,7 @@ import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import {
-  changesetPackages,
+  changelogHasVersion,
   compareVersions,
   isReleasePullRequest,
   planRelease,
@@ -67,39 +67,38 @@ const at2 = (name, version, extra = {}) => ({
   manifest: { name: `@knpkv/${name}`, version, ...extra }
 })
 
-test("versions npm lacks are ready, except a new package a pending changeset still names", () => {
+test("a version npm lacks is ready when Version Packages produced it, whatever is pending", () => {
   const manifests = [
     at2("released", "1.1.0"), // Version Packages moved it; its own run was skipped or failed
     at2("current", "2.0.0"),
-    at2("versioned-new", "0.1.0"), // Version Packages consumed its changeset; npm has never seen it
-    at2("placeholder-new", "0.0.0"), // its changeset is still pending
+    at2("first", "0.1.0"), // a first release Version Packages made; a newer changeset may name it again
+    at2("placeholder", "0.0.0"), // a new package whose changeset is still pending
     at2("internal", "9.9.9", { private: true })
   ]
   const published = new Map([
     ["@knpkv/released", new Set(["1.0.0"])],
     ["@knpkv/current", new Set(["2.0.0"])],
-    ["@knpkv/versioned-new", undefined],
-    ["@knpkv/placeholder-new", undefined]
+    ["@knpkv/first", undefined],
+    ["@knpkv/placeholder", undefined]
   ])
-  const plan = planRelease(manifests, published, new Set(["@knpkv/placeholder-new", "@knpkv/current"]))
+  const versioned = new Set(["@knpkv/released", "@knpkv/current", "@knpkv/first"])
+  const plan = planRelease(manifests, published, ({ manifest }) => versioned.has(manifest.name))
   assert.deepEqual(
     plan.ready.map(({ name, version }) => `${name}@${version}`),
-    ["@knpkv/released@1.1.0", "@knpkv/versioned-new@0.1.0"]
+    ["@knpkv/released@1.1.0", "@knpkv/first@0.1.0"]
   )
   assert.deepEqual(
-    plan.held.map(({ name }) => name),
-    ["@knpkv/placeholder-new"]
+    plan.unversioned.map(({ name }) => name),
+    ["@knpkv/placeholder"]
   )
 })
 
-test("a changeset's packages come from its front matter, and a malformed one fails", async () => {
-  const read = (text) => Effect.runPromise(Effect.result(changesetPackages(".changeset/a.md", text)))
-  assert.deepEqual((await read('---\n"@knpkv/a": minor\n"@knpkv/b": patch\n---\n\nWhy.\n')).success, [
-    "@knpkv/a",
-    "@knpkv/b"
-  ])
-  assert.deepEqual((await read("---\n---\n\nEmpty.\n")).success, [])
-  assert.equal((await read("no front matter")).failure?._tag, "VersionBumpError")
+test("a changelog records a version only as its own heading", () => {
+  const changelog = "# @knpkv/demo\n\n## 1.1.0\n\n### Minor Changes\n\n- mentions 2.0.0\n\n## 1.0.0\n"
+  assert.equal(changelogHasVersion(changelog, "1.1.0"), true)
+  assert.equal(changelogHasVersion(changelog, "1.0.0"), true)
+  assert.equal(changelogHasVersion(changelog, "2.0.0"), false)
+  assert.equal(changelogHasVersion("", "0.1.0"), false)
 })
 
 const runtime = ManagedRuntime.make(NodeServices.layer)
@@ -193,7 +192,7 @@ const fakeRegistry = Effect.acquireRelease(
   (server) => Effect.callback((resume) => server.close(() => resume(Effect.void)))
 )
 
-test("preparing a release sets changesets aside and holds placeholders, only when something is ready", async () => {
+test("preparing a release sets changesets aside only when every unpublished version is versioned", async () => {
   const outcome = await runtime.runPromise(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -215,43 +214,48 @@ test("preparing a release sets changesets aside and holds placeholders, only whe
           .makeDirectory(path.dirname(path.join(directory, file)), { recursive: true })
           .pipe(Effect.andThen(fileSystem.writeFileString(path.join(directory, file), text)))
       const manifest = (name, version) => JSON.stringify({ name: `@knpkv/${name}`, version })
+      const commit = (message) =>
+        run("git", ["add", "-A"], directory, env).pipe(
+          Effect.andThen(run("git", ["commit", "-q", "-m", message], directory, env))
+        )
       const prepare = Effect.gen(function* () {
         const output = path.join(directory, "github-output")
         yield* fileSystem.writeFileString(output, "")
         const result = yield* run("node", [script, "--prepare-release"], directory, { ...env, GITHUB_OUTPUT: output })
         assert.equal(result.exitCode, ChildProcessSpawner.ExitCode(0), result.output)
-        return yield* fileSystem.readFileString(output)
+        return {
+          changesets: (yield* fileSystem.readDirectory(path.join(directory, ".changeset"))).sort(),
+          log: result.output,
+          written: yield* fileSystem.readFileString(output)
+        }
       })
       yield* run("git", ["init", "-q", "-b", "main"], directory, env)
       yield* write("packages/released/package.json", manifest("released", "1.0.0"))
-      yield* write("packages/placeholder/package.json", manifest("placeholder", "0.0.0"))
+      yield* write("packages/released/CHANGELOG.md", "# @knpkv/released\n\n## 1.0.0\n")
       yield* write(".changeset/README.md", "# Changesets\n")
-      yield* write(".changeset/new-package.md", '---\n"@knpkv/placeholder": minor\n---\n\nAdds it.\n')
-      yield* run("git", ["add", "."], directory, env)
-      yield* run("git", ["commit", "-q", "-m", "base"], directory, env)
-      // Nothing ready: npm has released@1.0.0 and the placeholder waits for its changeset.
+      yield* write(".changeset/later.md", '---\n"@knpkv/released": patch\n---\n\nLater fix.\n')
+      yield* commit("base")
       const idle = yield* prepare
-      const idleChangesets = (yield* fileSystem.readDirectory(path.join(directory, ".changeset"))).sort()
-      // Version Packages moves released to 1.1.0 while the placeholder's changeset is still pending.
+      // Version Packages moves released to 1.1.0; a later changeset is still pending.
       yield* write("packages/released/package.json", manifest("released", "1.1.0"))
-      yield* run("git", ["commit", "-q", "-am", "Version Packages"], directory, env)
+      yield* write("packages/released/CHANGELOG.md", "# @knpkv/released\n\n## 1.1.0\n\n## 1.0.0\n")
+      yield* commit("Version Packages")
       const ready = yield* prepare
-      return {
-        idle,
-        idleChangesets,
-        ready,
-        readyChangesets: (yield* fileSystem.readDirectory(path.join(directory, ".changeset"))).sort(),
-        placeholder: JSON.parse(
-          yield* fileSystem.readFileString(path.join(directory, "packages/placeholder/package.json"))
-        ),
-        released: JSON.parse(yield* fileSystem.readFileString(path.join(directory, "packages/released/package.json")))
-      }
+      yield* run("git", ["checkout", "-q", "HEAD", "--", ".changeset"], directory, env)
+      // A new package arrives with its changeset before the release is published: publishing now would
+      // release its placeholder, so nothing is set aside and the run warns.
+      yield* write("packages/fresh/package.json", manifest("fresh", "0.0.0"))
+      yield* write(".changeset/fresh.md", '---\n"@knpkv/fresh": minor\n---\n\nAdds fresh.\n')
+      yield* commit("add fresh")
+      const waiting = yield* prepare
+      return { idle, ready, waiting }
     }).pipe(Effect.scoped)
   )
-  assert.equal(outcome.idle, "outstanding=false\npending=true\n")
-  assert.deepEqual(outcome.idleChangesets, ["README.md", "new-package.md"])
-  assert.equal(outcome.ready, "outstanding=true\npending=true\n")
-  assert.deepEqual(outcome.readyChangesets, ["README.md"])
-  assert.equal(outcome.placeholder.private, true)
-  assert.equal(outcome.released.private, undefined)
+  assert.equal(outcome.idle.written, "outstanding=false\npending=true\n")
+  assert.deepEqual(outcome.idle.changesets, ["README.md", "later.md"])
+  assert.equal(outcome.ready.written, "outstanding=true\npending=true\n")
+  assert.deepEqual(outcome.ready.changesets, ["README.md"])
+  assert.equal(outcome.waiting.written, "outstanding=false\npending=true\n")
+  assert.deepEqual(outcome.waiting.changesets, ["README.md", "fresh.md", "later.md"])
+  assert.match(outcome.waiting.log, /::warning title=Release waits::@knpkv\/released@1\.1\.0 stay unpublished/u)
 })
