@@ -30,6 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
+          # The release check compares this push with the commit before it.
+          fetch-depth: 0
           persist-credentials: false
       - name: Install dependencies
         uses: ./.github/actions/setup
@@ -38,11 +40,20 @@ jobs:
           registry-url: https://registry.npmjs.org
       # changesets/action publishes only when no changeset is pending; otherwise it
       # versions. A Version Packages merge that lands after newer changesets reached
-      # main would then publish nothing (#589). So publish first with the pending
-      # changesets set aside, then version them in a second pass. A failed publish
-      # fails this step and the job.
+      # main would then publish nothing (#589). So when this push moved a package's
+      # version (only Version Packages may: check-version-bumps guards pull requests),
+      # publish first with the pending changesets set aside, then version them. Any
+      # other push keeps the action's own choice, so a new package with a pending
+      # changeset is not published before that changeset versions it. A failed publish
+      # fails its step and the job.
+      - name: Detect a Version Packages release
+        id: released
+        run: node scripts/check-version-bumps.mjs --released-since "${PUSH_BEFORE}"
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
       - name: Set pending changesets aside
         id: pending
+        if: steps.released.outputs.moved == 'true'
         run: |
           shopt -s nullglob
           pending=()
@@ -54,7 +65,8 @@ jobs:
             mkdir -p "${RUNNER_TEMP}/pending-changesets"
             mv -- "${pending[@]}" "${RUNNER_TEMP}/pending-changesets/"
           fi
-      - name: Publish versions already on main
+      - name: Publish the released versions
+        if: steps.released.outputs.moved == 'true'
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           github-token: ${{ secrets.TOKEN_GITHUB }}
@@ -64,16 +76,19 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.TOKEN_NPM }}
           HUSKY: 0
       - name: Restore pending changesets
-        if: steps.pending.outputs.count != '0'
+        if: steps.released.outputs.moved == 'true' && steps.pending.outputs.count != '0'
         run: git checkout HEAD -- .changeset
-      - name: Create or update the Version Packages pull request
-        if: steps.pending.outputs.count != '0'
+      # Without a release this is the action's usual choice: version pending changesets, or
+      # publish when none are pending. After a release it only versions what is pending.
+      - name: Create Release Pull Request or Publish
+        if: steps.released.outputs.moved != 'true' || steps.pending.outputs.count != '0'
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           github-token: ${{ secrets.TOKEN_GITHUB }}
           # Version packages based on changeset files
           version-script: pnpm changeset:version
-          # Changesets are pending here, so this only versions; it tells the PR that merging publishes
+          # Build and publish packages to npm registry
           publish-script: pnpm changeset:publish
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.TOKEN_NPM }}
           HUSKY: 0

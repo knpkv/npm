@@ -6,15 +6,20 @@ import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as Option from "effect/Option"
+import * as FileSystem from "effect/FileSystem"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-// Release publishes every public package whose version is not on npm yet, so a pull request may change
-// an existing publishable package's version only as the Version Packages pull request. Runs in CI on
-// pull requests (GITHUB_EVENT_NAME, GITHUB_BASE_REF, GITHUB_HEAD_REF), against a full-history checkout.
+// Release publishes every public package whose version is not on npm yet, so only the Version Packages
+// pull request may move an existing package's version. Two modes, both on a full-history checkout:
+// - pull request (GITHUB_EVENT_NAME, GITHUB_BASE_REF, GITHUB_HEAD_REF, GITHUB_REPOSITORY, GITHUB_EVENT_PATH):
+//   fails when a version moved outside the repository's own changeset-release/main branch;
+// - `--released-since <rev>` (Release workflow): writes `moved=true|false` to GITHUB_OUTPUT, saying whether
+//   the push moved an existing package's version, which after the pull-request check means a Version
+//   Packages merge.
 
 class VersionBumpError extends Data.TaggedError("VersionBumpError") {
   get message() {
@@ -32,6 +37,10 @@ const PackageManifest = Schema.Struct({
   private: Schema.optional(Schema.Boolean)
 })
 
+const PullRequestEvent = Schema.Struct({
+  pull_request: Schema.Struct({ head: Schema.Struct({ repo: Schema.Struct({ full_name: Schema.String }) }) })
+})
+
 const decodeManifest = (file, text) =>
   Schema.decodeUnknownEffect(Schema.fromJsonString(PackageManifest))(text).pipe(
     Effect.mapError((cause) => fail(`${file} is not a readable package manifest: ${cause.message}`))
@@ -40,19 +49,29 @@ const decodeManifest = (file, text) =>
 const publishable = (manifest) => manifest.private !== true
 
 /**
- * Compares each workspace manifest with its base. `changes` lists existing publishable packages whose
- * version moved; they are violations unless `branch` is the Version Packages branch. `added` lists
- * publishable packages the base did not have: allowed, and reported so a first publish is visible.
+ * Compares workspace manifests by package name, since npm identity is the name and a package may move
+ * directories. `changes` lists packages the base already had whose version moved while either side is
+ * publishable (so going private in the same change hides nothing). `added` lists publishable packages
+ * the base did not have: a first publish, allowed and reported.
  */
-export const compareVersions = (branch, manifests) => {
-  const changes = manifests
-    .filter(({ base, head }) => base !== undefined && publishable(head) && base.version !== head.version)
-    .map(({ base, file, head }) => ({ file, name: head.name, from: base.version, to: head.version }))
-  const added = manifests
-    .filter(({ base, head }) => base === undefined && publishable(head))
-    .map(({ file, head }) => ({ file, name: head.name, version: head.version }))
-  return { added, violations: branch === releaseBranch ? [] : changes }
+export const compareVersions = (base, head) => {
+  const before = new Map(base.map((entry) => [entry.manifest.name, entry.manifest]))
+  const changes = []
+  const added = []
+  for (const { file, manifest } of head) {
+    const previous = before.get(manifest.name)
+    if (previous === undefined) {
+      if (publishable(manifest)) added.push({ file, name: manifest.name, version: manifest.version })
+    } else if ((publishable(previous) || publishable(manifest)) && previous.version !== manifest.version) {
+      changes.push({ file, name: manifest.name, from: previous.version, to: manifest.version })
+    }
+  }
+  return { added, changes }
 }
+
+/** Only the Version Packages branch pushed to this repository itself is exempt; a fork can name any branch. */
+export const isReleasePullRequest = ({ headRef, headRepository, repository }) =>
+  headRef === releaseBranch && headRepository === repository
 
 const git = Effect.fn("VersionBumps.git")(function* (args) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -66,48 +85,84 @@ const git = Effect.fn("VersionBumps.git")(function* (args) {
   return stdout
 }, Effect.scoped)
 
-// The base side of a file, or none when the base commit does not have it. Any git failure fails the check.
-const baseText = Effect.fn("VersionBumps.baseText")(function* (base, file) {
-  const listed = (yield* git(["ls-tree", "--name-only", base, "--", file])).trim()
-  return listed === "" ? Option.none() : Option.some(yield* git(["show", `${base}:${file}`]))
+const workspaceManifest = /^packages\/[^/]+\/package\.json$/u
+
+// Every workspace package manifest at a revision.
+const manifestsAt = Effect.fn("VersionBumps.manifestsAt")(function* (revision) {
+  const files = (yield* git(["ls-tree", "-r", "--name-only", revision, "--", "packages"]))
+    .split("\n")
+    .filter((file) => workspaceManifest.test(file))
+  return yield* Effect.forEach(files, (file) =>
+    git(["show", `${revision}:${file}`]).pipe(
+      Effect.flatMap((text) => decodeManifest(`${revision}:${file}`, text)),
+      Effect.map((manifest) => ({ file, manifest }))
+    )
+  )
+})
+
+const describe = ({ file, name, from, to }) => `- ${name} (${file}): ${from ?? "(none)"} -> ${to ?? "(none)"}`
+
+const checkPullRequest = Effect.gen(function* () {
+  const baseRef = yield* Config.String("GITHUB_BASE_REF")
+  const fileSystem = yield* FileSystem.FileSystem
+  const pullRequest = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(PullRequestEvent))(
+    yield* fileSystem.readFileString(yield* Config.String("GITHUB_EVENT_PATH"))
+  ).pipe(Effect.mapError((cause) => fail(`GITHUB_EVENT_PATH is not a pull request event: ${cause.message}`)))
+  const exempt = isReleasePullRequest({
+    headRef: yield* Config.String("GITHUB_HEAD_REF"),
+    headRepository: pullRequest.pull_request.head.repo.full_name,
+    repository: yield* Config.String("GITHUB_REPOSITORY")
+  })
+  const base = (yield* git(["merge-base", "HEAD", `origin/${baseRef}`])).trim()
+  const head = yield* manifestsAt("HEAD")
+  const { added, changes } = compareVersions(yield* manifestsAt(base), head)
+  for (const { name, version } of added) {
+    yield* Console.log(`New publishable package: ${name}@${version ?? "(no version)"}; Release publishes it on merge.`)
+  }
+  if (changes.length > 0 && !exempt) {
+    return yield* fail(
+      [
+        `Only this repository's ${releaseBranch} (the Version Packages pull request) may change a package's version:`,
+        ...changes.map(describe),
+        "Fix: revert the version field and add a changeset (`pnpm changeset`) instead."
+      ].join("\n")
+    )
+  }
+  yield* Console.log(
+    exempt
+      ? `Version bumps: ${changes.length} version changes on the Version Packages branch`
+      : `Version bumps: ${head.length} manifests checked, none changed outside ${releaseBranch}`
+  )
+})
+
+const reportRelease = Effect.fn("VersionBumps.reportRelease")(function* (since) {
+  // The range must be history main actually has; anything else fails rather than guessing.
+  yield* git(["merge-base", "--is-ancestor", since, "HEAD"]).pipe(
+    Effect.mapError(() => fail(`${since} is not an ancestor of HEAD; cannot tell what this push released`))
+  )
+  const { changes } = compareVersions(yield* manifestsAt(since), yield* manifestsAt("HEAD"))
+  for (const change of changes) yield* Console.log(`Released by this push: ${describe(change).slice(2)}`)
+  const fileSystem = yield* FileSystem.FileSystem
+  yield* fileSystem.writeFileString(yield* Config.String("GITHUB_OUTPUT"), `moved=${changes.length > 0}\n`, {
+    flag: "a"
+  })
 })
 
 const program = Effect.gen(function* () {
+  const args = yield* (yield* Stdio.Stdio).args
+  const sinceIndex = args.indexOf("--released-since")
+  if (sinceIndex >= 0) {
+    const since = args[sinceIndex + 1]
+    if (since === undefined || since === "") return yield* fail("--released-since needs a revision")
+    return yield* reportRelease(since)
+  }
   const event = yield* Config.String("GITHUB_EVENT_NAME")
   if (event !== "pull_request") {
     // Pushes to main include Version Packages merges, which are the one place versions move.
     yield* Console.log(`Version bumps: not checked on a ${event} event; pull requests are checked`)
     return
   }
-  const baseRef = yield* Config.String("GITHUB_BASE_REF")
-  const branch = yield* Config.String("GITHUB_HEAD_REF")
-  const base = (yield* git(["merge-base", "HEAD", `origin/${baseRef}`])).trim()
-  const files = (yield* git(["ls-files", "--", "packages/*/package.json"])).split("\n").filter((file) => file !== "")
-  const manifests = yield* Effect.forEach(files, (file) =>
-    Effect.gen(function* () {
-      const head = yield* decodeManifest(file, yield* git(["show", `HEAD:${file}`]))
-      const baseManifest = yield* baseText(base, file)
-      return {
-        file,
-        head,
-        base: Option.isSome(baseManifest) ? yield* decodeManifest(file, baseManifest.value) : undefined
-      }
-    })
-  )
-  const { added, violations } = compareVersions(branch, manifests)
-  for (const { name, version } of added) {
-    yield* Console.log(`New publishable package: ${name}@${version ?? "(no version)"}; Release publishes it on merge.`)
-  }
-  if (violations.length > 0) {
-    return yield* fail(
-      [
-        `Only ${releaseBranch} (the Version Packages pull request) may change a published package's version:`,
-        ...violations.map(({ file, from, to }) => `- ${file}: ${from ?? "(none)"} -> ${to ?? "(none)"}`),
-        "Fix: revert the version field and add a changeset (`pnpm changeset`) instead."
-      ].join("\n")
-    )
-  }
-  yield* Console.log(`Version bumps: ${files.length} manifests checked, none changed outside ${releaseBranch}`)
+  yield* checkPullRequest
 })
 
 // A version-bump failure prints its reason alone; anything else (a git or config failure, a defect) prints its full cause.
