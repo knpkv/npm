@@ -369,17 +369,16 @@ const Machines = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
     <Surface as="section" padding="spacious" className="machine-panel">
       <div className="section-heading">
         <div>
-          <Text variant="meta" tone="secondary">
-            Fleet
-          </Text>
+          {/* This machine is listed too, first; no eyebrow over the title. */}
           <Text as="h2" variant="section-title">
-            Other machines
+            Machines
           </Text>
         </div>
       </div>
       <nav className="machine-grid" aria-label="Fleet approval pages">
         <a className="machine machine-current" href={snapshot.directory.currentUrl}>
-          <StateLabel label="This machine" tone="progress" size="compact" />
+          {/* Online by definition; the progress tone's spinner said something was loading. */}
+          <StateLabel label="This machine" tone="positive" size="compact" />
           <strong>{snapshot.host}</strong>
         </a>
         {snapshot.directory.links.map((link) =>
