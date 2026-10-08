@@ -10,6 +10,7 @@ import { sync } from "./reconcile.js"
 import { launchTuiOrSetup } from "./setup.js"
 import { timer } from "./timer.js"
 import { watch } from "./watch.js"
+import { web } from "./web.js"
 
 const processArgv = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
@@ -38,6 +39,7 @@ type RootSubcommand =
   | typeof issue
   | typeof sync
   | typeof watch
+  | typeof web
   | typeof config
   | ReturnType<typeof makeInstallCommand>
 
@@ -55,5 +57,5 @@ export const root: Command.Command<
   Command.withDescription(
     "Track time on Jira issues in Clockify. Run with no command to set up and open the terminal UI."
   ),
-  Command.withSubcommands([tui, AuthCommand.auth, timer, issue, sync, watch, config, skills])
+  Command.withSubcommands([tui, AuthCommand.auth, timer, issue, sync, watch, web, config, skills])
 )

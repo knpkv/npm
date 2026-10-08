@@ -15,13 +15,24 @@ pnpm --filter "@knpkv/jcf-web..." build   # this package and jcf, which it impor
 pnpm --filter @knpkv/jcf-web start        # prints the URL that gets you in
 ```
 
+`start` first rebuilds jcf if its source changed, then runs the built server;
+`scripts/test-workspace-start.ts` checks that it starts from a fresh HOME and serves the client.
+
 When installed from the published package, run `jcf-web` from the package's bin directory
 (`pnpm exec jcf-web` in a pnpm project). The archive includes the built server and client;
 it does not need the workspace source tree or `tsx` to start.
 
 The printed URL carries a one-time code in its fragment. Opening it exchanges the code for a session
 cookie and strips it from the address bar; reloading afterwards works because the cookie is what
-authenticates. The code expires a minute after the server binds, so restart to get a fresh one.
+authenticates. The code expires a minute after it is minted.
+
+For another browser, or a tab that says it is not signed in, run `jcf web login` (or `jcf-web login`)
+on the same machine: it asks the running server for a fresh link. While it runs, jcf-web keeps its
+address and a control token in `~/.jcf/web.json` (owner-only, `0600`) for that request, and removes the
+file when it stops.
+
+A system that is not connected shows "Not connected" and the command that connects it
+(`jcf auth jira token`, `jcf auth clockify setup`), never a zero.
 
 For development, `pnpm --filter @knpkv/jcf-web dev` rebuilds jcf whenever its source changes, so the
 server never runs an old build of it, and runs the server and Vite together. It prints a

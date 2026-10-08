@@ -9,6 +9,7 @@ import {
   IgnoreResult,
   OwnershipResult,
   SavedWeek,
+  Sources,
   StandingResult,
   UpdateSavedEntryResponse,
   WeekPlan,
@@ -17,6 +18,7 @@ import {
 } from "../shared/contracts.js"
 
 export const decodeWeekEvent = Schema.decodeUnknownPromise(Schema.fromJsonString(WeekReadEvent))
+export const decodeSources = Schema.decodeUnknownPromise(Sources)
 export const decodeWriteResult = Schema.decodeUnknownPromise(WriteResult)
 export const decodeConfirmBatch = Schema.decodeUnknownPromise(ConfirmBatchResult)
 export const decodeOwnershipResult = Schema.decodeUnknownPromise(OwnershipResult)

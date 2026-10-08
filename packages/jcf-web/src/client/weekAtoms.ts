@@ -135,7 +135,17 @@ export const settleEntries = (
   return settled
 }
 
-class WeekWriteError extends Data.TaggedError("WeekWriteError")<{ readonly message: string }> {}
+/** A write that failed; `status` carries the HTTP status, so a 401 can still sign the tab out. */
+class WeekWriteError extends Data.TaggedError("WeekWriteError")<{
+  readonly message: string
+  readonly status?: number | undefined
+}> {}
+
+const writeError = (cause: unknown): WeekWriteError =>
+  new WeekWriteError({
+    message: Predicate.isError(cause) ? cause.message : String(cause),
+    status: Predicate.hasProperty(cause, "status") && Predicate.isNumber(cause.status) ? cause.status : undefined
+  })
 
 export interface SavedEntryEdit {
   readonly entry: SavedEntry
@@ -179,7 +189,7 @@ export const makeWeekAtoms = (transport: {
     Effect.gen(function*() {
       const result = yield* Effect.tryPromise({
         try: () => transport.confirmRow(item.request),
-        catch: (cause) => new WeekWriteError({ message: Predicate.isError(cause) ? cause.message : String(cause) })
+        catch: writeError
       })
       const held = get(source)
       get.set(source, { ...held, entries: [...held.entries, ...settleEntries(item.entries, result)] })
@@ -192,14 +202,13 @@ export const makeWeekAtoms = (transport: {
   // every item leaves the queue whether its write landed or not, preserving approvals added meanwhile.
   const writeQueuedBatch = Atom.fn<ReadonlyArray<QueuedConfirmation>>()((items, get) =>
     Effect.gen(function*() {
-      const message = (cause: unknown) => Predicate.isError(cause) ? cause.message : String(cause)
       const confirm = transport.confirmRows
       // A transport without the batch route confirms one at a time; outcomes keep the same shape.
       const outcomes: ReadonlyArray<ConfirmBatchItemResponse> = confirm === undefined
         ? yield* Effect.forEach(items, (item) =>
           Effect.tryPromise({
             try: () => transport.confirmRow(item.request),
-            catch: (cause) => new WeekWriteError({ message: message(cause) })
+            catch: writeError
           }).pipe(
             Effect.map((result): ConfirmBatchItemResponse => ({ _tag: "Written", result })),
             Effect.catch((error) =>
@@ -208,7 +217,7 @@ export const makeWeekAtoms = (transport: {
           ))
         : yield* Effect.tryPromise({
           try: () => confirm(items.map((item) => item.request)),
-          catch: (cause) => new WeekWriteError({ message: message(cause) })
+          catch: writeError
         })
       const settled = items.flatMap((item, index) => {
         const outcome = outcomes[index]
@@ -232,7 +241,7 @@ export const makeWeekAtoms = (transport: {
           const result = yield* Effect.tryPromise({
             try: () =>
               write.kind === "confirm" ? transport.confirmRow(write.request) : transport.logManual(write.request),
-            catch: (cause) => new WeekWriteError({ message: Predicate.isError(cause) ? cause.message : String(cause) })
+            catch: writeError
           })
           const settled = { ...before, entries: [...before.entries, ...settleEntries(pending, result)] }
           get.set(source, settled)
@@ -258,7 +267,7 @@ export const makeWeekAtoms = (transport: {
           }
           const result = yield* Effect.tryPromise({
             try: () => update(edit.request),
-            catch: (cause) => new WeekWriteError({ message: Predicate.isError(cause) ? cause.message : String(cause) })
+            catch: writeError
           })
           const settled = editedView(get(source), result.entry, false)
           get.set(source, settled)
