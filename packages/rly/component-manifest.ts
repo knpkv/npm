@@ -335,6 +335,29 @@ export const componentManifest = {
     {
       category: "pattern",
       exports: [
+        { kind: "value", name: "RelayTranscript" },
+        { kind: "type", name: "RelayTranscriptProps" },
+        { kind: "type", name: "RlyRelayCite" },
+        { kind: "type", name: "RlyRelayTool" },
+        { kind: "type", name: "RlyRelayTranscriptItem" }
+      ],
+      name: "RelayTranscript",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayTranscript.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayTranscript.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayTranscript.stories.tsx",
+        storyId: "patterns-relaytranscript--conversation",
+        coverageStoryIds: ["patterns-relaytranscript--streaming", "patterns-relaytranscript--failed"],
+        tests: ["test/patterns/RelayTranscript.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
         { kind: "value", name: "RelayComposer" },
         { kind: "value", name: "useRelayDraft" },
         { kind: "type", name: "RelayComposerProps" },

@@ -61,6 +61,11 @@ export const COMPONENT_REGISTRY_METADATA = {
     ["overlay", "pinned", "fullscreen"],
     ["agent", "overlay"]
   ),
+  RelayTranscript: registryMetadata(
+    "Show a Relay conversation: your turns, Relay's prose, tool activity with citations, run outcomes, and a polite announcer",
+    ["conversation", "streaming", "failed"],
+    ["agent", "present"]
+  ),
   RelayComposer: registryMetadata(
     "Write to Relay: an auto-growing message box with context refs, a run preset, send and stop, and drafts kept per object",
     ["draft", "busy"],

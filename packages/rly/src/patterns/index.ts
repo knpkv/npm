@@ -106,6 +106,8 @@ export type {
   RlyRelayScope,
   UseRelayPresentationOptions
 } from "./RelayPanel.js"
+export { RelayTranscript } from "./RelayTranscript.js"
+export type { RelayTranscriptProps, RlyRelayCite, RlyRelayTool, RlyRelayTranscriptItem } from "./RelayTranscript.js"
 export { ReleasePreview } from "./ReleasePreview.js"
 export type { ReleasePreviewProps, RlyReleasePreviewPresentation } from "./ReleasePreview.js"
 export {

@@ -71,6 +71,7 @@ describe("public entries", () => {
       "RLY_RELAY_PANEL_PRESENTATIONS",
       "RLY_RELAY_PANEL_WIDTH",
       "useRelayPresentation",
+      "RelayTranscript",
       "ReleasePreview",
       "ReleaseRelay",
       "RLY_RELEASE_RELAY_DEFAULT_VARIANTS",
