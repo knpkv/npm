@@ -184,7 +184,7 @@ const ConnectionCard = ({
   const isTesting = testState?._tag === "testing"
   const hasTested = testState !== undefined && testState._tag !== "testing"
   const isChanging = enablementState === "changing"
-  const status = connectionStatus(connection, testState)
+  const status = connectionStatus(connection, testState, synchronizationState)
   return (
     <Surface as="article" className={styles.card} padding="default" form="grouped">
       <div className={styles.cardHeading}>
@@ -542,6 +542,8 @@ export const ServicesPage = ({
   const awsProfileRequest = useRef<AbortController | null>(null)
   const atlassianProfileRequest = useRef<AbortController | null>(null)
   const synchronizationRequests = useRef(new Map<PluginConnectionId, AbortController>())
+  // Running syncs, kept apart from state reads: a page refresh re-reads state and must never abort a sync.
+  const synchronizeRequests = useRef(new Map<PluginConnectionId, AbortController>())
   const administrationRequests = useRef(new Map<PluginConnectionId, AbortController>())
   const administrationMutations = useRef(new Map<PluginConnectionId, AbortController>())
   const accountMutations = useRef(new Map<ProviderAccountId, AbortController>())
@@ -575,6 +577,8 @@ export const ServicesPage = ({
   const refreshSynchronization = useCallback(
     (pluginConnectionId: PluginConnectionId): void => {
       if (sessionKey === null || transport.synchronization === undefined) return
+      // A running sync answers with its own state when it settles.
+      if (synchronizeRequests.current.has(pluginConnectionId)) return
       synchronizationRequests.current.get(pluginConnectionId)?.abort()
       const request = new AbortController()
       synchronizationRequests.current.set(pluginConnectionId, request)
@@ -602,8 +606,10 @@ export const ServicesPage = ({
     (pluginConnectionId: PluginConnectionId): void => {
       if (sessionKey === null || transport.synchronize === undefined) return
       synchronizationRequests.current.get(pluginConnectionId)?.abort()
+      synchronizationRequests.current.delete(pluginConnectionId)
+      synchronizeRequests.current.get(pluginConnectionId)?.abort()
       const request = new AbortController()
-      synchronizationRequests.current.set(pluginConnectionId, request)
+      synchronizeRequests.current.set(pluginConnectionId, request)
       setSynchronizationStates((current) => {
         const existing = current.get(pluginConnectionId)
         const previous = existing?._tag === "ready" ? existing.synchronization : null
@@ -612,14 +618,14 @@ export const ServicesPage = ({
       transport.synchronize(pluginConnectionId, request.signal).then(
         (synchronization) => {
           if (request.signal.aborted) return
-          synchronizationRequests.current.delete(pluginConnectionId)
+          synchronizeRequests.current.delete(pluginConnectionId)
           setSynchronizationStates((current) =>
             new Map(current).set(pluginConnectionId, { _tag: "ready", synchronization })
           )
         },
         (failure) => {
           if (request.signal.aborted) return
-          synchronizationRequests.current.delete(pluginConnectionId)
+          synchronizeRequests.current.delete(pluginConnectionId)
           if (Predicate.isTagged("UnauthorizedApiError")(failure)) invalidateSession(sessionKey)
           setSynchronizationStates((current) => new Map(current).set(pluginConnectionId, { _tag: "failed" }))
         }
@@ -658,6 +664,11 @@ export const ServicesPage = ({
       if (synchronizableIds.has(pluginConnectionId)) continue
       request.abort()
       synchronizationRequests.current.delete(pluginConnectionId)
+    }
+    for (const [pluginConnectionId, request] of synchronizeRequests.current) {
+      if (synchronizableIds.has(pluginConnectionId)) continue
+      request.abort()
+      synchronizeRequests.current.delete(pluginConnectionId)
     }
     setSynchronizationStates((current) => {
       const next = new Map(current)
@@ -777,6 +788,8 @@ export const ServicesPage = ({
       atlassianProfileRequest.current = null
       for (const request of synchronizationRequests.current.values()) request.abort()
       synchronizationRequests.current.clear()
+      for (const request of synchronizeRequests.current.values()) request.abort()
+      synchronizeRequests.current.clear()
       for (const request of enablementRequests.current.values()) request.abort()
       enablementRequests.current.clear()
       for (const request of administrationRequests.current.values()) request.abort()
@@ -865,6 +878,15 @@ export const ServicesPage = ({
       const acceptResponse = (draftKey: string, response: CreatePluginConnectionResponse): void => {
         completed.add(draftKey)
         hasFailedTest = hasFailedTest || response.test._tag !== "healthy"
+        // A connected resource holds no data until it syncs: each healthy one that syncs starts its first
+        // sync as soon as it is accepted, so a later draft's failure can't skip it.
+        if (
+          response.test._tag === "healthy" &&
+          response.connection.isEnabled &&
+          response.connection.supportsSynchronization
+        ) {
+          synchronizeConnection(response.connection.pluginConnectionId)
+        }
         shouldRefreshOverview = shouldRefreshOverview || response.connection.providerAccountId !== null
         setConnectionsState((current) =>
           current._tag === "ready"
@@ -957,7 +979,7 @@ export const ServicesPage = ({
         return false
       }
     },
-    [invalidateSession, sessionKey, transport]
+    [invalidateSession, sessionKey, synchronizeConnection, transport]
   )
 
   const createConnection = useCallback(
