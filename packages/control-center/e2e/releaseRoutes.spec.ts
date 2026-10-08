@@ -712,8 +712,8 @@ const openRelayFullPage = async (page: Page, action: string): Promise<void> => {
   await expect(page.locator("[data-rly-relay-panel]")).toHaveCount(0)
 }
 
-test("audits every authenticated route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ page }) => {
-  test.setTimeout(60_000)
+/** The Items and Timeline read models the authenticated route pages load. */
+const routeItemsAndTimeline = async (page: Page): Promise<void> => {
   await page.route("**/api/v1/items**", async (route) => {
     if (new URL(route.request().url()).pathname !== "/api/v1/items") {
       await route.fallback()
@@ -751,6 +751,11 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
       status: 200
     })
   })
+}
+
+test("audits every authenticated route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ page }) => {
+  test.setTimeout(60_000)
+  await routeItemsAndTimeline(page)
   await page.route("**/api/v1/plugins/overview", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
@@ -2178,6 +2183,31 @@ test("cleans up an open preview when its browser session expires", async ({ page
 
 test.describe("on a touch phone", () => {
   test.use({ hasTouch: true, isMobile: true, viewport: { height: 844, width: 390 } })
+
+  // iOS zooms the page into a field whose text is under 16px; label-sized `font: inherit` fields did.
+  test("every form field reads at 16px or more", async ({ page }) => {
+    const routes = [
+      { path: `/w/${snapshot.workspaceId}/items`, ready: page.getByRole("searchbox", { name: "Search" }) },
+      { path: `/w/${snapshot.workspaceId}/timeline`, ready: page.locator("main select, main input").first() },
+      { path: "/open-pr", ready: page.locator("main input").first() }
+    ]
+    await routeItemsAndTimeline(page)
+    for (const route of routes) {
+      await page.goto(route.path)
+      await expect(route.ready).toBeVisible()
+      const sizes = await page.locator("main").evaluate((main) =>
+        [...main.querySelectorAll("input:not([type=checkbox]):not([type=radio]), select, textarea")]
+          .filter((field) => field.getBoundingClientRect().width > 0)
+          .map((field) => ({
+            field: field.tagName.toLowerCase(),
+            size: Number.parseFloat(field.ownerDocument.defaultView?.getComputedStyle(field).fontSize ?? "0")
+          }))
+      )
+      // An empty set would pass vacuously: each route must show the fields it is checked for.
+      expect(sizes.length, route.path).toBeGreaterThan(0)
+      expect(sizes.filter(({ size }) => size < 16), route.path).toEqual([])
+    }
+  })
 
   // A navigation target under 44px is hard to hit with a thumb.
   test("the phone navigation's targets are 44px tall", async ({ page }) => {
