@@ -1,8 +1,8 @@
 /** A semantic color pair selected by the inherited CSS color scheme. */
 export interface ColorTokenSource {
-  readonly dark: `#${string}`
+  readonly dark: `oklch(${string})`
   readonly forced: string
-  readonly light: `#${string}`
+  readonly light: `oklch(${string})`
   readonly name: string
   readonly purpose: "content" | "state" | "provenance" | "series"
 }
