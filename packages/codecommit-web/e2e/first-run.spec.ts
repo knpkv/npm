@@ -245,6 +245,57 @@ const withPrompt = (category: "read" | "write", operation: string, context: stri
   permissionPrompt: { category, context, id: "prompt-1", operation }
 })
 
+test("names every read waiting behind the shown one, so one grant clearly answers them all", async ({ page }) => {
+  await routeCommon(page)
+  await page.route("**/api/events/", (route) =>
+    route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          ...withPrompt("read", "getCallerIdentity", "Get identity for dev"),
+          pendingReads: { contexts: ["Get identity for dev", "List PRs for dev"], count: 2 }
+        })
+      }\n\n`,
+      contentType: "text/event-stream"
+    }))
+  await page.route("**/api/config", (route) => route.fulfill({ json: config }))
+
+  await page.goto("/")
+  await expect(page.getByText("2 reads are waiting: Get identity for dev and List PRs for dev.", { exact: false }))
+    .toBeVisible()
+})
+
+test("tells a signed-out browser in Settings how to sign in, not to check the config file", async ({ page }) => {
+  await routeCommon(page)
+  await page.route("**/api/events/", (route) => route.fulfill({ status: 401 }))
+  await page.route("**/api/config", (route) => route.fulfill({ status: 401 }))
+  await page.route("**/api/config/path", (route) => route.fulfill({ status: 401 }))
+
+  await page.goto("/settings/accounts")
+  await expect(page.getByText("This browser isn't signed in", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText("config.json", { exact: false })).toHaveCount(0)
+})
+
+test("says it is checking sign-in until an account's identity read answers", async ({ page }) => {
+  await routeCommon(page)
+  await page.route(
+    "**/api/events/",
+    (route) =>
+      route.fulfill({
+        body: `data: ${JSON.stringify({ ...emptySnapshot, enabledProfiles: ["dev"] })}\n\n`,
+        contentType: "text/event-stream"
+      })
+  )
+  await page.route(
+    "**/api/config",
+    (route) =>
+      route.fulfill({ json: { ...config, accounts: [{ enabled: true, profile: "dev", regions: ["eu-central-1"] }] } })
+  )
+
+  await page.goto("/settings/accounts")
+  await expect(page.getByText("Checking sign-in…", { exact: true })).toBeVisible()
+  await expect(page.getByText("Not logged in", { exact: true })).toHaveCount(0)
+})
+
 test("asks for a read inline, so the first account isn't blocked by a modal", async ({ page }) => {
   await routeCommon(page)
   const calls: Array<string> = []
