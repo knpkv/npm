@@ -1,12 +1,7 @@
-/**
- * rly's Geist faces, UI and mono, as the stylesheet build names them (esbuild `assetNames: "[name]"`).
- * Both are preloaded: the mono face sets ids and kickers, and loading it late re-wrapped a line in
- * the Approvals detail at 390 (CLS 0.069).
- */
-export const PRELOADED_FONTS: readonly [string, string] = [
-  "geist-latin-wght-normal.woff2",
-  "geist-mono-latin-wght-normal.woff2"
-]
+import { RLY_FONT_FACES } from "@knpkv/rly/tokens"
+
+/** The Geist woff2 files to preload: rly's own list of every face its styles load. */
+export const PRELOADED_FONTS: ReadonlyArray<string> = RLY_FONT_FACES.map(({ file }) => file)
 
 /**
  * Preloads for the Geist files this host actually serves, so first text paints in Geist rather than
