@@ -40,6 +40,8 @@ for (const id of stories) {
         if (centre === null || !element.contains(centre)) continue
         const name = element.getAttribute("aria-label") ?? element.textContent?.trim() ?? "?"
         // The hit area in document coordinates, since each control is scrolled to before it is measured.
+        // scrollX/Y only cover page scroll: a story whose tagged controls sit in an inner scroller must measure
+        // them in one pass without scrolling, or scrollIntoView moves them between measurements.
         const growY = Math.max(0, (44 - box.height) / 2)
         const growX = Math.max(0, (44 - box.width) / 2)
         areas.push({
