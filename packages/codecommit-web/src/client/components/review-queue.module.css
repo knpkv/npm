@@ -346,7 +346,7 @@
 }
 
 .queueSurface {
-  overflow: hidden;
+  overflow: clip;
 }
 
 .prRow {
@@ -415,7 +415,7 @@
 }
 
 .prDescription {
-  overflow: hidden;
+  overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -459,7 +459,7 @@
 }
 
 .prFact dd {
-  overflow: hidden;
+  overflow: clip;
   margin: 0;
   color: var(--rly-color-text-1);
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
@@ -611,7 +611,7 @@
 .activityList {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
-  overflow: hidden;
+  overflow: clip;
 }
 
 .activityItem {
@@ -689,7 +689,7 @@ a.activityItem:focus-visible {
 
 .activityItemTitle {
   display: -webkit-box;
-  overflow: hidden;
+  overflow: clip;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
@@ -698,7 +698,7 @@ a.activityItem:focus-visible {
   position: absolute;
   inline-size: 1px;
   block-size: 1px;
-  overflow: hidden;
+  overflow: clip;
   clip-path: inset(50%);
   white-space: nowrap;
 }

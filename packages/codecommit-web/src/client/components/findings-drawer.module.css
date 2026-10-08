@@ -66,7 +66,7 @@
   display: flex;
   flex-direction: column;
   min-block-size: 0;
-  overflow: hidden;
+  overflow: clip;
 }
 
 /* The pane fills the drawer instead of taking its stacked-below height. */

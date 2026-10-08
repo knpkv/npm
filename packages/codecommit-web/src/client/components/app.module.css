@@ -2,7 +2,7 @@
   /* Relay's overlay and pinned column start below the sticky header. */
   --rly-relay-panel-offset: var(--app-header-block-size, 4.5rem);
   display: flex;
-  min-block-size: 100dvh;
+  min-block-size: 100svh;
   flex-direction: column;
   background: var(--rly-color-canvas);
   color: var(--rly-color-text-1);
@@ -10,7 +10,7 @@
 
 .fullWidthRoot {
   block-size: 100dvh;
-  overflow: hidden;
+  overflow: clip;
 }
 
 .main {
@@ -32,7 +32,7 @@
   display: flex;
   min-inline-size: 0;
   min-block-size: 0;
-  overflow: hidden;
+  overflow: clip;
   flex: 1 1 auto;
   flex-direction: column;
   /* Every layout keeps a bottom-docked bar's height clear, the full-width workbench too. */

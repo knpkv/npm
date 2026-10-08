@@ -56,7 +56,7 @@
 }
 
 .brandName {
-  overflow: hidden;
+  overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -281,7 +281,7 @@
 }
 
 .userName {
-  overflow: hidden;
+  overflow: clip;
   color: var(--rly-color-text-1);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -312,7 +312,7 @@
 }
 
 .menuIdentity strong {
-  overflow: hidden;
+  overflow: clip;
   color: var(--rly-color-text-1);
   font-weight: 600;
   text-overflow: ellipsis;
@@ -428,7 +428,7 @@
     position: absolute;
     inline-size: 1px;
     block-size: 1px;
-    overflow: hidden;
+    overflow: clip;
     clip-path: inset(50%);
     white-space: nowrap;
   }
@@ -452,7 +452,7 @@
     position: absolute;
     inline-size: 1px;
     block-size: 1px;
-    overflow: hidden;
+    overflow: clip;
     clip-path: inset(50%);
     white-space: nowrap;
   }
