@@ -18,7 +18,9 @@
  * visible, the text under it must have rendered in a fallback face (`FALLBACK_FAMILIES`): a runner
  * without those fonts would otherwise measure system-ui and pass for the wrong reason. The fonts are
  * held past the block period and released; the text must still render in the fallback afterwards
- * (`FontLateFaceSwappedError` otherwise, meaning a face lost `optional`). Only layout-shift entries
+ * (`FontLateFaceSwappedError` otherwise, meaning a face lost `optional`), and every requested Geist
+ * face must have loaded (`FontLateFaceFailedError` otherwise: a 404 or corrupt font also stays on the
+ * fallback, which would pass for the wrong reason). Only layout-shift entries
  * recorded after the release count, so data and skeleton shifts before it never blame the fonts.
  * `sum` adds every such entry (stricter than CLS, which takes the worst session window).
  */
@@ -90,6 +92,21 @@ export class FontLateFaceSwappedError extends Data.TaggedError("FontLateFaceSwap
     } after a late Geist release; rly's faces must use font-display: optional`
   }
 }
+
+/** A Geist face the page requested did not load (404, CORS, corrupt bytes), so "no swap" proves nothing. */
+export class FontLateFaceFailedError extends Data.TaggedError("FontLateFaceFailedError")<{
+  readonly faces: ReadonlyArray<string>
+}> {
+  override get message(): string {
+    return `Geist faces did not load after release: ${this.faces.join(", ")}`
+  }
+}
+
+/** Each requested Geist face as "family: status"; unrequested faces stay "unloaded" and are skipped. */
+const GEIST_FACE_STATUS = `[...document.fonts]
+  .filter((face) => face.family.replaceAll('"', "").startsWith("Geist") && !face.family.includes("Fallback"))
+  .filter((face) => face.status !== "unloaded")
+  .map((face) => face.family.replaceAll('"', "") + ": " + face.status)`
 
 /** Longer than any browser's optional block period (about 100ms), so the release is always late. */
 const LATE_FONT_DELAY_MS = 300
@@ -286,6 +303,11 @@ export const measureFontSwapShift = async (page: Page, options: FontSwapOptions)
     const after = await platformFamilies(page, probe)
     if (after.some((family) => family.startsWith("Geist"))) {
       throw new FontLateFaceSwappedError({ families: after, selector: probe })
+    }
+    // Staying on the fallback only proves optional if the released face actually loaded.
+    const faces = Schema.decodeUnknownSync(Schema.Array(Schema.String))(await page.evaluate(GEIST_FACE_STATUS))
+    if (faces.length === 0 || faces.some((face) => !face.endsWith(": loaded"))) {
+      throw new FontLateFaceFailedError({ faces: faces.length === 0 ? ["none requested"] : faces })
     }
     const releasedAt = Schema.decodeUnknownSync(Schema.Number)(await page.evaluate("window.__rlyFontSwap.releasedAt"))
     const entries: ReadonlyArray<FontSwapEntry> = decodeShifts(await page.evaluate("window.__rlyFontSwap.shifts"))

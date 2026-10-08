@@ -429,15 +429,15 @@
       "name": "FontFaces",
       "paths": {
         "source": "packages/rly/src/tokens/fonts.ts",
-        "story": "packages/rly/stories/foundations/Tokens.stories.tsx",
+        "story": "packages/rly/stories/foundations/FontFaces.stories.tsx",
         "styles": [],
         "tests": [
           "packages/rly/test/tokens/font-faces.test.ts"
         ]
       },
-      "storyId": "foundations-tokens--overview",
+      "storyId": "foundations-fontfaces--specimen",
       "storyIds": [
-        "foundations-tokens--overview"
+        "foundations-fontfaces--specimen"
       ]
     },
     {

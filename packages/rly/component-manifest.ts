@@ -471,8 +471,8 @@ export const componentManifest = {
       styles: [],
       variants: [],
       visual: {
-        story: "stories/foundations/Tokens.stories.tsx",
-        storyId: "foundations-tokens--overview",
+        story: "stories/foundations/FontFaces.stories.tsx",
+        storyId: "foundations-fontfaces--specimen",
         tests: ["test/tokens/font-faces.test.ts"]
       }
     },
