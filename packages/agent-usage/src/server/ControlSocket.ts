@@ -17,7 +17,8 @@
  *   too deep for one still runs and still holds the lock, without `login`, and says so.
  * - **One question, one answer.** The client sends `mint`; once the HTTP listener is up, the server
  *   mints a link through the same path as the startup link (one use, one minute) and replies with it
- *   as one JSON line. Both sides give up after {@link EXCHANGE_DEADLINE}.
+ *   as one JSON line. Or it sends `limits`, and the server replies with this Machine's latest limits
+ *   ({@link LimitsNow}) once its store is open. Both sides give up after {@link EXCHANGE_DEADLINE}.
  *
  * @module
  */
@@ -29,6 +30,7 @@ import { Duration, Effect, FileSystem, Option, Path, Predicate, Schema } from "e
 import type { PlatformError } from "effect/PlatformError"
 import type { Socket, SocketServer } from "effect/socket"
 import { prepareStoreDirectory } from "../core/Database.js"
+import { LimitsNow } from "../shared/contracts.js"
 import { mintBootstrapUrl } from "./OwnerSession.js"
 
 export const SOCKET_FILE = "serve.sock"
@@ -91,6 +93,11 @@ export class SocketPathTooLong extends Schema.TaggedError<SocketPathTooLong>()("
   }
 }
 
+/** The server could not read its limits, or answered with something that is not them. */
+export class LimitsReplyInvalid extends Schema.TaggedError<LimitsReplyInvalid>()("LimitsReplyInvalid", {
+  reply: Schema.String
+}) {}
+
 /** The server answered with something that is not a link. */
 export class LoginReplyInvalid extends Schema.TaggedError<LoginReplyInvalid>()("LoginReplyInvalid", {
   reply: Schema.String
@@ -116,6 +123,9 @@ const LoginUrl = Schema.String.check(
 const LoginReply = Schema.fromJsonString(Schema.Struct({ url: LoginUrl }))
 const encodeReply = Schema.encodeSync(LoginReply)
 const decodeReply = Schema.decodeUnknownOption(LoginReply)
+const LimitsReply = Schema.fromJsonString(LimitsNow)
+const encodeLimits = Schema.encodeSync(LimitsReply)
+const decodeLimits = Schema.decodeUnknownOption(LimitsReply)
 
 /** A Node system error, as far as this module reads one. */
 const Errno = Schema.Struct({ code: Schema.String })
@@ -180,13 +190,27 @@ const readLine = (reader: Socket.Reader) =>
     return text
   })
 
-/** One connection: a `mint` request answered with a fresh link, anything else with an error. */
-const answer = (secrets: OwnerSessionService, listening: Effect.Effect<void>) => (socket: Socket.Socket) =>
+/**
+ * One connection: `mint` answered with a fresh link, `limits` with this Machine's latest limits,
+ * anything else with an error. A limits read that fails is answered with an error line.
+ */
+const answer = <E>(
+  secrets: OwnerSessionService,
+  listening: Effect.Effect<void>,
+  limits: Effect.Effect<LimitsNow, E>
+) =>
+(socket: Socket.Socket) =>
   Effect.scoped(Effect.gen(function*() {
     const reader = yield* socket.reader
     const write = yield* socket.writer
-    const request = yield* readLine(reader)
-    if (request.trim() !== "mint") return yield* write.write("{\"error\":\"unknown request\"}\n")
+    const request = (yield* readLine(reader)).trim()
+    if (request === "limits") {
+      const read = yield* Effect.result(limits)
+      return yield* write.write(
+        read._tag === "Success" ? `${encodeLimits(read.success)}\n` : "{\"error\":\"limits unavailable\"}\n"
+      )
+    }
+    if (request !== "mint") return yield* write.write("{\"error\":\"unknown request\"}\n")
     // Never before the HTTP listener is up: a code minted earlier would be one nobody could spend.
     yield* listening
     const url = yield* mintBootstrapUrl(secrets)
@@ -194,8 +218,12 @@ const answer = (secrets: OwnerSessionService, listening: Effect.Effect<void>) =>
     // One client's exchange failing (it hung up, or missed the deadline) must not stop the socket; log it.
   })).pipe(
     Effect.timeout(EXCHANGE_DEADLINE),
-    Effect.ignore({ log: "Warn", message: "agent-usage control socket: a mint exchange failed" })
+    Effect.ignore({ log: "Warn", message: "agent-usage control socket: an exchange failed" })
   )
+
+/** A control socket given no limits to read: every `limits` request is answered with an error. */
+class LimitsNotServed extends Schema.TaggedError<LimitsNotServed>()("LimitsNotServed", {}) {}
+const noLimits: Effect.Effect<LimitsNow, LimitsNotServed> = Effect.fail(new LimitsNotServed())
 
 /**
  * Takes the store's exclusive lock for the life of the scope: an SQLite database opened in exclusive
@@ -235,14 +263,15 @@ const holdStoreLock = Effect.fnUntraced(function*(directory: string) {
 /**
  * Holds the store's lock and listens on `<directory>/serve.sock` for the life of the scope; returns
  * the socket path, or nothing (and logs why) when the path is too long for a Unix socket. Requests
- * wait for `listening` before a link is minted. Fails with {@link ServerAlreadyRunning} when another
+ * wait for `listening` before a link is minted; a `limits` request runs `limits`. Fails with {@link ServerAlreadyRunning} when another
  * server runs on this store and {@link SocketPathUnsafe} when the path holds anything but this
  * user's socket.
  */
-export const controlSocket = Effect.fn("ControlSocket.listen")(function*(
+export const controlSocket = Effect.fn("ControlSocket.listen")(function*<E = LimitsNotServed>(
   directory: string,
   secrets: OwnerSessionService,
-  listening: Effect.Effect<void>
+  listening: Effect.Effect<void>,
+  limits?: Effect.Effect<LimitsNow, E>
 ) {
   const fs = yield* FileSystem.FileSystem
   // The directory must be the store's, checked, before its lock is taken inside it.
@@ -272,19 +301,12 @@ export const controlSocket = Effect.fn("ControlSocket.listen")(function*(
   if ((yield* inspect(directory, socketPath, self)) === undefined) {
     return yield* new SocketPathUnsafe({ path: socketPath, reason: "it vanished after binding" })
   }
-  yield* Effect.forkScoped(server.run(answer(secrets, listening)))
+  yield* Effect.forkScoped(server.run(answer<E | LimitsNotServed>(secrets, listening, limits ?? noLimits)))
   return socketPath
 })
 
-/**
- * Asks the server running on this store for a fresh one-time link, trusting only a socket owned by
- * `self`, the user id this process runs as. Fails with
- * {@link ServerNotRunning} when nothing listens, {@link SocketPathTooLong} when the store has no
- * control socket, {@link SocketPathUnsafe} when the path is not this user's socket,
- * {@link SocketRefused} when the socket may not be used or does not answer within
- * {@link EXCHANGE_DEADLINE}, and {@link LoginReplyInvalid} when the answer is not a link.
- */
-export const requestLoginUrl = Effect.fn("ControlSocket.requestLoginUrl")(function*(directory: string, self: number) {
+/** Sends one request line to the server on this store and returns its one reply line, trimmed. */
+const exchange = Effect.fnUntraced(function*(directory: string, self: number, request: "mint" | "limits") {
   const socketPath = yield* socketPathFor(directory)
   const found = yield* inspect(directory, socketPath, self)
   if (found === undefined) return yield* new ServerNotRunning({ path: socketPath })
@@ -292,7 +314,7 @@ export const requestLoginUrl = Effect.fn("ControlSocket.requestLoginUrl")(functi
     const socket = yield* NodeSocket.makeNet({ path: socketPath })
     const reader = yield* socket.reader
     const write = yield* socket.writer
-    yield* write.write("mint\n")
+    yield* write.write(`${request}\n`)
     return yield* readLine(reader)
   })).pipe(
     Effect.mapError((error) => {
@@ -306,7 +328,32 @@ export const requestLoginUrl = Effect.fn("ControlSocket.requestLoginUrl")(functi
       orElse: () => Effect.fail(new SocketRefused({ path: socketPath, reason: "the server did not answer in time" }))
     })
   )
-  const decoded = decodeReply(reply.trim())
-  if (Option.isNone(decoded)) return yield* new LoginReplyInvalid({ reply: reply.trim().slice(0, 200) })
+  return reply.trim()
+})
+
+/**
+ * Asks the server running on this store for a fresh one-time link, trusting only a socket owned by
+ * `self`, the user id this process runs as. Fails with
+ * {@link ServerNotRunning} when nothing listens, {@link SocketPathTooLong} when the store has no
+ * control socket, {@link SocketPathUnsafe} when the path is not this user's socket,
+ * {@link SocketRefused} when the socket may not be used or does not answer within
+ * {@link EXCHANGE_DEADLINE}, and {@link LoginReplyInvalid} when the answer is not a link.
+ */
+export const requestLoginUrl = Effect.fn("ControlSocket.requestLoginUrl")(function*(directory: string, self: number) {
+  const reply = yield* exchange(directory, self, "mint")
+  const decoded = decodeReply(reply)
+  if (Option.isNone(decoded)) return yield* new LoginReplyInvalid({ reply: reply.slice(0, 200) })
   return decoded.value.url
+})
+
+/**
+ * Asks the server running on this store for this Machine's latest limits, with the same trust and
+ * failures as {@link requestLoginUrl}; {@link LimitsReplyInvalid} when the server could not read
+ * them (or is a version that does not know the request).
+ */
+export const requestLimits = Effect.fn("ControlSocket.requestLimits")(function*(directory: string, self: number) {
+  const reply = yield* exchange(directory, self, "limits")
+  const decoded = decodeLimits(reply)
+  if (Option.isNone(decoded)) return yield* new LimitsReplyInvalid({ reply: reply.slice(0, 200) })
+  return decoded.value
 })

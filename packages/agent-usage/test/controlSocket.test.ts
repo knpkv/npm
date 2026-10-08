@@ -7,7 +7,9 @@ import { spawn } from "node:child_process"
 import { createServer, type Server } from "node:net"
 import {
   controlSocket,
+  LimitsReplyInvalid,
   LoginReplyInvalid,
+  requestLimits,
   requestLoginUrl,
   ServerAlreadyRunning,
   ServerNotRunning,
@@ -58,6 +60,33 @@ describe("control socket", () => {
         yield* controlSocket(directory, secrets, Effect.void)
         expect(yield* Effect.flip(requestLoginUrl(directory, self + 1))).toBeInstanceOf(SocketPathUnsafe)
         expect(yield* requestLoginUrl(directory, self)).toContain("#bootstrap_token=")
+      }))
+
+    it.effect("answers limits to the owner, and says when it has none to give", () =>
+      Effect.gen(function*() {
+        const limits = { machine: "host-a", observedAt: 1_000, latest: [], balances: [] }
+        const withLimits = yield* store
+        const secrets = yield* makeOwnerSession(origin)
+        yield* controlSocket(withLimits, secrets, Effect.void, Effect.succeed(limits))
+        expect(yield* Effect.flip(requestLimits(withLimits, self + 1))).toBeInstanceOf(SocketPathUnsafe)
+        expect(yield* requestLimits(withLimits, self)).toEqual(limits)
+        // A store that could not be read, and a server given no limits at all: an error line, never empty limits.
+        const failing = yield* store
+        yield* controlSocket(failing, secrets, Effect.void, Effect.fail("store unreadable"))
+        expect(yield* Effect.flip(requestLimits(failing, self))).toBeInstanceOf(LimitsReplyInvalid)
+        const without = yield* store
+        yield* controlSocket(without, secrets, Effect.void)
+        expect(yield* Effect.flip(requestLimits(without, self))).toBeInstanceOf(LimitsReplyInvalid)
+      }))
+
+    it.effect("reads limits from a server too old to know the request as an invalid reply", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const directory = yield* store
+        yield* fakeServer(path.join(directory, "serve.sock"), "{\"error\":\"unknown request\"}\n")
+        expect(yield* fs.exists(path.join(directory, "serve.sock"))).toBe(true)
+        expect(yield* Effect.flip(requestLimits(directory, self))).toBeInstanceOf(LimitsReplyInvalid)
       }))
 
     it.effect("mints nothing until the server is listening", () =>

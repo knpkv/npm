@@ -18,7 +18,7 @@ every model request in a private SQLite store, polls Claude's limits, and serves
 ## Running it
 
 Installed from npm, the binary is `agent-usage` (`agent-usage serve`, `agent-usage login`,
-`agent-usage ingest`). From this repository:
+`agent-usage ingest`, `agent-usage limits`). From this repository:
 
 ```bash
 pnpm build                                       # builds the workspace, this package included
@@ -72,6 +72,16 @@ time, but logs that `login` is unavailable, and `login` says to choose a shorter
 | `did not answer with a link`                 | Something answered on the socket with a reply that is not a sign-in link                                                 |
 
 Every failure exits nonzero and prints nothing on stdout, so `agent-usage login | xargs …` is safe.
+
+### Limits for another program
+
+`agent-usage limits` asks the running server for this Machine's latest limits over the same
+owner-only control socket and prints them as one JSON line: `{ machine, observedAt, latest, balances }`.
+`latest` holds the newest snapshot of every limit window, the same tiles as the page's "Limits now".
+A window that could not be read stays an `Unknown` snapshot with its reason; it is never reported as
+0%. `observedAt` is the server's clock when it answered, and every time in the reply is on that
+clock. No session cookie and no provider credential is involved, so hostd can call it to show limits
+in Connect. With no server running it prints why on stderr and exits nonzero, like `login`.
 
 ### Running as a service
 

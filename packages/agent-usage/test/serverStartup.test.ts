@@ -3,7 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Deferred, Effect, FileSystem, Layer, Path } from "effect"
 import * as Reactivity from "effect/reactivity/Reactivity"
 import type { AgentUsageConfig } from "../src/server/Config.js"
-import { controlSocket, ServerAlreadyRunning } from "../src/server/ControlSocket.js"
+import { controlSocket, requestLimits, ServerAlreadyRunning } from "../src/server/ControlSocket.js"
 import { makeOwnerSession } from "../src/server/OwnerSession.js"
 import { makeServer } from "../src/server/Server.js"
 
@@ -43,6 +43,37 @@ describe("server startup", () => {
         )
         expect(failure).toBeInstanceOf(ServerAlreadyRunning)
         expect(yield* fs.readFileString(database)).toBe("sentinel")
+      }))
+
+    it.effect("a running server answers limits from its own store over the control socket", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const directory = yield* fs.makeTempDirectoryScoped()
+        yield* fs.chmod(directory, 0o700)
+        const empty = yield* fs.makeTempDirectoryScoped()
+        const config: AgentUsageConfig = {
+          storeDirectory: directory,
+          projects: [],
+          claudeConfigDir: empty,
+          claudeCredentials: { file: path.join(empty, "none"), keychainService: "none", keychainAccount: "none" },
+          roots: {
+            claudeProjects: path.join(empty, "projects"),
+            codexHome: empty,
+            claudeLimitSamples: path.join(empty, "none.jsonl"),
+            machine: "test"
+          }
+        }
+        const secrets = yield* makeOwnerSession(origin)
+        const ready = yield* Deferred.make<string>()
+        yield* Layer.build(makeServer({ config, port: 0, ready, security: secrets }))
+        yield* Deferred.await(ready)
+        const limits = yield* requestLimits(directory, process.geteuid?.() ?? -1)
+        expect(limits.machine).toBe("test")
+        // No credentials or transcripts here: whatever the background poll stored by now is this
+        // Machine's, and none of it claims a level.
+        expect(limits.latest.every((snapshot) => snapshot.machine === "test" && snapshot.reading._tag === "Unknown"))
+          .toBe(true)
       }))
   })
 })
