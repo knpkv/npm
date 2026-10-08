@@ -33,6 +33,8 @@
   overflow: hidden;
   flex: 1 1 auto;
   flex-direction: column;
+  /* Every layout keeps a bottom-docked bar's height clear, the full-width workbench too. */
+  padding-block-end: var(--app-bottom-inset, 0px);
 }
 
 @media (max-width: 40rem) {
