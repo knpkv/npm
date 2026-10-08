@@ -6,6 +6,7 @@
  */
 import { FreshnessStamp } from "@knpkv/rly/patterns"
 import { LimitTrack, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
+import { useId } from "react"
 import type { BalanceReading, LimitSnapshot } from "../core/Model.js"
 import { describeReason, formatAge, formatBalance, formatInstant, formatPercent } from "./format.js"
 import { agentName, type LimitTone, NEAR_PERCENT, summarizeLimits, type WindowSummary } from "./limitsModel.js"
@@ -84,16 +85,22 @@ const WindowRow = (props: { readonly agent: string; readonly window: WindowSumma
 const balanceName = (kind: BalanceReading["kind"]): string =>
   kind === "claude-extra-usage" ? "Claude extra usage" : "Codex credits"
 
+/**
+ * The latest limits as cards, one per agent. `now` is on the same clock as the snapshots. `title`
+ * names the section ("Limits now" by default); several can share a page, each with its own heading.
+ */
 export const LimitsSummary = (props: {
   readonly latest: ReadonlyArray<LimitSnapshot>
   readonly balances: ReadonlyArray<BalanceReading>
   readonly now: number
+  readonly title?: string
 }) => {
+  const titleId = useId()
   const groups = summarizeLimits(props.latest, props.now)
   return (
-    <section aria-labelledby="limits-now-title" className="usage-limits-now">
-      <Text as="h2" id="limits-now-title" variant="card-title">
-        Limits now
+    <section aria-labelledby={titleId} className="usage-limits-now">
+      <Text as="h2" id={titleId} variant="card-title">
+        {props.title ?? "Limits now"}
       </Text>
       {groups.length === 0 ? (
         <Text as="p" tone="secondary">

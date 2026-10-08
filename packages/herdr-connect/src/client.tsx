@@ -2,7 +2,7 @@ import { useAtom, useAtomMount, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { Cause, Effect, Fiber, Predicate, Result, Schedule, Schema } from "effect"
+import { Cause, Clock, Effect, Fiber, Option, Predicate, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
@@ -60,6 +60,9 @@ import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { ConnectAgentIdentity } from "./work-goal-link-view.js"
 import { resolveConnectWorkGoal, workSnapshotForAssociation, type ConnectWorkGoalResolution } from "./work-goal-link.js"
 import { WorkPollMount } from "./work-poll.js"
+import { FleetLimits } from "./limits.js"
+import { connectLimitsView } from "./limits-model.js"
+import { ConnectLimits } from "./limits-view.js"
 import { makeTerminalWorkerGuard } from "./terminal-worker-guard.js"
 import {
   enterTerminalWorkspaceWithLock,
@@ -278,6 +281,38 @@ const loadWork = Effect.gen(function* () {
   )
 })
 
+/** The fleet's limits and when this page received them, on this page's clock. */
+interface LoadedLimits {
+  readonly fleet: FleetLimits
+  readonly receivedAt: number
+}
+
+const loadLimits = Effect.gen(function* () {
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client
+    .get("/v1/connect/limits")
+    .pipe(Effect.mapError((cause) => new ConnectNetworkError({ detail: String(cause) })))
+  if (response.status < 200 || response.status >= 300) {
+    return yield* new ConnectStatusError({ status: response.status })
+  }
+  const fleet = yield* decodeBoundedResponseJson(response, FleetLimits).pipe(
+    Effect.mapError((cause) => new ConnectProtocolError({ detail: "invalid limits", cause }))
+  )
+  return { fleet, receivedAt: yield* Clock.currentTimeMillis } satisfies LoadedLimits
+})
+
+/**
+ * The limits view as of the last good load, and why the latest load failed when it did. `now` is
+ * this page's clock, compared only with when the page received the reads.
+ */
+const connectLimitsState = (result: AsyncResult.AsyncResult<LoadedLimits, unknown>, now: number) => {
+  const last = AsyncResult.value(result)
+  return {
+    problem: AsyncResult.isFailure(result) ? "Couldn't load limits. Trying again every minute." : null,
+    view: Option.isSome(last) ? connectLimitsView(last.value.fleet, now - last.value.receivedAt) : null
+  }
+}
+
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
 /** The shared agent state language, for hosts that list agents outside Connect (the hub's dashboard). */
@@ -293,6 +328,7 @@ export {
 export const makeConnectAtoms = () => {
   const agents = browserRuntime.atom(loadAgents)
   const work = browserRuntime.atom(loadWork)
+  const limits = browserRuntime.atom(loadLimits)
   return {
     activityFilter: Atom.make<AgentActivityFilter>("all"),
     agents,
@@ -300,6 +336,9 @@ export const makeConnectAtoms = () => {
     connection: Atom.make<ConnectionState>({ _tag: "idle" }),
     connectionRequest: Atom.make<ConnectionRequest | null>(null),
     hostFilter: Atom.make<string | null>(null),
+    limits,
+    // Each host rereads its limits at most every 30 seconds; a minute keeps the page within two reads.
+    limitsPoll: browserRuntime.atom(Atom.refresh(limits).pipe(Effect.repeat(Schedule.spaced("60 seconds")))),
     preference: Atom.make(loadRememberedAgent),
     terminalKeysHidden: Atom.make(loadTerminalKeysHidden),
     preferenceError: Atom.make<string | null>(null),
@@ -702,6 +741,9 @@ export const ConnectSurface = ({
   const [terminalTextLines, setTerminalTextLines] = useState<ReadonlyArray<string> | null>(null)
   const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
   useAtomMount(atoms.agentsPoll)
+  useAtomMount(atoms.limitsPoll)
+  // A host API at the UI boundary, compared only with this page's own receipt time.
+  const limits = connectLimitsState(useAtomValue(atoms.limits), Date.now())
 
   const copyTerminalText = useCallback((text: string): void => {
     navigator.clipboard.writeText(text).then(
@@ -1080,6 +1122,7 @@ export const ConnectSurface = ({
             agents={current === null ? null : agents}
             unavailable={current === null && directory._tag === "Failure"}
           />
+          <ConnectLimits problem={limits.problem} view={limits.view} />
         </header>
       ) : (
         <header className="connect-header">
@@ -1092,6 +1135,7 @@ export const ConnectSurface = ({
               Connect
             </a>
           </nav>
+          <ConnectLimits problem={limits.problem} view={limits.view} />
         </header>
       )}
       <section

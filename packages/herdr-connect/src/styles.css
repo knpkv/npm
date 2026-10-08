@@ -1,4 +1,6 @@
 @import "@knpkv/rly/styles.css";
+/* agent-usage's "Limits now" cards, shown in Connect's limits disclosure. */
+@import "@knpkv/agent-usage/limits.css";
 
 @layer connect {
   html.connect-terminal-document-lock,
@@ -82,6 +84,51 @@
 
   .connect-embedded-intro h1 {
     margin: var(--rly-space-0);
+  }
+
+  /* Limits: one line of state labels under the summary, the cards behind a disclosure. */
+  .connect-limits {
+    display: grid;
+    gap: var(--rly-space-8);
+    margin-block-start: var(--rly-space-8);
+  }
+
+  .connect-limits-line,
+  .connect-limits-notes {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .connect-limits-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-4) var(--rly-space-16);
+  }
+
+  .connect-limits-details > summary {
+    color: var(--rly-color-text-2);
+    cursor: pointer;
+    font-size: var(--rly-type-meta-size);
+    inline-size: fit-content;
+    position: relative;
+  }
+
+  /* A one-line disclosure is shorter than 44px; an invisible layer takes the target there. */
+  .connect-limits-details > summary::after {
+    content: "";
+    inset: min(0px, (100% - 2.75rem) / 2);
+    position: absolute;
+  }
+
+  .connect-limits-details[open] {
+    display: grid;
+    gap: var(--rly-space-12);
+  }
+
+  .connect-limits-notes {
+    display: grid;
+    gap: var(--rly-space-4);
   }
 
   .connect-intro-caption {
