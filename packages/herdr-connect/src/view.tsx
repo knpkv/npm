@@ -538,6 +538,10 @@ type TerminalKeyRailProps = {
   readonly keysHidden?: boolean
   /** Offers a pinned Keys toggle when given; the caller remembers the choice. */
   readonly onKeysHiddenChange?: (hidden: boolean) => void
+  /** The terminal's text input holds focus, so a touch keyboard is up. */
+  readonly keyboardOpen?: boolean
+  /** Offers a pinned Keyboard toggle when given; it must focus or blur within the click. */
+  readonly onKeyboardToggle?: (open: boolean) => void
 }
 
 const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
@@ -546,12 +550,14 @@ const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctr
 export const TerminalKeyRail = ({
   disabled = false,
   error = null,
+  keyboardOpen = false,
   keysHidden = false,
   linesBack = 0,
   modifier,
   onFocusTerminal,
   onJumpToLatest,
   onKey,
+  onKeyboardToggle,
   onKeysHiddenChange,
   onModifierChange,
   onSelectText,
@@ -570,7 +576,19 @@ export const TerminalKeyRail = ({
     readonly ariaLabel: string
     readonly onClick: () => void
     readonly expanded?: boolean
+    readonly pressed?: boolean
   }> = [
+    ...(onKeyboardToggle === undefined
+      ? []
+      : [
+          {
+            key: "keyboard",
+            label: "Keyboard",
+            ariaLabel: "Keyboard",
+            onClick: () => onKeyboardToggle(!keyboardOpen),
+            pressed: keyboardOpen
+          }
+        ]),
     ...(onKeysHiddenChange === undefined
       ? []
       : [
@@ -701,6 +719,7 @@ export const TerminalKeyRail = ({
               <button
                 aria-controls={action.expanded === undefined ? undefined : `${keysId}-modifiers ${keysId}-keys`}
                 aria-expanded={action.expanded}
+                aria-pressed={action.pressed}
                 aria-label={action.ariaLabel}
                 className="terminal-key"
                 data-behind={action.key === "latest" && (linesBack > 0 || positionUnconfirmed) ? "true" : undefined}
