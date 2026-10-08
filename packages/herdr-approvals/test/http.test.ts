@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "@effect/vitest"
 import {
   connectAgentPageMaxRecords,
   FleetConnectAgentPage,
+  FleetLimits,
   terminalCommandMaxPayloadBytes,
   type TerminalConnector,
   terminalFrameMaxEncodedBytes,
@@ -46,7 +47,6 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import WebSocketClient from "ws"
-import { FleetLimits } from "../src/agent-limits.js"
 import { SanitizedJobRecord } from "../src/approval-request.js"
 import { resolveApprovalPage } from "../src/approval-url.js"
 import { authorize } from "../src/auth.js"
@@ -1753,12 +1753,17 @@ esac
   it.effect("serves this host's limits on its own listener and keeps the peer route off it", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-limits-"))
     const report = {
-      v: 1,
-      now: 1_000,
-      providers: {
-        claude: { reservePp: 15, windows: [{ window: "weekly", state: { _tag: "Unknown", reason: "Stale" } }] },
-        codex: { reservePp: 5, windows: [] }
-      }
+      machine: "ALPHA",
+      observedAt: 1_000,
+      latest: [{
+        agent: "claude",
+        machine: "ALPHA",
+        source: "claude-oauth-usage",
+        label: "*",
+        windowMinutes: null,
+        observedAt: 900,
+        reading: { _tag: "Unknown", reason: "Fetch" }
+      }]
     }
     return Effect.acquireUseRelease(
       JobStore.open(join(root, "jobs.sqlite")),
@@ -1770,7 +1775,7 @@ esac
               startHttpServer(
                 {
                   ...config(root),
-                  agentLimitsCommand: ["sh", "-c", "printf '%s' \"$1\"", "agent-limits", JSON.stringify(report)]
+                  agentUsageLimitsCommand: ["sh", "-c", "printf '%s' \"$1\"", "agent-usage", JSON.stringify(report)]
                 },
                 fleet,
                 assets,
@@ -1779,7 +1784,7 @@ esac
             ),
             (running) => Effect.promise(running.close)
           )
-          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/limits`))
+          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits`))
           expect(response.status).toBe(200)
           const body = Schema.decodeUnknownSync(FleetLimits)(yield* Effect.promise(() => response.json()))
           expect(body.failures).toEqual([])
@@ -1787,7 +1792,7 @@ esac
             ["ALPHA", { _tag: "Read", limits: report }]
           ])
           // Only a peer's tailnet listener answers the hub's per-host question.
-          expect((yield* Effect.promise(() => fetch(`${server.url}/v1/limits/local`))).status).toBe(404)
+          expect((yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits/local`))).status).toBe(404)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {

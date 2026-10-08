@@ -12,6 +12,8 @@ import {
   AgentRelationshipStore,
   ConnectAgentCursor,
   fleetConnectAgents,
+  fleetLimits,
+  hubLimits,
   localConnectAgents,
   makeHerdrTerminalConnector,
   pageFleetConnectAgents,
@@ -99,7 +101,6 @@ import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import WebSocketClient, { WebSocketServer } from "ws"
-import { fleetLimits, hubLimits, readAgentLimits, staleWhileRevalidate } from "./agent-limits.js"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
@@ -117,6 +118,7 @@ import {
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { fontPreloadLink } from "./font-preload.js"
+import { readHostLimits, staleWhileRevalidate } from "./host-limits.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
@@ -676,7 +678,7 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
         : `http://${address}:${config.port}/v1/connect/agents/local`,
       limitsUrl: address === undefined
         ? null
-        : `http://${address}:${config.port}/v1/limits/local`,
+        : `http://${address}:${config.port}/v1/connect/limits/local`,
       terminalUrl: address === undefined
         ? null
         : `ws://${address}:${config.port}/v1/connect/terminal`
@@ -1501,18 +1503,14 @@ export const startHttpServer = async (
     )
   }
   // A read older than 30 seconds is refreshed in the background, so a peer answers the hub's
-  // 1.5-second fetch from its last read even while agent-limits is slow.
-  const spawner = await httpRuntime.runPromise(
-    Effect.gen(function*() {
-      return yield* ChildProcessSpawner.ChildProcessSpawner
-    })
-  )
+  // 1.5-second fetch from its last read even while agent-usage is slow.
+  const spawner = await httpRuntime.runPromise(Effect.service(ChildProcessSpawner.ChildProcessSpawner))
   // Background refreshes live in this scope; closing the server closes it before the runtime.
   const limitsScope = await httpRuntime.runPromise(Scope.make())
   finalizers.unshift(() => httpRuntime.runPromise(Scope.close(limitsScope, Exit.void)))
-  const localLimits = await httpRuntime.runPromise(
+  const { read: localLimits } = await httpRuntime.runPromise(
     staleWhileRevalidate(
-      readAgentLimits(config.host, config.agentLimitsCommand).pipe(
+      readHostLimits(config.host, config.agentUsageLimitsCommand).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
       ),
       Duration.seconds(30)
@@ -3092,7 +3090,7 @@ export const startHttpServer = async (
           if (
             mode === "tailnet" &&
             request.method === "GET" &&
-            url.pathname === "/v1/limits/local"
+            url.pathname === "/v1/connect/limits/local"
           ) {
             await respond(
               response,
@@ -3103,7 +3101,7 @@ export const startHttpServer = async (
 
           // Every listener that serves a dashboard serves its limits: on the hub every peer's read,
           // anywhere else just this host's.
-          if (request.method === "GET" && url.pathname === "/v1/limits") {
+          if (request.method === "GET" && url.pathname === "/v1/connect/limits") {
             await respond(
               response,
               Effect.andThen(

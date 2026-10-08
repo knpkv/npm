@@ -1058,6 +1058,9 @@ importers:
       '@effect/platform-browser':
         specifier: 4.0.0
         version: 4.0.0(effect@4.0.0)
+      '@knpkv/agent-usage':
+        specifier: workspace:^
+        version: link:../agent-usage
       '@knpkv/bounded-io':
         specifier: workspace:^
         version: link:../bounded-io
