@@ -253,7 +253,9 @@
   line-height: var(--rly-type-meta-line-height);
 }
 
-.jcf-stretch:focus-within {
+/* Focus in the rows opens it (not on the head, which toggles it), and so does its head button. */
+.jcf-stretch:has(ul:focus-within),
+.jcf-stretch[data-expanded="true"] {
   block-size: auto;
   min-block-size: var(--jcf-stretch-height);
   overflow: visible;
@@ -272,7 +274,13 @@
 }
 
 .jcf-stretch-head {
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--rly-color-text-2);
+  cursor: pointer;
+  font: inherit;
+  text-align: start;
   white-space: nowrap;
 }
 
