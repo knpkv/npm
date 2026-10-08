@@ -36,14 +36,44 @@ jobs:
         with:
           node-version: 26.7.0
           registry-url: https://registry.npmjs.org
-      - name: Create Release Pull Request or Publish
+      # changesets/action publishes only when no changeset is pending; otherwise it
+      # versions. A Version Packages merge that lands after newer changesets reached
+      # main would then publish nothing (#589). So publish first with the pending
+      # changesets set aside, then version them in a second pass. A failed publish
+      # fails this step and the job.
+      - name: Set pending changesets aside
+        id: pending
+        run: |
+          shopt -s nullglob
+          pending=()
+          for file in .changeset/*.md; do
+            [[ "${file}" == .changeset/README.md ]] || pending+=("${file}")
+          done
+          echo "count=${#pending[@]}" >> "${GITHUB_OUTPUT}"
+          if (( ${#pending[@]} > 0 )); then
+            mkdir -p "${RUNNER_TEMP}/pending-changesets"
+            mv -- "${pending[@]}" "${RUNNER_TEMP}/pending-changesets/"
+          fi
+      - name: Publish versions already on main
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          github-token: ${{ secrets.TOKEN_GITHUB }}
+          # Build and publish every package whose version is not on npm yet
+          publish-script: pnpm changeset:publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.TOKEN_NPM }}
+          HUSKY: 0
+      - name: Restore pending changesets
+        if: steps.pending.outputs.count != '0'
+        run: git checkout HEAD -- .changeset
+      - name: Create or update the Version Packages pull request
+        if: steps.pending.outputs.count != '0'
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           github-token: ${{ secrets.TOKEN_GITHUB }}
           # Version packages based on changeset files
           version-script: pnpm changeset:version
-          # Build and publish packages to npm registry
+          # Changesets are pending here, so this only versions; it tells the PR that merging publishes
           publish-script: pnpm changeset:publish
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.TOKEN_NPM }}
           HUSKY: 0
