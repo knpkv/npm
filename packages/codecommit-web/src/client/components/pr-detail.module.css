@@ -767,3 +767,39 @@
     var(--rly-type-meta-font);
   margin: 0;
 }
+
+/* Drawn under 44px; the pseudo-element grows the touch target without changing the look. */
+.suggestedApprover,
+.removeApprover {
+  position: relative;
+}
+
+.suggestedApprover::after,
+.removeApprover::after {
+  position: absolute;
+  inset: min(0px, (100% - 2.75rem) / 2);
+  content: "";
+}
+
+/* Press feedback; the scale eases only when motion is allowed. */
+.suggestedApprover:active,
+.removeApprover:active {
+  scale: 0.97;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .removeApprover {
+    transition-property: scale;
+    transition-duration: var(--rly-motion-fast-duration);
+    transition-timing-function: var(--rly-motion-fast-easing);
+  }
+
+  /* Keeps its colour transitions alongside the press. */
+  .suggestedApprover {
+    transition:
+      background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      scale var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+  }
+}

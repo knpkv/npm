@@ -93,3 +93,27 @@
     overflow: visible;
   }
 }
+
+/* Drawn under 44px; the pseudo-element grows the touch target without changing the look. */
+.close {
+  position: relative;
+}
+
+.close::after {
+  position: absolute;
+  inset: min(0px, (100% - 2.75rem) / 2);
+  content: "";
+}
+
+/* Press feedback; the scale eases only when motion is allowed. */
+.close:active {
+  scale: 0.97;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .close {
+    transition-property: scale;
+    transition-duration: var(--rly-motion-fast-duration);
+    transition-timing-function: var(--rly-motion-fast-easing);
+  }
+}

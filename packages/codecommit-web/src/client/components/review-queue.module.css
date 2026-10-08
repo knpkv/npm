@@ -895,3 +895,33 @@ a.activityItem:focus-visible {
     transition: none;
   }
 }
+
+/* Drawn under 44px; the pseudo-element grows the touch target without changing the look. */
+.filterChip,
+.filterTrigger {
+  position: relative;
+}
+
+.filterChip::after,
+.filterTrigger::after {
+  position: absolute;
+  inset: min(0px, (100% - 2.75rem) / 2);
+  content: "";
+}
+
+/* Press feedback; the scale eases only when motion is allowed. */
+.filterChip:active,
+.filterTrigger:active,
+.clearSearch:active {
+  scale: 0.97;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .filterChip,
+  .filterTrigger,
+  .clearSearch {
+    transition-property: scale;
+    transition-duration: var(--rly-motion-fast-duration);
+    transition-timing-function: var(--rly-motion-fast-easing);
+  }
+}
