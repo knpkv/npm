@@ -128,53 +128,6 @@
   :root:is([data-theme="system"], [data-rly-theme="system"]),
   :where([data-theme="system"], [data-rly-theme="system"]) { color-scheme: light dark; }
 
-  :root:is(
-    [data-theme="light"], [data-rly-theme="light"],
-    [data-theme="dark"], [data-rly-theme="dark"],
-    [data-theme="system"], [data-rly-theme="system"]
-  ),
-  :where(
-    [data-theme="light"], [data-rly-theme="light"],
-    [data-theme="dark"], [data-rly-theme="dark"],
-    [data-theme="system"], [data-rly-theme="system"]
-  ) {
-    --rly-color-canvas: light-dark(#F6F6F8, #101114);
-    --rly-color-surface-1: light-dark(#FFFFFF, #17181C);
-    --rly-color-surface-2: light-dark(#F0F1F4, #1E2025);
-    --rly-color-surface-3: light-dark(#E8E9ED, #282A31);
-    --rly-color-text-1: light-dark(#17181B, #F4F4F6);
-    --rly-color-text-2: light-dark(#5E6068, #B7B9C1);
-    --rly-color-text-3: light-dark(#6E717A, #9396A0);
-    --rly-color-border-1: light-dark(#DADCE2, #30323A);
-    --rly-color-border-2: light-dark(#B9BCC5, #4C4F5A);
-    --rly-color-action-background: light-dark(#17181B, #F4F4F6);
-    --rly-color-action-foreground: light-dark(#FFFFFF, #17181B);
-    --rly-color-focus: light-dark(#006DFF, #89B7FF);
-    --rly-color-agent: light-dark(#6741A5, #BD9CF0);
-    --rly-color-success-ink: light-dark(#16753A, #66D38B);
-    --rly-color-success-tint: light-dark(#EAF6ED, #153222);
-    --rly-color-blocked-ink: light-dark(#B42318, #FF8B82);
-    --rly-color-blocked-tint: light-dark(#FDECEA, #3A1918);
-    --rly-color-held-ink: light-dark(#7A5100, #F0C66A);
-    --rly-color-held-tint: light-dark(#FFF5DC, #33270F);
-    --rly-color-deploying-ink: light-dark(#075EBC, #75AEFF);
-    --rly-color-deploying-tint: light-dark(#EAF3FF, #112B49);
-    --rly-color-service-codecommit: light-dark(#C45500, #FF9B55);
-    --rly-color-service-codepipeline: light-dark(#8A42C2, #D69CFF);
-    --rly-color-service-jira: light-dark(#0C66E4, #75AEFF);
-    --rly-color-service-confluence: light-dark(#4758D6, #9EA9FF);
-    --rly-color-service-clockify: light-dark(#0087C7, #64CCF2);
-    --rly-color-series-1: light-dark(#2A78D6, #3987E5);
-    --rly-color-series-2: light-dark(#008300, #2E9E2E);
-    --rly-color-series-3: light-dark(#C24F7C, #D55181);
-    --rly-color-series-4: light-dark(#9C6A00, #C98500);
-    --rly-color-series-5: light-dark(#118259, #199E70);
-    --rly-color-series-6: light-dark(#C4501E, #D95926);
-    --rly-color-series-7: light-dark(#4A3AA7, #9085E9);
-    --rly-color-series-8: light-dark(#D23D3C, #E66767);
-    --rly-color-series-other: light-dark(#777672, #7E7D79);
-  }
-
   @media (forced-colors: active) {
     :root,
     :where(

@@ -93,7 +93,8 @@ describe("semantic token contract", () => {
 
   it("emits one central light-dark, forced-color, and reduced-motion layer", () => {
     const css = renderTokenCss()
-    expect(css.match(/light-dark\(/g)).toHaveLength(colorTokenSource.length * 2)
+    // Declared once on :root; a themed subtree only switches color-scheme.
+    expect(css.match(/light-dark\(/g)).toHaveLength(colorTokenSource.length)
     expect(css).toContain("[data-theme=\"light\"]")
     expect(css).toContain("@media (forced-colors: active)")
     expect(css).toContain("[data-forced-colors=\"active\"]")
