@@ -1,6 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import { parseConfluencePageUrl, resolvePageInput, validateBaseUrl } from "../src/commands/pageInput.js"
+import * as FileSystem from "effect/FileSystem"
+import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
+import * as Path from "effect/Path"
+import {
+  baseUrlFromWorkspace,
+  parseConfluencePageUrl,
+  resolvePageInput,
+  validateBaseUrl
+} from "../src/commands/pageInput.js"
 
 describe("page input", () => {
   it.effect("parses shorthand Atlassian URLs", () =>
@@ -101,5 +110,28 @@ describe("page input", () => {
       const result = yield* Effect.result(validateBaseUrl("https://example.atlassian.net/wiki/spaces/DEV"))
 
       expect(result._tag).toBe("Failure")
+    }))
+})
+
+// A workspace config whose baseUrl is not a Confluence site is ignored, and the warning names the file.
+const workspaceConfig = "/work/.confluence/config.json"
+it.layer(Layer.mergeAll(
+  Path.layer,
+  FileSystem.layerNoop({
+    exists: (path) => Effect.succeed(path === workspaceConfig),
+    readFileString: () => Effect.succeed(JSON.stringify({ baseUrl: "https://example.com" }))
+  })
+))("workspace baseUrl", (it) => {
+  it.effect("ignores an invalid baseUrl and warns, naming the config", () =>
+    Effect.gen(function*() {
+      const messages: Array<unknown> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        messages.push(entry.message)
+      })
+      const baseUrl = yield* baseUrlFromWorkspace("/work").pipe(Effect.withLogger(logger))
+      expect(baseUrl).toBeUndefined()
+      expect(messages.map(String).join("\n")).toContain(
+        `Ignoring the baseUrl in ${workspaceConfig}: it is not a valid Confluence URL`
+      )
     }))
 })

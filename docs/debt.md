@@ -355,30 +355,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## confluence-to-markdown
 
-22 directives (ast-grep 20, effect-diagnostics 2), 2 without a reason.
+2 directives (effect-diagnostics 2), 2 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/confluence-to-markdown/src/commands/pageInput.ts](../packages/confluence-to-markdown/src/commands/pageInput.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/commands/pageInput.ts](../packages/confluence-to-markdown/src/commands/pageInput.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/commands/pageInput.ts](../packages/confluence-to-markdown/src/commands/pageInput.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/commands/pageInput.ts](../packages/confluence-to-markdown/src/commands/pageInput.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/commands/sync.ts](../packages/confluence-to-markdown/src/commands/sync.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/ConfluenceAuth.ts](../packages/confluence-to-markdown/src/ConfluenceAuth.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/ConfluenceAuth.ts](../packages/confluence-to-markdown/src/ConfluenceAuth.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/ConfluenceClient.ts](../packages/confluence-to-markdown/src/ConfluenceClient.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/ConfluenceConfig.ts](../packages/confluence-to-markdown/src/ConfluenceConfig.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/ConfluenceConfig.ts](../packages/confluence-to-markdown/src/ConfluenceConfig.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/confluence-to-markdown/test/authCommand.test.ts](../packages/confluence-to-markdown/test/authCommand.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 | [packages/confluence-to-markdown/test/ConfluenceAuth.test.ts](../packages/confluence-to-markdown/test/ConfluenceAuth.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 
