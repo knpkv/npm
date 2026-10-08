@@ -69,20 +69,6 @@ export const agentBucketLabel = (bucket: AgentBucket): string => {
   }
 }
 
-/** What an agent in this bucket is doing, before the name of its work ("Working in npm"). */
-export const agentBucketWorkPrefix = (bucket: AgentBucket): string => {
-  switch (bucket) {
-    case "working":
-      return "Working in"
-    case "needs-you":
-      return "Needs attention in"
-    case "ready":
-      return "Ready in"
-    case "finished":
-      return "Last active in"
-  }
-}
-
 /** An agent's state as its icon and word, in the state's tone. */
 export const AgentStateLabel = ({
   className,

@@ -1,7 +1,6 @@
 import {
   AgentStateLabel,
   agentBucketLabel,
-  agentBucketWorkPrefix,
   agentBuckets,
   type AgentBucket,
   agentStatePresentation
@@ -418,9 +417,7 @@ export const AgentDirectory = ({
                         <span className="connect-token">{agent.host}</span>,{" "}
                       </>
                     ) : null}
-                    {relationLabel(agent, issue, names)},{" "}
-                    {agentBucketWorkPrefix(agentStatePresentation(agent.state).bucket)}{" "}
-                    <span className="connect-token">{agent.work}</span>
+                    {relationLabel(agent, issue, names)}, <span className="connect-token">{agent.work}</span>
                   </Text>
                 </span>
                 <span className="connect-agent-state" data-activity={activity}>

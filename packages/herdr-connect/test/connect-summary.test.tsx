@@ -64,6 +64,8 @@ describe("AgentDirectory rows", () => {
     // The shared state language: a blocked agent counts as needing you and reads "Blocked" beside its icon.
     expect(markup).toMatch(/class="connect-agent-state" data-activity="needs-you"><span[^>]*>.*<svg.*Blocked</)
     expect(markup).toContain(">Working<")
+    // The label beside it carries the state; the work line names only relation and work.
+    expect(markup).not.toMatch(/(Working|Ready|Needs attention|Last active) in /)
   })
 
   it("name a listed parent and shorten an unlisted one instead of printing its full hash", () => {
