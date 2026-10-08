@@ -15,7 +15,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import { type ReactElement, useEffect, useMemo, useRef, useState } from "react"
+import { type ReactElement, useEffect, useId, useMemo, useRef, useState } from "react"
 import {
   ContinuePullRequestConversationRequest,
   type PullRequestThreadIdentity,
@@ -34,20 +34,33 @@ import {
 
 /**
  * The header button that opens Relay for this product: place it in the app header, before the panel.
- * It shares open state with RelayProductPanel through RelayProductDockProvider.
+ * It shares open state with RelayProductPanel through RelayProductDockProvider. Its visible label stays
+ * "Relay" on every page (no header shift); what it is about is its accessible description: the
+ * registered pull request, else the host's `scope` ("Release 2.18").
  */
-export const RelayProductLauncher = (): ReactElement => {
+export const RelayProductLauncher = ({ scope }: { readonly scope?: string | undefined } = {}): ReactElement => {
   const { launcher, open, returnTo, setOpen } = useRelayProductOpen()
+  const registration = useRelayProductDockRegistration()
+  const about = registration === null ? scope : scopeOf(registration.context).label
+  const descriptionId = useId()
   return (
-    <RelayLauncher
-      expanded={open}
-      onClick={() => {
-        returnTo.current = null
-        setOpen((current) => !current)
-      }}
-      ref={launcher}
-      shortcut={useRelayShortcut()}
-    />
+    <>
+      {about === undefined ? null : (
+        <span hidden id={descriptionId}>
+          about {about}
+        </span>
+      )}
+      <RelayLauncher
+        aria-describedby={about === undefined ? undefined : descriptionId}
+        expanded={open}
+        onClick={() => {
+          returnTo.current = null
+          setOpen((current) => !current)
+        }}
+        ref={launcher}
+        shortcut={useRelayShortcut()}
+      />
+    </>
   )
 }
 
@@ -179,6 +192,22 @@ export const RelayProductPanel = ({ host, pin }: RelayProductPanelProps): ReactE
   const returnTarget = returnTo.current?.isConnected === true ? returnTo : launcher
   const context = registration?.context ?? host.context
   const locating = registration === null || locatingFrom
+  // The host's other conversation leaves the panel for its own page, so Relay closes first: the next page
+  // must not open with Relay's open state still set. It leads where no pull request is registered, and
+  // follows the locator while finding another one.
+  const alternate =
+    host.alternate === undefined ? null : (
+      <Button
+        onClick={() => {
+          setOpen(false)
+          host.alternate?.onOpen()
+        }}
+        type="button"
+        variant="secondary"
+      >
+        {host.alternate.label}
+      </Button>
+    )
   return (
     <RelayPanel
       launcher={returnTarget}
@@ -209,12 +238,16 @@ export const RelayProductPanel = ({ host, pin }: RelayProductPanelProps): ReactE
     >
       {locating ? (
         <div style={{ display: "grid", gap: "var(--rly-space-16)" }}>
+          {registration === null && alternate}
           <p>
-            {registration === null
-              ? "Relay works on pull requests here. Open one, or find it:"
-              : "Find another pull request. Your draft for this one is kept."}
+            {registration !== null
+              ? "Find another pull request. Your draft for this one is kept."
+              : host.alternate === undefined
+                ? "Relay works on pull requests here. Open one, or find it:"
+                : "Or find a pull request conversation:"}
           </p>
           <Locator host={host} />
+          {registration === null ? null : alternate}
         </div>
       ) : (
         <Body registration={registration} />
@@ -390,6 +423,7 @@ const Continuation = ({
   )
   return (
     <>
+      {registration.notice === undefined ? null : <p>{registration.notice}</p>}
       {changed ? <p>Applies to your next message.</p> : null}
       {retargeted ? (
         <p>Context changed to {registration.about?.label ?? "the whole pull request"}. Your draft is kept.</p>

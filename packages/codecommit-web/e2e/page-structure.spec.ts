@@ -74,6 +74,20 @@ for (const [tab, title] of Object.entries(settingsTitles)) {
   })
 }
 
+// At 320px the audit actions wrap: no label spills past its button and the page does not scroll sideways.
+test("audit actions stay inside their buttons at 320px", async ({ page }) => {
+  await stubSession(page)
+  await page.setViewportSize({ width: 320, height: 640 })
+  await page.goto("/settings/audit")
+  const main = page.getByRole("main")
+  for (const name of ["Save", "View Audit Log", "Clear All Logs"]) {
+    const button = main.getByRole("button", { name, exact: true })
+    await expect(button).toBeVisible()
+    expect(await button.evaluate((el) => el.scrollWidth <= el.clientWidth), name).toBe(true)
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320)
+})
+
 // A failed config read is stated in the tab with a retry, never thrown out of the page.
 test("settings accounts says the settings are unavailable, keeps the page and reads again", async ({ page }) => {
   await stubSession(page)
@@ -112,11 +126,14 @@ test("the author link in the pull request sentence is underlined", async ({ page
 /** Contrast of an element's underline, blended over the page canvas, against that canvas (WCAG). */
 const underlineContrast = (page: Page, name: string) =>
   page.getByRole("main").getByRole("link", { name, exact: true }).first().evaluate((link) => {
+    // Any CSS colour (rgb(), oklch(), color()) as the sRGB bytes it paints, read back from a 1×1 canvas.
     const channels = (value: string) => {
-      const numbers = (value.match(/[\d.]+/gu) ?? []).map(Number)
-      const scale = value.startsWith("color(") ? 1 : 255
-      const [r = 0, g = 0, b = 0] = numbers.slice(0, 3).map((n) => n / scale)
-      return { r, g, b, a: numbers[3] ?? 1 }
+      const context = document.createElement("canvas").getContext("2d")
+      if (context === null) return { r: 0, g: 0, b: 0, a: 0 }
+      context.fillStyle = value
+      context.fillRect(0, 0, 1, 1)
+      const [r = 0, g = 0, b = 0, a = 0] = context.getImageData(0, 0, 1, 1).data
+      return { r: r / 255, g: g / 255, b: b / 255, a: a / 255 }
     }
     const canvas = channels(getComputedStyle(document.body).backgroundColor)
     const line = channels(getComputedStyle(link).textDecorationColor)
@@ -165,4 +182,18 @@ test("the current page stays marked in forced colours", async ({ page }) => {
     expect(marked.adjust).toBe("none")
     expect(marked.background).not.toBe((await paint(sibling, scope)).background)
   }
+})
+
+// At 320px every nav label fits inside its own pill; when the row runs out of room it scrolls instead.
+test("nav labels stay inside their pills at 320px", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 })
+  await stubSession(page)
+  await page.goto("/")
+  const navigation = page.getByRole("navigation", { name: "Primary" })
+  await expect(navigation.getByRole("link").first()).toBeVisible()
+  const overflowing = await navigation.getByRole("link").evaluateAll((links) =>
+    links.filter((link) => link.scrollWidth > link.clientWidth).map((link) => link.textContent)
+  )
+  expect(overflowing).toEqual([])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320)
 })

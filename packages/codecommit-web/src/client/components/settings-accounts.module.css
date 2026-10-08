@@ -10,7 +10,6 @@
   inline-size: 42px;
   margin: 0;
   position: relative;
-  transition: background-color 120ms ease;
 }
 
 .switch::after {
@@ -22,7 +21,6 @@
   inset-block-start: 2px;
   inset-inline-start: 2px;
   position: absolute;
-  transition: transform 120ms ease;
 }
 
 .switch:checked {
@@ -54,9 +52,12 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .switch,
+@media (prefers-reduced-motion: no-preference) {
+  .switch {
+    transition: background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+  }
+
   .switch::after {
-    transition: none;
+    transition: transform var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 }

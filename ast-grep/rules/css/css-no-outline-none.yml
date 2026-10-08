@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: css-no-outline-none
+language: css
+severity: error
+message: "Never remove the outline; forced colours and keyboard users lose the focus ring"
+
+rule:
+  kind: declaration
+  all:
+    - has:
+        kind: property_name
+        regex: "(?i)^outline(-style|-width)?$"
+    - any:
+        - has:
+            kind: plain_value
+            regex: "(?i)^none$"
+        - has:
+            kind: integer_value
+            regex: "^0$"
+  # Match the query, not the whole @media text: a nested forced-colours block must not excuse the
+  # outer rules.
+  not:
+    inside:
+      kind: media_statement
+      stopBy: end
+      has:
+        not:
+          kind: block
+        regex: "(?i)forced-colors"
+
+files:
+  - "packages/herdr-monitor/src/**/*.css"
+  - "packages/herdr-connect/src/**/*.css"
+  - "packages/review/src/**/*.css"
+  - "packages/agent-usage/src/**/*.css"
+
+note: |
+  Keep rly's ring (base :focus-visible) on the focused element. A transparent outline is no substitute:
+  lint:focus-rings rejects it, and forced colours repaint it as a second frame.
+  The one accepted exception is a ring moved to a container, e.g. `.box:has(.input:focus-visible)`:
+  clear the inner field's outline behind a comment naming that container rule, then
+  `/* ast-grep-ignore: css-no-outline-none */` on the line directly above. A file-wide exemption is
+  deliberately not built in, because it could not tell which field the container ring belongs to.
+  The escape's reason goes on the comment line directly above it, and the escape raises the
+  package's ledger: run `pnpm debt:update` in the same reviewed change.
+  `:focus:not(:focus-visible) { outline: none }` is not an exception; rly's ring is already
+  :focus-visible only.

@@ -88,9 +88,14 @@
   white-space: nowrap;
 }
 
-.navLink:hover,
 .navLink:focus-visible {
   color: var(--rly-color-text-1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .navLink:hover {
+    color: var(--rly-color-text-1);
+  }
 }
 
 .navLink[aria-current="page"] {
@@ -225,12 +230,18 @@
   block-size: 1.125rem;
 }
 
-.commandButton:hover,
-.iconButton:hover,
-.userButton:hover,
 .userButton[data-state="open"] {
   background: var(--rly-color-surface-2);
   color: var(--rly-color-text-1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .commandButton:hover,
+  .iconButton:hover,
+  .userButton:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .notificationCount {
@@ -406,9 +417,9 @@
     display: none;
   }
 
+  /* Pills share the row when it fits, never shrink under their label; past that the row scrolls. */
   .navLink {
-    min-inline-size: 0;
-    flex: 1 1 0;
+    flex: 1 0 auto;
     justify-content: center;
     padding-inline: 0.625rem;
   }
@@ -472,5 +483,42 @@
   .menu {
     animation: none;
     transition: none;
+  }
+}
+
+/* Drawn under 44px; the pseudo-element grows the touch target without changing the look. */
+.navLink {
+  position: relative;
+}
+
+.navLink::after {
+  position: absolute;
+  inset: min(0px, (100% - 2.75rem) / 2);
+  content: "";
+}
+
+/* Press feedback; the scale eases only when motion is allowed. */
+.navLink:active,
+.commandButton:active,
+.iconButton:active,
+.userButton:active {
+  scale: 0.97;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .commandButton,
+  .iconButton,
+  .userButton {
+    transition-property: scale;
+    transition-duration: var(--rly-motion-fast-duration);
+    transition-timing-function: var(--rly-motion-fast-easing);
+  }
+
+  /* Keeps its colour transitions alongside the press. */
+  .navLink {
+    transition:
+      color var(--rly-motion-standard-duration) var(--rly-motion-standard-easing),
+      background-color var(--rly-motion-standard-duration) var(--rly-motion-standard-easing),
+      scale var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 }

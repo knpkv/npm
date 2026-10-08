@@ -1,5 +1,11 @@
 # @knpkv/herdr-monitor
 
+## 0.3.3
+
+### Patch Changes
+
+- [#665](https://github.com/knpkv/npm/pull/665) [`28b9dbd`](https://github.com/knpkv/npm/commit/28b9dbdd6bf0a10e247ecbe36653b0f4273235ee) Thanks [@konopkov](https://github.com/konopkov)! - The board's stylesheet uses logical properties, so it follows the writing direction; no visual change.
+
 ## 0.3.2
 
 ### Patch Changes

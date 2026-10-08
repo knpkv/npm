@@ -1,0 +1,57 @@
+id: css-motion-opt-in
+snapshots:
+  ? |
+    .a { transition: color 140ms ease; }
+  : labels:
+      - source: "transition: color 140ms ease;"
+        style: primary
+        start: 5
+        end: 34
+      - source: transition
+        style: secondary
+        start: 5
+        end: 15
+  ? |
+    .a::after { animation: runway 1.6s ease-in-out infinite; }
+  : labels:
+      - source: "animation: runway 1.6s ease-in-out infinite;"
+        style: primary
+        start: 12
+        end: 56
+      - source: animation
+        style: secondary
+        start: 12
+        end: 21
+  ? |
+    :global(::view-transition-group(*)) { animation-duration: 240ms; }
+  : labels:
+      - source: "animation-duration: 240ms;"
+        style: primary
+        start: 38
+        end: 64
+      - source: animation-duration
+        style: secondary
+        start: 38
+        end: 56
+  ? |
+    @media (prefers-reduced-motion: reduce) { .a { transition: color 1s; } }
+  : labels:
+      - source: "transition: color 1s;"
+        style: primary
+        start: 47
+        end: 68
+      - source: transition
+        style: secondary
+        start: 47
+        end: 57
+  ? |
+    @media (width < 48rem) { .a { transition: color 1s; } @media (prefers-reduced-motion: no-preference) { .b { transition: color 1s; } } }
+  : labels:
+      - source: "transition: color 1s;"
+        style: primary
+        start: 30
+        end: 51
+      - source: transition
+        style: secondary
+        start: 30
+        end: 40

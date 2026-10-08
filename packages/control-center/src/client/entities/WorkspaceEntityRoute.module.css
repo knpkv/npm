@@ -1,7 +1,6 @@
 .state {
   display: grid;
   min-block-size: 60dvh;
-  outline: none;
   place-items: center;
 }
 
@@ -87,9 +86,11 @@
   text-decoration: none;
 }
 
-.secondaryAction:hover {
-  background: var(--rly-color-surface-2);
-  border-color: var(--rly-color-service-confluence);
+@media (hover: hover) and (pointer: fine) {
+  .secondaryAction:hover {
+    background: var(--rly-color-surface-2);
+    border-color: var(--rly-color-service-confluence);
+  }
 }
 
 .secondaryAction:focus-visible {
@@ -193,7 +194,7 @@
 
   isolation: isolate;
   min-inline-size: var(--rly-space-0);
-  overflow: hidden;
+  overflow: clip;
   position: relative;
 }
 

@@ -1,0 +1,7 @@
+id: no-viewport-zoom-lock
+valid:
+  - 'const page = `<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">`'
+  - "const doc = `<p>maximum-scale is a viewport setting</p>`"
+invalid:
+  - 'const page = `<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">`'
+  - 'const meta = ''<meta name="viewport" content="width=device-width, user-scalable=no">'''

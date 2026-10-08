@@ -355,19 +355,15 @@
   inline-size: var(--rly-space-32);
 }
 
-.agentSpinner {
-  animation: agent-spin 850ms linear infinite;
+@media (prefers-reduced-motion: no-preference) {
+  .agentSpinner {
+    animation: agent-spin 850ms linear infinite;
+  }
 }
 
 @keyframes agent-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agentSpinner {
-    animation: none;
   }
 }
 
@@ -409,13 +405,12 @@
   inline-size: 100%;
   padding: var(--rly-space-12);
   text-align: start;
-  transition:
-    border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
-    box-shadow var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
 }
 
-.findingCard:hover {
-  border-color: var(--rly-color-border-2);
+@media (hover: hover) and (pointer: fine) {
+  .findingCard:hover {
+    border-color: var(--rly-color-border-2);
+  }
 }
 
 /* Selection is a background and aria-current, never an edge bar. */
@@ -804,8 +799,10 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .findingCard {
-    transition: none;
+    transition:
+      border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      box-shadow var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 }

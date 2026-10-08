@@ -23,6 +23,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { decodePullRequestCoordinates } from "../../pull-request-coordinates.js"
 import type { PullRequestCoordinates } from "../../pull-request-coordinates.js"
 import {
+  AccountSwitchedOffApiError,
+  AccountUnknownApiError,
   ApiError,
   CodeCommitApi,
   type PullRequestDiffContentResponse,
@@ -369,7 +371,13 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           // The response carries only a short message, so the server log keeps the full cause.
           Effect.tapError((error) => Effect.logWarning("single pull request refresh failed", error)),
           Effect.mapError((error) =>
-            Predicate.isTagged(error, "ApiError") ? error : new ApiError({ message: extractAwsMessage(error) })
+            Predicate.isTagged(error, "ApiError")
+              ? error
+              : Predicate.isTagged(error, "AccountSwitchedOff")
+              ? new AccountSwitchedOffApiError({ message: error.message, profile: error.profile })
+              : Predicate.isTagged(error, "AccountUnknown")
+              ? new AccountUnknownApiError({ message: error.message })
+              : new ApiError({ message: extractAwsMessage(error) })
           )
         ))
       .handle("create", ({ payload }) =>

@@ -8,7 +8,7 @@
     display: grid;
     max-inline-size: 100%;
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   .header {

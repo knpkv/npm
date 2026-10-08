@@ -1,5 +1,17 @@
 # @knpkv/jira-clockify
 
+## 1.7.0
+
+### Minor Changes
+
+- [#598](https://github.com/knpkv/npm/pull/598) [`0360454`](https://github.com/knpkv/npm/commit/0360454dd4c280b982615173923bb42e93aa2569) Thanks [@konopkov](https://github.com/konopkov)! - jcf no longer reports success for writes that failed, and no longer falls back silently. `ConfigService.set` fails with `ConfigUnreadable` when `~/.jcf/config.json` cannot be read (instead of overwriting it with defaults) and with `ConfigNotSaved` when it cannot be written. `ClockifyAuth.save` fails with `ClockifyKeyNotSaved` when the key cannot be written or made owner-only. A Clockify project or tag that cannot be looked up while starting a timer, an unreadable state, cache or config file, and a Jira identity or search failure keep their fallback but log a warning naming what was dropped and why. Saving defaults during `timer start` or `timer stop` reports a failure without stopping the timer. In jcf-web, a settings save that fails now answers with the reason instead of a generic error.
+
+### Patch Changes
+
+- Updated dependencies [[`a5a7fcf`](https://github.com/knpkv/npm/commit/a5a7fcf055bfa7d0f6a1c1a0ae2cf4bc2eb8ab81)]:
+  - @knpkv/atlassian-common@1.9.3
+  - @knpkv/jira-cli@1.6.4
+
 ## 1.6.2
 
 ### Patch Changes

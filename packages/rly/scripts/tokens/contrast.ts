@@ -1,11 +1,13 @@
 import type { ColorTokenSource, ContrastPairSource } from "../../src/tokens/model.js"
+import { oklchToHex } from "./oklch.js"
 
 const channel = (hex: string, offset: number): number => Number.parseInt(hex.slice(offset, offset + 2), 16) / 255
 
 const linear = (value: number): number => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4
 
-/** WCAG relative luminance for an opaque six-digit sRGB color. */
-export const relativeLuminance = (hex: string): number => {
+/** WCAG relative luminance for an opaque colour: six-digit sRGB hex, or an `oklch()` token value as it displays. */
+export const relativeLuminance = (color: string): number => {
+  const hex = color.startsWith("oklch(") ? oklchToHex(color) : color
   if (!/^#[0-9a-f]{6}$/i.test(hex)) throw new Error(`Invalid sRGB color: ${hex}`)
   return 0.2126 * linear(channel(hex, 1)) + 0.7152 * linear(channel(hex, 3))
     + 0.0722 * linear(channel(hex, 5))

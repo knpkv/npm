@@ -691,6 +691,27 @@ interface AuthenticatedPresentationRoute {
   readonly primaryAction: () => Locator | null
 }
 
+/** Whether the element a locator resolves to is still in the document two frames later. */
+const staysConnected = (locator: Locator): Promise<boolean> =>
+  locator.evaluate(
+    (element) =>
+      new Promise<boolean>((resolve) => {
+        const view = element.ownerDocument.defaultView
+        if (view === null) {
+          resolve(false)
+          return
+        }
+        view.requestAnimationFrame(() => view.requestAnimationFrame(() => resolve(element.isConnected)))
+      })
+  )
+
+/** Open Relay from the header and leave for one of its full-page conversations; the panel closes first. */
+const openRelayFullPage = async (page: Page, action: string): Promise<void> => {
+  await page.getByRole("banner").getByRole("button", { name: /^Relay/u }).click()
+  await page.getByRole("button", { name: action }).click()
+  await expect(page.locator("[data-rly-relay-panel]")).toHaveCount(0)
+}
+
 test("audits every authenticated route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ page }) => {
   test.setTimeout(60_000)
   await page.route("**/api/v1/items**", async (route) => {
@@ -1049,6 +1070,8 @@ test("restores the exact release scroll position after a canonical entity round 
   await expect.poll(() => page.evaluate<number>("window.scrollY")).toBe(0)
 
   const freshNavigationItemLink = page.locator(`[data-rly-workset-jira-id="${canonicalEntityId}"] a`)
+  // The full view replaces its workset once its view transition commits; act on the settled element.
+  await expect.poll(() => staysConnected(freshNavigationItemLink)).toBe(true)
   await freshNavigationItemLink.scrollIntoViewIfNeeded()
   expect(await page.evaluate<number>("window.scrollY")).toBeGreaterThan(0)
   await page.getByRole("link", { name: "Back to overview" }).dispatchEvent("click")
@@ -1424,8 +1447,58 @@ test("launches an exact-head review and presents its durable findings", async ({
   await replaceFocusedDiffLine()
   await expect(wrapLines).toBeFocused()
   await expect(page.getByText("Review sandbox started")).toBeVisible()
-  await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
+  await expect(page.getByText("1 suggestion · 0 notes")).toBeVisible()
   await expect(page.getByText("Run completed · success")).toBeVisible()
+  // The header's Relay opens this PR's thread, and says the review panel is on the page too.
+  const relayLauncher = page.getByRole("banner").getByRole("button", { name: /^Relay/u })
+  await expect(relayLauncher).toHaveAccessibleDescription(/^about /u)
+  await relayLauncher.click()
+  await expect(
+    page.locator("[data-rly-relay-panel]").getByText(
+      "Also on this page: the review panel, with run, cancel and publish actions."
+    )
+  ).toBeVisible()
+  // The overlay spans the viewport below the header: no ancestor may box it into the header's height.
+  expect((await page.locator("[data-rly-relay-panel]").boundingBox())?.height ?? 0).toBeGreaterThan(400)
+  // A long preset name truncates in its trigger; the composer never runs past the panel's edge.
+  const panelBox = await page.locator("[data-rly-relay-panel]").boundingBox()
+  const composerBox = await page.locator("[data-rly-relay-panel] textarea").boundingBox()
+  expect((composerBox?.x ?? 0) + (composerBox?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(
+    (panelBox?.x ?? 0) + (panelBox?.width ?? 0)
+  )
+  await page.screenshot({ path: test.info().outputPath("relay-pr-panel.png") })
+  await page.getByRole("button", { name: "Close Relay" }).click()
+  await expect(page.locator("[data-rly-relay-panel]")).toHaveCount(0)
+  await expect(relayLauncher).toBeFocused()
+  // At 1280 the workspace header keeps Open PR, Search and Relay on one row (Relay's key hint gives way).
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await expect(page.locator("header [data-rly-relay-launcher]")).toBeVisible()
+  const actionTops = await page.getByRole("banner").locator("a, button").evaluateAll((elements) =>
+    elements
+      .filter((element) => element.closest("nav") === null && element.getBoundingClientRect().width > 0)
+      .map((element) => Math.round(element.getBoundingClientRect().top))
+  )
+  expect(new Set(actionTops.slice(1)).size).toBe(1)
+  await page.screenshot({ path: test.info().outputPath("header-1280-pr-page.png") })
+  // On a 320 phone the actions keep one row together (under the brand when they don't fit beside it),
+  // and the header's first row isn't flush with the top edge.
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ height: 800, width })
+    const phone = await page.getByRole("banner").evaluate((header) => {
+      const actions = [...header.querySelectorAll("a, button")].filter(
+        (element) => element.closest("nav") === null && element.getBoundingClientRect().width > 0
+      )
+      const tops = actions.map((element) => Math.round(element.getBoundingClientRect().top))
+      return { actionRows: new Set(tops.slice(1)).size, firstTop: Math.min(...tops) }
+    })
+    expect(phone.actionRows, `header actions at ${String(width)}`).toBe(1)
+    expect(phone.firstTop, `header top padding at ${String(width)}`).toBeGreaterThanOrEqual(8)
+    await page.screenshot({ path: test.info().outputPath(`header-${String(width)}-pr-page.png`) })
+  }
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await page.setViewportSize({ height: 800, width: 1024 })
+  expect(await page.evaluate<number>("document.documentElement.scrollWidth")).toBeLessThanOrEqual(1024)
+  await page.setViewportSize({ height: 800, width: 1280 })
   const reviewActivity = page.getByRole("log", { name: "Review activity" })
   await expect(reviewActivity).toBeVisible()
   expect(
@@ -1677,7 +1750,11 @@ test("uses semantic fallback when direct Active work changes release", async ({ 
 
 test("opens the selected Active work release from the shell agent control", async ({ page }) => {
   await page.goto(`/w/${snapshot.workspaceId}/work?release=${heldRelease.releaseId}`)
-  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await page.getByRole("banner").getByRole("button", { name: /^Relay/u }).click()
+  await expect(page.getByRole("button", { name: "Open the release conversation, full page" })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("relay-release-panel.png") })
+  await page.getByRole("button", { name: "Close Relay" }).click()
+  await openRelayFullPage(page, "Open the release conversation, full page")
   await expect(page).toHaveURL(
     `${heldFullPath}/agent?from=${
       encodeURIComponent(
@@ -1691,7 +1768,7 @@ test("opens the selected Active work release from the shell agent control", asyn
 test("opens Relay from any primary page and preserves the calling context", async ({ page }) => {
   const originPath = `${overviewPath}?status=attention`
   await page.goto(originPath)
-  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await openRelayFullPage(page, "Open Relay's full page")
   await expect(page).toHaveURL(`/agent?from=${encodeURIComponent(originPath)}`)
   await expect(page.getByRole("heading", { level: 1, name: "Choose a release." })).toBeVisible()
   await expect(page.getByRole("heading", { level: 2, name: "Workspace overview" })).toBeVisible()
@@ -1711,7 +1788,7 @@ test("opens Relay from any primary page and preserves the calling context", asyn
 
 test("keeps an invalid Active work agent context on the safe generic fallback", async ({ page }) => {
   await page.goto(`/w/${snapshot.workspaceId}/work?release=invalid`)
-  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await openRelayFullPage(page, "Open Relay's full page")
   await expect(page).toHaveURL(/\/agent\?from=/u)
   await expect(page.getByRole("heading", { level: 2, name: "Context unavailable" })).toBeVisible()
 })

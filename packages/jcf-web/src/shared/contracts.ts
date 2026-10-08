@@ -531,3 +531,17 @@ export const WeekReadEvent = Schema.Union([
   Schema.TaggedStruct("Failed", { message: Schema.String })
 ])
 export type WeekReadEvent = typeof WeekReadEvent.Type
+
+/**
+ * Whether one system is connected, and the command that connects it when it is not. A source that is
+ * not connected shows "Not connected" and no totals, never zero.
+ */
+export const SourceConnection = Schema.Struct({
+  connected: Schema.Boolean,
+  /** The terminal command that connects this system, such as `jcf auth jira token`. */
+  connect: Schema.String
+})
+export type SourceConnection = typeof SourceConnection.Type
+
+export const Sources = Schema.Struct({ jira: SourceConnection, clockify: SourceConnection })
+export type Sources = typeof Sources.Type

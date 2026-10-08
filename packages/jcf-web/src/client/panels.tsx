@@ -76,35 +76,36 @@ export interface ConfirmSubmission {
   readonly blocks: ReadonlyArray<number> | undefined
 }
 
+const writeTargets: ReadonlyArray<keyof WriteTargetsRequest> = ["clockify", "jira"]
+
 /**
- * A write can narrow the selected provider layers. Hidden layers cannot be re-enabled here.
+ * A write can narrow the selected provider layers. Hidden layers cannot be re-enabled here. Each layer
+ * is a pressed-state button, the same control as the calendar's layer chips.
  */
 const TargetPicker = (props: {
   readonly allowed: WriteTargetsRequest
   readonly targets: WriteTargetsRequest
   readonly onChange: (targets: WriteTargetsRequest) => void
 }) => (
-  <fieldset className="jcf-targets">
-    <legend>Write to selected layers</legend>
-    <label>
-      <input
-        checked={props.targets.clockify}
-        disabled={!props.allowed.clockify}
-        onChange={(event) => props.onChange({ ...props.targets, clockify: event.target.checked })}
-        type="checkbox"
-      />
-      <span>Clockify</span>
-    </label>
-    <label>
-      <input
-        checked={props.targets.jira}
-        disabled={!props.allowed.jira}
-        onChange={(event) => props.onChange({ ...props.targets, jira: event.target.checked })}
-        type="checkbox"
-      />
-      <span>Jira</span>
-    </label>
-  </fieldset>
+  <div className="jcf-targets" role="group" aria-labelledby="jcf-targets-label">
+    <span className="jcf-targets-label" id="jcf-targets-label">
+      Write to selected layers
+    </span>
+    <div className="jcf-targets-choices">
+      {writeTargets.map((target) => (
+        <Button
+          aria-pressed={props.targets[target]}
+          disabled={!props.allowed[target]}
+          key={target}
+          onClick={() => props.onChange({ ...props.targets, [target]: !props.targets[target] })}
+          size="compact"
+          variant={props.targets[target] ? "primary" : "secondary"}
+        >
+          {target === "clockify" ? "Clockify" : "Jira"}
+        </Button>
+      ))}
+    </div>
+  </div>
 )
 
 /** Editable and confirmation amounts must round-trip through parseDuration without losing seconds. */

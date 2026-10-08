@@ -15,10 +15,11 @@
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { Layers } from "@knpkv/jira-clockify"
-import { Config, Deferred, Effect, Layer, Schema } from "effect"
+import { Config, Deferred, Effect, Layer, type Redacted, Schema } from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/http"
 import { createServer } from "node:http"
 import { application } from "./HttpApplication.js"
+import { loginControlRouter } from "./LoginControl.js"
 
 const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))
 
@@ -28,13 +29,20 @@ export interface JcfWebServerOptions {
   /** Completed with the bootstrap URL once the server is listening. */
   readonly ready?: Deferred.Deferred<string>
   readonly security: OwnerSession.OwnerSessionService
+  /** When set, `POST /control/login` mints a fresh link for a caller presenting this token. */
+  readonly controlToken?: Redacted.Redacted<string>
 }
 
 export const makeServer = (options: JcfWebServerOptions) =>
   Layer.unwrap(
     Schema.decodeUnknownEffect(OwnerSession.LoopbackHostname)(options.hostname ?? "127.0.0.1").pipe(
       Effect.map((hostname) =>
-        HttpRouter.serve(application.pipe(Layer.provide(Layers.HeadlessLayer))).pipe(
+        HttpRouter.serve(
+          Layer.mergeAll(
+            application.pipe(Layer.provide(Layers.HeadlessLayer)),
+            options.controlToken === undefined ? Layer.empty : loginControlRouter(options.controlToken)
+          )
+        ).pipe(
           Layer.provide(
             NodeHttpServer.layerServer(createServer, { host: hostname, port: options.port })
           ),
