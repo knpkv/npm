@@ -9,7 +9,7 @@ import { Hero, HeroWord } from "@knpkv/rly/patterns"
 import { Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
 import { useId, useState, type ReactNode, type Ref } from "react"
-import type { ConnectAgent } from "./model.js"
+import type { ConnectAgent, ConnectPeerFailure } from "./model.js"
 import {
   serializeTerminalKey,
   terminalKeyDescriptors,
@@ -255,22 +255,65 @@ type AgentDirectoryProps = {
   readonly now?: number
   readonly query: string
   readonly selectedKey: string | null
+  /** Hosts that didn't answer this read; the Host filter names them so the gap in the list is visible. */
+  readonly silentHosts?: ReadonlyArray<string>
   readonly timeZone?: string
+}
+
+/**
+ * How many agents each Status filter option holds, within the current Host filter. The search
+ * query is ignored, so typing never changes the option labels under the cursor.
+ */
+export const agentBucketCounts = (
+  agents: ReadonlyArray<ConnectAgent>,
+  hostFilter: string | null
+): ReadonlyMap<AgentActivityFilter, number> => {
+  const inHost = agents.filter((agent) => hostFilter === null || agent.host === hostFilter)
+  return new Map<AgentActivityFilter, number>([
+    ["all", inHost.length],
+    ...agentBuckets.map((bucket): readonly [AgentActivityFilter, number] => [
+      bucket,
+      inHost.filter((agent) => agentStatePresentation(agent.state).bucket === bucket).length
+    ])
+  ])
+}
+
+const failureReasonLabel = (reason: ConnectPeerFailure["reason"]): string => {
+  switch (reason) {
+    case "offline":
+      return "offline"
+    case "unavailable":
+      return "Connect unavailable"
+    case "timeout":
+      return "timed out"
+    case "request_failed":
+      return "request failed"
+    case "invalid_response":
+      return "unreadable answer"
+  }
+}
+
+/** One line naming the hosts that didn't answer, each with its cause, and what that means for the list. */
+export const silentHostsSentence = (failures: ReadonlyArray<ConnectPeerFailure>): string | null => {
+  if (failures.length === 0) return null
+  const named = failures.map(({ host, reason }) => `${host} (${failureReasonLabel(reason)})`).join(", ")
+  return failures.length === 1
+    ? `${named} didn't answer; its agents aren't listed.`
+    : `${named} didn't answer; their agents aren't listed.`
 }
 
 const plural = (count: number, one: string, many: string): string => `${String(count)} ${count === 1 ? one : many}`
 
 /**
- * The Connect directory's one sentence: how many agents are listed and how many are working, how
- * many need attention, and which hosts could not be read. `agents` is null while the first list loads or when it failed.
+ * The Connect directory's one sentence: how many agents are listed, how many are working, and how
+ * many need you. Hosts that didn't answer are named once, by the line above the list, not here.
+ * `agents` is null while the first list loads or when it failed.
  */
 export const ConnectSummary = ({
   agents,
-  offlineHosts,
   unavailable
 }: {
   readonly agents: ReadonlyArray<ConnectAgent> | null
-  readonly offlineHosts: ReadonlyArray<string>
   readonly unavailable: boolean
 }) => {
   const needAttention =
@@ -283,7 +326,7 @@ export const ConnectSummary = ({
         fact={
           agents === null ? (
             unavailable ? (
-              "The fleet directory is unavailable"
+              "The fleet directory didn't answer"
             ) : (
               "Loading the fleet…"
             )
@@ -293,16 +336,7 @@ export const ConnectSummary = ({
               {needAttention === 0 ? null : (
                 <>
                   ,{" "}
-                  <HeroWord tone="held">{`${String(needAttention)} need${needAttention === 1 ? "s" : ""} attention`}</HeroWord>
-                </>
-              )}
-              {offlineHosts.length === 0 ? null : (
-                <>
-                  ;{" "}
-                  <HeroWord tone="blocked">
-                    {/* A host name stays whole; it may only break where it truly cannot fit. */}
-                    {`${offlineHosts.map((host) => host.replaceAll("-", "\u2011")).join(", ")} offline`}
-                  </HeroWord>
+                  <HeroWord tone="held">{`${String(needAttention)} need${needAttention === 1 ? "s" : ""} you`}</HeroWord>
                 </>
               )}
             </>
@@ -325,6 +359,7 @@ export const AgentDirectory = ({
   onSelect,
   query,
   selectedKey,
+  silentHosts = [],
   timeZone
 }: AgentDirectoryProps) => {
   const hostFilterLabelId = useId()
@@ -333,6 +368,7 @@ export const AgentDirectory = ({
   const names: ReadonlyMap<string, string> = new Map(agents.map((entry) => [String(entry.id), entry.name]))
   // With one host the filter already names it; rows repeat it only when it tells agents apart.
   const severalHosts = hosts.length > 1
+  const counts = agentBucketCounts(agents, hostFilter)
   const rows = connectLineageRows(agents).filter(({ agent }) => {
     const activity = agentStatePresentation(agent.state).bucket
     return (
@@ -357,6 +393,14 @@ export const AgentDirectory = ({
                 {host}
               </button>
             ))}
+            {/* A host that didn't answer has no agents to filter to; it is named, not offered. */}
+            {silentHosts
+              .filter((host) => !hosts.includes(host))
+              .map((host) => (
+                <span className="connect-host-silent" key={host}>
+                  {host} <small>didn't answer</small>
+                </span>
+              ))}
           </div>
         </div>
         <div className="connect-filter-set">
@@ -372,6 +416,8 @@ export const AgentDirectory = ({
                 type="button"
               >
                 {activityFilterLabel(activity)}
+                <span className="connect-visually-hidden">,</span>{" "}
+                <span className="connect-filter-count">{String(counts.get(activity) ?? 0)}</span>
               </button>
             ))}
           </div>
@@ -381,9 +427,9 @@ export const AgentDirectory = ({
         {rows.length === 0 ? <Text tone="secondary">No agents match “{query.trim()}”.</Text> : null}
         {rows.length === 0 ? null : (
           <div aria-hidden="true" className="connect-list-head">
-            <span>Active</span>
-            <span>Agent</span>
             <span>State</span>
+            <span>Agent</span>
+            <span>Active</span>
           </div>
         )}
         <div className="connect-agent-list">
@@ -398,15 +444,15 @@ export const AgentDirectory = ({
                 data-agent-key={key}
                 data-lineage-issue={issue ?? "none"}
                 data-selected={selectedKey === key}
-                style={{ paddingInlineStart: `calc(var(--rly-space-12) + ${String(depth * 20)}px)` }}
                 key={`${key}:${String(index)}`}
                 onClick={() => onSelect(agent)}
               >
-                <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
-                  <span className="connect-visually-hidden">Last active at </span>
-                  {timeLabel(agent.lastActivityAt, timeZone)}
-                </time>
-                <span className="connect-agent-copy">
+                {/* The state leads in a fixed track, so names line up whatever the state's word. */}
+                <span className="connect-agent-state" data-activity={activity}>
+                  <AgentStateLabel state={agent.state} />
+                </span>
+                {/* Lineage indents the name, not the state, so the state column stays straight. */}
+                <span className="connect-agent-copy" style={{ paddingInlineStart: `${String(depth * 20)}px` }}>
                   <Text as="strong" variant="label">
                     {agent.name}
                   </Text>
@@ -420,9 +466,12 @@ export const AgentDirectory = ({
                     {relationLabel(agent, issue, names)}, <span className="connect-token">{agent.work}</span>
                   </Text>
                 </span>
-                <span className="connect-agent-state" data-activity={activity}>
-                  <AgentStateLabel state={agent.state} />
-                </span>
+                <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
+                  <span className="connect-visually-hidden">, last active at </span>
+                  {timeLabel(agent.lastActivityAt, timeZone)}
+                </time>
+                {/* The row's own content names it; the action is added, never put in its place. */}
+                <span className="connect-visually-hidden">, open terminal</span>
               </button>
             )
           })}
