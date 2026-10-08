@@ -31,15 +31,18 @@ test("resolves rly colours per themed subtree, nested either way", async ({ page
     const forced = document.createElement("div")
     forced.setAttribute("data-forced-colors", "active")
     themed.append(forced)
-    const forcedCanvas = probe(forced, null)
-    const themedInForced = probe(forced, "light")
+    // The forced token is a system colour; system colours follow color-scheme, so compare the token itself.
+    const themedInForcedBox = document.createElement("div")
+    themedInForcedBox.setAttribute("data-theme", "light")
+    forced.append(themedInForcedBox)
+    const themedInForced = getComputedStyle(themedInForcedBox).getPropertyValue("--rly-color-canvas").trim()
     forced.remove()
-    return { dark, darkInLight, forcedCanvas, lightInDark, themedInForced }
+    return { dark, darkInLight, lightInDark, themedInForced }
   })
   expect(colours).not.toBeNull()
   // Each scheme resolves its own canvas, whichever way the subtrees nest.
   expect(colours?.lightInDark).not.toBe(colours?.dark)
   expect(colours?.darkInLight).toBe(colours?.dark)
-  // A themed subtree inside forced colours keeps the forced system colour rather than a light-dark value.
-  expect(colours?.themedInForced).toBe(colours?.forcedCanvas)
+  // A themed subtree inside forced colours keeps the forced system colour, not a light-dark() value.
+  expect(colours?.themedInForced).toBe("Canvas")
 })
