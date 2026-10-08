@@ -13,19 +13,22 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { parse as parseYaml } from "yaml"
 
 // Release publishes every public package whose version is not on npm yet, so only the Version Packages
 // pull request may move an existing package's version. Two modes:
 // - pull request (GITHUB_EVENT_NAME, GITHUB_BASE_REF, GITHUB_HEAD_REF, GITHUB_REPOSITORY, GITHUB_EVENT_PATH),
 //   on a full-history checkout: fails when a version moved outside the repository's own
-//   changeset-release/main branch;
+//   changeset-release/main branch, or when a new package's CHANGELOG.md already records its version (that
+//   heading is Release's proof that Version Packages produced a version);
 // - `--prepare-release` (Release workflow): finds the publishable versions on main that npm lacks. One is
 //   ready when its package's CHANGELOG.md has its `## <version>` heading: only `changeset version` writes
 //   that, so Version Packages produced it. One without the heading is unversioned (a new package whose
 //   changeset is still pending): publishing now would release a placeholder. When every version npm lacks
 //   is ready, it sets the pending changesets aside so the publish pass releases them; when any is
 //   unversioned it touches nothing and warns, leaving the release to the action's usual choice, because
-//   `changeset publish` cannot release only part of the workspace safely. Writes `outstanding=true|false`
+//   `changeset publish` cannot release only part of the workspace safely. An unversioned package no pending
+//   changeset names fails the step, since the usual publish would release it. Writes `outstanding=true|false`
 //   and `pending=true|false` to GITHUB_OUTPUT. Asking npm, not a push's diff, keeps a release ready
 //   through skipped or failed runs.
 
@@ -110,6 +113,20 @@ const manifestsAt = Effect.fn("VersionBumps.manifestsAt")(function* (revision) {
 
 const describe = ({ file, name, from, to }) => `- ${name} (${file}): ${from ?? "(none)"} -> ${to ?? "(none)"}`
 
+// A package's CHANGELOG.md at a revision, or "" when it has none.
+const changelogAt = Effect.fn("VersionBumps.changelogAt")(function* (revision, manifestFile) {
+  const file = manifestFile.replace(/package\.json$/u, "CHANGELOG.md")
+  const listed = (yield* git(["ls-tree", "--name-only", revision, "--", file])).trim()
+  return listed === "" ? "" : yield* git(["show", `${revision}:${file}`])
+})
+
+/**
+ * New packages whose changelog already records their version. Only `changeset version` may write that
+ * heading, since Release treats it as proof that Version Packages produced the version.
+ */
+export const preseededReleases = (added, changelogOf) =>
+  added.filter((release) => release.version !== undefined && changelogHasVersion(changelogOf(release), release.version))
+
 const checkPullRequest = Effect.gen(function* () {
   const baseRef = yield* Config.String("GITHUB_BASE_REF")
   const fileSystem = yield* FileSystem.FileSystem
@@ -133,6 +150,19 @@ const checkPullRequest = Effect.gen(function* () {
         `Only this repository's ${releaseBranch} (the Version Packages pull request) may change a package's version:`,
         ...changes.map(describe),
         "Fix: revert the version field and add a changeset (`pnpm changeset`) instead."
+      ].join("\n")
+    )
+  }
+  const changelogs = new Map(
+    yield* Effect.forEach(added, ({ file }) => changelogAt("HEAD", file).pipe(Effect.map((text) => [file, text])))
+  )
+  const preseeded = preseededReleases(added, ({ file }) => changelogs.get(file) ?? "")
+  if (preseeded.length > 0 && !exempt) {
+    return yield* fail(
+      [
+        "A new package's CHANGELOG.md may not record its own version; Version Packages writes that heading:",
+        ...preseeded.map(({ file, name, version }) => `- ${name} (${file}): ## ${version}`),
+        "Fix: remove the heading (or the copied changelog) and add a changeset (`pnpm changeset`)."
       ].join("\n")
     )
   }
@@ -183,6 +213,26 @@ const publishedVersions = Effect.fn("VersionBumps.publishedVersions")(function* 
   return new Set(Object.keys(packument.versions))
 })
 
+const ChangesetReleases = Schema.Record(Schema.String, Schema.String)
+const frontmatter = /^---\r?\n((?:[\s\S]*?\r?\n)?)---(?:\r?\n|$)/u
+
+// The package names a pending changeset releases, read from its front matter.
+export const changesetPackages = (file, text) => {
+  const match = frontmatter.exec(text)
+  if (match === null) return Effect.fail(fail(`${file} has no changeset front matter`))
+  return Effect.try({
+    try: () => parseYaml(match[1] ?? ""),
+    catch: (cause) => fail(`${file} front matter is not YAML: ${String(cause)}`)
+  }).pipe(
+    Effect.flatMap((value) =>
+      Schema.decodeUnknownEffect(ChangesetReleases)(value ?? {}).pipe(
+        Effect.mapError((cause) => fail(`${file}: ${cause.message}`))
+      )
+    ),
+    Effect.map((releases) => Object.keys(releases))
+  )
+}
+
 const prepareRelease = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const registry = yield* Config.String("NPM_REGISTRY_URL").pipe(Config.withDefault("https://registry.npmjs.org"))
@@ -213,6 +263,22 @@ const prepareRelease = Effect.gen(function* () {
   )
   for (const { name, version } of ready) yield* Console.log(`Ready to publish: ${name}@${version}`)
   for (const { name, version } of unversioned) yield* Console.log(`Not versioned yet: ${name}@${version}`)
+  // An unversioned version no pending changeset names would be published by the action's usual publish.
+  const pendingNames = new Set(
+    (yield* Effect.forEach(pendingFiles, (file) =>
+      fileSystem.readFileString(file).pipe(Effect.flatMap((text) => changesetPackages(file, text)))
+    )).flat()
+  )
+  const orphaned = unversioned.filter(({ name }) => !pendingNames.has(name))
+  if (orphaned.length > 0) {
+    return yield* fail(
+      [
+        "Not versioned by Version Packages, and no pending changeset will version it:",
+        ...orphaned.map(({ file, name, version }) => `- ${name}@${version} (${file})`),
+        "Release stops rather than publish an unversioned package. Fix: add a changeset for it."
+      ].join("\n")
+    )
+  }
   const outstanding = ready.length > 0 && unversioned.length === 0
   if (ready.length > 0 && unversioned.length > 0) {
     yield* Console.log(

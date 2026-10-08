@@ -14,9 +14,11 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import {
   changelogHasVersion,
+  changesetPackages,
   compareVersions,
   isReleasePullRequest,
   planRelease,
+  preseededReleases,
   releaseBranch
 } from "./check-version-bumps.mjs"
 
@@ -99,6 +101,28 @@ test("a changelog records a version only as its own heading", () => {
   assert.equal(changelogHasVersion(changelog, "1.0.0"), true)
   assert.equal(changelogHasVersion(changelog, "2.0.0"), false)
   assert.equal(changelogHasVersion("", "0.1.0"), false)
+})
+
+test("a new package may not arrive with a changelog that already records its version", () => {
+  const added = [
+    { file: "packages/copied/package.json", name: "@knpkv/copied", version: "0.0.0" },
+    { file: "packages/clean/package.json", name: "@knpkv/clean", version: "0.0.0" }
+  ]
+  const changelogs = new Map([["packages/copied/package.json", "# @knpkv/copied\n\n## 0.0.0\n"]])
+  assert.deepEqual(
+    preseededReleases(added, ({ file }) => changelogs.get(file) ?? "").map(({ name }) => name),
+    ["@knpkv/copied"]
+  )
+})
+
+test("a changeset's packages come from its front matter, and a malformed one fails", async () => {
+  const read = (text) => Effect.runPromise(Effect.result(changesetPackages(".changeset/a.md", text)))
+  assert.deepEqual((await read('---\n"@knpkv/a": minor\n"@knpkv/b": patch\n---\n\nWhy.\n')).success, [
+    "@knpkv/a",
+    "@knpkv/b"
+  ])
+  assert.deepEqual((await read("---\n---\n\nEmpty.\n")).success, [])
+  assert.equal((await read("no front matter")).failure?._tag, "VersionBumpError")
 })
 
 const runtime = ManagedRuntime.make(NodeServices.layer)
@@ -248,7 +272,13 @@ test("preparing a release sets changesets aside only when every unpublished vers
       yield* write(".changeset/fresh.md", '---\n"@knpkv/fresh": minor\n---\n\nAdds fresh.\n')
       yield* commit("add fresh")
       const waiting = yield* prepare
-      return { idle, ready, waiting }
+      // Its changeset disappears before anything versions it: the usual publish would release the
+      // placeholder, so preparation fails instead.
+      yield* fileSystem.remove(path.join(directory, ".changeset/fresh.md"))
+      yield* commit("drop fresh's changeset")
+      const output = path.join(directory, "github-output")
+      const orphaned = yield* run("node", [script, "--prepare-release"], directory, { ...env, GITHUB_OUTPUT: output })
+      return { idle, orphaned, ready, waiting }
     }).pipe(Effect.scoped)
   )
   assert.equal(outcome.idle.written, "outstanding=false\npending=true\n")
@@ -258,4 +288,6 @@ test("preparing a release sets changesets aside only when every unpublished vers
   assert.equal(outcome.waiting.written, "outstanding=false\npending=true\n")
   assert.deepEqual(outcome.waiting.changesets, ["README.md", "fresh.md", "later.md"])
   assert.match(outcome.waiting.log, /::warning title=Release waits::@knpkv\/released@1\.1\.0 stay unpublished/u)
+  assert.notEqual(outcome.orphaned.exitCode, ChildProcessSpawner.ExitCode(0), outcome.orphaned.output)
+  assert.match(outcome.orphaned.output, /no pending changeset will version it:\n- @knpkv\/fresh@0\.0\.0/u)
 })
