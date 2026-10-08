@@ -884,8 +884,7 @@
       min-inline-size: 0;
     }
 
-    /* One column, wrapping: with Keys, Latest and Select it fills the last row exactly, so the rail
-       keeps its height when the status appears and the terminal is never resized mid-session. */
+    /* The anchor for the lines-back badge below. */
     .terminal-key-rail {
       position: relative;
     }
