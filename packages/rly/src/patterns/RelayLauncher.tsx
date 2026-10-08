@@ -1,8 +1,8 @@
-import type { ComponentPropsWithRef, ReactElement, RefObject } from "react"
-import { useEffect, useRef, useSyncExternalStore } from "react"
+import type { ComponentPropsWithRef, ReactElement, RefCallback, RefObject } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import { focusRestoreTarget, isWithinComposedElement } from "../internal/composedFocus.js"
-import { isImeKey, matchesShortcutKeys, relaySummonTransition } from "../internal/relaySummon.js"
+import { hasNestedLayer, isImeKey, matchesShortcutKeys, relaySummonTransition } from "../internal/relaySummon.js"
 import styles from "./RelayLauncher.module.css"
 import { RelayMark } from "./RelayMark.js"
 
@@ -39,129 +39,131 @@ export const useRelayShortcut = (): RlyRelayShortcut =>
 export interface UseRelaySummonOptions {
   readonly open: boolean
   readonly onOpenChange: (open: boolean) => void
-  /** The Relay region; focus inside it counts as being in Relay. */
-  readonly region: RefObject<HTMLElement | null>
-  /** Where a summon puts focus, the composer. Focused once it renders after opening. */
-  readonly composer: RefObject<HTMLElement | null>
-  /** The launcher: where focus returns when the element Relay was summoned from is gone. */
-  readonly launcher: RefObject<HTMLElement | null>
   /** Relay is the full-screen dialog (phone): the shortcut closes it. */
   readonly fullscreen: boolean
+  /** The launcher: where focus returns when the element Relay was summoned from is gone. */
+  readonly launcher: RefObject<HTMLElement | null>
   /**
    * The shortcut to listen for, the same value the launcher advertises; `null` while the host's own
-   * surface owns the key (a live terminal), when the launcher button is the only way in.
+   * surface owns the key (a live terminal). Escape inside Relay keeps working either way.
    */
   readonly shortcut: RlyRelayShortcut | null
+}
+
+/** Refs a host attaches so the summon knows Relay's region and composer. */
+export interface RlyRelaySummon {
+  /** Attach to the composer; a pending summon focuses it as soon as it mounts, however late. */
+  readonly composerRef: RefCallback<HTMLElement>
+  /** Attach to Relay's region (RelayPanel's `ref`); focus inside it counts as being in Relay. */
+  readonly regionRef: RefCallback<HTMLElement>
 }
 
 /**
  * Relay's keyboard summon (Relay UX decision). The shortcut opens Relay and focuses the composer; open
  * with focus on the page, it moves focus to the composer; open with focus in Relay, it returns focus to
  * where it came from and Relay stays open; full screen, it closes. Escape closes when focus is in Relay
- * or Relay is full screen, returning focus. Only the exact chord is handled and prevented, so Ctrl+K,
- * `?`, g-sequences and the browser's other keys pass through.
+ * or Relay is full screen, and focus returns once Relay has actually closed (after a modal has released
+ * the page). Only the exact chord is handled and prevented, so Ctrl+K, `?`, g-sequences and the browser's
+ * other keys pass through. It listens on the launcher's document and on Relay's, if Relay is portaled
+ * into another (an iframe).
  */
-export const useRelaySummon = (options: UseRelaySummonOptions): void => {
+export const useRelaySummon = (options: UseRelaySummonOptions): RlyRelaySummon => {
   const latest = useRef(options)
   latest.current = options
+  const [region, setRegion] = useState<HTMLElement | null>(null)
+  const regionNode = useRef<HTMLElement | null>(null)
+  const composer = useRef<HTMLElement | null>(null)
   const returnTo = useRef<HTMLElement | null>(null)
-  const focusComposerOnOpen = useRef(false)
+  const pendingComposerFocus = useRef(false)
+  const pendingRestore = useRef(false)
+
+  const restoreFocus = useCallback((): void => {
+    const target = returnTo.current
+    returnTo.current = null
+    if (target?.isConnected === true) target.focus()
+    else latest.current.launcher.current?.focus()
+  }, [])
+  const regionRef = useCallback((element: HTMLElement | null) => {
+    regionNode.current = element
+    setRegion(element)
+  }, [])
+  const composerRef = useCallback((element: HTMLElement | null) => {
+    composer.current = element
+    if (element === null || !pendingComposerFocus.current) return
+    pendingComposerFocus.current = false
+    element.focus()
+  }, [])
 
   // Opened any way (the shortcut or the launcher), Relay remembers where focus was so the shortcut can
-  // take you back; a summon then focuses the composer once it has rendered.
+  // take you back. Closed by the summon, focus goes back only now, after the close has committed.
   useEffect(() => {
     if (!options.open) {
+      pendingComposerFocus.current = false
+      if (pendingRestore.current) {
+        pendingRestore.current = false
+        restoreFocus()
+      }
       returnTo.current = null
       return
     }
-    if (returnTo.current === null) returnTo.current = focusOutside(options.region.current)
-    if (!focusComposerOnOpen.current) return
-    focusComposerOnOpen.current = false
-    options.composer.current?.focus()
-  }, [options.open, options.composer, options.region])
+    pendingRestore.current = false
+    if (returnTo.current === null) returnTo.current = focusOutside(regionNode.current)
+  }, [options.open, restoreFocus])
 
   const keys = options.shortcut?.keys ?? null
   useEffect(() => {
-    if (keys === null) return
-    const rememberFocus = (): void => {
-      returnTo.current = focusOutside(latest.current.region.current)
-    }
-    const restoreFocus = (): void => {
-      const target = returnTo.current
-      returnTo.current = null
-      if (target?.isConnected === true) target.focus()
-      else latest.current.launcher.current?.focus()
-    }
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.defaultPrevented || isImeKey(event)) return
-      const key = event.key === "Escape" ? "escape" : matchesShortcutKeys(keys, event) ? "chord" : undefined
-      if (key === undefined) return
-      const { composer, fullscreen, onOpenChange, open, region } = latest.current
-      // Escape belongs to a dialog, listbox or menu open inside Relay, even one that doesn't prevent it.
-      if (key === "escape" && region.current !== null && hasNestedLayer(region.current, event.target)) return
-      const active = focusRestoreTarget(document)
-      const focusInRelay = region.current !== null && active !== null && isWithinComposedElement(region.current, active)
-      const effect = relaySummonTransition({ focusInRelay, fullscreen, open }, key)
-      if (effect === "Ignore") return
-      event.preventDefault()
-      switch (effect) {
-        case "Open":
-          rememberFocus()
-          focusComposerOnOpen.current = true
-          onOpenChange(true)
-          return
-        case "FocusComposer":
-          rememberFocus()
-          composer.current?.focus()
-          return
-        case "ReturnFocus":
-          restoreFocus()
-          return
-        case "Close":
-          onOpenChange(false)
-          restoreFocus()
-          return
+    const documents = new Set([options.launcher.current?.ownerDocument ?? document, region?.ownerDocument])
+    const listeners = [...documents].flatMap((owner) => {
+      if (owner === undefined) return []
+      const onKeyDown = (event: KeyboardEvent): void => {
+        if (event.defaultPrevented || isImeKey(event)) return
+        const key =
+          event.key === "Escape" ? "escape" : keys !== null && matchesShortcutKeys(keys, event) ? "chord" : undefined
+        if (key === undefined) return
+        const { fullscreen, onOpenChange, open } = latest.current
+        const surface = regionNode.current
+        // Escape belongs to a dialog, listbox or menu open inside (or opened from) Relay.
+        if (key === "escape" && hasNestedLayer(surface, event.composedPath())) return
+        const active = focusRestoreTarget(owner)
+        const focusInRelay = surface !== null && active !== null && isWithinComposedElement(surface, active)
+        const effect = relaySummonTransition({ focusInRelay, fullscreen, open }, key)
+        if (effect === "Ignore") return
+        event.preventDefault()
+        switch (effect) {
+          case "Open":
+            returnTo.current = focusOutside(surface)
+            pendingComposerFocus.current = true
+            onOpenChange(true)
+            return
+          case "FocusComposer":
+            returnTo.current = focusOutside(surface)
+            if (composer.current === null) pendingComposerFocus.current = true
+            else composer.current.focus()
+            return
+          case "ReturnFocus":
+            restoreFocus()
+            return
+          case "Close":
+            pendingRestore.current = true
+            onOpenChange(false)
+            return
+        }
       }
+      owner.addEventListener("keydown", onKeyDown)
+      return [() => owner.removeEventListener("keydown", onKeyDown)]
+    })
+    return () => {
+      for (const remove of listeners) remove()
     }
-    document.addEventListener("keydown", onKeyDown)
-    return () => document.removeEventListener("keydown", onKeyDown)
-  }, [keys])
+  }, [keys, options.launcher, region, restoreFocus])
+
+  return { composerRef, regionRef }
 }
-
-const dialogLayer = "dialog[open], [role='dialog'], [role='alertdialog']"
-const popupLayer = "[role='listbox'], [role='menu']"
-
-/**
- * Whether an event comes from a layer nested inside Relay: a dialog, or a listbox or menu while it is an
- * open popup (Radix's data-state, or the target of an expanded aria-controls). Relay's own surface,
- * marked data-rly-relay-surface (the dock's full-screen dialog), and always-rendered lists never count,
- * so Escape still closes Relay from them.
- */
-const hasNestedLayer = (region: HTMLElement, target: EventTarget | null): boolean => {
-  let current = isElementTarget(target) ? target : null
-  while (current !== null && current !== region && region.contains(current)) {
-    if (!current.hasAttribute("data-rly-relay-surface")) {
-      if (current.matches(dialogLayer)) return true
-      if (current.matches(popupLayer) && isOpenPopup(region, current)) return true
-    }
-    current = current.parentElement
-  }
-  return false
-}
-
-const isOpenPopup = (region: HTMLElement, element: Element): boolean =>
-  element.getAttribute("data-state") === "open" ||
-  (element.id !== "" &&
-    [...region.ownerDocument.querySelectorAll("[aria-expanded='true'][aria-controls]")].some((control) =>
-      (control.getAttribute("aria-controls") ?? "").split(/\s+/).includes(element.id)
-    ))
-
-const isElementTarget = (target: EventTarget | null): target is Element =>
-  target !== null && "closest" in target && "nodeType" in target && target.nodeType === 1
 
 /** The focused element when it is on the page rather than in Relay (shadow roots included), else null. */
 const focusOutside = (region: HTMLElement | null): HTMLElement | null => {
-  const active = focusRestoreTarget(document)
+  const owner = region?.ownerDocument ?? document
+  const active = focusRestoreTarget(owner) ?? (owner === document ? null : focusRestoreTarget(document))
   return active !== null && region !== null && isWithinComposedElement(region, active) ? null : active
 }
 

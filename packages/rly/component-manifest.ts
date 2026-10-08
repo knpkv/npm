@@ -279,6 +279,7 @@ export const componentManifest = {
         { kind: "value", name: "useRelaySummon" },
         { kind: "type", name: "RelayLauncherProps" },
         { kind: "type", name: "RlyRelayShortcut" },
+        { kind: "type", name: "RlyRelaySummon" },
         { kind: "type", name: "UseRelaySummonOptions" }
       ],
       name: "RelayLauncher",

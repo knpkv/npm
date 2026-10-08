@@ -3697,6 +3697,10 @@
           "name": "RlyRelayShortcut"
         },
         {
+          "kind": "type",
+          "name": "RlyRelaySummon"
+        },
+        {
           "kind": "value",
           "name": "useRelayShortcut"
         },

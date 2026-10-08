@@ -28,11 +28,15 @@ const header: CSSProperties = {
 const HostHeader = ({ bindsShortcut = true }: { readonly bindsShortcut?: boolean }): ReactElement => {
   const [open, setOpen] = useState(false)
   const shortcut = useRelayShortcut()
-  const region = useRef<HTMLElement>(null)
-  const composer = useRef<HTMLTextAreaElement>(null)
   const launcher = useRef<HTMLButtonElement>(null)
   const bound = bindsShortcut ? shortcut : null
-  useRelaySummon({ composer, fullscreen: false, launcher, onOpenChange: setOpen, open, region, shortcut: bound })
+  const { composerRef, regionRef } = useRelaySummon({
+    fullscreen: false,
+    launcher,
+    onOpenChange: setOpen,
+    open,
+    shortcut: bound
+  })
   return (
     <main style={pageStyle}>
       <header style={header}>
@@ -43,8 +47,8 @@ const HostHeader = ({ bindsShortcut = true }: { readonly bindsShortcut?: boolean
       </header>
       <p data-relay-state={open ? "open" : "closed"}>{open ? "Relay is open." : "Relay is closed."}</p>
       {open ? (
-        <section aria-label="Relay" ref={region}>
-          <textarea aria-label="Message Relay" ref={composer} />
+        <section aria-label="Relay" ref={regionRef}>
+          <textarea aria-label="Message Relay" ref={composerRef} />
         </section>
       ) : null}
     </main>

@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 
 import { act, type ReactElement, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it } from "vitest"
 import { RelayLauncher, relayShortcut, useRelaySummon } from "../../src/patterns/RelayLauncher.js"
@@ -15,19 +16,24 @@ afterEach(async () => {
 })
 
 /** A host page: a page control, the launcher, and Relay's region with its composer while open. */
-const Host = ({ bound = true, fullscreen = false }: { readonly bound?: boolean; readonly fullscreen?: boolean }) => {
+const Host = ({
+  bound = true,
+  composerLater = false,
+  fullscreen = false
+}: {
+  readonly bound?: boolean
+  readonly composerLater?: boolean
+  readonly fullscreen?: boolean
+}) => {
   const [open, setOpen] = useState(false)
-  const region = useRef<HTMLElement>(null)
-  const composer = useRef<HTMLTextAreaElement>(null)
   const launcher = useRef<HTMLButtonElement>(null)
   const [pageControl, setPageControl] = useState(true)
-  useRelaySummon({
-    composer,
+  const [composerReady, setComposerReady] = useState(!composerLater)
+  const { composerRef, regionRef } = useRelaySummon({
     fullscreen,
     launcher,
     onOpenChange: setOpen,
     open,
-    region,
     shortcut: bound ? ctrlJ : null
   })
   return (
@@ -44,11 +50,15 @@ const Host = ({ bound = true, fullscreen = false }: { readonly bound?: boolean; 
         shortcut={bound ? ctrlJ : null}
       />
       {open ? (
-        <aside aria-label="Relay" ref={region}>
+        <aside aria-label="Relay" ref={regionRef}>
           <button data-testid="relay-option" type="button">
             Options
           </button>
-          <textarea aria-label="Message Relay" ref={composer} />
+          <button data-testid="composer-ready" onClick={() => setComposerReady(true)} type="button">
+            Load composer
+          </button>
+          {composerReady ? <textarea aria-label="Message Relay" ref={composerRef} /> : null}
+          <div data-testid="shadow-host" ref={attachShadowDialog} />
           <button data-testid="remove-page" onClick={() => setPageControl(false)} type="button">
             Remove page control
           </button>
@@ -76,26 +86,80 @@ const Host = ({ bound = true, fullscreen = false }: { readonly bound?: boolean; 
   )
 }
 
+/** A shadow root inside Relay holding a dialog with a focusable control. */
+const attachShadowDialog = (host: HTMLDivElement | null): void => {
+  if (host === null || host.shadowRoot !== null) return
+  const shadow = host.attachShadow({ mode: "open" })
+  const dialog = document.createElement("div")
+  dialog.setAttribute("role", "dialog")
+  const button = document.createElement("button")
+  button.textContent = "Inside a shadow dialog"
+  dialog.append(button)
+  shadow.append(dialog)
+}
+
+/** Records whether the page control received focus while Relay's surface was still mounted. */
+let focusedWhileRelayMounted: boolean | undefined
+
 /** A host whose region is a wrapper around a modal surface, like the dock's full-screen dialog. */
 const SurfaceHost = (): ReactElement => {
   const [open, setOpen] = useState(false)
-  const region = useRef<HTMLDivElement>(null)
-  const composer = useRef<HTMLTextAreaElement>(null)
   const launcher = useRef<HTMLButtonElement>(null)
-  useRelaySummon({ composer, fullscreen: true, launcher, onOpenChange: setOpen, open, region, shortcut: ctrlJ })
+  const { composerRef, regionRef } = useRelaySummon({
+    fullscreen: true,
+    launcher,
+    onOpenChange: setOpen,
+    open,
+    shortcut: ctrlJ
+  })
+  return (
+    <>
+      <button
+        data-testid="page"
+        onFocus={() => {
+          focusedWhileRelayMounted = document.querySelector("[data-rly-relay-surface]") !== null
+        }}
+        type="button"
+      >
+        Page control
+      </button>
+      <RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} ref={launcher} shortcut={ctrlJ} />
+      {open ? (
+        <div ref={regionRef}>
+          <section aria-label="Relay" aria-modal data-rly-relay-surface="" role="dialog">
+            <textarea aria-label="Message Relay" ref={composerRef} />
+          </section>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
+/** A host that portals Relay into another document (an iframe's), as PortalProvider allows. */
+const OtherDocumentHost = ({ target }: { readonly target: HTMLElement }): ReactElement => {
+  const [open, setOpen] = useState(false)
+  const launcher = useRef<HTMLButtonElement>(null)
+  const { composerRef, regionRef } = useRelaySummon({
+    fullscreen: false,
+    launcher,
+    onOpenChange: setOpen,
+    open,
+    shortcut: ctrlJ
+  })
   return (
     <>
       <button data-testid="page" type="button">
         Page control
       </button>
       <RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} ref={launcher} shortcut={ctrlJ} />
-      {open ? (
-        <div ref={region}>
-          <section aria-label="Relay" aria-modal data-rly-relay-surface="" role="dialog">
-            <textarea aria-label="Message Relay" ref={composer} />
-          </section>
-        </div>
-      ) : null}
+      {open
+        ? createPortal(
+            <aside aria-label="Relay" ref={regionRef}>
+              <textarea aria-label="Message Relay" ref={composerRef} />
+            </aside>,
+            target
+          )
+        : null}
     </>
   )
 }
@@ -233,6 +297,64 @@ describe("useRelaySummon", () => {
     composer()?.focus()
     expect(await press("j", { ctrlKey: true })).toBe(true)
     expect(document.activeElement).toBe(launcher())
+  })
+
+  it("focuses a composer that mounts after Relay opened", async () => {
+    await mount(<Host composerLater />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    expect(composer()).toBeNull()
+    await act(async () => byTestId("composer-ready").click())
+    expect(document.activeElement).toBe(composer())
+  })
+
+  it("returns focus only after a full-screen Relay has closed", async () => {
+    focusedWhileRelayMounted = undefined
+    await mount(<SurfaceHost />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    focusedWhileRelayMounted = undefined
+    await press("Escape")
+    expect(document.activeElement).toBe(byTestId("page"))
+    expect(focusedWhileRelayMounted).toBe(false)
+  })
+
+  it("leaves Escape to a dialog inside a shadow root in Relay", async () => {
+    await mount(<Host />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    const inner = byTestId("shadow-host").shadowRoot?.querySelector("button")
+    inner?.focus()
+    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Escape" })
+    await act(async () => {
+      inner?.dispatchEvent(event)
+    })
+    expect(event.defaultPrevented).toBe(false)
+    expect(composer()).not.toBeNull()
+  })
+
+  it("follows Relay into another document", async () => {
+    const other = document.implementation.createHTMLDocument("relay frame")
+    await mount(<OtherDocumentHost target={other.body} />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    const otherComposer = other.querySelector("textarea")
+    expect(otherComposer).not.toBeNull()
+    otherComposer?.focus()
+    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ctrlKey: true, key: "j" })
+    await act(async () => {
+      otherComposer?.dispatchEvent(event)
+    })
+    expect(event.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(byTestId("page"))
+  })
+
+  it("keeps Escape working when the host's own surface owns the shortcut", async () => {
+    await mount(<Host bound={false} />)
+    await act(async () => launcher()?.click())
+    composer()?.focus()
+    expect(await press("Escape")).toBe(true)
+    expect(composer()).toBeNull()
   })
 
   it("does nothing while the host's own surface owns the key", async () => {

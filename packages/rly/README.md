@@ -472,14 +472,18 @@ came from, and Relay stays open. Full screen, it closes Relay. Escape closes Rel
 it or Relay is full screen, and returns focus. Only the exact chord is handled and prevented, so Ctrl+K,
 `?`, g-sequences and Alt keys reach the host. On a non-Latin layout the physical J key works; a Latin
 layout uses the J the user sees. Escape is left to an IME composition and to a dialog, listbox or menu
-open inside Relay. When the element Relay came from is gone, focus returns to the `launcher`. Pass the
-same `shortcut` the launcher advertises, or `null` while the host's own surface owns the key.
+open inside or opened from Relay, including inside shadow roots. When the element Relay came from is
+gone, focus returns to the `launcher`; after a close, focus returns once Relay has actually closed.
+Attach the returned `regionRef` to Relay's region and `composerRef` to the composer, which is focused
+as soon as it mounts. The hook follows Relay into another document (an iframe portal). Pass the same
+`shortcut` the launcher advertises, or `null` while the host's own surface owns the key; Escape inside
+Relay works either way.
 
 ```tsx
 import { RelayLauncher, useRelayShortcut, useRelaySummon } from "@knpkv/rly/patterns"
 
 ;const shortcut = useRelayShortcut()
-useRelaySummon({ composer, fullscreen: false, launcher, onOpenChange: setOpen, open, region, shortcut })
+const { composerRef, regionRef } = useRelaySummon({ fullscreen: false, launcher, onOpenChange: setOpen, open, shortcut })
 
 <RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} ref={launcher} shortcut={shortcut} />
 ```
