@@ -2,7 +2,7 @@ import { dashboardRefreshView } from "./internal/dashboard-refresh.js"
 import { RegistryProvider, useAtom, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
-import { Cause, Effect, Exit, Option, Result, Schedule, Schema } from "effect"
+import { Cause, Clock, Effect, Exit, Option, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
@@ -112,19 +112,32 @@ const fetchJson = Effect.fn("ApprovalClient.fetchJson")(function* <A>(
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
 const loadDashboard = fetchJson(DashboardSnapshot, "/v1/dashboard")
-const loadLimits = fetchJson(FleetLimits, "/v1/limits")
+/** The fleet's reads and when this page received them, on this page's clock. */
+interface LoadedLimits {
+  readonly fleet: FleetLimits
+  readonly receivedAt: number
+}
+
+const loadLimits = fetchJson(FleetLimits, "/v1/limits").pipe(
+  Effect.flatMap((fleet) =>
+    Clock.currentTimeMillis.pipe(Effect.map((receivedAt): LoadedLimits => ({ fleet, receivedAt })))
+  )
+)
 
 const limitsTime = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })
 
 /**
- * The limits as of the last good load, and why the latest load failed when it did. `now` is the
- * browser's clock: ages and reset countdowns are read against it on every render.
+ * The limits as of the last good load, and why the latest load failed when it did. `now` is this
+ * page's clock, compared only with when the page received the reads; host times stay on host clocks.
  */
-const limitsState = (result: AsyncResult.AsyncResult<FleetLimits, unknown>, now: number) => {
+const limitsState = (result: AsyncResult.AsyncResult<LoadedLimits, unknown>, now: number) => {
   const last = AsyncResult.value(result)
   return {
     problem: AsyncResult.isFailure(result) ? "Couldn't load limits. Trying again every minute." : null,
-    view: Option.isSome(last) ? limitsView(last.value, now, (millis) => limitsTime.format(millis)) : null
+    view: Option.isSome(last)
+      ? limitsView(last.value.fleet, { sinceLoad: Math.max(0, now - last.value.receivedAt), now }, (millis) =>
+        limitsTime.format(millis))
+      : null
   }
 }
 
@@ -416,7 +429,8 @@ type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const result = useAtomValue(atoms.dashboard)
   const workResult = useAtomValue(atoms.work)
-  // A host API at the UI boundary: limit ages are relative to the viewer's clock.
+  // A host API at the UI boundary, compared only with the page's own receipt time; the hub's
+  // 15-second clock tick re-renders the page, so ages stay current between loads.
   const limits = limitsState(useAtomValue(atoms.limits), Date.now())
   const notificationResult = useAtomValue(atoms.notification)
   const refresh = useAtomRefresh(atoms.dashboard)

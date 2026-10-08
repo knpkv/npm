@@ -4,6 +4,10 @@
  * per account and window, and the freshest reading wins; the window names the host it was read on.
  * A window nobody could read stays unknown, with the reason in words, and never becomes 0%.
  *
+ * Every time in a read is on the reading host's clock, so the model never compares one with this
+ * page's clock or with another host's. Ages and countdowns are measured against the CLI's own `now`,
+ * plus the time since this page received the read: neither clock skew moves them.
+ *
  * @module
  */
 import type { FleetLimits, HostLimits, LimitProvider, LimitWindowId, LimitWindowState } from "./limits-schema.js"
@@ -50,6 +54,11 @@ export interface LimitAccountView {
   readonly name: string
   /** The account's label (an email) when a host reports it. */
   readonly account: string | null
+  /**
+   * The host that read it, when the CLI names no account: two hosts may hold different
+   * subscriptions, so their unnamed reads stay apart.
+   */
+  readonly host: string | null
   readonly windows: ReadonlyArray<LimitWindowView>
   /** The window to show when there is room for one: the closest to its limit. */
   readonly headline: LimitWindowView | null
@@ -145,26 +154,33 @@ interface Candidate {
   readonly provider: LimitProvider
   readonly window: LimitWindowId
   readonly state: Exclude<LimitWindowState, { readonly _tag: "NotReported" }>
+  /** The CLI's `now` for this read, on the same host clock as every time in `state`. */
+  readonly readNow: number
 }
 
-const observedAt = (candidate: Candidate): number => candidate.state.observedAt ?? Number.NEGATIVE_INFINITY
+/** How old the reading was when the CLI ran; unknown readings may not say. */
+const ageAtRead = (candidate: Candidate): number => candidate.state.ageMs ?? Number.POSITIVE_INFINITY
 
-/** A Known reading beats an unknown one; between two of a kind, the later observation wins. */
+/** A Known reading beats an unknown one; between two of a kind, the younger reading wins. */
 const fresher = (left: Candidate, right: Candidate): Candidate => {
   const leftKnown = left.state._tag === "Known"
   const rightKnown = right.state._tag === "Known"
   if (leftKnown !== rightKnown) return leftKnown ? left : right
-  return observedAt(right) > observedAt(left) ? right : left
+  return ageAtRead(right) < ageAtRead(left) ? right : left
 }
+
+const percentText = (used: number): string => `${String(Math.round(used))}%`
 
 const toneRank = { "at-limit": 3, near: 2, unknown: 1, ok: 0 } satisfies Record<LimitTone, number>
 
 const windowView = (
   candidate: Candidate,
-  now: number,
+  clock: LimitsClock,
   formatTime: (millis: number) => string
 ): LimitWindowView => {
-  const { host, provider, state, window } = candidate
+  const { host, provider, readNow, state, window } = candidate
+  // A host time `at` is this far ahead of now, measured on the host's own clock.
+  const fromNow = (at: number): number => at - readNow - clock.sinceLoad
   const reserveMark = 100 - provider.reservePp
   const base = { key: windowKey(window), name: windowName(window), reserveMark }
   if (state._tag === "Unknown") {
@@ -177,10 +193,10 @@ const windowView = (
       usedText: "Unknown",
       detailText: unknownReason(state.reason, state.ageMs),
       paceText: null,
-      sourceText: state.observedAt === undefined ? null : `last read on ${host}, ${ago(now - state.observedAt)}`
+      sourceText: state.ageMs === undefined ? null : `last read on ${host}, ${ago(state.ageMs + clock.sinceLoad)}`
     }
   }
-  const age = now - state.observedAt
+  const age = state.ageMs + clock.sinceLoad
   const sourceText = `read on ${host}, ${ago(age)}`
   const used = state.usedPercent
   if (age > maxAge(window)) {
@@ -190,7 +206,7 @@ const windowView = (
       value: used,
       stale: true,
       projected: null,
-      usedText: `${String(used)}% used, old reading`,
+      usedText: `${percentText(used)} used, old reading`,
       // The source line already says how old it is.
       detailText: null,
       paceText: null,
@@ -198,7 +214,7 @@ const windowView = (
     }
   }
   const projected = state.burnPerHour._tag === "Known" && state.resetsAt !== null
-    ? used + (state.burnPerHour.value * Math.max(0, state.resetsAt - now)) / HOUR
+    ? used + (state.burnPerHour.value * Math.max(0, fromNow(state.resetsAt))) / HOUR
     : null
   const exhausts = state.exhaustsAt
   const runsOutBeforeReset = exhausts._tag === "Known" && exhausts.value !== "NotBeforeReset"
@@ -208,19 +224,19 @@ const windowView = (
     ? null
     : exhausts.value === "NotBeforeReset"
     ? "lasts until reset"
-    : `reaches the reserve ${formatTime(exhausts.value)}`
+    : `reaches the reserve ${formatTime(clock.now + fromNow(exhausts.value))}`
   return {
     ...base,
     tone: used >= 100 ? "at-limit" : used >= reserveMark || runsOutBeforeReset ? "near" : "ok",
     value: used,
     stale: false,
     projected,
-    usedText: `${String(used)}% used`,
+    usedText: `${percentText(used)} used`,
     detailText: state.resetsAt === null
       ? "reset time unknown"
-      : state.resetsAt <= now
+      : fromNow(state.resetsAt) <= 0
       ? "reset"
-      : `resets in ${duration(state.resetsAt - now)}`,
+      : `resets in ${duration(fromNow(state.resetsAt))}`,
     paceText,
     sourceText
   }
@@ -236,12 +252,21 @@ export const headlineWindow = (windows: ReadonlyArray<LimitWindowView>): LimitWi
   }, null)
 
 /**
+ * The page's side of time: how long ago it received the reads, and its own clock, used only to
+ * print an absolute moment. Both are this page's clock, so their difference is skew-free.
+ */
+export interface LimitsClock {
+  readonly sinceLoad: number
+  readonly now: number
+}
+
+/**
  * Merges every host's read into one view per account. `formatTime` renders an absolute moment
- * ("Thu 18:30"); the caller owns the locale and time zone.
+ * ("Thu 18:30") on the page's clock; the caller owns the locale and time zone.
  */
 export const limitsView = (
   fleet: FleetLimits,
-  now: number,
+  clock: LimitsClock,
   formatTime: (millis: number) => string
 ): LimitsView => {
   const accounts = new Map<
@@ -249,6 +274,7 @@ export const limitsView = (
     {
       readonly provider: LimitProviderId
       readonly account: string | null
+      readonly host: string | null
       readonly windows: Map<string, Candidate>
     }
   >()
@@ -261,35 +287,49 @@ export const limitsView = (
     for (const provider of limitProviders) {
       const report = host.reading.limits.providers[provider]
       const account = report.account?._tag === "Known" ? report.account : null
-      const key = `${provider}:${account === null ? "" : account.id}`
-      const entry = accounts.get(key) ?? { provider, account: account?.label ?? null, windows: new Map() }
+      const key = account === null ? `${provider}:host:${host.host}` : `${provider}:account:${account.id}`
+      const entry = accounts.get(key) ?? {
+        provider,
+        account: account?.label ?? null,
+        host: account === null ? host.host : null,
+        windows: new Map()
+      }
       accounts.set(key, entry)
       for (const { state, window } of report.windows) {
         if (state._tag === "NotReported") continue
-        const candidate: Candidate = { host: host.host, provider: report, state, window }
+        const candidate: Candidate = {
+          host: host.host,
+          provider: report,
+          readNow: host.reading.limits.now,
+          state,
+          window
+        }
         const current = entry.windows.get(windowKey(window))
         entry.windows.set(windowKey(window), current === undefined ? candidate : fresher(current, candidate))
       }
     }
   }
   for (const failure of fleet.failures) notes.push(`No reading from ${failure.host} (${failureWords[failure.reason]})`)
+  if (!fleet.peersListed) notes.push("Other machines unknown: the hub couldn't list the fleet")
   const views = [...accounts.entries()]
     .map(([key, entry]): LimitAccountView => {
       const windows = [...entry.windows.values()]
         .sort((left, right) => windowOrder(left.window) - windowOrder(right.window))
-        .map((candidate) => windowView(candidate, now, formatTime))
+        .map((candidate) => windowView(candidate, clock, formatTime))
       return {
         key,
         provider: entry.provider,
         name: providerNames[entry.provider],
         account: entry.account,
+        host: entry.host,
         windows,
         headline: headlineWindow(windows)
       }
     })
     .sort(
       (left, right) =>
-        left.provider.localeCompare(right.provider) || (left.account ?? "").localeCompare(right.account ?? "")
+        left.provider.localeCompare(right.provider) ||
+        (left.account ?? left.host ?? "").localeCompare(right.account ?? right.host ?? "")
     )
   return { accounts: views, notes }
 }

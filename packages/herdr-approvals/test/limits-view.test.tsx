@@ -59,10 +59,19 @@ const view: LimitsView = {
       provider: "claude",
       name: "Claude",
       account: "andrey@example.com",
+      host: null,
       windows: [limitWindow({ key: "five_hour", name: "5-hour", value: 19 }), limitWindow({})],
       headline: limitWindow({})
     },
-    { key: "codex:", provider: "codex", name: "Codex", account: null, windows: [unknownWeekly], headline: unknownWeekly }
+    {
+      key: "codex:",
+      provider: "codex",
+      name: "Codex",
+      account: null,
+      host: null,
+      windows: [unknownWeekly],
+      headline: unknownWeekly
+    }
   ],
   notes: ["Limits are off on MBP"]
 }

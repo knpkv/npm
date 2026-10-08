@@ -29,7 +29,7 @@ const stateTone = {
 
 // An old reading is not the current level: the chip says unknown rather than repeat a stale number.
 const percent = (window: LimitWindowView): string =>
-  window.value === null || window.stale ? "unknown" : `${String(window.value)}%`
+  window.value === null || window.stale ? "unknown" : `${String(Math.round(window.value))}%`
 
 /** "Claude" plus every account's headline window, the closest to its limit first. */
 const providerHeadlines = (
@@ -116,15 +116,21 @@ const WindowRow = ({ window }: { readonly window: LimitWindowView }) => {
   )
 }
 
-const Account = ({ account }: { readonly account: LimitAccountView }) => (
-  <section className="limits-account" aria-label={account.account === null ? account.name : `${account.name}, ${account.account}`}>
+/** The account's email, or for an unnamed account the host that read it. */
+const accountLabel = (account: LimitAccountView): string | null =>
+  account.account ?? (account.host === null ? null : `on ${account.host}`)
+
+const Account = ({ account }: { readonly account: LimitAccountView }) => {
+  const label = accountLabel(account)
+  return (
+  <section className="limits-account" aria-label={label === null ? account.name : `${account.name}, ${label}`}>
     <div className="limits-account-heading">
       <Text as="h3" variant="label">
         {account.name}
       </Text>
-      {account.account === null ? null : (
+      {label === null ? null : (
         <Text className="limits-account-label" tone="secondary" variant="meta">
-          {account.account}
+          {label}
         </Text>
       )}
     </div>
@@ -140,7 +146,8 @@ const Account = ({ account }: { readonly account: LimitAccountView }) => (
       </ul>
     )}
   </section>
-)
+  )
+}
 
 /**
  * The "Usage limits" panel. `problem` says why the latest load failed; the last good view stays
