@@ -9,7 +9,7 @@ import { LimitTrack, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { useId } from "react"
 import type { BalanceReading, LimitSnapshot } from "../core/Model.js"
 import { describeReason, formatAge, formatBalance, formatInstant, formatPercent } from "./format.js"
-import { agentName, type LimitTone, NEAR_PERCENT, summarizeLimits, type WindowSummary } from "./limitsModel.js"
+import { agentName, type LimitTone, NEAR_PERCENT, summarizeLimits, type WindowSummary } from "./model.js"
 
 interface ToneLabel {
   readonly label: string

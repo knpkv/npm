@@ -21,10 +21,10 @@
       "default": "./dist/index.js"
     },
     "./limits": {
-      "types": "./src/limits.ts",
-      "default": "./dist/limits.js"
+      "types": "./src/limits/index.ts",
+      "default": "./dist/limits/index.js"
     },
-    "./limits.css": "./src/client/limits.css",
+    "./limits.css": "./src/limits/limits.css",
     "./*.js": {
       "types": "./src/*.ts",
       "default": "./dist/*.js"
@@ -40,10 +40,10 @@
         "default": "./dist/index.js"
       },
       "./limits": {
-        "types": "./dist/limits.d.ts",
-        "default": "./dist/limits.js"
+        "types": "./dist/limits/index.d.ts",
+        "default": "./dist/limits/index.js"
       },
-      "./limits.css": "./src/client/limits.css",
+      "./limits.css": "./src/limits/limits.css",
       "./*.js": {
         "types": "./dist/*.d.ts",
         "default": "./dist/*.js"
@@ -52,7 +52,7 @@
   },
   "files": [
     "dist",
-    "src/client/limits.css"
+    "src/limits/limits.css"
   ],
   "engines": {
     "node": ">=26"
