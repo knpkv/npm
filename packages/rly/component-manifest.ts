@@ -332,6 +332,31 @@ export const componentManifest = {
         tests: ["test/patterns/RelayPanel.test.tsx"]
       }
     },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayComposer" },
+        { kind: "value", name: "useRelayDraft" },
+        { kind: "type", name: "RelayComposerProps" },
+        { kind: "type", name: "RlyRelayContextRef" },
+        { kind: "type", name: "RlyRelayDraft" },
+        { kind: "type", name: "RlyRelayDraftStorage" },
+        { kind: "type", name: "RlyRelaySubmission" },
+        { kind: "type", name: "UseRelayDraftOptions" }
+      ],
+      name: "RelayComposer",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayComposer.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayComposer.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayComposer.stories.tsx",
+        storyId: "patterns-relaycomposer--draft",
+        tests: ["test/patterns/RelayComposer.test.tsx"]
+      }
+    },
     // scaffold:components:insert
     {
       category: "primitive",

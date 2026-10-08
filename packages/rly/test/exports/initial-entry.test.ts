@@ -57,6 +57,8 @@ describe("public entries", () => {
       "RLY_RELATIONSHIP_DIRECTION_PRESENTATION",
       "RLY_RELATIONSHIP_LIFECYCLE_PRESENTATION",
       "RelationshipTable",
+      "RelayComposer",
+      "useRelayDraft",
       "RelayDock",
       "RelayLauncher",
       "relayShortcut",

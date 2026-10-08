@@ -959,6 +959,28 @@
     {
       "capabilities": [
         "agent",
+        "write"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayComposer",
+      "states": [
+        "busy",
+        "default",
+        "draft"
+      ],
+      "terms": [
+        "agent",
+        "busy",
+        "draft",
+        "pattern",
+        "relaycomposer",
+        "write"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
         "conversation",
         "overlay",
         "select"

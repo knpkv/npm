@@ -469,6 +469,18 @@ the platform) only when the host binds that key and prevents the browser's own C
 or `null` where it binds none, such as a live terminal that keeps its chords.
 The hint hides at 40rem and below, and the button is 32px tall, 44px for a coarse pointer.
 
+`RelayComposer` is Relay's message box: it grows with its text up to 12 lines or 40%
+of the viewport, Enter adds a line and Ctrl/⌘+Enter sends (said beside Send), and an
+IME composition never sends. Context refs are removable chips. One `preset` slot holds
+the run preset. Stop appears only when the host passes `onStop`. While `busyReason` is
+set, Send stays focusable and announces why it is unavailable. `useRelayDraft(objectKey, { newRequestId })`
+keeps the draft per object (the JSON ObjectRef) for the page, so closing, reopening or
+resizing Relay keeps it and one object's draft never sends as another's; pass
+`storage: () => sessionStorage` to survive a reload (never localStorage). Its
+`submission()` reuses one request id until the text changes, so a retry after an
+uncertain outcome is deduplicated; call `accepted(requestId)` once the server accepts
+that request, which clears the draft unless the user has typed since.
+
 `RelayPanel` is Relay's frame: header (mark, title, exact scope with the revision in
 mono, an optional pin, options, close), tabs whose counts are part of their names, a
 freshness line, a body, and a footer for the composer. Only the body scrolls, so the
