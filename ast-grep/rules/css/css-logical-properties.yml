@@ -26,6 +26,7 @@ note: |
   text-align: start. Three- and four-value margin/padding shorthands are physical too but are not
   matched (values may contain spaces); write margin-block / margin-inline instead. Media and
   container queries (max-width: 30rem) are features, not properties, and stay allowed.
-  A shape drawn with borders that must not mirror (a tick glyph) may keep physical sides with a
-  preceding /* ast-grep-ignore: css-logical-properties */ comment. Packages opt in by adding their
-  stylesheets to files once they comply.
+  A shape drawn with borders that must not mirror (a tick glyph) sets `direction: ltr` on itself and
+  keeps logical properties: they resolve against the element's own direction, so no escape is
+  needed (escapes count against the package ledger in `pnpm debt:check`). Packages opt in by adding
+  their stylesheets to files once they comply.

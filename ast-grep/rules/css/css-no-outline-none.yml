@@ -39,5 +39,7 @@ note: |
   clear the inner field's outline behind a comment naming that container rule, then
   `/* ast-grep-ignore: css-no-outline-none */` on the line directly above. A file-wide exemption is
   deliberately not built in, because it could not tell which field the container ring belongs to.
+  The escape's reason goes on the comment line directly above it, and the escape raises the
+  package's ledger: run `pnpm debt:update` in the same reviewed change.
   `:focus:not(:focus-visible) { outline: none }` is not an exception; rly's ring is already
   :focus-visible only.
