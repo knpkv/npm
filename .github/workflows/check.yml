@@ -90,6 +90,10 @@ jobs:
           node-version: 26.7.0
       - name: Configure canonical Effect remote
         run: git remote add effect-upstream https://github.com/Effect-TS/effect.git
+      # Release publishes every public version not yet on npm, so only the Version Packages
+      # pull request may move an existing package's version.
+      - name: Check version bumps
+        run: node scripts/check-version-bumps.mjs
       # The checker resolves workspace types through built package outputs.
       - run: pnpm check
       - run: pnpm lint:changeset-coverage
