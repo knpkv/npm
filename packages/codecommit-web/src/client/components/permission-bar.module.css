@@ -2,15 +2,16 @@
 .dock {
   position: fixed;
   z-index: 30;
-  inset-block-end: var(--rly-space-16);
+  inset-block-end: 0;
   inset-inline: var(--rly-space-16);
   margin-inline: auto;
   max-inline-size: 72rem;
   /*
-   * An 8px clear band on top, counted in the published height: a chip docked above (Relay) keeps a
-   * gap from the bar. The band takes no clicks; only the bar does.
+   * The published height is the bar's whole footprint from the viewport's bottom edge: an 8px clear band
+   * on top, so Relay's panel above keeps a gap, and the 16px gutter below. Neither takes clicks; only the
+   * bar does.
    */
-  padding-block-start: var(--rly-space-8);
+  padding-block: var(--rly-space-8) var(--rly-space-16);
   pointer-events: none;
 }
 

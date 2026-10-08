@@ -167,7 +167,8 @@ const useRelayDockAction = (): readonly [
   return [state, run]
 }
 
-export const HostConversationLocator = ({ host }: { readonly host: RelayProductDockHost }): ReactElement => {
+/** The locator form's state and submit: region, repository, PR number and optional account, decoded before lookup. */
+export const useHostConversationLocator = (host: RelayProductDockHost) => {
   const [accountId, setAccountId] = useState("")
   const [pullRequestId, setPullRequestId] = useState("")
   const [region, setRegion] = useState("")
@@ -201,6 +202,36 @@ export const HostConversationLocator = ({ host }: { readonly host: RelayProductD
     setValidation(null)
     runAction(host.locatePullRequestConversation(decoded.success))
   }
+
+  return {
+    accountId,
+    action,
+    pullRequestId,
+    region,
+    repositoryName,
+    setAccountId,
+    setPullRequestId,
+    setRegion,
+    setRepositoryName,
+    submit,
+    validation
+  }
+}
+
+export const HostConversationLocator = ({ host }: { readonly host: RelayProductDockHost }): ReactElement => {
+  const {
+    accountId,
+    action,
+    pullRequestId,
+    region,
+    repositoryName,
+    setAccountId,
+    setPullRequestId,
+    setRegion,
+    setRepositoryName,
+    submit,
+    validation
+  } = useHostConversationLocator(host)
 
   return (
     <form aria-label="Find a pull request conversation" onSubmit={submit}>

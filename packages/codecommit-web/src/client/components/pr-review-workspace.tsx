@@ -1481,7 +1481,10 @@ const ReadyReviewWorkspace = ({
   )
 
   const { openFrom: openRelayFrom } = useRelayProductOpen()
-  const clearFinding = useCallback(() => setSelectedFindingId(null), [])
+  // What Relay's next message is about: set only by Discuss and cleared only by removing it, never by the
+  // deck's own selection (which follows runs and reloads).
+  const [relayAboutId, setRelayAboutId] = useState<string | null>(null)
+  const clearFinding = useCallback(() => setRelayAboutId(null), [])
   const selectFinding = useCallback(
     (finding: RelayReviewFinding): void => {
       setSelectedFindingId(finding.id)
@@ -1490,12 +1493,6 @@ const ReadyReviewWorkspace = ({
     },
     [diff.files]
   )
-  const selectedFinding = review?.result.findings.find(({ id }) => id === selectedFindingId) ?? null
-  const conversationFindingId =
-    selectedFinding?.id ??
-    (selectedFindingId !== null && turns.some(({ findingId }) => findingId === selectedFindingId)
-      ? selectedFindingId
-      : null)
   const visibleProgress = progress.slice(-4)
   const [workbenchRef, workbenchWidth] = useInlineSize<HTMLDivElement>()
   const placement = findingsPlacement(workbenchWidth, rootFontSizePx())
@@ -1712,6 +1709,7 @@ const ReadyReviewWorkspace = ({
         }
         onDiscuss={(finding, control) => {
           selectFinding(finding)
+          setRelayAboutId(finding.id)
           openRelayFrom(control)
         }}
         onPost={(finding) => void postFinding(finding)}
@@ -1735,7 +1733,7 @@ const ReadyReviewWorkspace = ({
         pullRequest={pullRequest}
         review={review}
         reviewIsStale={reviewIsStale}
-        selectedFindingId={conversationFindingId}
+        selectedFindingId={relayAboutId}
         turns={turns}
       />
       <Surface as="section" className={styles.workspace} padding="none" form="grouped">

@@ -2,12 +2,18 @@ import { expect, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { RelayReviewProfile, RelayReviewResult } from "../src/server/Api.js"
 
-/** Relay's panel, opened from the app header or a finding's Discuss action. */
-const relayPanel = (page: Page) => page.getByRole("complementary", { name: "Relay" })
+/** Relay's panel, opened from the app header or a finding's Discuss action: an overlay, or full screen on a phone. */
+const relayPanel = (page: Page) =>
+  page
+    .getByRole("complementary", { exact: true, name: "Relay" })
+    .or(page.getByRole("dialog", { exact: true, name: "Relay" }))
+
+/** The page's findings deck, kept apart from Relay's panel, which may quote the same finding. */
+const findingDeck = (page: Page) => page.getByRole("region", { name: "Findings" })
 
 /** Discuss one finding in Relay: selects it and opens the panel with it as the composer's context. */
 const discussInRelay = async (page: Page, finding: RegExp): Promise<void> => {
-  await page
+  await findingDeck(page)
     .getByRole("listitem")
     .filter({ has: page.getByRole("button", { name: finding }) })
     .getByRole("button", { name: "Discuss in Relay" })
@@ -28,7 +34,10 @@ const closeRelay = async (page: Page): Promise<void> => {
 }
 
 const openRelay = async (page: Page): Promise<void> => {
-  await page.getByRole("banner").getByRole("button", { name: /^Relay/ }).click()
+  await page
+    .getByRole("banner")
+    .getByRole("button", { name: /^Relay/ })
+    .click()
   await expect(relayPanel(page)).toBeVisible()
 }
 
@@ -55,12 +64,14 @@ test.beforeEach(async ({ page }) => {
         refreshIntervalSeconds: 300,
         review: {
           defaultProfileId: "thorough",
-          profiles: [{
-            id: "thorough",
-            name: "Thorough review",
-            kind: "review",
-            skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
-          }]
+          profiles: [
+            {
+              id: "thorough",
+              name: "Thorough review",
+              kind: "review",
+              skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+            }
+          ]
         }
       }),
       contentType: "application/json",
@@ -113,17 +124,19 @@ const pullRequest = {
 
 const changedReviewResult: RelayReviewResult = {
   verdict: "The retry finding changed after re-review.",
-  findings: [{
-    id: "F1",
-    priority: "P2",
-    title: "Retry amplification",
-    summary: "The changed retry can duplicate a non-idempotent request.",
-    details: "The changed constant still expands retries without an idempotency guard.",
-    recommendation: "Require an idempotency key before retrying.",
-    verification: "Re-reviewed while publication remained active.",
-    publicationTarget: "line-comment",
-    location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
-  }]
+  findings: [
+    {
+      id: "F1",
+      priority: "P2",
+      title: "Retry amplification",
+      summary: "The changed retry can duplicate a non-idempotent request.",
+      details: "The changed constant still expands retries without an idempotency guard.",
+      recommendation: "Require an idempotency key before retrying.",
+      verification: "Re-reviewed while publication remained active.",
+      publicationTarget: "line-comment",
+      location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
+    }
+  ]
 }
 
 const RelayContinuePayload = Schema.Struct({
@@ -195,10 +208,12 @@ const routeReviewWorkspace = async (
       accounts: [{ ...activePullRequest.account, enabled: true }],
       currentUser: "reviewer",
       lastUpdated: "2026-08-12T09:30:00.000Z",
-      pullRequests: [{
-        ...activePullRequest,
-        commentCount: options?.commentCount?.() ?? activePullRequest.commentCount
-      }],
+      pullRequests: [
+        {
+          ...activePullRequest,
+          commentCount: options?.commentCount?.() ?? activePullRequest.commentCount
+        }
+      ],
       sandboxes: [],
       status: "idle"
     })
@@ -216,12 +231,14 @@ const routeReviewWorkspace = async (
     }
     const review = options?.review?.() ?? {
       defaultProfileId: "thorough",
-      profiles: [{
-        id: "thorough",
-        name: "Thorough review",
-        kind: expectedKind,
-        skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
-      }]
+      profiles: [
+        {
+          id: "thorough",
+          name: "Thorough review",
+          kind: expectedKind,
+          skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+        }
+      ]
     }
     await route.fulfill({
       body: JSON.stringify({
@@ -246,66 +263,74 @@ const routeReviewWorkspace = async (
   await page.route("**/api/prs/comments*", async (route) => {
     await options?.commentsGate?.(findingPostCount)
     await route.fulfill({
-      body: JSON.stringify([{
-        filePath: "src/retry.ts",
-        beforeCommitId: "a".repeat(40),
-        afterCommitId: "b".repeat(40),
-        relativeFileVersion: "AFTER",
-        comments: [
-          ...(options?.emptyCommentsInitially === true ?
-            [] :
-            (findingPostCount === 0 || options?.deleteOriginalCommentAfterPost !== true ?
-              [{
-                root: {
-                  id: "comment-1",
-                  content: "### Keep this retry path idempotent.\n\n**Owner:** reviewer",
-                  author: "reviewer",
-                  creationDate: "2026-08-12T10:00:00.000Z",
-                  deleted: false,
-                  filePath: "src/retry.ts",
-                  lineNumber: 1
-                },
-                replies: []
-              }] :
-              [])),
-          ...(options?.emptyCommentsInitially === true ? [] : [{
-            root: {
-              id: "comment-deleted",
-              content: "Deleted provider comment",
-              author: "deleted-reviewer",
-              creationDate: "2026-08-12T10:00:00.000Z",
-              deleted: true,
-              filePath: "src/retry.ts",
-              lineNumber: 1
-            },
-            replies: []
-          }]),
-          ...Array.from({ length: options?.commentFindingCount?.() ?? findingPostCount }, (_, index) => ({
-            root: {
-              id: `relay-comment-${String(index + 1)}`,
-              content: index === 0 ? "P2: Retry amplification" : "P3: Before-path evidence",
-              author: "relay",
-              creationDate: "2026-08-12T10:01:00.000Z",
-              deleted: false,
-              filePath: "src/retry.ts",
-              lineNumber: 1
-            },
-            replies: []
-          })),
-          ...Array.from({ length: options?.commentUnrelatedCount?.() ?? 0 }, (_, index) => ({
-            root: {
-              id: `unrelated-comment-${String(index + 1)}`,
-              content: "Unrelated provider comment",
-              author: "reviewer",
-              creationDate: "2026-08-12T10:02:00.000Z",
-              deleted: false,
-              filePath: "src/retry.ts",
-              lineNumber: 1
-            },
-            replies: []
-          }))
-        ]
-      }]),
+      body: JSON.stringify([
+        {
+          filePath: "src/retry.ts",
+          beforeCommitId: "a".repeat(40),
+          afterCommitId: "b".repeat(40),
+          relativeFileVersion: "AFTER",
+          comments: [
+            ...(options?.emptyCommentsInitially === true
+              ? []
+              : findingPostCount === 0 || options?.deleteOriginalCommentAfterPost !== true
+              ? [
+                {
+                  root: {
+                    id: "comment-1",
+                    content: "### Keep this retry path idempotent.\n\n**Owner:** reviewer",
+                    author: "reviewer",
+                    creationDate: "2026-08-12T10:00:00.000Z",
+                    deleted: false,
+                    filePath: "src/retry.ts",
+                    lineNumber: 1
+                  },
+                  replies: []
+                }
+              ]
+              : []),
+            ...(options?.emptyCommentsInitially === true
+              ? []
+              : [
+                {
+                  root: {
+                    id: "comment-deleted",
+                    content: "Deleted provider comment",
+                    author: "deleted-reviewer",
+                    creationDate: "2026-08-12T10:00:00.000Z",
+                    deleted: true,
+                    filePath: "src/retry.ts",
+                    lineNumber: 1
+                  },
+                  replies: []
+                }
+              ]),
+            ...Array.from({ length: options?.commentFindingCount?.() ?? findingPostCount }, (_, index) => ({
+              root: {
+                id: `relay-comment-${String(index + 1)}`,
+                content: index === 0 ? "P2: Retry amplification" : "P3: Before-path evidence",
+                author: "relay",
+                creationDate: "2026-08-12T10:01:00.000Z",
+                deleted: false,
+                filePath: "src/retry.ts",
+                lineNumber: 1
+              },
+              replies: []
+            })),
+            ...Array.from({ length: options?.commentUnrelatedCount?.() ?? 0 }, (_, index) => ({
+              root: {
+                id: `unrelated-comment-${String(index + 1)}`,
+                content: "Unrelated provider comment",
+                author: "reviewer",
+                creationDate: "2026-08-12T10:02:00.000Z",
+                deleted: false,
+                filePath: "src/retry.ts",
+                lineNumber: 1
+              },
+              replies: []
+            }))
+          ]
+        }
+      ]),
       contentType: "application/json",
       status: 200
     })
@@ -318,14 +343,16 @@ const routeReviewWorkspace = async (
         revisionId: "revision-1",
         baseCommit: "a".repeat(40),
         headCommit: "b".repeat(40),
-        files: [{
-          index: 0,
-          status: "renamed",
-          path: "src/retry.ts",
-          previousPath: "src/old-retry.ts",
-          beforeMode: "100644",
-          afterMode: "100755"
-        }]
+        files: [
+          {
+            index: 0,
+            status: "renamed",
+            path: "src/retry.ts",
+            previousPath: "src/old-retry.ts",
+            beforeMode: "100644",
+            afterMode: "100755"
+          }
+        ]
       }),
       contentType: "application/json",
       status: 200
@@ -476,7 +503,7 @@ const routeReviewWorkspace = async (
 
 const ContinuationTarget = Schema.Struct({ findingId: Schema.String })
 
-test("opens Relay from the header and discusses findings in its panel", async ({ page }) => {
+test("opens Relay from the header and discusses findings in its panel", async ({ page }, testInfo) => {
   const targets: Array<string> = []
   page.on("request", (request) => {
     if (request.url().includes("/relay-review/continue")) {
@@ -492,6 +519,9 @@ test("opens Relay from the header and discusses findings in its panel", async ({
   const launcher = page.getByRole("banner").getByRole("button", { name: /^Relay/ })
   await launcher.click()
   await expect(launcher).toHaveAttribute("aria-expanded", "true")
+  // The overlay spans the viewport below the header: no ancestor may box it into the header's height.
+  const panelBox = await relayPanel(page).boundingBox()
+  expect(panelBox?.height ?? 0).toBeGreaterThan(400)
   await closeRelay(page)
   await expect(launcher).toBeFocused()
   await page.keyboard.press("ControlOrMeta+j")
@@ -500,7 +530,7 @@ test("opens Relay from the header and discusses findings in its panel", async ({
   await closeRelay(page)
 
   // Discuss attaches the finding, and closing returns to that Discuss button.
-  const discussRetry = page
+  const discussRetry = findingDeck(page)
     .getByRole("listitem")
     .filter({ has: page.getByRole("button", { name: /Retry amplification/ }) })
     .getByRole("button", { name: "Discuss in Relay" })
@@ -514,9 +544,11 @@ test("opens Relay from the header and discusses findings in its panel", async ({
   // Discussing another finding keeps the draft and says what it is now about.
   await discussInRelay(page, /Before-path evidence/)
   await expect(asking).toContainText("Finding: Before-path evidence")
-  await expect(relayPanel(page).getByText("Context changed to Finding: Before-path evidence. Your draft is kept."))
-    .toBeVisible()
+  await expect(
+    relayPanel(page).getByText("Context changed to Finding: Before-path evidence. Your draft is kept.")
+  ).toBeVisible()
   await expect(relayPanel(page).getByLabel("Message Relay")).toHaveValue("Is the retry bounded?")
+  await page.screenshot({ path: testInfo.outputPath("relay-context-changed.png") })
   await relayPanel(page).getByRole("button", { exact: true, name: "Send" }).click()
   await expect.poll(() => targets).toEqual(["F2"])
   await expect(relayPanel(page).getByText("About Before-path evidence")).toBeVisible()
@@ -526,7 +558,17 @@ test("opens Relay from the header and discusses findings in its panel", async ({
   await expect(asking).toHaveCount(0)
   await sendToRelay(page, "Anything else on this PR?")
   await expect.poll(() => targets).toEqual(["F2", "PR"])
+  // A completed reply never re-attaches a finding on its own.
+  await expect(asking).toHaveCount(0)
   await expect(relayPanel(page).getByText("About the whole pull request")).toBeVisible()
+
+  // Visual evidence of the thread with its notes, in both themes and forced colours.
+  await page.screenshot({ path: testInfo.outputPath("relay-thread-light.png") })
+  await page.emulateMedia({ colorScheme: "dark" })
+  await page.screenshot({ path: testInfo.outputPath("relay-thread-dark.png") })
+  await page.emulateMedia({ colorScheme: "light", forcedColors: "active" })
+  await page.screenshot({ path: testInfo.outputPath("relay-thread-forced.png") })
+  await page.emulateMedia({ forcedColors: "none" })
 
   // There is one Relay: no fixed chip, no second conversation in the page.
   await expect(page.locator("[data-relay-product-dock-chrome]")).toHaveCount(0)
@@ -578,20 +620,24 @@ test("submits the configured default profile as soon as delayed profiles load", 
   })
 
   configGate.resolve()
-  await expect.poll(() => runs).toEqual([{
-    revisionId: "revision-1",
-    baseCommit: "a".repeat(40),
-    headCommit: "b".repeat(40),
-    profile: {
-      id: "thorough",
-      name: "Thorough review",
-      kind: "security",
-      provider: "codex",
-      harness: "native-codex",
-      model: "configured-default",
-      skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
-    }
-  }])
+  await expect
+    .poll(() => runs)
+    .toEqual([
+      {
+        revisionId: "revision-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        profile: {
+          id: "thorough",
+          name: "Thorough review",
+          kind: "security",
+          provider: "codex",
+          harness: "native-codex",
+          model: "configured-default",
+          skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+        }
+      }
+    ])
 })
 
 test("keeps a replacement Relay stream visibly active after aborting its predecessor", async ({ page }) => {
@@ -736,7 +782,11 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
   })
   // The rerun keeps both exchanges in the PR thread.
   await openRelay(page)
-  await expect(relayPanel(page).getByRole("listitem").filter({ hasText: /^You: / })).toHaveCount(2)
+  await expect(
+    relayPanel(page)
+      .getByRole("listitem")
+      .filter({ hasText: /^You: / })
+  ).toHaveCount(2)
   await expect(relayPanel(page).getByText("Confirmed against the same exact revision.")).toHaveCount(2)
 })
 
@@ -750,48 +800,51 @@ test("waits for legacy session migration before persisting the first continuatio
   })
   const sourceKey = "codecommit:relay-review-session:111111111111:payments-api:eu-west-1:42"
   const targetPrefix = "codecommit:relay-review-session:222222222222:payments-api:eu-west-1:42"
-  await page.addInitScript(({ key, session }) => {
-    window.localStorage.setItem(key, JSON.stringify(session))
-    void navigator.locks.request("codecommit:relay-review-session", async () => {
-      await new Promise<void>((resolve) => {
-        window.releaseRelayMigration = resolve
-        window.releaseRelayMigrationReady = true
+  await page.addInitScript(
+    ({ key, session }) => {
+      window.localStorage.setItem(key, JSON.stringify(session))
+      void navigator.locks.request("codecommit:relay-review-session", async () => {
+        await new Promise<void>((resolve) => {
+          window.releaseRelayMigration = resolve
+          window.releaseRelayMigrationReady = true
+        })
       })
-    })
-  }, {
-    key: sourceKey,
-    session: {
-      identity: "legacy-head",
-      resource: {
-        accountKind: "credential",
-        accountId: "111111111111",
-        pullRequestId: "42",
-        region: "eu-west-1",
-        repositoryName: "payments-api"
-      },
-      review: {
-        pullRequestId: "42",
-        revisionId: "revision-1",
-        baseCommit: "a".repeat(40),
-        headCommit: "b".repeat(40),
-        kind: "review",
-        profile: {
-          id: "thorough",
-          name: "Thorough review",
-          kind: "review",
-          provider: "codex",
-          harness: "native-codex",
-          model: "configured-default",
-          skillIds: []
+    },
+    {
+      key: sourceKey,
+      session: {
+        identity: "legacy-head",
+        resource: {
+          accountKind: "credential",
+          accountId: "111111111111",
+          pullRequestId: "42",
+          region: "eu-west-1",
+          repositoryName: "payments-api"
         },
-        result: { verdict: "Saved legacy review.", findings: changedReviewResult.findings }
-      },
-      skillIds: [],
-      turns: [],
-      dispositions: {},
-      version: 2
+        review: {
+          pullRequestId: "42",
+          revisionId: "revision-1",
+          baseCommit: "a".repeat(40),
+          headCommit: "b".repeat(40),
+          kind: "review",
+          profile: {
+            id: "thorough",
+            name: "Thorough review",
+            kind: "review",
+            provider: "codex",
+            harness: "native-codex",
+            model: "configured-default",
+            skillIds: []
+          },
+          result: { verdict: "Saved legacy review.", findings: changedReviewResult.findings }
+        },
+        skillIds: [],
+        turns: [],
+        dispositions: {},
+        version: 2
+      }
     }
-  })
+  )
   await page.goto("/accounts/111111111111/prs/42")
   await expect.poll(() => page.evaluate(() => window.releaseRelayMigrationReady === true)).toBe(true)
   await expect(page.getByRole("button", { name: "Run again" })).toBeVisible()
@@ -799,7 +852,7 @@ test("waits for legacy session migration before persisting the first continuatio
 
   await sendToRelay(page, "Continue before migration completes.")
   await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
-  await expect(page.getByText("The retry finding changed after re-review.")).toBeVisible()
+  await expect(findingDeck(page).getByText("The retry finding changed after re-review.")).toBeVisible()
   expect(
     await page.evaluate(
       (prefix) => Object.keys(window.localStorage).some((key) => key.startsWith(prefix)),
@@ -811,12 +864,14 @@ test("waits for legacy session migration before persisting the first continuatio
     window.releaseRelayMigration?.()
     delete window.releaseRelayMigration
   })
-  await expect.poll(async () =>
-    page.evaluate((prefix) => {
-      const key = Object.keys(window.localStorage).find((candidate) => candidate.startsWith(prefix))
-      return key === undefined ? null : window.localStorage.getItem(key)
-    }, targetPrefix)
-  ).toContain("The retry finding changed after re-review.")
+  await expect
+    .poll(async () =>
+      page.evaluate((prefix) => {
+        const key = Object.keys(window.localStorage).find((candidate) => candidate.startsWith(prefix))
+        return key === undefined ? null : window.localStorage.getItem(key)
+      }, targetPrefix)
+    )
+    .toContain("The retry finding changed after re-review.")
 })
 
 test("preserves completed conversations when a rerun fails", async ({ page }) => {
@@ -891,10 +946,14 @@ test("retries a failed continuation without persisting the failed turn", async (
   await expect(page.getByText("Confirmed after retry.")).toBeVisible()
   expect(continuations[1]?.turns).toEqual([])
   // The retried turn lands once in the PR thread, not once per attempt.
-  await expect(relayPanel(page).getByRole("listitem").filter({ hasText: `You: ${message}` })).toHaveCount(1)
   await expect(
-    relayPanel(page).getByRole("listitem").filter({ hasText: "Relay: Confirmed after retry." })
+    relayPanel(page)
+      .getByRole("listitem")
+      .filter({ hasText: `You: ${message}` })
   ).toHaveCount(1)
+  await expect(relayPanel(page).getByRole("listitem").filter({ hasText: "Relay: Confirmed after retry." })).toHaveCount(
+    1
+  )
 })
 
 test("keeps the prior review session atomic when frames follow completion", async ({ page }) => {
@@ -914,17 +973,19 @@ test("keeps the prior review session atomic when frames follow completion", asyn
             profile: payload.profile,
             result: {
               verdict: "This invalid terminal frame must not replace the prior deck.",
-              findings: [{
-                id: "F3",
-                priority: "P1",
-                title: "Uncommitted terminal finding",
-                summary: "The transport has not reached a clean EOF.",
-                details: "A frame follows this complete event.",
-                recommendation: "Stage terminal state until EOF.",
-                verification: "Malformed transport fixture.",
-                publicationTarget: "pr-comment",
-                location: { scope: "file", filePath: "src/retry.ts" }
-              }]
+              findings: [
+                {
+                  id: "F3",
+                  priority: "P1",
+                  title: "Uncommitted terminal finding",
+                  summary: "The transport has not reached a clean EOF.",
+                  details: "A frame follows this complete event.",
+                  recommendation: "Stage terminal state until EOF.",
+                  verification: "Malformed transport fixture.",
+                  publicationTarget: "pr-comment",
+                  location: { scope: "file", filePath: "src/retry.ts" }
+                }
+              ]
             }
           },
           reply: "This reply must not be retained."
@@ -938,25 +999,29 @@ test("keeps the prior review session atomic when frames follow completion", asyn
 
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await expect.poll(() =>
-    page.evaluate(() => {
-      const key = Object.keys(window.localStorage).find((candidate) =>
-        candidate.startsWith("codecommit:relay-review-session:")
-      )
-      return key === undefined ? null : window.localStorage.getItem(key)
-    })
-  ).toContain("\"revisionId\":\"revision-1\"")
+  await findingDeck(page).getByRole("button", { name: /Retry amplification/ }).click()
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const key = Object.keys(window.localStorage).find((candidate) =>
+          candidate.startsWith("codecommit:relay-review-session:")
+        )
+        return key === undefined ? null : window.localStorage.getItem(key)
+      })
+    )
+    .toContain("\"revisionId\":\"revision-1\"")
   await page.getByRole("button", { exact: true, name: "Ack" }).first().click()
   await expect(page.getByText("acknowledged")).toBeVisible()
-  await expect.poll(() =>
-    page.evaluate(() => {
-      const key = Object.keys(window.localStorage).find((candidate) =>
-        candidate.startsWith("codecommit:relay-review-session:")
-      )
-      return key === undefined ? null : window.localStorage.getItem(key)
-    })
-  ).toContain("\"F1\":\"acknowledged\"")
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const key = Object.keys(window.localStorage).find((candidate) =>
+          candidate.startsWith("codecommit:relay-review-session:")
+        )
+        return key === undefined ? null : window.localStorage.getItem(key)
+      })
+    )
+    .toContain("\"F1\":\"acknowledged\"")
   const persistedBefore = await page.evaluate(() => {
     const key = Object.keys(window.localStorage).find((candidate) =>
       candidate.startsWith("codecommit:relay-review-session:")
@@ -972,7 +1037,7 @@ test("keeps the prior review session atomic when frames follow completion", asyn
 
   await expect(page.getByText("Relay review failed")).toBeVisible()
   await expect(composer).toHaveValue("Try an invalid continuation.")
-  await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
+  await expect(findingDeck(page).getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect(page.getByText("Uncommitted terminal finding")).toHaveCount(0)
   await expect(page.getByText("acknowledged")).toBeVisible()
   expect(
@@ -1002,17 +1067,19 @@ test("commits a staged continuation after clean EOF", async ({ page }) => {
             profile: payload.profile,
             result: {
               verdict: "The staged terminal review is committed after clean EOF.",
-              findings: [{
-                id: "F3",
-                priority: "P1",
-                title: "Committed terminal finding",
-                summary: "The transport reached a clean EOF.",
-                details: "No frame follows this complete event.",
-                recommendation: "Commit the staged terminal state.",
-                verification: "Clean transport fixture.",
-                publicationTarget: "pr-comment",
-                location: { scope: "file", filePath: "src/retry.ts" }
-              }]
+              findings: [
+                {
+                  id: "F3",
+                  priority: "P1",
+                  title: "Committed terminal finding",
+                  summary: "The transport reached a clean EOF.",
+                  details: "No frame follows this complete event.",
+                  recommendation: "Commit the staged terminal state.",
+                  verification: "Clean transport fixture.",
+                  publicationTarget: "pr-comment",
+                  location: { scope: "file", filePath: "src/retry.ts" }
+                }
+              ]
             }
           },
           reply: "This reply is retained after clean EOF."
@@ -1029,7 +1096,7 @@ test("commits a staged continuation after clean EOF", async ({ page }) => {
   await sendToRelay(page, "Apply the valid continuation.")
 
   await expect(page.getByRole("button", { name: /Committed terminal finding/ })).toBeVisible()
-  await expect(page.getByRole("button", { name: /Retry amplification/ })).toHaveCount(0)
+  await expect(findingDeck(page).getByRole("button", { name: /Retry amplification/ })).toHaveCount(0)
   await expect(page.getByText("This reply is retained after clean EOF.")).toBeVisible()
 })
 
@@ -1050,17 +1117,19 @@ test("keeps a continuation reply visible when its finding is withdrawn", async (
             profile: payload.profile,
             result: {
               verdict: "The retry finding was withdrawn after verification.",
-              findings: [{
-                id: "F2",
-                priority: "P3",
-                title: "Before-path evidence",
-                summary: "The removed line carries the old filename.",
-                details: "The before-side annotation resolves the renamed file's previous path.",
-                recommendation: "Keep the previous path bound to deletion annotations.",
-                verification: "Static patch review only.",
-                publicationTarget: "line-comment",
-                location: { scope: "line", filePath: "src/old-retry.ts", line: 1, side: "before" }
-              }]
+              findings: [
+                {
+                  id: "F2",
+                  priority: "P3",
+                  title: "Before-path evidence",
+                  summary: "The removed line carries the old filename.",
+                  details: "The before-side annotation resolves the renamed file's previous path.",
+                  recommendation: "Keep the previous path bound to deletion annotations.",
+                  verification: "Static patch review only.",
+                  publicationTarget: "line-comment",
+                  location: { scope: "line", filePath: "src/old-retry.ts", line: 1, side: "before" }
+                }
+              ]
             }
           },
           reply: "F1 is withdrawn because the retry path is now verified idempotent."
@@ -1076,7 +1145,7 @@ test("keeps a continuation reply visible when its finding is withdrawn", async (
   await discussInRelay(page, /Retry amplification/)
   await sendToRelay(page, "Withdraw this if it is resolved.")
 
-  await expect(page.getByRole("button", { name: /Retry amplification/ })).toHaveCount(0)
+  await expect(findingDeck(page).getByRole("button", { name: /Retry amplification/ })).toHaveCount(0)
   // The withdrawn finding's discussion stays readable in the PR thread, named for what it was about.
   await expect(relayPanel(page).getByText("About F1, no longer in the current deck")).toBeVisible()
   await expect(
@@ -1122,7 +1191,7 @@ test("preserves an active finding publication across changed live reconciliation
   })
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await findingDeck(page).getByRole("button", { name: /Retry amplification/ }).click()
 
   const post = page.getByRole("button", { name: "Accept and post" }).first()
   await post.click()
@@ -1160,7 +1229,7 @@ test("releases a changed finding after its active publication fails", async ({ p
   })
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await findingDeck(page).getByRole("button", { name: /Retry amplification/ }).click()
 
   const post = page.getByRole("button", { name: "Accept and post" }).first()
   await post.click()
@@ -1249,10 +1318,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   await srcDirectory.click()
   await expect(page.getByRole("button", { name: "src/retry.ts, renamed, Ready" })).toBeVisible()
   const directoryBox = await srcDirectory.locator("code").boundingBox()
-  const fileBox = await page
-    .getByRole("button", { name: "src/retry.ts, renamed, Ready" })
-    .locator("code")
-    .boundingBox()
+  const fileBox = await page.getByRole("button", { name: "src/retry.ts, renamed, Ready" }).locator("code").boundingBox()
   expect(directoryBox).not.toBeNull()
   expect(fileBox).not.toBeNull()
   expect(fileBox!.x).toBeGreaterThan(directoryBox!.x + 8)
@@ -1262,7 +1328,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   await expect(page.getByRole("heading", { name: "Relay is reviewing" })).toBeVisible()
   await expect(page.getByText("Live stages are updating above.")).toBeVisible()
   reviewGate.resolve()
-  await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
+  await expect(findingDeck(page).getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect(page.getByText("Relay is reviewing the exact patch")).toBeVisible()
   await expect(page.getByText("P2: Retry amplification")).toBeVisible()
   await expect(page.getByText("2 actionable findings")).toBeVisible()
@@ -1270,9 +1336,9 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   await page.getByText("Evidence & recommendation").first().click()
   await expect(page.getByText("The changed constant expands retries without an idempotency guard.")).toBeVisible()
   expect(
-    await page.getByRole("complementary", { name: "Relay findings" }).evaluate((element) =>
-      element.getBoundingClientRect().width
-    )
+    await page
+      .getByRole("complementary", { name: "Relay findings" })
+      .evaluate((element) => element.getBoundingClientRect().width)
   ).toBeGreaterThanOrEqual(480)
   await page.getByRole("button", { name: /^Comments/ }).click()
   await expect(page.getByText("Keep this retry path idempotent.").last()).toBeVisible()
@@ -1293,7 +1359,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   await expect(page.getByText("mode 100644 → 100755")).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toBeVisible()
   await expect(page.getByLabel("P3 finding: Before-path evidence")).toBeVisible()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await findingDeck(page).getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByRole("button", { exact: true, name: "Ack" }).first().click()
   await expect(page).toHaveURL(/\/accounts\/111111111111\/prs\/42$/)
   await expect(page.getByText("acknowledged")).toBeVisible()
@@ -1305,8 +1371,7 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
   await page.getByRole("button", { exact: true, name: "Reject" }).last().click()
   await expect(page.getByText("rejected")).toBeVisible()
-  const findingDeck = page.getByRole("region", { name: "Findings" })
-  expect(await findingDeck.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+  expect(await findingDeck(page).evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
   await discussInRelay(page, /Retry amplification/)
   await expect(relayPanel(page).getByRole("list", { name: "Asking with" })).toContainText(
     "Finding: Retry amplification"
@@ -1321,10 +1386,12 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
     await expect(replies).toHaveCount(index + 1)
   }
   // A long thread scrolls inside Relay's body; the composer stays on screen.
+  await page.setViewportSize({ height: 600, width: 1920 })
   const relayBody = relayPanel(page).locator("[data-rly-relay-scroll]")
   expect(await relayBody.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
   await relayBody.evaluate((element) => element.scrollTo({ top: 0 }))
   await expect(relayPanel(page).getByLabel("Message Relay")).toBeInViewport()
+  await page.setViewportSize({ height: 1080, width: 1920 })
   await page.reload()
   expect(await emitAppState(3)).toBeGreaterThan(0)
   await openRelay(page)
@@ -1349,13 +1416,13 @@ test("settles an optimistic comment count from refreshed provider comments", asy
   const settlement = Promise.withResolvers<void>()
   await routeReviewWorkspace(page, "review", undefined, undefined, {
     commentCount: () => 2,
-    commentsGate: (findingPostCount) => findingPostCount > 0 ? settlement.promise : Promise.resolve()
+    commentsGate: (findingPostCount) => (findingPostCount > 0 ? settlement.promise : Promise.resolve())
   })
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: /^Comments/ }).click()
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await findingDeck(page).getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByRole("button", { name: "Accept and post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
@@ -1371,14 +1438,14 @@ test("settles an optimistic comment count when the provider total is unchanged",
   const settlement = Promise.withResolvers<void>()
   await routeReviewWorkspace(page, "review", undefined, undefined, {
     commentCount: () => 2,
-    commentsGate: (findingPostCount) => findingPostCount > 0 ? settlement.promise : Promise.resolve(),
+    commentsGate: (findingPostCount) => (findingPostCount > 0 ? settlement.promise : Promise.resolve()),
     deleteOriginalCommentAfterPost: true
   })
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: /^Comments/ }).click()
   await expect(page.getByRole("button", { name: /^Comments 2$/ })).toBeVisible()
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await findingDeck(page).getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByRole("button", { name: "Accept and post" }).first().click()
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
@@ -1404,14 +1471,14 @@ test("preserves unobserved optimistic comment increments across partial provider
       if (providerFindingCount === 2 && ++settledReads >= 2) settledObserved.resolve()
       return providerFindingCount
     },
-    commentsGate: (findingPostCount) => findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve(),
+    commentsGate: (findingPostCount) => (findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve()),
     emptyCommentsInitially: true
   })
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: /^Comments/ }).click()
   await page.getByRole("button", { name: "Run Relay" }).click()
 
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await findingDeck(page).getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByRole("button", { name: "Accept and post" }).first().click()
   await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
   await page.getByRole("button", { name: /Before-path evidence/ }).click()
@@ -1448,7 +1515,7 @@ test("does not double-count pending comments after partial authoritative growth"
       return authoritativeCount
     },
     commentFindingCount: () => providerFindingCount,
-    commentsGate: (findingPostCount) => findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve(),
+    commentsGate: (findingPostCount) => (findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve()),
     emptyCommentsInitially: true
   })
   await page.goto("/accounts/111111111111/prs/42")
@@ -1456,7 +1523,7 @@ test("does not double-count pending comments after partial authoritative growth"
   await expect(commentsTrigger).toHaveAttribute("aria-expanded", "false")
   await page.getByRole("button", { name: "Run Relay" }).click()
 
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await findingDeck(page).getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByRole("button", { name: "Accept and post" }).first().click()
   await page.getByRole("button", { name: /Before-path evidence/ }).click()
   await page.getByRole("button", { name: "Accept and post" }).last().click()
@@ -1491,7 +1558,7 @@ test("reconciles unrelated comment growth while Comments remains collapsed", asy
       return authoritativeCount
     },
     commentFindingCount: () => providerFindingCount,
-    commentsGate: (findingPostCount) => findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve(),
+    commentsGate: (findingPostCount) => (findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve()),
     commentUnrelatedCount: () => {
       if (unrelatedCount === 1) identitiesObserved.resolve()
       return unrelatedCount
@@ -1503,7 +1570,7 @@ test("reconciles unrelated comment growth while Comments remains collapsed", asy
   await expect(commentsTrigger).toHaveAttribute("aria-expanded", "false")
   await page.getByRole("button", { name: "Run Relay" }).click()
 
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await findingDeck(page).getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByRole("button", { name: "Accept and post" }).first().click()
   await page.getByRole("button", { name: /Before-path evidence/ }).click()
   await page.getByRole("button", { name: "Accept and post" }).last().click()
@@ -1535,7 +1602,7 @@ test("preserves a pending Relay comment across unrelated SSE growth", async ({ p
       if (providerFindingCount === 1 && ++relayReads >= 1) relayObserved.resolve()
       return providerFindingCount
     },
-    commentsGate: (findingPostCount) => findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve(),
+    commentsGate: (findingPostCount) => (findingPostCount > 0 ? responsesEnabled.promise : Promise.resolve()),
     commentUnrelatedCount: () => {
       if (unrelatedCount === 1 && ++unrelatedReads >= 2) unrelatedObserved.resolve()
       return unrelatedCount
@@ -1545,7 +1612,7 @@ test("preserves a pending Relay comment across unrelated SSE growth", async ({ p
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: /^Comments/ }).click()
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await findingDeck(page).getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByRole("button", { name: "Accept and post" }).first().click()
   await expect(page.getByRole("button", { name: /^Comments 1$/ })).toBeVisible()
 
@@ -1575,9 +1642,11 @@ test("opens the generated console URL with the O shortcut", async ({ page }) => 
 
   await page.keyboard.press("o")
 
-  await expect.poll(async () => (await opened.promise).link).toBe(
-    "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/42?region=eu-west-1"
-  )
+  await expect
+    .poll(async () => (await opened.promise).link)
+    .toBe(
+      "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/42?region=eu-west-1"
+    )
 })
 
 test("preserves manual approver input when the repository account is unavailable", async ({ page }) => {
@@ -1652,17 +1721,19 @@ test("rejects description-target findings before presenting a post action", asyn
           profile: payload.profile,
           result: {
             verdict: "Description suggestion.",
-            findings: [{
-              id: "F1",
-              priority: "P2",
-              title: "Rewrite the description",
-              summary: "The description is incomplete.",
-              details: "The patch changes behavior not mentioned in the description.",
-              recommendation: "Update the pull-request description.",
-              verification: "Static patch review only.",
-              publicationTarget: "description",
-              location: { scope: "general" }
-            }]
+            findings: [
+              {
+                id: "F1",
+                priority: "P2",
+                title: "Rewrite the description",
+                summary: "The description is incomplete.",
+                details: "The patch changes behavior not mentioned in the description.",
+                recommendation: "Update the pull-request description.",
+                verification: "Static patch review only.",
+                publicationTarget: "description",
+                location: { scope: "general" }
+              }
+            ]
           }
         }
       }) + "\n",
@@ -1721,17 +1792,19 @@ test("reloads after a completed manual refresh without refetching for ordinary S
           profile: payload.profile,
           result: {
             verdict: "One retry regression needs attention.",
-            findings: [{
-              id: "F1",
-              priority: "P2",
-              title: "Retry amplification",
-              summary: "The extra retry can duplicate a non-idempotent request.",
-              details: "The changed constant expands retries without an idempotency guard.",
-              recommendation: "Require an idempotency key before retrying.",
-              verification: "Static patch review only.",
-              publicationTarget: "line-comment",
-              location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
-            }]
+            findings: [
+              {
+                id: "F1",
+                priority: "P2",
+                title: "Retry amplification",
+                summary: "The extra retry can duplicate a non-idempotent request.",
+                details: "The changed constant expands retries without an idempotency guard.",
+                recommendation: "Require an idempotency key before retrying.",
+                verification: "Static patch review only.",
+                publicationTarget: "line-comment",
+                location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
+              }
+            ]
           }
         }
       }) + "\n",
@@ -1771,14 +1844,16 @@ test("reloads after a completed manual refresh without refetching for ordinary S
         revisionId: currentRevision,
         baseCommit: "a".repeat(40),
         headCommit: (currentRevision === "revision-1" ? "b" : "c").repeat(40),
-        files: [{
-          index: 0,
-          status: "modified",
-          path: "src/retry.ts",
-          previousPath: null,
-          beforeMode: "100644",
-          afterMode: "100644"
-        }]
+        files: [
+          {
+            index: 0,
+            status: "modified",
+            path: "src/retry.ts",
+            previousPath: null,
+            beforeMode: "100644",
+            afterMode: "100644"
+          }
+        ]
       }),
       contentType: "application/json",
       status: 200
@@ -1824,7 +1899,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   await page.goto("/accounts/111111111111/prs/42")
   await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
+  await expect(findingDeck(page).getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toBeVisible()
   await expect.poll(() => eventCount, { timeout: 10_000 }).toBeGreaterThanOrEqual(2)
   expect(diffRequestCount).toBe(1)
@@ -1845,7 +1920,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   expect(diffRequestCount).toBe(2)
   changedRevisionRefresh.resolve()
   await expect(page.getByText("Latest diff unavailable")).toBeVisible()
-  await expect(page.getByRole("button", { name: /Retry amplification/ })).toBeVisible()
+  await expect(findingDeck(page).getByRole("button", { name: /Retry amplification/ })).toBeVisible()
   await expect(page.getByText(`head ${"b".repeat(12)}`)).toBeVisible()
   expect(diffRequestCount).toBe(3)
 
@@ -1980,14 +2055,16 @@ test("invalidates approver refreshes once per observed head without polling chur
         revisionId: currentRevision,
         baseCommit: "a".repeat(40),
         headCommit: (currentRevision === "revision-1" ? "b" : "c").repeat(40),
-        files: [{
-          index: 0,
-          status: "modified",
-          path: "src/retry.ts",
-          previousPath: null,
-          beforeMode: "100644",
-          afterMode: "100644"
-        }]
+        files: [
+          {
+            index: 0,
+            status: "modified",
+            path: "src/retry.ts",
+            previousPath: null,
+            beforeMode: "100644",
+            afterMode: "100644"
+          }
+        ]
       }),
       contentType: "application/json",
       status: 200
@@ -2108,24 +2185,28 @@ test("scopes file selection to the exact pull request while preserving same-revi
   await page.route("**/api/prs/comments*", async (route) => {
     const pullRequestId = new URL(route.request().url()).searchParams.get("pullRequestId") ?? ""
     await route.fulfill({
-      body: JSON.stringify([{
-        filePath: `src/pr-${pullRequestId}-0.ts`,
-        beforeCommitId: "a".repeat(40),
-        afterCommitId: "b".repeat(40),
-        relativeFileVersion: "AFTER",
-        comments: [{
-          root: {
-            id: `comment-${pullRequestId}`,
-            content: `Comment for PR ${pullRequestId}`,
-            author: "reviewer",
-            creationDate: "2026-08-12T10:00:00.000Z",
-            deleted: false,
-            filePath: `src/pr-${pullRequestId}-0.ts`,
-            lineNumber: 1
-          },
-          replies: []
-        }]
-      }]),
+      body: JSON.stringify([
+        {
+          filePath: `src/pr-${pullRequestId}-0.ts`,
+          beforeCommitId: "a".repeat(40),
+          afterCommitId: "b".repeat(40),
+          relativeFileVersion: "AFTER",
+          comments: [
+            {
+              root: {
+                id: `comment-${pullRequestId}`,
+                content: `Comment for PR ${pullRequestId}`,
+                author: "reviewer",
+                creationDate: "2026-08-12T10:00:00.000Z",
+                deleted: false,
+                filePath: `src/pr-${pullRequestId}-0.ts`,
+                lineNumber: 1
+              },
+              replies: []
+            }
+          ]
+        }
+      ]),
       contentType: "application/json",
       status: 200
     })
@@ -2217,14 +2298,16 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
         revisionId: `revision-${pullRequestId}`,
         baseCommit: "a".repeat(40),
         headCommit: "b".repeat(40),
-        files: [{
-          index: 0,
-          status: "modified",
-          path: "src/retry.ts",
-          previousPath: null,
-          beforeMode: "100644",
-          afterMode: "100644"
-        }]
+        files: [
+          {
+            index: 0,
+            status: "modified",
+            path: "src/retry.ts",
+            previousPath: null,
+            beforeMode: "100644",
+            afterMode: "100644"
+          }
+        ]
       }),
       contentType: "application/json",
       status: 200
@@ -2289,14 +2372,16 @@ test("shows a mode-only change even when file text is unchanged", async ({ page 
         revisionId: "revision-1",
         baseCommit: "a".repeat(40),
         headCommit: "b".repeat(40),
-        files: [{
-          index: 0,
-          status: "modified",
-          path: "scripts/retry.ts",
-          previousPath: null,
-          beforeMode: "100644",
-          afterMode: "100755"
-        }]
+        files: [
+          {
+            index: 0,
+            status: "modified",
+            path: "scripts/retry.ts",
+            previousPath: null,
+            beforeMode: "100644",
+            afterMode: "100755"
+          }
+        ]
       }),
       contentType: "application/json",
       status: 200

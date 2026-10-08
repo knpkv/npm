@@ -10,7 +10,7 @@ import {
   useRelayShortcut,
   useRelaySummon
 } from "@knpkv/rly/patterns"
-import { Button, Select, StatePanel } from "@knpkv/rly/primitives"
+import { Button, Field, Select, StatePanel } from "@knpkv/rly/primitives"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Result from "effect/Result"
@@ -21,7 +21,7 @@ import {
   type PullRequestThreadIdentity,
   pullRequestThreadIdentity
 } from "./conversation.js"
-import { failureFromCause, HostConversationLocator, relaySelectionMatchesRegistration } from "./dock.js"
+import { failureFromCause, relaySelectionMatchesRegistration, useHostConversationLocator } from "./dock.js"
 import type { RelaySelectorState } from "./model.js"
 import {
   type RelayProductDockHost,
@@ -194,18 +194,69 @@ export const RelayProductPanel = ({ host, pin }: RelayProductPanelProps): ReactE
         : {})}
     >
       {locating ? (
-        <>
+        <div style={{ display: "grid", gap: "var(--rly-space-16)" }}>
           <p>
             {registration === null
               ? "Relay works on pull requests here. Open one, or find it:"
               : "Find another pull request. Your draft for this one is kept."}
           </p>
-          <HostConversationLocator host={host} />
-        </>
+          <Locator host={host} />
+        </div>
       ) : (
         <Body registration={registration} />
       )}
     </RelayPanel>
+  )
+}
+
+/** The pull-request locator in rly fields: Relay opens the exact product page before continuing its thread. */
+const Locator = ({ host }: { readonly host: RelayProductDockHost }): ReactElement => {
+  const locator = useHostConversationLocator(host)
+  const failure = locator.validation ?? locator.action.description
+  return (
+    <form
+      aria-label="Find a pull request conversation"
+      onSubmit={locator.submit}
+      style={{ display: "grid", gap: "var(--rly-space-12)" }}
+    >
+      <Field label="Region">
+        {(props) => (
+          <input {...props} onChange={(event) => locator.setRegion(event.currentTarget.value)} value={locator.region} />
+        )}
+      </Field>
+      <Field label="Repository">
+        {(props) => (
+          <input
+            {...props}
+            onChange={(event) => locator.setRepositoryName(event.currentTarget.value)}
+            value={locator.repositoryName}
+          />
+        )}
+      </Field>
+      <Field label="Pull request">
+        {(props) => (
+          <input
+            {...props}
+            inputMode="numeric"
+            onChange={(event) => locator.setPullRequestId(event.currentTarget.value)}
+            value={locator.pullRequestId}
+          />
+        )}
+      </Field>
+      <Field label="Account (optional)">
+        {(props) => (
+          <input
+            {...props}
+            onChange={(event) => locator.setAccountId(event.currentTarget.value)}
+            value={locator.accountId}
+          />
+        )}
+      </Field>
+      {failure === null ? null : <p role="alert">{failure}</p>}
+      <Button loading={locator.action.pending} type="submit" variant="primary">
+        {locator.action.pending ? "Opening PR conversation…" : "Open PR conversation"}
+      </Button>
+    </form>
   )
 }
 
