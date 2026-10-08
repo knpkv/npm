@@ -1,12 +1,19 @@
-/** rly's Geist UI font, as the stylesheet build names it (esbuild `assetNames: "[name]"`). */
-export const PRELOADED_FONT = "geist-latin-wght-normal.woff2"
+/**
+ * rly's Geist faces, UI and mono, as the stylesheet build names them (esbuild `assetNames: "[name]"`).
+ * Both are preloaded: the mono face sets ids and kickers, and loading it late re-wrapped a line in
+ * the Approvals detail at 390 (CLS 0.069).
+ */
+export const PRELOADED_FONTS: readonly [string, string] = [
+  "geist-latin-wght-normal.woff2",
+  "geist-mono-latin-wght-normal.woff2"
+]
 
 /**
- * A preload for the Geist file this host actually serves, so first text paints in Geist rather than
+ * Preloads for the Geist files this host actually serves, so first text paints in Geist rather than
  * the fallback. Built from the fonts scraped out of index.css, so it never names a file /assets/
- * would 404; a stylesheet without Geist gets no preload.
+ * would 404; a face the stylesheet doesn't carry gets no preload.
  */
 export const fontPreloadLink = (fonts: ReadonlyMap<string, Uint8Array>): string =>
-  fonts.has(PRELOADED_FONT)
-    ? `<link rel="preload" href="/assets/${PRELOADED_FONT}" as="font" type="font/woff2" crossorigin>\n`
-    : ""
+  PRELOADED_FONTS.filter((font) => fonts.has(font))
+    .map((font) => `<link rel="preload" href="/assets/${font}" as="font" type="font/woff2" crossorigin>\n`)
+    .join("")
