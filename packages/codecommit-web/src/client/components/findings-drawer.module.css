@@ -53,8 +53,10 @@
   padding: var(--rly-space-4) var(--rly-space-12);
 }
 
-.close:hover {
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .close:hover {
+    background: var(--rly-color-surface-2);
+  }
 }
 
 .close:focus-visible {

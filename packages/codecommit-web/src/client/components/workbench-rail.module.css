@@ -98,8 +98,10 @@
   text-decoration: none;
 }
 
-.row:hover {
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .row:hover {
+    background: var(--rly-color-surface-2);
+  }
 }
 
 .row[aria-current="page"] {
