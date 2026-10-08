@@ -380,6 +380,29 @@ export const componentManifest = {
         tests: ["test/patterns/RelayComposer.test.tsx"]
       }
     },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayDecision" },
+        { kind: "type", name: "RelayDecisionProps" },
+        { kind: "type", name: "RlyRelayDecisionCopy" },
+        { kind: "type", name: "RlyRelayDecisionReceipt" },
+        { kind: "type", name: "RlyRelayDecisionState" },
+        { kind: "type", name: "RlyRelayDecisionTarget" }
+      ],
+      name: "RelayDecision",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayDecision.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayDecision.module.css"],
+      variants: [{ defaultValue: "default", name: "tone", values: ["default", "danger"] }],
+      visual: {
+        story: "stories/patterns/RelayDecision.stories.tsx",
+        storyId: "patterns-relaydecision--lifecycle",
+        tests: ["test/patterns/RelayDecision.test.tsx"]
+      }
+    },
     // scaffold:components:insert
     {
       category: "primitive",

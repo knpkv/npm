@@ -490,6 +490,16 @@ resizing Relay keeps it and one object's draft never sends as another's; pass
 uncertain outcome is deduplicated; call `accepted(requestId)` once the server accepts
 that request, which clears the draft unless the user has typed since.
 
+`RelayDecision` asks before one Relay write: the question, exactly where the write
+goes (only what the action pins: a PR comment names the PR, not a line), the exact
+text in its own scroll, and Confirm or Don't for that one call, never "allow all". The
+host writes the words (`copy`: ask, confirm, decline, working, done, and an optional
+`reversible`), and `tone: "danger"` marks a destructive write. The first press is
+latched until the host moves `state` on, so a double click cannot confirm twice.
+Confirmed says "Posting…"; only Done, with its receipt, is past tense; Failed never
+claims nothing was written. Pending, declined and expired are announced once per call
+`id`, without moving focus; after an answer, focus moves to the outcome.
+
 `RelayPanel` is Relay's frame: header (mark, title, exact scope with the revision in
 mono, an optional pin, options, close), tabs whose counts are part of their names, a
 freshness line, a body, and a footer for the composer. Only the body scrolls, so the

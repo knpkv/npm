@@ -981,6 +981,39 @@
     {
       "capabilities": [
         "agent",
+        "decide"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayDecision",
+      "states": [
+        "confirmed",
+        "declined",
+        "default",
+        "done",
+        "expired",
+        "failed",
+        "pending"
+      ],
+      "terms": [
+        "agent",
+        "confirmed",
+        "danger",
+        "decide",
+        "declined",
+        "default",
+        "done",
+        "expired",
+        "failed",
+        "pattern",
+        "pending",
+        "relaydecision",
+        "tone"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
         "conversation",
         "overlay",
         "select"

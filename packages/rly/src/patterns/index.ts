@@ -83,6 +83,14 @@ export type {
   RlyRelaySubmission,
   UseRelayDraftOptions
 } from "./RelayComposer.js"
+export { RelayDecision } from "./RelayDecision.js"
+export type {
+  RelayDecisionProps,
+  RlyRelayDecisionCopy,
+  RlyRelayDecisionReceipt,
+  RlyRelayDecisionState,
+  RlyRelayDecisionTarget
+} from "./RelayDecision.js"
 export { RelayDock } from "./RelayDock.js"
 export type {
   RelayDockProps,
