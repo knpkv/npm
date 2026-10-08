@@ -16,7 +16,6 @@
 
   /* Over the right of the page: no backdrop, fixed, so opening never moves the page (zero CLS). */
   .overlay {
-    animation: relay-panel-enter var(--rly-motion-standard-duration) var(--rly-motion-standard-easing);
     border: 1px solid var(--rly-color-border-1);
     border-radius: var(--rly-radius-group);
     box-shadow: 0 12px 32px color-mix(in srgb, var(--rly-color-text-1) 12%, transparent);
@@ -141,18 +140,18 @@
       translate: var(--rly-space-16) 0;
     }
   }
-  :where([dir="rtl"]) .overlay {
-    animation-name: relay-panel-enter-rtl;
-  }
   @keyframes relay-panel-enter-rtl {
     from {
       opacity: 0;
       translate: calc(-1 * var(--rly-space-16)) 0;
     }
   }
-  @media (prefers-reduced-motion: reduce) {
+  @media (prefers-reduced-motion: no-preference) {
     .overlay {
-      animation: none;
+      animation: relay-panel-enter var(--rly-motion-standard-duration) var(--rly-easing-out);
+    }
+    :where([dir="rtl"]) .overlay {
+      animation-name: relay-panel-enter-rtl;
     }
   }
 

@@ -63,7 +63,12 @@
   .triggerIcon {
     display: inline-flex;
     flex: none;
-    transition: transform var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .triggerIcon {
+      transition: transform var(--rly-motion-fast-duration) var(--rly-easing-in-out);
+    }
   }
 
   .trigger[data-state="open"] .triggerIcon {

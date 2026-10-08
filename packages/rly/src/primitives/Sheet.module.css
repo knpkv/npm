@@ -58,17 +58,12 @@
   }
 
   .overlay {
-    animation: rly-sheet-overlay-out var(--rly-motion-standard-duration) var(--rly-motion-standard-easing);
     background: var(--rly-color-text-1);
     inset: var(--rly-space-0);
     opacity: 0.3;
     position: fixed;
     pointer-events: auto;
     z-index: 0;
-  }
-
-  .overlay[data-state="open"] {
-    animation-name: rly-sheet-overlay-in;
   }
 
   .content {
@@ -87,27 +82,39 @@
   }
 
   .end {
-    animation: rly-sheet-end-out var(--rly-motion-standard-duration) var(--rly-motion-standard-easing);
     border-inline-start: 1px solid var(--rly-color-border-1);
     border-start-start-radius: var(--rly-radius-overlay);
     border-end-start-radius: var(--rly-radius-overlay);
     inset-inline-end: var(--rly-space-0);
   }
 
-  .end[data-state="open"] {
-    animation-name: rly-sheet-end-in;
-  }
-
   .start {
-    animation: rly-sheet-start-out var(--rly-motion-standard-duration) var(--rly-motion-standard-easing);
     border-inline-end: 1px solid var(--rly-color-border-1);
     border-start-end-radius: var(--rly-radius-overlay);
     border-end-end-radius: var(--rly-radius-overlay);
     inset-inline-start: var(--rly-space-0);
   }
 
-  .start[data-state="open"] {
-    animation-name: rly-sheet-start-in;
+  /* Under reduced motion the sheet appears and leaves at once. */
+  @media (prefers-reduced-motion: no-preference) {
+    .overlay {
+      animation: rly-sheet-overlay-out var(--rly-motion-standard-duration) var(--rly-easing-out);
+    }
+    .overlay[data-state="open"] {
+      animation-name: rly-sheet-overlay-in;
+    }
+    .end {
+      animation: rly-sheet-end-out var(--rly-motion-standard-duration) var(--rly-easing-out);
+    }
+    .end[data-state="open"] {
+      animation-name: rly-sheet-end-in;
+    }
+    .start {
+      animation: rly-sheet-start-out var(--rly-motion-standard-duration) var(--rly-easing-out);
+    }
+    .start[data-state="open"] {
+      animation-name: rly-sheet-start-in;
+    }
   }
 
   .layer[data-rly-sheet-entry-motion="external"] .overlay[data-state="open"],
