@@ -177,6 +177,15 @@ test.describe("touch", () => {
       .toBe(true)
   })
 
+  // iOS zooms into a field under 16px when it takes focus; the page no longer locks zoom to hide it.
+  test("the terminal's text input is at least 16px, so focusing it does not zoom the page", async ({ page }) => {
+    await open(page)
+    const fontSize = await page
+      .locator("#connect-terminal-input")
+      .evaluate((input) => Number.parseFloat(getComputedStyle(input).fontSize))
+    expect(fontSize).toBeGreaterThanOrEqual(16)
+  })
+
   test("the Keys toggle hides the modifier and terminal keys, and the choice survives a reload", async ({ page }) => {
     await open(page)
     const keys = page.getByRole("button", { name: "Hide terminal keys" })

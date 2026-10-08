@@ -147,6 +147,13 @@
     padding: var(--rly-space-8) var(--rly-space-12);
   }
 
+  /* iOS zooms the page into any field under 16px when it takes focus, and the page leaves pinch zoom
+     on, so the search field and Ghostty's hidden input (UA default ~13px) both stay at 16px or more. */
+  .connect-search input,
+  #connect-terminal-input {
+    font-size: max(16px, 1rem);
+  }
+
   /* Forced colours would paint the placeholder in a link-like system colour; it is hint text. */
   @media (forced-colors: active) {
     .connect-search input::placeholder {
