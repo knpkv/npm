@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+  isImeKey,
   matchesShortcutKeys,
   type RelaySummonContext,
   type RelaySummonEffect,
@@ -15,12 +16,17 @@ const context = (open: boolean, focusInRelay: boolean, fullscreen: boolean): Rel
 
 const press = (
   key: string,
-  modifiers: Partial<Record<"altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "isComposing" | "repeat", boolean>> = {}
+  modifiers: Partial<Record<"altKey" | "ctrlKey" | "metaKey" | "shiftKey" | "isComposing" | "repeat", boolean>> & {
+    readonly code?: string
+    readonly keyCode?: number
+  } = {}
 ) => ({
   altKey: false,
+  code: `Key${key.toUpperCase()}`,
   ctrlKey: false,
   isComposing: false,
   key,
+  keyCode: 0,
   metaKey: false,
   repeat: false,
   shiftKey: false,
@@ -64,5 +70,23 @@ describe("matchesShortcutKeys", () => {
     expect(matchesShortcutKeys("Control+J", press("j", { altKey: true, ctrlKey: true }))).toBe(false)
     expect(matchesShortcutKeys("Control+J", press("j", { ctrlKey: true, isComposing: true }))).toBe(false)
     expect(matchesShortcutKeys("Control+J", press("j", { ctrlKey: true, repeat: true }))).toBe(false)
+    expect(matchesShortcutKeys("Control+J", press("j", { ctrlKey: true, keyCode: 229 }))).toBe(false)
+  })
+
+  it("matches the physical J on a non-Latin layout and the visible J on a Latin one", () => {
+    // Russian: the J key types "о".
+    expect(matchesShortcutKeys("Control+J", press("о", { code: "KeyJ", ctrlKey: true }))).toBe(true)
+    expect(matchesShortcutKeys("Control+J", press("О", { code: "KeyJ", ctrlKey: true, shiftKey: true }))).toBe(false)
+    // Greek: the J key types "ξ".
+    expect(matchesShortcutKeys("Meta+J", press("ξ", { code: "KeyJ", metaKey: true }))).toBe(true)
+    // Dvorak: "j" sits on the physical C key, and the physical J key types "h".
+    expect(matchesShortcutKeys("Control+J", press("j", { code: "KeyC", ctrlKey: true }))).toBe(true)
+    expect(matchesShortcutKeys("Control+J", press("h", { code: "KeyJ", ctrlKey: true }))).toBe(false)
+  })
+
+  it("treats composition and keyCode 229 as IME keys", () => {
+    expect(isImeKey(press("Escape", { isComposing: true }))).toBe(true)
+    expect(isImeKey(press("Process", { keyCode: 229 }))).toBe(true)
+    expect(isImeKey(press("Escape"))).toBe(false)
   })
 })

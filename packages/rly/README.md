@@ -470,16 +470,18 @@ The hint hides at 40rem and below, and the button is 32px tall, 44px for a coars
 Relay is already open, moves focus to the composer); from inside Relay it takes focus back to where it
 came from, and Relay stays open. Full screen, it closes Relay. Escape closes Relay when focus is inside
 it or Relay is full screen, and returns focus. Only the exact chord is handled and prevented, so Ctrl+K,
-`?`, g-sequences and Alt keys reach the host. Pass the same `shortcut` the launcher advertises, or `null`
-while the host's own surface owns the key.
+`?`, g-sequences and Alt keys reach the host. On a non-Latin layout the physical J key works; a Latin
+layout uses the J the user sees. Escape is left to an IME composition and to a dialog, listbox or menu
+open inside Relay. When the element Relay came from is gone, focus returns to the `launcher`. Pass the
+same `shortcut` the launcher advertises, or `null` while the host's own surface owns the key.
 
 ```tsx
 import { RelayLauncher, useRelayShortcut, useRelaySummon } from "@knpkv/rly/patterns"
 
 ;const shortcut = useRelayShortcut()
-useRelaySummon({ composer, fullscreen: false, onOpenChange: setOpen, open, region, shortcut })
+useRelaySummon({ composer, fullscreen: false, launcher, onOpenChange: setOpen, open, region, shortcut })
 
-<RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} shortcut={shortcut} />
+<RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} ref={launcher} shortcut={shortcut} />
 ```
 
 `RelayDock` is the shared product frame for one adapter-owned Relay thread. It

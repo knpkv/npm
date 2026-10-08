@@ -25,28 +25,41 @@ export const relaySummonTransition = (context: RelaySummonContext, key: RelaySum
   return context.focusInRelay ? "ReturnFocus" : "FocusComposer"
 }
 
-/** The parts of a keyboard event the chord match reads. */
+/** The parts of a keyboard event the summon reads. */
 export interface RelaySummonKeyEvent {
   readonly altKey: boolean
+  readonly code: string
   readonly ctrlKey: boolean
   readonly isComposing: boolean
   readonly key: string
+  /** Deprecated, but 229 is still how some browsers mark a key that belongs to an IME. */
+  readonly keyCode: number
   readonly metaKey: boolean
   readonly repeat: boolean
   readonly shiftKey: boolean
 }
 
+/** A key that belongs to an IME composition; Escape there cancels the composition, never Relay. */
+export const isImeKey = (event: RelaySummonKeyEvent): boolean => event.isComposing || event.keyCode === 229
+
+const asciiLetter = /^[a-z]$/i
+
 /**
  * Whether an event is exactly the shortcut's ARIA keys ("Control+J", "Meta+J"): the named modifiers and
- * no others, so Ctrl+Shift+J, Alt chords, an IME composition or a held key's repeats never match.
+ * no others, so Ctrl+Shift+J, Alt chords, an IME composition or a held key's repeats never match. A
+ * Latin layout matches the letter the user sees (Dvorak, AZERTY); a non-Latin one (Russian, Greek), where
+ * the key is no ASCII letter, matches the physical key instead.
  */
 export const matchesShortcutKeys = (keys: string, event: RelaySummonKeyEvent): boolean => {
-  if (event.isComposing || event.repeat) return false
+  if (isImeKey(event) || event.repeat) return false
   const parts = keys.split("+")
   const key = parts.at(-1) ?? ""
   const modifiers = new Set(parts.slice(0, -1))
+  const sameKey = asciiLetter.test(event.key)
+    ? event.key.toLowerCase() === key.toLowerCase()
+    : event.code === `Key${key.toUpperCase()}`
   return (
-    event.key.toLowerCase() === key.toLowerCase() &&
+    sameKey &&
     event.ctrlKey === modifiers.has("Control") &&
     event.metaKey === modifiers.has("Meta") &&
     event.altKey === modifiers.has("Alt") &&

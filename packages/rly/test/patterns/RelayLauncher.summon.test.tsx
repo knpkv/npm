@@ -19,19 +19,51 @@ const Host = ({ bound = true, fullscreen = false }: { readonly bound?: boolean; 
   const [open, setOpen] = useState(false)
   const region = useRef<HTMLElement>(null)
   const composer = useRef<HTMLTextAreaElement>(null)
-  useRelaySummon({ composer, fullscreen, onOpenChange: setOpen, open, region, shortcut: bound ? ctrlJ : null })
+  const launcher = useRef<HTMLButtonElement>(null)
+  const [pageControl, setPageControl] = useState(true)
+  useRelaySummon({
+    composer,
+    fullscreen,
+    launcher,
+    onOpenChange: setOpen,
+    open,
+    region,
+    shortcut: bound ? ctrlJ : null
+  })
   return (
     <>
-      <button data-testid="page" type="button">
-        Page control
-      </button>
-      <RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} shortcut={bound ? ctrlJ : null} />
+      {pageControl ? (
+        <button data-testid="page" type="button">
+          Page control
+        </button>
+      ) : null}
+      <RelayLauncher
+        expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        ref={launcher}
+        shortcut={bound ? ctrlJ : null}
+      />
       {open ? (
         <aside aria-label="Relay" ref={region}>
           <button data-testid="relay-option" type="button">
             Options
           </button>
           <textarea aria-label="Message Relay" ref={composer} />
+          <button data-testid="remove-page" onClick={() => setPageControl(false)} type="button">
+            Remove page control
+          </button>
+          <div data-testid="menu" role="listbox" tabIndex={-1}>
+            Options menu
+          </div>
+          <div
+            data-testid="prevented"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") event.preventDefault()
+            }}
+            tabIndex={-1}
+          >
+            Popup that handles Escape
+          </div>
         </aside>
       ) : null}
     </>
@@ -121,6 +153,37 @@ describe("useRelaySummon", () => {
     expect(await press("g")).toBe(false)
     expect(await press("j", { altKey: true, ctrlKey: true })).toBe(false)
     expect(composer()).toBeNull()
+  })
+
+  it("leaves Escape to an IME composition in the composer", async () => {
+    await mount(<Host />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    expect(await press("Escape", { isComposing: true })).toBe(false)
+    expect(await press("Escape", { keyCode: 229 })).toBe(false)
+    expect(composer()).not.toBeNull()
+  })
+
+  it("leaves Escape to a layer inside Relay, whether or not it prevents it", async () => {
+    await mount(<Host />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    byTestId("menu").focus()
+    expect(await press("Escape")).toBe(false)
+    expect(composer()).not.toBeNull()
+    byTestId("prevented").focus()
+    expect(await press("Escape")).toBe(true)
+    expect(composer()).not.toBeNull()
+  })
+
+  it("returns focus to the launcher when the element Relay came from is gone", async () => {
+    await mount(<Host />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    await act(async () => byTestId("remove-page").click())
+    composer()?.focus()
+    expect(await press("j", { ctrlKey: true })).toBe(true)
+    expect(document.activeElement).toBe(launcher())
   })
 
   it("does nothing while the host's own surface owns the key", async () => {

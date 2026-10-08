@@ -2,7 +2,7 @@ import type { ComponentPropsWithRef, ReactElement, RefObject } from "react"
 import { useEffect, useRef, useSyncExternalStore } from "react"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import { focusRestoreTarget, isWithinComposedElement } from "../internal/composedFocus.js"
-import { matchesShortcutKeys, relaySummonTransition } from "../internal/relaySummon.js"
+import { isImeKey, matchesShortcutKeys, relaySummonTransition } from "../internal/relaySummon.js"
 import styles from "./RelayLauncher.module.css"
 import { RelayMark } from "./RelayMark.js"
 
@@ -43,6 +43,8 @@ export interface UseRelaySummonOptions {
   readonly region: RefObject<HTMLElement | null>
   /** Where a summon puts focus, the composer. Focused once it renders after opening. */
   readonly composer: RefObject<HTMLElement | null>
+  /** The launcher: where focus returns when the element Relay was summoned from is gone. */
+  readonly launcher: RefObject<HTMLElement | null>
   /** Relay is the full-screen dialog (phone): the shortcut closes it. */
   readonly fullscreen: boolean
   /**
@@ -88,12 +90,15 @@ export const useRelaySummon = (options: UseRelaySummonOptions): void => {
       const target = returnTo.current
       returnTo.current = null
       if (target?.isConnected === true) target.focus()
+      else latest.current.launcher.current?.focus()
     }
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.defaultPrevented) return
+      if (event.defaultPrevented || isImeKey(event)) return
       const key = event.key === "Escape" ? "escape" : matchesShortcutKeys(keys, event) ? "chord" : undefined
       if (key === undefined) return
       const { composer, fullscreen, onOpenChange, open, region } = latest.current
+      // Escape belongs to a dialog, listbox or menu open inside Relay, even one that doesn't prevent it.
+      if (key === "escape" && region.current !== null && hasNestedLayer(region.current, event.target)) return
       const active = focusRestoreTarget(document)
       const focusInRelay = region.current !== null && active !== null && isWithinComposedElement(region.current, active)
       const effect = relaySummonTransition({ focusInRelay, fullscreen, open }, key)
@@ -122,6 +127,17 @@ export const useRelaySummon = (options: UseRelaySummonOptions): void => {
     return () => document.removeEventListener("keydown", onKeyDown)
   }, [keys])
 }
+
+const nestedLayer = "dialog[open], [role='dialog'], [role='alertdialog'], [role='listbox'], [role='menu']"
+
+/** Whether an event comes from a layer nested inside Relay, not from Relay's own region. */
+const hasNestedLayer = (region: HTMLElement, target: EventTarget | null): boolean => {
+  const layer = isElementTarget(target) ? target.closest(nestedLayer) : null
+  return layer !== null && layer !== region && region.contains(layer)
+}
+
+const isElementTarget = (target: EventTarget | null): target is Element =>
+  target !== null && "closest" in target && "nodeType" in target && target.nodeType === 1
 
 /** The focused element when it is on the page rather than in Relay (shadow roots included), else null. */
 const focusOutside = (region: HTMLElement | null): HTMLElement | null => {

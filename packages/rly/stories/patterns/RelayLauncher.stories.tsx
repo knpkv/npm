@@ -30,15 +30,16 @@ const HostHeader = ({ bindsShortcut = true }: { readonly bindsShortcut?: boolean
   const shortcut = useRelayShortcut()
   const region = useRef<HTMLElement>(null)
   const composer = useRef<HTMLTextAreaElement>(null)
+  const launcher = useRef<HTMLButtonElement>(null)
   const bound = bindsShortcut ? shortcut : null
-  useRelaySummon({ composer, fullscreen: false, onOpenChange: setOpen, open, region, shortcut: bound })
+  useRelaySummon({ composer, fullscreen: false, launcher, onOpenChange: setOpen, open, region, shortcut: bound })
   return (
     <main style={pageStyle}>
       <header style={header}>
         <Text as="h1" variant="card-title">
           infra-core #12
         </Text>
-        <RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} shortcut={bound} />
+        <RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} ref={launcher} shortcut={bound} />
       </header>
       <p data-relay-state={open ? "open" : "closed"}>{open ? "Relay is open." : "Relay is closed."}</p>
       {open ? (
