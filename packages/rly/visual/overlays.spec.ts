@@ -44,6 +44,31 @@ test("keeps dialog focus, isolation, dismissal, and restoration deterministic", 
   await expect(dialog).toHaveCount(0)
 })
 
+test("packs a full-screen phone dialog's rows at the top, one gap apart", async ({ page }) => {
+  await page.setViewportSize({ height: 844, width: 390 })
+  await page.goto(story("primitives-dialog--interaction"))
+  await expect(page.locator("[data-dialog-play-complete=\"true\"]")).toHaveCount(1)
+  await page.getByRole("button", { name: "Review deployment" }).click()
+
+  const layout = await page.getByRole("dialog", { name: "Approve production deployment" }).evaluate((dialog) => {
+    const rows = [...dialog.children].filter((child) => {
+      const position = getComputedStyle(child).position
+      return position !== "absolute" && position !== "fixed" && child.getBoundingClientRect().height > 0
+    })
+    const gaps = rows.slice(1).map((row, index) =>
+      Math.round(row.getBoundingClientRect().top - (rows[index]?.getBoundingClientRect().bottom ?? 0))
+    )
+    return {
+      gap: Number.parseFloat(getComputedStyle(dialog).rowGap),
+      gaps,
+      height: dialog.getBoundingClientRect().height
+    }
+  })
+  expect(Math.round(layout.height)).toBe(844)
+  expect(layout.gaps.length).toBeGreaterThan(0)
+  for (const gap of layout.gaps) expect(gap).toBe(layout.gap)
+})
+
 test("reflows dialog to a full-screen decision at compact zoom-equivalent width", async ({ page }) => {
   await page.setViewportSize({ height: 800, width: 320 })
   await page.goto(story("primitives-dialog--interaction"))
