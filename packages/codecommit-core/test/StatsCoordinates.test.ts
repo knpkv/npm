@@ -23,6 +23,40 @@ const comments = (id: string, author: string): string =>
   }])
 
 describe("stats pull-request coordinates", () => {
+  // A list whose read failed may still name a revoked approval, so it isn't counted as one.
+  it.effect("does not count approvers that couldn't be read", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-stats-approvers-" })
+      const context = yield* Layer.build(LibsqlClient.layer({
+        url: `file:${root}/stats.db`,
+        transformResultNames: (name: string) =>
+          name.replace(/_([a-z])/g, (_, character: string) => character.toUpperCase())
+      }))
+      const sql = Context.get(context, SqlClient.SqlClient)
+      yield* sql`CREATE TABLE pull_requests (
+        id TEXT NOT NULL, title TEXT NOT NULL, author TEXT NOT NULL, aws_account_id TEXT NOT NULL,
+        repository_name TEXT NOT NULL, account_region TEXT NOT NULL, creation_date TEXT NOT NULL,
+        closed_at TEXT, last_modified_date TEXT NOT NULL, status TEXT NOT NULL, merged_by TEXT,
+        approved_by TEXT, approvers_unknown INTEGER NOT NULL DEFAULT 0
+      )`
+      yield* sql`CREATE TABLE pr_comments (
+        pull_request_id TEXT NOT NULL, aws_account_id TEXT NOT NULL, repository_name TEXT NOT NULL,
+        account_region TEXT NOT NULL, locations_json TEXT NOT NULL
+      )`
+      yield* sql`INSERT INTO pull_requests
+        (id, title, author, aws_account_id, repository_name, account_region,
+         creation_date, last_modified_date, status, approved_by, approvers_unknown)
+        VALUES
+          ('1', 'Known', 'author', '123', 'payments', 'eu-west-1',
+           '2026-08-01T00:00:00.000Z', '2026-08-04T00:00:00.000Z', 'OPEN', 'alice', 0),
+          ('2', 'Unknown', 'author', '123', 'payments', 'eu-west-1',
+           '2026-08-01T00:00:00.000Z', '2026-08-04T00:00:00.000Z', 'OPEN', 'alice,bob', 1)`
+      const result = yield* reviewerData(sql)("2026-08-01T00:00:00.000Z", "2026-09-01T00:00:00.000Z", {})
+      expect(result.topApprovers).toEqual([{ author: "alice", approvalCount: 1 }])
+      expect(result.firstReviewDetails.map((detail) => detail.prId)).toEqual(["1"])
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
   it.effect("attributes comments to the matching repository and region", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
@@ -48,7 +82,8 @@ describe("stats pull-request coordinates", () => {
         comment_count INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL,
         merged_by TEXT,
-        approved_by TEXT
+        approved_by TEXT,
+        approvers_unknown INTEGER NOT NULL DEFAULT 0
       )`
       yield* sql`CREATE TABLE pr_comments (
         pull_request_id TEXT NOT NULL,

@@ -39,7 +39,7 @@ import type {
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import * as DistilledRegion from "@distilled.cloud/aws/Region"
-import { Data, Effect, Predicate, Schema, SchemaGetter, Stream } from "effect"
+import { Data, Effect, Option, Predicate, Schema, SchemaGetter, Stream } from "effect"
 import { HttpClient } from "effect/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
 import { isCredentialInvalidCause } from "../AwsCredentialErrors.js"
@@ -84,11 +84,6 @@ const decodeAccount = Schema.decodeSync(Account)
 const decodeApprovalRule = Schema.decodeSync(ApprovalRule)
 
 const EpochFallback = new Date(0)
-
-const emptyApprovers = () => ({
-  names: [],
-  arns: []
-})
 
 const decodeRawStatus = (rawStatus: string | undefined, isMerged: boolean): PullRequestStatus => {
   if (isMerged) return "MERGED"
@@ -221,6 +216,13 @@ export const buildApprovalRules = (
       )
   )
 
+/** The listing's raw names for a read's approver fields. */
+const rawApproverFields = ({ approvedBy, approvedByArns, approversUnknown }: ApproverFields) => ({
+  approvers: approvedBy,
+  approverArns: approvedByArns,
+  ...(approversUnknown !== undefined && { approversUnknown })
+})
+
 /**
  * Fetch approval + merge status for a single PR.
  */
@@ -244,19 +246,25 @@ const fetchPRDetails = (id: string, repoName: string) =>
       isApproved: evaluation.isApproved,
       approvalUnknown: evaluation.approvalUnknown,
       isMergeable,
-      approvers: approvers.names,
-      approverArns: approvers.arns,
+      ...rawApproverFields(approverFields(approvers)),
       approvalRules
     }
   })
 
 /**
- * Fetch who approved a PR (ARN list of approvers with APPROVE state).
+ * Fetch who approved a PR (ARN list of approvers with APPROVE state). None when the read fails, logged:
+ * the caller keeps the last known approvers rather than reading the failure as "nobody approved".
+ * Credentials that stopped working are not unknown approvers: that failure stays typed, so the refresh
+ * marks the account signed out.
  */
 export const fetchApprovers = (
   pullRequestId: string,
   revisionId: string
-): Effect.Effect<{ readonly names: Array<string>; readonly arns: Array<string> }, never, AwsMethodEnv> =>
+): Effect.Effect<
+  Option.Option<{ readonly names: Array<string>; readonly arns: Array<string> }>,
+  Effect.Error<ReturnType<typeof codecommit.getPullRequestApprovalStates>>,
+  AwsMethodEnv
+> =>
   throttleRetry(
     codecommit.getPullRequestApprovalStates({ pullRequestId, revisionId })
   ).pipe(
@@ -265,14 +273,30 @@ export const fetchApprovers = (
         .filter((a): a is typeof a & { userArn: string } =>
           a.approvalState === "APPROVE" && a.userArn !== undefined && a.userArn !== ""
         )
-      return {
+      return Option.some({
         names: approved.map((a) => normalizeAuthor(a.userArn)),
         arns: approved.map((a) => a.userArn)
-      }
+      })
     }),
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    Effect.catch(() => Effect.succeed(emptyApprovers()))
+    Effect.catchIf((error) => !isCredentialInvalidCause(error), (error) =>
+      Effect.logWarning("approver read failed; keeping the last known approvers", error).pipe(
+        Effect.as(Option.none())
+      ))
   )
+
+/** A read's approver fields: the approvers, or an empty placeholder marked unknown when the read failed. */
+export interface ApproverFields {
+  readonly approvedBy: Array<string>
+  readonly approvedByArns: Array<string>
+  readonly approversUnknown?: true
+}
+export const approverFields = (
+  approvers: Option.Option<{ readonly names: Array<string>; readonly arns: Array<string> }>
+): ApproverFields =>
+  Option.match(approvers, {
+    onNone: (): ApproverFields => ({ approvedBy: [], approvedByArns: [], approversUnknown: true }),
+    onSome: ({ arns, names }): ApproverFields => ({ approvedBy: names, approvedByArns: arns })
+  })
 
 /**
  * Check PR merge status.
@@ -318,6 +342,7 @@ const RawPullRequest = Schema.Struct({
   isMergeable: Schema.Boolean,
   approvers: Schema.Array(Schema.String),
   approverArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
+  approversUnknown: Schema.optionalKey(Schema.Literal(true)),
   approvalRules: Schema.Array(ApprovalRule).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
   accountProfile: Schema.String,
   accountRegion: Schema.String,
@@ -355,6 +380,7 @@ const RawToPullRequest = RawPullRequest.pipe(
         ...(raw.approvalUnknown !== undefined && { approvalUnknown: raw.approvalUnknown }),
         approvedBy: raw.approvers,
         approvedByArns: raw.approverArns,
+        ...(raw.approversUnknown !== undefined && { approversUnknown: raw.approversUnknown }),
         commentedBy: [],
         approvalRules: raw.approvalRules
       }
@@ -377,6 +403,7 @@ const RawToPullRequest = RawPullRequest.pipe(
       isMergeable: pr.isMergeable,
       approvers: pr.approvedBy ?? [],
       approverArns: pr.approvedByArns ?? [],
+      ...(pr.approversUnknown !== undefined && { approversUnknown: pr.approversUnknown }),
       approvalRules: (pr.approvalRules ?? []).map((rule) => decodeApprovalRule(rule)),
       accountProfile: pr.account.profile,
       accountRegion: pr.account.region,

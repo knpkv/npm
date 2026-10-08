@@ -873,19 +873,19 @@ export const ServicesPage = ({
       let hasFailedTest = false
       let hasSetupFailure = false
       let shouldRefreshOverview = false
-      // A connected resource holds no data until it syncs, so each healthy one that syncs gets its first sync.
-      const firstSyncs: Array<PluginConnectionId> = []
       const completed = completedBatchDrafts.current.get(originProvider) ?? new Set<string>()
       completedBatchDrafts.current.set(originProvider, completed)
       const acceptResponse = (draftKey: string, response: CreatePluginConnectionResponse): void => {
         completed.add(draftKey)
         hasFailedTest = hasFailedTest || response.test._tag !== "healthy"
+        // A connected resource holds no data until it syncs: each healthy one that syncs starts its first
+        // sync as soon as it is accepted, so a later draft's failure can't skip it.
         if (
           response.test._tag === "healthy" &&
           response.connection.isEnabled &&
           response.connection.supportsSynchronization
         ) {
-          firstSyncs.push(response.connection.pluginConnectionId)
+          synchronizeConnection(response.connection.pluginConnectionId)
         }
         shouldRefreshOverview = shouldRefreshOverview || response.connection.providerAccountId !== null
         setConnectionsState((current) =>
@@ -970,7 +970,6 @@ export const ServicesPage = ({
         createRequest.current = null
         setOpenProvider(hasFailedTest || hasSetupFailure ? originProvider : null)
         setSubmittingProvider(null)
-        for (const pluginConnectionId of firstSyncs) synchronizeConnection(pluginConnectionId)
         return !hasSetupFailure
       } catch (failure: unknown) {
         if (request.signal.aborted) return false

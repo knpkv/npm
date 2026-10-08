@@ -60,7 +60,7 @@ export const syncLine = (state: PluginSynchronizationState, now: Date): SyncLine
 export const isAccountSyncFailure = (failureClass: PluginFailureClass): boolean =>
   failureClass === "authentication" || failureClass === "authorization"
 
-const failureSentences: Readonly<Record<PluginFailureClass, string>> = {
+const failureSentences = {
   authentication: "The provider rejected the account's credentials. Sign in again, then sync again.",
   authorization: "The account's credentials can't read this resource. Grant access, then sync again.",
   "rate-limit": "The provider is limiting requests. Wait a minute, then sync again.",
@@ -69,7 +69,7 @@ const failureSentences: Readonly<Record<PluginFailureClass, string>> = {
     "The provider sent data Control Center couldn't read. Sync again; report it if it keeps failing.",
   outage: "The provider is unavailable right now. Sync again later.",
   unknown: "The provider couldn't be read. Sync again."
-}
+} satisfies Readonly<Record<PluginFailureClass, string>>
 
 /** The account-level sentence for a credential failure, stated once on the account card. */
 export const accountSyncFailureSentence = (failureClass: PluginFailureClass): string => failureSentences[failureClass]

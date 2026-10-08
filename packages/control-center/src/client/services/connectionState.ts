@@ -45,12 +45,18 @@ export const connectionStatus = (
   }
 }
 
-/** The sync state that outranks health, or nothing once a sync has succeeded (or while unknown). */
+/**
+ * The sync state that outranks health, or nothing once a sync has succeeded. State that hasn't
+ * loaded or couldn't be read is no proof of data, so it never falls through to "Healthy".
+ */
 const syncStatus = (
   synchronization: ConnectionSynchronizationViewState | undefined
 ): ConnectionStatusPresentation | undefined => {
-  if (synchronization?._tag === "syncing") return { label: "Syncing…", tone: "progress" }
-  if (synchronization?._tag !== "ready") return undefined
+  if (synchronization === undefined || synchronization._tag === "loading") {
+    return { label: "Checking sync…", tone: "neutral" }
+  }
+  if (synchronization._tag === "failed") return { label: "Sync state unknown", tone: "neutral" }
+  if (synchronization._tag === "syncing") return { label: "Syncing…", tone: "progress" }
   switch (synchronization.synchronization.result) {
     case "never":
       return { label: "Not synced yet", tone: "neutral" }

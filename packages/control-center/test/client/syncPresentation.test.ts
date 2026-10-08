@@ -6,7 +6,10 @@ import { syncedAtText, syncFailureSentence, syncLine } from "../../src/client/se
 
 const NOW = new Date("2026-10-08T19:35:00")
 
-const state = (result: PluginSynchronizationState["result"], extra: Record<string, unknown> = {}) =>
+const state = (
+  result: PluginSynchronizationState["result"],
+  extra: Partial<typeof PluginSynchronizationState.Encoded> = {}
+) =>
   Schema.decodeUnknownSync(PluginSynchronizationState)({
     pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000171",
     providerId: "codecommit",

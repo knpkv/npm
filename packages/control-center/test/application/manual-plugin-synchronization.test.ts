@@ -6,6 +6,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as TestClock from "effect/testing/TestClock"
 
+import { PluginHealth } from "../../src/domain/freshness.js"
 import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { type ProviderId, VendorImmutableId } from "../../src/domain/sourceRevision.js"
@@ -765,7 +766,7 @@ describe("manual plugin synchronization", () => {
       yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
       const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
       if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
-      const { connections } = yield* setupFixture(fixture)
+      const { connections, persistence } = yield* setupFixture(fixture)
       const failing = yield* Ref.make(true)
       const drivers = makeManualPluginSyncDriverRegistry([{
         providerId: fixture.providerId,
@@ -787,6 +788,24 @@ describe("manual plugin synchronization", () => {
       assert.strictEqual(failed.failure?.failureClass, "timeout")
       assert.isTrue((failed.failure?.safeMessage.length ?? 0) > 0)
       assert.deepStrictEqual((yield* synchronization.state(input)).failure, failed.failure)
+
+      // A later health write (a connection test after credentials expired) isn't this sync's cause.
+      yield* TestClock.adjust("1 minute")
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, fixture.pluginConnectionId)
+      yield* persistence.pluginRuntime.recordHealth(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        runtime.revision,
+        Schema.decodeUnknownSync(Schema.toType(PluginHealth))({
+          _tag: "unavailable",
+          checkedAt: DateTime.makeUnsafe(DateTime.toEpochMillis(SYNCHRONIZED_AT) + 60_000),
+          failureClass: "authentication",
+          retryAt: null,
+          safeMessage: "Credentials were rejected."
+        }),
+        runtime.consecutiveFailures + 1
+      )
+      assert.isNull((yield* synchronization.state(input)).failure)
 
       yield* Ref.set(failing, false)
       const recovered = yield* synchronization.synchronize(input)

@@ -193,9 +193,26 @@ const failureHealth = Effect.fn("ManualPluginSynchronization.failureHealth")(fun
 })
 
 /**
+ * Why a failed attempt failed: the failure on the connection's health, but only when that health was
+ * recorded during the attempt (`persistHealth` writes it before the attempt completes). A health
+ * written later, by a connection test or another sync, says nothing about this attempt, so the
+ * reason is unknown (null) rather than borrowed.
+ */
+const failureOfAttempt = (
+  attempt: PluginSyncAttemptRecord,
+  health: PluginHealthType | null
+): PluginSynchronizationState["failure"] => {
+  if (attempt.outcome !== SOURCE_UNAVAILABLE_OUTCOME || attempt.completedAt === null || health === null) return null
+  if (health._tag !== "unavailable" && health._tag !== "degraded") return null
+  const checkedAt = DateTime.toEpochMillis(health.checkedAt)
+  const recordedDuringAttempt = checkedAt >= DateTime.toEpochMillis(attempt.startedAt) &&
+    checkedAt <= DateTime.toEpochMillis(attempt.completedAt)
+  return recordedDuringAttempt ? { failureClass: health.failureClass, safeMessage: health.safeMessage } : null
+}
+
+/**
  * The state of a stream's syncs. A failed last sync says why from the failure it recorded on the
- * connection's health (`persistHealth` records it before completing the attempt); a later health
- * write that isn't a failure leaves the reason unknown (null) rather than inventing one.
+ * connection's health (see `failureOfAttempt`).
  */
 const stateFromAttemptState = (
   pluginConnectionId: PluginConnectionId,
@@ -218,10 +235,7 @@ const stateFromAttemptState = (
       ? "running"
       : lastAttempt.outcome,
     pagesCommitted: lastAttempt?.pagesCommitted ?? 0,
-    failure: lastAttempt?.outcome === SOURCE_UNAVAILABLE_OUTCOME &&
-        health !== null && (health._tag === "unavailable" || health._tag === "degraded")
-      ? { failureClass: health.failureClass, safeMessage: health.safeMessage }
-      : null
+    failure: lastAttempt === undefined ? null : failureOfAttempt(lastAttempt, health)
   }
 }
 

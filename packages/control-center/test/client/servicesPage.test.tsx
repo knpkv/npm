@@ -3813,7 +3813,7 @@ describe("ServicesPage first sync", () => {
   const syncState = (
     pluginConnectionId: PluginConnectionId,
     result: PluginSynchronizationState["result"],
-    extra: Record<string, unknown> = {}
+    extra: Partial<typeof PluginSynchronizationState.Encoded> = {}
   ) =>
     Schema.decodeUnknownSync(PluginSynchronizationState)({
       pluginConnectionId,
@@ -4058,6 +4058,94 @@ describe("ServicesPage first sync", () => {
     const credentialSentence = "The provider rejected the account's credentials."
     expect(host.textContent?.split(credentialSentence).length).toBe(2)
     expect(pipeline?.textContent).not.toContain(credentialSentence)
+  })
+
+  // Sync state that hasn't loaded, or failed to load, is not proof of data: never "Healthy".
+  it("doesn't call a resource Healthy while its sync state is loading or unreadable", async () => {
+    const existing = Schema.decodeSync(PluginConnectionSummary)({
+      pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000191",
+      providerAccountId: null,
+      followedResourceId: null,
+      providerId: "codecommit",
+      displayName: "payments-api",
+      isEnabled: true,
+      supportsSynchronization: true,
+      health: { _tag: "healthy", checkedAt: "2026-07-14T10:03:00.000Z" },
+      updatedAt: "2026-07-14T10:03:00.000Z"
+    })
+    let failRead: (() => void) | undefined
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(existing.pluginConnectionId),
+      overview: () => Promise.resolve({ ...awsOverview, connections: [existing] }),
+      setEnabled: vi.fn(),
+      synchronization: () =>
+        new Promise((_, reject) => {
+          failRead = () => reject(new Error("unavailable"))
+        }),
+      synchronize: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const card = () =>
+      [...host.querySelectorAll<HTMLElement>("article")].find(({ textContent }) =>
+        textContent?.includes("payments-api")
+      )
+    expect(card()?.textContent).not.toContain("Healthy")
+    await act(async () => failRead?.())
+    expect(card()?.textContent).not.toContain("Healthy")
+    expect(card()?.textContent).toContain("Sync state unknown")
+  })
+
+  // Without batch create, one draft can connect and a later one fail: the one that connected still syncs.
+  it("syncs a connected resource even when a later draft in the same setup fails", async () => {
+    const ids = [
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000192"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000193")
+    ]
+    const create = vi
+      .fn<ConnectionTestTransport["create"]>()
+      .mockImplementationOnce((request) => Promise.resolve(created(request, true)))
+      .mockImplementationOnce(() => Promise.reject(new Error("setup failed")))
+    const synchronize = vi.fn<NonNullable<ConnectionTestTransport["synchronize"]>>((pluginConnectionId) =>
+      Promise.resolve(syncState(pluginConnectionId, "synchronized"))
+    )
+    const transport: ConnectionTestTransport = {
+      create,
+      discoverAwsProfiles: () => Promise.resolve([{ profile: "production", region: "eu-west-1" }]),
+      discoverAwsResources: () =>
+        Promise.resolve({
+          accountId: "123456789012",
+          codeCommit: { _tag: "available", names: [], truncated: false },
+          codePipeline: { _tag: "available", names: [], truncated: false }
+        }),
+      overview: () => Promise.resolve(awsOverview),
+      makeConnectionId: vi.fn().mockResolvedValueOnce(ids[0]).mockResolvedValueOnce(ids[1]),
+      setEnabled: vi.fn(),
+      synchronization: (pluginConnectionId) => Promise.resolve(syncState(pluginConnectionId, "never")),
+      synchronize,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const inputs = host.querySelectorAll<HTMLInputElement>("input")
+    if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
+    if (inputs[1] !== undefined) await setControlValue(inputs[1], "production")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+    const textareas = host.querySelectorAll<HTMLTextAreaElement>("textarea")
+    if (textareas[0] !== undefined) await setControlValue(textareas[0], "payments-api\nrisk-engine")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => submit?.click())
+    await act(async () => undefined)
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(synchronize.mock.calls.map(([pluginConnectionId]) => pluginConnectionId)).toEqual([ids[0]])
   })
 
   // Opening Services never syncs anything by itself: only a connect or Sync now does.

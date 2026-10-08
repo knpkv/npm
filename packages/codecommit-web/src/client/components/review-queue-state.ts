@@ -73,7 +73,7 @@ export const matchesQueueFilter = (pr: Domain.PullRequest, entry: FilterEntry): 
     case "repo":
       return pr.repositoryName === entry.value
     case "approver":
-      return pr.approvedBy.some((name) => name === entry.value)
+      return Domain.currentApprovers(pr).some((name) => name === entry.value)
     case "commenter":
       return pr.commentedBy.some((name) => name === entry.value)
     case "size": {
@@ -151,7 +151,7 @@ export const queueFilterOptions = (
     const scope = extractScope(pr.title)
     if (scope) scopes.add(scope)
     for (const name of pr.commentedBy) if (name) commenters.add(name)
-    for (const name of pr.approvedBy) if (name) approvers.add(name)
+    for (const name of Domain.currentApprovers(pr)) if (name !== "") approvers.add(name)
   }
 
   return {

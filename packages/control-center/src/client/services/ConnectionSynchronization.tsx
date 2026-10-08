@@ -1,5 +1,5 @@
 import { Button, StateLabel, Text } from "@knpkv/rly/primitives"
-import type { ReactElement } from "react"
+import { type ReactElement, useEffect, useState } from "react"
 
 import type { PluginSynchronizationState } from "../../api/plugins.js"
 import styles from "./ServicesPage.module.css"
@@ -12,6 +12,16 @@ export type ConnectionSynchronizationViewState =
   | { readonly _tag: "failed" }
   | { readonly _tag: "ready"; readonly synchronization: PluginSynchronizationState }
 
+/** The current time, refreshed every half minute so relative times ("2 min ago") stay true. */
+const useNow = (): Date => {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(timer)
+  }, [])
+  return now
+}
+
 const StateDetails = ({
   hideAccountFailure,
   isSyncing,
@@ -22,7 +32,8 @@ const StateDetails = ({
   readonly synchronization: PluginSynchronizationState
 }): ReactElement => {
   // While an attempt is in flight, surface the in-progress state instead of the stale prior result.
-  const line: SyncLine = isSyncing ? { label: "Syncing…", tone: "progress" } : syncLine(synchronization, new Date())
+  const now = useNow()
+  const line: SyncLine = isSyncing ? { label: "Syncing…", tone: "progress" } : syncLine(synchronization, now)
   const failureClass = synchronization.failure?.failureClass
   const sentence =
     isSyncing || (hideAccountFailure && failureClass !== undefined && isAccountSyncFailure(failureClass))

@@ -14,6 +14,7 @@ import {
   decodeBoundedResponseJson,
   FleetOperationError,
   fleetResponseBodyMaxBytes,
+  FleetStoreBusyError,
   HostConfiguration,
   type HostOperationLifecycle,
   type HostOperations,
@@ -1041,6 +1042,46 @@ describe("fleet local authority", () => {
             status: "succeeded"
           })
           expect(coordinatorRuns).toBe(1)
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("fails an approval with a retryable busy error while another connection holds the write lock", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-approve-busy-test-"))
+    const databasePath = join(root, "jobs.sqlite")
+    return Effect.acquireUseRelease(
+      JobStore.open(databasePath),
+      (store) =>
+        Effect.gen(function*() {
+          const service = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-approve-busy"),
+            nonce: Effect.succeed("nonce-approve-busy"),
+            now: Effect.succeed(1_000),
+            operations,
+            store
+          })
+          const job = yield* service.submit({ payload: { kind: "nix.apply", ref: "main" } }, "owner")
+          const approval = { hash: job.hash, nonce: "nonce-approve-busy" }
+          const holder = new DatabaseSync(databasePath)
+          holder.exec("BEGIN IMMEDIATE")
+          const busy = yield* Effect.flip(service.approve(job.id, approval, "owner")).pipe(
+            Effect.ensuring(Effect.sync(() => {
+              holder.exec("ROLLBACK")
+              holder.close()
+            }))
+          )
+          expect(busy).toBeInstanceOf(FleetStoreBusyError)
+          expect(busy).toMatchObject({ operation: "transition" })
+          // Nothing was written, so the same approval succeeds once the lock is released.
+          const approved = yield* service.approve(job.id, approval, "owner")
+          expect(approved.status).toBe("queued")
         }),
       (store) =>
         Effect.sync(() => {

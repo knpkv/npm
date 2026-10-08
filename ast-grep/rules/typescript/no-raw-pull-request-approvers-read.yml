@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-raw-pull-request-approvers-read
+language: tsx
+severity: error
+message: "Read who approved through Domain.currentApprovers; `approvedBy` and `approvedByArns` are only the last known lists while approvers are unknown."
+
+rule:
+  any:
+    - pattern: $PR.approvedBy
+    - pattern: $PR?.approvedBy
+    - pattern: $PR["approvedBy"]
+    - pattern: $PR.approvedByArns
+    - pattern: $PR?.approvedByArns
+    - pattern: $PR["approvedByArns"]
+
+files:
+  - "packages/codecommit-core/src/**/*.ts"
+  - "packages/codecommit/src/**/*.ts"
+  - "packages/codecommit/src/**/*.tsx"
+  - "packages/codecommit-web/src/**/*.ts"
+  - "packages/codecommit-web/src/**/*.tsx"
+
+ignores:
+  # currentApprovers and needsMyReview, which checks approversUnknown first.
+  - "packages/codecommit-core/src/Domain.ts"
+  # The provider adapter produces the list; the cache stores the last known list beside its marker.
+  - "packages/codecommit-core/src/AwsClient/**"
+  - "packages/codecommit-core/src/CacheService/**"
+  # Row <-> domain mappers copy the field unchanged.
+  - "packages/codecommit-core/src/PRService/internal.ts"
+
+note: |
+  A pull request whose approver read failed keeps its last known `approvedBy` and sets
+  `approversUnknown`; that list may still name an approval since revoked. Reading `approvedBy`
+  directly shows it as current. `currentApprovers(pr)` is empty while approvers are unknown; show
+  the state with `approversUnknownLabel`. A reader that checks `approversUnknown` itself carries an
+  `ast-grep-ignore` saying so. Destructuring (`const { approvedBy } = pr`) is not matched: telling a
+  pull request from any other object with that key needs types; reviews still judge it.
