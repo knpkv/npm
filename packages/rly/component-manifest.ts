@@ -426,6 +426,30 @@ export const componentManifest = {
         tests: ["test/patterns/RelaySetup.test.tsx"]
       }
     },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayFindings" },
+        { kind: "type", name: "RelayFindingsProps" },
+        { kind: "type", name: "RlyRelayFinding" },
+        { kind: "type", name: "RlyRelayFindingDisposition" },
+        { kind: "type", name: "RlyRelayFindingLocation" },
+        { kind: "type", name: "RlyRelayFindingPriority" }
+      ],
+      name: "RelayFindings",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayFindings.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayFindings.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayFindings.stories.tsx",
+        storyId: "patterns-relayfindings--review-findings",
+        coverageStoryIds: ["patterns-relayfindings--stale", "patterns-relayfindings--empty"],
+        tests: ["test/patterns/RelayFindings.test.tsx"]
+      }
+    },
     // scaffold:components:insert
     {
       category: "primitive",

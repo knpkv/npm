@@ -509,6 +509,17 @@ client's own request state. rly never collects provider credentials: the fix tel
 user what to run on their machine. A finished check is announced politely, and Start
 stays reachable while unavailable, saying what is missing.
 
+`RelayFindings` reviews Relay's findings (the shape of codecommit's
+`RelayReviewFinding`): grouped by location, the whole pull request first, most severe
+first in each group, severity as an icon, a word and the P-number (Blocking, Should fix,
+Consider, Nit). Accept and Dismiss are toggles (pressing again returns to pending);
+Discuss attaches the set to the conversation. "Post accepted" hands the host the
+accepted ids to post one confirmed call at a time, never a bulk write. When the head has
+moved since `reviewedHead`, a banner says so with Re-run, and line findings wait for the
+re-run instead of landing on the wrong line. A before-side line is shown as text with
+its old revision and never opens a head line. Posting outcomes are announced once each;
+a failed post offers Try again for that one finding.
+
 `RelayPanel` is Relay's frame: header (mark, title, exact scope with the revision in
 mono, an optional pin, options, close), tabs whose counts are part of their names, a
 freshness line, a body, and a footer for the composer. Only the body scrolls, so the

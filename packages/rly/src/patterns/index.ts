@@ -100,6 +100,14 @@ export type {
   RlyRelayDockSelectionControl,
   RlyRelayDockState
 } from "./RelayDock.js"
+export { RelayFindings } from "./RelayFindings.js"
+export type {
+  RelayFindingsProps,
+  RlyRelayFinding,
+  RlyRelayFindingDisposition,
+  RlyRelayFindingLocation,
+  RlyRelayFindingPriority
+} from "./RelayFindings.js"
 export { RelayLauncher, relayShortcut, useRelayShortcut, useRelaySummon } from "./RelayLauncher.js"
 export type { RelayLauncherProps, RlyRelayShortcut, RlyRelaySummon, UseRelaySummonOptions } from "./RelayLauncher.js"
 export { RelayMark, RLY_RELAY_MARK_SIZES, RLY_RELAY_MARK_TILE_SIZES } from "./RelayMark.js"

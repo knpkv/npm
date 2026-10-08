@@ -761,6 +761,25 @@
       ]
     },
     {
+      "name": "RelayFindings",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayFindings.tsx",
+        "story": "packages/rly/stories/patterns/RelayFindings.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayFindings.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayFindings.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relayfindings--review-findings",
+      "storyIds": [
+        "patterns-relayfindings--review-findings",
+        "patterns-relayfindings--stale",
+        "patterns-relayfindings--empty"
+      ]
+    },
+    {
       "name": "RelayLauncher",
       "paths": {
         "source": "packages/rly/src/patterns/RelayLauncher.tsx",
