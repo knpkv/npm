@@ -1,6 +1,7 @@
 import react from "@vitejs/plugin-react"
 import { basename } from "node:path"
 import { defineConfig, type Plugin } from "vite"
+import { BROWSER_TARGET } from "../../browser-target.ts"
 import { componentManifest } from "./component-manifest.js"
 import { moduleEntrySources } from "./generated/vite-entries.js"
 import { componentStyleSources } from "./scripts/contract.js"
@@ -64,6 +65,7 @@ export default defineConfig({
     }
   },
   build: {
+    target: BROWSER_TARGET,
     cssCodeSplit: false,
     emptyOutDir: true,
     lib: {
