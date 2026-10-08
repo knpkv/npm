@@ -1,15 +1,14 @@
 import { dashboardRefreshView } from "./internal/dashboard-refresh.js"
-import { RegistryProvider, useAtom, useAtomMount, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
+import { RegistryProvider, useAtom, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
-import { Cause, Effect, Exit, Option, Result, Schedule, Schema } from "effect"
+import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import { useEffect, useRef, useState, type TouchEvent } from "react"
 import { createRoot, hydrateRoot } from "react-dom/client"
-import { ChatEntry, ChatHistory, type ChatMode, type ChatRequest } from "@knpkv/herdr-coordinator/model"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
 import { decodeWorkNavigationSelection, workNavigationHref } from "@knpkv/herdr-work/navigation"
 import { WorkBoard } from "@knpkv/herdr-work/react"
@@ -20,7 +19,7 @@ import {
   registerNewPushSubscription,
   unregisterPushSubscription
 } from "./push-subscription.js"
-import { CoordinatorChatPanel, type NotificationState } from "./approval-app-view.js"
+import type { NotificationState } from "./approval-app-view.js"
 import { ActivityHistory } from "./activity-history.js"
 import {
   DashboardSnapshot,
@@ -166,14 +165,6 @@ const decisionAnswerOf = (
       return DecisionAnswer.Uncertain({ status: null })
   }
 }
-
-const loadChat = fetchJson(ChatHistory, "/v1/chat")
-const sendChat = Effect.fn("CoordinatorChat.send")(function* (request: ChatRequest) {
-  return yield* fetchJson(ChatEntry, "/v1/chat", {
-    body: JSON.stringify(request),
-    method: "POST"
-  })
-})
 
 const pushSupported = (): boolean =>
   window.isSecureContext && "Notification" in window && "PushManager" in window && "serviceWorker" in navigator
@@ -366,27 +357,15 @@ const setApprovalBadge = Effect.fn("Notifications.setBadge")((count: number) =>
 )
 
 const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
-  // Only what this listener serves is ever requested; a host dashboard has no chat, push or (when
-  // it is cross-host) Work snapshot, and polling them only produced 404s.
+  // Only what this listener serves is ever requested; a host dashboard has no push or (when it is
+  // cross-host) Work snapshot, and polling them only produced 404s.
   const served = dashboardPolls(initial.approvalApp)
-  const chat = browserRuntime.atom(served.chat ? loadChat : Effect.succeed(initial.chat ?? { entries: [] }), {
-    initialValue: initial.chat ?? { entries: [] }
-  })
   const connect = makeConnectAtoms()
   const work = served.work ? connect.work : browserRuntime.atom(Effect.never)
   const workPoll = served.work ? connect.workPoll : browserRuntime.atom(Effect.never)
-  const chatPoll = browserRuntime.atom(
-    initial.approvalApp.chatEnabled
-      ? Atom.refresh(chat).pipe(Effect.repeat(Schedule.spaced("3 seconds")))
-      : Effect.never
-  )
   return {
     badge: browserRuntime.fn(setApprovalBadge),
-    busyChat: Atom.make(false),
     busyJob: Atom.make<string | null>(null),
-    chat,
-    chatPoll,
-    chatSend: browserRuntime.fn(sendChat),
     connect,
     // The served snapshot: what the page shows until a refresh succeeds, and after one fails.
     bootstrap: initial,
@@ -414,15 +393,12 @@ type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 
 const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const result = useAtomValue(atoms.dashboard)
-  const chatResult = useAtomValue(atoms.chat)
   const workResult = useAtomValue(atoms.work)
   const notificationResult = useAtomValue(atoms.notification)
   const refresh = useAtomRefresh(atoms.dashboard)
-  const refreshChat = useAtomRefresh(atoms.chat)
   const refreshWork = useAtomRefresh(atoms.work)
   const refreshNotification = useAtomRefresh(atoms.notification)
   const runDecision = useAtomSet(atoms.decision, { mode: "promiseExit" })
-  const runChat = useAtomSet(atoms.chatSend, { mode: "promiseExit" })
   const runBadge = useAtomSet(atoms.badge, { mode: "promiseExit" })
   const runNotificationAction = useAtomSet(atoms.notificationAction, {
     mode: "promiseExit"
@@ -439,7 +415,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const [busyJobId, setBusyJobId] = useAtom(atoms.busyJob)
   const [sendingDecision, setSendingDecision] = useState<ApprovalDecision | null>(null)
   const [decisionStatus, setDecisionStatus] = useState<DecisionStatus | null>(null)
-  const [busyChat, setBusyChat] = useAtom(atoms.busyChat)
   const [pull, setPull] = useAtom(atoms.pull)
   const [deepLinkTarget, setDeepLinkTarget] = useState<PendingApprovalTargetType | null>(null)
   const [historyBusy, setHistoryBusy] = useState(false)
@@ -447,7 +422,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const [pendingBusy, setPendingBusy] = useState(false)
   const [pendingState, setPendingState] = useState(dashboardPendingState(0, initial.pendingApprovals))
   const start = useRef<number | null>(null)
-  useAtomMount(atoms.chatPoll)
 
   const resetPull = (): void => {
     start.current = null
@@ -456,7 +430,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const refreshDashboard = (): void => {
     setPull({ ...initialPull, refreshing: true })
     refresh()
-    refreshChat()
     refreshWork()
   }
   const onTouchStart = (event: TouchEvent<HTMLDivElement>): void => {
@@ -515,17 +488,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       refreshDashboard()
     }
   }
-  const onChatSubmit = async (mode: ChatMode, message: string): Promise<boolean> => {
-    setBusyChat(true)
-    const exit = await runChat({ message, mode })
-    setBusyChat(false)
-    if (Exit.isSuccess(exit)) {
-      refreshChat()
-      refresh()
-      return true
-    }
-    return false
-  }
   const onNotificationAction = async (enable: boolean): Promise<void> => {
     await runNotificationAction(enable)
     refreshNotification()
@@ -561,11 +523,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     if (result._tag === "Failure")
       Effect.runFork(Effect.logWarning("dashboard refresh failed", Cause.pretty(result.cause)))
   }, [result])
-  const chat = AsyncResult.isSuccess(chatResult)
-    ? chatResult.value
-    : chatResult._tag === "Failure" && chatResult.previousSuccess._tag === "Some"
-      ? chatResult.previousSuccess.value.value
-      : snapshot.chat
   const work = AsyncResult.isSuccess(workResult)
     ? workResult.value
     : workResult._tag === "Failure" && workResult.previousSuccess._tag === "Some"
@@ -581,9 +538,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const canonical = snapshot.approvalApp.canonical === true
   const currentSnapshot = withPendingApprovalTarget(
     {
-      ...(chat === undefined && work === undefined
-        ? snapshot
-        : { ...snapshot, chat: chat ?? null, work: work ?? null }),
+      ...(work === undefined ? snapshot : { ...snapshot, work }),
       historyNextCursor: historyState.nextCursor,
       pendingApprovals: pendingState,
       records: [...snapshot.records, ...historyState.records]
@@ -687,13 +642,11 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     <DashboardView
       approvalOnly={canonical}
       busyJobId={busyJobId}
-      chatBusy={busyChat}
       decisionStatus={decisionStatus}
       sendingDecision={sendingDecision}
       historyLoading={historyBusy}
       pendingLoading={pendingBusy}
       notificationState={notificationState}
-      onChatSubmit={onChatSubmit}
       onDecision={(decision) => void onDecision(decision)}
       onDisableNotifications={() => void onNotificationAction(false)}
       onEnableNotifications={() => void onNotificationAction(true)}
@@ -719,17 +672,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
         {canonical ? (
           <FleetShell
             approvals={dashboardView}
-            connect={
-              <ConnectSurface
-                atoms={atoms.connect}
-                embedded
-                roomFooter={
-                  current.chat === null ? null : (
-                    <CoordinatorChatPanel busy={busyChat} history={current.chat} onSubmit={onChatSubmit} />
-                  )
-                }
-              />
-            }
+            connect={<ConnectSurface atoms={atoms.connect} embedded />}
             hostCount={current.directory === null ? 1 : current.directory.links.length + 1}
             notice={refreshNotice}
             work={

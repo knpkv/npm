@@ -38,12 +38,10 @@ const snapshot = (pending: DashboardSnapshot["pendingApprovals"]): DashboardSnap
   approvalApp: {
     canonical: true,
     canonicalUrl: "https://hub.example.test/",
-    chatEnabled: false,
     pushEnabled: false,
     workEnabled: false
   },
   approvalsEnabled: true,
-  chat: null,
   directory: null,
   historyNextCursor: null,
   host: "ALPHA",

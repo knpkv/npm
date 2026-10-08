@@ -10,7 +10,7 @@ import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { FitAddon, init, Terminal } from "ghostty-web"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { buildConnectForest } from "./forest.js"
-import { applyTerminalInputIdentity } from "./terminal-input-identity.js"
+import { applyTerminalInputIdentity, focusTerminalInput } from "./terminal-input-identity.js"
 import { clampTerminalDimensions, type TerminalDimensions, terminalResizeCommand } from "./terminal-dimensions.js"
 import {
   type ConnectAgent,
@@ -153,6 +153,30 @@ const storeRememberedAgent = (key: string) =>
     )
   )
 
+/** Whether this device hides the terminal key rail's keys; nothing stored means shown, as before. */
+const TerminalKeysVisibility = Schema.Literals(["shown", "hidden"])
+const terminalKeysStorageKey = "fleet-connect-terminal-keys"
+
+const loadTerminalKeysHidden = Effect.try({
+  try: () => window.localStorage.getItem(terminalKeysStorageKey),
+  catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.read", cause })
+}).pipe(
+  Effect.flatMap((value) =>
+    value === null
+      ? Effect.succeed(false)
+      : Schema.decodeUnknownEffect(TerminalKeysVisibility)(value).pipe(
+          Effect.map((visibility) => visibility === "hidden"),
+          Effect.mapError((cause) => new ConnectPreferenceError({ operation: "local_storage.decode", cause }))
+        )
+  )
+)
+
+const storeTerminalKeysHidden = (hidden: boolean) =>
+  Effect.try({
+    try: () => window.localStorage.setItem(terminalKeysStorageKey, hidden ? "hidden" : "shown"),
+    catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.write", cause })
+  })
+
 /** One line for a failure a person reads: the error's own message, never a stack trace. */
 const causeSummary = (cause: Cause.Cause<unknown>): string => {
   const error = Cause.squash(cause)
@@ -254,6 +278,7 @@ export const makeConnectAtoms = () => {
     connectionRequest: Atom.make<ConnectionRequest | null>(null),
     hostFilter: Atom.make<string | null>(null),
     preference: Atom.make(loadRememberedAgent),
+    terminalKeysHidden: Atom.make(loadTerminalKeysHidden),
     preferenceError: Atom.make<string | null>(null),
     query: Atom.make(""),
     selectedKey: Atom.make<string | null>(null),
@@ -362,7 +387,7 @@ const terminalWorker = (
         })
       }
       applyTerminalInputIdentity(textarea)
-      const releaseTerminalFocus = keyboard.setTerminalFocus(textarea, () => terminal.terminal.focus())
+      const releaseTerminalFocus = keyboard.setTerminalFocus(textarea, () => focusTerminalInput(textarea))
       yield* Effect.addFinalizer(() => Effect.sync(releaseTerminalFocus))
       let ready = false
       let socket: WebSocket | null = null
@@ -585,6 +610,27 @@ export const ConnectSurface = ({
   const terminalModifierRef = useRef<TerminalModifier | null>(null)
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
+  // The stored choice seeds it; this session's toggle wins once made. Unreadable storage shows the keys.
+  const storedKeysHidden = useAtomValue(atoms.terminalKeysHidden)
+  const [keysHiddenChoice, setKeysHiddenChoice] = useState<boolean | null>(null)
+  const terminalKeysHidden =
+    keysHiddenChoice ?? (AsyncResult.isSuccess(storedKeysHidden) ? storedKeysHidden.value : false)
+  const changeTerminalKeysHidden = (hidden: boolean): void => {
+    setKeysHiddenChoice(hidden)
+    // A latched Ctrl or Alt would stay applied with no visible indicator or way to cancel it, so a
+    // plain "c" would arrive as Ctrl-C. Hiding the keys releases it.
+    if (hidden) {
+      terminalModifierRef.current = null
+      setTerminalModifier(null)
+    }
+    Effect.runFork(
+      storeTerminalKeysHidden(hidden).pipe(
+        Effect.catch(() =>
+          Effect.sync(() => setTerminalKeyError("Couldn't remember this on this device; it applies until you reload."))
+        )
+      )
+    )
+  }
   const terminalInteractionRef = useRef<TerminalInteraction | null>(null)
   const [terminalLinesBack, setTerminalLinesBack] = useState(0)
   const [terminalPositionUnconfirmed, setTerminalPositionUnconfirmed] = useState(false)
@@ -1099,8 +1145,10 @@ export const ConnectSurface = ({
         disabled={connection._tag !== "connected"}
         error={terminalKeyError}
         modifier={terminalModifier}
+        keysHidden={terminalKeysHidden}
         onFocusTerminal={() => terminalFocusRef.current()}
         onKey={sendTerminalRailKey}
+        onKeysHiddenChange={changeTerminalKeysHidden}
         onModifierChange={changeTerminalModifier}
         onSelectText={() => terminalInteractionRef.current?.selectText()}
         onJumpToLatest={() => terminalInteractionRef.current?.jumpToLatest()}

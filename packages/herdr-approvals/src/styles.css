@@ -799,11 +799,6 @@
     overflow-wrap: break-word;
   }
 
-  .chat-panel {
-    display: grid;
-    gap: var(--rly-space-16);
-  }
-
   .notification-status {
     align-items: center;
     display: flex;
@@ -860,71 +855,10 @@
     padding-inline-start: var(--rly-space-24);
   }
 
-  .notification-actions,
-  .chat-actions {
+  .notification-actions {
     display: flex;
     gap: var(--rly-space-8);
     justify-content: flex-end;
-  }
-
-  .chat-history {
-    display: grid;
-    gap: var(--rly-space-12);
-    max-block-size: 32rem;
-    overflow-y: auto;
-  }
-
-  /* Turns are rows in the log, separated by a rule, not cards inside the panel's card. */
-  .chat-turn {
-    border-block-end: 1px solid var(--rly-color-border-1);
-    display: grid;
-    gap: var(--rly-space-8);
-    padding-block: var(--rly-space-12);
-  }
-
-  .chat-turn:last-child {
-    border-block-end: 0;
-  }
-
-  .chat-turn p {
-    margin: 0;
-    overflow-wrap: break-word;
-    white-space: pre-wrap;
-  }
-
-  /* A turn's state as a word; only a failure takes ink. */
-  .chat-turn-state {
-    color: var(--rly-color-text-2);
-    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
-      var(--rly-type-label-font);
-  }
-
-  .chat-turn-state[data-state="failed"] {
-    color: var(--rly-color-blocked-ink);
-  }
-
-  .chat-history:focus-visible {
-    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-    outline-offset: var(--rly-focus-ring-offset);
-  }
-
-  .chat-turn-heading {
-    align-items: center;
-    display: flex;
-    gap: var(--rly-space-8);
-    justify-content: space-between;
-  }
-
-  /* The coordinator's answer under the question it answers; its "Coordinator" label marks it, no side bar. */
-  .coordinator-reply {
-    display: grid;
-    gap: var(--rly-space-6);
-    padding-block-start: var(--rly-space-4);
-  }
-
-  .chat-compose {
-    display: grid;
-    gap: var(--rly-space-8);
   }
 
   .keyboard-hints {
@@ -935,39 +869,6 @@
       var(--rly-type-meta-font);
     gap: var(--rly-space-12);
     justify-content: flex-end;
-  }
-
-  .chat-compose label {
-    color: var(--rly-color-text-2);
-    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
-      var(--rly-type-meta-font);
-  }
-
-  .chat-compose textarea {
-    background: var(--rly-color-surface-2);
-    border: 1px solid var(--rly-color-border-2);
-    border-radius: var(--rly-radius-control);
-    color: var(--rly-color-text-1);
-    font: inherit;
-    padding: var(--rly-space-12);
-    resize: vertical;
-  }
-
-  /* Forced colours would paint the placeholder in a link-like system colour; it is hint text. */
-  @media (forced-colors: active) {
-    .chat-compose textarea::placeholder {
-      color: GrayText;
-    }
-  }
-
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .chat-compose textarea::placeholder {
-    color: GrayText;
-  }
-
-  .chat-compose textarea:focus-visible {
-    border-color: var(--rly-color-agent);
-    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .notice {
