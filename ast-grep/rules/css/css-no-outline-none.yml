@@ -31,6 +31,8 @@ rule:
 
 files:
   - "packages/herdr-monitor/src/**/*.css"
+  - "packages/review/src/**/*.css"
+  - "packages/agent-usage/src/**/*.css"
 
 note: |
   Keep rly's ring (base :focus-visible) on the focused element. A transparent outline is no substitute:

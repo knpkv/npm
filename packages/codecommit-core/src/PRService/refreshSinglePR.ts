@@ -35,7 +35,7 @@ import {
   PullRequestStatus,
   type RepositoryName
 } from "../Domain.js"
-import { type AwsClientError, RefreshError } from "../Errors.js"
+import { AccountSwitchedOff, AccountUnknown, type AwsClientError, RefreshError } from "../Errors.js"
 import { approverColumnsOf, countAllComments, type PRState } from "./internal.js"
 
 interface ResolvedAccount {
@@ -65,7 +65,7 @@ export interface RefreshSinglePRResult {
   readonly revisionId: string
   readonly sourceCommit: string
 }
-export type RefreshSinglePRError = AwsClientError | RefreshError
+export type RefreshSinglePRError = AwsClientError | RefreshError | AccountSwitchedOff | AccountUnknown
 
 /** Exact repository and region used when a browser route disambiguates a PR. */
 export interface RefreshSinglePRCoordinates {
@@ -160,6 +160,31 @@ const resolveAccountFromCache = (
     return undefined
   })
 
+/**
+ * Why `awsAccountId` could not be resolved. Switched off when a disabled profile owns it (by name, or
+ * through a cached pull request of that account); unknown when nothing ties it to any profile; otherwise
+ * the account is known and only this pull request's coordinates failed, a plain RefreshError.
+ */
+const unreadableAccount = (prRepo: PullRequestRepoContract, awsAccountId: string) =>
+  Effect.gen(function*() {
+    const configService = yield* ConfigService
+    const unreadable = (cause: unknown) => new RefreshError({ failedAccounts: [awsAccountId], cause })
+    const config = yield* configService.load.pipe(Effect.mapError(unreadable))
+    const cached = yield* prRepo.findAll().pipe(Effect.mapError(unreadable))
+    const owners = new Set([
+      awsAccountId,
+      ...cached
+        .filter((p) => p.awsAccountId === awsAccountId || p.repoAccountId === awsAccountId)
+        .map((p) => p.accountProfile)
+    ])
+    const switchedOff = config.accounts.find((account) => !account.enabled && owners.has(account.profile))
+    if (switchedOff !== undefined) {
+      return yield* new AccountSwitchedOff({ awsAccountId, profile: switchedOff.profile })
+    }
+    const known = owners.size > 1 || config.accounts.some((account) => account.profile === awsAccountId)
+    return yield* known ? new RefreshError({ failedAccounts: [awsAccountId] }) : new AccountUnknown({ awsAccountId })
+  })
+
 export const makeRefreshSinglePR = (
   state: PRState
 ) => {
@@ -216,7 +241,7 @@ export const makeRefreshSinglePR = (
       ? resolvedAccount(cachedPR.value.accountProfile, coordinates?.region ?? cachedPR.value.accountRegion)
       : yield* resolveAccountFromCache(prRepo, awsAccountId, prId, coordinates)
 
-    if (account === undefined) return yield* new RefreshError({ failedAccounts: [awsAccountId] })
+    if (account === undefined) return yield* unreadableAccount(prRepo, awsAccountId)
 
     // Fetch fresh PR details, after taking the observation number: a read that began later wins.
     const observation = yield* prRepo.observe().pipe(

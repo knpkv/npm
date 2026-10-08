@@ -1,5 +1,11 @@
 # @knpkv/codecommit-core
 
+## 0.23.1
+
+### Patch Changes
+
+- [#612](https://github.com/knpkv/npm/pull/612) [`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26) Thanks [@konopkov](https://github.com/konopkov)! - A refresh held back by the permission gate no longer reads "PermissionDeniedError:." It now says what is missing and where to fix it: "Couldn't list pull requests in dev (eu-central-1): Not allowed yet: the getPullRequests permission prompt has no answer. Allow it in Settings → Permissions." A provider error with no message is named without a dangling colon.
+
 ## 0.23.0
 
 ### Minor Changes

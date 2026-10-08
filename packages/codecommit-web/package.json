@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/codecommit-web",
-  "version": "0.26.2",
+  "version": "0.27.0",
   "description": "Web server and frontend for CodeCommit PR browser",
   "type": "module",
   "main": "dist/index.js",

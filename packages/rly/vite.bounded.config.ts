@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
+import { BROWSER_TARGET } from "../../browser-target.ts"
 
 export default defineConfig({
   base: "./",
@@ -10,6 +11,7 @@ export default defineConfig({
     }
   },
   build: {
+    target: BROWSER_TARGET,
     cssCodeSplit: true,
     emptyOutDir: false,
     lib: {

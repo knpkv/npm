@@ -1,11 +1,12 @@
 import { build } from "esbuild"
+import { BROWSER_TARGET } from "../../../browser-target.ts"
 
 const common = {
   bundle: true,
   logLevel: "info",
   minify: true,
   sourcemap: true,
-  target: "es2022"
+  target: BROWSER_TARGET
 }
 
 await Promise.all([

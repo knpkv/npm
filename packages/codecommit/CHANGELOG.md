@@ -1,5 +1,17 @@
 # @knpkv/codecommit
 
+## 0.17.0
+
+### Minor Changes
+
+- [#610](https://github.com/knpkv/npm/pull/610) [`bbdbb13`](https://github.com/knpkv/npm/commit/bbdbb130868ddd3593e7bc5d547b470baa21ae3c) Thanks [@konopkov](https://github.com/konopkov)! - `codecommit web --no-open` prints the sign-in link without opening a browser. It also skips the browser when `BROWSER=none`, when `CI` is set, or when stdout is not a terminal, and says why. Test harnesses and scripts no longer open tabs in the user's browser.
+
+### Patch Changes
+
+- Updated dependencies [[`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26), [`26d9de9`](https://github.com/knpkv/npm/commit/26d9de9c64b78da62ab462856cbd09e9137eb40f)]:
+  - @knpkv/codecommit-core@0.23.1
+  - @knpkv/codecommit-web@0.27.0
+
 ## 0.16.3
 
 ### Patch Changes
