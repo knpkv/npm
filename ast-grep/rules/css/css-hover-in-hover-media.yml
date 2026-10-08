@@ -26,6 +26,8 @@ files:
   - "packages/herdr-connect/src/**/*.css"
   - "packages/review/src/**/*.css"
   - "packages/agent-usage/src/**/*.css"
+  - "packages/control-center/src/**/*.css"
+  - "packages/jcf-web/src/**/*.css"
 
 note: |
   Wrap hover styles: @media (hover: hover) and (pointer: fine) { .link:hover { … } }.
