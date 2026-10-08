@@ -485,6 +485,22 @@ describe("ApprovalsCountdown", () => {
     view.unmount()
   })
 
+  it("says a request without an expiry has none, in the row and on its bar", () => {
+    const view = mount({
+      snapshot: snapshot({
+        pendingApprovals: {
+          failures: [],
+          local: [record("job-1", { approvalExpiresAt: null })],
+          nextCursors: [],
+          remote: []
+        }
+      })
+    })
+    expect(view.container.querySelector(".countdown-row-clock")?.textContent).toBe("No expiry")
+    expect(view.container.querySelector(".countdown-detail")?.textContent).toContain("No expiry")
+    view.unmount()
+  })
+
   it("admits that a later page may hold a sooner deadline", () => {
     const view = mount({
       snapshot: snapshot({
@@ -499,7 +515,8 @@ describe("ApprovalsCountdown", () => {
     expect(view.container.querySelector("[aria-label='Approval summary']")?.textContent).toContain(
       "More requests aren't loaded yet; one of them may expire sooner."
     )
-    expect(view.container.querySelector(".countdown-waiting h2")?.textContent).toBe("Waiting for you 1+")
+    // The count is what's listed; the hero says in words that more may come.
+    expect(view.container.querySelector(".countdown-waiting h2")?.textContent).toBe("Waiting for you 1")
     view.unmount()
   })
 

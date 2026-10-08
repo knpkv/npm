@@ -157,6 +157,15 @@ const renderMixedAgentStates = (): string => {
   )
 }
 
+describe("dashboard agent states", () => {
+  it("spins only the working agent's state; a done agent keeps a still icon", () => {
+    const markup = renderMixedAgentStates()
+    expect(markup.match(/agent-state-spinning/g)).toHaveLength(1)
+    const done = markup.slice(markup.indexOf("reviewer"))
+    expect(done.slice(0, done.indexOf("</section>"))).not.toContain("agent-state-spinning")
+  })
+})
+
 describe("dashboard approval capability", () => {
   it("shows the existing-owner reconciliation title and summary", () => {
     const base = snapshot(true)

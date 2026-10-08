@@ -92,21 +92,13 @@
     position: static;
   }
 
+  /*
+   * Columns by width, not by label width: the web font arrives wider than its fallback, and a
+   * wrapping flex row then re-breaks after first paint and pushes the page down (CLS 0.14 at 200%).
+   */
   .tabList {
-    display: flex;
-    flex-wrap: wrap;
-    overflow-x: auto;
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
     padding-block-end: var(--rly-space-4);
-    overscroll-behavior-inline: contain;
-    scrollbar-width: none;
-  }
-
-  .tabList::-webkit-scrollbar {
-    display: none;
-  }
-
-  .tab {
-    flex: 1 1 auto;
   }
 }
 

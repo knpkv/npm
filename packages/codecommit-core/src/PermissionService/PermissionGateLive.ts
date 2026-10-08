@@ -35,6 +35,12 @@ interface PendingEntry {
   readonly prompt: PermissionPrompt
 }
 
+/** A category's waiting prompts: their count and the first few contexts. */
+export interface PendingPrompts {
+  readonly count: number
+  readonly contexts: ReadonlyArray<string>
+}
+
 export interface PermissionGateLive {
   readonly request: (
     prompt: PermissionPrompt,
@@ -50,6 +56,14 @@ export interface PermissionGateLive {
     response: PermissionResponse
   ) => Effect.Effect<void>
   readonly getFirstPending: () => Effect.Effect<PermissionPrompt | undefined>
+  /**
+   * The prompts of one category waiting in this process right now: how many, and the first `limit`
+   * contexts in arrival order. Only what is actually queued here, so the count never guesses.
+   */
+  readonly pendingOf: (
+    category: PermissionPrompt["category"],
+    limit: number
+  ) => Effect.Effect<PendingPrompts>
 }
 
 const makePermissionGateLive = Effect.gen(function*() {
@@ -134,7 +148,15 @@ const makePermissionGateLive = Effect.gen(function*() {
       })
     )
 
-  return { request, resolve, resolveCategory, getFirstPending } satisfies PermissionGateLive
+  const pendingOf = (category: PermissionPrompt["category"], limit: number): Effect.Effect<PendingPrompts> =>
+    Ref.get(pending).pipe(
+      Effect.map((m) => {
+        const prompts = [...m.values()].filter((entry) => entry.prompt.category === category)
+        return { contexts: prompts.slice(0, limit).map((entry) => entry.prompt.context), count: prompts.length }
+      })
+    )
+
+  return { request, resolve, resolveCategory, getFirstPending, pendingOf } satisfies PermissionGateLive
 })
 
 export class PermissionGateLiveTag extends Context.Service<

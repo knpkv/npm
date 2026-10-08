@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { assert, describe, it } from "@effect/vitest"
+import { assert, describe, it, layer } from "@effect/vitest"
 import { CONFLUENCE_SCOPES, JIRA_SCOPES, type UserInfo } from "@knpkv/atlassian-common/auth"
 import {
   HomeDirectoryLive,
@@ -14,6 +14,8 @@ import * as FileSystem from "effect/FileSystem"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Path from "effect/Path"
+import * as PlatformError from "effect/PlatformError"
+import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
@@ -1264,6 +1266,65 @@ describe("AtlassianOAuthGrants", () => {
     }).pipe(
       Effect.provideService(HttpClient.HttpClient, providerClient),
       Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
+})
+
+layer(NodeServices.layer)("AtlassianOAuthGrants pre-save snapshot", (it) => {
+  it.effect("refuses to save when a pre-save snapshot cannot tell whether an auth file exists", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fileSystem.makeTempDirectoryScoped({ prefix: "control-center-atlassian-snapshot-" })
+      const configHome = path.join(home, "config")
+      yield* writeOAuthConfig(configHome, "jira-cli")
+      yield* writeOAuthConfig(configHome, "confluence-to-markdown")
+      const canonicalStore = yield* writeOAuthConfig(configHome, CONTROL_CENTER_AUTH_STORE_NAME)
+      const authFile = path.join(canonicalStore, "auth.json")
+      const configProvider = ConfigProvider.fromUnknown({ HOME: home, XDG_CONFIG_HOME: configHome })
+      // Once armed, existence checks of the auth file fail, starting with the snapshot taken before the save.
+      // A snapshot that recorded the file as absent would delete it on any later rollback.
+      const armed = yield* Ref.make(false)
+      const flakyFileSystem: FileSystem.FileSystem = {
+        ...fileSystem,
+        exists: (filePath) =>
+          (filePath === authFile ? Ref.get(armed) : Effect.succeed(false)).pipe(
+            Effect.flatMap((fail) =>
+              fail
+                ? Effect.fail(PlatformError.systemError({
+                  _tag: "PermissionDenied",
+                  module: "FileSystem",
+                  method: "exists",
+                  pathOrDescriptor: filePath
+                }))
+                : fileSystem.exists(filePath)
+            )
+          )
+      }
+      const grants = yield* makeAtlassianOAuthGrants().pipe(
+        Effect.provideService(FileSystem.FileSystem, flakyFileSystem)
+      )
+      const started = yield* grants.start(owner, "http://127.0.0.1:4173", ["jira", "confluence"]).pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+      if (started._tag !== "ready") return yield* Effect.die("OAuth grant did not start")
+      const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(
+        new URL(started.authorizationUrl).searchParams.get("state")
+      )
+      const exchanged = yield* grants.exchange(owner, grantId, "authorization-code").pipe(
+        Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+      )
+
+      yield* Ref.set(armed, true)
+      const saved = yield* Effect.result(
+        grants.complete(owner, exchanged.grantId, "cloud-2").pipe(
+          Effect.provideService(ConfigProvider.ConfigProvider, configProvider)
+        )
+      )
+      assert.isTrue(Result.isFailure(saved))
+      assert.isFalse(yield* fileSystem.exists(authFile))
+    }).pipe(
+      Effect.provideService(HttpClient.HttpClient, providerClient),
       Effect.scoped
     ))
 })

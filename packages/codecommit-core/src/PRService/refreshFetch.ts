@@ -38,6 +38,9 @@ const isAuthFailure = (error: AwsClientError): boolean =>
       isCredentialInvalidCause(error.cause.cause))
   ))
 
+/** How many merged or closed pull requests with unknown approvers one refresh re-reads. */
+const approverRepairBatch = 25
+
 const accountRegionKey = (profile: string, region: string): string => `${profile}\0${region}`
 
 export const fetchAndUpsertPRs = (params: {
@@ -173,15 +176,17 @@ export const fetchAndUpsertPRs = (params: {
         const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
         // The whole read, each group unless the cache holds a newer one: status, details, approval.
         const written = yield* prRepo.writeRead(pr.awsAccountId, pr.id, detail, observation, coordinates)
-        const reason = detail.approvalUnknown
-        // An approval group not written was older than the cache: its unknown approval isn't current.
-        if (!written.approval || reason === undefined) {
-          return
-        }
-        yield* Ref.update(
+        // An approval group not written was older than the cache: nothing unknown in it is current.
+        if (!written.approval) return
+        const markPartial = Ref.update(
           partialScopes,
           (scopes) => new Set(scopes).add(accountRegionKey(pr.accountProfile, pr.accountRegion))
         )
+        // Approvers that couldn't be read kept their cached value: partial, as for a listed pull request.
+        if (detail.approversUnknown === true) yield* markPartial
+        const reason = detail.approvalUnknown
+        if (reason === undefined) return
+        yield* markPartial
         // A stale row is reconciled only for an enabled account's scope, which supplies its typed profile and region.
         for (const account of enabledAccounts.filter((a) => a.profile === pr.accountProfile)) {
           for (const region of (account.regions ?? []).filter((r) => r === pr.accountRegion)) {
@@ -251,6 +256,10 @@ export const fetchAndUpsertPRs = (params: {
                 repositoryName: pr.repositoryName,
                 message: approvalUnknownReasonText(unknownReason)
               }])
+              yield* Ref.update(partialScopes, (scopes) => new Set(scopes).add(accountRegionKey(profile, region)))
+            }
+            // Approvers that couldn't be read kept their cached value: the refresh is partial, not clean.
+            if (written.approval && pr.approversUnknown === true) {
               yield* Ref.update(partialScopes, (scopes) => new Set(scopes).add(accountRegionKey(profile, region)))
             }
             const pending = subscribed ? Option.match(written.replaced, { onNone: () => [], onSome: transitions }) : []
@@ -349,6 +358,50 @@ export const fetchAndUpsertPRs = (params: {
         )
       ),
       Effect.catch(() => Ref.set(successfullyFetchedScopes, new Set()))
+    )
+
+    // A merged or closed pull request is never listed again, so approvers that couldn't be read on its
+    // last read are re-read here: a capped batch per refresh, oldest-updated first, so the backlog
+    // drains. Repair is history, not this refresh's result: a failed re-read stays unknown and is
+    // logged, and never withholds a scope.
+    const repairScopes = yield* Ref.get(successfullyFetchedScopes)
+    yield* prRepo.findClosedWithUnknownApprovers(approverRepairBatch).pipe(
+      Effect.flatMap((rows) =>
+        Effect.forEach(
+          rows.filter((pr) =>
+            accountIdMap.get(pr.accountProfile) === pr.awsAccountId &&
+            repairScopes.has(accountRegionKey(pr.accountProfile, pr.accountRegion))
+          ),
+          (pr) =>
+            prRepo.observe().pipe(
+              Effect.flatMap((observation) =>
+                awsClient
+                  .getPullRequest({
+                    account: { profile: pr.accountProfile, region: pr.accountRegion },
+                    pullRequestId: pr.id
+                  })
+                  .pipe(
+                    Effect.flatMap((detail) =>
+                      detail.repositoryName === pr.repositoryName
+                        ? prRepo.writeRead(pr.awsAccountId, pr.id, detail, observation, {
+                          repositoryName: pr.repositoryName,
+                          accountRegion: pr.accountRegion
+                        })
+                        : Effect.void
+                    )
+                  )
+              ),
+              Effect.catch((error) =>
+                Effect.logWarning(
+                  `approvers of closed pull request #${pr.id} could not be re-read; still unknown`,
+                  error
+                )
+              )
+            ),
+          { concurrency: 5, discard: true }
+        )
+      ),
+      Effect.catch((error) => Effect.logWarning("closed pull requests with unknown approvers not listed", error))
     )
 
     // Every refresh replaces the list, so a pull request that evaluates again drops off it. One

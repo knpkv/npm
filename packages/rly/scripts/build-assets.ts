@@ -82,7 +82,14 @@ const program = Effect.gen(function*() {
     yield* fs.writeFileString(path.join(fontOutput, font.license), license)
   }
 
-  yield* Console.log("built rly CSS and two self-hosted Geist font assets")
+  // Static assets under src/assets (Relay's favicon) are published as they are.
+  for (const asset of componentManifest.assets.filter(({ source }) => source.startsWith("src/assets/"))) {
+    const output = path.join(packageRoot, asset.output)
+    yield* fs.makeDirectory(path.dirname(output), { recursive: true })
+    yield* fs.copyFile(path.join(packageRoot, asset.source), output)
+  }
+
+  yield* Console.log("built rly CSS, two self-hosted Geist font assets and the static assets")
 })
 
 NodeRuntime.runMain(

@@ -1,6 +1,6 @@
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { FreshnessStamp } from "@knpkv/rly/patterns"
-import type { FormEvent, KeyboardEvent, ReactElement } from "react"
+import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 import type { DashboardSnapshot, PendingApproval, PendingApprovalFailure } from "./dashboard-model.js"
 import type { ChatMode } from "@knpkv/herdr-coordinator/model"
 import { CoordinatorChatPanel, NotificationPanel, type NotificationState } from "./approval-app-view.js"
@@ -10,6 +10,7 @@ import { ApprovalRequestDisclosure } from "./approval-request-view.js"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
 import { ApprovalsCountdown, type DecisionStatus } from "./countdown-view.js"
+import { agentStatePresentation } from "./internal/agent-state.js"
 
 export { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
 
@@ -38,6 +39,8 @@ type DashboardViewProps = {
   }
   readonly snapshot: DashboardSnapshot
   readonly showHeader?: boolean
+  /** A page-level notice (such as a failed refresh), placed under the header in the page gutter. */
+  readonly notice?: ReactNode
 }
 
 type PendingAgendaItem =
@@ -353,7 +356,7 @@ export const AgentActivity = ({ snapshot }: { readonly snapshot: DashboardSnapsh
                 {agent.kind}, {agent.work}
               </Text>
             </div>
-            <StateLabel label={agent.status} tone="progress" size="compact" />
+            <AgentStateLabel status={agent.status} />
           </div>
         </Surface>
       ))}
@@ -368,17 +371,16 @@ const Machines = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
     <Surface as="section" padding="spacious" className="machine-panel">
       <div className="section-heading">
         <div>
-          <Text variant="meta" tone="secondary">
-            Fleet
-          </Text>
+          {/* This machine is listed too, first; no eyebrow over the title. */}
           <Text as="h2" variant="section-title">
-            Other machines
+            Machines
           </Text>
         </div>
       </div>
       <nav className="machine-grid" aria-label="Fleet approval pages">
         <a className="machine machine-current" href={snapshot.directory.currentUrl}>
-          <StateLabel label="This machine" tone="progress" size="compact" />
+          {/* Online by definition; the progress tone's spinner said something was loading. */}
+          <StateLabel label="This machine" tone="positive" size="compact" />
           <strong>{snapshot.host}</strong>
         </a>
         {snapshot.directory.links.map((link) =>
@@ -404,12 +406,27 @@ const Machines = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
   )
 }
 
+/** An agent's state as its word and its own icon; only work in progress spins. */
+const AgentStateLabel = ({ status }: { readonly status: string }): ReactElement => {
+  const presentation = agentStatePresentation(status)
+  return (
+    <StateLabel
+      className={presentation.spins ? "agent-state-spinning" : undefined}
+      icon={presentation.icon}
+      label={status}
+      size="compact"
+      tone={presentation.tone}
+    />
+  )
+}
+
 export const DashboardView = ({
   approvalOnly = false,
   busyJobId,
   chatBusy,
   decisionStatus = null,
   historyLoading = false,
+  notice = null,
   notificationState,
   onChatSubmit,
   onDecision,
@@ -521,6 +538,7 @@ export const DashboardView = ({
             </div>
           </header>
         ) : null}
+        {notice}
         {approvalOnly ? (
           <ApprovalsCountdown
             decisionStatus={decisionStatus}

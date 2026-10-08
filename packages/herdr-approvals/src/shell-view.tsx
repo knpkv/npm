@@ -97,8 +97,10 @@ const WorkHeading = (): ReactElement => (
 export const FleetWorkPanel = ({ state }: { readonly state: FleetWorkState }): ReactElement => {
   switch (state._tag) {
     case "Loading":
+      // Holds a screen of space, like the board that replaces it, so agents and history below
+      // stay out of view instead of being pushed down (CLS 0.48 at 1440 before).
       return (
-        <>
+        <div className="fleet-work-reserved">
           <WorkHeading />
           <StatePanel
             announce="polite"
@@ -106,7 +108,7 @@ export const FleetWorkPanel = ({ state }: { readonly state: FleetWorkState }): R
             title="Loading Work"
             tone="progress"
           />
-        </>
+        </div>
       )
     case "Unavailable":
       return (
@@ -120,9 +122,17 @@ export const FleetWorkPanel = ({ state }: { readonly state: FleetWorkState }): R
         </>
       )
     case "Failure":
-      return (
+      // A failure before any board arrived keeps the loading reservation: the retry that follows
+      // usually lands a full board, and collapsing now would pull the panels below up, then push
+      // them back down. Unavailable and an empty board are settled answers and release it.
+      return state.content === null ? (
+        <div className="fleet-work-reserved">
+          <WorkHeading />
+          <StatePanel description={state.detail} title="Work unavailable" tone="critical" />
+        </div>
+      ) : (
         <>
-          {state.content === null ? <WorkHeading /> : state.content}
+          {state.content}
           <StatePanel description={state.detail} title="Work unavailable" tone="critical" />
         </>
       )
@@ -248,11 +258,14 @@ export const FleetShell = ({
   approvals,
   connect,
   hostCount,
+  notice = null,
   work
 }: {
   readonly approvals: ReactNode
   readonly connect: ReactNode
   readonly hostCount: number
+  /** A page-level notice (such as a failed refresh): under the masthead, in the gutter, above the tabs. */
+  readonly notice?: ReactNode
   readonly work: ReactNode
 }): ReactElement => {
   const [tab, setTab] = useState<FleetShellTab>("approvals")
@@ -401,6 +414,7 @@ export const FleetShell = ({
           </div>
         </header>
         <main className="fleet-shell-main">
+          {notice}
           <Tabs
             aria-label="Fleet applications"
             data-mobile-layout="single-row"

@@ -38,7 +38,9 @@ export function AppLayout() {
           className={isFullWidth ? styles.fullWidthMain : isWide ? `${styles.main} ${styles.wideMain}` : styles.main}
         >
           {/* Read prompts wait inline so the page stays usable; writes still ask in a modal, per call. */}
-          {state.permissionPrompt?.category === "read" ? <PermissionBar prompt={state.permissionPrompt} /> : null}
+          {state.permissionPrompt?.category === "read" ? (
+            <PermissionBar pendingReads={state.pendingReads} prompt={state.permissionPrompt} />
+          ) : null}
           <Outlet />
         </main>
         <ScrollRestoration storageKey="codecommit-web-scroll-positions" />

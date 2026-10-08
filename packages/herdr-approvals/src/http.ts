@@ -27,6 +27,7 @@ import type {
   FleetJobConflictError,
   FleetOperationUnavailableError,
   FleetService,
+  FleetStoreBusyError,
   FleetStoreError,
   FleetTransitionConflictError,
   HostConfiguration,
@@ -249,6 +250,7 @@ type ApiError =
   | FleetJobNotFoundError
   | FleetOperationError
   | FleetOperationUnavailableError
+  | FleetStoreBusyError
   | FleetStoreError
   | FleetTransitionConflictError
   | FleetValidationError
@@ -373,6 +375,7 @@ const apiError = (error: ApiError): ApiErrorResponse => {
         body: { error: error._tag, host: error.host, reason: error.reason }
       }
     case "FleetOperationError":
+    case "FleetStoreBusyError":
     case "TerminalTransportError":
       return { status: 503, body: { error: error._tag, detail: error.detail } }
     case "LanWorkCryptoError":
@@ -1418,13 +1421,11 @@ export const makeRunner = Effect.fn("HostRunner.make")(function*(
     if (!accepting) return Promise.resolve(false)
     const run = serial.withPermits(1)(
       runJob(jobId).pipe(
-        Effect.tapError((error) =>
+        Effect.catch((error) =>
           Effect.logError("HostRunner.job_failed", error).pipe(
             Effect.annotateLogs({ jobId })
           )
-        ),
-        // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        Effect.ignore
+        )
       )
     )
     return runPromise(Effect.forkIn(run, scope)).then(() => true)

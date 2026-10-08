@@ -41,6 +41,7 @@ const makePullRequestRepo = Effect.gen(function*() {
     search: Q.search(sql),
     findStaleOpen: Q.findStaleOpen(sql),
     findOpenInRange: Q.findOpenInRange(sql),
+    findClosedWithUnknownApprovers: Q.findClosedWithUnknownApprovers(sql),
     ...mutations(sql, publish)
   }
   return service
