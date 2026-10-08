@@ -158,7 +158,10 @@ const checkPullRequest = Effect.gen(function* () {
       ].join("\n")
     )
   }
-  const baseFiles = new Map(baseManifests.map(({ file, manifest }) => [manifest.name, file]))
+  // A private package's changelog is not release history: it proves nothing once the package goes public.
+  const baseFiles = new Map(
+    baseManifests.filter(({ manifest }) => publishable(manifest)).map(({ file, manifest }) => [manifest.name, file])
+  )
   const headings = yield* Effect.forEach(
     head.filter(({ manifest }) => publishable(manifest)),
     ({ file, manifest }) =>

@@ -214,8 +214,27 @@ test("the script fails a feature branch or a fork that bumps a version, and pass
       )
       yield* git("add", ".")
       yield* git("commit", "-q", "-m", "heading")
+      const heading = yield* check("feat/heading", "knpkv/npm")
+      // A private package already carrying its version heading goes public without moving its version.
+      yield* git("switch", "-q", "main")
+      yield* fileSystem.makeDirectory(path.join(directory, "packages/internal"), { recursive: true })
+      yield* fileSystem.writeFileString(
+        path.join(directory, "packages/internal/package.json"),
+        JSON.stringify({ name: "@knpkv/internal", version: "0.0.0", private: true })
+      )
+      yield* fileSystem.writeFileString(path.join(directory, "packages/internal/CHANGELOG.md"), "## 0.0.0\n")
+      yield* git("add", ".")
+      yield* git("commit", "-q", "-m", "private internal")
+      yield* git("update-ref", "refs/remotes/origin/main", "HEAD")
+      yield* git("switch", "-q", "-c", "feat/public")
+      yield* fileSystem.writeFileString(
+        path.join(directory, "packages/internal/package.json"),
+        JSON.stringify({ name: "@knpkv/internal", version: "0.0.0" })
+      )
+      yield* git("commit", "-q", "-am", "go public")
       return {
-        heading: yield* check("feat/heading", "knpkv/npm"),
+        heading,
+        wentPublic: yield* check("feat/public", "knpkv/npm"),
         feature,
         fork,
         release
@@ -228,6 +247,8 @@ test("the script fails a feature branch or a fork that bumps a version, and pass
   assert.equal(outcome.release.exitCode, ChildProcessSpawner.ExitCode(0), outcome.release.output)
   assert.notEqual(outcome.heading.exitCode, ChildProcessSpawner.ExitCode(0), outcome.heading.output)
   assert.match(outcome.heading.output, /@knpkv\/demo \(packages\/demo\/package\.json\): ## 1\.0\.0/u)
+  assert.notEqual(outcome.wentPublic.exitCode, ChildProcessSpawner.ExitCode(0), outcome.wentPublic.output)
+  assert.match(outcome.wentPublic.output, /@knpkv\/internal \(packages\/internal\/package\.json\): ## 0\.0\.0/u)
 })
 
 // A registry that knows `@knpkv/released` at 1.0.0 and nothing else.
