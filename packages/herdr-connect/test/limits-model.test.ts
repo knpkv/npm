@@ -32,7 +32,7 @@ const window = (
 const fleet = (...hosts: ReadonlyArray<HostLimits>): FleetLimits => ({ hosts, failures: [], peersListed: true })
 
 describe("connectLimitsView", () => {
-  it("names each agent once, by the window closest to its limit on any host", () => {
+  it("names each agent once, by the window closest to its limit, and the host it came from", () => {
     const t = 1_000 * HOUR
     const view = connectLimitsView(
       fleet(
@@ -41,8 +41,36 @@ describe("connectLimitsView", () => {
       ),
       0
     )
-    expect(view.line).toEqual([{ agent: "claude", tone: "near", text: "Claude 86% 5-hour" }])
+    // Two hosts read Claude and may hold different subscriptions: the line says whose window it is.
+    expect(view.line).toEqual([{ agent: "claude", tone: "near", text: "Claude 86% 5-hour on PI" }])
     expect(view.hosts.map((host) => host.host)).toEqual(["SER8", "PI"])
+  })
+
+  it("leaves the host out when only one host reads the agent", () => {
+    const t = 1_000 * HOUR
+    const view = connectLimitsView(
+      fleet(
+        read("SER8", t, [window("SER8", "five_hour", 86, t - MINUTE), window("SER8", "seven_day", 48, t - MINUTE)])
+      ),
+      0
+    )
+    expect(view.line).toEqual([{ agent: "claude", tone: "near", text: "Claude 86% 5-hour" }])
+  })
+
+  it("passes on agent-usage's own sentence without its prefix or backticks", () => {
+    const view = connectLimitsView(
+      fleet({
+        host: "SER8",
+        readAt: 0,
+        reading: {
+          _tag: "Unavailable",
+          reason: "failed",
+          detail: "agent-usage: agent-usage is not running on this store. Start it with `agent-usage serve`."
+        }
+      }),
+      0
+    )
+    expect(view.notes).toEqual(["SER8: agent-usage is not running on this store. Start it with agent-usage serve."])
   })
 
   it("reads each host on its own clock, however far it is from this page's", () => {

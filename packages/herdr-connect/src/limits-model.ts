@@ -35,7 +35,11 @@ export interface HostLimitsView {
 
 export interface LimitsLineItem {
   readonly agent: Agent
-  /** "Claude 48% weekly", or "Codex unknown". */
+  /**
+   * "Claude 48% weekly", or "Codex unknown". When several hosts read the agent, the host the window
+   * came from is named ("Claude 86% 5-hour on SER8"): hosts are not merged by account yet, so another
+   * host may hold a different subscription.
+   */
   readonly text: string
   readonly tone: LimitTone
 }
@@ -60,23 +64,28 @@ const closer = (left: WindowSummary, right: WindowSummary): WindowSummary => {
   return (right.usedPercent ?? -1) > (left.usedPercent ?? -1) ? right : left
 }
 
-const lineItem = (agent: Agent, window: WindowSummary | undefined): LimitsLineItem => {
-  const tone = window === undefined ? "unknown" : lineTone(window)
-  return {
-    agent,
-    tone,
-    text: window === undefined || window.usedPercent === null || tone === "unknown"
-      ? `${agentName(agent)} unknown`
-      : `${agentName(agent)} ${String(Math.round(window.usedPercent))}% ${window.name.toLowerCase()}`
-  }
+interface HostWindow {
+  readonly host: string
+  readonly window: WindowSummary
 }
+
+const lineItem = (agent: Agent, worst: HostWindow | undefined, nameHost: boolean): LimitsLineItem => {
+  const tone = worst === undefined ? "unknown" : lineTone(worst.window)
+  const level = worst === undefined || worst.window.usedPercent === null || tone === "unknown"
+    ? `${agentName(agent)} unknown`
+    : `${agentName(agent)} ${String(Math.round(worst.window.usedPercent))}% ${worst.window.name.toLowerCase()}`
+  return { agent, tone, text: worst !== undefined && nameHost ? `${level} on ${worst.host}` : level }
+}
+
+/** agent-usage's stderr sentence, without its own "agent-usage:" prefix or Markdown backticks. */
+const plainDetail = (detail: string): string => detail.replace(/^(?:agent-usage:\s*)+/u, "").replaceAll("`", "")
 
 const unavailableNote = (host: string, reading: Extract<HostLimits["reading"], { _tag: "Unavailable" }>) => {
   switch (reading.reason) {
     case "not_configured":
       return `Limits are off on ${host}`
     case "failed":
-      return reading.detail === "" ? `agent-usage failed on ${host}` : `${host}: ${reading.detail}`
+      return reading.detail === "" ? `agent-usage failed on ${host}` : `${host}: ${plainDetail(reading.detail)}`
     case "timeout":
       return `agent-usage didn't answer on ${host}`
     case "unsupported_version":
@@ -118,17 +127,20 @@ export const connectLimitsView = (fleet: FleetLimits, sinceLoad: number): Connec
   }
   for (const failure of fleet.failures) notes.push(`No reading from ${failure.host} (${failureWords[failure.reason]})`)
   if (!fleet.peersListed) notes.push("Other machines unknown: the hub couldn't list the fleet")
-  const groups = hosts.flatMap((host) => summarizeLimits(host.latest, host.now))
+  const groups = hosts.flatMap((host) =>
+    summarizeLimits(host.latest, host.now).map((group) => ({ host: host.host, group }))
+  )
   const agents: ReadonlyArray<Agent> = ["claude", "codex"]
   const line = agents.flatMap((agent): ReadonlyArray<LimitsLineItem> => {
-    const own = groups.filter((group) => group.agent === agent)
+    const own = groups.filter(({ group }) => group.agent === agent)
     if (own.length === 0) return []
-    const windows = own.flatMap((group) => group.windows)
-    const worst = windows.reduce<WindowSummary | undefined>(
-      (best, window) => (best === undefined ? window : closer(best, window)),
+    const windows = own.flatMap(({ group, host }) => group.windows.map((window): HostWindow => ({ host, window })))
+    const worst = windows.reduce<HostWindow | undefined>(
+      (best, candidate) =>
+        best === undefined || closer(best.window, candidate.window) === candidate.window ? candidate : best,
       undefined
     )
-    return [lineItem(agent, worst)]
+    return [lineItem(agent, worst, new Set(own.map(({ host }) => host)).size > 1)]
   })
   const off = hosts.length === 0 && fleet.failures.length === 0 && fleet.peersListed &&
     fleet.hosts.every((host) => host.reading._tag === "Unavailable" && host.reading.reason === "not_configured")
