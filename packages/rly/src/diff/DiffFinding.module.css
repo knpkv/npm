@@ -125,8 +125,10 @@
     content: "−";
   }
 
-  .prevention summary:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .prevention summary:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .prevention summary:focus-visible {
@@ -245,8 +247,10 @@
     text-align: start;
   }
 
-  .footer button:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .footer button:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .footer button:focus-visible {

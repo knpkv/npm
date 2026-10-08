@@ -47,8 +47,10 @@
     padding: var(--rly-space-4) var(--rly-space-12);
   }
 
-  .overflow:hover {
-    background: var(--rly-color-surface-3);
+  @media (hover: hover) and (pointer: fine) {
+    .overflow:hover {
+      background: var(--rly-color-surface-3);
+    }
   }
 
   .overflow:active {
