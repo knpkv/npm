@@ -1,7 +1,9 @@
 @layer rly.components {
+  /* minmax(0, 1fr) tracks: the composer takes the panel's width, never its content's min-content width. */
   .root {
     display: grid;
     gap: var(--rly-space-8);
+    grid-template-columns: minmax(0, 1fr);
     min-inline-size: 0;
   }
   .refs {
@@ -35,6 +37,7 @@
     border-radius: var(--rly-radius-field);
     display: grid;
     gap: var(--rly-space-8);
+    grid-template-columns: minmax(0, 1fr);
     padding: var(--rly-space-8);
   }
   .box:focus-within {
@@ -63,6 +66,21 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--rly-space-8);
+  }
+  /*
+   * The preset shrinks with the panel: a long preset name truncates inside its menu trigger rather than
+   * widening the composer past the panel.
+   */
+  .preset {
+    display: flex;
+    flex: 1 1 12rem;
+    gap: var(--rly-space-8);
+    max-inline-size: 100%;
+    min-inline-size: 0;
+  }
+  .preset > * {
+    max-inline-size: 100%;
+    min-inline-size: 0;
   }
   .actions {
     align-items: center;

@@ -4,6 +4,11 @@
   color: var(--rly-color-text-1);
 }
 
+/* Relay's overlay and pinned column start below the sticky header (its height is published at runtime). */
+.root {
+  --rly-relay-panel-offset: var(--cc-header-block-size, 4.5rem);
+}
+
 .header {
   position: sticky;
   z-index: 10;
@@ -14,6 +19,17 @@
   min-block-size: 4.5rem;
   padding-inline: clamp(1.25rem, 4vw, 4rem);
   border-block-end: 1px solid var(--rly-color-border-1);
+}
+
+/*
+ * The frosted backdrop lives on its own layer: a backdrop-filter on the header itself would make it the
+ * containing block for fixed descendants, boxing Relay's overlay panel into the header's height.
+ */
+.header::before {
+  position: absolute;
+  z-index: -1;
+  content: "";
+  inset: 0;
   background: color-mix(in srgb, var(--rly-color-canvas) 88%, transparent);
   backdrop-filter: blur(24px);
 }
@@ -108,6 +124,25 @@
   min-inline-size: 0;
 }
 
+/*
+ * On a desktop header the actions are a size container: when Open PR, Search and Relay are tight in their
+ * track, Relay's key hint gives way (the launcher still advertises the chord to assistive technology), so
+ * the actions keep one row.
+ */
+@media (min-width: 48.0625rem) {
+  .actions {
+    container: header-actions / inline-size;
+    justify-self: stretch;
+  }
+}
+
+@container header-actions (max-width: 22rem) {
+  .actions [data-rly-relay-launcher] kbd,
+  .relayLauncherStandInHint {
+    display: none;
+  }
+}
+
 /* Header actions sit beside rly's dense Search button, so they share its height and radius. */
 .agent {
   display: inline-flex;
@@ -158,8 +193,16 @@
 @media (max-width: 48rem) {
   .header {
     grid-template-columns: 1fr auto;
+  }
+
+  .header::before {
     background: var(--rly-color-canvas);
     backdrop-filter: none;
+  }
+
+  /* The phone navigation docks 1rem above the bottom edge; Relay's overlay ends above it. */
+  .root {
+    --app-bottom-inset: calc(var(--cc-mobile-nav-block-size, 0px) + 1rem);
   }
 
   .desktopNav {
@@ -201,5 +244,52 @@
     overflow: clip;
     clip-path: inset(50%);
     white-space: nowrap;
+  }
+}
+
+/*
+ * Relay's launcher stand-in, shown until the rly launcher loads: the same box, built from rly's
+ * launcher tokens (control height, padding, gap, a 20px mark, a hint at least 4.5em wide that hides on
+ * phones), so the swap never moves the header.
+ */
+.relayLauncherStandIn {
+  display: inline-flex;
+  flex: none;
+  box-sizing: border-box;
+  min-block-size: var(--rly-control-height-dense);
+  align-items: center;
+  gap: var(--rly-space-8);
+  padding-block: 0;
+  padding-inline: var(--rly-space-8) var(--rly-space-12);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-control);
+  background: transparent;
+  color: var(--rly-color-text-1);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+  letter-spacing: var(--rly-type-label-tracking);
+  white-space: nowrap;
+}
+
+.relayLauncherStandInMark {
+  inline-size: 20px;
+  block-size: 20px;
+  flex: none;
+}
+
+.relayLauncherStandInHint {
+  box-sizing: border-box;
+  min-inline-size: 4.5em;
+  padding-inline: var(--rly-space-4);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-tag);
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / 1.25 var(--rly-type-meta-font);
+  text-align: center;
+}
+
+@media (max-width: 40rem) {
+  .relayLauncherStandInHint {
+    display: none;
   }
 }
