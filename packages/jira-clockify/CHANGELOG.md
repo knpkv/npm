@@ -1,5 +1,18 @@
 # @knpkv/jira-clockify
 
+## 1.6.2
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/ai-claude@0.4.2
+  - @knpkv/ai-codex@0.5.2
+  - @knpkv/atlassian-common@1.9.2
+  - @knpkv/clockify-api-client@3.0.1
+  - @knpkv/jira-api-client@2.1.1
+  - @knpkv/jira-cli@1.6.3
+
 ## 1.6.1
 
 ### Patch Changes

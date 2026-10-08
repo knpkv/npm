@@ -12,6 +12,7 @@
  *
  * @module
  */
+import { PortalProvider } from "@knpkv/rly/foundations"
 import { type ReactNode, useEffect, useLayoutEffect, useRef } from "react"
 import styles from "./findings-drawer.module.css"
 
@@ -124,7 +125,10 @@ export function FindingsDrawer({
           Close
         </button>
       </header>
-      <div className={styles.body}>{children}</div>
+      <div className={styles.body}>
+        {/* Menus and listboxes inside the drawer portal into it: the page behind a modal is inert. */}
+        <PortalProvider>{children}</PortalProvider>
+      </div>
     </dialog>
   )
 }

@@ -279,7 +279,8 @@ describe("Relay review profile skill selection", () => {
       const current = Array.from(host.querySelectorAll("label")).find((label) =>
         label.textContent?.includes("Current skill")
       )
-      expect(current?.textContent).toContain("Still installed · environment")
+      expect(current?.textContent).toContain("Still installed")
+      expect(current?.textContent).toContain("Source: environment")
     } finally {
       await act(async () => root.unmount())
     }

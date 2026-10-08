@@ -106,10 +106,15 @@ describe("approved goal reassignment", () => {
       expect(result.checkpoint.goal.activity).toEqual([{
         id: request.approvalJobId,
         kind: "status",
-        summary: `Reassigned from ${from.name} (${from.id}) to ${to.name} (${to.id}): ${request.reason} ` +
-          `(approved Fleet job ${request.approvalJobId}, hash ${request.approvalHash})`,
+        summary: `Reassigned from ${from.name} to ${to.name}: ${request.reason}`,
         occurredAt: 1_000
       }])
+      // Written for people: ids and the approval hash stay structured (the activity id is the job).
+      const summary = result.checkpoint.goal.activity?.[0]?.summary ?? ""
+      expect(summary).not.toMatch(/[0-9a-f]{32,}/)
+      for (const id of [from.id, to.id, request.approvalJobId, request.approvalHash]) {
+        expect(summary).not.toContain(id)
+      }
       expect(result.lane).toEqual({
         ...laneClaim,
         operationId: request.approvalJobId,

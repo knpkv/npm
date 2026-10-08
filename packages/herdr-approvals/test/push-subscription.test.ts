@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Result, Schema } from "effect"
 import { PushSubscriptionRecord } from "../src/model.js"
 import {
+  type CurrentPushSubscription,
   reconcileCurrentPushSubscription,
   reconcileExistingPushSubscription,
   reconcilePushSubscriptionState,
@@ -87,12 +88,14 @@ describe("browser push subscription ownership", () => {
       ).toBe(true)
       expect(retainedUnsubscribed).toBe(0)
 
+      // A subscription created without an application server key, typed as the browser reports it.
+      const keyless: CurrentPushSubscription & { readonly endpoint: string } = {
+        endpoint: "https://push.example/keyless",
+        options: { applicationServerKey: null },
+        unsubscribe: () => Promise.resolve(true)
+      }
       yield* reconcileCurrentPushSubscription(
-        {
-          endpoint: "https://push.example/keyless",
-          options: { applicationServerKey: null },
-          unsubscribe: () => Promise.resolve(true)
-        },
+        keyless,
         key(2, 3, 4),
         Effect.succeed(replacement),
         () => Effect.die("keyless subscription must not be checked"),

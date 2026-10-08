@@ -39,11 +39,11 @@ const live = Effect.gen(function*() {
   const write = yield* socket.writer
   const reader = yield* socket.reader
   // Messages from the page are not expected; reading only notices that it went away.
-  // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
+  // best-effort: the read failing is how a closed page is noticed, so its error is the expected end.
   const closed = Effect.forever(reader.pull).pipe(Effect.ignore)
+  // best-effort: a write fails once the page has gone, which ends this connection like the read does.
   const pushing = SubscriptionRef.changes(state.versions).pipe(
     Stream.runForEach((versions) => write.write(encodeVersions(versions))),
-    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.ignore
   )
   yield* Effect.raceFirst(pushing, closed)

@@ -37,13 +37,12 @@ const required = <A>(name: string, config: Config.Config<A>) =>
  */
 const optional = <A>(name: string, config: Config.Config<A>) =>
   config.pipe(
-    Effect.catch(() =>
+    Effect.catchTag("ConfigError", () =>
       Config.option(Config.String(name)).pipe(
-        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        Effect.orElseSucceed(() => Option.none<string>()),
+        // The raw value is only echoed in the error; when even it cannot be read, the error names the setting alone.
+        Effect.catchTag("ConfigError", () => Effect.succeed(Option.none<string>())),
         Effect.flatMap((value) => Effect.fail(new InvalidSetting({ name, value: Option.getOrUndefined(value) })))
-      )
-    )
+      ))
   )
 
 /** What a file read failure means, in words: the system tag, not the platform's call trace. */

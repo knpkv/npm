@@ -85,9 +85,8 @@ export function ReviewProfileSkillPicker({
           />
           <span>
             <b>{skill.name}</b>
-            <small className="block text-muted-foreground">
-              {skill.description} · {skill.source}
-            </small>
+            <small className="block text-muted-foreground">{skill.description}</small>
+            <small className="block text-muted-foreground">Source: {skill.source}</small>
           </span>
         </label>
       ))}
@@ -202,7 +201,7 @@ export function SettingsRelayView({ config, onReload = () => undefined, saveConf
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-lg font-semibold">Relay review profiles</h2>
+          <h1 className="text-lg font-semibold">Relay review profiles</h1>
           <p className="text-sm text-muted-foreground">Default focus and prompt-only skills for Diff &amp; Relay</p>
         </div>
         {AsyncResult.isSuccess(config) && review !== null ? (
@@ -266,9 +265,9 @@ export function SettingsRelayView({ config, onReload = () => undefined, saveConf
           {review.profiles.map((profile) => (
             <section className="space-y-3 rounded-lg border p-4" key={profile.id}>
               <div>
-                <h3 className="text-sm font-semibold">{profile.name}</h3>
+                <h2 className="text-sm font-semibold">{profile.name}</h2>
                 <p className="text-xs text-muted-foreground">
-                  {profile.provider} · {profile.harness} · {profile.model}
+                  {profile.model} on {profile.provider}, through {profile.harness}
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
