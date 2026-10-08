@@ -76,7 +76,7 @@ Every failure exits nonzero and prints nothing on stdout, so `agent-usage login 
 ### Limits for another program
 
 `agent-usage limits` asks the running server for this Machine's latest limits over the same
-owner-only control socket and prints them as one JSON line: `{ machine, observedAt, latest }`.
+owner-only control socket and prints them as one JSON line: `{ v: 1, machine, observedAt, latest }`. A reader pinned to another agent-usage checks `v` first and decodes `latest` one snapshot at a time, so a newer source or reason skips that snapshot rather than the whole line.
 `latest` holds the newest snapshot of every limit window seen in the last eight days, the same tiles as
 the page's "Limits now". A window not seen for eight days is left out: it has reset since. A window
 that could not be read stays an `Unknown` snapshot with its reason; it is never reported as 0%.

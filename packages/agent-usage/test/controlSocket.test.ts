@@ -20,6 +20,7 @@ import {
   SocketRefused
 } from "../src/server/ControlSocket.js"
 import { makeOwnerSession } from "../src/server/OwnerSession.js"
+import type { LimitsNow } from "../src/shared/contracts.js"
 
 const origin = "http://127.0.0.1:3112"
 
@@ -69,7 +70,7 @@ describe("control socket", () => {
 
     it.effect("answers limits to the owner, and says when it has none to give", () =>
       Effect.gen(function*() {
-        const limits = { machine: "host-a", observedAt: 1_000, latest: [] }
+        const limits: LimitsNow = { v: 1, machine: "host-a", observedAt: 1_000, latest: [] }
         const withLimits = yield* store
         const secrets = yield* makeOwnerSession(origin)
         yield* controlSocket(withLimits, secrets, Effect.void, Effect.succeed(limits))

@@ -24,5 +24,5 @@ export const readLimitsNow = Effect.fn("LimitsNow.read")(function*(store: UsageS
   const now = yield* Clock.currentTimeMillis
   const range = { from: now - LIMITS_NOW_LOOKBACK_MILLIS, to: now + 1 }
   const snapshots = yield* store.limitSnapshots({ ...range, machine })
-  return { machine, observedAt: now, latest: buildLimitsReport(snapshots, range).latest } satisfies LimitsNow
+  return { v: 1, machine, observedAt: now, latest: buildLimitsReport(snapshots, range).latest } satisfies LimitsNow
 })
