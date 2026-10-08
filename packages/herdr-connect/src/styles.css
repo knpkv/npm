@@ -349,15 +349,22 @@
     overflow-wrap: break-word;
   }
 
-  /* The state as a word; only an agent that needs attention takes ink. */
+  /* The state as its icon and word (agent-state.tsx); the label carries its own tone. */
   .connect-agent-state {
-    color: var(--rly-color-text-2);
-    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
-      var(--rly-type-label-font);
+    display: inline-flex;
   }
 
-  .connect-agent-state[data-activity="attention"] {
-    color: var(--rly-color-held-ink);
+  /* Only an agent at work moves; settled states keep a still, distinct icon. */
+  @media (prefers-reduced-motion: no-preference) {
+    .agent-state-spinning svg {
+      animation: agent-state-spin 1.6s linear infinite;
+    }
+  }
+
+  @keyframes agent-state-spin {
+    to {
+      transform: rotate(1turn);
+    }
   }
 
   .connect-failures {

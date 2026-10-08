@@ -47,7 +47,7 @@ describe("Connect summary", () => {
 })
 
 describe("AgentDirectory rows", () => {
-  it("show the state as a word with no presence dot or status chip", () => {
+  it("show the state as the shared icon label, with no presence dot", () => {
     const markup = renderToStaticMarkup(
       <AgentDirectory
         activityFilter="all"
@@ -61,7 +61,8 @@ describe("AgentDirectory rows", () => {
       />
     )
     expect(markup).not.toContain("agent-presence")
-    expect(markup).toContain('class="connect-agent-state" data-activity="attention">Blocked<')
+    // The shared state language: a blocked agent counts as needing you and reads "Blocked" beside its icon.
+    expect(markup).toMatch(/class="connect-agent-state" data-activity="needs-you"><span[^>]*>.*<svg.*Blocked</)
     expect(markup).toContain(">Working<")
   })
 
