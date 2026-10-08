@@ -226,6 +226,7 @@ export const ControlCenterRelayThread = ({
         })
       },
       messages: relayMessages(reviewState),
+      notice: "Also on this page: the review panel, with run, cancel and publish actions.",
       status: "ready"
     }
   }, [canEnqueue, conversation, details, inspection.source.vendorImmutableId, reviewState, selection, startReview])

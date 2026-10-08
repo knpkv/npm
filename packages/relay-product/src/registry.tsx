@@ -33,6 +33,18 @@ export interface RelayProductDockHost {
   ) => Effect.Effect<void, RelayProductDockLocateFailure>
   readonly product: AgenticProduct
   readonly selection: RelaySelectorState
+  /**
+   * Another Relay conversation this host offers where no pull request is registered (Control Center's
+   * release conversation, say); the panel shows it before the pull-request locator.
+   */
+  readonly alternate?: RelayProductDockAlternate | undefined
+}
+
+/** A host's other Relay conversation, opened by the host (navigating to its own page). */
+export interface RelayProductDockAlternate {
+  /** The action, naming the conversation: "Open the Release 2.18 conversation". */
+  readonly label: string
+  readonly onOpen: () => void
 }
 
 export interface RelayProductDockMessage {
@@ -81,6 +93,8 @@ export type RelayPullRequestDockRegistration = RelayPullRequestDockRegistrationB
          * reference on the composer; clearing it sends to the whole pull request.
          */
         readonly about?: RelayProductDockAbout | undefined
+        /** One line the panel shows above its composer (another composer on this page, say). */
+        readonly notice?: string | undefined
         readonly status: "ready"
       }
     | {

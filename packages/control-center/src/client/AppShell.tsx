@@ -2,8 +2,9 @@ import { lazy, type ReactElement, Suspense, useEffect, useState } from "react"
 import { NavLink, Outlet, useLocation } from "react-router"
 import type { WorkspaceId } from "../domain/identifiers.js"
 import { type BrowserSessionState, useBrowserSession } from "./BrowserSession.js"
-import { contextualAgentPath, isWorkspaceRouteId } from "./contextualAgentPath.js"
-import { ControlCenterRelayDock } from "./controlCenterRelayDockShell.js"
+import { isWorkspaceRouteId } from "./contextualAgentPath.js"
+import { RelayProductLauncher } from "@knpkv/relay-product"
+import { ControlCenterRelayDock, ControlCenterRelayPanelSlot } from "./controlCenterRelayDockShell.js"
 import { subscribeWorkspacePresentation } from "./settings/workspaceSettingsSignals.js"
 import styles from "./AppShell.module.css"
 import { WorkspaceScrollRestoration } from "./workspaceScrollRestoration.js"
@@ -97,7 +98,6 @@ export const AppShell = (): ReactElement => {
   const browserSession = useBrowserSession()
   const isAuthorizedShare = location.pathname.startsWith("/shares/")
   const overviewPath = workspaceOverviewPath(location.pathname)
-  const agentDestination = contextualAgentPath(location.pathname, location.search, location.hash)
   const workspaceId = workspaceIdFromPathname(location.pathname)
   const includeSettings = canInspectWorkspaceSettings(browserSession.state, workspaceId)
   const includeOpenPullRequest = canOpenCodeCommitPullRequest(browserSession.state, workspaceId)
@@ -160,9 +160,9 @@ export const AppShell = (): ReactElement => {
                   <CommandSearch workspaceId={workspaceId} />
                 </Suspense>
               )}
-              <NavLink className={styles.agent ?? ""} state={location.state} to={agentDestination}>
-                Ask Relay
-              </NavLink>
+              {/* Relay opens from here into one panel, right after the launcher so Tab order follows. */}
+              <RelayProductLauncher />
+              <ControlCenterRelayPanelSlot />
             </div>
             <PrimaryNavigation
               className={styles.mobileNav ?? ""}

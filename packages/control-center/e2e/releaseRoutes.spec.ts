@@ -691,6 +691,13 @@ interface AuthenticatedPresentationRoute {
   readonly primaryAction: () => Locator | null
 }
 
+/** Open Relay from the header and leave for one of its full-page conversations; the panel closes first. */
+const openRelayFullPage = async (page: Page, action: string): Promise<void> => {
+  await page.getByRole("banner").getByRole("button", { name: /^Relay/u }).click()
+  await page.getByRole("button", { name: action }).click()
+  await expect(page.locator("[data-rly-relay-panel]")).toHaveCount(0)
+}
+
 test("audits every authenticated route family for keyboard, WCAG, reflow, forced colors, and reduced motion", async ({ page }) => {
   test.setTimeout(60_000)
   await page.route("**/api/v1/items**", async (route) => {
@@ -1426,6 +1433,18 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(page.getByText("Review sandbox started")).toBeVisible()
   await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
   await expect(page.getByText("Run completed · success")).toBeVisible()
+  // The header's Relay opens this PR's thread, and says the review panel is on the page too.
+  const relayLauncher = page.getByRole("banner").getByRole("button", { name: /^Relay/u })
+  await expect(relayLauncher).toHaveAccessibleDescription(/^about /u)
+  await relayLauncher.click()
+  await expect(
+    page.locator("[data-rly-relay-panel]").getByText(
+      "Also on this page: the review panel, with run, cancel and publish actions."
+    )
+  ).toBeVisible()
+  await page.getByRole("button", { name: "Close Relay" }).click()
+  await expect(page.locator("[data-rly-relay-panel]")).toHaveCount(0)
+  await expect(relayLauncher).toBeFocused()
   const reviewActivity = page.getByRole("log", { name: "Review activity" })
   await expect(reviewActivity).toBeVisible()
   expect(
@@ -1677,7 +1696,7 @@ test("uses semantic fallback when direct Active work changes release", async ({ 
 
 test("opens the selected Active work release from the shell agent control", async ({ page }) => {
   await page.goto(`/w/${snapshot.workspaceId}/work?release=${heldRelease.releaseId}`)
-  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await openRelayFullPage(page, "Open the release conversation, full page")
   await expect(page).toHaveURL(
     `${heldFullPath}/agent?from=${
       encodeURIComponent(
@@ -1691,7 +1710,7 @@ test("opens the selected Active work release from the shell agent control", asyn
 test("opens Relay from any primary page and preserves the calling context", async ({ page }) => {
   const originPath = `${overviewPath}?status=attention`
   await page.goto(originPath)
-  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await openRelayFullPage(page, "Open Relay's full page")
   await expect(page).toHaveURL(`/agent?from=${encodeURIComponent(originPath)}`)
   await expect(page.getByRole("heading", { level: 1, name: "Choose a release." })).toBeVisible()
   await expect(page.getByRole("heading", { level: 2, name: "Workspace overview" })).toBeVisible()
@@ -1711,7 +1730,7 @@ test("opens Relay from any primary page and preserves the calling context", asyn
 
 test("keeps an invalid Active work agent context on the safe generic fallback", async ({ page }) => {
   await page.goto(`/w/${snapshot.workspaceId}/work?release=invalid`)
-  await page.getByRole("link", { name: "Ask Relay" }).click()
+  await openRelayFullPage(page, "Open Relay's full page")
   await expect(page).toHaveURL(/\/agent\?from=/u)
   await expect(page.getByRole("heading", { level: 2, name: "Context unavailable" })).toBeVisible()
 })

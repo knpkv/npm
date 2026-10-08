@@ -1,12 +1,14 @@
 import { RelayProductDockProvider } from "@knpkv/relay-product/registry"
-import { Component, lazy, type ReactElement, type ReactNode, Suspense } from "react"
+import { Component, lazy, type ReactElement, type ReactNode, Suspense, useEffect } from "react"
 
-const LazyControlCenterRelayDockChrome = lazy(async () => {
-  const module = await import("./controlCenterRelayDockChrome.js")
-  return { default: module.ControlCenterRelayDockChrome }
+const loadPanel = () => import("./controlCenterRelayPanel.js")
+
+const LazyControlCenterRelayPanel = lazy(async () => {
+  const module = await loadPanel()
+  return { default: module.ControlCenterRelayPanel }
 })
 
-/** Keep routed content mounted while the product-specific Relay chrome loads. */
+/** Keep routed content mounted if Relay's panel fails to load or render. */
 export class RelayDockChromeBoundary extends Component<{ readonly children: ReactNode }, { readonly failed: boolean }> {
   override state: RelayDockChromeBoundaryState = { failed: false }
 
@@ -24,13 +26,32 @@ interface RelayDockChromeBoundaryState {
   readonly failed: boolean
 }
 
+/** Hold Relay's shared state (the registered PR thread, open and pin) for the whole app. */
 export const ControlCenterRelayDock = ({ children }: { readonly children: ReactNode }): ReactElement => (
-  <RelayProductDockProvider>
-    {children}
+  <RelayProductDockProvider>{children}</RelayProductDockProvider>
+)
+
+/**
+ * Relay's panel slot, right after the header launcher. The panel renders only while open, so it loads
+ * lazily; the chunk is fetched once the browser is idle, so the first open does not wait for it.
+ */
+export const ControlCenterRelayPanelSlot = (): ReactElement => {
+  useEffect(() => {
+    // Safari has no requestIdleCallback, which the DOM types promise; a short timeout after mount stands
+    // in for idle there.
+    const idle: Partial<Pick<Window, "cancelIdleCallback" | "requestIdleCallback">> = window
+    if (idle.requestIdleCallback !== undefined) {
+      const handle = idle.requestIdleCallback(() => void loadPanel())
+      return () => idle.cancelIdleCallback?.(handle)
+    }
+    const handle = window.setTimeout(() => void loadPanel(), 2_000)
+    return () => window.clearTimeout(handle)
+  }, [])
+  return (
     <RelayDockChromeBoundary>
       <Suspense fallback={null}>
-        <LazyControlCenterRelayDockChrome />
+        <LazyControlCenterRelayPanel />
       </Suspense>
     </RelayDockChromeBoundary>
-  </RelayProductDockProvider>
-)
+  )
+}
