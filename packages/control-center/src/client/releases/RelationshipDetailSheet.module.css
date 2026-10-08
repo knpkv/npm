@@ -74,7 +74,7 @@
 }
 
 .facts div {
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .facts dt {

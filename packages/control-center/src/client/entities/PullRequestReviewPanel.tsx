@@ -890,7 +890,9 @@ export const PullRequestReviewPanel = ({
             <Button onClick={onCancelReview}>Cancel review</Button>
           </div>
         ) : null}
-        <code className={styles.reviewHead}>{review.subject.headRevision}</code>
+        <code className={styles.reviewHead} title={review.subject.headRevision}>
+          {review.subject.headRevision}
+        </code>
         <span aria-hidden="true" className={styles.reviewRunway} />
       </div>
     )
