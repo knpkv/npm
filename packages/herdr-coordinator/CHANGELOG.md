@@ -1,5 +1,14 @@
 # @knpkv/herdr-coordinator
 
+## 0.3.7
+
+### Patch Changes
+
+- [#619](https://github.com/knpkv/npm/pull/619) [`addf81d`](https://github.com/knpkv/npm/commit/addf81ddd5956692b571b5ecfc8ec2f3b3413aa2) Thanks [@konopkov](https://github.com/konopkov)! - `pullRequestEvidenceLayer` no longer lists `Clock` among its requirements. Effect's clock is a default reference, so the declared requirement could never be satisfied at the type level, and callers had to silence the diagnostic.
+- Updated dependencies [[`da04e85`](https://github.com/knpkv/npm/commit/da04e85df105627acbfcc017ee0f15e6f4d6f20d)]:
+  - @knpkv/herdr-fleet@0.8.0
+  - @knpkv/herdr-work@0.9.1
+
 ## 0.3.6
 
 ### Patch Changes

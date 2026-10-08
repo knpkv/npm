@@ -1,5 +1,15 @@
 # @knpkv/herdr-connect
 
+## 0.7.4
+
+### Patch Changes
+
+- [#623](https://github.com/knpkv/npm/pull/623) [`c47e854`](https://github.com/knpkv/npm/commit/c47e8544c762aeb58a28811106e3acf768af12b1) Thanks [@konopkov](https://github.com/konopkov)! - The hub no longer jumps while its first content loads. Connect's agent directory and the Work board each hold a screen of space until their first content arrives, through a failed first request and its retry, so the coordinator chat (Connect) and the agents and history panels (Work) stay out of view instead of being pushed down when the list or board arrives. CLS on a cold load was 0.60 (Connect, 768) and 0.48 (Work, 1440).
+- Updated dependencies [[`da04e85`](https://github.com/knpkv/npm/commit/da04e85df105627acbfcc017ee0f15e6f4d6f20d), [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597), [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae), [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db)]:
+  - @knpkv/herdr-fleet@0.8.0
+  - @knpkv/rly@0.14.0
+  - @knpkv/herdr-work@0.9.1
+
 ## 0.7.3
 
 ### Patch Changes

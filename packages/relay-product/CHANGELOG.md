@@ -1,5 +1,16 @@
 # @knpkv/relay-product
 
+## 0.2.8
+
+### Patch Changes
+
+- [#635](https://github.com/knpkv/npm/pull/635) [`4ff1f03`](https://github.com/knpkv/npm/commit/4ff1f0386648e41cfee2d0198c7c30c312c60539) Thanks [@konopkov](https://github.com/konopkov)! - The read permission bar docks to the bottom edge instead of entering the page above it, so a prompt that arrives after the page has painted no longer pushes everything down (the Settings layout shift on a first run). The page keeps the bar's height free at its end. While the identity read waits for that permission, Settings → Accounts says "Waiting for read permission" instead of a sign-in state.
+
+  The Relay chip sits above the docked bar instead of covering its answers: `@knpkv/relay-product`'s dock adds the host's `--app-bottom-inset` to its bottom offset. The bar's sentence is shorter, and Accounts says "Waiting for read permission" whenever any read waits.
+
+- Updated dependencies [[`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597), [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae), [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db)]:
+  - @knpkv/rly@0.14.0
+
 ## 0.2.7
 
 ### Patch Changes

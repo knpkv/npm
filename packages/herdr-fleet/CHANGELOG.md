@@ -1,5 +1,11 @@
 # @knpkv/herdr-fleet
 
+## 0.8.0
+
+### Minor Changes
+
+- [#626](https://github.com/knpkv/npm/pull/626) [`da04e85`](https://github.com/knpkv/npm/commit/da04e85df105627acbfcc017ee0f15e6f4d6f20d) Thanks [@konopkov](https://github.com/konopkov)! - Job-store writes (`put`, `transition`) that lose the SQLite write lock to another connection now fail with the new `FleetStoreBusyError` instead of `FleetStoreError`. Nothing was written, so the same request can be retried. Every `FleetService` method that writes a job (approve, reject, run and the rest) can now fail with it.
+
 ## 0.7.0
 
 ### Minor Changes
