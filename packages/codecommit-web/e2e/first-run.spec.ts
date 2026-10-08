@@ -327,13 +327,18 @@ test("docks the read prompt so a late one doesn't push the page down", async ({ 
   const room = await page.locator("main").evaluate((main) => Number.parseFloat(getComputedStyle(main).paddingBottom))
   expect(room).toBeGreaterThanOrEqual((await bar.boundingBox())?.height ?? Number.POSITIVE_INFINITY)
   await expect(page.getByText("Waiting for read permission", { exact: true })).toBeVisible()
-  // The Relay chip sits above the bar, never on its answers.
-  const chip = page.locator("[data-relay-product-dock-chrome]")
-  await expect(chip).toBeVisible()
-  const chipBox = await chip.boundingBox()
+  // Relay opens from the header and its panel ends above the bar, never on its answers.
+  await page.getByRole("banner").getByRole("button", { name: /^Relay/ }).click()
+  const panel = page.getByRole("complementary", { name: "Relay" })
+  await expect(panel).toBeVisible()
+  // Measured once its entrance animation has settled.
+  await panel.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished))
+  })
+  const panelBox = await panel.boundingBox()
   const barBox = await bar.boundingBox()
-  // The bar's box includes its 8px clear band, so a chip ending at its top keeps that gap from the notice.
-  expect((chipBox?.y ?? Number.POSITIVE_INFINITY) + (chipBox?.height ?? 0)).toBeLessThanOrEqual(barBox?.y ?? 0)
+  // The bar's box includes its 8px clear band, so a panel ending at its top keeps that gap from the notice.
+  expect((panelBox?.y ?? Number.POSITIVE_INFINITY) + (panelBox?.height ?? 0)).toBeLessThanOrEqual(barBox?.y ?? 0)
   await expect(page.getByRole("button", { name: "Deny" })).toBeVisible()
 })
 

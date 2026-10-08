@@ -55,4 +55,4 @@ export {
 } from "./dock.js"
 
 export { RelayProductLauncher, RelayProductPanel, type RelayProductPanelProps, type RelayProductPin } from "./panel.js"
-export { RelayProductSummonClaimed, useRelayProductOpen } from "./registry.js"
+export { type RelayProductDockAbout, RelayProductSummonClaimed, useRelayProductOpen } from "./registry.js"

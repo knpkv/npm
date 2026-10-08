@@ -2,6 +2,36 @@ import { expect, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 import { RelayReviewProfile, RelayReviewResult } from "../src/server/Api.js"
 
+/** Relay's panel, opened from the app header or a finding's Discuss action. */
+const relayPanel = (page: Page) => page.getByRole("complementary", { name: "Relay" })
+
+/** Discuss one finding in Relay: selects it and opens the panel with it as the composer's context. */
+const discussInRelay = async (page: Page, finding: RegExp): Promise<void> => {
+  await page
+    .getByRole("listitem")
+    .filter({ has: page.getByRole("button", { name: finding }) })
+    .getByRole("button", { name: "Discuss in Relay" })
+    .click()
+  await expect(relayPanel(page)).toBeVisible()
+}
+
+const sendToRelay = async (page: Page, message: string): Promise<void> => {
+  await relayPanel(page).getByLabel("Message Relay").fill(message)
+  await relayPanel(page).getByRole("button", { exact: true, name: "Send" }).click()
+}
+
+/** Close Relay with Escape from inside it, so the page's own controls are reachable again. */
+const closeRelay = async (page: Page): Promise<void> => {
+  await relayPanel(page).getByLabel("Message Relay").focus()
+  await page.keyboard.press("Escape")
+  await expect(relayPanel(page)).toHaveCount(0)
+}
+
+const openRelay = async (page: Page): Promise<void> => {
+  await page.getByRole("banner").getByRole("button", { name: /^Relay/ }).click()
+  await expect(relayPanel(page)).toBeVisible()
+}
+
 // Wide enough that Relay stays a column beside the diff next to the queue rail; the mid-width
 // drawer has its own spec (findings-drawer.spec.ts).
 test.use({ viewport: { height: 1080, width: 1920 } })
@@ -444,6 +474,65 @@ const routeReviewWorkspace = async (
   })
 }
 
+const ContinuationTarget = Schema.Struct({ findingId: Schema.String })
+
+test("opens Relay from the header and discusses findings in its panel", async ({ page }) => {
+  const targets: Array<string> = []
+  page.on("request", (request) => {
+    if (request.url().includes("/relay-review/continue")) {
+      targets.push(Schema.decodeUnknownSync(ContinuationTarget)(request.postDataJSON()).findingId)
+    }
+  })
+  await routeReviewWorkspace(page)
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { name: "Run Relay" }).click()
+  await expect(page.getByText("P2: Retry amplification")).toBeVisible()
+
+  // The header launcher and Ctrl/⌘+J open the same panel; Escape returns focus to the launcher.
+  const launcher = page.getByRole("banner").getByRole("button", { name: /^Relay/ })
+  await launcher.click()
+  await expect(launcher).toHaveAttribute("aria-expanded", "true")
+  await closeRelay(page)
+  await expect(launcher).toBeFocused()
+  await page.keyboard.press("ControlOrMeta+j")
+  await expect(relayPanel(page)).toBeVisible()
+  await expect(relayPanel(page).getByLabel("Message Relay")).toBeFocused()
+  await closeRelay(page)
+
+  // Discuss attaches the finding, and closing returns to that Discuss button.
+  const discussRetry = page
+    .getByRole("listitem")
+    .filter({ has: page.getByRole("button", { name: /Retry amplification/ }) })
+    .getByRole("button", { name: "Discuss in Relay" })
+  await discussInRelay(page, /Retry amplification/)
+  const asking = relayPanel(page).getByRole("list", { name: "Asking with" })
+  await expect(asking).toContainText("Finding: Retry amplification")
+  await relayPanel(page).getByLabel("Message Relay").fill("Is the retry bounded?")
+  await closeRelay(page)
+  await expect(discussRetry).toBeFocused()
+
+  // Discussing another finding keeps the draft and says what it is now about.
+  await discussInRelay(page, /Before-path evidence/)
+  await expect(asking).toContainText("Finding: Before-path evidence")
+  await expect(relayPanel(page).getByText("Context changed to Finding: Before-path evidence. Your draft is kept."))
+    .toBeVisible()
+  await expect(relayPanel(page).getByLabel("Message Relay")).toHaveValue("Is the retry bounded?")
+  await relayPanel(page).getByRole("button", { exact: true, name: "Send" }).click()
+  await expect.poll(() => targets).toEqual(["F2"])
+  await expect(relayPanel(page).getByText("About Before-path evidence")).toBeVisible()
+
+  // Removing the reference sends to the whole pull request.
+  await relayPanel(page).getByRole("button", { name: "Remove Finding: Before-path evidence" }).click()
+  await expect(asking).toHaveCount(0)
+  await sendToRelay(page, "Anything else on this PR?")
+  await expect.poll(() => targets).toEqual(["F2", "PR"])
+  await expect(relayPanel(page).getByText("About the whole pull request")).toBeVisible()
+
+  // There is one Relay: no fixed chip, no second conversation in the page.
+  await expect(page.locator("[data-relay-product-dock-chrome]")).toHaveCount(0)
+  await expect(page.getByLabel("Message Relay")).toHaveCount(1)
+})
+
 test("shows an actionable error when Relay profiles cannot load", async ({ page }) => {
   await routeReviewWorkspace(page, "review", undefined, undefined, { configStatus: 500 })
 
@@ -619,17 +708,15 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
   await page.reload()
   await expect(page.getByRole("combobox", { name: "Profile" })).toHaveText("Test review")
   await expect(page.getByText("P2: Retry amplification")).toBeVisible()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByPlaceholder("Ask Relay about this finding…").fill("Continue this security review.")
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await discussInRelay(page, /Retry amplification/)
+  await sendToRelay(page, "Continue this security review.")
   await expect.poll(() => continuations.length).toBe(1)
   expect(continuations[0]).toMatchObject({
     profile: { id: "quick", kind: "tests", model: "gpt-5.6-luna", skillIds: [] },
     message: "Continue this security review.",
     turns: []
   })
-  await page.getByPlaceholder("Ask Relay about this finding…").fill("Check the evidence once more.")
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await sendToRelay(page, "Check the evidence once more.")
   await expect.poll(() => continuations.length).toBe(2)
   expect(continuations[1]).toMatchObject({
     profile: { id: "quick", kind: "tests", model: "gpt-5.6-luna" },
@@ -639,6 +726,7 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
       { message: "Confirmed against the same exact revision.", role: "assistant" }
     ]
   })
+  await closeRelay(page)
   await page.getByRole("combobox", { name: "Profile" }).click()
   await page.getByRole("option", { name: "Thorough review" }).click()
   await page.getByRole("button", { name: "Run again" }).click()
@@ -646,7 +734,10 @@ test("restores the exact profile and roundtrips its model-owned execution", asyn
   expect(runs[1]).toMatchObject({
     profile: { id: "thorough", kind: "security", model: "configured-default" }
   })
-  await expect(page.getByRole("log").locator("li")).toHaveCount(4)
+  // The rerun keeps both exchanges in the PR thread.
+  await openRelay(page)
+  await expect(relayPanel(page).getByRole("listitem").filter({ hasText: /^You: / })).toHaveCount(2)
+  await expect(relayPanel(page).getByText("Confirmed against the same exact revision.")).toHaveCount(2)
 })
 
 test("waits for legacy session migration before persisting the first continuation", async ({ page }) => {
@@ -704,10 +795,9 @@ test("waits for legacy session migration before persisting the first continuatio
   await page.goto("/accounts/111111111111/prs/42")
   await expect.poll(() => page.evaluate(() => window.releaseRelayMigrationReady === true)).toBe(true)
   await expect(page.getByRole("button", { name: "Run again" })).toBeVisible()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await discussInRelay(page, /Retry amplification/)
 
-  await page.getByPlaceholder("Ask Relay about this finding…").fill("Continue before migration completes.")
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await sendToRelay(page, "Continue before migration completes.")
   await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
   await expect(page.getByText("The retry finding changed after re-review.")).toBeVisible()
   expect(
@@ -733,10 +823,10 @@ test("preserves completed conversations when a rerun fails", async ({ page }) =>
   await routeReviewWorkspace(page)
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByPlaceholder("Ask Relay about this finding…").fill("Keep this verified conversation.")
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
-  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
+  await discussInRelay(page, /Retry amplification/)
+  await sendToRelay(page, "Keep this verified conversation.")
+  await expect(relayPanel(page).getByText("Confirmed against the same exact revision.")).toBeVisible()
+  await closeRelay(page)
 
   await page.route("**/api/prs/*/42/relay-review/stream*", async (route) => {
     await route.fulfill({ body: "Relay rerun unavailable", contentType: "text/plain", status: 500 })
@@ -745,16 +835,14 @@ test("preserves completed conversations when a rerun fails", async ({ page }) =>
   await expect(page.getByText("Relay review failed")).toBeVisible()
   await expect(page.getByText("Previous result retained. The latest rerun failed", { exact: false })).toBeVisible()
   await expect(page.getByText("Previous result", { exact: true })).toBeVisible()
-  await expect(page.getByText("Keep this verified conversation.")).toBeVisible()
-  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
+  await openRelay(page)
+  await expect(relayPanel(page).getByText("Keep this verified conversation.")).toBeVisible()
+  await expect(relayPanel(page).getByText("Confirmed against the same exact revision.")).toBeVisible()
 
   await page.reload()
-  await page
-    .getByRole("region", { name: "Conversation about F1" })
-    .getByRole("button", { exact: true, name: "Open" })
-    .click()
-  await expect(page.getByText("Keep this verified conversation.")).toBeVisible()
-  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
+  await openRelay(page)
+  await expect(relayPanel(page).getByText("Keep this verified conversation.")).toBeVisible()
+  await expect(relayPanel(page).getByText("Confirmed against the same exact revision.")).toBeVisible()
 })
 
 test("retries a failed continuation without persisting the failed turn", async ({ page }) => {
@@ -790,21 +878,22 @@ test("retries a failed continuation without persisting the failed turn", async (
 
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await discussInRelay(page, /Retry amplification/)
   const message = "Retry this failed follow-up."
-  const composer = page.getByPlaceholder("Ask Relay about this finding…")
+  const composer = relayPanel(page).getByLabel("Message Relay")
   await composer.fill(message)
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await relayPanel(page).getByRole("button", { exact: true, name: "Send" }).click()
   await expect(page.getByText("Relay review failed")).toBeVisible()
   await expect(composer).toHaveValue(message)
   expect(continuations[0]?.turns).toEqual([])
 
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await relayPanel(page).getByRole("button", { exact: true, name: "Send" }).click()
   await expect(page.getByText("Confirmed after retry.")).toBeVisible()
   expect(continuations[1]?.turns).toEqual([])
-  await expect(page.getByRole("log").locator("li[data-role=\"user\"]").filter({ hasText: message })).toHaveCount(1)
+  // The retried turn lands once in the PR thread, not once per attempt.
+  await expect(relayPanel(page).getByRole("listitem").filter({ hasText: `You: ${message}` })).toHaveCount(1)
   await expect(
-    page.getByRole("log").locator("li[data-role=\"assistant\"]").filter({ hasText: "Confirmed after retry." })
+    relayPanel(page).getByRole("listitem").filter({ hasText: "Relay: Confirmed after retry." })
   ).toHaveCount(1)
 })
 
@@ -876,9 +965,10 @@ test("keeps the prior review session atomic when frames follow completion", asyn
   })
   expect(persistedBefore).not.toBeNull()
 
-  const composer = page.getByPlaceholder("Ask Relay about this finding…")
+  await discussInRelay(page, /Retry amplification/)
+  const composer = relayPanel(page).getByLabel("Message Relay")
   await composer.fill("Try an invalid continuation.")
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await relayPanel(page).getByRole("button", { exact: true, name: "Send" }).click()
 
   await expect(page.getByText("Relay review failed")).toBeVisible()
   await expect(composer).toHaveValue("Try an invalid continuation.")
@@ -935,9 +1025,8 @@ test("commits a staged continuation after clean EOF", async ({ page }) => {
 
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByPlaceholder("Ask Relay about this finding…").fill("Apply the valid continuation.")
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await discussInRelay(page, /Retry amplification/)
+  await sendToRelay(page, "Apply the valid continuation.")
 
   await expect(page.getByRole("button", { name: /Committed terminal finding/ })).toBeVisible()
   await expect(page.getByRole("button", { name: /Retry amplification/ })).toHaveCount(0)
@@ -984,14 +1073,15 @@ test("keeps a continuation reply visible when its finding is withdrawn", async (
 
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await page.getByRole("button", { name: /Retry amplification/ }).click()
-  await page.getByPlaceholder("Ask Relay about this finding…").fill("Withdraw this if it is resolved.")
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await discussInRelay(page, /Retry amplification/)
+  await sendToRelay(page, "Withdraw this if it is resolved.")
 
   await expect(page.getByRole("button", { name: /Retry amplification/ })).toHaveCount(0)
-  await expect(page.getByText("Discuss withdrawn finding")).toBeVisible()
-  await expect(page.getByText("F1 is no longer in the current deck")).toBeVisible()
-  await expect(page.getByText("F1 is withdrawn because the retry path is now verified idempotent.")).toBeVisible()
+  // The withdrawn finding's discussion stays readable in the PR thread, named for what it was about.
+  await expect(relayPanel(page).getByText("About F1, no longer in the current deck")).toBeVisible()
+  await expect(
+    relayPanel(page).getByText("F1 is withdrawn because the retry path is now verified idempotent.")
+  ).toBeVisible()
 })
 
 test("recovers an interrupted finding publication after reload", async ({ page }) => {
@@ -1039,8 +1129,8 @@ test("preserves an active finding publication across changed live reconciliation
   await postStarted.promise
   await expect(post).toBeDisabled()
 
-  await page.getByPlaceholder("Ask Relay about this finding…").fill("Re-check while publication is active.")
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await discussInRelay(page, /Retry amplification/)
+  await sendToRelay(page, "Re-check while publication is active.")
   await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
   await expect(post).toBeDisabled()
   expect(postAttempts).toBe(1)
@@ -1075,8 +1165,8 @@ test("releases a changed finding after its active publication fails", async ({ p
   const post = page.getByRole("button", { name: "Accept and post" }).first()
   await post.click()
   await postStarted.promise
-  await page.getByPlaceholder("Ask Relay about this finding…").fill("Re-check while publication is active.")
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await discussInRelay(page, /Retry amplification/)
+  await sendToRelay(page, "Re-check while publication is active.")
   await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
   await expect(post).toBeDisabled()
 
@@ -1215,36 +1305,39 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }, testInfo) =
   await expect(page.getByRole("button", { name: /^Comments 3$/ })).toBeVisible()
   await page.getByRole("button", { exact: true, name: "Reject" }).last().click()
   await expect(page.getByText("rejected")).toBeVisible()
-  await page.getByPlaceholder("Ask Relay about this finding…").fill("Verify this again.")
-  await page.getByRole("button", { exact: true, name: "Send" }).click()
-  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
-  for (let index = 1; index <= 4; index++) {
-    const message = `Follow-up ${String(index)}`
-    await page.getByPlaceholder("Ask Relay about this finding…").fill(message)
-    await page.getByRole("button", { exact: true, name: "Send" }).click()
-    await expect(page.getByText(message)).toBeVisible()
-    await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(index + 1)
-  }
   const findingDeck = page.getByRole("region", { name: "Findings" })
   expect(await findingDeck.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
-  await findingDeck.evaluate((element) => element.scrollTo({ top: element.scrollHeight }))
-  const conversationHistory = page.getByRole("log", { name: "Conversation history about F1" })
-  expect(await conversationHistory.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
-  await conversationHistory.evaluate((element) => element.scrollTo({ top: 0 }))
-  await expect(page.getByLabel("Message Relay")).toBeInViewport()
+  await discussInRelay(page, /Retry amplification/)
+  await expect(relayPanel(page).getByRole("list", { name: "Asking with" })).toContainText(
+    "Finding: Retry amplification"
+  )
+  await sendToRelay(page, "Verify this again.")
+  const replies = relayPanel(page).getByText("Confirmed against the same exact revision.")
+  await expect(replies).toHaveCount(1)
+  for (let index = 1; index <= 4; index++) {
+    const message = `Follow-up ${String(index)}`
+    await sendToRelay(page, message)
+    await expect(relayPanel(page).getByText(message)).toBeVisible()
+    await expect(replies).toHaveCount(index + 1)
+  }
+  // A long thread scrolls inside Relay's body; the composer stays on screen.
+  const relayBody = relayPanel(page).locator("[data-rly-relay-scroll]")
+  expect(await relayBody.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+  await relayBody.evaluate((element) => element.scrollTo({ top: 0 }))
+  await expect(relayPanel(page).getByLabel("Message Relay")).toBeInViewport()
   await page.reload()
   expect(await emitAppState(3)).toBeGreaterThan(0)
-  await page
-    .getByRole("region", { name: "Conversation about F1" })
-    .getByRole("button", { exact: true, name: "Open" })
-    .click()
-  await expect(page.getByText("Verify this again.")).toBeVisible()
-  await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(5)
+  await openRelay(page)
+  await expect(relayPanel(page).getByText("Verify this again.")).toBeVisible()
+  await expect(replies).toHaveCount(5)
+  await closeRelay(page)
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByText("rejected")).toBeVisible()
   await page.getByRole("button", { name: "Run again" }).click()
-  await expect(page.getByText("Verify this again.")).toHaveCount(1)
-  await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(5)
+  await openRelay(page)
+  await expect(relayPanel(page).getByText("Verify this again.")).toHaveCount(1)
+  await expect(replies).toHaveCount(5)
+  await closeRelay(page)
 
   await page.screenshot({ fullPage: true, path: testInfo.outputPath("pr-review-workspace.png") })
   await page.setViewportSize({ height: 844, width: 390 })
@@ -1764,10 +1857,10 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   await expect(page.getByText(staleReviewMessage)).toBeVisible()
   await expect(page.getByRole("button", { name: "Re-review latest" })).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toHaveCount(0)
-  const conversation = page.locator("section[aria-label=\"Conversation about F1\"]")
-  await conversation.getByRole("button", { name: "Open" }).click()
-  await expect(conversation.getByLabel("Message Relay")).toBeDisabled()
-  await expect(conversation.getByRole("button", { exact: true, name: "Send" })).toBeDisabled()
+  // A stale deck holds the PR thread: Relay says why and offers no composer until the rerun.
+  await openRelay(page)
+  await expect(relayPanel(page).getByText("Relay unavailable for this PR")).toBeVisible()
+  await expect(relayPanel(page).getByLabel("Message Relay")).toHaveCount(0)
   expect(diffRequestCount).toBe(4)
 })
 

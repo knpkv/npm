@@ -37,11 +37,14 @@ import {
  * It shares open state with RelayProductPanel through RelayProductDockProvider.
  */
 export const RelayProductLauncher = (): ReactElement => {
-  const { launcher, open, setOpen } = useRelayProductOpen()
+  const { launcher, open, returnTo, setOpen } = useRelayProductOpen()
   return (
     <RelayLauncher
       expanded={open}
-      onClick={() => setOpen((current) => !current)}
+      onClick={() => {
+        returnTo.current = null
+        setOpen((current) => !current)
+      }}
       ref={launcher}
       shortcut={useRelayShortcut()}
     />
@@ -87,13 +90,26 @@ const itemsOf = (messages: ReadonlyArray<RelayProductDockMessage>): ReadonlyArra
   )
 
 /**
- * Profiles and models pair one to one by id and the active pair matches: one choice sets both, so one
- * preset is offered. Anything else keeps both selects, so no active or extra model is hidden.
+ * One choice sets both, so one preset is offered: a single profile with a single model (named
+ * together), or profiles and models pairing one to one by id with the active pair matching. Anything
+ * else keeps both selects, so no active or extra model is hidden.
  */
 const isCoupled = (selection: RelaySelectorState): boolean =>
-  selection.profileId === selection.modelId &&
-  selection.profiles.length === selection.models.length &&
-  selection.profiles.every(({ id }) => selection.models.some((model) => model.id === id))
+  (selection.profiles.length === 1 && selection.models.length === 1) ||
+  (selection.profileId === selection.modelId &&
+    selection.profiles.length === selection.models.length &&
+    selection.profiles.every(({ id }) => selection.models.some((model) => model.id === id)))
+
+/** A preset's name: the profile, with its model when the two are named differently. */
+const presetLabel = (
+  selection: RelaySelectorState,
+  profile: { readonly id: string; readonly label: string }
+): string => {
+  const model =
+    selection.models.find(({ id }) => id === profile.id) ??
+    (selection.models.length === 1 ? selection.models[0] : undefined)
+  return model === undefined || model.label === profile.label ? profile.label : `${profile.label}, ${model.label}`
+}
 
 /** The selector's meaning, so an equal selector re-allocated by the host is not a change. */
 const selectorRevision = (selection: RelaySelectorState): string =>
@@ -123,7 +139,7 @@ const rerunReason = "Rerun Relay with the selected profile or model before conti
  */
 export const RelayProductPanel = ({ host, pin }: RelayProductPanelProps): ReactElement | null => {
   const registration = useRelayProductDockRegistration()
-  const { launcher, open, pinned, setOpen, setPinned } = useRelayProductOpen()
+  const { launcher, open, pinned, returnTo, setOpen, setPinned } = useRelayProductOpen()
   const available = pin._tag === "Available"
   // An unavailable layout never pins; its width only matters to a pin it cannot offer.
   const presentationOf = useRelayPresentation({
@@ -145,11 +161,13 @@ export const RelayProductPanel = ({ host, pin }: RelayProductPanelProps): ReactE
     shortcut: useRelayShortcut()
   })
   if (!open) return null
+  // Closing returns to the control that opened Relay while it is still on the page, else the launcher.
+  const returnTarget = returnTo.current?.isConnected === true ? returnTo : launcher
   const context = registration?.context ?? host.context
   const locating = registration === null || locatingFrom
   return (
     <RelayPanel
-      launcher={launcher}
+      launcher={returnTarget}
       onClose={() => setOpen(false)}
       options={
         registration === null ? undefined : (
@@ -240,6 +258,14 @@ const Continuation = ({
   // A different preset applies to the next message; a selection outside this thread's options needs a
   // rerun first, and the composer says so instead of failing on send.
   const changed = !sameRun(selection, registration.selection)
+  // A draft written about one thing stays, but a change of what it is about is said, never silent. What
+  // the draft was written about lives on the provider, so closing and reopening Relay keeps it.
+  const { draftAbout } = useRelayProductOpen()
+  const thread = threadKey(pullRequestThreadIdentity(registration.conversation))
+  const aboutId = registration.about?.id ?? null
+  const hasDraft = draft.value.trim() !== ""
+  if (!hasDraft || !draftAbout.current.has(thread)) draftAbout.current.set(thread, aboutId)
+  const retargeted = hasDraft && draftAbout.current.get(thread) !== aboutId
   const busyReason = sending
     ? "Relay is answering."
     : relaySelectionMatchesRegistration(selection, registration)
@@ -261,8 +287,10 @@ const Continuation = ({
     setSending(true)
     void Effect.runPromiseExit(registration.continuePullRequestConversation(decoded.success)).then((exit) => {
       setSending(false)
-      if (Exit.isSuccess(exit)) draft.accepted(submission.requestId)
-      else setFailure(`${failureFromCause(exit.cause)} Your message is kept.`)
+      if (Exit.isSuccess(exit)) {
+        draft.accepted(submission.requestId)
+        draftAbout.current.set(thread, aboutId)
+      } else setFailure(`${failureFromCause(exit.cause)} Your message is kept.`)
     })
   }
 
@@ -277,12 +305,16 @@ const Continuation = ({
     const model = selection.models.find((option) => option.id === id)
     if (model !== undefined) setSelection({ ...selection, modelId: model.id })
   }
-  const runWith = useMemo(() => selection.profiles.map(({ id, label }) => ({ label, value: id })), [selection.profiles])
+  const profileOptions = useMemo(
+    () => selection.profiles.map(({ id, label }) => ({ label, value: id })),
+    [selection.profiles]
+  )
+  const presets = selection.profiles.map((profile) => ({ label: presetLabel(selection, profile), value: profile.id }))
   const preset = coupled ? (
-    <Select aria-label="Run with" onValueChange={chooseProfile} options={runWith} value={selection.profileId} />
+    <Select aria-label="Run with" onValueChange={chooseProfile} options={presets} value={selection.profileId} />
   ) : (
     <>
-      <Select aria-label="Profile" onValueChange={chooseProfile} options={runWith} value={selection.profileId} />
+      <Select aria-label="Profile" onValueChange={chooseProfile} options={profileOptions} value={selection.profileId} />
       <Select
         aria-label="Model"
         onValueChange={chooseModel}
@@ -294,9 +326,16 @@ const Continuation = ({
   return (
     <>
       {changed ? <p>Applies to your next message.</p> : null}
+      {retargeted ? (
+        <p>Context changed to {registration.about?.label ?? "the whole pull request"}. Your draft is kept.</p>
+      ) : null}
       {failure === null ? null : <p role="alert">{failure}</p>}
       <RelayComposer
         busyReason={busyReason}
+        {...(registration.about === undefined
+          ? {}
+          : { contextRefs: [{ id: registration.about.id, label: registration.about.label }] })}
+        onRemoveContextRef={() => registration.about?.onClear()}
         onSend={send}
         onValueChange={draft.onValueChange}
         placeholder="Ask Relay to verify one concrete part of this pull request…"

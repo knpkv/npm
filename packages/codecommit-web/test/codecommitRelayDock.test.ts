@@ -25,7 +25,7 @@ import {
   makeCodeCommitRelaySelection,
   makeCodeCommitRelayThreadRegistration
 } from "../src/client/codecommitRelayDock.js"
-import type { PullRequestRelayReviewResponse } from "../src/server/Api.js"
+import { type PullRequestRelayReviewResponse, RelayReviewFinding } from "../src/server/Api.js"
 
 const selection = Schema.decodeUnknownSync(RelaySelectorState)({
   modelId: "configured-default",
@@ -63,6 +63,18 @@ const explainReview: PullRequestRelayReviewResponse = {
   },
   result: { explanation: "The change keeps provider access on the host.", findings: [], verdict: "Explained." }
 }
+
+const retryFinding = Schema.decodeUnknownSync(RelayReviewFinding)({
+  details: "Each retry re-enqueues the job.",
+  id: "F1",
+  location: { scope: "general" },
+  priority: "P2",
+  publicationTarget: "pr-comment",
+  recommendation: "Bound the retries.",
+  summary: "Retries multiply under load.",
+  title: "Retry amplification",
+  verification: "Load test the queue."
+})
 
 const continuationRequest = (message: string) =>
   Schema.decodeUnknownSync(ContinuePullRequestConversationRequest)({ conversation, message, selection })
@@ -316,4 +328,52 @@ describe("CodeCommit Relay dock adapter", () => {
       expect(registration.description).toContain("current exact revision")
     }
   })
+
+  it.effect("names what each run of turns is about, so per-finding discussions stay readable in one thread", () =>
+    Effect.gen(function*() {
+      const onClear = (): void => undefined
+      const registration = yield* requireReadyRegistration(
+        makeCodeCommitRelayThreadRegistration({
+          about: { id: "F1", label: "Finding: Retry amplification", onClear },
+          available: true,
+          context: [],
+          continueReview: () => Promise.resolve({ _tag: "completed" }),
+          conversation,
+          isReviewing: false,
+          review: {
+            ...explainReview,
+            result: {
+              ...explainReview.result,
+              findings: [retryFinding]
+            }
+          },
+          selectedFindingId: "F1",
+          selection,
+          turns: [
+            { id: "t1", findingId: "F1", role: "user", message: "Is it bounded?" },
+            { id: "t2", findingId: "F1", role: "assistant", message: "Yes, three attempts." },
+            { id: "t3", findingId: "F9", role: "user", message: "And the old one?" },
+            { id: "t4", findingId: "PR", role: "user", message: "Anything else?" }
+          ]
+        })
+      )
+      expect(registration.about?.label).toBe("Finding: Retry amplification")
+      expect(registration.messages.filter(({ role }) => role === "system").map(({ text }) => text)).toEqual([
+        "About Retry amplification",
+        "About F9, no longer in the current deck",
+        "About the whole pull request"
+      ])
+      // Verdict and explanation, then each run of turns after the note naming it.
+      expect(registration.messages.map(({ role }) => role)).toEqual([
+        "relay",
+        "relay",
+        "system",
+        "operator",
+        "relay",
+        "system",
+        "operator",
+        "system",
+        "operator"
+      ])
+    }))
 })

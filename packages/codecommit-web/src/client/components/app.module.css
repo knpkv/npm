@@ -1,4 +1,6 @@
 .root {
+  /* Relay's overlay and pinned column start below the sticky header. */
+  --rly-relay-panel-offset: var(--app-header-block-size, 4.5rem);
   display: flex;
   min-block-size: 100dvh;
   flex-direction: column;
