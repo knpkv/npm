@@ -1,5 +1,13 @@
 # @knpkv/confluence-to-markdown
 
+## 2.5.3
+
+### Patch Changes
+
+- [#609](https://github.com/knpkv/npm/pull/609) [`1ea00b5`](https://github.com/knpkv/npm/commit/1ea00b527ca09262c38856da6cc143e86c0af6d1) Thanks [@konopkov](https://github.com/konopkov)! - Sync no longer hides failures. If Confluence changes cannot be merged into your branch after a pull, a warning names the branch and the `git merge` that finishes it; before, a conflict was dropped without a word. The same goes for a deleted file whose page id cannot be read, so its page is not deleted; a canonical-content amend that fails; a switch back to the original branch that fails; and an unreadable or invalid project `baseUrl`. A config or legacy auth file whose existence cannot be checked now fails with an error instead of reading as missing.
+- Updated dependencies [[`a5a7fcf`](https://github.com/knpkv/npm/commit/a5a7fcf055bfa7d0f6a1c1a0ae2cf4bc2eb8ab81)]:
+  - @knpkv/atlassian-common@1.9.3
+
 ## 2.5.2
 
 ### Patch Changes

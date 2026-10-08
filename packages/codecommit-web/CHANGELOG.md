@@ -1,5 +1,17 @@
 # @knpkv/codecommit-web
 
+## 0.27.0
+
+### Minor Changes
+
+- [#661](https://github.com/knpkv/npm/pull/661) [`26d9de9`](https://github.com/knpkv/npm/commit/26d9de9c64b78da62ab462856cbd09e9137eb40f) Thanks [@konopkov](https://github.com/konopkov)! - Relay opens from the app header (button or Ctrl/⌘+J) into one panel, replacing the fixed chip. A finding's "Discuss in Relay" opens the panel with that finding attached to the composer; the separate in-page discussion is gone, and earlier per-finding discussions stay readable in the PR thread, each named for what it was about. Run, profile and focus controls, progress and the findings deck stay in the page. No new AWS operations or permissions.
+
+### Patch Changes
+
+- [#612](https://github.com/knpkv/npm/pull/612) [`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26) Thanks [@konopkov](https://github.com/konopkov)! - A refresh held back by the permission gate no longer reads "PermissionDeniedError:." It now says what is missing and where to fix it: "Couldn't list pull requests in dev (eu-central-1): Not allowed yet: the getPullRequests permission prompt has no answer. Allow it in Settings → Permissions." A provider error with no message is named without a dangling colon.
+- Updated dependencies [[`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26)]:
+  - @knpkv/codecommit-core@0.23.1
+
 ## 0.26.2
 
 ### Patch Changes

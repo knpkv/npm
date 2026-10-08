@@ -1,5 +1,11 @@
 # @knpkv/atlassian-common
 
+## 1.9.3
+
+### Patch Changes
+
+- [#595](https://github.com/knpkv/npm/pull/595) [`a5a7fcf`](https://github.com/knpkv/npm/commit/a5a7fcf055bfa7d0f6a1c1a0ae2cf4bc2eb8ab81) Thanks [@konopkov](https://github.com/konopkov)! - Failures that used to read as "nothing there" are now reported. A token or profile file whose existence cannot be checked fails with a FileSystemError instead of reading as signed out. A token the system refuses to delete fails the logout instead of reporting success; an already-deleted token still succeeds. An unreadable legacy auth file is skipped with a warning naming it. In jira-cli, a Jira user that cannot be read is still shown by account id, now with a warning naming them.
+
 ## 1.9.2
 
 ### Patch Changes
