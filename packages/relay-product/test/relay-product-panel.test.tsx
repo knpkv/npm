@@ -635,4 +635,29 @@ describe("RelayProductPanel", () => {
       await unmount()
     }
   })
+
+  it("puts the host's other conversation after the locator while finding another pull request", async () => {
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel
+          host={{
+            ...host,
+            alternate: { label: "Open the Release 2.18 conversation, full page", onOpen: () => undefined }
+          }}
+          pin={{ _tag: "Unavailable" }}
+        />
+        <Registered registration={ready(coupled, () => Effect.void)} />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      expect(button("Open the Release 2.18 conversation, full page")).toBeUndefined()
+      await act(async () => button("Find another pull request")?.click())
+      const body = document.querySelector("[data-rly-relay-panel]")?.textContent ?? ""
+      expect(body.indexOf("Open PR conversation")).toBeLessThan(body.indexOf("Open the Release 2.18 conversation"))
+    } finally {
+      await unmount()
+    }
+  })
 })

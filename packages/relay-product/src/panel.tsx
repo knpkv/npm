@@ -193,7 +193,8 @@ export const RelayProductPanel = ({ host, pin }: RelayProductPanelProps): ReactE
   const context = registration?.context ?? host.context
   const locating = registration === null || locatingFrom
   // The host's other conversation leaves the panel for its own page, so Relay closes first: the next page
-  // must not open with Relay's open state still set. It leads only where no pull request is registered.
+  // must not open with Relay's open state still set. It leads where no pull request is registered, and
+  // follows the locator while finding another one.
   const alternate =
     host.alternate === undefined ? null : (
       <Button

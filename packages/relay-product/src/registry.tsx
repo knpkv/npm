@@ -34,8 +34,8 @@ export interface RelayProductDockHost {
   readonly product: AgenticProduct
   readonly selection: RelaySelectorState
   /**
-   * Another Relay conversation this host offers where no pull request is registered (Control Center's
-   * release conversation, say); the panel shows it before the pull-request locator.
+   * Another Relay conversation this host offers (Control Center's release conversation, say): before the
+   * pull-request locator where no pull request is registered, after it while finding another one.
    */
   readonly alternate?: RelayProductDockAlternate | undefined
 }
