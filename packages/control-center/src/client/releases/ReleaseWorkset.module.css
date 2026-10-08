@@ -72,7 +72,7 @@
 }
 
 .selectedFacts div {
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .selectedFacts dt {
@@ -121,14 +121,14 @@
   grid-template-columns: auto minmax(10rem, 1fr) auto auto auto;
   align-items: center;
   gap: var(--rly-space-12);
-  min-width: 0;
+  min-inline-size: 0;
   padding: var(--rly-space-8) var(--rly-space-12);
   border-radius: var(--rly-radius-control);
   background: var(--rly-color-surface-2);
 }
 
 .traceConnection {
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .traceConnection a {

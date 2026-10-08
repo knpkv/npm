@@ -15,7 +15,7 @@
     color: var(--rly-color-text-1);
     container-type: inline-size;
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   .viewer {
