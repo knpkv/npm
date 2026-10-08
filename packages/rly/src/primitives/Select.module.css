@@ -26,7 +26,7 @@
 
   .trigger > span:first-child {
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -79,7 +79,7 @@
     max-block-size: min(20rem, var(--radix-select-content-available-height));
     max-inline-size: min(calc(100vw - var(--rly-space-32)), 32rem);
     min-inline-size: var(--radix-select-trigger-width);
-    overflow: hidden;
+    overflow: clip;
     transform-origin: var(--radix-select-content-transform-origin);
     z-index: 100;
   }

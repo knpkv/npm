@@ -6,7 +6,7 @@
     container-type: inline-size;
     display: grid;
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   .header {

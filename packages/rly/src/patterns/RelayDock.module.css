@@ -67,7 +67,7 @@
     flex-direction: column;
     inset-block: var(--rly-space-0);
     inset-inline-end: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
     padding-block-end: env(safe-area-inset-bottom, 0px);
     padding-block-start: env(safe-area-inset-top, 0px);
     pointer-events: auto;
@@ -185,7 +185,7 @@
 
   .chipValue {
     color: var(--rly-color-text-1);
-    overflow: hidden;
+    overflow: clip;
     text-overflow: ellipsis;
     white-space: nowrap;
   }

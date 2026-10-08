@@ -8,7 +8,7 @@
     /* One bounded track: an implicit auto track can't shrink below its content, so it overflowed at 320. */
     grid-template-columns: minmax(var(--rly-space-0), 1fr);
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   .header {

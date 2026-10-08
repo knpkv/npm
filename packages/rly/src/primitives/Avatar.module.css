@@ -7,7 +7,7 @@
     display: inline-flex;
     flex: none;
     justify-content: center;
-    overflow: hidden;
+    overflow: clip;
   }
 
   .small {
@@ -46,7 +46,7 @@
       var(--rly-type-meta-font);
     inline-size: 100%;
     justify-content: center;
-    overflow: hidden;
+    overflow: clip;
     text-transform: uppercase;
   }
 }
