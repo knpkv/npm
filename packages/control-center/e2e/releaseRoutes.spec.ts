@@ -691,6 +691,20 @@ interface AuthenticatedPresentationRoute {
   readonly primaryAction: () => Locator | null
 }
 
+/** Whether the element a locator resolves to is still in the document two frames later. */
+const staysConnected = (locator: Locator): Promise<boolean> =>
+  locator.evaluate(
+    (element) =>
+      new Promise<boolean>((resolve) => {
+        const view = element.ownerDocument.defaultView
+        if (view === null) {
+          resolve(false)
+          return
+        }
+        view.requestAnimationFrame(() => view.requestAnimationFrame(() => resolve(element.isConnected)))
+      })
+  )
+
 /** Open Relay from the header and leave for one of its full-page conversations; the panel closes first. */
 const openRelayFullPage = async (page: Page, action: string): Promise<void> => {
   await page.getByRole("banner").getByRole("button", { name: /^Relay/u }).click()
@@ -1056,6 +1070,8 @@ test("restores the exact release scroll position after a canonical entity round 
   await expect.poll(() => page.evaluate<number>("window.scrollY")).toBe(0)
 
   const freshNavigationItemLink = page.locator(`[data-rly-workset-jira-id="${canonicalEntityId}"] a`)
+  // The full view replaces its workset once its view transition commits; act on the settled element.
+  await expect.poll(() => staysConnected(freshNavigationItemLink)).toBe(true)
   await freshNavigationItemLink.scrollIntoViewIfNeeded()
   expect(await page.evaluate<number>("window.scrollY")).toBeGreaterThan(0)
   await page.getByRole("link", { name: "Back to overview" }).dispatchEvent("click")
@@ -1442,6 +1458,15 @@ test("launches an exact-head review and presents its durable findings", async ({
       "Also on this page: the review panel, with run, cancel and publish actions."
     )
   ).toBeVisible()
+  // The overlay spans the viewport below the header: no ancestor may box it into the header's height.
+  expect((await page.locator("[data-rly-relay-panel]").boundingBox())?.height ?? 0).toBeGreaterThan(400)
+  // A long preset name truncates in its trigger; the composer never runs past the panel's edge.
+  const panelBox = await page.locator("[data-rly-relay-panel]").boundingBox()
+  const composerBox = await page.locator("[data-rly-relay-panel] textarea").boundingBox()
+  expect((composerBox?.x ?? 0) + (composerBox?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(
+    (panelBox?.x ?? 0) + (panelBox?.width ?? 0)
+  )
+  await page.screenshot({ path: test.info().outputPath("relay-pr-panel.png") })
   await page.getByRole("button", { name: "Close Relay" }).click()
   await expect(page.locator("[data-rly-relay-panel]")).toHaveCount(0)
   await expect(relayLauncher).toBeFocused()
@@ -1696,6 +1721,10 @@ test("uses semantic fallback when direct Active work changes release", async ({ 
 
 test("opens the selected Active work release from the shell agent control", async ({ page }) => {
   await page.goto(`/w/${snapshot.workspaceId}/work?release=${heldRelease.releaseId}`)
+  await page.getByRole("banner").getByRole("button", { name: /^Relay/u }).click()
+  await expect(page.getByRole("button", { name: "Open the release conversation, full page" })).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath("relay-release-panel.png") })
+  await page.getByRole("button", { name: "Close Relay" }).click()
   await openRelayFullPage(page, "Open the release conversation, full page")
   await expect(page).toHaveURL(
     `${heldFullPath}/agent?from=${

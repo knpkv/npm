@@ -1,7 +1,46 @@
-import { RelayProductDockProvider } from "@knpkv/relay-product/registry"
+import { RelayProductDockProvider, useRelayProductOpen } from "@knpkv/relay-product/registry"
 import { Component, lazy, type ReactElement, type ReactNode, Suspense, useEffect } from "react"
 
+import styles from "./AppShell.module.css"
+
 const loadPanel = () => import("./controlCenterRelayPanel.js")
+
+// rly ships its patterns as one chunk, so the launcher loads lazily too, off the initial closure.
+const LazyRelayLauncher = lazy(async () => {
+  const module = await import("@knpkv/relay-product")
+  return { default: module.RelayProductLauncher }
+})
+
+/**
+ * Stands in for Relay's launcher until it loads: the same box (rly's launcher tokens), the same name,
+ * and it already opens Relay, so the header never moves and an early click is not lost.
+ */
+const RelayLauncherStandIn = (): ReactElement => {
+  const { open, setOpen } = useRelayProductOpen()
+  return (
+    <button
+      aria-expanded={open}
+      className={styles.relayLauncherStandIn}
+      onClick={() => setOpen((current) => !current)}
+      type="button"
+    >
+      <span aria-hidden="true" className={styles.relayLauncherStandInMark} />
+      <span>Relay</span>
+      <span aria-hidden="true" className={styles.relayLauncherStandInHint}>
+        Ctrl J
+      </span>
+    </button>
+  )
+}
+
+/** Relay's header launcher: the real one once its chunk has loaded, the same-size stand-in before. */
+export const ControlCenterRelayLauncher = (): ReactElement => (
+  <RelayDockChromeBoundary>
+    <Suspense fallback={<RelayLauncherStandIn />}>
+      <LazyRelayLauncher />
+    </Suspense>
+  </RelayDockChromeBoundary>
+)
 
 const LazyControlCenterRelayPanel = lazy(async () => {
   const module = await loadPanel()

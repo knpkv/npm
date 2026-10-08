@@ -820,6 +820,31 @@ test("keeps mobile navigation clear of application identity and content", async 
   await expect(page.getByRole("link", { name: "Overview" })).toBeFocused()
 })
 
+test("fits Relay's header launcher at every width, in both themes and forced colours", async ({ page }, testInfo) => {
+  for (const width of [320, 390, 1280]) {
+    await page.setViewportSize({ height: 844, width })
+    await page.goto("/")
+    const launcher = page.getByRole("banner").getByRole("button", { name: /^Relay/u })
+    // The real launcher, once its chunk has replaced the same-size stand-in.
+    await expect(page.locator("header [data-rly-relay-launcher]")).toBeVisible()
+    const box = await launcher.boundingBox()
+    expect((box?.x ?? 0) + (box?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(width)
+    expect(await page.evaluate<number>("document.documentElement.scrollWidth")).toBeLessThanOrEqual(width)
+    const looks: ReadonlyArray<
+      readonly [string, { readonly colorScheme: "dark" | "light"; readonly forcedColors: "active" | "none" }]
+    > = [
+      ["light", { colorScheme: "light", forcedColors: "none" }],
+      ["dark", { colorScheme: "dark", forcedColors: "none" }],
+      ["forced", { colorScheme: "light", forcedColors: "active" }]
+    ]
+    for (const [name, media] of looks) {
+      await page.emulateMedia(media)
+      await page.screenshot({ path: testInfo.outputPath(`header-${String(width)}-${name}.png`) })
+    }
+    await page.emulateMedia({ colorScheme: "light", forcedColors: "none" })
+  }
+})
+
 test("explains credential rejection separately from server availability", async ({ page }) => {
   let requestCount = 0
   await page.route("**/api/v1/session/pair", async (route) => {

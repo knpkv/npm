@@ -1,12 +1,16 @@
-import { lazy, type ReactElement, Suspense, useEffect, useState } from "react"
+import { lazy, type ReactElement, type RefCallback, Suspense, useEffect, useState } from "react"
 import { NavLink, Outlet, useLocation } from "react-router"
 import type { WorkspaceId } from "../domain/identifiers.js"
 import { type BrowserSessionState, useBrowserSession } from "./BrowserSession.js"
 import { isWorkspaceRouteId } from "./contextualAgentPath.js"
-import { RelayProductLauncher } from "@knpkv/relay-product"
-import { ControlCenterRelayDock, ControlCenterRelayPanelSlot } from "./controlCenterRelayDockShell.js"
+import {
+  ControlCenterRelayDock,
+  ControlCenterRelayLauncher,
+  ControlCenterRelayPanelSlot
+} from "./controlCenterRelayDockShell.js"
 import { subscribeWorkspacePresentation } from "./settings/workspaceSettingsSignals.js"
 import styles from "./AppShell.module.css"
+import { usePublishedBlockSize } from "./usePublishedBlockSize.js"
 import { WorkspaceScrollRestoration } from "./workspaceScrollRestoration.js"
 
 const CommandSearch = lazy(async () => {
@@ -77,13 +81,15 @@ const navClassName = ({ isActive }: { readonly isActive: boolean }): string =>
 const PrimaryNavigation = ({
   className,
   includeSettings,
+  navRef,
   overviewPath
 }: {
   readonly className: string
   readonly includeSettings: boolean
+  readonly navRef?: RefCallback<HTMLElement> | undefined
   readonly overviewPath: string
 }): ReactElement => (
-  <nav aria-label="Primary" className={`${styles.nav ?? ""} ${className}`}>
+  <nav aria-label="Primary" className={`${styles.nav ?? ""} ${className}`} ref={navRef}>
     {navigation(overviewPath, includeSettings).map((item) => (
       <NavLink className={navClassName} end={item.to === overviewPath} key={item.label} to={item.to}>
         {item.label}
@@ -102,6 +108,8 @@ export const AppShell = (): ReactElement => {
   const includeSettings = canInspectWorkspaceSettings(browserSession.state, workspaceId)
   const includeOpenPullRequest = canOpenCodeCommitPullRequest(browserSession.state, workspaceId)
   const [density, setDensity] = useState<"comfortable" | "compact">("comfortable")
+  const publishHeader = usePublishedBlockSize<HTMLElement>("--cc-header-block-size")
+  const publishMobileNav = usePublishedBlockSize<HTMLElement>("--cc-mobile-nav-block-size")
   useEffect(() => {
     setDensity("comfortable")
     let latestRevision = 0
@@ -122,7 +130,7 @@ export const AppShell = (): ReactElement => {
 
   const content = (
     <div className={styles.root} data-workspace-density={density}>
-      <header className={styles.header}>
+      <header className={styles.header} ref={publishHeader}>
         {isAuthorizedShare ? (
           <span className={styles.brand ?? ""}>{brand}</span>
         ) : workspaceId === null ? (
@@ -161,11 +169,12 @@ export const AppShell = (): ReactElement => {
                 </Suspense>
               )}
               {/* Relay opens from here into one panel, right after the launcher so Tab order follows. */}
-              <RelayProductLauncher />
+              <ControlCenterRelayLauncher />
               <ControlCenterRelayPanelSlot />
             </div>
             <PrimaryNavigation
               className={styles.mobileNav ?? ""}
+              navRef={publishMobileNav}
               includeSettings={includeSettings}
               overviewPath={overviewPath}
             />
