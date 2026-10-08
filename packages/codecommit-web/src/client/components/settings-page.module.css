@@ -40,9 +40,6 @@
     var(--rly-type-label-font);
   text-align: start;
   text-decoration: none;
-  transition:
-    background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
-    color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   white-space: nowrap;
 }
 
@@ -104,8 +101,10 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .tab {
-    transition: none;
+    transition:
+      background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 }
