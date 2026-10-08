@@ -74,6 +74,20 @@ for (const [tab, title] of Object.entries(settingsTitles)) {
   })
 }
 
+// At 320px the audit actions wrap: no label spills past its button and the page does not scroll sideways.
+test("audit actions stay inside their buttons at 320px", async ({ page }) => {
+  await stubSession(page)
+  await page.setViewportSize({ width: 320, height: 640 })
+  await page.goto("/settings/audit")
+  const main = page.getByRole("main")
+  for (const name of ["Save", "View Audit Log", "Clear All Logs"]) {
+    const button = main.getByRole("button", { name, exact: true })
+    await expect(button).toBeVisible()
+    expect(await button.evaluate((el) => el.scrollWidth <= el.clientWidth), name).toBe(true)
+  }
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320)
+})
+
 // A failed config read is stated in the tab with a retry, never thrown out of the page.
 test("settings accounts says the settings are unavailable, keeps the page and reads again", async ({ page }) => {
   await stubSession(page)
