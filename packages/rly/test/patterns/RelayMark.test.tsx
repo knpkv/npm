@@ -42,6 +42,8 @@ describe("RelayMark", () => {
     expect(referenced.getAttribute("aria-labelledby")).toBe("relay-name")
     expect(referenced.getAttribute("aria-hidden")).toBeNull()
     expect(referenced.getAttribute("role")).toBe("img")
+    expect(() => renderToStaticMarkup(<RelayMark aria-label=" " />)).toThrow(/visible text/)
+    expect(() => renderToStaticMarkup(<RelayMark.Tile aria-labelledby="" />)).toThrow(/visible text/)
   })
 
   it("sets a half-size glyph on the tile", () => {

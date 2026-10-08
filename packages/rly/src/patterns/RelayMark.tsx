@@ -28,13 +28,17 @@ interface NativeNaming {
  * Named by `label`, or natively by `aria-label`/`aria-labelledby`: a named mark is an image, an
  * unnamed one is decorative and hidden. Native naming is kept rather than overwritten.
  */
+const requireOptionalText = (value: string | undefined, what: string): string | undefined =>
+  value === undefined ? undefined : requireText(value, what)
+
 const naming = (label: string | undefined, native: NativeNaming, what: string): NativeNaming => {
   const named = label !== undefined || native["aria-label"] !== undefined || native["aria-labelledby"] !== undefined
   if (!named) return { "aria-hidden": "true", role: native.role }
   return {
     "aria-hidden": native["aria-hidden"],
-    "aria-label": label === undefined ? native["aria-label"] : requireText(label, what),
-    "aria-labelledby": native["aria-labelledby"],
+    // Every name must be visible text, however it is given, so a named mark is never an unnamed image.
+    "aria-label": requireOptionalText(label ?? native["aria-label"], what),
+    "aria-labelledby": requireOptionalText(native["aria-labelledby"], `${what} (aria-labelledby)`),
     role: native.role ?? "img"
   }
 }
