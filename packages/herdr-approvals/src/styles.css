@@ -545,6 +545,10 @@
     margin-block-end: var(--rly-space-12);
   }
 
+  .fleet-work-reserved {
+    min-block-size: 100svh;
+  }
+
   .activity-toolbar {
     align-items: end;
     background: color-mix(in srgb, var(--rly-color-surface-1) 94%, transparent);

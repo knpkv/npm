@@ -774,13 +774,6 @@
     {
       "package": "codecommit-core",
       "kind": "ast-grep",
-      "file": "packages/codecommit-core/src/AwsClient/getPullRequests.ts",
-      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "codecommit-core",
-      "kind": "ast-grep",
       "file": "packages/codecommit-core/src/CacheService/migrations/0003_add_health_score.ts",
       "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
@@ -3079,27 +3072,6 @@
       "kind": "effect-diagnostics",
       "file": "packages/control-center-sql/scripts/vendor-effect-qb.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "ast-grep",
-      "file": "packages/herdr-approvals/src/http.ts",
-      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "ast-grep",
-      "file": "packages/herdr-approvals/src/push-worker.ts",
-      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-approvals",
-      "kind": "ast-grep",
-      "file": "packages/herdr-approvals/src/push-worker.ts",
-      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
     },
     {

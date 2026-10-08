@@ -72,7 +72,8 @@ test("default lint retains every original check and both CI partitions", () => {
     "node --test scripts/check-lint-partition.test.mjs",
     "node --test scripts/check-test-partition.test.mjs",
     "node scripts/check-test-typecheck-coverage.mjs",
-    "node --test scripts/check-test-typecheck-coverage.test.mjs"
+    "node --test scripts/check-test-typecheck-coverage.test.mjs",
+    "node --test scripts/check-browser-partition.test.mjs"
   ])
   assert.deepEqual(expandedScript("lint"), [...staticCommands, ...coverageCommands])
   assert.deepEqual(expandedScript("lint:config"), [...expandedScript("lint:config:static"), ...coverageCommands])
