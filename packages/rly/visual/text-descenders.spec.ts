@@ -16,13 +16,19 @@ test("display headings' boxes reach accented capitals and descenders without mov
       if (element === null) return { variant, missing: true }
       element.textContent = "ÅÉÜ payments-api gjpqy"
       const styles = getComputedStyle(element)
-      // An empty inline-block aligned to the baseline marks where the baseline sits.
-      const probe = document.createElement("span")
-      probe.style.display = "inline-block"
-      probe.style.blockSize = "0"
-      element.append(probe)
-      const baseline = probe.getBoundingClientRect().top
-      probe.remove()
+      // An empty inline-block sits on its line's baseline. The text may wrap, so one probe at the start
+      // marks the first line (where accents rise) and one at the end marks the last (where descenders hang).
+      const baselineAt = (position: "prepend" | "append"): number => {
+        const probe = document.createElement("span")
+        probe.style.display = "inline-block"
+        probe.style.blockSize = "0"
+        element[position](probe)
+        const top = probe.getBoundingClientRect().top
+        probe.remove()
+        return top
+      }
+      const firstBaseline = baselineAt("prepend")
+      const lastBaseline = baselineAt("append")
       const context = document.createElement("canvas").getContext("2d")
       if (context === null) return { variant, missing: true }
       context.font = `${styles.fontWeight} ${styles.fontSize} ${styles.fontFamily}`
@@ -32,8 +38,8 @@ test("display headings' boxes reach accented capitals and descenders without mov
         variant,
         boxBottom: box.bottom,
         boxTop: box.top,
-        inkBottom: baseline + ink.actualBoundingBoxDescent,
-        inkTop: baseline - ink.actualBoundingBoxAscent,
+        inkBottom: lastBaseline + ink.actualBoundingBoxDescent,
+        inkTop: firstBaseline - ink.actualBoundingBoxAscent,
         marginEnd: Number.parseFloat(styles.marginBlockEnd),
         marginStart: Number.parseFloat(styles.marginBlockStart),
         paddingEnd: Number.parseFloat(styles.paddingBlockEnd),
