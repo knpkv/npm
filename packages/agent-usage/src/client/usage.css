@@ -1,4 +1,5 @@
 @import "@knpkv/rly/styles.css";
+@import "./limits.css";
 
 /*
  * Rly owns presentation tokens. Chart series colours are the validated eight-slot categorical
@@ -63,96 +64,6 @@
   padding-block: var(--rly-space-12);
 }
 
-.usage-limits-now {
-  display: flex;
-  flex-direction: column;
-  gap: var(--rly-space-12);
-}
-
-.usage-limits-now h2 {
-  margin: 0;
-}
-
-.usage-agent-groups {
-  align-items: start;
-  display: grid;
-  gap: var(--rly-space-12);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
-}
-
-.usage-agent-groups h3 {
-  margin-block: 0 var(--rly-space-8);
-  margin-inline: 0;
-}
-
-.usage-windows {
-  display: flex;
-  flex-direction: column;
-  gap: var(--rly-space-12);
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.usage-window {
-  display: flex;
-  flex-direction: column;
-  gap: var(--rly-space-4);
-}
-
-.usage-window-head,
-.usage-window-meta {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--rly-space-8);
-  justify-content: space-between;
-}
-
-.usage-window-meter {
-  align-items: center;
-  display: flex;
-  gap: var(--rly-space-8);
-}
-
-.usage-meter {
-  background: var(--rly-color-surface-3);
-  block-size: 0.5rem;
-  border-radius: var(--rly-radius-round);
-  flex: 1;
-  overflow: clip;
-}
-
-.usage-meter-fill {
-  background: var(--rly-color-text-2);
-  block-size: 100%;
-  border-radius: inherit;
-  display: block;
-}
-
-.usage-window[data-tone="near"] .usage-meter-fill {
-  background: var(--rly-color-held-ink);
-}
-
-.usage-window[data-tone="at-limit"] .usage-meter-fill {
-  background: var(--rly-color-blocked-ink);
-}
-
-.usage-window-value {
-  color: var(--rly-color-text-1);
-  font-family: var(--rly-type-card-title-font);
-  font-size: var(--rly-type-card-title-size);
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--rly-type-card-title-weight);
-  min-inline-size: 2.4em;
-  text-align: end;
-}
-
-.usage-unnamed {
-  margin-block-start: var(--rly-space-12);
-}
-
-.usage-unnamed summary,
 .usage-explain summary,
 .usage-readings summary {
   color: var(--rly-color-text-2);
@@ -161,28 +72,11 @@
 }
 
 /* A one-line disclosure is shorter than 44px; an invisible layer takes the target there. */
-.usage-unnamed summary::after,
 .usage-explain summary::after,
 .usage-readings summary::after {
   content: "";
   inset: min(0px, (100% - 44px) / 2);
   position: absolute;
-}
-
-.usage-balances {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--rly-space-24);
-  margin: 0;
-}
-
-.usage-balances div {
-  display: flex;
-  flex-direction: column;
-}
-
-.usage-balances dd {
-  margin: 0;
 }
 
 .usage-headline {
