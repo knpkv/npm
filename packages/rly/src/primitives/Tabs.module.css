@@ -139,4 +139,35 @@
     max-inline-size: none;
     white-space: nowrap;
   }
+
+  /*
+   * Forced colours may drop a gradient, so the single-row hairline goes back to a real border there, and
+   * the underline sits on the tab's own bottom edge, just above it. Both are system ink, and nothing
+   * reaches past the scroller's padding box.
+   */
+  @media (forced-colors: active) {
+    .root[data-mobile-layout="single-row"] .list {
+      background: none;
+      border-block-end: 1px solid CanvasText;
+      padding-block-end: var(--rly-space-0);
+    }
+
+    .root[data-mobile-layout="single-row"] .trigger::after {
+      inset-block-end: var(--rly-space-0);
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .root[data-mobile-layout="single-row"]
+    .list {
+    background: none;
+    border-block-end: 1px solid CanvasText;
+    padding-block-end: var(--rly-space-0);
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .root[data-mobile-layout="single-row"]
+    .trigger::after {
+    inset-block-end: var(--rly-space-0);
+  }
 }

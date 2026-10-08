@@ -194,3 +194,25 @@ test("single-row tabs at 1280 don't overflow, and the underline still covers the
   expect(measured.scrollHeight).toBeLessThanOrEqual(measured.clientHeight)
   expect(measured.underlineBottom).toBeCloseTo(measured.listBottom, 1)
 })
+
+test("single-row tabs at 1280 keep a hairline border and no overflow in forced colours", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await page.emulateMedia({ forcedColors: "active" })
+  await page.goto(story.replace("forcedColors:auto", "forcedColors:active"))
+
+  const list = page.getByRole("tablist", { name: "Fleet applications" })
+  await expect(list.getByRole("tab", { selected: true })).toBeVisible()
+  const measured = await list.evaluate((element) => {
+    const styles = getComputedStyle(element)
+    return {
+      backgroundImage: styles.backgroundImage,
+      borderStyle: styles.borderBlockEndStyle,
+      borderWidth: styles.borderBlockEndWidth,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight
+    }
+  })
+  // The hairline doesn't depend on a gradient surviving forced colours: it's a real border here.
+  expect(measured).toMatchObject({ backgroundImage: "none", borderStyle: "solid", borderWidth: "1px" })
+  expect(measured.scrollHeight).toBeLessThanOrEqual(measured.clientHeight)
+})
