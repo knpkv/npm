@@ -9,7 +9,7 @@ import {
   TerminalSelection,
   type TerminalSession
 } from "@knpkv/herdr-connect"
-import { ChatHistory, chatHistoryMaxEntries, ChatStore, type StoredChatTurn } from "@knpkv/herdr-coordinator"
+import { chatHistoryMaxEntries, ChatStore, type StoredChatTurn } from "@knpkv/herdr-coordinator"
 import {
   FleetAuthorizationError,
   FleetOperationError,
@@ -3437,13 +3437,8 @@ esac
           const chatResponse = yield* Effect.promise(() =>
             secureRequestBody(`${server.serveUrl}/v1/chat`, requestHeaders)
           )
-          expect(chatResponse.status).toBe(200)
-          expect(Buffer.byteLength(chatResponse.body)).toBeLessThanOrEqual(
-            fleetResponseBodyMaxBytes
-          )
-          expect(
-            Schema.decodeUnknownSync(ChatHistory)(JSON.parse(chatResponse.body)).entries
-          ).toHaveLength(chatHistoryMaxEntries)
+          // The coordinator chat is gone from the hub: its route no longer exists.
+          expect(chatResponse.status).toBe(404)
           const agentIds: Array<string> = []
           let agentCursor: (typeof FleetConnectAgentPage.Type)["nextCursor"] = null
           do {

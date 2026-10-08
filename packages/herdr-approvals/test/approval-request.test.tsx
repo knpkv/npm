@@ -52,12 +52,10 @@ const dashboardFor = (record: JobRecord): DashboardSnapshot => ({
   approvalApp: {
     canonical: true,
     canonicalUrl: "https://ser8.example.test/",
-    chatEnabled: true,
     pushEnabled: true,
     workEnabled: false
   },
   approvalsEnabled: true,
-  chat: null,
   directory: null,
   historyNextCursor: null,
   host: "SER8",
@@ -86,9 +84,7 @@ const renderDashboard = (record: JobRecord): string =>
     <DashboardView
       approvalOnly
       busyJobId={null}
-      chatBusy={false}
       notificationState="disabled"
-      onChatSubmit={undefined}
       onDecision={() => undefined}
       onDisableNotifications={undefined}
       onEnableNotifications={undefined}

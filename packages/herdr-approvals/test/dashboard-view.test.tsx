@@ -27,12 +27,10 @@ const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
     approvalApp: {
       canonical: false,
       canonicalUrl: "https://ser8.example.test/",
-      chatEnabled: false,
       pushEnabled: false,
       workEnabled: false
     },
     approvalsEnabled,
-    chat: null,
     work: null,
     directory: null,
     host: "ALPHA",
@@ -56,9 +54,7 @@ const render = (approvalsEnabled: boolean): string =>
   renderToStaticMarkup(
     <DashboardView
       busyJobId={null}
-      chatBusy={false}
       notificationState="disabled"
-      onChatSubmit={undefined}
       onDecision={() => undefined}
       onDisableNotifications={undefined}
       onEnableNotifications={undefined}
@@ -73,9 +69,7 @@ const renderApprovalOnly = (): string =>
     <DashboardView
       approvalOnly
       busyJobId={null}
-      chatBusy={false}
       notificationState="disabled"
-      onChatSubmit={undefined}
       onDecision={() => undefined}
       onDisableNotifications={undefined}
       onEnableNotifications={undefined}
@@ -99,9 +93,7 @@ const renderApprovedFailure = (): string => {
     <DashboardView
       approvalOnly
       busyJobId={null}
-      chatBusy={false}
       notificationState="disabled"
-      onChatSubmit={undefined}
       onDecision={() => undefined}
       onDisableNotifications={undefined}
       onEnableNotifications={undefined}
@@ -141,9 +133,7 @@ const renderMixedAgentStates = (): string => {
   return renderToStaticMarkup(
     <DashboardView
       busyJobId={null}
-      chatBusy={false}
       notificationState="disabled"
-      onChatSubmit={undefined}
       onDecision={() => undefined}
       onDisableNotifications={undefined}
       onEnableNotifications={undefined}
@@ -194,9 +184,7 @@ describe("dashboard approval capability", () => {
     const html = renderToStaticMarkup(
       <DashboardView
         busyJobId={null}
-        chatBusy={false}
         notificationState="disabled"
-        onChatSubmit={undefined}
         onDecision={() => undefined}
         onDisableNotifications={undefined}
         onEnableNotifications={undefined}
@@ -240,9 +228,7 @@ describe("dashboard approval capability", () => {
     const html = renderToStaticMarkup(
       <DashboardView
         busyJobId={null}
-        chatBusy={false}
         notificationState="disabled"
-        onChatSubmit={undefined}
         onDecision={() => undefined}
         onDisableNotifications={undefined}
         onEnableNotifications={undefined}
@@ -275,9 +261,7 @@ describe("dashboard approval capability", () => {
     const html = renderToStaticMarkup(
       <DashboardView
         busyJobId={null}
-        chatBusy={false}
         notificationState="disabled"
-        onChatSubmit={undefined}
         onDecision={() => undefined}
         onDisableNotifications={undefined}
         onRefresh={undefined}
@@ -301,9 +285,7 @@ describe("dashboard approval capability", () => {
     const html = renderToStaticMarkup(
       <DashboardView
         busyJobId={null}
-        chatBusy={false}
         notificationState="disabled"
-        onChatSubmit={undefined}
         onDecision={() => undefined}
         onDisableNotifications={undefined}
         onEnableNotifications={undefined}
@@ -347,9 +329,7 @@ describe("dashboard approval capability", () => {
     const markup = renderToStaticMarkup(
       <DashboardView
         busyJobId={null}
-        chatBusy={false}
         notificationState="disabled"
-        onChatSubmit={undefined}
         onDecision={undefined}
         onDisableNotifications={undefined}
         onEnableNotifications={undefined}
@@ -373,9 +353,7 @@ describe("dashboard approval capability", () => {
     const html = renderToStaticMarkup(
       <DashboardView
         busyJobId={null}
-        chatBusy={false}
         notificationState="disabled"
-        onChatSubmit={undefined}
         onDecision={undefined}
         onDisableNotifications={undefined}
         onEnableNotifications={undefined}
@@ -400,9 +378,7 @@ describe("dashboard approval capability", () => {
       <DashboardView
         approvalOnly
         busyJobId={null}
-        chatBusy={false}
         notificationState="disabled"
-        onChatSubmit={undefined}
         onDecision={undefined}
         onDisableNotifications={undefined}
         onEnableNotifications={undefined}
