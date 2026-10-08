@@ -1711,7 +1711,8 @@ const ReadyReviewWorkspace = ({
         onDiscuss={(finding, control) => {
           selectFinding(finding)
           setRelayAboutId(finding.id)
-          openRelayFrom(control)
+          // In drawer layout the Discuss button closes with the drawer, so Relay returns to its trigger.
+          openRelayFrom(placement === "drawer" ? (findingsTrigger.current ?? control) : control)
         }}
         onPost={(finding) => void postFinding(finding)}
         onReject={(finding) => setDispositions((current) => applyFindingDecision(current, finding.id, "rejected"))}
