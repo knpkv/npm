@@ -44,6 +44,8 @@ test("keeps dialog focus, isolation, dismissal, and restoration deterministic", 
   await expect(dialog).toHaveCount(0)
 })
 
+// A stretched grid row stretches its item too, so the gaps between rows stay one gap either way; what
+// stretching changes is where the free space goes. Packed rows leave it below the last row.
 test("packs a full-screen phone dialog's rows at the top, one gap apart", async ({ page }) => {
   await page.setViewportSize({ height: 844, width: 390 })
   await page.goto(story("primitives-dialog--interaction"))
@@ -58,8 +60,11 @@ test("packs a full-screen phone dialog's rows at the top, one gap apart", async 
     const gaps = rows.slice(1).map((row, index) =>
       Math.round(row.getBoundingClientRect().top - (rows[index]?.getBoundingClientRect().bottom ?? 0))
     )
+    const styles = getComputedStyle(dialog)
+    const contentBottom = dialog.getBoundingClientRect().bottom - Number.parseFloat(styles.paddingBlockEnd)
     return {
-      gap: Number.parseFloat(getComputedStyle(dialog).rowGap),
+      freeBelow: contentBottom - (rows.at(-1)?.getBoundingClientRect().bottom ?? contentBottom),
+      gap: Number.parseFloat(styles.rowGap),
       gaps,
       height: dialog.getBoundingClientRect().height
     }
@@ -67,6 +72,7 @@ test("packs a full-screen phone dialog's rows at the top, one gap apart", async 
   expect(Math.round(layout.height)).toBe(844)
   expect(layout.gaps.length).toBeGreaterThan(0)
   for (const gap of layout.gaps) expect(gap).toBe(layout.gap)
+  expect(layout.freeBelow).toBeGreaterThan(layout.gap)
 })
 
 test("reflows dialog to a full-screen decision at compact zoom-equivalent width", async ({ page }) => {
