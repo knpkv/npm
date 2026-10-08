@@ -535,6 +535,8 @@ g[data-active="true"] .usage-segment {
   font-weight: 600;
   gap: var(--rly-space-6);
   padding: 0;
+  /* A wrapped long booking name reads from the start, not centred under its swatch. */
+  text-align: start;
 }
 
 /* Rows sit too close for an invisible hit layer, so on touch each booking button grows to 44px. */
