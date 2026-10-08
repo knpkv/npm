@@ -194,6 +194,18 @@ test.describe("touch", () => {
     await expect(page.getByRole("group", { name: "Terminal keys" })).toBeVisible()
   })
 
+  test("hiding the keys releases a latched modifier, so the next letter arrives as itself", async ({ page }) => {
+    await open(page)
+    await page.getByRole("button", { name: "Ctrl", exact: true }).tap()
+    await expect(page.getByRole("button", { name: "Ctrl", exact: true })).toHaveAttribute("aria-pressed", "true")
+    await page.getByRole("button", { name: "Hide terminal keys" }).tap()
+    const cell = await cellPoint(page, "290 ", 2)
+    await page.touchscreen.tap(cell.x, cell.y)
+    await page.keyboard.type("c")
+    await expect.poll(async () => (await commands(page)).some((command) => command.text === "c")).toBe(true)
+    expect((await commands(page)).some((command) => command.text?.includes("\u0003") === true)).toBe(false)
+  })
+
   test("a vertical pan follows the finger, scrolls the server, and never raises the keyboard", async ({ page }) => {
     await open(page)
     const client = await page.context().newCDPSession(page)

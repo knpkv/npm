@@ -607,6 +607,12 @@ export const ConnectSurface = ({
     keysHiddenChoice ?? (AsyncResult.isSuccess(storedKeysHidden) ? storedKeysHidden.value : false)
   const changeTerminalKeysHidden = (hidden: boolean): void => {
     setKeysHiddenChoice(hidden)
+    // A latched Ctrl or Alt would stay applied with no visible indicator or way to cancel it, so a
+    // plain "c" would arrive as Ctrl-C. Hiding the keys releases it.
+    if (hidden) {
+      terminalModifierRef.current = null
+      setTerminalModifier(null)
+    }
     Effect.runFork(
       storeTerminalKeysHidden(hidden).pipe(
         Effect.catch(() =>
