@@ -721,6 +721,23 @@
       ]
     },
     {
+      "name": "RelayDecision",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayDecision.tsx",
+        "story": "packages/rly/stories/patterns/RelayDecision.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayDecision.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayDecision.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaydecision--lifecycle",
+      "storyIds": [
+        "patterns-relaydecision--lifecycle"
+      ]
+    },
+    {
       "name": "RelayDock",
       "paths": {
         "source": "packages/rly/src/patterns/RelayDock.tsx",

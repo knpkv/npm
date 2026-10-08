@@ -59,6 +59,7 @@ describe("public entries", () => {
       "RelationshipTable",
       "RelayComposer",
       "useRelayDraft",
+      "RelayDecision",
       "RelayDock",
       "RelayLauncher",
       "relayShortcut",

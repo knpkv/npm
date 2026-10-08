@@ -71,6 +71,11 @@ export const COMPONENT_REGISTRY_METADATA = {
     ["draft", "busy"],
     ["agent", "write"]
   ),
+  RelayDecision: registryMetadata(
+    "Ask before one Relay write: the action, its exact target and body, confirm or decline, and its outcome with a receipt",
+    ["pending", "confirmed", "done", "failed", "declined", "expired"],
+    ["agent", "decide"]
+  ),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"
