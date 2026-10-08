@@ -327,6 +327,13 @@ test("docks the read prompt so a late one doesn't push the page down", async ({ 
   const room = await page.locator("main").evaluate((main) => Number.parseFloat(getComputedStyle(main).paddingBottom))
   expect(room).toBeGreaterThanOrEqual((await bar.boundingBox())?.height ?? Number.POSITIVE_INFINITY)
   await expect(page.getByText("Waiting for read permission", { exact: true })).toBeVisible()
+  // The Relay chip sits above the bar, never on its answers.
+  const chip = page.locator("[data-relay-product-dock-chrome]")
+  await expect(chip).toBeVisible()
+  const chipBox = await chip.boundingBox()
+  const barBox = await bar.boundingBox()
+  expect((chipBox?.y ?? Number.POSITIVE_INFINITY) + (chipBox?.height ?? 0)).toBeLessThanOrEqual(barBox?.y ?? 0)
+  await expect(page.getByRole("button", { name: "Deny" })).toBeVisible()
 })
 
 test("asks for a read inline, so the first account isn't blocked by a modal", async ({ page }) => {
@@ -350,7 +357,7 @@ test("asks for a read inline, so the first account isn't blocked by a modal", as
   await page.goto("/")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(page.getByText("Waiting for your permission", { exact: true })).toBeVisible()
-  await expect(page.getByText("CodeCommit asks before reading from AWS: Get identity for dev.", { exact: false }))
+  await expect(page.getByText("Allow CodeCommit to read from AWS: Get identity for dev?", { exact: false }))
     .toBeVisible()
   await page.getByRole("button", { name: "Allow every read" }).click()
   await expect.poll(() => calls.length).toBe(1)

@@ -197,7 +197,7 @@ export function SettingsAccounts() {
         .onSuccess((data) => (
           <AccountsList
             callerIdentities={appState.callerIdentities}
-            identityWaitsForPermission={appState.permissionPrompt?.operation === "getCallerIdentity"}
+            identityWaitsForPermission={appState.permissionPrompt?.category === "read"}
             currentUser={appState.currentUser}
             autoDetect={autoDetectChoice ?? data.autoDetect}
             data={data}
@@ -353,7 +353,7 @@ function AccountsList({
   readonly autoDetect: boolean
   /** Per enabled profile once its identity read finished; a missing key means it hasn't yet. */
   readonly callerIdentities: AppState["callerIdentities"]
-  /** The identity read is held by a permission prompt, not by AWS: say that, not "signed out". */
+  /** A read waits for permission (the identity read, or one queued ahead of it): say that, not "signed out". */
   readonly identityWaitsForPermission: boolean
   readonly currentUser: string | undefined
   readonly data: ConfigData

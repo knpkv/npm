@@ -1,7 +1,7 @@
 /**
  * @title Read permission bar: answers a read prompt without blocking the page
  *
- * CodeCommit asks before every AWS call (zero-trust). A read prompt shows here, inline above the page,
+ * CodeCommit asks before every AWS call (zero-trust). A read prompt shows here, docked at the bottom edge,
  * so the reader can see what's waiting on it. "Allow every read" grants the whole read category once;
  * writes keep their per-call modal.
  *
@@ -43,7 +43,8 @@ export function PermissionBar({
   readonly prompt: NonNullable<AppState["permissionPrompt"]>
 }) {
   const waiting = pendingReads === undefined ? null : waitingReadsText(pendingReads)
-  const publishBlockSize = usePublishedBlockSize<HTMLDivElement>("--permission-bar-block-size")
+  // Shared with the Relay chip, which sits above the bar instead of on its actions.
+  const publishBlockSize = usePublishedBlockSize<HTMLDivElement>("--app-bottom-inset")
   const respond = useAtomSet(permissionRespondAtom)
   const grantCategory = useAtomSet(permissionsCategoryUpdateAtom, { mode: "promiseExit" })
   const [failure, setFailure] = useState<string | null>(null)
@@ -86,14 +87,9 @@ export function PermissionBar({
         announce="polite"
         tone="caution"
       >
-        {waiting === null ? (
-          <>CodeCommit asks before reading from AWS: {prompt.context}.</>
-        ) : (
-          // More than one read waits: name them, so "Allow every read" is plainly the one answer for all.
-          <>CodeCommit asks before reading from AWS. {waiting}</>
-        )}{" "}
-        Allowing every read covers pull requests, approval status and identity for all profiles; changes still ask each
-        time.
+        {/* Short enough for a phone: what waits, then what "every read" means. */}
+        {waiting === null ? <>Allow CodeCommit to read from AWS: {prompt.context}?</> : waiting} Every read covers pull
+        requests, approvals and identity; changes still ask.
         {failure === null ? null : <span className={styles.failure}> {failure}</span>}
       </Notice>
     </div>
