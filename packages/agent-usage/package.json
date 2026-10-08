@@ -20,6 +20,11 @@
       "types": "./src/index.ts",
       "default": "./dist/index.js"
     },
+    "./limits": {
+      "types": "./src/limits.ts",
+      "default": "./dist/limits.js"
+    },
+    "./limits.css": "./src/client/limits.css",
     "./*.js": {
       "types": "./src/*.ts",
       "default": "./dist/*.js"
@@ -34,6 +39,11 @@
         "types": "./dist/index.d.ts",
         "default": "./dist/index.js"
       },
+      "./limits": {
+        "types": "./dist/limits.d.ts",
+        "default": "./dist/limits.js"
+      },
+      "./limits.css": "./src/client/limits.css",
       "./*.js": {
         "types": "./dist/*.d.ts",
         "default": "./dist/*.js"
@@ -41,7 +51,8 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "src/client/limits.css"
   ],
   "engines": {
     "node": ">=26"
@@ -83,6 +94,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "@vitest/browser": "5.0.3",
     "@vitest/browser-playwright": "5.0.3",
+    "esbuild": "0.28.2",
     "storybook": "10.6.1",
     "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
