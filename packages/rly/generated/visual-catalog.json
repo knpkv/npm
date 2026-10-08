@@ -750,6 +750,23 @@
       ]
     },
     {
+      "name": "RelayPanel",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayPanel.tsx",
+        "story": "packages/rly/stories/patterns/RelayPanel.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayPanel.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayPanel.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaypanel--overlay",
+      "storyIds": [
+        "patterns-relaypanel--overlay"
+      ]
+    },
+    {
       "name": "ReleasePreview",
       "paths": {
         "source": "packages/rly/src/patterns/ReleasePreview.tsx",

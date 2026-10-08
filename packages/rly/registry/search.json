@@ -1037,6 +1037,29 @@
     },
     {
       "capabilities": [
+        "agent",
+        "overlay"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayPanel",
+      "states": [
+        "default",
+        "fullscreen",
+        "overlay",
+        "pinned"
+      ],
+      "terms": [
+        "agent",
+        "fullscreen",
+        "overlay",
+        "pattern",
+        "pinned",
+        "relaypanel"
+      ]
+    },
+    {
+      "capabilities": [
         "inspect",
         "release"
       ],

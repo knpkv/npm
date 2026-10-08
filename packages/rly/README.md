@@ -466,6 +466,20 @@ the platform) only when the host binds that key and prevents the browser's own C
 or `null` where it binds none, such as a live terminal that keeps its chords.
 The hint hides at 40rem and below, and the button is 32px tall, 44px for a coarse pointer.
 
+`RelayPanel` is Relay's frame: header (mark, title, exact scope with the revision in
+mono, an optional pin, options, close), tabs whose counts are part of their names, a
+freshness line, a body, and a footer for the composer. Only the body scrolls, so the
+composer never leaves the screen. `overlay` floats over the right of the page with
+no backdrop and no focus trap; render it right after the launcher so Tab order
+follows. `pinned` is a sticky column for the host's grid, and `fullscreen` is a modal
+dialog with the page inert. Escape and the close button call `onClose` and return
+focus to the launcher; closing hides Relay in every presentation, and whether it was
+pinned stays the host's remembered preference. `useRelayPresentation({ pinned,
+minHostWidth })` picks the presentation: full screen at 640 CSS px and narrower,
+pinned only when the user pinned it at 1440 and up with the host's minimum beside the
+440px column, otherwise the overlay. Hosts set `--rly-relay-panel-offset` to their
+sticky header's height and `--app-bottom-inset` to any bar docked at the bottom.
+
 `useRelaySummon` binds that shortcut. From the page it opens Relay and focuses the composer (or, if
 Relay is already open, moves focus to the composer); from inside Relay it takes focus back to where it
 came from, and Relay stays open. Full screen, it closes Relay. Escape closes Relay when focus is inside
