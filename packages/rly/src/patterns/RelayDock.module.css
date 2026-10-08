@@ -14,7 +14,7 @@
     display: inline-flex;
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
-    justify-content: center;
+    justify-content: safe center;
   }
 
   .trigger {
@@ -60,7 +60,6 @@
 
   .panel {
     background: var(--rly-color-surface-1);
-    block-size: 100vh;
     block-size: 100dvh;
     color: var(--rly-color-text-1);
     display: flex;
@@ -218,7 +217,6 @@
 
   @media (max-width: 40rem), (max-height: 40rem) and (pointer: coarse) {
     .sheet {
-      block-size: 100vh;
       block-size: 100dvh;
       border: var(--rly-space-0);
       border-radius: var(--rly-space-0);

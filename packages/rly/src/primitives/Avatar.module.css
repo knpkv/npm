@@ -6,7 +6,7 @@
     color: var(--rly-color-text-2);
     display: inline-flex;
     flex: none;
-    justify-content: center;
+    justify-content: safe center;
     overflow: hidden;
   }
 
@@ -45,7 +45,7 @@
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     inline-size: 100%;
-    justify-content: center;
+    justify-content: safe center;
     overflow: hidden;
     text-transform: uppercase;
   }

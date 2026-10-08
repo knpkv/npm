@@ -43,7 +43,7 @@
     display: inline-flex;
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
-    justify-content: center;
+    justify-content: safe center;
     padding: var(--rly-space-4) var(--rly-space-12);
   }
 

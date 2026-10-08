@@ -7,7 +7,7 @@
 }
 
 .file + .file {
-  border-top: 1px solid var(--rly-color-border-1);
+  border-block-start: 1px solid var(--rly-color-border-1);
 }
 
 .noChanges {
@@ -21,7 +21,7 @@
 .fileName {
   margin: 0;
   padding: var(--rly-space-12) var(--rly-space-16);
-  border-bottom: 1px solid var(--rly-color-border-1);
+  border-block-end: 1px solid var(--rly-color-border-1);
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
 }
@@ -57,9 +57,9 @@
   width: 3.25rem;
   /* Room either side of the number, so the column rule reads as one rule, not a box per line. */
   padding-inline: var(--rly-space-8) var(--rly-space-6) !important;
-  border-right: 1px solid var(--rly-color-border-1);
+  border-inline-end: 1px solid var(--rly-color-border-1);
   color: var(--rly-color-text-3);
-  text-align: right;
+  text-align: end;
   user-select: none;
 }
 
@@ -117,7 +117,7 @@
 .deletionCode,
 .additionCode {
   width: 50%;
-  border-right: 1px solid var(--rly-color-border-1);
+  border-inline-end: 1px solid var(--rly-color-border-1);
 }
 
 .annotationRow > td {

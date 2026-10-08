@@ -126,7 +126,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--rly-space-4);
-    justify-content: center;
+    justify-content: safe center;
   }
 
   .arrow {

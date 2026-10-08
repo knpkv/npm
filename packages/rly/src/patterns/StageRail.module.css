@@ -45,7 +45,7 @@
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     inline-size: var(--rly-space-24);
-    justify-content: center;
+    justify-content: safe center;
     position: relative;
     z-index: 1;
   }

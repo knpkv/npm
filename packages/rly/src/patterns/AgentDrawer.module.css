@@ -48,7 +48,7 @@
     color: var(--rly-color-surface-1);
     display: inline-flex;
     inline-size: var(--rly-space-48);
-    justify-content: center;
+    justify-content: safe center;
   }
 
   .glyph {
