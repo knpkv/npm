@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { RLY_FONT_FACES } from "@knpkv/rly/tokens"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fontPreloadLink, PRELOADED_FONTS } from "../src/font-preload.js"
@@ -13,7 +14,7 @@ describe("approval pages preload Geist", () => {
   })
 
   it("preloads only the faces the host serves", () => {
-    const [ui] = PRELOADED_FONTS
+    const ui = RLY_FONT_FACES[0].file
     expect(fontPreloadLink(new Map([[ui, new Uint8Array([1])]]))).toBe(link(ui))
   })
 
