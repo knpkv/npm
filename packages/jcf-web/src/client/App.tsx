@@ -549,8 +549,9 @@ export const App = () => {
                 <>
                   <div className="jcf-totals" role="group" aria-label="Week totals">
                     {readFailure === null || readAt === null ? null : (
+                      // The alert above says the read failed and why; here the totals are only marked old.
                       <p className="jcf-totals-age">
-                        <strong>Last read failed:</strong> totals are from {readAt}.
+                        <strong>Totals from {readAt}</strong>
                       </p>
                     )}
                     {plan.scope === "clockify" ? null : (
@@ -701,6 +702,8 @@ export const App = () => {
             {open === null ? null : (
               <EditorFrame
                 notice={plan === null ? undefined : feedback}
+                // The conversation stays put while the read's progress comes and goes below it.
+                noticeAt={open.kind === "agent" ? "end" : "start"}
                 busy={open.kind === "agent" ? false : writing}
                 label={
                   open.kind === "agent"
@@ -743,6 +746,12 @@ export const App = () => {
                         Close
                       </Button>
                     </div>
+                    <AgentTerminal
+                      key={startedAt}
+                      activity={activity}
+                      ended={readFailure !== null ? "failed" : cancelled ? "cancelled" : null}
+                    />
+                    {/* Below the conversation, so it can come and go without moving what is being read. */}
                     {loading && readMode === "full" ? (
                       <>
                         <ReadStatus
@@ -757,7 +766,6 @@ export const App = () => {
                         )}
                       </>
                     ) : null}
-                    <AgentTerminal key={startedAt} activity={activity} />
                   </>
                 ) : null}
                 {openRow === undefined || open?.kind !== "confirm" || plan === null ? null : (

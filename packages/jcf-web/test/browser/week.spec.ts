@@ -71,32 +71,32 @@ for (const width of [1440, 390]) {
   })
 }
 
-test(
-  "streams detailed progress, keeps the previous week visible, and cancels a read",
-  async ({ page, request }, testInfo) => {
-    await open(page)
-    await request.get("/__test/hold")
-    await page.getByRole("button", { name: "Rescan sessions", exact: true }).first().click()
-    await expect(page.getByRole("status")).toContainText("2 of 8 sessions checked.")
-    await expect(page.getByRole("progressbar", { name: "Sessions checked" })).toHaveAttribute("value", "2")
-    await expect(page.getByRole("region", { name: "Agent activity" })).toContainText(
-      "Checking session context. Matched PROJ-5662."
-    )
-    const terminal = page.getByRole("region", { name: "Agent activity" })
-    await expect(terminal.getByRole("region", { name: "Agent response", exact: true })).toBeVisible()
-    await expect(terminal.locator("textarea, input, [contenteditable=true]")).toHaveCount(0)
-    await expect(terminal.getByRole("region", { name: "Agent response", exact: true }).locator("pre")).toBeVisible()
-    await page.getByText("Loading details", { exact: false }).click()
-    await expect(page.getByText("Read logged time", { exact: true })).toBeVisible()
-    await expect(page.getByRole("heading", { name: "7–13 September 2026" })).toBeVisible()
-    await page.screenshot({ path: testInfo.outputPath("read-progress.png"), fullPage: true })
-    await page.getByRole("button", { name: "Cancel read" }).click()
-    await expect(page.getByText("Read cancelled", { exact: true })).toBeVisible()
-    await request.get("/__test/finish")
-    await page.getByRole("button", { name: "Rescan sessions", exact: true }).first().click()
-    await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
-  }
-)
+test("streams detailed progress, keeps the previous week visible, and cancels a read", async ({
+  page,
+  request
+}, testInfo) => {
+  await open(page)
+  await request.get("/__test/hold")
+  await page.getByRole("button", { name: "Rescan sessions", exact: true }).first().click()
+  await expect(page.getByRole("status")).toContainText("2 of 8 sessions checked.")
+  await expect(page.getByRole("progressbar", { name: "Sessions checked" })).toHaveAttribute("value", "2")
+  await expect(page.getByRole("region", { name: "Agent activity" })).toContainText(
+    "Checking session context. Matched PROJ-5662."
+  )
+  const terminal = page.getByRole("region", { name: "Agent activity" })
+  await expect(terminal.getByRole("region", { name: "Agent response", exact: true })).toBeVisible()
+  await expect(terminal.locator("textarea, input, [contenteditable=true]")).toHaveCount(0)
+  await expect(terminal.getByRole("region", { name: "Agent response", exact: true }).locator("pre")).toBeVisible()
+  await page.getByText("Loading details", { exact: false }).click()
+  await expect(page.getByText("Read logged time", { exact: true })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "7–13 September 2026" })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath("read-progress.png"), fullPage: true })
+  await page.getByRole("button", { name: "Cancel read" }).click()
+  await expect(page.getByText("Read cancelled", { exact: true })).toBeVisible()
+  await request.get("/__test/finish")
+  await page.getByRole("button", { name: "Rescan sessions", exact: true }).first().click()
+  await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
+})
 
 test("a newer scope wins over a slow older read", async ({ page }) => {
   await open(page)
@@ -170,10 +170,12 @@ for (const { amount, scenario, seconds } of exactAmountCases) {
     await editor.getByRole("button", { name: "Log selected time" }).click()
     expect((await submitted).postDataJSON()).not.toHaveProperty("seconds")
     await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
-    const observations = Schema.decodeUnknownSync(Schema.Struct({
-      clockifyWriteSeconds: Schema.Array(Schema.Number),
-      jiraWriteSeconds: Schema.Array(Schema.Number)
-    }))(await (await page.request.get("/__test/observations")).json())
+    const observations = Schema.decodeUnknownSync(
+      Schema.Struct({
+        clockifyWriteSeconds: Schema.Array(Schema.Number),
+        jiraWriteSeconds: Schema.Array(Schema.Number)
+      })
+    )(await (await page.request.get("/__test/observations")).json())
     expect(observations.clockifyWriteSeconds).toEqual([seconds])
     expect(observations.jiraWriteSeconds).toEqual([seconds])
   })
@@ -192,20 +194,25 @@ for (const { preview, scenario, seconds } of previewCases) {
   test(`confirmation preview agrees with both provider writes when ${scenario ?? "no time"} overlaps`, async ({ page }) => {
     await open(page, scenario)
     if (scenario === "overlap") {
-      await page.getByRole("group", { name: "Visible calendar layers" }).getByRole("button", {
-        name: "Overlap",
-        exact: true
-      }).click()
+      await page
+        .getByRole("group", { name: "Visible calendar layers" })
+        .getByRole("button", {
+          name: "Overlap",
+          exact: true
+        })
+        .click()
     }
     await page.getByRole("button", { name: /PROJ-123, 11:00/ }).click()
     const editor = page.getByRole("complementary", { name: "Time entry editor" })
     await expect(editor.getByText(/Will add/)).toContainText(preview)
     await editor.getByRole("button", { name: "Log selected time" }).click()
     await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
-    const observations = Schema.decodeUnknownSync(Schema.Struct({
-      clockifyWriteSeconds: Schema.Array(Schema.Number),
-      jiraWriteSeconds: Schema.Array(Schema.Number)
-    }))(await (await page.request.get("/__test/observations")).json())
+    const observations = Schema.decodeUnknownSync(
+      Schema.Struct({
+        clockifyWriteSeconds: Schema.Array(Schema.Number),
+        jiraWriteSeconds: Schema.Array(Schema.Number)
+      })
+    )(await (await page.request.get("/__test/observations")).json())
     expect(observations.clockifyWriteSeconds).toEqual([seconds])
     expect(observations.jiraWriteSeconds).toEqual([seconds])
   })
@@ -221,20 +228,25 @@ test("preview and provider writes agree after half a block was logged under a co
   await editor.getByRole("button", { name: "Log selected time" }).click()
   await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
 
-  await page.getByRole("group", { name: "Visible calendar layers" }).getByRole("button", {
-    name: "Overlap",
-    exact: true
-  }).click()
+  await page
+    .getByRole("group", { name: "Visible calendar layers" })
+    .getByRole("button", {
+      name: "Overlap",
+      exact: true
+    })
+    .click()
   await block.click()
   await expect(editor.getByRole("textbox", { name: "Amount", exact: true })).toHaveValue("1h 0m")
   await expect(editor.getByText("The entry will say the amount was set by hand.")).toHaveCount(0)
   await expect(editor.getByText(/Will add/)).toContainText("Clockify 30m 0s and Jira 30m 0s")
   await editor.getByRole("button", { name: "Log selected time" }).click()
   await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
-  const observations = Schema.decodeUnknownSync(Schema.Struct({
-    clockifyWriteSeconds: Schema.Array(Schema.Number),
-    jiraWriteSeconds: Schema.Array(Schema.Number)
-  }))(await (await page.request.get("/__test/observations")).json())
+  const observations = Schema.decodeUnknownSync(
+    Schema.Struct({
+      clockifyWriteSeconds: Schema.Array(Schema.Number),
+      jiraWriteSeconds: Schema.Array(Schema.Number)
+    })
+  )(await (await page.request.get("/__test/observations")).json())
   expect(observations.clockifyWriteSeconds).toEqual([1800, 1800])
   expect(observations.jiraWriteSeconds).toEqual([1800, 1800])
 })
@@ -246,23 +258,27 @@ test("preview keeps provider consumption separate after a Clockify-only correcte
   const editor = page.getByRole("complementary", { name: "Time entry editor" })
   await editor.getByRole("textbox", { name: "Issue key", exact: true }).fill("PROJ-456")
   await editor.getByRole("textbox", { name: "Amount", exact: true }).fill("30m")
-  await editor.getByRole("group", { name: "Write to selected layers" }).getByRole("checkbox", { name: "Jira" })
-    .uncheck()
+  await editor.getByRole("group", { name: "Write to selected layers" }).getByRole("button", { name: "Jira" }).click()
   await editor.getByRole("button", { name: "Log selected time" }).click()
   await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
 
-  await page.getByRole("group", { name: "Visible calendar layers" }).getByRole("button", {
-    name: "Overlap",
-    exact: true
-  }).click()
+  await page
+    .getByRole("group", { name: "Visible calendar layers" })
+    .getByRole("button", {
+      name: "Overlap",
+      exact: true
+    })
+    .click()
   await block.click()
   await expect(editor.getByText(/Will add/)).toContainText("Clockify 30m 0s and Jira 1h 0m")
   await editor.getByRole("button", { name: "Log selected time" }).click()
   await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
-  const observations = Schema.decodeUnknownSync(Schema.Struct({
-    clockifyWriteSeconds: Schema.Array(Schema.Number),
-    jiraWriteSeconds: Schema.Array(Schema.Number)
-  }))(await (await page.request.get("/__test/observations")).json())
+  const observations = Schema.decodeUnknownSync(
+    Schema.Struct({
+      clockifyWriteSeconds: Schema.Array(Schema.Number),
+      jiraWriteSeconds: Schema.Array(Schema.Number)
+    })
+  )(await (await page.request.get("/__test/observations")).json())
   expect(observations.clockifyWriteSeconds).toEqual([1800, 1800])
   expect(observations.jiraWriteSeconds).toEqual([3600])
 })
@@ -307,20 +323,19 @@ test("mobile agenda, manual date selection, validation and partial-write feedbac
   await page.screenshot({ path: testInfo.outputPath("mobile-dark.png"), fullPage: true })
 })
 
-test(
-  "light and dark calendars fit desktop and narrow calendar scroll stays inside the page",
-  async ({ page }, testInfo) => {
-    await open(page)
-    await chooseTheme(page, "Light")
-    await page.screenshot({ path: testInfo.outputPath("desktop-light.png"), fullPage: true })
-    await chooseTheme(page, "Dark")
-    await page.screenshot({ path: testInfo.outputPath("desktop-dark.png"), fullPage: true })
-    await page.setViewportSize({ width: 320, height: 700 })
-    await page.getByRole("button", { name: "Calendar", exact: true }).click()
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-    await expect(page.getByRole("region", { name: "Scrollable weekly calendar" })).toBeVisible()
-  }
-)
+test("light and dark calendars fit desktop and narrow calendar scroll stays inside the page", async ({
+  page
+}, testInfo) => {
+  await open(page)
+  await chooseTheme(page, "Light")
+  await page.screenshot({ path: testInfo.outputPath("desktop-light.png"), fullPage: true })
+  await chooseTheme(page, "Dark")
+  await page.screenshot({ path: testInfo.outputPath("desktop-dark.png"), fullPage: true })
+  await page.setViewportSize({ width: 320, height: 700 })
+  await page.getByRole("button", { name: "Calendar", exact: true }).click()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
+  await expect(page.getByRole("region", { name: "Scrollable weekly calendar" })).toBeVisible()
+})
 
 test("failed reads preserve the visible week and offer a working retry", async ({ page }) => {
   await open(page)
@@ -495,12 +510,14 @@ test("fifteen-minute allocations have readable labels and do not overlap visuall
               jiraSeconds: 0,
               proposal: {
                 ...template.proposal,
-                blocks: [{
-                  startMs: start + index * 900_000,
-                  endMs: start + (index + 1) * 900_000,
-                  seconds: 900,
-                  consumed: { clockify: 0, jira: 0 }
-                }],
+                blocks: [
+                  {
+                    startMs: start + index * 900_000,
+                    endMs: start + (index + 1) * 900_000,
+                    seconds: 900,
+                    consumed: { clockify: 0, jira: 0 }
+                  }
+                ],
                 maxSeconds: 900,
                 clockifyDelta: 900,
                 jiraDelta: 900
@@ -750,16 +767,18 @@ test("Clockify-only manual time keeps exact sub-minute seconds while Jira retain
   await editor.getByRole("textbox", { name: "Issue key", exact: true }).fill("PROJ-999")
   await editor.getByRole("textbox", { name: "Amount", exact: true }).fill("45s")
   await expect(editor.getByRole("button", { name: "Log time", exact: true })).toBeDisabled()
-  await editor.getByRole("checkbox", { name: "Jira" }).uncheck()
+  await editor.getByRole("group", { name: "Write to selected layers" }).getByRole("button", { name: "Jira" }).click()
   await expect(editor.getByRole("button", { name: "Log time", exact: true })).toBeEnabled()
   const submitted = page.waitForResponse((response) => response.url().includes("/api/rows/manual"))
   await editor.getByRole("button", { name: "Log time", exact: true }).click()
   expect((await submitted).status()).toBe(200)
   await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
-  const observations = Schema.decodeUnknownSync(Schema.Struct({
-    clockifyWriteSeconds: Schema.Array(Schema.Number),
-    jiraWriteSeconds: Schema.Array(Schema.Number)
-  }))(await (await page.request.get("/__test/observations")).json())
+  const observations = Schema.decodeUnknownSync(
+    Schema.Struct({
+      clockifyWriteSeconds: Schema.Array(Schema.Number),
+      jiraWriteSeconds: Schema.Array(Schema.Number)
+    })
+  )(await (await page.request.get("/__test/observations")).json())
   expect(observations.clockifyWriteSeconds).toEqual([45])
   expect(observations.jiraWriteSeconds).toEqual([])
 })
@@ -787,10 +806,13 @@ test("missing plans do not start an agent or fall back to a full read", async ({
     expect(empty.y).toBeGreaterThanOrEqual(calendar.y)
   }
   const scan = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/week/stream")
-  await page.getByRole("complementary", { name: "Session suggestions", exact: true }).getByRole("button", {
-    name: "Scan sessions",
-    exact: true
-  }).click()
+  await page
+    .getByRole("complementary", { name: "Session suggestions", exact: true })
+    .getByRole("button", {
+      name: "Scan sessions",
+      exact: true
+    })
+    .click()
   await scan
   await expect(page.getByRole("heading", { name: "7–13 September 2026" })).toBeVisible()
   expect(scans).toBe(1)
@@ -822,10 +844,7 @@ test("unkeyed Clockify entries count toward totals and visible-layer overlap", a
   const meeting = page.locator(".jcf-block-logged[data-source=\"clockify\"]").filter({ hasText: "Team planning" })
   await expect(meeting).toContainText("No ticket")
   await expect(page.getByLabel("Clockify totals")).toContainText("1h 30m saved")
-  await expect(layers.getByRole("button", { name: "Overlap", exact: true })).toHaveAttribute(
-    "aria-pressed",
-    "false"
-  )
+  await expect(layers.getByRole("button", { name: "Overlap", exact: true })).toHaveAttribute("aria-pressed", "false")
   await layers.getByRole("button", { name: "Overlap", exact: true }).click()
   await expect(page.locator(".jcf-block-gap[data-overlap=\"true\"]")).toHaveCount(1)
   await expect(layers.getByRole("button", { name: "No overlap", exact: true })).toHaveAttribute("aria-pressed", "false")
