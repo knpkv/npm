@@ -36,6 +36,26 @@ export const COMPONENT_REGISTRY_METADATA = {
     ],
     ["decide", "present"]
   ),
+  RelayMark: {
+    accessibility: [
+      "Decorative unless given a label; a labelled mark is an image with that name",
+      "Drawn in currentColor, so it follows its host's text in every theme and in forced colours"
+    ],
+    capabilities: ["present", "brand"],
+    purpose:
+      "Show Relay's mark, the baton, bare in the current colour (16, 20 default, 24 or 32px) or on an agent-coloured tile (20, 24 default or 32px)",
+    states: ["bare", "tile"]
+  },
+  RelayLauncher: {
+    accessibility: [
+      "A native button whose aria-expanded follows Relay being open",
+      "aria-keyshortcuts names the shortcut; the visible hint is hidden from assistive technology so it is heard once",
+      "32px tall, 44px for a coarse pointer, with the shared focus ring"
+    ],
+    capabilities: ["open", "agent"],
+    purpose: "Open and close Relay from the host's header, with its mark, a label and the Ctrl/⌘+J hint",
+    states: ["closed", "open"]
+  },
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"
