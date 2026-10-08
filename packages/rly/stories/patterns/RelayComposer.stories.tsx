@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import { type ReactElement, useState } from "react"
 import { expect, userEvent } from "storybook/test"
 import { RelayComposer, useRelayDraft } from "../../src/patterns/RelayComposer.js"
+import { Button } from "../../src/primitives/Button.js"
 import { pageStyle } from "../primitives/storyStyles.js"
 
 const meta = { component: RelayComposer, tags: ["autodocs"], title: "Patterns/RelayComposer" } satisfies Meta<
@@ -35,13 +36,15 @@ const Composer = ({
           contextRefs={refs}
           onRemoveContextRef={(id) => setRefs((current) => current.filter((ref) => ref.id !== id))}
           onSend={() => {
-            setSent((current) => [...current, draft.submission().text])
-            draft.accepted()
+            // The host would post this and call accepted once the server returns 202 for its request id.
+            const submission = draft.submission()
+            setSent((current) => [...current, submission.text])
+            draft.accepted(submission.requestId)
           }}
           onStop={busy ? () => undefined : undefined}
           onValueChange={draft.onValueChange}
           placeholder="Ask about this pull request"
-          preset={<button type="button">Thorough review, Codex</button>}
+          preset={<Button variant="quiet">Thorough review, Codex</Button>}
           value={draft.value}
         />
         <ol data-sent="">

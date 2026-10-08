@@ -81,12 +81,22 @@ export const RelayComposer = ({
     [ref]
   )
 
-  // Grow with the text in every browser (field-sizing is not everywhere); CSS caps the height.
+  // Grow with the text in every browser (field-sizing is not everywhere); CSS caps the height. A width
+  // change (a resized panel, a rotated phone) re-wraps the text, so it re-syncs then too.
   useLayoutEffect(() => {
     const element = input.current
     if (element === null) return
-    element.style.blockSize = "auto"
-    element.style.blockSize = `${element.scrollHeight}px`
+    fitHeight(element)
+    const view = element.ownerDocument.defaultView
+    if (view === null || !("ResizeObserver" in view)) return
+    let width = element.clientWidth
+    const observer = new view.ResizeObserver(() => {
+      if (element.clientWidth === width) return
+      width = element.clientWidth
+      fitHeight(element)
+    })
+    observer.observe(element)
+    return () => observer.disconnect()
   }, [value])
 
   const send = (): void => {
@@ -132,38 +142,45 @@ export const RelayComposer = ({
         />
         <div className={style("foot")}>
           {preset}
-          <span className={style("hint")} id={hintId}>
-            {apple ? "⌘ Enter to send" : "Ctrl Enter to send"}
-          </span>
           {busyReason === undefined ? null : (
             <span className={style("busy")} id={busyId}>
               {requireText(busyReason, "RelayComposer busy reason")}
             </span>
           )}
-          {onStop === undefined ? null : (
-            <Button onClick={onStop} type="button">
-              Stop
+          <span className={style("actions")}>
+            <span className={style("hint")} id={hintId}>
+              {apple ? "⌘ Enter to send" : "Ctrl Enter to send"}
+            </span>
+            {onStop === undefined ? null : (
+              <Button onClick={onStop} type="button">
+                Stop
+              </Button>
+            )}
+            <Button
+              aria-describedby={busyReason === undefined ? undefined : busyId}
+              aria-disabled={blocked}
+              onClick={send}
+              type="button"
+              variant="primary"
+            >
+              Send
             </Button>
-          )}
-          <Button
-            aria-describedby={busyReason === undefined ? undefined : busyId}
-            aria-disabled={blocked}
-            onClick={send}
-            type="button"
-            variant="primary"
-          >
-            Send
-          </Button>
+          </span>
         </div>
       </div>
     </div>
   )
 }
 
+const fitHeight = (element: HTMLTextAreaElement): void => {
+  element.style.blockSize = "auto"
+  element.style.blockSize = `${element.scrollHeight}px`
+}
+
 /** A per-object draft: the value for the composer and the submission a send makes. */
 export interface RlyRelayDraft {
-  /** The request was accepted: clear the draft and its request id. */
-  readonly accepted: () => void
+  /** The request with this id was accepted: clear the draft, unless the user has typed since. */
+  readonly accepted: (requestId: string) => void
   readonly onValueChange: (value: string) => void
   /** The current text with a request id that stays the same until the text changes or is accepted. */
   readonly submission: () => RlyRelaySubmission
@@ -197,22 +214,36 @@ const notify = (objectKey: string): void => {
   for (const listener of listeners.get(objectKey) ?? []) listener()
 }
 
+/** A stored draft is `{ text, requestId }` JSON, so a retry after a reload keeps its request id. */
+const decodeStored = (raw: string): DraftEntry | undefined => {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    // best-effort: not a draft this version wrote; treated as no stored draft.
+    return undefined
+  }
+  if (!Predicate.isObjectOrArray(parsed) || !("text" in parsed) || !Predicate.isString(parsed.text)) return undefined
+  const requestId = "requestId" in parsed && Predicate.isString(parsed.requestId) ? parsed.requestId : null
+  return { requestId, text: parsed.text }
+}
+
 const readStored = (objectKey: string, storage: (() => RlyRelayDraftStorage) | undefined): DraftEntry => {
   if (storage === undefined) return emptyDraft
   try {
-    const text = storage().getItem(storageKey(objectKey))
-    return text === null ? emptyDraft : { requestId: null, text }
+    const raw = storage().getItem(storageKey(objectKey))
+    return raw === null ? emptyDraft : (decodeStored(raw) ?? emptyDraft)
   } catch {
     // best-effort: storage refused (private mode, blocked site data); the draft lives in memory only.
     return emptyDraft
   }
 }
 
-const writeStored = (objectKey: string, text: string, storage: (() => RlyRelayDraftStorage) | undefined): void => {
+const writeStored = (objectKey: string, entry: DraftEntry, storage: (() => RlyRelayDraftStorage) | undefined): void => {
   if (storage === undefined) return
   try {
-    if (text === "" || text.length > STORED_DRAFT_LIMIT) storage().removeItem(storageKey(objectKey))
-    else storage().setItem(storageKey(objectKey), text)
+    if (entry.text === "" || entry.text.length > STORED_DRAFT_LIMIT) storage().removeItem(storageKey(objectKey))
+    else storage().setItem(storageKey(objectKey), JSON.stringify(entry))
   } catch {
     // best-effort: storage refused or full; the in-memory draft is still current.
   }
@@ -235,35 +266,47 @@ export const useRelayDraft = (objectKey: string, options: UseRelayDraftOptions):
     },
     [objectKey]
   )
-  const read = useCallback((): DraftEntry => {
-    const known = drafts.get(objectKey)
-    if (known !== undefined) return known
-    const stored = readStored(objectKey, storage)
-    drafts.set(objectKey, stored)
-    return stored
-  }, [objectKey, storage])
-  const entry = useSyncExternalStore(subscribe, read, () => emptyDraft)
+  // A pure read: the text in memory, else what storage holds. The snapshot is a string, so a stored
+  // draft read twice is the same value; memory is only written when the user types.
+  const current = useCallback(
+    (): DraftEntry => drafts.get(objectKey) ?? readStored(objectKey, storage),
+    [objectKey, storage]
+  )
+  const value = useSyncExternalStore(
+    subscribe,
+    () => current().text,
+    () => ""
+  )
 
   const onValueChange = useCallback(
     (text: string) => {
-      const current = drafts.get(objectKey) ?? emptyDraft
-      drafts.set(objectKey, { requestId: text === current.text ? current.requestId : null, text })
-      writeStored(objectKey, text, storage)
+      const before = current()
+      const entry: DraftEntry = { requestId: text === before.text ? before.requestId : null, text }
+      drafts.set(objectKey, entry)
+      writeStored(objectKey, entry, storage)
       notify(objectKey)
     },
-    [objectKey, storage]
+    [current, objectKey, storage]
   )
   const submission = useCallback((): RlyRelaySubmission => {
-    const current = drafts.get(objectKey) ?? emptyDraft
-    const requestId = current.requestId ?? newRequestId()
-    drafts.set(objectKey, { requestId, text: current.text })
-    return { requestId, text: current.text }
-  }, [newRequestId, objectKey])
-  const accepted = useCallback(() => {
-    drafts.set(objectKey, emptyDraft)
-    writeStored(objectKey, "", storage)
-    notify(objectKey)
-  }, [objectKey, storage])
+    const entry = current()
+    const requestId = entry.requestId ?? newRequestId()
+    const sent: DraftEntry = { requestId, text: entry.text }
+    drafts.set(objectKey, sent)
+    // Stored with its id, so the same text retried after a reload is the same request.
+    writeStored(objectKey, sent, storage)
+    return { requestId, text: entry.text }
+  }, [current, newRequestId, objectKey, storage])
+  // Only the accepted request clears: text typed after Send has a new id and survives the acceptance.
+  const accepted = useCallback(
+    (requestId: string) => {
+      if (current().requestId !== requestId) return
+      drafts.set(objectKey, emptyDraft)
+      writeStored(objectKey, emptyDraft, storage)
+      notify(objectKey)
+    },
+    [current, objectKey, storage]
+  )
 
-  return { accepted, onValueChange, submission, value: entry.text }
+  return { accepted, onValueChange, submission, value }
 }

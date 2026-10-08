@@ -478,7 +478,8 @@ keeps the draft per object (the JSON ObjectRef) for the page, so closing, reopen
 resizing Relay keeps it and one object's draft never sends as another's; pass
 `storage: () => sessionStorage` to survive a reload (never localStorage). Its
 `submission()` reuses one request id until the text changes, so a retry after an
-uncertain outcome is deduplicated; call `accepted()` once the server accepts.
+uncertain outcome is deduplicated; call `accepted(requestId)` once the server accepts
+that request, which clears the draft unless the user has typed since.
 
 `RelayPanel` is Relay's frame: header (mark, title, exact scope with the revision in
 mono, an optional pin, options, close), tabs whose counts are part of their names, a

@@ -139,7 +139,7 @@ describe("useRelayDraft", () => {
 
   it("reuses one request id until the text changes, and clears on acceptance", async () => {
     const sent: Array<RlyRelaySubmission> = []
-    let accept: () => void = () => undefined
+    let accept: (requestId: string) => void = () => undefined
     const Accepting = (): ReactElement => {
       const draft = useRelayDraft("request-ids", { newRequestId })
       accept = draft.accepted
@@ -159,12 +159,18 @@ describe("useRelayDraft", () => {
     await press({ ctrlKey: true })
     expect(sent[0]?.requestId).toBe(sent[1]?.requestId)
     expect(sent[2]?.requestId).not.toBe(sent[0]?.requestId)
-    await act(async () => accept())
+    // Accepting the first request after the user typed more keeps the newer text.
+    await act(async () => accept(sent[0]?.requestId ?? ""))
+    expect(textarea()?.value).toBe("First, edited")
+    // Accepting the latest request clears it.
+    await act(async () => accept(sent[2]?.requestId ?? ""))
     expect(textarea()?.value).toBe("")
   })
 
   it("restores a stored draft after a reload, and keeps working when storage refuses", async () => {
-    const stored = new Map<string, string>([["rly.relay.draft:reloaded", "Survived the reload"]])
+    const stored = new Map<string, string>([
+      ["rly.relay.draft:reloaded", JSON.stringify({ requestId: null, text: "Survived the reload" })]
+    ])
     const storage: RlyRelayDraftStorage = {
       getItem: (key) => stored.get(key) ?? null,
       removeItem: (key) => void stored.delete(key),
@@ -173,7 +179,7 @@ describe("useRelayDraft", () => {
     await mount(<Host objectKey="reloaded" sent={[]} storage={() => storage} />)
     expect(textarea()?.value).toBe("Survived the reload")
     await type("Edited")
-    expect(stored.get("rly.relay.draft:reloaded")).toBe("Edited")
+    expect(JSON.parse(stored.get("rly.relay.draft:reloaded") ?? "{}")).toEqual({ requestId: null, text: "Edited" })
 
     const refusing = (): RlyRelayDraftStorage => {
       throw new Error("storage blocked")
@@ -181,5 +187,31 @@ describe("useRelayDraft", () => {
     await act(async () => root?.render(<Host key="refused" objectKey="refused" sent={[]} storage={refusing} />))
     await type("Still here")
     expect(textarea()?.value).toBe("Still here")
+  })
+
+  it("keeps a sent draft's request id across a reload, so the retry is the same request", async () => {
+    const stored = new Map<string, string>()
+    const storage: RlyRelayDraftStorage = {
+      getItem: (key) => stored.get(key) ?? null,
+      removeItem: (key) => void stored.delete(key),
+      setItem: (key, value) => void stored.set(key, value)
+    }
+    const sent: Array<RlyRelaySubmission> = []
+    await mount(<Host objectKey="uncertain" sent={sent} storage={() => storage} />)
+    await type("Post this finding")
+    await press({ ctrlKey: true })
+    const firstId = sent[0]?.requestId
+    expect(JSON.parse(stored.get("rly.relay.draft:uncertain") ?? "{}").requestId).toBe(firstId)
+    // A reload: the page's memory is gone, storage remains, and the unchanged text is retried.
+    const raw = stored.get("rly.relay.draft:uncertain") ?? ""
+    await act(async () =>
+      root?.render(<Host key="reload" objectKey="uncertain-reloaded" sent={sent} storage={() => storage} />)
+    )
+    stored.set("rly.relay.draft:uncertain-reloaded", raw)
+    await act(async () =>
+      root?.render(<Host key="reload-2" objectKey="uncertain-reloaded" sent={sent} storage={() => storage} />)
+    )
+    await press({ ctrlKey: true })
+    expect(sent.at(-1)?.requestId).toBe(firstId)
   })
 })
