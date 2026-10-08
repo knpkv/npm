@@ -39,7 +39,7 @@ import {
 
 const hostSelection = Schema.decodeUnknownSync(RelaySelectorState)({
   modelId: "configured-default",
-  models: [{ id: "configured-default", label: "Configured default" }],
+  models: [{ id: "configured-default", label: "Default model" }],
   profileId: "configured-review",
   profiles: [{ id: "configured-review", label: "Configured review" }]
 })
@@ -172,10 +172,14 @@ export interface ReviewProfileSelection {
   readonly name: string
 }
 
+/** A model as people read it: the provider's default is "Default model", never its raw id. */
+export const relayModelLabel = (model: string | undefined): string =>
+  model === undefined || model === "default" || model === "configured-default" ? "Default model" : model
+
 export const makeCodeCommitRelaySelection = (profile: ReviewProfileSelection | undefined): RelaySelectorState =>
   Schema.decodeUnknownSync(RelaySelectorState)({
     modelId: profile?.model ?? "configured-default",
-    models: [{ id: profile?.model ?? "configured-default", label: profile?.model ?? "Configured default" }],
+    models: [{ id: profile?.model ?? "configured-default", label: relayModelLabel(profile?.model) }],
     profileId: profile?.id ?? "configured-review",
     profiles: [{ id: profile?.id ?? "configured-review", label: profile?.name ?? "Configured review" }]
   })

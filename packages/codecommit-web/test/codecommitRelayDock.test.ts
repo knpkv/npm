@@ -24,7 +24,8 @@ import {
   codeCommitRouteAccountIdentity,
   makeCodeCommitRelayConversation,
   makeCodeCommitRelaySelection,
-  makeCodeCommitRelayThreadRegistration
+  makeCodeCommitRelayThreadRegistration,
+  relayModelLabel
 } from "../src/client/codecommitRelayDock.js"
 import { type PullRequestRelayReviewResponse, RelayReviewFinding } from "../src/server/Api.js"
 
@@ -392,5 +393,15 @@ describe("CodeCommit Relay dock adapter", () => {
     expect(after?.id).not.toBe(before?.id)
     expect(codeCommitRelayAbout("F1", null, onClear)).toMatchObject({ id: "F1", label: "Finding: F1" })
     expect(codeCommitRelayAbout(null, review, onClear)).toBeUndefined()
+  })
+
+  it("names the provider's default model in words, never by its raw id", () => {
+    expect(relayModelLabel("configured-default")).toBe("Default model")
+    expect(relayModelLabel("default")).toBe("Default model")
+    expect(relayModelLabel(undefined)).toBe("Default model")
+    expect(relayModelLabel("gpt-5.6-luna")).toBe("gpt-5.6-luna")
+    expect(
+      makeCodeCommitRelaySelection({ id: "thorough", model: "configured-default", name: "Thorough review" }).models
+    ).toEqual([{ id: "configured-default", label: "Default model" }])
   })
 })
