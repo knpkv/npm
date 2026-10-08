@@ -166,3 +166,17 @@ test("the current page stays marked in forced colours", async ({ page }) => {
     expect(marked.background).not.toBe((await paint(sibling, scope)).background)
   }
 })
+
+// At 320px every nav label fits inside its own pill; when the row runs out of room it scrolls instead.
+test("nav labels stay inside their pills at 320px", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 640 })
+  await stubSession(page)
+  await page.goto("/")
+  const navigation = page.getByRole("navigation", { name: "Primary" })
+  await expect(navigation.getByRole("link").first()).toBeVisible()
+  const overflowing = await navigation.getByRole("link").evaluateAll((links) =>
+    links.filter((link) => link.scrollWidth > link.clientWidth).map((link) => link.textContent)
+  )
+  expect(overflowing).toEqual([])
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(320)
+})

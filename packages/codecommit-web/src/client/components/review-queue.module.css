@@ -46,9 +46,11 @@
   border-inline-end: 0;
 }
 
-.facet:hover {
-  background: var(--rly-color-surface-2);
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .facet:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .facet[aria-pressed="true"] {
@@ -135,7 +137,6 @@
   color: var(--rly-color-text-1);
   font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
     var(--rly-type-body-font);
-  outline: none;
   transition: border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
 }
 
@@ -174,9 +175,11 @@
   cursor: pointer;
 }
 
-.clearSearch:hover {
-  background: var(--rly-color-surface-2);
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .clearSearch:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .activeFilters {
@@ -204,9 +207,11 @@
   color: var(--rly-color-text-2);
 }
 
-.filterChip:hover {
-  border-color: var(--rly-color-border-2);
-  background: var(--rly-color-surface-3);
+@media (hover: hover) and (pointer: fine) {
+  .filterChip:hover {
+    border-color: var(--rly-color-border-2);
+    background: var(--rly-color-surface-3);
+  }
 }
 
 .filterChip svg {
@@ -266,10 +271,16 @@
   white-space: nowrap;
 }
 
-.filterTrigger:hover,
 .filterTrigger[data-state="open"] {
   background: var(--rly-color-surface-2);
   color: var(--rly-color-text-1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .filterTrigger:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .filterTrigger[data-active="true"] {
@@ -366,8 +377,10 @@
   border-block-end: 0;
 }
 
-.prRow:hover {
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .prRow:hover {
+    background: var(--rly-color-surface-2);
+  }
 }
 
 .prRow:focus-visible {
@@ -408,10 +421,12 @@
   transition: text-decoration-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
 }
 
-.prRow:hover .prTitle {
-  text-decoration: underline;
-  text-decoration-color: var(--rly-color-action-background);
-  text-underline-offset: 0.28rem;
+@media (hover: hover) and (pointer: fine) {
+  .prRow:hover .prTitle {
+    text-decoration: underline;
+    text-decoration-color: var(--rly-color-action-background);
+    text-underline-offset: 0.28rem;
+  }
 }
 
 .prDescription {
@@ -521,8 +536,10 @@
   white-space: nowrap;
 }
 
-.prRow:hover .openReview {
-  background: var(--rly-color-surface-3);
+@media (hover: hover) and (pointer: fine) {
+  .prRow:hover .openReview {
+    background: var(--rly-color-surface-3);
+  }
 }
 
 .openReview svg {
@@ -604,8 +621,10 @@
   text-decoration: none;
 }
 
-.activityMore:hover {
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .activityMore:hover {
+    color: var(--rly-color-text-1);
+  }
 }
 
 .activityList {
@@ -631,8 +650,10 @@
   border-inline-end: 0;
 }
 
-a.activityItem:hover {
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  a.activityItem:hover {
+    background: var(--rly-color-surface-2);
+  }
 }
 
 a.activityItem:focus-visible {

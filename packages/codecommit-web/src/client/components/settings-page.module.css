@@ -46,9 +46,11 @@
   white-space: nowrap;
 }
 
-.tab:hover {
-  background: var(--rly-color-surface-2);
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .tab:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .tab[data-active="true"] {

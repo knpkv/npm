@@ -414,8 +414,10 @@
     box-shadow var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
 }
 
-.findingCard:hover {
-  border-color: var(--rly-color-border-2);
+@media (hover: hover) and (pointer: fine) {
+  .findingCard:hover {
+    border-color: var(--rly-color-border-2);
+  }
 }
 
 /* Selection is a background and aria-current, never an edge bar. */

@@ -78,8 +78,10 @@
   border-block-end: 0;
 }
 
-.sandboxRow:hover {
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .sandboxRow:hover {
+    background: var(--rly-color-surface-2);
+  }
 }
 
 .sandboxIdentity {

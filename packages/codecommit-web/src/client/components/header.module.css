@@ -88,9 +88,14 @@
   white-space: nowrap;
 }
 
-.navLink:hover,
 .navLink:focus-visible {
   color: var(--rly-color-text-1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .navLink:hover {
+    color: var(--rly-color-text-1);
+  }
 }
 
 .navLink[aria-current="page"] {
@@ -225,12 +230,18 @@
   block-size: 1.125rem;
 }
 
-.commandButton:hover,
-.iconButton:hover,
-.userButton:hover,
 .userButton[data-state="open"] {
   background: var(--rly-color-surface-2);
   color: var(--rly-color-text-1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .commandButton:hover,
+  .iconButton:hover,
+  .userButton:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .notificationCount {
@@ -406,9 +417,9 @@
     display: none;
   }
 
+  /* Pills share the row when it fits, never shrink under their label; past that the row scrolls. */
   .navLink {
-    min-inline-size: 0;
-    flex: 1 1 0;
+    flex: 1 0 auto;
     justify-content: center;
     padding-inline: 0.625rem;
   }
