@@ -191,8 +191,17 @@
 }
 
 @media (max-width: 48rem) {
+  /*
+   * On a phone the brand and the actions share a row only while the actions fit beside it; otherwise the
+   * actions move to their own row as one group, never split across two. The top padding clears the notch
+   * when the page is drawn under it (viewport-fit=cover).
+   */
   .header {
-    grid-template-columns: 1fr auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--rly-space-8) var(--rly-space-12);
+    padding-block: max(var(--rly-space-12), env(safe-area-inset-top, 0px)) var(--rly-space-12);
   }
 
   .header::before {
@@ -228,7 +237,8 @@
   }
 
   .actions {
-    grid-column: 2;
+    flex-wrap: nowrap;
+    margin-inline-start: auto;
   }
 
   .main {

@@ -1480,6 +1480,22 @@ test("launches an exact-head review and presents its durable findings", async ({
   )
   expect(new Set(actionTops.slice(1)).size).toBe(1)
   await page.screenshot({ path: test.info().outputPath("header-1280-pr-page.png") })
+  // On a 320 phone the actions keep one row together (under the brand when they don't fit beside it),
+  // and the header's first row isn't flush with the top edge.
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ height: 800, width })
+    const phone = await page.getByRole("banner").evaluate((header) => {
+      const actions = [...header.querySelectorAll("a, button")].filter(
+        (element) => element.closest("nav") === null && element.getBoundingClientRect().width > 0
+      )
+      const tops = actions.map((element) => Math.round(element.getBoundingClientRect().top))
+      return { actionRows: new Set(tops.slice(1)).size, firstTop: Math.min(...tops) }
+    })
+    expect(phone.actionRows, `header actions at ${String(width)}`).toBe(1)
+    expect(phone.firstTop, `header top padding at ${String(width)}`).toBeGreaterThanOrEqual(8)
+    await page.screenshot({ path: test.info().outputPath(`header-${String(width)}-pr-page.png`) })
+  }
+  await page.setViewportSize({ height: 800, width: 1280 })
   await page.setViewportSize({ height: 800, width: 1024 })
   expect(await page.evaluate<number>("document.documentElement.scrollWidth")).toBeLessThanOrEqual(1024)
   await page.setViewportSize({ height: 800, width: 1280 })
