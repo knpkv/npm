@@ -107,7 +107,14 @@ export const useRelaySummon = (options: UseRelaySummonOptions): RlyRelaySummon =
       return
     }
     pendingRestore.current = false
-    if (returnTo.current === null) returnTo.current = focusOutside(regionNode.current)
+    if (returnTo.current === null) {
+      returnTo.current = focusOutside(regionNode.current, latest.current.launcher.current?.ownerDocument ?? document)
+    }
+    // A composer that was already mounted gets no ref callback, so a pending summon focuses it here.
+    if (pendingComposerFocus.current && composer.current !== null) {
+      pendingComposerFocus.current = false
+      composer.current.focus()
+    }
   }, [options.open, restoreFocus])
 
   const keys = options.shortcut?.keys ?? null
@@ -131,19 +138,21 @@ export const useRelaySummon = (options: UseRelaySummonOptions): RlyRelaySummon =
         event.preventDefault()
         switch (effect) {
           case "Open":
-            returnTo.current = focusOutside(surface)
+            returnTo.current = focusOutside(surface, owner)
             pendingComposerFocus.current = true
             onOpenChange(true)
             return
           case "FocusComposer":
-            returnTo.current = focusOutside(surface)
+            returnTo.current = focusOutside(surface, owner)
             if (composer.current === null) pendingComposerFocus.current = true
             else composer.current.focus()
             return
           case "ReturnFocus":
+            pendingComposerFocus.current = false
             restoreFocus()
             return
           case "Close":
+            pendingComposerFocus.current = false
             pendingRestore.current = true
             onOpenChange(false)
             return
@@ -160,10 +169,12 @@ export const useRelaySummon = (options: UseRelaySummonOptions): RlyRelaySummon =
   return { composerRef, regionRef }
 }
 
-/** The focused element when it is on the page rather than in Relay (shadow roots included), else null. */
-const focusOutside = (region: HTMLElement | null): HTMLElement | null => {
-  const owner = region?.ownerDocument ?? document
-  const active = focusRestoreTarget(owner) ?? (owner === document ? null : focusRestoreTarget(document))
+/**
+ * The element focused in `owner` (the document that received the key, or the launcher's) when it is on
+ * the page rather than in Relay, shadow roots included; otherwise null.
+ */
+const focusOutside = (region: HTMLElement | null, owner: Document): HTMLElement | null => {
+  const active = focusRestoreTarget(owner)
   return active !== null && region !== null && isWithinComposedElement(region, active) ? null : active
 }
 

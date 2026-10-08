@@ -71,28 +71,41 @@ const dialogLayer = "dialog[open], [role='dialog'], [role='alertdialog']"
 const popupLayer = "[role='listbox'], [role='menu']"
 
 /**
- * Whether a key event belongs to a layer nested in or opened from Relay: a dialog, or a listbox or menu
- * while it is an open popup (Radix's data-state, or the target of an expanded aria-controls). It reads
+ * Whether a key event belongs to a layer nested in or opened from Relay: a dialog, a listbox or menu
+ * while it is an open popup (Radix's data-state, or the target of an expanded aria-controls), or an
+ * expanded popup controller inside Relay that keeps focus while its popup is open (a combobox). It reads
  * the event's composed path up to Relay's region, so layers inside shadow roots and layers portaled out
  * of Relay (whose path never reaches the region) count. Relay's own surface, marked
  * data-rly-relay-surface (the full-screen dialog), and always-rendered lists never count.
  */
 export const hasNestedLayer = (region: HTMLElement | null, path: ReadonlyArray<EventTarget>): boolean => {
+  const reachesRegion = region !== null && path.includes(region)
   for (const node of path) {
     if (node === region) return false
     if (!isElementTarget(node) || node.hasAttribute("data-rly-relay-surface")) continue
     if (node.matches(dialogLayer)) return true
     if (node.matches(popupLayer) && isOpenPopup(node)) return true
+    if (reachesRegion && node.matches(openController)) return true
   }
   return false
 }
 
+/** A control whose popup is open and which keeps focus while it is (a combobox, a menu button). */
+const openController =
+  "[aria-expanded='true'][aria-controls], [aria-expanded='true'][aria-haspopup]:not([aria-haspopup='false'])"
+
 const isOpenPopup = (element: Element): boolean =>
   element.getAttribute("data-state") === "open" ||
   (element.id !== "" &&
-    [...element.ownerDocument.querySelectorAll("[aria-expanded='true'][aria-controls]")].some((control) =>
+    [...controlScope(element).querySelectorAll("[aria-expanded='true'][aria-controls]")].some((control) =>
       (control.getAttribute("aria-controls") ?? "").split(/\s+/).includes(element.id)
     ))
 
 const isElementTarget = (target: EventTarget): target is Element =>
   "matches" in target && "nodeType" in target && target.nodeType === 1
+
+/** Where a popup's controls live: its own shadow root when it has one, else its document. */
+const controlScope = (element: Element): ParentNode => {
+  const root = element.getRootNode()
+  return "querySelectorAll" in root && root !== element ? root : element.ownerDocument
+}

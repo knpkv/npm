@@ -59,6 +59,11 @@ const Host = ({
           </button>
           {composerReady ? <textarea aria-label="Message Relay" ref={composerRef} /> : null}
           <div data-testid="shadow-host" ref={attachShadowDialog} />
+          <div data-testid="shadow-popup-host" ref={attachShadowPopup} />
+          <input aria-controls="relay-mentions" aria-expanded="true" data-testid="combobox" role="combobox" />
+          <div id="relay-mentions" role="listbox">
+            Mentions
+          </div>
           <button data-testid="remove-page" onClick={() => setPageControl(false)} type="button">
             Remove page control
           </button>
@@ -96,6 +101,44 @@ const attachShadowDialog = (host: HTMLDivElement | null): void => {
   button.textContent = "Inside a shadow dialog"
   dialog.append(button)
   shadow.append(dialog)
+}
+
+/** A shadow root inside Relay holding an open listbox and the expanded control that names it. */
+const attachShadowPopup = (host: HTMLDivElement | null): void => {
+  if (host === null || host.shadowRoot !== null) return
+  const shadow = host.attachShadow({ mode: "open" })
+  const control = document.createElement("button")
+  control.setAttribute("aria-controls", "shadow-list")
+  control.setAttribute("aria-expanded", "true")
+  const list = document.createElement("div")
+  list.id = "shadow-list"
+  list.setAttribute("role", "listbox")
+  list.tabIndex = -1
+  shadow.append(control, list)
+}
+
+/** A host whose Relay stays mounted (hidden) while closed, composer included. */
+const MountedHost = (): ReactElement => {
+  const [open, setOpen] = useState(false)
+  const launcher = useRef<HTMLButtonElement>(null)
+  const { composerRef, regionRef } = useRelaySummon({
+    fullscreen: false,
+    launcher,
+    onOpenChange: setOpen,
+    open,
+    shortcut: ctrlJ
+  })
+  return (
+    <>
+      <button data-testid="page" type="button">
+        Page control
+      </button>
+      <RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} ref={launcher} shortcut={ctrlJ} />
+      <aside aria-label="Relay" hidden={!open} ref={regionRef}>
+        <textarea aria-label="Message Relay" ref={composerRef} />
+      </aside>
+    </>
+  )
 }
 
 /** Records whether the page control received focus while Relay's surface was still mounted. */
@@ -347,6 +390,48 @@ describe("useRelaySummon", () => {
     })
     expect(event.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(byTestId("page"))
+  })
+
+  it("focuses a composer that was already mounted when Relay opens", async () => {
+    await mount(<MountedHost />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    expect(document.activeElement).toBe(composer())
+  })
+
+  it("leaves Escape to a combobox inside Relay whose popup is open", async () => {
+    await mount(<Host />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    byTestId("combobox").focus()
+    expect(await press("Escape")).toBe(false)
+    expect(composer()).not.toBeNull()
+  })
+
+  it("finds a popup's expanded control inside the same shadow root", async () => {
+    await mount(<Host />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    const list = byTestId("shadow-popup-host").shadowRoot?.querySelector<HTMLElement>("[role='listbox']")
+    list?.focus()
+    const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Escape" })
+    await act(async () => {
+      list?.dispatchEvent(event)
+    })
+    expect(event.defaultPrevented).toBe(false)
+    expect(composer()).not.toBeNull()
+  })
+
+  it("drops a pending composer focus once focus has gone back to the page", async () => {
+    await mount(<Host composerLater />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    byTestId("relay-option").focus()
+    await press("j", { ctrlKey: true })
+    expect(document.activeElement).toBe(byTestId("page"))
+    await act(async () => byTestId("composer-ready").click())
+    expect(composer()).not.toBeNull()
+    expect(document.activeElement).not.toBe(composer())
   })
 
   it("keeps Escape working when the host's own surface owns the shortcut", async () => {
