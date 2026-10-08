@@ -250,7 +250,9 @@ describe("review evidence from sign-offs", () => {
       signed({ isApproved: true, approvedBy: ["reviewer"] }),
       // The author's own sign-off, under another spelling of the identity.
       signed({ isApproved: true, approvedBy: ["arn:aws:iam::111122223333:user/Reviewer"] }),
-      signed({ isApproved: true, approvedBy: ["alice"], approvalUnknown: { _tag: "NotPermitted" } })
-    ]).toEqual([true, true, true, false, false, false, false])
+      signed({ isApproved: true, approvedBy: ["alice"], approvalUnknown: { _tag: "NotPermitted" } }),
+      // A last known list may name someone whose approval was since revoked.
+      signed({ isApproved: true, approvedBy: ["alice"], approversUnknown: true })
+    ]).toEqual([true, true, true, false, false, false, false, false])
   })
 })

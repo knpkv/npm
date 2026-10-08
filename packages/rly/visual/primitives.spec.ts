@@ -221,6 +221,14 @@ test("keeps the near mark two-toned over the empty track and over a full fill, i
   }
 })
 
+test("keeps no-reading band stretches outlined under the forced-colours toolbar", async ({ page }) => {
+  await page.goto(story("primitives-stackedbars--week").replace("forcedColors:auto", "forcedColors:active"))
+  const unknown = page.locator("#storybook-root [data-band] [class*='unknown']").first()
+  await expect(unknown).toBeAttached()
+  // In forced colours the fill is dropped, so the stretch must keep a visible stroke.
+  expect(await unknown.evaluate((element) => getComputedStyle(element).stroke)).not.toBe("none")
+})
+
 test("keeps primary and pressed button labels readable in forced colours", async ({ page }) => {
   await page.goto(story("primitives-button--states"))
   // Scoped to the story: Storybook's own chrome has buttons too.

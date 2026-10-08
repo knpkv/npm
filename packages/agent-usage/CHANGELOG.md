@@ -1,5 +1,21 @@
 # @knpkv/agent-usage
 
+## 0.5.6
+
+### Patch Changes
+
+- [#588](https://github.com/knpkv/npm/pull/588) [`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047) Thanks [@konopkov](https://github.com/konopkov)! - Add `StackedBars`: stacked values per period with limit bands above, a shaded window such as the current limit window, width-aware binning, and a single-stop keyboard span selection. Columns out of time order throw an error naming the column. The focus-ring lint now also holds SVG focus strokes to the shared width token, and reserves the focus colour for focus; agent-usage's chart focus stroke uses the token.
+- Updated dependencies [[`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/rly@0.13.0
+
+## 0.5.5
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/rly@0.12.1
+
 ## 0.5.4
 
 ### Patch Changes

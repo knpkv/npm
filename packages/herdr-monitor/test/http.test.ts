@@ -1,7 +1,7 @@
 import { NodeHttpClient, NodeHttpServer } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { Schema } from "effect"
-import { Clock, Effect, Layer, Redacted, Tracer } from "effect"
+import { Clock, Effect, Layer, Logger, Redacted, Tracer } from "effect"
 import { HttpBody, HttpClient, HttpServer, HttpServerResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 import { createServer } from "node:http"
@@ -146,6 +146,24 @@ describe("actual HTTP authority boundary", () => {
         })).status
       ).toBe(415)
     }).pipe(withServer))
+
+  // Review finding (#599): a malformed publish returned 400 without any trace in the server log.
+  it.effect("logs a rejected publish by its failure kind, never its body", () => {
+    const logged: Array<string> = []
+    const capture = Logger.make(({ message }) => {
+      logged.push((Array.isArray(message) ? message : [message]).map(String).join(" "))
+    })
+    return Effect.gen(function*() {
+      const { client } = yield* setup
+      const sent = yield* client.put("/boards/main", {
+        headers: { authorization: `Bearer ${publishToken}`, "content-type": "application/json" },
+        body: HttpBody.text("{\"title\": \"secret-payload\"", "application/json")
+      })
+      expect(sent.status).toBe(400)
+      expect(logged.filter((line) => line.startsWith("monitor publish rejected: "))).toHaveLength(1)
+      expect(logged.join("\n")).not.toContain("secret-payload")
+    }).pipe(withServer, Effect.provideService(Logger.CurrentLoggers, new Set([capture])))
+  })
 
   it.effect("unauthenticated and view-only traffic cannot spend the publisher budget", () =>
     Effect.gen(function*() {

@@ -202,21 +202,38 @@ const lunaRoute = {
   reasoningEffort: "medium"
 } satisfies OrchestratorRoutedSubmission["route"]
 
-const makeLunaCommand = <Mode extends "consult" | "transition_summary">(
-  mode: Mode,
+/** The routed command a Luna submission carries for one mode. */
+type LunaCommand<Mode extends "consult" | "transition_summary"> = Extract<
+  OrchestratorRoutedSubmission["command"],
+  { readonly payload: { readonly mode: Mode } }
+>
+/** The only routed submission that carries a durable Work link. */
+type SolSubmission = Extract<OrchestratorRoutedSubmission, { readonly workLink: OrchestratorWorkLink }>
+
+function makeLunaCommand(mode: "consult", activityIdempotencyKey: string): LunaCommand<"consult">
+function makeLunaCommand(
+  mode: "transition_summary",
   activityIdempotencyKey: string
-) =>
-  ({
-    activityIdempotencyKey,
-    actor: command.actor,
-    kind: "fleet.job",
-    payload: {
-      kind: "agent.delegate",
-      mode,
-      prompt: "Run bounded coordination",
-      repository: "npm"
+): LunaCommand<"transition_summary">
+function makeLunaCommand(
+  mode: "consult" | "transition_summary",
+  activityIdempotencyKey: string
+): LunaCommand<"consult"> | LunaCommand<"transition_summary"> {
+  const prompt = "Run bounded coordination"
+  return mode === "consult"
+    ? {
+      activityIdempotencyKey,
+      actor: command.actor,
+      kind: "fleet.job",
+      payload: { kind: "agent.delegate", mode: "consult", prompt, repository: "npm" }
     }
-  }) satisfies OrchestratorRoutedSubmission["command"]
+    : {
+      activityIdempotencyKey,
+      actor: command.actor,
+      kind: "fleet.job",
+      payload: { kind: "agent.delegate", mode: "transition_summary", prompt, repository: "npm" }
+    }
+}
 
 const makeWorkLink = (lineage: ReadonlyArray<string>): OrchestratorWorkLink => ({
   handoff: {
@@ -241,7 +258,7 @@ const makeWorkLink = (lineage: ReadonlyArray<string>): OrchestratorWorkLink => (
 const makeSolSubmission = (
   parentDispatchRequestId: string | null,
   idempotencyKey: string
-): OrchestratorRoutedSubmission => ({
+): SolSubmission => ({
   command: {
     activityIdempotencyKey: `activity:${idempotencyKey}`,
     actor: command.actor,
@@ -3890,11 +3907,11 @@ database.close()`,
         route: solRoute,
         status: "accepted",
         workLink: null
-      } satisfies typeof OrchestratorRequest.Encoded
+      }
       const pending = {
         ...request,
         status: "accepted"
-      } satisfies typeof OrchestratorPendingDispatch.Encoded
+      }
       expect(yield* Effect.result(Schema.decodeUnknownEffect(OrchestratorRequest)(request))).toMatchObject({
         failure: { _tag: "SchemaError" }
       })
@@ -3955,7 +3972,7 @@ database.close()`,
       const submission = makeSolSubmission("dispatch:lineage-parent", "dispatch:lineage-invalid-sol")
       const contradictory = {
         ...submission,
-        workLink: submission.workLink === null ? null : {
+        workLink: {
           ...submission.workLink,
           handoff: { ...submission.workLink.handoff, dispatchIds: ["dispatch:unrelated"] }
         }
@@ -4102,7 +4119,7 @@ database.close()`,
         )
         const wrongGoal = {
           ...submission,
-          workLink: submission.workLink === null ? null : {
+          workLink: {
             ...submission.workLink,
             handoff: { ...submission.workLink.handoff, goalId: "goal:other" }
           }

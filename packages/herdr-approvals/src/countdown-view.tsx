@@ -27,12 +27,12 @@ import {
   type PendingItem,
   pendingItems,
   REVALIDATE_RETRY_MS,
-  tickInterval,
   urgencyOf,
   windowUsed
 } from "./countdown-model.js"
 import type { DashboardSnapshot, PendingApprovalFailure } from "./dashboard-model.js"
 import { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
+import { useHubNow } from "./hub-clock.js"
 
 /** The hub's answer to the last decision sent from this page, for the job it decided. */
 export interface DecisionStatus {
@@ -45,28 +45,10 @@ export interface DecisionStatus {
   /** `observedAt` of the snapshot on screen when the answer arrived. */
   readonly observedAt: number
   readonly text: string
-}
-
-/**
- * Wall-clock milliseconds, re-read after `delayFor(now)` while the page is visible and again
- * when it becomes visible. The clock is a framework boundary, so it reads the browser's time directly.
- */
-const useNow = (delayFor: (now: number) => number): number => {
-  const [now, setNow] = useState(() => Date.now())
-  const delay = delayFor(now)
-  useEffect(() => {
-    // No ticks while the page is hidden; becoming visible again re-reads the clock and resumes.
-    const timer = document.visibilityState === "hidden" ? undefined : window.setTimeout(() => setNow(Date.now()), delay)
-    const onVisible = () => {
-      if (document.visibilityState === "visible") setNow(Date.now())
-    }
-    document.addEventListener("visibilitychange", onVisible)
-    return () => {
-      window.clearTimeout(timer)
-      document.removeEventListener("visibilitychange", onVisible)
-    }
-  }, [delay, now])
-  return now
+  /** How the hub answered, in the Work board's words. */
+  readonly outcome: "accepted" | "refused" | "uncertain"
+  /** The decided request's expiry when the decision was sent, so a new request on the same job is told apart. */
+  readonly expiresAt: number | null | undefined
 }
 
 const failureText = (failure: PendingApprovalFailure): string => {
@@ -308,11 +290,13 @@ const RequestDetail = ({
         </div>
       ) : (
         <DecisionBar
-          {...(clock === null
-            ? {}
-            : {
+          {...(clock !== null
+            ? {
                 clock: <span className="countdown-nowrap">{clock === "expiring" ? "expiring" : `${clock} left`}</span>
-              })}
+              }
+            : gone || facts.expiresAt !== null
+              ? {}
+              : { clock: <span className="countdown-nowrap">No expiry</span> })}
           {...(state._tag === "ready" || state._tag === "sending"
             ? {
                 note: "If it expires before your decision reaches the hub, you'll see the hub's refusal, not a success."
@@ -378,22 +362,11 @@ export const ApprovalsCountdown = ({
       ? [...facts, factsOf(selected, snapshot.host)]
       : facts
 
-  // Expiries are hub times, so the clock is the hub's: the snapshot's `observedAt` plus the time
-  // elapsed here since it arrived. A browser clock ahead of or behind the hub does not matter.
-  const [origin, setOrigin] = useState(() => ({
-    observedAt: snapshot.observedAt,
-    offset: snapshot.observedAt - Date.now()
-  }))
-  if (origin.observedAt !== snapshot.observedAt) {
-    setOrigin({ observedAt: snapshot.observedAt, offset: snapshot.observedAt - Date.now() })
-  }
-  const now =
-    useNow((at) =>
-      tickInterval(
-        tracked.map(({ expiresAt }) => expiresAt),
-        at + origin.offset
-      )
-    ) + origin.offset
+  // Expiries are hub times, so the clock is the hub's (see hub-clock.ts).
+  const now = useHubNow(
+    snapshot.observedAt,
+    tracked.map(({ expiresAt }) => expiresAt)
+  )
 
   const stateOf = (item: PendingItem, itemGone: Departure | null): RlyDecisionBarState => {
     if (onDecision === undefined) return { _tag: "off", reason: "Decisions are unavailable here." }
@@ -559,14 +532,9 @@ export const ApprovalsCountdown = ({
       <div className="countdown-regions" data-has-selection={selected !== undefined}>
         <Region
           className="countdown-waiting"
-          {...(items.length === 0 && unchecked.length > 0
-            ? {}
-            : {
-                count:
-                  unchecked.length > 0 || snapshot.pendingApprovals.nextCursors.length > 0
-                    ? `${String(items.length)}+`
-                    : items.length
-              })}
+          // The count is what's listed. Unchecked hosts and pages not loaded yet are said in words above,
+          // so an unexplained "+" isn't needed.
+          {...(items.length === 0 && unchecked.length > 0 ? {} : { count: items.length })}
           title="Waiting for you"
         >
           {items.length === 0 ? (
@@ -602,14 +570,13 @@ export const ApprovalsCountdown = ({
                         <code>{row.kind}</code>, {row.host}
                       </span>
                       <span className="countdown-row-title">{row.title}</span>
-                      {clock === null ? null : (
-                        <span
-                          className="countdown-row-clock"
-                          data-urgency={row.expiresAt === null ? "calm" : urgencyOf(row.expiresAt - now)}
-                        >
-                          {clock}
-                        </span>
-                      )}
+                      {/* A request without an expiry says so, instead of leaving the clock's place empty. */}
+                      <span
+                        className="countdown-row-clock"
+                        data-urgency={row.expiresAt === null ? "calm" : urgencyOf(row.expiresAt - now)}
+                      >
+                        {clock ?? "No expiry"}
+                      </span>
                       {used === null ? null : (
                         <span className="countdown-visually-hidden">
                           , {String(Math.round(used.value))}% of its approval window used

@@ -165,26 +165,67 @@ describe("Work requests decided in place", () => {
     expect(sent).toEqual([])
   })
 
-  it("keeps the bar and announces the hub's answer after the request leaves the queue", async () => {
-    const { decisions, sent } = decisionsOf(
+  it("drops the bar once the outcome is proven: the title and state word say it, and it is announced", async () => {
+    const { decisions } = decisionsOf(
       {},
       { answer: { jobId: "job-1", outcome: "accepted", text: "The hub recorded your approval." } }
     )
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
-    // The proven outcome is the off reason; the accepted answer has nothing to add to it.
-    expect(reasonAndStatus(host)).toEqual({ reason: "Approved.", status: "" })
-    const approve = button(host, "Approve: Apply r1")
-    expect(approve?.getAttribute("aria-disabled")).toBe("true")
-    await act(async () => approve?.click())
-    expect(sent).toEqual([])
+    expect(button(host, "Approve: Apply r1")).toBeUndefined()
+    expect(host.querySelector(".work-request-heading")?.textContent).toBe("Apply r1Approved")
+    expect(host.querySelector(".work-request-announcement")?.textContent).toBe("Apply r1: Approved.")
+    expect(host.textContent).not.toContain("The hub recorded your approval.")
   })
 
-  it("lets the snapshot's proven outcome replace an uncertain answer, and names it as the off reason", async () => {
+  it("keeps a refusal's explanation under a proven outcome", async () => {
+    const refusal = "The hub refused: another approver decided first."
+    const { decisions } = decisionsOf({}, { answer: { jobId: "job-1", outcome: "refused", text: refusal } })
+    const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
+    expect(button(host, "Approve: Apply r1")).toBeUndefined()
+    expect(host.textContent).toContain(refusal)
+  })
+
+  it("announces the outcome from the same status region the bar was mounted beside", async () => {
+    const { decisions } = decisionsOf(
+      { "job-1": NOW + 60_000 },
+      { answer: { jobId: "job-1", outcome: "accepted", text: "The hub recorded your approval." } }
+    )
+    const hostElement = document.createElement("div")
+    document.body.append(hostElement)
+    const root = createRoot(hostElement)
+    roots.push(root)
+    const render = (state: WorkRequest["state"]) =>
+      act(async () =>
+        root.render(
+          <WorkBoard
+            decisions={decisions}
+            initialGoalId="goal-1"
+            snapshots={snapshotsOf([request("r1", "job-1", state)])}
+          />
+        )
+      )
+    await render("open")
+    const region = hostElement.querySelector(".work-request-announcement")
+    expect(region?.textContent).toBe("")
+    await render("approved")
+    expect(hostElement.querySelector(".work-request-announcement")).toBe(region)
+    expect(region?.textContent).toBe("Apply r1: Approved.")
+  })
+
+  it("names the request once while its bar is shown", async () => {
+    const { decisions } = decisionsOf({ "job-1": NOW + 60_000 })
+    const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1")]) })
+    const item = host.querySelector(".work-detail-list li")
+    expect(item?.querySelector(".work-request-heading")).toBeNull()
+    expect(item?.textContent?.split("Apply r1").length).toBe(2)
+  })
+
+  it("lets the snapshot's proven outcome replace an uncertain answer", async () => {
     const uncertain = "Couldn't reach the hub, so the decision may not have arrived."
     const { decisions } = decisionsOf({}, { answer: { jobId: "job-1", outcome: "uncertain", text: uncertain } })
     const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", "approved")]) })
     expect(host.textContent).not.toContain(uncertain)
-    // The proven outcome is said once, as the reason the bar is off.
+    // The proven outcome is said once, in the announcement; the state word shows it.
     expect(host.textContent?.split("Approved.").length).toBe(2)
     expect(host.textContent).not.toContain("no longer lists")
   })
@@ -222,24 +263,18 @@ describe("Work requests decided in place", () => {
     expect(status).toContain(uncertain)
   })
 
-  it("never says the same thing twice in the off reason and the status", async () => {
+  it("never says the same thing twice in the off reason and the status while the bar is shown", async () => {
     const outcomes: ReadonlyArray<WorkRequestAnswer["outcome"]> = ["accepted", "refused", "uncertain"]
-    // Pending implies the request is still open, so a proven outcome is never pending.
-    const cases: ReadonlyArray<{ readonly pending: boolean; readonly state: WorkRequest["state"] }> = [
-      { pending: true, state: "open" },
-      { pending: false, state: "open" },
-      { pending: false, state: "approved" },
-      { pending: false, state: "rejected" }
-    ]
+    // A bar is shown only while the request is open: pending here, or left the queue unproven.
     for (const outcome of outcomes) {
-      for (const { pending, state } of cases) {
+      for (const pending of [true, false]) {
         const text = outcome === "uncertain" ? "Couldn't reach the hub." : `The hub ${outcome} your decision.`
         const { decisions } = decisionsOf(pending ? { "job-1": NOW + 60_000 } : {}, {
           answer: { jobId: "job-1", outcome, text }
         })
-        const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1", state)]) })
+        const host = await mount({ decisions, snapshots: snapshotsOf([request("r1", "job-1")]) })
         const { reason, status } = reasonAndStatus(host)
-        const label = `${outcome}, ${pending ? "pending" : "not pending"}, ${state}`
+        const label = `${outcome}, ${pending ? "pending" : "not pending"}`
         if (reason !== "" && status !== "") {
           expect(status.includes(reason) || reason.includes(status), label).toBe(false)
         }

@@ -95,6 +95,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -147,6 +148,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -198,6 +200,7 @@ describe("fetchAndUpsertPRs", () => {
           Layer.mock(PullRequestRepo, {
             observe: () => Effect.succeed(1),
             findStaleOpen: () => Effect.succeed([]),
+            findClosedWithUnknownApprovers: () => Effect.succeed([]),
             propagateRepoAccountId: () => Effect.void,
             upsertMany: () => Effect.void
           }),
@@ -267,6 +270,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void,
           upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.none(), versions: undefined }),
           writeRead: () => Effect.succeed({ row: true, approval: true, versions: undefined })
@@ -330,6 +334,7 @@ describe("fetchAndUpsertPRs", () => {
           Layer.mock(PullRequestRepo, {
             observe: () => Effect.succeed(1),
             findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+            findClosedWithUnknownApprovers: () => Effect.succeed([]),
             deleteOne: () => Ref.update(deleted, (n) => n + 1).pipe(Effect.as(true)),
             propagateRepoAccountId: () => Effect.void
           }),
@@ -412,6 +417,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -462,6 +468,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
           writeRead: (_, id, evaluation) =>
             Ref.update(
@@ -512,6 +519,7 @@ describe("fetchAndUpsertPRs", () => {
     isApproved: 0,
     approvalUnknownReason: null,
     approvalBaselineKnown: 1,
+    approversUnknown: 0,
     observationSeq: 0,
     approvalVersion: "2026-08-02T00:00:00.000Z",
     approvalObservationSeq: 0,
@@ -656,6 +664,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -702,6 +711,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -744,6 +754,7 @@ describe("fetchAndUpsertPRs", () => {
           observe: () => Effect.succeed(1),
           findStaleOpen: () =>
             Effect.fail(new CacheError({ operation: "find-stale-open", cause: new Error("database unavailable") })),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -788,6 +799,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           deleteOne: () =>
             Effect.fail(new CacheError({ operation: "delete-pull-request", cause: new Error("database unavailable") })),
           propagateRepoAccountId: () => Effect.void
@@ -837,6 +849,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -884,6 +897,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -924,6 +938,7 @@ describe("fetchAndUpsertPRs", () => {
           observe: () => Effect.succeed(1),
           writeRead: () => Effect.succeed({ row: true, approval: true, versions: undefined }),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -964,6 +979,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           writeRead: () =>
             Effect.fail(new CacheError({ operation: "recordApprovalEvaluation", cause: new Error("disk full") })),
           deleteOne: () => Ref.update(deletes, (n) => n + 1).pipe(Effect.as(true)),
@@ -983,6 +999,43 @@ describe("fetchAndUpsertPRs", () => {
       }).pipe(Effect.provide(dependencies))
       // A failed cache write is no evidence the pull request is gone.
       expect(yield* Ref.get(deletes)).toBe(0)
+      expect(successfulScopes).toEqual([])
+    }))
+
+  // A stale re-read whose approvers couldn't be read kept the cached ones: partial, like a listed one.
+  it.effect("reports a stale re-read whose approvers couldn't be read as partial", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () =>
+            Effect.succeed(new PullRequestDetail({ ...providerOpenDetail, isApproved: true, approversUnknown: true }))
+        }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
+          writeRead: () => Effect.succeed({ row: true, approval: true, versions: undefined }),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
       expect(successfulScopes).toEqual([])
     }))
 
@@ -1013,6 +1066,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([staleOpen(unknownRow)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           writeRead: (_, id, evaluation) =>
             Ref.update(recorded, (all) => [...all, [id, evaluation] satisfies (typeof all)[number]]).pipe(
               Effect.as({ row: true, approval: true, versions: undefined })
@@ -1072,6 +1126,7 @@ describe("fetchAndUpsertPRs", () => {
           upsert: () =>
             Effect.succeed({ row: true, approval: true, replaced: Option.some(cachedRow), versions: undefined }),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {
@@ -1119,6 +1174,7 @@ describe("fetchAndUpsertPRs", () => {
           upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.none(), versions: undefined }),
           // PR 35 closed at the provider; PR 36 was just listed, so it is not stale.
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           // A closed or merged re-read now arrives as a whole-row write.
           writeRead: (_, __, read) =>
             Ref.update(statusUpdates, (count) => read.status === "OPEN" ? count : count + 1).pipe(
@@ -1165,6 +1221,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           // A closed or merged re-read now arrives as a whole-row write.
           writeRead: (_, __, read) =>
             Ref.update(statusUpdates, (count) => read.status === "OPEN" ? count : count + 1).pipe(
@@ -1216,6 +1273,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           // A closed or merged re-read now arrives as a whole-row write.
           writeRead: (_, __, read) =>
             Ref.update(statusUpdates, (count) => read.status === "OPEN" ? count : count + 1).pipe(
@@ -1260,6 +1318,7 @@ describe("fetchAndUpsertPRs", () => {
           upsert: () =>
             Effect.fail(new CacheError({ operation: "upsert-pull-request", cause: new Error("database unavailable") })),
           findStaleOpen: () => Effect.succeed([staleOpen(staleOpenPR)]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           deleteOne: () => Ref.update(deleteCalls, (count) => count + 1).pipe(Effect.as(true)),
           propagateRepoAccountId: () => Effect.void
         }),
@@ -1297,6 +1356,7 @@ describe("fetchAndUpsertPRs", () => {
         Layer.mock(PullRequestRepo, {
           observe: () => Effect.succeed(1),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -1313,6 +1373,47 @@ describe("fetchAndUpsertPRs", () => {
         staleThreshold: "2026-08-03T00:00:00Z"
       }).pipe(Effect.provide(dependencies))
 
+      expect(successfulScopes).toEqual([])
+    }))
+
+  // A read that couldn't fetch its approvers keeps the cached ones; its refresh is partial, not clean.
+  it.effect("upserts a pull request whose approvers couldn't be read as unknown, and reports the account as partial", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const upserted = yield* Ref.make<ReadonlyArray<readonly [string, boolean | undefined]>>([])
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const approversUnread = new PullRequest({ ...openPR("39"), approversUnknown: true })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, { getPullRequests: () => Stream.make(openPR("38"), approversUnread) }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          upsert: (input) =>
+            Ref.update(
+              upserted,
+              (rows) => [...rows, [input.id, input.approversUnknown] satisfies (typeof rows)[number]]
+            )
+              .pipe(Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })),
+          findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+      const successfulScopes = yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef: yield* Ref.make(new Set<string>()),
+        currentUser: undefined,
+        identityGeneration: 1,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+      expect(yield* Ref.get(upserted)).toEqual([["38", false], ["39", true]])
       expect(successfulScopes).toEqual([])
     }))
 
@@ -1340,6 +1441,7 @@ describe("fetchAndUpsertPRs", () => {
               Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
             ),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {
@@ -1394,6 +1496,7 @@ describe("fetchAndUpsertPRs", () => {
           observe: () => Effect.succeed(1),
           upsert: () => Effect.succeed({ row: false, approval: false, replaced: Option.none(), versions: undefined }),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, { addSystem: () => Effect.void }),
@@ -1433,6 +1536,7 @@ describe("fetchAndUpsertPRs", () => {
           observe: () => Effect.succeed(1),
           upsert: () => Effect.succeed({ row: true, approval: true, replaced: Option.none(), versions: undefined }),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {
@@ -1481,6 +1585,7 @@ describe("fetchAndUpsertPRs", () => {
               Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
             ),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
@@ -1520,6 +1625,7 @@ describe("fetchAndUpsertPRs", () => {
           findByAccountAndId: () => Effect.succeed(Option.some(staleOpenPR)),
           findByCoordinates: () => Effect.succeed(Option.some(staleOpenPR)),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           upsert: () =>
             Effect.succeed({ row: true, approval: true, replaced: Option.some(staleOpenPR), versions: undefined }),
           propagateRepoAccountId: () => Effect.void
@@ -1585,6 +1691,7 @@ describe("fetchAndUpsertPRs", () => {
             findByAccountAndId: () => Effect.succeed(Option.some(cachedPending)),
             findByCoordinates: () => Effect.succeed(Option.some(cachedPending)),
             findStaleOpen: () => Effect.succeed([]),
+            findClosedWithUnknownApprovers: () => Effect.succeed([]),
             upsert: () =>
               Effect.succeed({
                 row: applied,
@@ -1648,6 +1755,7 @@ describe("fetchAndUpsertPRs", () => {
           findByAccountAndId: () => Effect.succeed(Option.some(cachedRow(0))),
           findByCoordinates: () => Effect.succeed(Option.some(cachedRow(0))),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           // Meanwhile another read stored it approved; this write replaced that.
           upsert: () =>
             Effect.succeed({ row: true, approval: true, versions: undefined, replaced: Option.some(cachedRow(1)) }),

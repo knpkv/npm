@@ -66,7 +66,7 @@
   font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
     var(--rly-type-body-large-font);
   margin: var(--rly-space-0);
-  max-inline-size: 62ch;
+  max-inline-size: 41.3em;
 }
 
 .heroFacts {

@@ -125,6 +125,19 @@ describe("shared queue filter contract", () => {
     expect(options.every((value) => matchesQueueFilter(pullRequest, { key: "account", value }))).toBe(true)
   })
 
+  // A last known approver may have revoked: neither offered nor matched while approvers are unknown.
+  it("offers and matches only approvers known now", () => {
+    const known = Schema.decodeSync(PullRequest)({
+      ...Schema.encodeSync(PullRequest)(pullRequest),
+      approvedBy: ["alice"]
+    })
+    const unknown = Schema.decodeSync(PullRequest)({ ...Schema.encodeSync(PullRequest)(known), approversUnknown: true })
+    expect(queueFilterOptions([known]).approver).toEqual(["alice"])
+    expect(matchesQueueFilter(known, { key: "approver", value: "alice" })).toBe(true)
+    expect(queueFilterOptions([unknown]).approver).toEqual([])
+    expect(matchesQueueFilter(unknown, { key: "approver", value: "alice" })).toBe(false)
+  })
+
   it("does not invent an unknown account outside the decoded domain", () => {
     expect(queueFilterOptions([pullRequest]).account).not.toContain("unknown")
     expect(matchesQueueFilter(pullRequest, { key: "account", value: "unknown" })).toBe(false)

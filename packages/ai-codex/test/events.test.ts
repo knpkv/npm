@@ -492,10 +492,14 @@ layer(nodeFileSystemAndPath)("Codex output schema cleanup", (it) => {
       const logger = Logger.make<unknown, void>((entry) => {
         if (entry.logLevel === "Warn") warnings.push(String(entry.message))
       })
-      const file = yield* makeStreamOutputSchemaFile(stuck, Schema.Struct({ verdict: Schema.String }))
+      const paths = yield* Path.Path
+      // The real directory is removed by the scope, registered as soon as it exists, so a failing
+      // assertion below cannot leak it.
+      const file = yield* Effect.acquireRelease(
+        makeStreamOutputSchemaFile(stuck, Schema.Struct({ verdict: Schema.String })),
+        (created) => fileSystem.remove(paths.dirname(created.path), { recursive: true }).pipe(Effect.orDie)
+      )
       yield* file.cleanup.pipe(Effect.withLogger(logger))
       expect(warnings.join("\n")).toContain("Could not remove the Codex output schema directory")
-      const paths = yield* Path.Path
-      yield* fileSystem.remove(paths.dirname(file.path), { recursive: true })
-    }))
+    }).pipe(Effect.scoped))
 })

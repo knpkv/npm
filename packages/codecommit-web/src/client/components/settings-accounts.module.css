@@ -1,0 +1,62 @@
+/* A profile's on/off control: a track with a thumb, not a bare checkbox. */
+.switch {
+  appearance: none;
+  background: var(--rly-color-surface-3);
+  block-size: 24px;
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: 999px;
+  cursor: pointer;
+  flex-shrink: 0;
+  inline-size: 42px;
+  margin: 0;
+  position: relative;
+  transition: background-color 120ms ease;
+}
+
+.switch::after {
+  background: var(--rly-color-text-2);
+  block-size: 18px;
+  border-radius: 50%;
+  content: "";
+  inline-size: 18px;
+  inset-block-start: 2px;
+  inset-inline-start: 2px;
+  position: absolute;
+  transition: transform 120ms ease;
+}
+
+.switch:checked {
+  background: var(--rly-color-action-background);
+  border-color: var(--rly-color-action-background);
+}
+
+.switch:checked::after {
+  background: var(--rly-color-action-foreground);
+  transform: translateX(18px);
+}
+
+.switch:focus-visible {
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
+}
+
+@media (forced-colors: active) {
+  .switch {
+    border-color: CanvasText;
+  }
+
+  .switch::after {
+    background: CanvasText;
+  }
+
+  .switch:checked {
+    background: Highlight;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch,
+  .switch::after {
+    transition: none;
+  }
+}

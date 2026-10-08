@@ -51,4 +51,38 @@ describe("focus ring policy", () => {
     expect(rules(".x:hover { outline: 1px solid red; box-shadow: 0 0 0 2px red; }")).toEqual([])
     expect(rules(".x:focus-visible { color: var(--rly-color-text-1); }")).toEqual([])
   })
+  // ui-b AU1b S2: an SVG focus ring at a hardcoded 2px missed the shared width token.
+  it("holds an SVG ring to the same width token and focus colour", () => {
+    expect(rules(".plot:focus-visible .ring { stroke: var(--rly-color-focus); stroke-width: 2px; }")).toEqual([
+      "focus-stroke"
+    ])
+    expect(rules(".plot:focus-visible .ring { stroke: var(--rly-color-agent); }")).toEqual(["focus-stroke"])
+    expect(
+      rules(".plot:focus-visible .ring { stroke: var(--rly-color-focus); stroke-width: var(--rly-focus-ring-width); }")
+    ).toEqual([])
+  })
+
+  // ui-b AU1b S1: a chart window drawn in the focus colour read as a second focus ring.
+  it("reserves the focus colour for focus rules", () => {
+    expect(rules(".window { stroke: var(--rly-color-focus); }")).toEqual(["focus-colour"])
+    expect(rules(".window { stroke: var(--rly-color-focus, blue); }")).toEqual(["focus-colour"])
+    expect(rules(".plot:focus-visible { outline-color: var(--rly-color-focus); }")).toEqual([])
+    // An alias is checked where it is used, and forced colours draw their own system colours.
+    expect(rules(":root { --ring: var(--rly-color-focus); }")).toEqual([])
+    expect(rules(":root { --ring: var(--rly-color-focus); } .window { stroke: var(--ring); }")).toEqual([
+      "focus-colour"
+    ])
+    // Spaces, a fallback, or a chain of aliases still name the focus colour.
+    expect(rules(":root { --ring: var(--rly-color-focus); } .window { stroke: var( --ring , red); }")).toEqual([
+      "focus-colour"
+    ])
+    expect(
+      rules(":root { --b: var(--a); --a: var(--rly-color-focus); } .window { stroke: var(--b); }")
+    ).toEqual(["focus-colour"])
+    expect(rules(":root { --ring-soft: red; } .window { stroke: var(--ring-soft); }")).toEqual([])
+    expect(rules(":root { --ring: var(--rly-color-focus); } .x:focus-visible { outline-color: var(--ring); }")).toEqual(
+      []
+    )
+    expect(rules("@media (forced-colors: active) { .window { stroke: var(--rly-color-focus); } }")).toEqual([])
+  })
 })
