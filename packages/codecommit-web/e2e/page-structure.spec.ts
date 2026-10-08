@@ -112,11 +112,14 @@ test("the author link in the pull request sentence is underlined", async ({ page
 /** Contrast of an element's underline, blended over the page canvas, against that canvas (WCAG). */
 const underlineContrast = (page: Page, name: string) =>
   page.getByRole("main").getByRole("link", { name, exact: true }).first().evaluate((link) => {
+    // Any CSS colour (rgb(), oklch(), color()) as the sRGB bytes it paints, read back from a 1×1 canvas.
     const channels = (value: string) => {
-      const numbers = (value.match(/[\d.]+/gu) ?? []).map(Number)
-      const scale = value.startsWith("color(") ? 1 : 255
-      const [r = 0, g = 0, b = 0] = numbers.slice(0, 3).map((n) => n / scale)
-      return { r, g, b, a: numbers[3] ?? 1 }
+      const context = document.createElement("canvas").getContext("2d")
+      if (context === null) return { r: 0, g: 0, b: 0, a: 0 }
+      context.fillStyle = value
+      context.fillRect(0, 0, 1, 1)
+      const [r = 0, g = 0, b = 0, a = 0] = context.getImageData(0, 0, 1, 1).data
+      return { r: r / 255, g: g / 255, b: b / 255, a: a / 255 }
     }
     const canvas = channels(getComputedStyle(document.body).backgroundColor)
     const line = channels(getComputedStyle(link).textDecorationColor)
