@@ -1,0 +1,19 @@
+id: css-motion-opt-in
+valid:
+  - |
+    @media (prefers-reduced-motion: no-preference) { .a { transition: color 1s; } }
+  - |
+    @media (hover: hover) and (prefers-reduced-motion: no-preference) { .a:hover { animation: spin 1s; } }
+  - |
+    .a { transition: none; }
+  - |
+    .a { transition-delay: 1s; scroll-behavior: auto; }
+invalid:
+  - |
+    .a { transition: color 140ms ease; }
+  - |
+    .a::after { animation: runway 1.6s ease-in-out infinite; }
+  - |
+    @media (prefers-reduced-motion: reduce) { .a { transition: color 1s; } }
+  - |
+    :global(::view-transition-group(*)) { animation-duration: 240ms; }

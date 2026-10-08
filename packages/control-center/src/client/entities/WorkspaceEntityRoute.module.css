@@ -1,7 +1,6 @@
 .state {
   display: grid;
   min-block-size: 60dvh;
-  outline: none;
   place-items: center;
 }
 
@@ -54,7 +53,7 @@
   color: var(--rly-color-action-foreground);
   display: inline-flex;
   font-size: var(--rly-type-body-large-size);
-  justify-content: center;
+  justify-content: safe center;
   min-block-size: var(--rly-space-48);
   padding-inline: var(--rly-space-24);
   text-decoration: none;
@@ -81,15 +80,17 @@
   display: inline-flex;
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
-  justify-content: center;
+  justify-content: safe center;
   min-block-size: var(--rly-space-40);
   padding-inline: var(--rly-space-20);
   text-decoration: none;
 }
 
-.secondaryAction:hover {
-  background: var(--rly-color-surface-2);
-  border-color: var(--rly-color-service-confluence);
+@media (hover: hover) and (pointer: fine) {
+  .secondaryAction:hover {
+    background: var(--rly-color-surface-2);
+    border-color: var(--rly-color-service-confluence);
+  }
 }
 
 .secondaryAction:focus-visible {
@@ -193,7 +194,7 @@
 
   isolation: isolate;
   min-inline-size: var(--rly-space-0);
-  overflow: hidden;
+  overflow: clip;
   position: relative;
 }
 

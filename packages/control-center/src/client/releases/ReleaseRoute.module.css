@@ -16,7 +16,7 @@
   display: inline-flex;
   min-block-size: var(--rly-space-48);
   align-items: center;
-  justify-content: center;
+  justify-content: safe center;
   padding-inline: var(--rly-space-24);
   border-radius: var(--rly-radius-control);
   background: var(--rly-color-action-background);
@@ -72,7 +72,6 @@
 
 .fullTitle h1 {
   max-inline-size: 8.22em;
-  outline: none;
   min-inline-size: 0;
   overflow-wrap: break-word;
   text-wrap: balance;

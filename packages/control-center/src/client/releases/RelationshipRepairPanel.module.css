@@ -53,7 +53,7 @@
 
 .proposal {
   gap: var(--rly-space-20);
-  overflow: hidden;
+  overflow: clip;
   padding: var(--rly-space-24);
 }
 
@@ -104,7 +104,7 @@
   display: inline-flex;
   block-size: var(--rly-space-24);
   inline-size: var(--rly-space-24);
-  justify-content: center;
+  justify-content: safe center;
 }
 
 .agentIdentity > span:last-child {
@@ -145,7 +145,7 @@
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
   inline-size: 1px;
-  overflow: hidden;
+  overflow: clip;
   position: absolute;
   white-space: nowrap;
 }
@@ -173,7 +173,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .reviewForm {
-    animation: reveal-review 160ms ease-out both;
+    animation: reveal-review var(--rly-motion-standard-duration) var(--rly-motion-standard-easing) both;
   }
 }
 

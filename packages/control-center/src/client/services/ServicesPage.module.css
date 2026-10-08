@@ -36,7 +36,7 @@
 }
 
 .resourceList {
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid var(--rly-color-border-2);
   border-radius: var(--rly-radius-control);
 }

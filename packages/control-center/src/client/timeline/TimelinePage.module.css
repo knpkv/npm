@@ -41,7 +41,7 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-group);
 }
