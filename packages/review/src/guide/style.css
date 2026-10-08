@@ -109,11 +109,10 @@
   content: "";
   inline-size: 8px;
   block-size: 4px;
-  /* A tick glyph: its strokes must not mirror with the writing direction. */
-  /* ast-grep-ignore: css-logical-properties */
-  border-left: 2px solid currentColor;
-  /* ast-grep-ignore: css-logical-properties */
-  border-bottom: 2px solid currentColor;
+  /* A tick glyph must not mirror in right-to-left text, so its strokes resolve left-to-right. */
+  direction: ltr;
+  border-inline-start: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
   transform: translateY(-1px) rotate(-45deg);
 }
 @media (hover: hover) and (pointer: fine) {
