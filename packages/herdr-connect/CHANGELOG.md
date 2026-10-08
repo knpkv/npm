@@ -1,5 +1,23 @@
 # @knpkv/herdr-connect
 
+## 0.9.0
+
+### Minor Changes
+
+- [#652](https://github.com/knpkv/npm/pull/652) [`2b79b24`](https://github.com/knpkv/npm/commit/2b79b241a95d5e6d54c1055e0b245bd24a490276) Thanks [@konopkov](https://github.com/konopkov)! - Connect's agents now speak the hub's state language. Each directory row shows the agent's state as an icon and word in its tone, the same label the hub's Agent activity uses, instead of a plain capitalised word. Only working agents spin, and only with motion allowed. `waiting` now counts under the Status filter's "Needs you" (renamed from "Attention") rather than "Ready", because it waits on a person. The work line no longer repeats the state ("Root agent, npm", not "Root agent, Working in npm"), since the label beside it says it. Unknown states keep their own word with a caution alert icon, so they never look idle. `@knpkv/herdr-connect/surface` exports `agentStatePresentation`, `AgentStateLabel`, `agentBuckets` and `agentBucketLabel`. herdr-approvals' Agent activity reads the same mapping, so its state words are now capitalised and blocked and errored agents show in critical tone.
+
+- [#658](https://github.com/knpkv/npm/pull/658) [`504148b`](https://github.com/knpkv/npm/commit/504148b49fef69471bd3772c60d1629758ccf930) Thanks [@konopkov](https://github.com/konopkov)! - Connect is now the hub's one agent list, and the Work tab no longer repeats agents under Agent activity. Each Connect row leads with the agent's state (icon and word) in a fixed column, then its name and work, then when it was last active. Lineage indents the name, not the state. At 24rem and below the state sits above the name. A row's accessible name is its own content plus "open terminal". Status filter options show their counts within the current Host filter, ignoring the search. A host that didn't answer is named in the Host filter (not offered as an option) and, once, in a line above the list with its cause; the summary only counts agents: "GAMMA (timed out) didn't answer; its agents aren't listed." That line now shows on phones too. The directory shows when it was last read ("Updated 09:41:05"), changing only when a poll lands, and says "Stale" when a refresh failed. Empty and failure states read "No agents running on any host." and "The fleet directory didn't answer: …". `AgentDirectory` takes an optional `silentHosts`.
+
+- [#664](https://github.com/knpkv/npm/pull/664) [`5199a49`](https://github.com/knpkv/npm/commit/5199a4959d643d029a9b7701bce94d904250abfd) Thanks [@konopkov](https://github.com/konopkov)! - Connect's key rail has a Keyboard button: press it to bring up the on-screen keyboard (it focuses the terminal's input inside the tap, so iOS opens it), press again to put it away. It stays pressed while the keyboard is up, including after a tap on the terminal. On a phone the "N lines back" status is now a badge over the terminal's top corner rather than a rail cell, so it never resizes the terminal and taps go through it. `TerminalKeyRail` takes optional `keyboardOpen` and `onKeyboardToggle`.
+
+- [#670](https://github.com/knpkv/npm/pull/670) [`8acdf0d`](https://github.com/knpkv/npm/commit/8acdf0dbd0800c27d5dd4d0130e035558f575975) Thanks [@konopkov](https://github.com/konopkov)! - Connect's key rail has a Paste button. It reads the clipboard inside the tap (iOS asks to confirm) and sends the text to the terminal as one paste, bracketed when the program asked for it; a latched Ctrl or Alt is released first. An empty clipboard, a refused read or a browser without clipboard access says so in the rail. On phones the pinned actions sit five to a row. `TerminalKeyRail` takes an optional `onPaste`.
+
+### Patch Changes
+
+- Updated dependencies [[`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6), [`67f7ea1`](https://github.com/knpkv/npm/commit/67f7ea1a5e3c0281da1d627fce940975e2db0cf4), [`f5f5fd9`](https://github.com/knpkv/npm/commit/f5f5fd98dcea7b7df1b226043e89ffb6decaffad), [`ce3234a`](https://github.com/knpkv/npm/commit/ce3234a201e3336b17f22219c8215d11eecc3408), [`4a41bf8`](https://github.com/knpkv/npm/commit/4a41bf82e327ec66a5df1202920f08e8e51554a4), [`e584518`](https://github.com/knpkv/npm/commit/e584518c9c98186e331a9962c4c6347c470cb3c5), [`d476bb0`](https://github.com/knpkv/npm/commit/d476bb0b2e2399c72eb2cd7b8c6005d833464598), [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327), [`765e850`](https://github.com/knpkv/npm/commit/765e850895d4edc16a75b3af072f71d527ad0b8c)]:
+  - @knpkv/rly@0.16.0
+  - @knpkv/herdr-work@0.9.3
+
 ## 0.8.0
 
 ### Minor Changes

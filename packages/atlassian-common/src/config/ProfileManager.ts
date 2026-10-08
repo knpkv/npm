@@ -148,8 +148,9 @@ const loadLegacyToken = (
     const homeDirectory = yield* HomeDirectoryTag
     const home = yield* homeDirectory.get()
     const authPath = path.join(home, ...tool.legacyAuthPath)
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    const exists = yield* fs.exists(authPath).pipe(Effect.catch(() => Effect.succeed(false)))
+    const exists = yield* fs.exists(authPath).pipe(
+      Effect.mapError((cause) => new FileSystemError({ operation: "check", path: authPath, cause }))
+    )
     if (!exists) return null
     const content = yield* fs.readFileString(authPath).pipe(
       Effect.mapError((cause) => new FileSystemError({ operation: "read", path: authPath, cause }))
@@ -157,12 +158,18 @@ const loadLegacyToken = (
     const parsed = yield* Effect.try({
       try: () => JSON.parse(content),
       catch: (): "invalid-json" => "invalid-json"
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    }).pipe(Effect.catch(() => Effect.succeed(null)))
+    }).pipe(
+      Effect.catch((reason) =>
+        Effect.logWarning(`Skipping the legacy auth file at ${authPath}: ${reason}`).pipe(Effect.as(null))
+      )
+    )
     if (parsed === null) return null
     return yield* Schema.decodeUnknownEffect(OAuthTokenSchema)(parsed).pipe(
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.catch(() => Effect.succeed(null))
+      Effect.catch((error) =>
+        Effect.logWarning(`Skipping the legacy auth file at ${authPath}: not a saved token`, error).pipe(
+          Effect.as(null)
+        )
+      )
     )
   })
 
@@ -259,8 +266,9 @@ export const migrateLegacyProfiles = (
       Effect.gen(function*() {
         const storeName = authStoreName(tool)
         const profilesPath = yield* getProfilesPath(storeName)
-        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        const hasProfilesFile = yield* fs.exists(profilesPath).pipe(Effect.catch(() => Effect.succeed(false)))
+        const hasProfilesFile = yield* fs.exists(profilesPath).pipe(
+          Effect.mapError((cause) => new FileSystemError({ operation: "check", path: profilesPath, cause }))
+        )
         if (hasProfilesFile) return
         const store = yield* loadProfiles(storeName)
         if (store.profiles.length > 0) {

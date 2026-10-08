@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Redacted from "effect/Redacted"
 import { stripEmails } from "../src/commands/version.js"
 import type { Version } from "../src/VersionService.js"
@@ -284,5 +285,42 @@ it.layer(VersionServiceLayer.pipe(Layer.provideMerge(makeJiraLayer())))("listPro
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ", { maxResults: 1 })
       expect(list[0]?.contributors.map((person) => person.accountId)).toEqual(["account-1", "account-2"])
+    }))
+})
+
+// A user Jira will not return (deleted, or hidden from this account) is shown by account id, with a warning.
+const unreadableUserLayer = () => {
+  const httpClient = HttpClient.make((request) => {
+    const [status, body] = request.url.includes("/project/PROJ/version")
+      ? [200, {
+        values: [{ id: "9", name: "9.0.0", released: false, self: "https://x/version/9", driver: "gone-1" }],
+        isLast: true
+      }]
+      : request.url.includes("/user")
+      ? [404, { errorMessages: ["User does not exist"] }]
+      : [200, { issues: [], isLast: true }]
+    return Effect.succeed(HttpClientResponse.fromWeb(
+      request,
+      new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+    ))
+  })
+  const api = make(httpClient, {
+    baseUrl: "https://jira.test",
+    auth: { type: "basic", email: "test@example.com", apiToken: Redacted.make("token") }
+  })
+  return Layer.succeed(JiraApiClient, JiraApiClient.of({ ...api, uploadAttachment: () => Effect.die("unused") }))
+}
+
+it.layer(VersionServiceLayer.pipe(Layer.provideMerge(unreadableUserLayer())))("unreadable users", (it) => {
+  it.effect("shows the account id and warns, naming the user", () =>
+    Effect.gen(function*() {
+      const messages: Array<unknown> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        messages.push(entry.message)
+      })
+      const service = yield* VersionService
+      const [version] = yield* service.listProjectVersions("PROJ").pipe(Effect.withLogger(logger))
+      expect(version?.driver).toEqual({ accountId: "gone-1", displayName: "gone-1", emailAddress: null })
+      expect(messages.map(String).join("\n")).toContain("Jira user gone-1 could not be read; showing the account id")
     }))
 })

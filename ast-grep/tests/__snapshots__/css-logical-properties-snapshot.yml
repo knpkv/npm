@@ -1,0 +1,52 @@
+id: css-logical-properties
+snapshots:
+  ? |
+    .x { border-bottom: 1px solid; }
+  : labels:
+      - source: border-bottom
+        style: primary
+        start: 5
+        end: 18
+  ? |
+    .x { border-top-left-radius: 2px; }
+  : labels:
+      - source: border-top-left-radius
+        style: primary
+        start: 5
+        end: 27
+  ? |
+    .x { margin-top: 1rem; }
+  : labels:
+      - source: margin-top
+        style: primary
+        start: 5
+        end: 15
+  ? |
+    .x { max-width: 28rem; }
+  : labels:
+      - source: max-width
+        style: primary
+        start: 5
+        end: 14
+  ? |
+    .x { text-align: left; }
+  : labels:
+      - source: "text-align: left;"
+        style: primary
+        start: 5
+        end: 22
+      - source: text-align
+        style: secondary
+        start: 5
+        end: 15
+      - source: left
+        style: secondary
+        start: 17
+        end: 21
+  ? |
+    .x { top: 0; }
+  : labels:
+      - source: top
+        style: primary
+        start: 5
+        end: 8

@@ -1,7 +1,9 @@
 @layer rly.components {
+  /* minmax(0, 1fr) tracks: the composer takes the panel's width, never its content's min-content width. */
   .root {
     display: grid;
     gap: var(--rly-space-8);
+    grid-template-columns: minmax(0, 1fr);
     min-inline-size: 0;
   }
   .refs {
@@ -35,10 +37,20 @@
     border-radius: var(--rly-radius-field);
     display: grid;
     gap: var(--rly-space-8);
+    grid-template-columns: minmax(0, 1fr);
     padding: var(--rly-space-8);
   }
   .box:focus-within {
     border-color: var(--rly-color-text-2);
+  }
+  /* The textarea's focus ring encloses the whole box (its text and its controls), not the text alone. */
+  .box:has(.input:focus-visible) {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  /* Its own ring would sit inside the box's; .box:has(.input:focus-visible) draws the one ring. */
+  .input:focus {
+    outline: none;
   }
   /* Grows with its text (sized in script), then scrolls: at most 12 lines or 40% of the viewport. */
   .input {
@@ -52,7 +64,6 @@
     inline-size: 100%;
     max-block-size: min(calc(12 * var(--rly-type-body-line-height)), 40dvh);
     min-block-size: calc(2 * var(--rly-type-body-line-height));
-    outline: none;
     overflow-y: auto;
     padding: var(--rly-space-4);
     resize: none;
@@ -63,6 +74,21 @@
     display: flex;
     flex-wrap: wrap;
     gap: var(--rly-space-8);
+  }
+  /*
+   * The preset shrinks with the panel: a long preset name truncates inside its menu trigger rather than
+   * widening the composer past the panel.
+   */
+  .preset {
+    display: flex;
+    flex: 1 1 12rem;
+    gap: var(--rly-space-8);
+    max-inline-size: 100%;
+    min-inline-size: 0;
+  }
+  .preset > * {
+    max-inline-size: 100%;
+    min-inline-size: 0;
   }
   .actions {
     align-items: center;

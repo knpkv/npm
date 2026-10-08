@@ -6,9 +6,12 @@ on:
   push:
     branches: [main]
 
+# A newer push to a pull request supersedes its running checks. Main is never cancelled: pushes there
+# land every few minutes while a full run takes longer, so cancelling left main with no completed run.
+# Main runs queue instead (GitHub keeps one running and the newest pending).
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions: {}
 

@@ -1,5 +1,22 @@
 # @knpkv/control-center
 
+## 0.12.0
+
+### Minor Changes
+
+- [#663](https://github.com/knpkv/npm/pull/663) [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6) Thanks [@konopkov](https://github.com/konopkov)! - Relay opens from one header launcher into one panel, replacing the "Ask Relay" link and the fixed chip. A PR page opens straight into its thread and notes the review panel on the page; elsewhere the panel offers the release conversation (or Relay's full page), which keeps its route and calling page, then the PR locator.
+
+### Patch Changes
+
+- [#672](https://github.com/knpkv/npm/pull/672) [`1ad3453`](https://github.com/knpkv/npm/commit/1ad345324b80b58c00cb7827aaab9f74634ef9e7) Thanks [@konopkov](https://github.com/konopkov)! - Hover styles apply only to a fine pointer, motion runs only when reduced motion is not requested, keyboard focus on page headings and the command search shows the focus ring, and overflow clipping and sizing use clip and logical properties.
+- Updated dependencies [[`1ea00b5`](https://github.com/knpkv/npm/commit/1ea00b527ca09262c38856da6cc143e86c0af6d1), [`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26), [`26d9de9`](https://github.com/knpkv/npm/commit/26d9de9c64b78da62ab462856cbd09e9137eb40f), [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6), [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327), [`8e2091a`](https://github.com/knpkv/npm/commit/8e2091af22179180f401b7eeb42b578ea785a492), [`aa274d2`](https://github.com/knpkv/npm/commit/aa274d2ef7b40c194acd57d204c158e46992386c), [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6), [`67f7ea1`](https://github.com/knpkv/npm/commit/67f7ea1a5e3c0281da1d627fce940975e2db0cf4), [`f5f5fd9`](https://github.com/knpkv/npm/commit/f5f5fd98dcea7b7df1b226043e89ffb6decaffad), [`ce3234a`](https://github.com/knpkv/npm/commit/ce3234a201e3336b17f22219c8215d11eecc3408), [`4a41bf8`](https://github.com/knpkv/npm/commit/4a41bf82e327ec66a5df1202920f08e8e51554a4), [`e584518`](https://github.com/knpkv/npm/commit/e584518c9c98186e331a9962c4c6347c470cb3c5), [`d476bb0`](https://github.com/knpkv/npm/commit/d476bb0b2e2399c72eb2cd7b8c6005d833464598), [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327), [`765e850`](https://github.com/knpkv/npm/commit/765e850895d4edc16a75b3af072f71d527ad0b8c), [`a5a7fcf`](https://github.com/knpkv/npm/commit/a5a7fcf055bfa7d0f6a1c1a0ae2cf4bc2eb8ab81)]:
+  - @knpkv/confluence-to-markdown@2.5.3
+  - @knpkv/codecommit-core@0.23.1
+  - @knpkv/relay-product@0.3.0
+  - @knpkv/review@0.4.6
+  - @knpkv/rly@0.16.0
+  - @knpkv/atlassian-common@1.9.3
+
 ## 0.11.0
 
 ### Minor Changes

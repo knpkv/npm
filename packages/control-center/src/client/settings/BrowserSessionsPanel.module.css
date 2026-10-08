@@ -65,12 +65,12 @@
 }
 
 .sessions {
-  border-top: 1px solid var(--rly-color-border-2);
+  border-block-start: 1px solid var(--rly-color-border-2);
   display: grid;
 }
 
 .session {
-  border-bottom: 1px solid var(--rly-color-border-2);
+  border-block-end: 1px solid var(--rly-color-border-2);
   padding: var(--rly-space-24) 0;
 }
 

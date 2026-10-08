@@ -6,16 +6,17 @@ import {
   PullRequestConversationRedirectFailed,
   RelayAuthenticationRequired,
   RelayAuthorizationDenied,
-  RelayProductDockChrome,
-  type RelayProductDockHost
+  type RelayProductDockHost,
+  RelayProductPanel
 } from "@knpkv/relay-product"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { type ReactElement, useMemo } from "react"
-import { useNavigate } from "react-router"
+import { useLocation, useNavigate } from "react-router"
 
 import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
 import { useBrowserSession } from "./BrowserSession.js"
+import { contextualAgentPath } from "./contextualAgentPath.js"
 import {
   controlCenterRelayCandidatesForAccount,
   controlCenterRelayHostSelection,
@@ -23,12 +24,23 @@ import {
 } from "./controlCenterRelayDock.js"
 import { workspaceEntityPath } from "./workspaceEntityPaths.js"
 
-/** Install Control Center's authenticated resolver behind the shared Relay chrome. */
-export const ControlCenterRelayDockChrome = (): ReactElement => {
+/**
+ * Relay's panel for Control Center, rendered right after the header launcher: a registered PR opens
+ * into its thread; elsewhere the panel offers the page's release conversation (or Relay's full page),
+ * which keeps its own route, durable key and origin, then the authenticated PR locator. The PR and
+ * entity pages are not measured beside a pinned column yet, so the pin is unavailable.
+ */
+export const ControlCenterRelayPanel = (): ReactElement => {
   const browserSession = useBrowserSession()
   const navigate = useNavigate()
+  const location = useLocation()
+  const agentPath = contextualAgentPath(location.pathname, location.search, location.hash)
   const host = useMemo<RelayProductDockHost>(
     () => ({
+      alternate: {
+        label: agentPath.startsWith("/agent?") ? "Open Relay's full page" : "Open the release conversation, full page",
+        onOpen: () => void navigate(agentPath, { state: location.state })
+      },
       context: [{ id: "product", label: "Product", value: "Control Center" }],
       locatePullRequestConversation: Effect.fn("ControlCenterRelayDock.locatePullRequestConversation")(function* (
         locator: PullRequestConversationLocator
@@ -105,7 +117,7 @@ export const ControlCenterRelayDockChrome = (): ReactElement => {
       product: "control-center",
       selection: controlCenterRelayHostSelection
     }),
-    [browserSession.state, navigate]
+    [agentPath, browserSession.state, location.state, navigate]
   )
-  return <RelayProductDockChrome host={host} />
+  return <RelayProductPanel host={host} pin={{ _tag: "Unavailable" }} />
 }

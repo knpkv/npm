@@ -76,7 +76,7 @@
     padding-block-start: var(--rly-space-24);
   }
 
-  @media (hover: hover) {
+  @media (hover: hover) and (pointer: fine) {
     .trigger:not(:disabled, [data-state="active"]):hover {
       color: var(--rly-color-text-1);
     }

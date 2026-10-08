@@ -23,6 +23,7 @@ import {
 } from "./controlCenterRelayDock.js"
 import type { PullRequestReviewControllerState } from "./entities/usePullRequestReview.js"
 import { workspaceEntityPath } from "./workspaceEntityPaths.js"
+import { reviewCountsLabel } from "./entities/reviewCounts.js"
 
 const eventMessage = (event: PullRequestReviewThreadEvent): RelayProductDockMessage | null => {
   switch (event._tag) {
@@ -34,7 +35,7 @@ const eventMessage = (event: PullRequestReviewThreadEvent): RelayProductDockMess
       return {
         id: String(event.eventSequence),
         role: "relay",
-        text: `${String(event.report.suggestions.length)} suggestions · ${String(event.report.notes.length)} notes`
+        text: reviewCountsLabel(event.report.suggestions.length, event.report.notes.length)
       }
     case "run-failed":
       return { id: String(event.eventSequence), role: "system", text: `Review failed at ${event.stage}.` }
@@ -226,6 +227,7 @@ export const ControlCenterRelayThread = ({
         })
       },
       messages: relayMessages(reviewState),
+      notice: "Also on this page: the review panel, with run, cancel and publish actions.",
       status: "ready"
     }
   }, [canEnqueue, conversation, details, inspection.source.vendorImmutableId, reviewState, selection, startReview])

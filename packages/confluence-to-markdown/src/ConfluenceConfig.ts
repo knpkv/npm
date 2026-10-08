@@ -71,8 +71,7 @@ const loadConfig = (
     const fs = yield* FileSystem.FileSystem
 
     const exists = yield* fs.exists(configPath).pipe(
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.catch(() => Effect.succeed(false))
+      Effect.mapError((cause) => new ConfigParseError({ path: configPath, cause }))
     )
     if (!exists) {
       return yield* Effect.fail(new ConfigNotFoundError({ path: configPath }))
@@ -225,8 +224,10 @@ export const createConfigFile = (
     )
 
     // Create .confluence directory if it doesn't exist
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    const dirExists = yield* fs.exists(configDir).pipe(Effect.catch(() => Effect.succeed(false)))
+    // A failed check falls through to a recursive makeDirectory, which reports any real problem.
+    const dirExists = yield* fs.exists(configDir).pipe(
+      Effect.catch((error) => Effect.logDebug(`Could not check ${configDir}`, error).pipe(Effect.as(false)))
+    )
     if (!dirExists) {
       yield* fs.makeDirectory(configDir, { recursive: true }).pipe(
         Effect.mapError((cause) => new ConfigParseError({ path: configDir, cause }))

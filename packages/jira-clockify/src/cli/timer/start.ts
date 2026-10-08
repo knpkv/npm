@@ -203,11 +203,16 @@ export const start = Command.make(
           )
           projectName = projects.find((p) => p.id === projectId)?.name ?? null
         }
+        // Saving defaults is secondary: the timer still starts, and the user is told the save failed.
         yield* cfg.set({
           ...(projectId && { defaultProjectId: projectId, defaultProjectName: projectName }),
           ...((billableVal !== undefined) && { defaultBillable: billableVal })
-        })
-        yield* Console.log("Defaults saved to ~/.jcf/config.json")
+        }).pipe(
+          Effect.matchEffect({
+            onFailure: (error) => Console.error(`Defaults not saved: ${error.message} The timer starts anyway.`),
+            onSuccess: () => Console.log("Defaults saved to ~/.jcf/config.json")
+          })
+        )
       }
 
       yield* timer.start(ticket, { projectId, billable: billableVal, startedAt }).pipe(Effect.mapError(toCommandFailed))
