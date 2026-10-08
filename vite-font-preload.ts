@@ -1,23 +1,27 @@
 /**
- * Preload rly's Geist UI font from a product shell's built index.html.
+ * Preload rly's Geist faces, UI and mono, from a product shell's built index.html.
  *
  * rly's styles.css asks for Geist only once the stylesheet has been parsed and a text node needs it,
  * so without a preload the first paint uses the metric-matched fallback and Geist swaps in later.
  * Add `rlyFontPreload()` to a Vite shell's plugins: after the bundle is written it finds the woff2
- * asset the CSS references and prepends `<link rel="preload" as="font" crossorigin>` for that exact
- * hashed file, so the preload and the CSS url() can never point at two different assets.
+ * assets the CSS references and prepends `<link rel="preload" as="font" crossorigin>` for each exact
+ * hashed file, so the preloads and the CSS url()s can never point at different assets. Both faces:
+ * mono sets ids and kickers, and a late mono swap re-wrapped lines (hub Approvals CLS 0.069 at 390).
  *
- * A build with no Geist asset fails, because a shell that imports rly styles always emits one.
+ * A build missing either face fails, because a shell that imports rly styles always emits both.
  * The dev server is left alone: it serves the font under a /@fs URL with no stable name, and dev
  * first-paint timing is not what the font-swap budget measures.
  */
 import { Data } from "effect"
 import type { HtmlTagDescriptor, Plugin } from "vite"
 
-/** The rly woff2 a shell preloads, as Fontsource names it. */
-export const RLY_PRELOADED_FONT = "geist-latin-wght-normal.woff2"
+/** The rly woff2 files a shell preloads, as Fontsource names them: every face rly's fonts.css loads. */
+export const RLY_PRELOADED_FONTS: readonly [string, string] = [
+  "geist-latin-wght-normal.woff2",
+  "geist-mono-latin-wght-normal.woff2"
+]
 
-/** The build emitted no Geist asset, so the shell does not load rly's styles or the font was renamed. */
+/** The build emitted no asset for a Geist face, so the shell does not load rly's styles or the font was renamed. */
 export class RlyFontPreloadMissingError extends Data.TaggedError("RlyFontPreloadMissingError")<{
   readonly font: string
   readonly html: string
@@ -38,20 +42,21 @@ export const findFontAsset = (bundle: FontBundle, font: string): string | undefi
     output.type === "asset" && (output.names ?? []).some((name) => name === font || name.endsWith(`/${font}`))
   )?.fileName
 
-/** The preload tag for `html`'s build, or a tagged failure when the bundle carries no Geist. */
+/** The preload tags for `html`'s build, one per Geist face, or a tagged failure when a face is missing. */
 export const fontPreloadTags = (
   bundle: FontBundle,
   base: string,
   html: string
-): ReadonlyArray<HtmlTagDescriptor> => {
-  const fileName = findFontAsset(bundle, RLY_PRELOADED_FONT)
-  if (fileName === undefined) throw new RlyFontPreloadMissingError({ font: RLY_PRELOADED_FONT, html })
-  return [{
-    attrs: { as: "font", crossorigin: "", href: `${base}${fileName}`, rel: "preload", type: "font/woff2" },
-    injectTo: "head-prepend",
-    tag: "link"
-  }]
-}
+): ReadonlyArray<HtmlTagDescriptor> =>
+  RLY_PRELOADED_FONTS.map((font) => {
+    const fileName = findFontAsset(bundle, font)
+    if (fileName === undefined) throw new RlyFontPreloadMissingError({ font, html })
+    return {
+      attrs: { as: "font", crossorigin: "", href: `${base}${fileName}`, rel: "preload", type: "font/woff2" },
+      injectTo: "head-prepend",
+      tag: "link"
+    }
+  })
 
 /** The Vite plugin; see the module comment. */
 export const rlyFontPreload = (): Plugin => {
