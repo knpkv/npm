@@ -1,0 +1,35 @@
+id: css-hover-in-hover-media
+snapshots:
+  ? |
+    .review-checkbox:hover input { border-color: red; }
+  : labels:
+      - source: .review-checkbox:hover
+        style: primary
+        start: 0
+        end: 22
+      - source: hover
+        style: secondary
+        start: 17
+        end: 22
+  ? |
+    .review-nav li a:hover { text-decoration: underline; }
+  : labels:
+      - source: .review-nav li a:hover
+        style: primary
+        start: 0
+        end: 22
+      - source: hover
+        style: secondary
+        start: 17
+        end: 22
+  ? |
+    @media (pointer: fine) { .x:hover { color: red; } }
+  : labels:
+      - source: .x:hover
+        style: primary
+        start: 25
+        end: 33
+      - source: hover
+        style: secondary
+        start: 28
+        end: 33

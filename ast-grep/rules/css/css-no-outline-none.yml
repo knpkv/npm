@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: css-no-outline-none
+language: css
+severity: error
+message: "Never remove the outline; forced colours and keyboard users lose the focus ring"
+
+rule:
+  kind: declaration
+  all:
+    - has:
+        kind: property_name
+        regex: "(?i)^outline(-style|-width)?$"
+    - any:
+        - has:
+            kind: plain_value
+            regex: "(?i)^none$"
+        - has:
+            kind: integer_value
+            regex: "^0$"
+  not:
+    inside:
+      kind: media_statement
+      regex: "(?i)forced-colors"
+      stopBy: end
+
+files:
+  - "packages/herdr-monitor/src/**/*.css"
+
+note: |
+  To draw focus another way (an SVG stroke), keep a transparent outline at the rly ring width:
+  outline: var(--rly-focus-ring-width) solid transparent. It stays invisible in normal colours and
+  becomes the system ring in forced colours. :focus:not(:focus-visible) { outline: none } is not an
+  exception; rly's ring is already :focus-visible only.

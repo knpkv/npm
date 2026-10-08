@@ -1,0 +1,47 @@
+id: css-no-outline-none
+snapshots:
+  ? |
+    .usage-column-target { outline: none; }
+  : labels:
+      - source: "outline: none;"
+        style: primary
+        start: 23
+        end: 37
+      - source: outline
+        style: secondary
+        start: 23
+        end: 30
+      - source: none
+        style: secondary
+        start: 32
+        end: 36
+  ? |
+    .x { outline-style: none; }
+  : labels:
+      - source: "outline-style: none;"
+        style: primary
+        start: 5
+        end: 25
+      - source: outline-style
+        style: secondary
+        start: 5
+        end: 18
+      - source: none
+        style: secondary
+        start: 20
+        end: 24
+  ? |
+    .x:focus:not(:focus-visible) { outline: 0; }
+  : labels:
+      - source: "outline: 0;"
+        style: primary
+        start: 31
+        end: 42
+      - source: outline
+        style: secondary
+        start: 31
+        end: 38
+      - source: "0"
+        style: secondary
+        start: 40
+        end: 41
