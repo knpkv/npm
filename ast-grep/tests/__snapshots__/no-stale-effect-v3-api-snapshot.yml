@@ -3,26 +3,26 @@ snapshots:
   ? |
     class Users extends Context.Tag("Users")<Users, UsersShape>() {}
   : labels:
-    - source: Context.Tag("Users")
-      style: primary
-      start: 20
-      end: 40
+      - source: Context.Tag("Users")
+        style: primary
+        start: 20
+        end: 40
   ? |
     const program = Effect.gen(this, function* () {
       return 1
     })
   : labels:
-    - source: |-
-        Effect.gen(this, function* () {
-          return 1
-        })
-      style: primary
-      start: 16
-      end: 61
+      - source: |-
+          Effect.gen(this, function* () {
+            return 1
+          })
+        style: primary
+        start: 16
+        end: 61
   ? |
     const recovered = effect.pipe(Effect.catchAll(() => Effect.succeed(fallback)))
   : labels:
-    - source: Effect.catchAll(() => Effect.succeed(fallback))
-      style: primary
-      start: 30
-      end: 77
+      - source: Effect.catchAll(() => Effect.succeed(fallback))
+        style: primary
+        start: 30
+        end: 77

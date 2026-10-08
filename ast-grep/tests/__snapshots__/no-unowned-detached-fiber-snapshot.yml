@@ -3,14 +3,14 @@ snapshots:
   ? |
     const worker = Effect.forkDetach(loop)
   : labels:
-    - source: Effect.forkDetach(loop)
-      style: primary
-      start: 15
-      end: 38
+      - source: Effect.forkDetach(loop)
+        style: primary
+        start: 15
+        end: 38
   ? |
     const worker = loop.pipe(Effect.forkDetach)
   : labels:
-    - source: Effect.forkDetach
-      style: primary
-      start: 25
-      end: 42
+      - source: Effect.forkDetach
+        style: primary
+        start: 25
+        end: 42

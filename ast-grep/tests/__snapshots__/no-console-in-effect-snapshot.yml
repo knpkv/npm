@@ -5,14 +5,14 @@ snapshots:
       console.log("started")
     })
   : labels:
-    - source: console.log("started")
-      style: primary
-      start: 44
-      end: 66
-    - source: |-
-        Effect.gen(function* () {
-          console.log("started")
-        })
-      style: secondary
-      start: 16
-      end: 69
+      - source: console.log("started")
+        style: primary
+        start: 44
+        end: 66
+      - source: |-
+          Effect.gen(function* () {
+            console.log("started")
+          })
+        style: secondary
+        start: 16
+        end: 69

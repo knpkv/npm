@@ -4,30 +4,30 @@ snapshots:
     // the temp directory goes away anyway
     yield* fs.remove(tmp).pipe(Effect.ignoreCause)
   : labels:
-    - source: Effect.ignoreCause
-      style: primary
-      start: 66
-      end: 84
+      - source: Effect.ignoreCause
+        style: primary
+        start: 66
+        end: 84
   ? |
     const released = unlock.pipe(
       Effect.ignore
     )
   : labels:
-    - source: Effect.ignore
-      style: primary
-      start: 32
-      end: 45
+      - source: Effect.ignore
+        style: primary
+        start: 32
+        end: 45
   ? |
     yield* Effect.ignore(release)
   : labels:
-    - source: Effect.ignore
-      style: primary
-      start: 7
-      end: 20
+      - source: Effect.ignore
+        style: primary
+        start: 7
+        end: 20
   ? |
     yield* fs.remove(tmp).pipe(Effect.ignore)
   : labels:
-    - source: Effect.ignore
-      style: primary
-      start: 27
-      end: 40
+      - source: Effect.ignore
+        style: primary
+        start: 27
+        end: 40

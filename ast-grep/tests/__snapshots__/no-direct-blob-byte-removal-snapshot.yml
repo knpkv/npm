@@ -2,7 +2,7 @@ id: no-direct-blob-byte-removal
 snapshots:
   blobs.removeAuthorizedBytes(workspaceId, digest):
     labels:
-    - source: blobs.removeAuthorizedBytes(workspaceId, digest)
-      style: primary
-      start: 0
-      end: 48
+      - source: blobs.removeAuthorizedBytes(workspaceId, digest)
+        style: primary
+        start: 0
+        end: 48

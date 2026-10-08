@@ -6,29 +6,29 @@ snapshots:
       insert.run(index)
     }
   : labels:
-    - source: insert.run(index)
-      style: primary
-      start: 109
-      end: 126
-    - source: const insert = database.prepare("INSERT INTO rows VALUES (?)")
-      style: secondary
-      start: 0
-      end: 62
-    - source: |
-        const insert = database.prepare("INSERT INTO rows VALUES (?)")
-        for (let index = 0; index < 500; index++) {
-          insert.run(index)
-        }
-      style: secondary
-      start: 0
-      end: 129
-    - source: |-
-        for (let index = 0; index < 500; index++) {
-          insert.run(index)
-        }
-      style: secondary
-      start: 63
-      end: 128
+      - source: insert.run(index)
+        style: primary
+        start: 109
+        end: 126
+      - source: const insert = database.prepare("INSERT INTO rows VALUES (?)")
+        style: secondary
+        start: 0
+        end: 62
+      - source: |
+          const insert = database.prepare("INSERT INTO rows VALUES (?)")
+          for (let index = 0; index < 500; index++) {
+            insert.run(index)
+          }
+        style: secondary
+        start: 0
+        end: 129
+      - source: |-
+          for (let index = 0; index < 500; index++) {
+            insert.run(index)
+          }
+        style: secondary
+        start: 63
+        end: 128
   ? |
     const oversizedLegacy = new DatabaseSync(oversizedLegacyPath)
     for (let index = 0; index < 260; index++) {
@@ -36,17 +36,17 @@ snapshots:
     }
     oversizedLegacy.close()
   : labels:
-    - source: oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)").run(index, index, index, index)
-      style: primary
-      start: 108
-      end: 221
-    - source: |-
-        for (let index = 0; index < 260; index++) {
-          oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)").run(index, index, index, index)
-        }
-      style: secondary
-      start: 62
-      end: 223
+      - source: oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)").run(index, index, index, index)
+        style: primary
+        start: 108
+        end: 221
+      - source: |-
+          for (let index = 0; index < 260; index++) {
+            oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)").run(index, index, index, index)
+          }
+        style: secondary
+        start: 62
+        end: 223
   ? |
     database.exec("BEGIN")
     database.exec("COMMIT")
@@ -54,17 +54,17 @@ snapshots:
       database.prepare("INSERT INTO rows VALUES (?)").run(index)
     }
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(index)
-      style: primary
-      start: 93
-      end: 151
-    - source: |-
-        for (let index = 0; index < 260; index++) {
-          database.prepare("INSERT INTO rows VALUES (?)").run(index)
-        }
-      style: secondary
-      start: 47
-      end: 153
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(index)
+        style: primary
+        start: 93
+        end: 151
+      - source: |-
+          for (let index = 0; index < 260; index++) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(index)
+          }
+        style: secondary
+        start: 47
+        end: 153
   ? |
     database.exec("BEGIN")
     try {
@@ -76,17 +76,17 @@ snapshots:
       database.close()
     }
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
-      style: primary
-      start: 87
-      end: 143
-    - source: |-
-        for (const row of rows) {
-            database.prepare("INSERT INTO rows VALUES (?)").run(row)
-          }
-      style: secondary
-      start: 57
-      end: 147
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
+        style: primary
+        start: 87
+        end: 143
+      - source: |-
+          for (const row of rows) {
+              database.prepare("INSERT INTO rows VALUES (?)").run(row)
+            }
+        style: secondary
+        start: 57
+        end: 147
   ? |
     database.exec(`
       CREATE TRIGGER rows_after_insert AFTER INSERT ON rows
@@ -98,33 +98,33 @@ snapshots:
       database.prepare("INSERT INTO rows VALUES (?)").run(row)
     }
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
-      style: primary
-      start: 159
-      end: 215
-    - source: |-
-        for (const row of rows) {
-          database.prepare("INSERT INTO rows VALUES (?)").run(row)
-        }
-      style: secondary
-      start: 131
-      end: 217
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
+        style: primary
+        start: 159
+        end: 215
+      - source: |-
+          for (const row of rows) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(row)
+          }
+        style: secondary
+        start: 131
+        end: 217
   ? |
     for (const key in rows) {
       database.prepare("INSERT INTO rows VALUES (?)").run(key)
     }
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(key)
-      style: primary
-      start: 28
-      end: 84
-    - source: |-
-        for (const key in rows) {
-          database.prepare("INSERT INTO rows VALUES (?)").run(key)
-        }
-      style: secondary
-      start: 0
-      end: 86
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(key)
+        style: primary
+        start: 28
+        end: 84
+      - source: |-
+          for (const key in rows) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(key)
+          }
+        style: secondary
+        start: 0
+        end: 86
   ? |
     for (const path of paths) {
       const database = new DatabaseSync(path)
@@ -134,67 +134,67 @@ snapshots:
       database.close()
     }
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
-      style: primary
-      start: 102
-      end: 158
-    - source: |-
-        for (const row of rows) {
-            database.prepare("INSERT INTO rows VALUES (?)").run(row)
-          }
-      style: secondary
-      start: 72
-      end: 162
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
+        style: primary
+        start: 102
+        end: 158
+      - source: |-
+          for (const row of rows) {
+              database.prepare("INSERT INTO rows VALUES (?)").run(row)
+            }
+        style: secondary
+        start: 72
+        end: 162
   ? |
     for (const row of rows) {
       database.prepare("INSERT INTO rows VALUES (?)").run(row)
     }
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
-      style: primary
-      start: 28
-      end: 84
-    - source: |-
-        for (const row of rows) {
-          database.prepare("INSERT INTO rows VALUES (?)").run(row)
-        }
-      style: secondary
-      start: 0
-      end: 86
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
+        style: primary
+        start: 28
+        end: 84
+      - source: |-
+          for (const row of rows) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(row)
+          }
+        style: secondary
+        start: 0
+        end: 86
   ? |
     let index = 0
     do {
       database.prepare("INSERT INTO rows VALUES (?)").run(index++)
     } while (index < 260)
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(index++)
-      style: primary
-      start: 21
-      end: 81
-    - source: |-
-        do {
-          database.prepare("INSERT INTO rows VALUES (?)").run(index++)
-        } while (index < 260)
-      style: secondary
-      start: 14
-      end: 103
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+        style: primary
+        start: 21
+        end: 81
+      - source: |-
+          do {
+            database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+          } while (index < 260)
+        style: secondary
+        start: 14
+        end: 103
   ? |
     let index = 0
     while (index < 260) {
       database.prepare("INSERT INTO rows VALUES (?)").run(index++)
     }
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(index++)
-      style: primary
-      start: 38
-      end: 98
-    - source: |-
-        while (index < 260) {
-          database.prepare("INSERT INTO rows VALUES (?)").run(index++)
-        }
-      style: secondary
-      start: 14
-      end: 100
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+        style: primary
+        start: 38
+        end: 98
+      - source: |-
+          while (index < 260) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(index++)
+          }
+        style: secondary
+        start: 14
+        end: 100
   ? |
     other.exec("BEGIN")
     const insert = database.prepare("INSERT INTO rows VALUES (?)")
@@ -202,30 +202,30 @@ snapshots:
       insert.run(index)
     }
   : labels:
-    - source: insert.run(index)
-      style: primary
-      start: 129
-      end: 146
-    - source: const insert = database.prepare("INSERT INTO rows VALUES (?)")
-      style: secondary
-      start: 20
-      end: 82
-    - source: |
-        other.exec("BEGIN")
-        const insert = database.prepare("INSERT INTO rows VALUES (?)")
-        for (let index = 0; index < 500; index++) {
-          insert.run(index)
-        }
-      style: secondary
-      start: 0
-      end: 149
-    - source: |-
-        for (let index = 0; index < 500; index++) {
-          insert.run(index)
-        }
-      style: secondary
-      start: 83
-      end: 148
+      - source: insert.run(index)
+        style: primary
+        start: 129
+        end: 146
+      - source: const insert = database.prepare("INSERT INTO rows VALUES (?)")
+        style: secondary
+        start: 20
+        end: 82
+      - source: |
+          other.exec("BEGIN")
+          const insert = database.prepare("INSERT INTO rows VALUES (?)")
+          for (let index = 0; index < 500; index++) {
+            insert.run(index)
+          }
+        style: secondary
+        start: 0
+        end: 149
+      - source: |-
+          for (let index = 0; index < 500; index++) {
+            insert.run(index)
+          }
+        style: secondary
+        start: 83
+        end: 148
   ? |
     other.exec("BEGIN")
     for (let index = 0; index < 260; index++) {
@@ -233,17 +233,17 @@ snapshots:
     }
     other.exec("COMMIT")
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(index)
-      style: primary
-      start: 66
-      end: 124
-    - source: |-
-        for (let index = 0; index < 260; index++) {
-          database.prepare("INSERT INTO rows VALUES (?)").run(index)
-        }
-      style: secondary
-      start: 20
-      end: 126
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(index)
+        style: primary
+        start: 66
+        end: 124
+      - source: |-
+          for (let index = 0; index < 260; index++) {
+            database.prepare("INSERT INTO rows VALUES (?)").run(index)
+          }
+        style: secondary
+        start: 20
+        end: 126
   ? |
     try {
       for (let index = 0; index < 260; index++) {
@@ -253,17 +253,17 @@ snapshots:
       database.close()
     }
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(index)
-      style: primary
-      start: 56
-      end: 114
-    - source: |-
-        for (let index = 0; index < 260; index++) {
-            database.prepare("INSERT INTO rows VALUES (?)").run(index)
-          }
-      style: secondary
-      start: 8
-      end: 118
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(index)
+        style: primary
+        start: 56
+        end: 114
+      - source: |-
+          for (let index = 0; index < 260; index++) {
+              database.prepare("INSERT INTO rows VALUES (?)").run(index)
+            }
+        style: secondary
+        start: 8
+        end: 118
   ? |
     withTransaction(other, () => {
       for (const row of rows) {
@@ -271,14 +271,14 @@ snapshots:
       }
     })
   : labels:
-    - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
-      style: primary
-      start: 63
-      end: 119
-    - source: |-
-        for (const row of rows) {
-            database.prepare("INSERT INTO rows VALUES (?)").run(row)
-          }
-      style: secondary
-      start: 33
-      end: 123
+      - source: database.prepare("INSERT INTO rows VALUES (?)").run(row)
+        style: primary
+        start: 63
+        end: 119
+      - source: |-
+          for (const row of rows) {
+              database.prepare("INSERT INTO rows VALUES (?)").run(row)
+            }
+        style: secondary
+        start: 33
+        end: 123

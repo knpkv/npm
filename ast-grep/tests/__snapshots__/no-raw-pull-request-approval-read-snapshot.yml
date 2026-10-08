@@ -3,14 +3,14 @@ snapshots:
   ? |
     const bonus = pr.isApproved ? 2 : 0
   : labels:
-    - source: pr.isApproved
-      style: primary
-      start: 14
-      end: 27
+      - source: pr.isApproved
+        style: primary
+        start: 14
+        end: 27
   ? |
     return !pullRequest.isApproved
   : labels:
-    - source: pullRequest.isApproved
-      style: primary
-      start: 8
-      end: 30
+      - source: pullRequest.isApproved
+        style: primary
+        start: 8
+        end: 30

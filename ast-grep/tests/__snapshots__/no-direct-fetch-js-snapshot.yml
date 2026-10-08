@@ -3,14 +3,14 @@ snapshots:
   ? |
     const response = await fetch(url)
   : labels:
-    - source: fetch(url)
-      style: primary
-      start: 23
-      end: 33
+      - source: fetch(url)
+        style: primary
+        start: 23
+        end: 33
   ? |
     const response = await globalThis.fetch(url, { method: "POST" })
   : labels:
-    - source: 'globalThis.fetch(url, { method: "POST" })'
-      style: primary
-      start: 23
-      end: 64
+      - source: 'globalThis.fetch(url, { method: "POST" })'
+        style: primary
+        start: 23
+        end: 64

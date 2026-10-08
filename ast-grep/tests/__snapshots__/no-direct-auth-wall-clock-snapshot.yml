@@ -3,7 +3,7 @@ snapshots:
   ? |
     const expiresAt = Date.now() + expiresIn
   : labels:
-    - source: Date.now()
-      style: primary
-      start: 18
-      end: 28
+      - source: Date.now()
+        style: primary
+        start: 18
+        end: 28

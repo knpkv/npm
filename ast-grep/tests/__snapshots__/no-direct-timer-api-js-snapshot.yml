@@ -3,21 +3,21 @@ snapshots:
   ? |
     const now = Date.now()
   : labels:
-    - source: Date.now()
-      style: primary
-      start: 12
-      end: 22
+      - source: Date.now()
+        style: primary
+        start: 12
+        end: 22
   ? |
     const today = new Date()
   : labels:
-    - source: new Date()
-      style: primary
-      start: 14
-      end: 24
+      - source: new Date()
+        style: primary
+        start: 14
+        end: 24
   ? |
     setInterval(poll, 1000)
   : labels:
-    - source: setInterval(poll, 1000)
-      style: primary
-      start: 0
-      end: 23
+      - source: setInterval(poll, 1000)
+        style: primary
+        start: 0
+        end: 23

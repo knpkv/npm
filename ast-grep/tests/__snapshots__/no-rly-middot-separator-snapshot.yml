@@ -2,13 +2,13 @@ id: no-rly-middot-separator
 snapshots:
   const label = <span>{provider} · {capability}</span>:
     labels:
-    - source: ' · '
-      style: primary
-      start: 30
-      end: 34
+      - source: " · "
+        style: primary
+        start: 30
+        end: 34
   const text = "Agent finding · not an approval":
     labels:
-    - source: Agent finding · not an approval
-      style: primary
-      start: 14
-      end: 46
+      - source: Agent finding · not an approval
+        style: primary
+        start: 14
+        end: 46

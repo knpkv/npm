@@ -9,24 +9,24 @@ snapshots:
       }
     }
   : labels:
-    - source: |-
-        put() {
-            return Effect.gen(function*() {
-              return yield* Effect.succeed("stored")
-            })
-          }
-      style: primary
-      start: 16
-      end: 115
-    - source: |-
-        {
-            return Effect.gen(function*() {
-              return yield* Effect.succeed("stored")
-            })
-          }
-      style: secondary
-      start: 22
-      end: 115
+      - source: |-
+          put() {
+              return Effect.gen(function*() {
+                return yield* Effect.succeed("stored")
+              })
+            }
+        style: primary
+        start: 16
+        end: 115
+      - source: |-
+          {
+              return Effect.gen(function*() {
+                return yield* Effect.succeed("stored")
+              })
+            }
+        style: secondary
+        start: 22
+        end: 115
   ? |
     class Store {
       put() {
@@ -34,20 +34,20 @@ snapshots:
       }
     }
   : labels:
-    - source: |-
-        put() {
-            return Effect.uninterruptibleMask(() => Effect.succeed("stored"))
-          }
-      style: primary
-      start: 16
-      end: 97
-    - source: |-
-        {
-            return Effect.uninterruptibleMask(() => Effect.succeed("stored"))
-          }
-      style: secondary
-      start: 22
-      end: 97
+      - source: |-
+          put() {
+              return Effect.uninterruptibleMask(() => Effect.succeed("stored"))
+            }
+        style: primary
+        start: 16
+        end: 97
+      - source: |-
+          {
+              return Effect.uninterruptibleMask(() => Effect.succeed("stored"))
+            }
+        style: secondary
+        start: 22
+        end: 97
   ? |
     class Store {
       put() {
@@ -55,20 +55,20 @@ snapshots:
       }
     }
   : labels:
-    - source: |-
-        put() {
-            return Effect.uninterruptibleMask(() => Effect.succeed("stored")).pipe(Effect.provide(layer))
-          }
-      style: primary
-      start: 16
-      end: 125
-    - source: |-
-        {
-            return Effect.uninterruptibleMask(() => Effect.succeed("stored")).pipe(Effect.provide(layer))
-          }
-      style: secondary
-      start: 22
-      end: 125
+      - source: |-
+          put() {
+              return Effect.uninterruptibleMask(() => Effect.succeed("stored")).pipe(Effect.provide(layer))
+            }
+        style: primary
+        start: 16
+        end: 125
+      - source: |-
+          {
+              return Effect.uninterruptibleMask(() => Effect.succeed("stored")).pipe(Effect.provide(layer))
+            }
+        style: secondary
+        start: 22
+        end: 125
   ? |
     const claim = <Failure, Requirements>(
       value: string
@@ -77,150 +77,150 @@ snapshots:
         return value
       }).pipe(Effect.provide(layer))
   : labels:
-    - source: |-
-        claim = <Failure, Requirements>(
-          value: string
-        ): Effect.Effect<string, Failure, Requirements> =>
+      - source: |-
+          claim = <Failure, Requirements>(
+            value: string
+          ): Effect.Effect<string, Failure, Requirements> =>
+            Effect.gen(function*() {
+              return value
+            }).pipe(Effect.provide(layer))
+        style: primary
+        start: 6
+        end: 182
+      - source: <Failure, Requirements>
+        style: secondary
+        start: 14
+        end: 37
+      - source: |-
           Effect.gen(function*() {
-            return value
-          }).pipe(Effect.provide(layer))
-      style: primary
-      start: 6
-      end: 182
-    - source: <Failure, Requirements>
-      style: secondary
-      start: 14
-      end: 37
-    - source: |-
-        Effect.gen(function*() {
-            return value
-          }).pipe(Effect.provide(layer))
-      style: secondary
-      start: 108
-      end: 182
-    - source: |-
-        <Failure, Requirements>(
-          value: string
-        ): Effect.Effect<string, Failure, Requirements> =>
-          Effect.gen(function*() {
-            return value
-          }).pipe(Effect.provide(layer))
-      style: secondary
-      start: 14
-      end: 182
+              return value
+            }).pipe(Effect.provide(layer))
+        style: secondary
+        start: 108
+        end: 182
+      - source: |-
+          <Failure, Requirements>(
+            value: string
+          ): Effect.Effect<string, Failure, Requirements> =>
+            Effect.gen(function*() {
+              return value
+            }).pipe(Effect.provide(layer))
+        style: secondary
+        start: 14
+        end: 182
   ? |
     const collect: FilterServiceContract["collect"] = (targets) =>
       Effect.gen(function*() {
         return yield* fanOut(targets)
       })
   : labels:
-    - source: |-
-        const collect: FilterServiceContract["collect"] = (targets) =>
-          Effect.gen(function*() {
-            return yield* fanOut(targets)
-          })
-      style: primary
-      start: 0
-      end: 128
+      - source: |-
+          const collect: FilterServiceContract["collect"] = (targets) =>
+            Effect.gen(function*() {
+              return yield* fanOut(targets)
+            })
+        style: primary
+        start: 0
+        end: 128
   ? |
     const collectMatching = (stream) =>
       stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
   : labels:
-    - source: |-
-        const collectMatching = (stream) =>
-          stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
-      style: primary
-      start: 0
-      end: 113
+      - source: |-
+          const collectMatching = (stream) =>
+            stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
+        style: primary
+        start: 0
+        end: 113
   ? |
     const collectOpen: FilterServiceContract["collectOpen"] = (targets, opts) =>
       fanOut(targets, opts).pipe(Effect.map(({ prs }) => ({ prs })))
   : labels:
-    - source: |-
-        const collectOpen: FilterServiceContract["collectOpen"] = (targets, opts) =>
-          fanOut(targets, opts).pipe(Effect.map(({ prs }) => ({ prs })))
-      style: primary
-      start: 0
-      end: 141
+      - source: |-
+          const collectOpen: FilterServiceContract["collectOpen"] = (targets, opts) =>
+            fanOut(targets, opts).pipe(Effect.map(({ prs }) => ({ prs })))
+        style: primary
+        start: 0
+        end: 141
   ? |
     const fetchJson = <A,>(schema: Schema.Codec<A>) =>
       Effect.gen(function*() {
         return yield* Schema.decodeUnknownEffect(schema)({})
       })
   : labels:
-    - source: |-
-        fetchJson = <A,>(schema: Schema.Codec<A>) =>
+      - source: |-
+          fetchJson = <A,>(schema: Schema.Codec<A>) =>
+            Effect.gen(function*() {
+              return yield* Schema.decodeUnknownEffect(schema)({})
+            })
+        style: primary
+        start: 6
+        end: 139
+      - source: <A,>
+        style: secondary
+        start: 18
+        end: 22
+      - source: |-
           Effect.gen(function*() {
-            return yield* Schema.decodeUnknownEffect(schema)({})
-          })
-      style: primary
-      start: 6
-      end: 139
-    - source: <A,>
-      style: secondary
-      start: 18
-      end: 22
-    - source: |-
-        Effect.gen(function*() {
-            return yield* Schema.decodeUnknownEffect(schema)({})
-          })
-      style: secondary
-      start: 53
-      end: 139
-    - source: |-
-        <A,>(schema: Schema.Codec<A>) =>
-          Effect.gen(function*() {
-            return yield* Schema.decodeUnknownEffect(schema)({})
-          })
-      style: secondary
-      start: 18
-      end: 139
+              return yield* Schema.decodeUnknownEffect(schema)({})
+            })
+        style: secondary
+        start: 53
+        end: 139
+      - source: |-
+          <A,>(schema: Schema.Codec<A>) =>
+            Effect.gen(function*() {
+              return yield* Schema.decodeUnknownEffect(schema)({})
+            })
+        style: secondary
+        start: 18
+        end: 139
   ? |
     const gitOutput = (path, args) =>
       spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
   : labels:
-    - source: |-
-        const gitOutput = (path, args) =>
-          spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
-      style: primary
-      start: 0
-      end: 115
+      - source: |-
+          const gitOutput = (path, args) =>
+            spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
+        style: primary
+        start: 0
+        end: 115
   ? |
     const load = (id: Id) => Effect.gen(function*() {
       return yield* repository.load(id)
     })
   : labels:
-    - source: |-
-        const load = (id: Id) => Effect.gen(function*() {
-          return yield* repository.load(id)
-        })
-      style: primary
-      start: 0
-      end: 88
+      - source: |-
+          const load = (id: Id) => Effect.gen(function*() {
+            return yield* repository.load(id)
+          })
+        style: primary
+        start: 0
+        end: 88
   ? |
     const load = (id: Id) => Effect.gen(function*() {
       return yield* repository.load(id)
     }).pipe(Effect.provide(layer))
   : labels:
-    - source: |-
-        const load = (id: Id) => Effect.gen(function*() {
-          return yield* repository.load(id)
-        }).pipe(Effect.provide(layer))
-      style: primary
-      start: 0
-      end: 116
+      - source: |-
+          const load = (id: Id) => Effect.gen(function*() {
+            return yield* repository.load(id)
+          }).pipe(Effect.provide(layer))
+        style: primary
+        start: 0
+        end: 116
   ? |
     const load = (id: Id): Effect.Effect<Item> => Effect.gen(function*() {
       return yield* repository.load(id)
     })
   : labels:
-    - source: |-
-        const load = (id: Id): Effect.Effect<Item> => Effect.gen(function*() {
-          return yield* repository.load(id)
-        })
-      style: primary
-      start: 0
-      end: 109
+      - source: |-
+          const load = (id: Id): Effect.Effect<Item> => Effect.gen(function*() {
+            return yield* repository.load(id)
+          })
+        style: primary
+        start: 0
+        end: 109
   ? |
     const load = function loadItem(id: Id) {
       return Effect.gen(function*() {
@@ -228,15 +228,15 @@ snapshots:
       })
     }
   : labels:
-    - source: |-
-        const load = function loadItem(id: Id) {
-          return Effect.gen(function*() {
-            return yield* repository.load(id)
-          })
-        }
-      style: primary
-      start: 0
-      end: 119
+      - source: |-
+          const load = function loadItem(id: Id) {
+            return Effect.gen(function*() {
+              return yield* repository.load(id)
+            })
+          }
+        style: primary
+        start: 0
+        end: 119
   ? |
     const load = function loadItem(id: Id) {
       return Effect.gen(function*() {
@@ -244,15 +244,15 @@ snapshots:
       }).pipe(Effect.provide(layer))
     }
   : labels:
-    - source: |-
-        const load = function loadItem(id: Id) {
-          return Effect.gen(function*() {
-            return yield* repository.load(id)
-          }).pipe(Effect.provide(layer))
-        }
-      style: primary
-      start: 0
-      end: 147
+      - source: |-
+          const load = function loadItem(id: Id) {
+            return Effect.gen(function*() {
+              return yield* repository.load(id)
+            }).pipe(Effect.provide(layer))
+          }
+        style: primary
+        start: 0
+        end: 147
   ? |
     const load = function loadItem(id: Id): Effect.Effect<Item> {
       return Effect.gen(function*() {
@@ -260,15 +260,15 @@ snapshots:
       }).pipe(Effect.provide(layer))
     }
   : labels:
-    - source: |-
-        const load = function loadItem(id: Id): Effect.Effect<Item> {
-          return Effect.gen(function*() {
-            return yield* repository.load(id)
-          }).pipe(Effect.provide(layer))
-        }
-      style: primary
-      start: 0
-      end: 168
+      - source: |-
+          const load = function loadItem(id: Id): Effect.Effect<Item> {
+            return Effect.gen(function*() {
+              return yield* repository.load(id)
+            }).pipe(Effect.provide(layer))
+          }
+        style: primary
+        start: 0
+        end: 168
   ? |
     const load = function loadItem<Value>(value: Value) {
       return Effect.gen(function*() {
@@ -276,165 +276,153 @@ snapshots:
       })
     }
   : labels:
-    - source: |-
-        load = function loadItem<Value>(value: Value) {
-          return Effect.gen(function*() {
-            return value
-          })
-        }
-      style: primary
-      start: 6
-      end: 111
-    - source: <Value>
-      style: secondary
-      start: 30
-      end: 37
-    - source: |-
-        {
-          return Effect.gen(function*() {
-            return value
-          })
-        }
-      style: secondary
-      start: 52
-      end: 111
-    - source: |-
-        function loadItem<Value>(value: Value) {
-          return Effect.gen(function*() {
-            return value
-          })
-        }
-      style: secondary
-      start: 13
-      end: 111
-  ? |
-    const login = (options?: LoginOptions) => Effect.gen(function*() {
-      return yield* authorize(options)
-    })
-  : labels:
-    - source: |-
-        const login = (options?: LoginOptions) => Effect.gen(function*() {
-          return yield* authorize(options)
-        })
-      style: primary
-      start: 0
-      end: 104
+      - source: |-
+          load = function loadItem<Value>(value: Value) {
+            return Effect.gen(function*() {
+              return value
+            })
+          }
+        style: primary
+        start: 6
+        end: 111
+      - source: <Value>
+        style: secondary
+        start: 30
+        end: 37
+      - source: |-
+          {
+            return Effect.gen(function*() {
+              return value
+            })
+          }
+        style: secondary
+        start: 52
+        end: 111
+      - source: |-
+          function loadItem<Value>(value: Value) {
+            return Effect.gen(function*() {
+              return value
+            })
+          }
+        style: secondary
+        start: 13
+        end: 111
   ? |
     const publish = <Failure, Requirements>(value: string) =>
       Effect.gen(function*() {
         return value
       })
   : labels:
-    - source: |-
-        publish = <Failure, Requirements>(value: string) =>
+      - source: |-
+          publish = <Failure, Requirements>(value: string) =>
+            Effect.gen(function*() {
+              return value
+            })
+        style: primary
+        start: 6
+        end: 106
+      - source: <Failure, Requirements>
+        style: secondary
+        start: 16
+        end: 39
+      - source: |-
           Effect.gen(function*() {
-            return value
-          })
-      style: primary
-      start: 6
-      end: 106
-    - source: <Failure, Requirements>
-      style: secondary
-      start: 16
-      end: 39
-    - source: |-
-        Effect.gen(function*() {
-            return value
-          })
-      style: secondary
-      start: 60
-      end: 106
-    - source: |-
-        <Failure, Requirements>(value: string) =>
-          Effect.gen(function*() {
-            return value
-          })
-      style: secondary
-      start: 16
-      end: 106
+              return value
+            })
+        style: secondary
+        start: 60
+        end: 106
+      - source: |-
+          <Failure, Requirements>(value: string) =>
+            Effect.gen(function*() {
+              return value
+            })
+        style: secondary
+        start: 16
+        end: 106
   ? |
     const publish = <Failure, Requirements>(value: string) =>
       Effect.uninterruptibleMask(() => Effect.succeed(value))
   : labels:
-    - source: |-
-        publish = <Failure, Requirements>(value: string) =>
-          Effect.uninterruptibleMask(() => Effect.succeed(value))
-      style: primary
-      start: 6
-      end: 115
-    - source: <Failure, Requirements>
-      style: secondary
-      start: 16
-      end: 39
-    - source: Effect.uninterruptibleMask(() => Effect.succeed(value))
-      style: secondary
-      start: 60
-      end: 115
-    - source: |-
-        <Failure, Requirements>(value: string) =>
-          Effect.uninterruptibleMask(() => Effect.succeed(value))
-      style: secondary
-      start: 16
-      end: 115
+      - source: |-
+          publish = <Failure, Requirements>(value: string) =>
+            Effect.uninterruptibleMask(() => Effect.succeed(value))
+        style: primary
+        start: 6
+        end: 115
+      - source: <Failure, Requirements>
+        style: secondary
+        start: 16
+        end: 39
+      - source: Effect.uninterruptibleMask(() => Effect.succeed(value))
+        style: secondary
+        start: 60
+        end: 115
+      - source: |-
+          <Failure, Requirements>(value: string) =>
+            Effect.uninterruptibleMask(() => Effect.succeed(value))
+        style: secondary
+        start: 16
+        end: 115
   ? |
     const publish = function<Failure, Requirements>(value: string) {
       return Effect.uninterruptibleMask(() => Effect.succeed(value)).pipe(Effect.provide(layer))
     }
   : labels:
-    - source: |-
-        publish = function<Failure, Requirements>(value: string) {
-          return Effect.uninterruptibleMask(() => Effect.succeed(value)).pipe(Effect.provide(layer))
-        }
-      style: primary
-      start: 6
-      end: 159
-    - source: <Failure, Requirements>
-      style: secondary
-      start: 24
-      end: 47
-    - source: |-
-        {
-          return Effect.uninterruptibleMask(() => Effect.succeed(value)).pipe(Effect.provide(layer))
-        }
-      style: secondary
-      start: 63
-      end: 159
-    - source: |-
-        function<Failure, Requirements>(value: string) {
-          return Effect.uninterruptibleMask(() => Effect.succeed(value)).pipe(Effect.provide(layer))
-        }
-      style: secondary
-      start: 16
-      end: 159
+      - source: |-
+          publish = function<Failure, Requirements>(value: string) {
+            return Effect.uninterruptibleMask(() => Effect.succeed(value)).pipe(Effect.provide(layer))
+          }
+        style: primary
+        start: 6
+        end: 159
+      - source: <Failure, Requirements>
+        style: secondary
+        start: 24
+        end: 47
+      - source: |-
+          {
+            return Effect.uninterruptibleMask(() => Effect.succeed(value)).pipe(Effect.provide(layer))
+          }
+        style: secondary
+        start: 63
+        end: 159
+      - source: |-
+          function<Failure, Requirements>(value: string) {
+            return Effect.uninterruptibleMask(() => Effect.succeed(value)).pipe(Effect.provide(layer))
+          }
+        style: secondary
+        start: 16
+        end: 159
   ? |
     const retry = (): Effect.Effect<void> => Effect.suspend(() => retry())
   : labels:
-    - source: 'const retry = (): Effect.Effect<void> => Effect.suspend(() => retry())'
-      style: primary
-      start: 0
-      end: 70
+      - source: "const retry = (): Effect.Effect<void> => Effect.suspend(() => retry())"
+        style: primary
+        start: 0
+        end: 70
   ? |
     const retry = function<Value>(value: Value) {
       return Effect.suspend(() => Effect.succeed(value)).pipe(Effect.provide(layer))
     }
   : labels:
-    - source: |-
-        const retry = function<Value>(value: Value) {
-          return Effect.suspend(() => Effect.succeed(value)).pipe(Effect.provide(layer))
-        }
-      style: primary
-      start: 0
-      end: 128
+      - source: |-
+          const retry = function<Value>(value: Value) {
+            return Effect.suspend(() => Effect.succeed(value)).pipe(Effect.provide(layer))
+          }
+        style: primary
+        start: 0
+        end: 128
   ? |
     const scan: PrOpenServiceContract["scan"] = input =>
       source(input).pipe(Effect.map(({ prs }) => ({ prs })))
   : labels:
-    - source: |-
-        const scan: PrOpenServiceContract["scan"] = input =>
-          source(input).pipe(Effect.map(({ prs }) => ({ prs })))
-      style: primary
-      start: 0
-      end: 109
+      - source: |-
+          const scan: PrOpenServiceContract["scan"] = input =>
+            source(input).pipe(Effect.map(({ prs }) => ({ prs })))
+        style: primary
+        start: 0
+        end: 109
   ? |
     function load(id: Id): Effect.Effect<Item> {
       return Effect.gen(function*() {
@@ -442,27 +430,27 @@ snapshots:
       })
     }
   : labels:
-    - source: |-
-        function load(id: Id): Effect.Effect<Item> {
-          return Effect.gen(function*() {
-            return yield* repository.load(id)
-          })
-        }
-      style: primary
-      start: 0
-      end: 123
+      - source: |-
+          function load(id: Id): Effect.Effect<Item> {
+            return Effect.gen(function*() {
+              return yield* repository.load(id)
+            })
+          }
+        style: primary
+        start: 0
+        end: 123
   ? |
     function load(id: Id): Effect.Effect<Item> {
       return Effect.suspend(() => repository.load(id)).pipe(Effect.provide(layer))
     }
   : labels:
-    - source: |-
-        function load(id: Id): Effect.Effect<Item> {
-          return Effect.suspend(() => repository.load(id)).pipe(Effect.provide(layer))
-        }
-      style: primary
-      start: 0
-      end: 125
+      - source: |-
+          function load(id: Id): Effect.Effect<Item> {
+            return Effect.suspend(() => repository.load(id)).pipe(Effect.provide(layer))
+          }
+        style: primary
+        start: 0
+        end: 125
   ? |
     function load<Value>(value: Value): Effect.Effect<Value> {
       return Effect.gen(function*() {
@@ -470,95 +458,107 @@ snapshots:
       }).pipe(Effect.provide(layer))
     }
   : labels:
-    - source: |-
-        function load<Value>(value: Value): Effect.Effect<Value> {
-          return Effect.gen(function*() {
-            return value
-          }).pipe(Effect.provide(layer))
-        }
-      style: primary
-      start: 0
-      end: 144
-    - source: <Value>
-      style: secondary
-      start: 13
-      end: 20
-    - source: |-
-        {
-          return Effect.gen(function*() {
-            return value
-          }).pipe(Effect.provide(layer))
-        }
-      style: secondary
-      start: 57
-      end: 144
+      - source: |-
+          function load<Value>(value: Value): Effect.Effect<Value> {
+            return Effect.gen(function*() {
+              return value
+            }).pipe(Effect.provide(layer))
+          }
+        style: primary
+        start: 0
+        end: 144
+      - source: <Value>
+        style: secondary
+        start: 13
+        end: 20
+      - source: |-
+          {
+            return Effect.gen(function*() {
+              return value
+            }).pipe(Effect.provide(layer))
+          }
+        style: secondary
+        start: 57
+        end: 144
   ? |
     function publish<Failure, Requirements>(value: string): Effect.Effect<string> {
       return Effect.uninterruptibleMask(() => Effect.succeed(value))
     }
   : labels:
-    - source: |-
-        function publish<Failure, Requirements>(value: string): Effect.Effect<string> {
-          return Effect.uninterruptibleMask(() => Effect.succeed(value))
-        }
-      style: primary
-      start: 0
-      end: 146
-    - source: <Failure, Requirements>
-      style: secondary
-      start: 16
-      end: 39
-    - source: |-
-        {
-          return Effect.uninterruptibleMask(() => Effect.succeed(value))
-        }
-      style: secondary
-      start: 78
-      end: 146
+      - source: |-
+          function publish<Failure, Requirements>(value: string): Effect.Effect<string> {
+            return Effect.uninterruptibleMask(() => Effect.succeed(value))
+          }
+        style: primary
+        start: 0
+        end: 146
+      - source: <Failure, Requirements>
+        style: secondary
+        start: 16
+        end: 39
+      - source: |-
+          {
+            return Effect.uninterruptibleMask(() => Effect.succeed(value))
+          }
+        style: secondary
+        start: 78
+        end: 146
   ? |
     function retry<Value>(value: Value): Effect.Effect<Value> {
       return Effect.suspend(() => Effect.succeed(value))
     }
   : labels:
-    - source: |-
-        function retry<Value>(value: Value): Effect.Effect<Value> {
-          return Effect.suspend(() => Effect.succeed(value))
-        }
-      style: primary
-      start: 0
-      end: 114
-    - source: <Value>
-      style: secondary
-      start: 14
-      end: 21
-    - source: |-
-        {
-          return Effect.suspend(() => Effect.succeed(value))
-        }
-      style: secondary
-      start: 58
-      end: 114
+      - source: |-
+          function retry<Value>(value: Value): Effect.Effect<Value> {
+            return Effect.suspend(() => Effect.succeed(value))
+          }
+        style: primary
+        start: 0
+        end: 114
+      - source: <Value>
+        style: secondary
+        start: 14
+        end: 21
+      - source: |-
+          {
+            return Effect.suspend(() => Effect.succeed(value))
+          }
+        style: secondary
+        start: 58
+        end: 114
   ? |
     let load = (id: Id) => Effect.gen(function*() {
       return yield* repository.load(id)
     })
   : labels:
-    - source: |-
-        let load = (id: Id) => Effect.gen(function*() {
-          return yield* repository.load(id)
-        })
-      style: primary
-      start: 0
-      end: 86
+      - source: |-
+          let load = (id: Id) => Effect.gen(function*() {
+            return yield* repository.load(id)
+          })
+        style: primary
+        start: 0
+        end: 86
   ? |
     let load = function(id: Id) {
       return Effect.suspend(() => repository.load(id))
     }
   : labels:
-    - source: |-
-        let load = function(id: Id) {
-          return Effect.suspend(() => repository.load(id))
-        }
-      style: primary
-      start: 0
-      end: 82
+      - source: |-
+          let load = function(id: Id) {
+            return Effect.suspend(() => repository.load(id))
+          }
+        style: primary
+        start: 0
+        end: 82
+  ? |
+    const login = (options?: LoginOptions) => Effect.gen(function*() {
+      return yield* authorize(options)
+    })
+  : labels:
+      - source: |-
+          const login = (options?: LoginOptions) => Effect.gen(function*() {
+            return yield* authorize(options)
+          })
+        style: primary
+        start: 0
+        end: 104

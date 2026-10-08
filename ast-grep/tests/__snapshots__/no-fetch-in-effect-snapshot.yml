@@ -3,10 +3,10 @@ snapshots:
   ? |
     const load = Effect.tryPromise(() => fetch(url))
   : labels:
-    - source: Effect.tryPromise(() => fetch(url))
-      style: primary
-      start: 13
-      end: 48
+      - source: Effect.tryPromise(() => fetch(url))
+        style: primary
+        start: 13
+        end: 48
   ? |
     const load = Effect.tryPromise({
       try: async () => {
@@ -16,25 +16,25 @@ snapshots:
       catch: (cause) => new LoadError({ cause })
     })
   : labels:
-    - source: |-
-        Effect.tryPromise({
-          try: async () => {
-            const response = await fetch(url)
-            return response.json()
-          },
-          catch: (cause) => new LoadError({ cause })
-        })
-      style: primary
-      start: 13
-      end: 171
-    - source: fetch(url)
-      style: secondary
-      start: 81
-      end: 91
+      - source: |-
+          Effect.tryPromise({
+            try: async () => {
+              const response = await fetch(url)
+              return response.json()
+            },
+            catch: (cause) => new LoadError({ cause })
+          })
+        style: primary
+        start: 13
+        end: 171
+      - source: fetch(url)
+        style: secondary
+        start: 81
+        end: 91
   ? |
     const load = Effect.tryPromise({ try: () => fetch(url), catch: (cause) => new LoadError({ cause }) })
   : labels:
-    - source: 'Effect.tryPromise({ try: () => fetch(url), catch: (cause) => new LoadError({ cause }) })'
-      style: primary
-      start: 13
-      end: 101
+      - source: "Effect.tryPromise({ try: () => fetch(url), catch: (cause) => new LoadError({ cause }) })"
+        style: primary
+        start: 13
+        end: 101

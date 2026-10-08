@@ -3,22 +3,22 @@ snapshots:
   ? |
     <input title="first\nsecond" />
   : labels:
-    - source: '"first\nsecond"'
-      style: primary
-      start: 13
-      end: 28
-    - source: title="first\nsecond"
-      style: secondary
-      start: 7
-      end: 28
+      - source: '"first\nsecond"'
+        style: primary
+        start: 13
+        end: 28
+      - source: title="first\nsecond"
+        style: secondary
+        start: 7
+        end: 28
   ? |
     <textarea placeholder="payments-api\nrisk-engine" />
   : labels:
-    - source: '"payments-api\nrisk-engine"'
-      style: primary
-      start: 22
-      end: 49
-    - source: placeholder="payments-api\nrisk-engine"
-      style: secondary
-      start: 10
-      end: 49
+      - source: '"payments-api\nrisk-engine"'
+        style: primary
+        start: 22
+        end: 49
+      - source: placeholder="payments-api\nrisk-engine"
+        style: secondary
+        start: 10
+        end: 49

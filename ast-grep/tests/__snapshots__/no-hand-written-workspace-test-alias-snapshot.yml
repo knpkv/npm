@@ -9,26 +9,26 @@ snapshots:
       }
     })
   : labels:
-    - source: '"@knpkv/atlassian-common/auth": new URL("../atlassian-common/src/auth/index.ts", import.meta.url).pathname'
-      style: primary
-      start: 62
-      end: 168
-    - source: '"@knpkv/atlassian-common/auth"'
-      style: secondary
-      start: 62
-      end: 92
+      - source: '"@knpkv/atlassian-common/auth": new URL("../atlassian-common/src/auth/index.ts", import.meta.url).pathname'
+        style: primary
+        start: 62
+        end: 168
+      - source: '"@knpkv/atlassian-common/auth"'
+        style: secondary
+        start: 62
+        end: 92
   ? |
     export default defineConfig({ resolve: { alias: [{ find: "@knpkv/rly/primitives", replacement: "../rly/src/primitives/index.ts" }] } })
   : labels:
-    - source: 'find: "@knpkv/rly/primitives"'
-      style: primary
-      start: 51
-      end: 80
-    - source: find
-      style: secondary
-      start: 51
-      end: 55
-    - source: '"@knpkv/rly/primitives"'
-      style: secondary
-      start: 57
-      end: 80
+      - source: 'find: "@knpkv/rly/primitives"'
+        style: primary
+        start: 51
+        end: 80
+      - source: find
+        style: secondary
+        start: 51
+        end: 55
+      - source: '"@knpkv/rly/primitives"'
+        style: secondary
+        start: 57
+        end: 80

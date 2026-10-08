@@ -6,31 +6,31 @@ snapshots:
       return failure
     })
   : labels:
-    - source: new TypeError("bad input")
-      style: primary
-      start: 60
-      end: 86
-    - source: |-
-        Effect.gen(function* () {
-          const failure = new TypeError("bad input")
-          return failure
-        })
-      style: secondary
-      start: 16
-      end: 106
+      - source: new TypeError("bad input")
+        style: primary
+        start: 60
+        end: 86
+      - source: |-
+          Effect.gen(function* () {
+            const failure = new TypeError("bad input")
+            return failure
+          })
+        style: secondary
+        start: 16
+        end: 106
   ? |
     const program = Effect.gen(function* () {
       return yield* Effect.fail(new Error("boom"))
     })
   : labels:
-    - source: new Error("boom")
-      style: primary
-      start: 70
-      end: 87
-    - source: |-
-        Effect.gen(function* () {
-          return yield* Effect.fail(new Error("boom"))
-        })
-      style: secondary
-      start: 16
-      end: 91
+      - source: new Error("boom")
+        style: primary
+        start: 70
+        end: 87
+      - source: |-
+          Effect.gen(function* () {
+            return yield* Effect.fail(new Error("boom"))
+          })
+        style: secondary
+        start: 16
+        end: 91

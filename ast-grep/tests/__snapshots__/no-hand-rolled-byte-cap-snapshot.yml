@@ -3,40 +3,40 @@ snapshots:
   ? |
     handle.stdout.pipe(Stream.mapEffect((chunk) => Ref.updateAndGet(seen, (bytes) => bytes + chunk.byteLength)))
   : labels:
-    - source: Stream.mapEffect((chunk) => Ref.updateAndGet(seen, (bytes) => bytes + chunk.byteLength))
-      style: primary
-      start: 19
-      end: 107
-    - source: bytes + chunk.byteLength
-      style: secondary
-      start: 81
-      end: 105
+      - source: Stream.mapEffect((chunk) => Ref.updateAndGet(seen, (bytes) => bytes + chunk.byteLength))
+        style: primary
+        start: 19
+        end: 107
+      - source: bytes + chunk.byteLength
+        style: secondary
+        start: 81
+        end: 105
   ? |
     stdout.pipe(Stream.mapAccumEffect(() => 0, (bytes, chunk) => Effect.succeed([bytes + chunk.byteLength, [chunk]])))
   : labels:
-    - source: Stream.mapAccumEffect(() => 0, (bytes, chunk) => Effect.succeed([bytes + chunk.byteLength, [chunk]]))
-      style: primary
-      start: 12
-      end: 113
-    - source: bytes + chunk.byteLength
-      style: secondary
-      start: 77
-      end: 101
+      - source: Stream.mapAccumEffect(() => 0, (bytes, chunk) => Effect.succeed([bytes + chunk.byteLength, [chunk]]))
+        style: primary
+        start: 12
+        end: 113
+      - source: bytes + chunk.byteLength
+        style: secondary
+        start: 77
+        end: 101
   ? |
     stream.pipe(Stream.runFoldEffect(() => ({ bytes: 0, chunks: [] }), (output, chunk) => {
       const bytes = output.bytes + chunk.byteLength
       return bytes > max ? Effect.fail(new TooLarge()) : Effect.succeed({ bytes, chunks: [...output.chunks, chunk] })
     }))
   : labels:
-    - source: |-
-        Stream.runFoldEffect(() => ({ bytes: 0, chunks: [] }), (output, chunk) => {
-          const bytes = output.bytes + chunk.byteLength
-          return bytes > max ? Effect.fail(new TooLarge()) : Effect.succeed({ bytes, chunks: [...output.chunks, chunk] })
-        })
-      style: primary
-      start: 12
-      end: 252
-    - source: output.bytes + chunk.byteLength
-      style: secondary
-      start: 104
-      end: 135
+      - source: |-
+          Stream.runFoldEffect(() => ({ bytes: 0, chunks: [] }), (output, chunk) => {
+            const bytes = output.bytes + chunk.byteLength
+            return bytes > max ? Effect.fail(new TooLarge()) : Effect.succeed({ bytes, chunks: [...output.chunks, chunk] })
+          })
+        style: primary
+        start: 12
+        end: 252
+      - source: output.bytes + chunk.byteLength
+        style: secondary
+        start: 104
+        end: 135

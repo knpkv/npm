@@ -3,7 +3,7 @@ snapshots:
   ? |
     const ssoLogout = useAtomSet(notificationsSsoLogoutAtom)
   : labels:
-    - source: notificationsSsoLogoutAtom
-      style: primary
-      start: 29
-      end: 55
+      - source: notificationsSsoLogoutAtom
+        style: primary
+        start: 29
+        end: 55

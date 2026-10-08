@@ -7,10 +7,10 @@ snapshots:
       return yield* decode(input)
     })
   : labels:
-    - source: Effect.fn.Return<Item, unknown, never>
-      style: primary
-      start: 70
-      end: 108
+      - source: Effect.fn.Return<Item, unknown, never>
+        style: primary
+        start: 70
+        end: 108
   ? |
     const publish = Effect.fn("Feature.publish")(function*(
       item: Item
@@ -18,7 +18,7 @@ snapshots:
       yield* save(item)
     })
   : labels:
-    - source: Effect.fn.Return<void, unknown, Database>
-      style: primary
-      start: 72
-      end: 113
+      - source: Effect.fn.Return<void, unknown, Database>
+        style: primary
+        start: 72
+        end: 113

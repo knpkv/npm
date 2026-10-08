@@ -3,21 +3,21 @@ snapshots:
   ? |
     const fs = require("node:fs")
   : labels:
-    - source: require("node:fs")
-      style: primary
-      start: 11
-      end: 29
+      - source: require("node:fs")
+        style: primary
+        start: 11
+        end: 29
   ? |
     import * as fs from "node:fs"
   : labels:
-    - source: import * as fs from "node:fs"
-      style: primary
-      start: 0
-      end: 29
+      - source: import * as fs from "node:fs"
+        style: primary
+        start: 0
+        end: 29
   ? |
     import { readFile } from "fs/promises"
   : labels:
-    - source: import { readFile } from "fs/promises"
-      style: primary
-      start: 0
-      end: 38
+      - source: import { readFile } from "fs/promises"
+        style: primary
+        start: 0
+        end: 38
