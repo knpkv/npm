@@ -127,7 +127,7 @@ export const ActiveWorkPage = (): ReactElement => {
             size="hero"
             symbolIndices={selected.relay.symbolIndices}
           />
-          <div>
+          <div className={styles.identityTitle}>
             <Text as="h2" id="active-release-title" variant="page-title">
               {selected.serviceName}
             </Text>

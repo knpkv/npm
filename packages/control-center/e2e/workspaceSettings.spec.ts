@@ -214,3 +214,34 @@ test("does not load or mutate settings for a route outside the browser session w
   await expect(page.getByText("Workspace not found", { exact: true })).toBeVisible()
   await expect.poll(() => settingsRequests).toBe(0)
 })
+
+test.describe("on a touch phone", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { height: 844, width: 390 } })
+
+  // iOS zooms the page into a field whose text is under 16px; the permission select is label-sized otherwise.
+  test("the browser permission select reads at 16px", async ({ context, page }) => {
+    await context.addCookies([{ name: "cc_session", value: "ab".repeat(32), url: "http://127.0.0.1:4173" }])
+    await page.addInitScript((token) => sessionStorage.setItem("cc_csrf", token), csrfToken)
+    await context.route(
+      "**/api/v1/session/current",
+      (route) =>
+        route.fulfill({ body: JSON.stringify({ csrfToken, session }), contentType: "application/json", status: 200 })
+    )
+    await context.route(
+      "**/api/v1/settings",
+      (route) =>
+        route.fulfill({
+          body: JSON.stringify({ ...readModel, settings }),
+          contentType: "application/json",
+          status: 200
+        })
+    )
+    await page.goto(`/w/${workspaceId}/settings`)
+    expect(await page.evaluate<boolean>("matchMedia('(pointer: coarse)').matches")).toBe(true)
+    const select = page.getByLabel("New browser access")
+    await expect(select).toBeVisible()
+    expect(await select.evaluate((field) => field.ownerDocument.defaultView?.getComputedStyle(field).fontSize)).toBe(
+      "16px"
+    )
+  })
+})

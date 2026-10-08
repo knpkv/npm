@@ -1,4 +1,11 @@
+/*
+ * The page is drawn under the notch and home indicator (viewport-fit=cover), so every edge that holds
+ * content keeps clear of the device's safe area as well as its own gutter.
+ */
 .root {
+  --cc-safe-inline: max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px));
+  --cc-safe-block-end: env(safe-area-inset-bottom, 0px);
+
   min-block-size: 100dvh;
   background: var(--rly-color-canvas);
   color: var(--rly-color-text-1);
@@ -17,7 +24,7 @@
   grid-template-columns: minmax(12rem, 1fr) auto minmax(12rem, 1fr);
   align-items: center;
   min-block-size: 4.5rem;
-  padding-inline: clamp(1.25rem, 4vw, 4rem);
+  padding-inline: max(clamp(1.25rem, 4vw, 4rem), var(--cc-safe-inline));
   border-block-end: 1px solid var(--rly-color-border-1);
 }
 
@@ -161,7 +168,7 @@
 }
 
 .main {
-  inline-size: min(100% - 2.5rem, 80rem);
+  inline-size: min(100% - 2 * max(1.25rem, var(--cc-safe-inline)), 80rem);
   margin-inline: auto;
   /* The page heading starts a region-gap below the header rule, not a screen's height lower. */
   padding-block: clamp(var(--rly-space-24), 3vw, var(--rly-space-40)) clamp(3.5rem, 8vw, 7rem);
@@ -211,7 +218,7 @@
 
   /* The phone navigation docks 1rem above the bottom edge; Relay's overlay ends above it. */
   .root {
-    --app-bottom-inset: calc(var(--cc-mobile-nav-block-size, 0px) + 1rem);
+    --app-bottom-inset: calc(var(--cc-mobile-nav-block-size, 0px) + 1rem + var(--cc-safe-block-end));
   }
 
   .desktopNav {
@@ -221,16 +228,17 @@
   .mobileNav {
     position: fixed;
     z-index: 20;
-    inset-inline: 1rem;
-    inset-block-end: 1rem;
+    inset-inline: max(1rem, var(--cc-safe-inline));
+    inset-block-end: calc(1rem + var(--cc-safe-block-end));
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    max-inline-size: calc(100% - 2rem);
+    max-inline-size: calc(100% - 2 * max(1rem, var(--cc-safe-inline)));
     box-shadow: 0 1rem 3rem oklch(0% 0 none / 35%);
   }
 
   .mobileNav .navLink {
     align-content: center;
+    min-block-size: 2.75rem;
     min-inline-size: var(--rly-space-0);
     padding-inline: var(--rly-space-8);
     text-align: center;
@@ -242,7 +250,7 @@
   }
 
   .main {
-    padding-block-end: 8rem;
+    padding-block-end: calc(8rem + var(--cc-safe-block-end));
   }
 }
 
@@ -301,5 +309,13 @@
 @media (max-width: 40rem) {
   .relayLauncherStandInHint {
     display: none;
+  }
+}
+
+/* On touch the navigation links take a 44px target; the phone bar sets its own above. */
+@media (pointer: coarse) {
+  .navLink {
+    min-block-size: 2.75rem;
+    align-content: center;
   }
 }
