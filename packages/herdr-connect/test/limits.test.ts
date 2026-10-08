@@ -62,7 +62,7 @@ describe("fleet limits", () => {
         observedAt: 900,
         reading: { _tag: "Known", usedPercent: 19, resetsAt: 2_000 }
       }
-      const newer = {
+      const newer: typeof LooseHostLimits.Type = {
         host: "PI",
         readAt: 1_000,
         reading: {
