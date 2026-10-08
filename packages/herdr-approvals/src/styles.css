@@ -553,6 +553,11 @@
     gap: var(--rly-space-16);
   }
 
+  /* A failed refresh's notice sits in the page gutter above the content it is about. */
+  .dashboard-refresh-failed {
+    margin-block-end: var(--rly-space-12);
+  }
+
   .fleet-work-reserved {
     min-block-size: 100svh;
   }
@@ -784,8 +789,9 @@
     border-color: var(--rly-color-border-2);
   }
 
+  /* No dimming: the "Offline" label says it, and opacity pulled its ink below 4.5:1 (axe, QA-167). */
   .machine-offline {
-    opacity: 0.65;
+    color: var(--rly-color-text-2);
   }
 
   .hub-link {
@@ -1277,16 +1283,6 @@
         "decided";
       grid-template-columns: minmax(0, 1fr);
     }
-  }
-
-  .app-error {
-    color: var(--rly-color-text-1);
-  }
-
-  .app-error pre {
-    color: var(--rly-color-blocked-ink);
-    overflow-wrap: break-word;
-    white-space: pre-wrap;
   }
 
   @media (max-width: 46rem) {

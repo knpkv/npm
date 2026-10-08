@@ -168,3 +168,29 @@ describe("PermissionGateLive.resolveCategory", () => {
       }))
   })
 })
+
+// Its own layer: a gate shared with other tests would count their prompts too.
+describe("PermissionGateLive.pendingOf", () => {
+  it.layer(PermissionGateLiveTag.Default)((it) => {
+    it.effect("counts only the prompts waiting now, per category, naming the first few", () =>
+      Effect.gen(function*() {
+        const gate = yield* PermissionGateLiveTag
+        const ask = (id: string, category: "read" | "write") =>
+          gate.request({ id, operation: "getBlob", category, context: `ctx ${id}` }).pipe(Effect.forkChild)
+        const fibers = [
+          yield* ask("r1", "read"),
+          yield* ask("r2", "read"),
+          yield* ask("w1", "write"),
+          yield* ask("r3", "read")
+        ]
+        yield* Effect.yieldNow
+        expect(yield* gate.pendingOf("read", 2)).toEqual({ contexts: ["ctx r1", "ctx r2"], count: 3 })
+        yield* gate.resolve("r1", "allow_once")
+        yield* Fiber.join(fibers[0]!)
+        expect((yield* gate.pendingOf("read", 3)).count).toBe(2)
+        yield* gate.resolveCategory("read", "deny")
+        yield* gate.resolve("w1", "deny")
+        for (const fiber of fibers.slice(1)) yield* Fiber.await(fiber)
+      }))
+  })
+})

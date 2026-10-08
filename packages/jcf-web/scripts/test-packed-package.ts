@@ -275,8 +275,8 @@ void [request, result, invalidSeconds, invalidRoot, provider, invalidProvider, i
         stdout: "pipe",
         stderr: "inherit"
       })),
-      // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      (handle) => handle.kill().pipe(Effect.ignore)
+      (handle) =>
+        handle.kill().pipe(Effect.ignore({ log: "Warn", message: "Could not stop the packed jcf-web server" }))
     )
     const advertisedLine = yield* Stream.decodeText(child.stdout).pipe(
       Stream.splitLines,

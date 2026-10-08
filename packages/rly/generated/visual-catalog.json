@@ -712,6 +712,42 @@
       ]
     },
     {
+      "name": "RelayLauncher",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayLauncher.tsx",
+        "story": "packages/rly/stories/patterns/RelayLauncher.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayLauncher.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayLauncher.css.test.ts",
+          "packages/rly/test/patterns/RelayLauncher.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaylauncher--header",
+      "storyIds": [
+        "patterns-relaylauncher--header"
+      ]
+    },
+    {
+      "name": "RelayMark",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayMark.tsx",
+        "story": "packages/rly/stories/patterns/RelayMark.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayMark.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayMark.favicon.test.ts",
+          "packages/rly/test/patterns/RelayMark.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaymark--sizes",
+      "storyIds": [
+        "patterns-relaymark--sizes"
+      ]
+    },
+    {
       "name": "ReleasePreview",
       "paths": {
         "source": "packages/rly/src/patterns/ReleasePreview.tsx",

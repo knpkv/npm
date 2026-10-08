@@ -17,7 +17,31 @@ import type { AppState } from "../atoms/app.js"
 import { permissionRespondAtom, permissionsCategoryUpdateAtom } from "../atoms/app.js"
 import styles from "./permission-bar.module.css"
 
-export function PermissionBar({ prompt }: { readonly prompt: NonNullable<AppState["permissionPrompt"]> }) {
+/**
+ * "2 reads are waiting: Get identity for dev and List PRs for dev." Only reads queued now in the
+ * server process are counted; at most three are named, then "and N more".
+ */
+export const waitingReadsText = (pending: NonNullable<AppState["pendingReads"]>): string | null => {
+  if (pending.count < 2) return null
+  const named = pending.contexts.slice(0, 3)
+  const rest = pending.count - named.length
+  const list =
+    rest > 0
+      ? `${named.join(", ")} and ${String(rest)} more`
+      : named.length === 1
+        ? named[0]
+        : `${named.slice(0, -1).join(", ")} and ${named[named.length - 1]}`
+  return `${String(pending.count)} reads are waiting: ${list}.`
+}
+
+export function PermissionBar({
+  pendingReads,
+  prompt
+}: {
+  readonly pendingReads?: AppState["pendingReads"]
+  readonly prompt: NonNullable<AppState["permissionPrompt"]>
+}) {
+  const waiting = pendingReads === undefined ? null : waitingReadsText(pendingReads)
   const respond = useAtomSet(permissionRespondAtom)
   const grantCategory = useAtomSet(permissionsCategoryUpdateAtom, { mode: "promiseExit" })
   const [failure, setFailure] = useState<string | null>(null)
@@ -59,8 +83,14 @@ export function PermissionBar({ prompt }: { readonly prompt: NonNullable<AppStat
         className={styles.bar}
         tone="caution"
       >
-        CodeCommit asks before reading from AWS: {prompt.context}. Allowing every read covers pull requests, approval
-        status and identity for all profiles; changes still ask each time.
+        {waiting === null ? (
+          <>CodeCommit asks before reading from AWS: {prompt.context}.</>
+        ) : (
+          // More than one read waits: name them, so "Allow every read" is plainly the one answer for all.
+          <>CodeCommit asks before reading from AWS. {waiting}</>
+        )}{" "}
+        Allowing every read covers pull requests, approval status and identity for all profiles; changes still ask each
+        time.
         {failure === null ? null : <span className={styles.failure}> {failure}</span>}
       </Notice>
     </div>
