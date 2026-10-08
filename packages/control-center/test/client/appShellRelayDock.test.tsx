@@ -35,7 +35,7 @@ const ThrowingDockChrome = (): ReactElement => {
 }
 
 describe("AppShell Relay dock", () => {
-  it("keeps the routed page mounted once while the dock chrome loads", async () => {
+  it("opens one Relay from the header launcher, with no fixed chip, keeping the routed page mounted", async () => {
     observedMounts = 0
     const host = document.createElement("div")
     document.body.append(host)
@@ -44,7 +44,10 @@ describe("AppShell Relay dock", () => {
       [
         {
           element: <AppShell />,
-          children: [{ path: "/", element: <MountProbe /> }]
+          children: [
+            { path: "/", element: <MountProbe /> },
+            { path: "/agent", element: <output data-agent-page="true">agent</output> }
+          ]
         }
       ],
       { initialEntries: ["/"] }
@@ -56,12 +59,25 @@ describe("AppShell Relay dock", () => {
           <RouterProvider router={router} />
         </BrowserSessionProvider>
       )
-      await import("../../src/client/controlCenterRelayDockChrome.js")
+      await import("../../src/client/controlCenterRelayPanel.js")
       await Promise.resolve()
     })
 
-    expect(host.querySelector("[data-relay-product-dock-chrome]")).not.toBeNull()
+    expect(host.querySelector("[data-relay-product-dock-chrome]")).toBeNull()
+    const launcher = host.querySelector<HTMLButtonElement>("header [data-rly-relay-launcher]")
+    expect(launcher?.textContent).toContain("Relay")
+    await act(async () => launcher?.click())
+    expect(host.querySelector("[data-rly-relay-panel]")).not.toBeNull()
     expect(observedMounts).toBe(1)
+
+    // Relay's full page keeps its route and origin; the panel closes before leaving for it.
+    const fullPage = [...host.querySelectorAll("button")].find(
+      (button) => button.textContent === "Open Relay's full page"
+    )
+    await act(async () => fullPage?.click())
+    expect(router.state.location.pathname).toBe("/agent")
+    expect(new URLSearchParams(router.state.location.search).get("from")).toBe("/")
+    expect(host.querySelector("[data-rly-relay-panel]")).toBeNull()
   })
 
   it("contains a rejected dock chrome without unmounting routed content", async () => {

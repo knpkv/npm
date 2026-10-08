@@ -563,4 +563,101 @@ describe("RelayProductPanel", () => {
       await unmount()
     }
   })
+
+  it("offers the host's other conversation before the locator, and closes before leaving for it", async () => {
+    const opened = vi.fn()
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel
+          host={{ ...host, alternate: { label: "Open the Release 2.18 conversation, full page", onOpen: opened } }}
+          pin={{ _tag: "Unavailable" }}
+        />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      const body = document.querySelector("[data-rly-relay-panel]")?.textContent ?? ""
+      expect(body.indexOf("Open the Release 2.18 conversation")).toBeLessThan(body.indexOf("Or find a pull request"))
+      await act(async () => button("Open the Release 2.18 conversation, full page")?.click())
+      expect(opened).toHaveBeenCalledTimes(1)
+      expect(document.querySelector("[data-rly-relay-panel]")).toBeNull()
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("names what the launcher is about in its description, keeping the visible label 'Relay'", async () => {
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher scope="Release 2.18" />
+        <RelayProductPanel host={host} pin={{ _tag: "Unavailable" }} />
+        <Swappable initial={ready(coupled, () => Effect.void)} />
+      </RelayProductDockProvider>
+    )
+    try {
+      const description = (): string | undefined => {
+        const id = launcher()?.getAttribute("aria-describedby")
+        return id === null || id === undefined ? undefined : (document.getElementById(id)?.textContent ?? undefined)
+      }
+      expect(launcher()?.textContent).toContain("Relay")
+      expect(description()).toBe("about payments #184")
+    } finally {
+      await unmount()
+    }
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher scope="Release 2.18" />
+      </RelayProductDockProvider>
+    )
+    try {
+      const id = launcher()?.getAttribute("aria-describedby") ?? ""
+      expect(document.getElementById(id)?.textContent).toBe("about Release 2.18")
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("shows the registration's notice above the composer", async () => {
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel host={host} pin={{ _tag: "Unavailable" }} />
+        <Registered
+          registration={{ ...ready(coupled, () => Effect.void), notice: "Also on this page: the review composer." }}
+        />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      expect(document.body.textContent).toContain("Also on this page: the review composer.")
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("puts the host's other conversation after the locator while finding another pull request", async () => {
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel
+          host={{
+            ...host,
+            alternate: { label: "Open the Release 2.18 conversation, full page", onOpen: () => undefined }
+          }}
+          pin={{ _tag: "Unavailable" }}
+        />
+        <Registered registration={ready(coupled, () => Effect.void)} />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      expect(button("Open the Release 2.18 conversation, full page")).toBeUndefined()
+      await act(async () => button("Find another pull request")?.click())
+      const body = document.querySelector("[data-rly-relay-panel]")?.textContent ?? ""
+      expect(body.indexOf("Open PR conversation")).toBeLessThan(body.indexOf("Open the Release 2.18 conversation"))
+    } finally {
+      await unmount()
+    }
+  })
 })

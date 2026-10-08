@@ -141,7 +141,7 @@ export const RelayComposer = ({
           value={value}
         />
         <div className={style("foot")}>
-          {preset}
+          {preset === undefined ? null : <div className={style("preset")}>{preset}</div>}
           {busyReason === undefined ? null : (
             <span className={style("busy")} id={busyId}>
               {requireText(busyReason, "RelayComposer busy reason")}

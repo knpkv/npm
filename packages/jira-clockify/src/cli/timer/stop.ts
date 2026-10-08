@@ -79,8 +79,12 @@ export const resolveStopProject = (params: {
     })
     if (saveDefault) {
       const cfg = yield* ConfigService
-      yield* cfg.set({ defaultProjectId: selected, defaultProjectName: selectedName })
-      yield* Console.log("Default project saved.")
+      yield* cfg.set({ defaultProjectId: selected, defaultProjectName: selectedName }).pipe(
+        Effect.matchEffect({
+          onFailure: (error) => Console.error(`Default project not saved: ${error.message}`),
+          onSuccess: () => Console.log("Default project saved.")
+        })
+      )
     }
     return selected
   })
@@ -120,8 +124,12 @@ export const resolveStopBillable = (params: {
     })
     if (saveDefault) {
       const cfg = yield* ConfigService
-      yield* cfg.set({ defaultBillable: stopBillable })
-      yield* Console.log("Default billable saved.")
+      yield* cfg.set({ defaultBillable: stopBillable }).pipe(
+        Effect.matchEffect({
+          onFailure: (error) => Console.error(`Default billable not saved: ${error.message}`),
+          onSuccess: () => Console.log("Default billable saved.")
+        })
+      )
     }
     return stopBillable
   })
