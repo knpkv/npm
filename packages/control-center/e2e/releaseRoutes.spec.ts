@@ -1447,7 +1447,7 @@ test("launches an exact-head review and presents its durable findings", async ({
   await replaceFocusedDiffLine()
   await expect(wrapLines).toBeFocused()
   await expect(page.getByText("Review sandbox started")).toBeVisible()
-  await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
+  await expect(page.getByText("1 suggestion · 0 notes")).toBeVisible()
   await expect(page.getByText("Run completed · success")).toBeVisible()
   // The header's Relay opens this PR's thread, and says the review panel is on the page too.
   const relayLauncher = page.getByRole("banner").getByRole("button", { name: /^Relay/u })
@@ -1470,6 +1470,19 @@ test("launches an exact-head review and presents its durable findings", async ({
   await page.getByRole("button", { name: "Close Relay" }).click()
   await expect(page.locator("[data-rly-relay-panel]")).toHaveCount(0)
   await expect(relayLauncher).toBeFocused()
+  // At 1280 the workspace header keeps Open PR, Search and Relay on one row (Relay's key hint gives way).
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await expect(page.locator("header [data-rly-relay-launcher]")).toBeVisible()
+  const actionTops = await page.getByRole("banner").locator("a, button").evaluateAll((elements) =>
+    elements
+      .filter((element) => element.closest("nav") === null && element.getBoundingClientRect().width > 0)
+      .map((element) => Math.round(element.getBoundingClientRect().top))
+  )
+  expect(new Set(actionTops.slice(1)).size).toBe(1)
+  await page.screenshot({ path: test.info().outputPath("header-1280-pr-page.png") })
+  await page.setViewportSize({ height: 800, width: 1024 })
+  expect(await page.evaluate<number>("document.documentElement.scrollWidth")).toBeLessThanOrEqual(1024)
+  await page.setViewportSize({ height: 800, width: 1280 })
   const reviewActivity = page.getByRole("log", { name: "Review activity" })
   await expect(reviewActivity).toBeVisible()
   expect(
