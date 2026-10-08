@@ -48,11 +48,18 @@ export const RelayProductLauncher = (): ReactElement => {
   )
 }
 
+/**
+ * Whether this host layout may pin Relay beside it, declared per layout with no default: `Available`
+ * names the narrowest host track the page stays usable at beside the column; `Unavailable` until that
+ * layout has been measured.
+ */
+export type RelayProductPin =
+  { readonly _tag: "Unavailable" } | { readonly _tag: "Available"; readonly minHostWidth: number }
+
 /** Inputs for the product panel. */
 export interface RelayProductPanelProps {
   readonly host: RelayProductDockHost
-  /** The narrowest width this host's page stays usable at beside a pinned Relay (no default: hosts differ). */
-  readonly minHostWidth: number
+  readonly pin: RelayProductPin
 }
 
 /** The scope line: the context's values (product aside), with the head as the exact revision. */
@@ -114,10 +121,17 @@ const rerunReason = "Rerun Relay with the selected profile or model before conti
  * of failing on send. A host with no registered pull request names its PR-only scope and offers the
  * locator. Mount it once per provider, after RelayProductLauncher; it owns Relay's Ctrl/⌘+J.
  */
-export const RelayProductPanel = ({ host, minHostWidth }: RelayProductPanelProps): ReactElement | null => {
+export const RelayProductPanel = ({ host, pin }: RelayProductPanelProps): ReactElement | null => {
   const registration = useRelayProductDockRegistration()
   const { launcher, open, pinned, setOpen, setPinned } = useRelayProductOpen()
-  const { canPin, presentation } = useRelayPresentation({ minHostWidth, pinned })
+  const available = pin._tag === "Available"
+  // An unavailable layout never pins; its width only matters to a pin it cannot offer.
+  const presentationOf = useRelayPresentation({
+    minHostWidth: available ? pin.minHostWidth : 0,
+    pinned: available && pinned
+  })
+  const canPin = available && presentationOf.canPin
+  const { presentation } = presentationOf
   useSummonClaim()
   const thread = registration === null ? null : threadKey(pullRequestThreadIdentity(registration.conversation))
   // Finding another PR ends when a different thread registers (the locator navigated there).

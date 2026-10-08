@@ -14,6 +14,7 @@ import {
   RelayProductLauncher,
   RelayProductPanel,
   RelayAuthenticationRequired,
+  type RelayProductPin,
   type RelayPullRequestDockRegistration,
   RelaySelectorState,
   useRelayPullRequestDock
@@ -149,7 +150,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={host} minHostWidth={960} />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
       </RelayProductDockProvider>
     )
     try {
@@ -170,7 +171,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={host} minHostWidth={960} />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
         <Registered registration={ready(coupled, continued)} />
       </RelayProductDockProvider>
     )
@@ -197,7 +198,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={host} minHostWidth={960} />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
         <Registered registration={ready(coupled, () => Effect.void)} />
       </RelayProductDockProvider>
     )
@@ -211,7 +212,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={host} minHostWidth={960} />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
         <Registered registration={ready(uncoupled, () => Effect.void)} />
       </RelayProductDockProvider>
     )
@@ -229,7 +230,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={host} minHostWidth={960} />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
         <Registered registration={ready(coupled, failing)} />
       </RelayProductDockProvider>
     )
@@ -248,8 +249,8 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <Catch>
-          <RelayProductPanel host={host} minHostWidth={960} />
-          <RelayProductPanel host={host} minHostWidth={960} />
+          <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
+          <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
         </Catch>
       </RelayProductDockProvider>
     )
@@ -264,7 +265,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={host} minHostWidth={960} />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
         <Registered registration={ready(coupled, () => Effect.void)} />
       </RelayProductDockProvider>
     )
@@ -284,7 +285,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={host} minHostWidth={960} />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
         <Registered registration={{ ...reordered, conversation: thread }} />
       </RelayProductDockProvider>
     )
@@ -300,7 +301,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={host} minHostWidth={960} />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
         <Swappable initial={ready(coupled, () => Effect.void)} />
       </RelayProductDockProvider>
     )
@@ -323,7 +324,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={host} minHostWidth={960} />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
         <Swappable initial={ready(coupled, () => Effect.die("transport"))} />
       </RelayProductDockProvider>
     )
@@ -354,7 +355,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={{ ...host, selection: extra }} minHostWidth={960} />
+        <RelayProductPanel host={{ ...host, selection: extra }} pin={{ _tag: "Available", minHostWidth: 960 }} />
         <Registered registration={ready(extra, () => Effect.void)} />
       </RelayProductDockProvider>
     )
@@ -375,7 +376,7 @@ describe("RelayProductPanel", () => {
     await mount(
       <RelayProductDockProvider>
         <RelayProductLauncher />
-        <RelayProductPanel host={host} minHostWidth={960} />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
         <Registered registration={ready(coupled, unauthenticated)} />
       </RelayProductDockProvider>
     )
@@ -391,13 +392,14 @@ describe("RelayProductPanel", () => {
     }
   })
 
-  it("offers the pin only where the host stays usable beside the column", async () => {
-    const pinnable = async (width: number): Promise<boolean> => {
+  it("offers the pin only on an available layout where the host stays usable beside the column", async () => {
+    const available: RelayProductPin = { _tag: "Available", minHostWidth: 1100 }
+    const pinnable = async (width: number, layout: RelayProductPin = available): Promise<boolean> => {
       await act(async () => window.happyDOM?.setViewport({ height: 900, width }))
       await mount(
         <RelayProductDockProvider>
           <RelayProductLauncher />
-          <RelayProductPanel host={host} minHostWidth={1100} />
+          <RelayProductPanel host={host} pin={layout} />
           <Registered registration={ready(coupled, () => Effect.void)} />
         </RelayProductDockProvider>
       )
@@ -411,6 +413,8 @@ describe("RelayProductPanel", () => {
     try {
       expect(await pinnable(1600)).toBe(true)
       expect(await pinnable(1500)).toBe(false)
+      // A layout not yet measured never offers the pin, however wide.
+      expect(await pinnable(1920, { _tag: "Unavailable" })).toBe(false)
     } finally {
       await act(async () => window.happyDOM?.setViewport({ height: 768, width: 1024 }))
     }
