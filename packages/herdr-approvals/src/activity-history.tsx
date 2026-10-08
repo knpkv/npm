@@ -258,6 +258,31 @@ export const filterActivityItems = (
   )
 }
 
+/** The parts of a key event that decide whether list navigation may take it. */
+export interface ActivityKeySource {
+  readonly target: unknown
+  readonly ctrlKey: boolean
+  readonly metaKey: boolean
+  readonly altKey: boolean
+  readonly shiftKey: boolean
+}
+
+/**
+ * J, K and the arrows move only while the list itself has focus: a key typed into a field (search,
+ * a select, any editable text) or pressed with a modifier belongs to that field or the browser.
+ */
+export const activityKeyBelongsElsewhere = (event: ActivityKeySource): boolean => {
+  // Shift too: Shift+arrows extend a text selection, and Shift+J/K is not list navigation.
+  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return true
+  const target = event.target
+  if (Predicate.hasProperty(target, "isContentEditable") && target.isContentEditable === true) return true
+  return (
+    Predicate.hasProperty(target, "nodeName") &&
+    Predicate.isString(target.nodeName) &&
+    (target.nodeName === "INPUT" || target.nodeName === "TEXTAREA" || target.nodeName === "SELECT")
+  )
+}
+
 export const activityNavigationIndex = ({
   current,
   key,
@@ -358,12 +383,7 @@ export const ActivityHistory = ({
     else group.push(item)
   }
   const handleKeyboard = (event: KeyboardEvent<HTMLElement>): void => {
-    if (
-      Predicate.hasProperty(event.target, "nodeName") &&
-      Predicate.isString(event.target.nodeName) &&
-      (event.target.nodeName === "INPUT" || event.target.nodeName === "TEXTAREA")
-    )
-      return
+    if (activityKeyBelongsElsewhere(event)) return
     const rows = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-activity-row]")]
     const current = rows.findIndex((row) => row === document.activeElement)
     const next = activityNavigationIndex({ current, key: event.key, total: rows.length })
@@ -383,7 +403,7 @@ export const ActivityHistory = ({
           </Text>
         </div>
         <Text variant="meta" tone="secondary">
-          {visible.length} visible · {filtered.length} matching · {items.length} jobs
+          Showing {visible.length} of {filtered.length} matching, {items.length} jobs in all
         </Text>
       </div>
       <div className="activity-toolbar">
@@ -466,13 +486,14 @@ export const ActivityHistory = ({
             variant="quiet"
           >
             {visible.length < filtered.length
-              ? `Load earlier · ${String(filtered.length - visible.length)} remaining`
+              ? `Load earlier (${String(filtered.length - visible.length)} remaining)`
               : "Load earlier activity"}
           </Button>
         </div>
       ) : null}
       <Text as="p" className="activity-keyboard-help" tone="secondary" variant="meta">
-        <kbd>j</kbd>/<kbd>k</kbd> move · <kbd>Enter</kbd> details · <kbd>Esc</kbd> clear search
+        In the list, <kbd>J</kbd> and <kbd>K</kbd> move, <kbd>Enter</kbd> opens details and <kbd>Esc</kbd> clears the
+        search.
       </Text>
     </Surface>
   )

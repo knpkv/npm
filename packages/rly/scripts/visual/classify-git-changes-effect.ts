@@ -69,8 +69,8 @@ export const collectBoundedGitProcess = (
     stderr: collectBounded(handle.stderr, maximumBytes, "stderr"),
     stdout: collectBounded(handle.stdout, maximumBytes, "stdout")
   }, { concurrency: "unbounded" }).pipe(
-    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    Effect.onError(() => handle.kill().pipe(Effect.ignore)),
+    // Git may already have exited, so a failed kill is logged rather than replacing the original failure.
+    Effect.onError(() => handle.kill().pipe(Effect.ignore({ log: true }))),
     Effect.flatMap(({ exitCode, stdout }) =>
       exitCode === 0
         ? Effect.succeed(stdout)
@@ -82,5 +82,11 @@ export const collectBoundedGitProcess = (
 export const recoverVisualGitFailure = <E, R>(
   effect: Effect.Effect<VisualClassification, E, R>
 ): Effect.Effect<VisualClassification, never, R> =>
-  // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-  effect.pipe(Effect.catch(() => Effect.succeed(failClosedVisualClassification)))
+  // Logged, so a run that falls back to every visual test says why.
+  effect.pipe(
+    Effect.catch((error) =>
+      Effect.logWarning("visual classification failed; running every visual test", error).pipe(
+        Effect.as(failClosedVisualClassification)
+      )
+    )
+  )

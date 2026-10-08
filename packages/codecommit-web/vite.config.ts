@@ -2,6 +2,7 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import path from "node:path"
 import { defineConfig, loadEnv } from "vite"
+import { rlyFontPreload } from "../../vite-font-preload.ts"
 import {
   authenticatedDevBackendOrigin,
   authenticatedDevServerOptions,
@@ -18,7 +19,7 @@ export default defineConfig(({ mode }) => {
     : `http://127.0.0.1:${env.PORT}`
 
   return {
-    plugins: [react(), tailwindcss(), productionPrototypeBoundary(clientRoot)],
+    plugins: [react(), tailwindcss(), productionPrototypeBoundary(clientRoot), rlyFontPreload()],
     root: "src/client",
     build: {
       // The authenticated application shell includes the review workspace and syntax tooling.

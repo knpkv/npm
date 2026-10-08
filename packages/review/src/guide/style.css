@@ -1,9 +1,5 @@
 @import "@knpkv/rly/styles.css";
 
-/* Set by the export's head script until the inlined fonts are ready (at most a second). */
-html[data-review-fonts="loading"] body {
-  visibility: hidden;
-}
 .review-guide {
   --review-reading-ink: color-mix(in srgb, var(--rly-color-text-1) 60%, var(--rly-color-text-2));
   background: var(--rly-color-surface-2);
@@ -157,7 +153,7 @@ html[data-review-fonts="loading"] body {
 /* A document's title, not a poster's: page-title type, capped so a long title stays a few lines. */
 .review-header h1 {
   margin-block: var(--rly-space-24);
-  max-width: 28ch;
+  max-width: 19.18em;
   font-size: min(var(--rly-type-page-title-size), 2.75rem);
 }
 .review-explanation {
@@ -182,7 +178,7 @@ html[data-review-fonts="loading"] body {
   font-size: var(--rly-type-label-size);
 }
 .review-prose {
-  max-width: 68ch;
+  max-width: 45.3em;
   font-size: var(--rly-type-body-size);
   line-height: 1.75;
   color: var(--review-reading-ink);
@@ -334,14 +330,14 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   color: var(--rly-color-text-2);
 }
 .review-finding {
-  max-width: 80ch;
+  max-width: 53.3em;
   margin-block: var(--rly-space-8);
   scroll-margin-top: var(--rly-space-24);
   font-family: var(--rly-font-ui);
 }
 /* A long fenced example must scroll inside its card, not widen the diff table. */
 .review-file .review-finding {
-  max-width: min(80ch, calc(100cqi - var(--rly-space-24)));
+  max-width: min(53.3em, calc(100cqi - var(--rly-space-24)));
 }
 .review-finding .review-inline a {
   margin-inline-start: auto;

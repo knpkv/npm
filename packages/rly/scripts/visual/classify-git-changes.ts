@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Logger from "effect/Logger"
 import * as Path from "effect/Path"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Schema from "effect/Schema"
@@ -99,8 +100,9 @@ const program = Effect.gen(function*() {
   return classifyVisualChanges({ baseCatalog, changes, currentCatalog })
 })
 
+// Stdout carries only the classification JSON; the fail-closed warning goes to stderr.
 NodeRuntime.runMain(
   recoverVisualGitFailure(program).pipe(
     Effect.flatMap((classification) => Console.log(JSON.stringify(classification)))
-  ).pipe(Effect.provide(NodeServices.layer))
+  ).pipe(Effect.provideService(Logger.LogToStderr, true), Effect.provide(NodeServices.layer))
 )

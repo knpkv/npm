@@ -33,7 +33,7 @@
       var(--rly-type-page-title-font);
     letter-spacing: var(--rly-type-page-title-tracking);
     margin: var(--rly-space-0);
-    max-inline-size: 24ch;
+    max-inline-size: 16.44em;
     min-inline-size: var(--rly-space-0);
     overflow-wrap: break-word;
     text-wrap: balance;

@@ -1,6 +1,6 @@
 /**
- * Fails when any stylesheet draws a one-sided accent stripe (see accent-stripes.ts) or splits words
- * (see word-breaks.ts): every rly
+ * Fails when any stylesheet draws a one-sided accent stripe (see accent-stripes.ts), splits words
+ * (see word-breaks.ts) or measures in a glyph of the current font (see glyph-units.ts): every rly
  * source and story stylesheet, and every product package's `src` CSS. Stripes that product packages
  * already had are listed in `stripe-baseline.json` and allowed until removed (see stripe-baseline.ts).
  * Run with `pnpm lint:stripes`; part of the root `lint:static`.
@@ -15,6 +15,7 @@ import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import * as Schema from "effect/Schema"
 import { findAccentStripes } from "./accent-stripes.js"
+import { findGlyphUnits } from "./glyph-units.js"
 import { compareToBaseline, type StripeBaselineEntry } from "./stripe-baseline.js"
 import { findWordSplits } from "./word-breaks.js"
 
@@ -82,7 +83,13 @@ const program = Effect.gen(function*() {
   for (const file of files.sort()) {
     const source = yield* fs.readFileString(file)
     const relativePath = path.relative(repoRoot, file)
-    for (const violation of [...findAccentStripes(relativePath, source), ...findWordSplits(relativePath, source)]) {
+    for (
+      const violation of [
+        ...findAccentStripes(relativePath, source),
+        ...findWordSplits(relativePath, source),
+        ...findGlyphUnits(relativePath, source)
+      ]
+    ) {
       violations.push(violation)
     }
   }
