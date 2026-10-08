@@ -2,19 +2,19 @@ id: no-direct-aws-node-provider-chain
 snapshots:
   const provider = fromNodeProviderChain(options):
     labels:
-      - source: fromNodeProviderChain(options)
-        style: primary
-        start: 17
-        end: 47
+    - source: fromNodeProviderChain(options)
+      style: primary
+      start: 17
+      end: 47
   const raw = fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))():
     labels:
-      - source: fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))()
-        style: primary
-        start: 12
-        end: 91
+    - source: fromNodeProviderChain(codePipelineCredentialProviderOptions(account.profile))()
+      style: primary
+      start: 12
+      end: 91
   fromNodeProviderChain({ profile })():
     labels:
-      - source: fromNodeProviderChain({ profile })()
-        style: primary
-        start: 0
-        end: 36
+    - source: fromNodeProviderChain({ profile })()
+      style: primary
+      start: 0
+      end: 36

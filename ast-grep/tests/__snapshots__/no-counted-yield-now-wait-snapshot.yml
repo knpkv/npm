@@ -5,21 +5,21 @@ snapshots:
       yield* Effect.yieldNow
     }
   : labels:
-      - source: |-
-          for (let index = 0; index < 200; index++) {
-            yield* Effect.yieldNow
-          }
-        style: primary
-        start: 0
-        end: 70
-      - source: yield* Effect.yieldNow
-        style: secondary
-        start: 46
-        end: 68
+    - source: |-
+        for (let index = 0; index < 200; index++) {
+          yield* Effect.yieldNow
+        }
+      style: primary
+      start: 0
+      end: 70
+    - source: yield* Effect.yieldNow
+      style: secondary
+      start: 46
+      end: 68
   ? |
     for (let schedulerYield = 0; schedulerYield < 100; schedulerYield += 1) yield* Effect.yieldNow
   : labels:
-      - source: for (let schedulerYield = 0; schedulerYield < 100; schedulerYield += 1) yield* Effect.yieldNow
-        style: primary
-        start: 0
-        end: 94
+    - source: for (let schedulerYield = 0; schedulerYield < 100; schedulerYield += 1) yield* Effect.yieldNow
+      style: primary
+      start: 0
+      end: 94

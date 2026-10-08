@@ -9,23 +9,23 @@ snapshots:
       }
     })
   : labels:
-      - source: |-
+    - source: |-
+        try {
+            return parse(text)
+          } catch {
+            return undefined
+          }
+      style: primary
+      start: 44
+      end: 109
+    - source: |-
+        Effect.gen(function* () {
           try {
-              return parse(text)
-            } catch {
-              return undefined
-            }
-        style: primary
-        start: 44
-        end: 109
-      - source: |-
-          Effect.gen(function* () {
-            try {
-              return parse(text)
-            } catch {
-              return undefined
-            }
-          })
-        style: secondary
-        start: 16
-        end: 112
+            return parse(text)
+          } catch {
+            return undefined
+          }
+        })
+      style: secondary
+      start: 16
+      end: 112

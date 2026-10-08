@@ -5,30 +5,30 @@ snapshots:
       return JSON.parse(text)
     })
   : labels:
-      - source: JSON.parse(text)
-        style: primary
-        start: 51
-        end: 67
-      - source: |-
-          Effect.gen(function* () {
-            return JSON.parse(text)
-          })
-        style: secondary
-        start: 16
-        end: 70
+    - source: JSON.parse(text)
+      style: primary
+      start: 51
+      end: 67
+    - source: |-
+        Effect.gen(function* () {
+          return JSON.parse(text)
+        })
+      style: secondary
+      start: 16
+      end: 70
   ? |
     const program = Effect.gen(function* () {
       yield* fs.writeFileString(path, JSON.stringify(manifest))
     })
   : labels:
-      - source: JSON.stringify(manifest)
-        style: primary
-        start: 76
-        end: 100
-      - source: |-
-          Effect.gen(function* () {
-            yield* fs.writeFileString(path, JSON.stringify(manifest))
-          })
-        style: secondary
-        start: 16
-        end: 104
+    - source: JSON.stringify(manifest)
+      style: primary
+      start: 76
+      end: 100
+    - source: |-
+        Effect.gen(function* () {
+          yield* fs.writeFileString(path, JSON.stringify(manifest))
+        })
+      style: secondary
+      start: 16
+      end: 104

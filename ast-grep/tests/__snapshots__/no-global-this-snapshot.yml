@@ -3,14 +3,14 @@ snapshots:
   ? |
     const process = globalThis.process
   : labels:
-      - source: globalThis
-        style: primary
-        start: 16
-        end: 26
+    - source: globalThis
+      style: primary
+      start: 16
+      end: 26
   ? |
     globalThis.fetch(url)
   : labels:
-      - source: globalThis
-        style: primary
-        start: 0
-        end: 10
+    - source: globalThis
+      style: primary
+      start: 0
+      end: 10

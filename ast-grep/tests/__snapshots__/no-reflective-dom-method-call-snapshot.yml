@@ -2,7 +2,7 @@ id: no-reflective-dom-method-call
 snapshots:
   Reflect.apply(Reflect.get(line, "cloneNode"), line, [true]):
     labels:
-      - source: Reflect.apply(Reflect.get(line, "cloneNode"), line, [true])
-        style: primary
-        start: 0
-        end: 59
+    - source: Reflect.apply(Reflect.get(line, "cloneNode"), line, [true])
+      style: primary
+      start: 0
+      end: 59

@@ -3,16 +3,16 @@ snapshots:
   ? |
     const tagged = "_tag" in value
   : labels:
-      - source: '"_tag" in value'
-        style: primary
-        start: 15
-        end: 30
+    - source: '"_tag" in value'
+      style: primary
+      start: 15
+      end: 30
   ? |
     if ("message" in error) {
       report(error.message)
     }
   : labels:
-      - source: '"message" in error'
-        style: primary
-        start: 4
-        end: 22
+    - source: '"message" in error'
+      style: primary
+      start: 4
+      end: 22

@@ -3,29 +3,29 @@ snapshots:
   ? |
     const work = await import("@knpkv/herdr-work")
   : labels:
-      - source: import("@knpkv/herdr-work")
-        style: primary
-        start: 19
-        end: 46
+    - source: import("@knpkv/herdr-work")
+      style: primary
+      start: 19
+      end: 46
   ? |
     export { WorkStore } from "@knpkv/herdr-work"
   : labels:
-      - source: export { WorkStore } from "@knpkv/herdr-work"
-        style: primary
-        start: 0
-        end: 45
-      - source: '"@knpkv/herdr-work"'
-        style: secondary
-        start: 26
-        end: 45
+    - source: export { WorkStore } from "@knpkv/herdr-work"
+      style: primary
+      start: 0
+      end: 45
+    - source: '"@knpkv/herdr-work"'
+      style: secondary
+      start: 26
+      end: 45
   ? |
     import { WorkStore } from "@knpkv/herdr-work"
   : labels:
-      - source: import { WorkStore } from "@knpkv/herdr-work"
-        style: primary
-        start: 0
-        end: 45
-      - source: '"@knpkv/herdr-work"'
-        style: secondary
-        start: 26
-        end: 45
+    - source: import { WorkStore } from "@knpkv/herdr-work"
+      style: primary
+      start: 0
+      end: 45
+    - source: '"@knpkv/herdr-work"'
+      style: secondary
+      start: 26
+      end: 45

@@ -3,98 +3,98 @@ snapshots:
   ? |
     const all = read.pipe(Effect.catchIf(() => true, () => Effect.succeed(false)))
   : labels:
-      - source: Effect.catchIf(() => true, () => Effect.succeed(false))
-        style: primary
-        start: 22
-        end: 77
-      - source: Effect.succeed(false)
-        style: secondary
-        start: 55
-        end: 76
+    - source: Effect.catchIf(() => true, () => Effect.succeed(false))
+      style: primary
+      start: 22
+      end: 77
+    - source: Effect.succeed(false)
+      style: secondary
+      start: 55
+      end: 76
   ? |
     const block = read.pipe(Effect.catch(() => {
       const fallback = defaults()
       return Effect.succeed(fallback)
     }))
   : labels:
-      - source: |-
-          Effect.catch(() => {
-            const fallback = defaults()
-            return Effect.succeed(fallback)
-          })
-        style: primary
-        start: 24
-        end: 111
-      - source: Effect.succeed(fallback)
-        style: secondary
-        start: 84
-        end: 108
+    - source: |-
+        Effect.catch(() => {
+          const fallback = defaults()
+          return Effect.succeed(fallback)
+        })
+      style: primary
+      start: 24
+      end: 111
+    - source: Effect.succeed(fallback)
+      style: secondary
+      start: 84
+      end: 108
   ? |
     const done = Effect.catch(save, () => Effect.void)
   : labels:
-      - source: Effect.catch(save, () => Effect.void)
-        style: primary
-        start: 13
-        end: 50
-      - source: Effect.void
-        style: secondary
-        start: 38
-        end: 49
+    - source: Effect.catch(save, () => Effect.void)
+      style: primary
+      start: 13
+      end: 50
+    - source: Effect.void
+      style: secondary
+      start: 38
+      end: 49
   ? |
     const done = save.pipe(Effect.catch(() => Effect.void))
   : labels:
-      - source: Effect.catch(() => Effect.void)
-        style: primary
-        start: 23
-        end: 54
-      - source: Effect.void
-        style: secondary
-        start: 42
-        end: 53
+    - source: Effect.catch(() => Effect.void)
+      style: primary
+      start: 23
+      end: 54
+    - source: Effect.void
+      style: secondary
+      start: 42
+      end: 53
   ? |
     const done = save.pipe(Effect.catch((_error) => Effect.void))
   : labels:
-      - source: Effect.catch((_error) => Effect.void)
-        style: primary
-        start: 23
-        end: 60
-      - source: Effect.void
-        style: secondary
-        start: 48
-        end: 59
+    - source: Effect.catch((_error) => Effect.void)
+      style: primary
+      start: 23
+      end: 60
+    - source: Effect.void
+      style: secondary
+      start: 48
+      end: 59
   ? |
     const list = Effect.orElseSucceed(load, (_error) => [])
   : labels:
-      - source: Effect.orElseSucceed(load, (_error) => [])
-        style: primary
-        start: 13
-        end: 55
+    - source: Effect.orElseSucceed(load, (_error) => [])
+      style: primary
+      start: 13
+      end: 55
   ? |
     const list = load.pipe(Effect.catch(() => Effect.succeed([])))
   : labels:
-      - source: Effect.catch(() => Effect.succeed([]))
-        style: primary
-        start: 23
-        end: 61
-      - source: Effect.succeed([])
-        style: secondary
-        start: 42
-        end: 60
+    - source: Effect.catch(() => Effect.succeed([]))
+      style: primary
+      start: 23
+      end: 61
+    - source: Effect.succeed([])
+      style: secondary
+      start: 42
+      end: 60
   ? |
     const list = load.pipe(Effect.orElseSucceed(() => []))
   : labels:
-      - source: Effect.orElseSucceed(() => [])
-        style: primary
-        start: 23
-        end: 53
+    - source: Effect.orElseSucceed(() => [])
+      style: primary
+      start: 23
+      end: 53
   ? |
     const none = read.pipe(Effect.catchCause(() => Effect.succeedNone))
   : labels:
-      - source: Effect.catchCause(() => Effect.succeedNone)
-        style: primary
-        start: 23
-        end: 66
-      - source: Effect.succeedNone
-        style: secondary
-        start: 47
-        end: 65
+    - source: Effect.catchCause(() => Effect.succeedNone)
+      style: primary
+      start: 23
+      end: 66
+    - source: Effect.succeedNone
+      style: secondary
+      start: 47
+      end: 65

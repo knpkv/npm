@@ -3,14 +3,14 @@ snapshots:
   ? |
     yield* spawner.lines(ChildProcess.make("node", ["verify.mjs"], { cwd: consumer }))
   : labels:
-      - source: 'spawner.lines(ChildProcess.make("node", ["verify.mjs"], { cwd: consumer }))'
-        style: primary
-        start: 7
-        end: 82
+    - source: 'spawner.lines(ChildProcess.make("node", ["verify.mjs"], { cwd: consumer }))'
+      style: primary
+      start: 7
+      end: 82
   ? |
     yield* spawner.string(ChildProcess.make("pnpm", ["pack"], { cwd: packageRoot }))
   : labels:
-      - source: 'spawner.string(ChildProcess.make("pnpm", ["pack"], { cwd: packageRoot }))'
-        style: primary
-        start: 7
-        end: 80
+    - source: 'spawner.string(ChildProcess.make("pnpm", ["pack"], { cwd: packageRoot }))'
+      style: primary
+      start: 7
+      end: 80

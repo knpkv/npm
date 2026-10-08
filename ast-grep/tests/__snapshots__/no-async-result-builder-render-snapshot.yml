@@ -1,22 +1,22 @@
 id: no-async-result-builder-render
 snapshots:
-  AsyncResult.builder(result).onInitialOrWaiting(() => null).onError(() => null).onDefect(() => null).onSuccess((value) => value).render():
-    labels:
-      - source: AsyncResult.builder(result).onInitialOrWaiting(() => null).onError(() => null).onDefect(() => null).onSuccess((value) => value).render()
-        style: primary
-        start: 0
-        end: 136
-      - source: AsyncResult.builder(result)
-        style: secondary
-        start: 0
-        end: 27
+  ? AsyncResult.builder(result).onInitialOrWaiting(() => null).onError(() => null).onDefect(() => null).onSuccess((value) => value).render()
+  : labels:
+    - source: AsyncResult.builder(result).onInitialOrWaiting(() => null).onError(() => null).onDefect(() => null).onSuccess((value) => value).render()
+      style: primary
+      start: 0
+      end: 136
+    - source: AsyncResult.builder(result)
+      style: secondary
+      start: 0
+      end: 27
   AsyncResult.builder(result).onSuccess((value) => value).render():
     labels:
-      - source: AsyncResult.builder(result).onSuccess((value) => value).render()
-        style: primary
-        start: 0
-        end: 64
-      - source: AsyncResult.builder(result)
-        style: secondary
-        start: 0
-        end: 27
+    - source: AsyncResult.builder(result).onSuccess((value) => value).render()
+      style: primary
+      start: 0
+      end: 64
+    - source: AsyncResult.builder(result)
+      style: secondary
+      start: 0
+      end: 27

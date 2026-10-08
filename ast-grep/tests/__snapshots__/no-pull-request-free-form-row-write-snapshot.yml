@@ -3,15 +3,15 @@ snapshots:
   ? |
     const compareAndSet = (where: Statement.Fragment, version: RowVersion, set: Statement.Fragment) => where
   : labels:
-      - source: "set: Statement.Fragment"
-        style: primary
-        start: 71
-        end: 94
-      - source: set
-        style: secondary
-        start: 71
-        end: 74
-      - source: ": Statement.Fragment"
-        style: secondary
-        start: 74
-        end: 94
+    - source: 'set: Statement.Fragment'
+      style: primary
+      start: 71
+      end: 94
+    - source: set
+      style: secondary
+      start: 71
+      end: 74
+    - source: ': Statement.Fragment'
+      style: secondary
+      start: 74
+      end: 94

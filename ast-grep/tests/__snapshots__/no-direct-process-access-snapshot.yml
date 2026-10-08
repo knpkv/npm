@@ -3,21 +3,21 @@ snapshots:
   ? |
     const home = process.env.HOME
   : labels:
-      - source: process.env
-        style: primary
-        start: 13
-        end: 24
+    - source: process.env
+      style: primary
+      start: 13
+      end: 24
   ? |
     const host = globalThis.process.platform
   : labels:
-      - source: globalThis.process.platform
-        style: primary
-        start: 13
-        end: 40
+    - source: globalThis.process.platform
+      style: primary
+      start: 13
+      end: 40
   ? |
     import { argv } from "node:process"
   : labels:
-      - source: import { argv } from "node:process"
-        style: primary
-        start: 0
-        end: 35
+    - source: import { argv } from "node:process"
+      style: primary
+      start: 0
+      end: 35

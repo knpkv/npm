@@ -3,42 +3,42 @@ snapshots:
   ? |
     const arns = pr?.approvedByArns
   : labels:
-      - source: pr?.approvedByArns
-        style: primary
-        start: 13
-        end: 31
+    - source: pr?.approvedByArns
+      style: primary
+      start: 13
+      end: 31
   ? |
     const count = pr.approvedBy.length
   : labels:
-      - source: pr.approvedBy
-        style: primary
-        start: 14
-        end: 27
+    - source: pr.approvedBy
+      style: primary
+      start: 14
+      end: 27
   ? |
     const mine = pr.approvedByArns.includes(arn)
   : labels:
-      - source: pr.approvedByArns
-        style: primary
-        start: 13
-        end: 30
+    - source: pr.approvedByArns
+      style: primary
+      start: 13
+      end: 30
   ? |
     const names = pr?.approvedBy ?? []
   : labels:
-      - source: pr?.approvedBy
-        style: primary
-        start: 14
-        end: 28
+    - source: pr?.approvedBy
+      style: primary
+      start: 14
+      end: 28
   ? |
     const names = pr["approvedBy"]
   : labels:
-      - source: pr["approvedBy"]
-        style: primary
-        start: 14
-        end: 30
+    - source: pr["approvedBy"]
+      style: primary
+      start: 14
+      end: 30
   ? |
     return pullRequest.approvedBy.some((name) => name === viewer)
   : labels:
-      - source: pullRequest.approvedBy
-        style: primary
-        start: 7
-        end: 29
+    - source: pullRequest.approvedBy
+      style: primary
+      start: 7
+      end: 29

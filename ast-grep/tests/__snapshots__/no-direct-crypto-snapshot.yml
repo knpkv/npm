@@ -3,21 +3,21 @@ snapshots:
   ? |
     const id = crypto.randomUUID()
   : labels:
-      - source: crypto
-        style: primary
-        start: 11
-        end: 17
+    - source: crypto
+      style: primary
+      start: 11
+      end: 17
   ? |
     import { createHash } from "node:crypto"
   : labels:
-      - source: import { createHash } from "node:crypto"
-        style: primary
-        start: 0
-        end: 40
+    - source: import { createHash } from "node:crypto"
+      style: primary
+      start: 0
+      end: 40
   ? |
     import { randomBytes } from "crypto"
   : labels:
-      - source: import { randomBytes } from "crypto"
-        style: primary
-        start: 0
-        end: 36
+    - source: import { randomBytes } from "crypto"
+      style: primary
+      start: 0
+      end: 36

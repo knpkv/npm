@@ -5,10 +5,10 @@ snapshots:
       readonly id: string
     }
   : labels:
-      - source: |-
-          export interface User {
-            readonly id: string
-          }
-        style: primary
-        start: 0
-        end: 47
+    - source: |-
+        export interface User {
+          readonly id: string
+        }
+      style: primary
+      start: 0
+      end: 47

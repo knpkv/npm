@@ -3,7 +3,7 @@ snapshots:
   ? |
     const csrfToken = sessionStorage.getItem("cc_csrf")
   : labels:
-      - source: sessionStorage.getItem("cc_csrf")
-        style: primary
-        start: 18
-        end: 51
+    - source: sessionStorage.getItem("cc_csrf")
+      style: primary
+      start: 18
+      end: 51
