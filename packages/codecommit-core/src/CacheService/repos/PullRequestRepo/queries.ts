@@ -169,6 +169,26 @@ export const findStaleOpen = (sql: SqlClient.SqlClient) => {
   return (olderThan: string) => run({ olderThan }).pipe(cacheError("findStaleOpen"))
 }
 
+/**
+ * Merged or closed pull requests whose approvers couldn't be read, oldest-updated first, at most
+ * `limit`. A terminal pull request is never listed again, so the refresh re-reads these in batches
+ * until none is left.
+ */
+export const findClosedWithUnknownApprovers = (sql: SqlClient.SqlClient) => {
+  const run = SqlSchema.findAll({
+    Result: StaleOpenRow,
+    Request: Schema.Struct({ limit: Schema.Number }),
+    execute: (req) =>
+      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region, last_modified_date, observation_seq,
+            approval_version, approval_observation_seq
+          FROM pull_requests
+          WHERE status != 'OPEN' AND approvers_unknown = 1
+          ORDER BY last_modified_date ASC
+          LIMIT ${req.limit}`
+  })
+  return (limit: number) => run({ limit }).pipe(cacheError("findClosedWithUnknownApprovers"))
+}
+
 export const findOpenInRange = (sql: SqlClient.SqlClient) => {
   const run = SqlSchema.findAll({
     Result: StaleOpenRow,

@@ -36,7 +36,7 @@ import {
   type RepositoryName
 } from "../Domain.js"
 import { type AwsClientError, RefreshError } from "../Errors.js"
-import { countAllComments, type PRState } from "./internal.js"
+import { approverColumnsOf, countAllComments, type PRState } from "./internal.js"
 
 interface ResolvedAccount {
   readonly profile: AwsProfileName
@@ -274,8 +274,7 @@ export const makeRefreshSinglePR = (
       commentCount: Option.match(fetched, { onNone: () => null, onSome: countAllComments }),
       link: cached?.link ?? pr?.link ??
         codecommitConsoleUrl(account.region, coordinates?.repositoryName ?? detail.repositoryName, prId),
-      approvedBy: detail.approvedBy,
-      approvedByArns: detail.approvedByArns,
+      ...approverColumnsOf(detail),
       approvalRules: detail.approvalRules
     }
 

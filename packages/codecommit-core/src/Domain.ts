@@ -236,6 +236,8 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   fetchedAt: Schema.optional(Schema.Date),
   approvedBy: Schema.Array(Schema.String),
   approvedByArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
+  /** Set when the last approver read failed: `approvedBy` is then only the last known list. */
+  approversUnknown: Schema.optionalKey(Schema.Literal(true)),
   commentedBy: Schema.Array(Schema.String),
   filesChanged: Schema.optional(Schema.Number),
   approvalRules: Schema.Array(ApprovalRule).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([])))
@@ -294,6 +296,34 @@ export const approvalNotRequiredLabel = "No approval required"
 export const approvalUnknownLabel = "Approval unknown"
 
 /**
+ * The label every surface shows while `approversUnknown` is set, instead of a count or names.
+ *
+ * @category Domain
+ */
+export const approversUnknownLabel = "Approvers unknown"
+
+/**
+ * Who approved, as far as is known now: none while the last approver read failed, because the
+ * last known list may name an approval since revoked. Surfaces that mark people as approved read
+ * this, not `approvedBy`.
+ *
+ * @category Domain
+ */
+export const currentApprovers = (
+  pr: { readonly approvedBy: ReadonlyArray<string>; readonly approversUnknown?: true | undefined }
+): ReadonlyArray<string> => pr.approversUnknown === true ? [] : pr.approvedBy
+
+/**
+ * Approver ARNs as far as is known now: none while the last approver read failed, like
+ * {@link currentApprovers}.
+ *
+ * @category Domain
+ */
+export const currentApproverArns = (
+  pr: { readonly approvedByArns: ReadonlyArray<string>; readonly approversUnknown?: true | undefined }
+): ReadonlyArray<string> => pr.approversUnknown === true ? [] : pr.approvedByArns
+
+/**
  * The sentence every surface shows to explain an unknown approval.
  *
  * @category Domain
@@ -348,12 +378,14 @@ export const needsMyReview = (
     readonly approvalRules: ReadonlyArray<ApprovalRule>
     readonly approvedBy: ReadonlyArray<string>
     readonly approvalUnknown?: ApprovalUnknownReason | undefined
+    readonly approversUnknown?: true | undefined
   },
   currentUser: string | undefined
 ): boolean => {
   if (currentUser === undefined || currentUser.length === 0) return false
-  // While approval is unknown, which rules are satisfied is only last known, so review is not certain.
-  if (pr.approvalUnknown !== undefined) return false
+  // While approval is unknown, which rules are satisfied is only last known, so review is not certain;
+  // nor while approvers are unknown, since the user may already be one of them.
+  if (pr.approvalUnknown !== undefined || pr.approversUnknown === true) return false
   if (pr.approvedBy.some((approver) => identityMatches(currentUser, approver))) return false
   return pr.approvalRules.some(
     (rule) => !rule.satisfied && rule.poolMembers.some((member) => identityMatches(currentUser, member))
