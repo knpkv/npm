@@ -207,7 +207,8 @@ export function NotificationsPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex items-baseline gap-2">
                           <span
-                            className={`text-sm truncate ${item.read === 0 ? "font-medium" : "text-muted-foreground"}`}
+                            // The title is the notification: wrap it (up to two lines) rather than cut it to an ellipsis.
+                            className={`min-w-0 flex-1 break-words text-sm line-clamp-2 ${item.read === 0 ? "font-medium" : "text-muted-foreground"}`}
                           >
                             {item.title || (!isSystem(item) ? `PR #${item.pullRequestId}` : item.type)}
                           </span>

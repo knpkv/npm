@@ -229,7 +229,11 @@ export const ProviderAccountCard = ({
     const connection = connections.find((candidate) => candidate.followedResourceId === resource.followedResourceId)
     const state = connection === undefined ? undefined : synchronizationStates.get(connection.pluginConnectionId)
     const failureClass = state?._tag === "ready" ? state.synchronization.failure?.failureClass : undefined
-    return connection !== undefined && failureClass !== undefined && isAccountSyncFailure(failureClass)
+    // A disabled resource can't sync; Check again would only trade its known failure for a rejection.
+    return connection !== undefined &&
+      connection.isEnabled &&
+      failureClass !== undefined &&
+      isAccountSyncFailure(failureClass)
       ? [{ pluginConnectionId: connection.pluginConnectionId, failureClass }]
       : []
   })

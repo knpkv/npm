@@ -290,11 +290,13 @@ const RequestDetail = ({
         </div>
       ) : (
         <DecisionBar
-          {...(clock === null
-            ? {}
-            : {
+          {...(clock !== null
+            ? {
                 clock: <span className="countdown-nowrap">{clock === "expiring" ? "expiring" : `${clock} left`}</span>
-              })}
+              }
+            : gone || facts.expiresAt !== null
+              ? {}
+              : { clock: <span className="countdown-nowrap">No expiry</span> })}
           {...(state._tag === "ready" || state._tag === "sending"
             ? {
                 note: "If it expires before your decision reaches the hub, you'll see the hub's refusal, not a success."
@@ -530,14 +532,9 @@ export const ApprovalsCountdown = ({
       <div className="countdown-regions" data-has-selection={selected !== undefined}>
         <Region
           className="countdown-waiting"
-          {...(items.length === 0 && unchecked.length > 0
-            ? {}
-            : {
-                count:
-                  unchecked.length > 0 || snapshot.pendingApprovals.nextCursors.length > 0
-                    ? `${String(items.length)}+`
-                    : items.length
-              })}
+          // The count is what's listed. Unchecked hosts and pages not loaded yet are said in words above,
+          // so an unexplained "+" isn't needed.
+          {...(items.length === 0 && unchecked.length > 0 ? {} : { count: items.length })}
           title="Waiting for you"
         >
           {items.length === 0 ? (
@@ -573,14 +570,13 @@ export const ApprovalsCountdown = ({
                         <code>{row.kind}</code>, {row.host}
                       </span>
                       <span className="countdown-row-title">{row.title}</span>
-                      {clock === null ? null : (
-                        <span
-                          className="countdown-row-clock"
-                          data-urgency={row.expiresAt === null ? "calm" : urgencyOf(row.expiresAt - now)}
-                        >
-                          {clock}
-                        </span>
-                      )}
+                      {/* A request without an expiry says so, instead of leaving the clock's place empty. */}
+                      <span
+                        className="countdown-row-clock"
+                        data-urgency={row.expiresAt === null ? "calm" : urgencyOf(row.expiresAt - now)}
+                      >
+                        {clock ?? "No expiry"}
+                      </span>
                       {used === null ? null : (
                         <span className="countdown-visually-hidden">
                           , {String(Math.round(used.value))}% of its approval window used

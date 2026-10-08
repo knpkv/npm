@@ -36,7 +36,36 @@ jobs:
         with:
           node-version: 26.7.0
           registry-url: https://registry.npmjs.org
+      # changesets/action publishes only when no changeset is pending; otherwise it
+      # versions. A Version Packages merge that lands after newer changesets reached
+      # main would then publish nothing (#589). So this step asks npm which versions
+      # on main it lacks. When every one was produced by Version Packages (its
+      # CHANGELOG has the version's heading), it sets the pending changesets aside
+      # and the next step publishes them, then they are restored for versioning.
+      # When any is not versioned yet (a new package awaiting its changeset), it
+      # warns and leaves the release to the action's usual choice, since a partial
+      # publish is unsafe. Asking npm, not this push's diff, keeps a release ready
+      # through skipped or failed runs. A failed publish fails its step and the job.
+      - name: Prepare versions ready to publish
+        id: released
+        run: node scripts/check-version-bumps.mjs --prepare-release
+      - name: Publish the released versions
+        if: steps.released.outputs.outstanding == 'true'
+        uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
+        with:
+          github-token: ${{ secrets.TOKEN_GITHUB }}
+          # Build and publish every package whose version is not on npm yet
+          publish-script: pnpm changeset:publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.TOKEN_NPM }}
+          HUSKY: 0
+      - name: Restore pending changesets
+        if: steps.released.outputs.outstanding == 'true'
+        run: git checkout HEAD -- .changeset
+      # With nothing outstanding this is the action's usual choice: version pending changesets, or
+      # publish when none are pending. After a release it only versions what is pending.
       - name: Create Release Pull Request or Publish
+        if: steps.released.outputs.outstanding != 'true' || steps.released.outputs.pending == 'true'
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           github-token: ${{ secrets.TOKEN_GITHUB }}

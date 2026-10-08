@@ -110,7 +110,7 @@
   .keyboard-hints kbd {
     background: var(--rly-color-surface-2);
     border: 1px solid var(--rly-color-border-2);
-    border-block-end-color: var(--rly-color-border-3);
+    border-block-end-color: currentcolor;
     border-radius: var(--rly-radius-field);
     color: var(--rly-color-text-2);
     font: inherit;
@@ -320,7 +320,9 @@
     justify-content: space-between;
   }
 
+  /* A count that doesn't fit beside the heading drops under it instead of squeezing into a column. */
   .section-heading {
+    flex-wrap: wrap;
     margin-block-end: var(--rly-space-20);
   }
 
@@ -338,21 +340,35 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  /* The state label drops under the name before it can squeeze it; names and work wrap whole.
+     A zero basis with an 8rem floor keeps the presence dot beside the name at 320. */
   .agent-line {
     align-items: center;
+    flex-wrap: wrap;
   }
 
   .agent-line > div {
     display: grid;
-    flex: 1;
-    min-inline-size: 0;
+    flex: 1 1 0;
+    min-inline-size: 8rem;
   }
 
   .agent-line small,
   .agent-line strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
+  }
+
+  /* Only an agent at work moves; settled states keep a still, distinct icon. */
+  @media (prefers-reduced-motion: no-preference) {
+    .agent-state-spinning svg {
+      animation: agent-state-spin 1.6s linear infinite;
+    }
+  }
+
+  @keyframes agent-state-spin {
+    to {
+      transform: rotate(1turn);
+    }
   }
 
   .agenda-list {
@@ -540,6 +556,11 @@
     gap: var(--rly-space-16);
   }
 
+  /* A failed refresh's notice sits in the page gutter above the content it is about. */
+  .dashboard-refresh-failed {
+    margin-block-end: var(--rly-space-12);
+  }
+
   .fleet-work-reserved {
     min-block-size: 100svh;
   }
@@ -575,6 +596,8 @@
     color: var(--rly-color-text-1);
     font: inherit;
     min-block-size: 2.5rem;
+    /* An input's intrinsic width would hold the toolbar column open past the card at 320. */
+    min-inline-size: 0;
     padding-inline: var(--rly-space-12);
   }
 
@@ -602,7 +625,7 @@
     font: inherit;
     font-size: var(--rly-type-meta-size);
     min-block-size: 2rem;
-    padding-inline: var(--rly-space-10);
+    padding-inline: var(--rly-space-12);
   }
 
   .activity-filters button[aria-pressed="true"] {
@@ -656,10 +679,9 @@
     min-inline-size: 0;
   }
 
+  /* Titles and descriptions wrap: at phone width an ellipsis left a third of the sentence. */
   .activity-row-copy > * {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
   }
 
   .activity-actor {
@@ -771,8 +793,9 @@
     border-color: var(--rly-color-border-2);
   }
 
+  /* No dimming: the "Offline" label says it, and opacity pulled its ink below 4.5:1 (axe, QA-167). */
   .machine-offline {
-    opacity: 0.65;
+    color: var(--rly-color-text-2);
   }
 
   .hub-link {
@@ -1266,16 +1289,6 @@
     }
   }
 
-  .app-error {
-    color: var(--rly-color-text-1);
-  }
-
-  .app-error pre {
-    color: var(--rly-color-blocked-ink);
-    overflow-wrap: break-word;
-    white-space: pre-wrap;
-  }
-
   @media (max-width: 46rem) {
     .app {
       inline-size: min(calc(100% - var(--rly-space-16)), 68rem);
@@ -1309,7 +1322,7 @@
     }
 
     .activity-toolbar {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
       position: static;
     }
 
@@ -1352,6 +1365,34 @@
 
     .activity-detail {
       padding: var(--rly-space-12);
+    }
+  }
+
+  /* Below 24rem a time column left the title about 80px, and words broke mid-word: the time
+     moves onto its own line above the title, and the copy takes the row's full width. */
+  @media (max-width: 24rem) {
+    .activity-row {
+      grid-template-columns: minmax(0, 1fr) 1rem;
+    }
+
+    .activity-row > time {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .activity-row-copy {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .activity-status {
+      grid-column: 1;
+      grid-row: 3;
+    }
+
+    .activity-disclosure {
+      grid-column: 2;
+      grid-row: 1 / span 3;
     }
   }
 

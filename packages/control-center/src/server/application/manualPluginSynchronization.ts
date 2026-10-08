@@ -195,8 +195,10 @@ const failureHealth = Effect.fn("ManualPluginSynchronization.failureHealth")(fun
 /**
  * Why a failed attempt failed: the failure on the connection's health, but only when that health was
  * recorded during the attempt (`persistHealth` writes it before the attempt completes). A health
- * written later, by a connection test or another sync, says nothing about this attempt, so the
- * reason is unknown (null) rather than borrowed.
+ * written after the attempt, by a connection test or another sync, says nothing about it, so the
+ * reason is unknown (null) rather than borrowed. The join is by time: a different failure written
+ * inside the attempt's own window (a concurrent connection test) would still be attributed to it;
+ * an exact join needs the attempt to record its failure class, which waits for a stable schema.
  */
 const failureOfAttempt = (
   attempt: PluginSyncAttemptRecord,

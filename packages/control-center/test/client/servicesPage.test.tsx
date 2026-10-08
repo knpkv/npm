@@ -4060,6 +4060,80 @@ describe("ServicesPage first sync", () => {
     expect(pipeline?.textContent).not.toContain(credentialSentence)
   })
 
+  // Check again re-syncs only enabled resources: the server rejects a sync of a disabled one.
+  it("re-syncs only enabled resources from the account's Check again", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000211")
+    const resourceIds = [
+      Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000212"),
+      Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000213")
+    ]
+    const connectionIds = [
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000214"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000215")
+    ]
+    const accountOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        catalogEntry("codecommit"),
+        catalogEntry("codepipeline"),
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: connectionIds.map((pluginConnectionId, index) => ({
+        pluginConnectionId,
+        providerAccountId: accountId,
+        followedResourceId: resourceIds[index],
+        providerId: "codecommit",
+        displayName: index === 0 ? "enabled-repo" : "disabled-repo",
+        isEnabled: index === 0,
+        supportsSynchronization: true,
+        health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      })),
+      accounts: [
+        {
+          providerAccountId: accountId,
+          providerFamily: "aws",
+          displayName: "123456789012",
+          providerImmutableId: "123456789012",
+          revision: 1,
+          resources: resourceIds.map((followedResourceId, index) => ({
+            followedResourceId,
+            providerId: "codecommit",
+            displayName: index === 0 ? "enabled-repo" : "disabled-repo",
+            providerImmutableId: `eu-west-1:repo-${index}`,
+            isEnabled: true
+          }))
+        }
+      ]
+    })
+    const synchronize = vi.fn<NonNullable<ConnectionTestTransport["synchronize"]>>((pluginConnectionId) =>
+      Promise.resolve(syncState(pluginConnectionId, "synchronized"))
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connectionIds[0]!),
+      overview: () => Promise.resolve(accountOverview),
+      setEnabled: vi.fn(),
+      synchronization: (pluginConnectionId) =>
+        Promise.resolve(
+          syncState(pluginConnectionId, "source-unavailable", {
+            failure: { failureClass: "authentication", safeMessage: "Credentials were rejected." }
+          })
+        ),
+      synchronize,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const checkAgain = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Check again"
+    )
+    await act(async () => checkAgain?.click())
+
+    expect(synchronize.mock.calls.map(([pluginConnectionId]) => pluginConnectionId)).toEqual([connectionIds[0]])
+  })
+
   // Sync state that hasn't loaded, or failed to load, is not proof of data: never "Healthy".
   it("doesn't call a resource Healthy while its sync state is loading or unreadable", async () => {
     const existing = Schema.decodeSync(PluginConnectionSummary)({

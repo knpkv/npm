@@ -151,7 +151,7 @@ function LifecycleMetrics({
 
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-3">
         {metrics.map((m) => (
           <Card
             key={m.key}
@@ -207,7 +207,7 @@ function StatsContent({
   return (
     <div className="space-y-4">
       {/* KPI Row */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-3">
         <KPICard
           label="PRs Created"
           value={data.prsCreated}
@@ -229,7 +229,7 @@ function StatsContent({
       <LifecycleMetrics data={data} goToPR={goToPR} />
 
       {/* Contributors + Reviewers + Approvers */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
         <RankingChart
           data={data.topContributors}
           labelKey="author"
@@ -275,7 +275,7 @@ function StatsContent({
       </div>
 
       {/* PR Size + Diff by contributor */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(14rem,1fr))] gap-3">
         <SizeDistributionChart
           dist={data.prSizeDistribution}
           onBarClick={(size) =>

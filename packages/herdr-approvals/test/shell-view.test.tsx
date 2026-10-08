@@ -52,6 +52,22 @@ describe("shared fleet shell", () => {
     expect(markup).not.toContain("APPROVALS_ONLY<section>WORK_DEPARTURE_BOARD")
   })
 
+  it("places a page notice under the masthead and above the tabs, inside the page", () => {
+    const markup = renderToStaticMarkup(
+      <FleetShell
+        approvals={<section>APPROVALS_ONLY</section>}
+        connect={<section>CONNECT</section>}
+        hostCount={1}
+        notice={<p>REFRESH_FAILED</p>}
+        work={<section>WORK</section>}
+      />
+    )
+    const notice = markup.indexOf("REFRESH_FAILED")
+    expect(notice).toBeGreaterThan(markup.indexOf('<main class="fleet-shell-main">'))
+    expect(notice).toBeGreaterThan(markup.indexOf("</header>"))
+    expect(notice).toBeLessThan(markup.indexOf('role="tablist"'))
+  })
+
   it("acts on no single bare key: 1, 2, 3 and / do nothing", () => {
     for (const key of ["1", "2", "3", "/", "a", "c", "w"]) expect(press(key)).toEqual({ prefix: null, shortcut: null })
   })

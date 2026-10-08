@@ -31,6 +31,7 @@ import { Field } from "../primitives/Field.js"
 import { Select, type RlySelectOption } from "../primitives/Select.js"
 import { StatePanel } from "../primitives/StatePanel.js"
 import styles from "./RelayDock.module.css"
+import { RelayMark } from "./RelayMark.js"
 
 const style = (name: string): string => cssClass(styles, name)
 const compactViewportQuery = "(max-width: 40rem), (max-height: 40rem) and (pointer: coarse)"
@@ -561,15 +562,6 @@ const useCompactViewport = (view: Window | null): boolean => {
   return useSyncExternalStore(subscribe, snapshot, serverCompactViewportSnapshot)
 }
 
-const RelayMark = (): ReactElement => (
-  <span aria-hidden="true" className={style("mark")}>
-    <span className={style("markLine")} />
-    <svg className={style("markGlyph")} focusable="false" viewBox="0 0 24 24">
-      <path d="M12 3.5 14 10l6.5 2-6.5 2-2 6.5L10 14l-6.5-2 6.5-2Z" fill="currentColor" />
-    </svg>
-  </span>
-)
-
 const ContextChips = ({
   context,
   labelId
@@ -987,7 +979,7 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
         ref={triggerRef}
         type="button"
       >
-        <RelayMark />
+        <RelayMark.Tile size={32} />
         <span>{visibleTriggerLabel}</span>
       </button>
       {!resolvedOpen ? null : (
