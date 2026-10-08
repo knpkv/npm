@@ -17,3 +17,22 @@ export const applyTerminalInputIdentity = (input: TerminalInputIdentityTarget): 
 export const focusTerminalInput = (input: Pick<HTMLElement, "focus">): void => {
   input.focus({ preventScroll: true })
 }
+
+/**
+ * Report whether the terminal's text input holds focus, as it changes: a tap, the Keyboard button,
+ * or iOS dismissing its keyboard. The Keyboard button's pressed state follows this, so it never
+ * disagrees with the screen. Returns the release.
+ */
+export const trackTerminalInputFocus = (
+  input: Pick<HTMLElement, "addEventListener" | "removeEventListener">,
+  onChange: (focused: boolean) => void
+): () => void => {
+  const focused = (): void => onChange(true)
+  const blurred = (): void => onChange(false)
+  input.addEventListener("focus", focused)
+  input.addEventListener("blur", blurred)
+  return () => {
+    input.removeEventListener("focus", focused)
+    input.removeEventListener("blur", blurred)
+  }
+}

@@ -30,6 +30,11 @@
     min-block-size: var(--rly-space-32);
     min-inline-size: var(--rly-space-32);
   }
+  @supports (justify-content: safe center) {
+    .avatar {
+      justify-content: safe center;
+    }
+  }
 
   .human {
     border-radius: var(--rly-radius-round);
@@ -125,8 +130,10 @@
     content: "−";
   }
 
-  .prevention summary:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .prevention summary:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .prevention summary:focus-visible {
@@ -245,8 +252,10 @@
     text-align: start;
   }
 
-  .footer button:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .footer button:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .footer button:focus-visible {

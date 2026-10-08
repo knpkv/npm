@@ -67,8 +67,10 @@
     text-underline-offset: var(--rly-space-4);
   }
 
-  .link:hover {
-    text-decoration-color: currentcolor;
+  @media (hover: hover) and (pointer: fine) {
+    .link:hover {
+      text-decoration-color: currentcolor;
+    }
   }
 
   .link:focus-visible {

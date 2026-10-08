@@ -126,4 +126,71 @@ describe("TerminalKeyRail", () => {
     expect(toggle?.tabIndex).toBe(0)
     expect(host.querySelector<HTMLButtonElement>('[data-terminal-key="latest"]')?.disabled).toBe(false)
   })
+
+  it("offers a Keyboard toggle whose pressed state is the keyboard's, and asks for the other state", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const requests: Array<boolean> = []
+    const render = async (keyboardOpen: boolean, withToggle: boolean) =>
+      act(async () => {
+        root.render(
+          <TerminalKeyRail
+            keyboardOpen={keyboardOpen}
+            modifier={null}
+            onFocusTerminal={() => undefined}
+            onKey={() => undefined}
+            {...(withToggle ? { onKeyboardToggle: (open: boolean) => requests.push(open) } : {})}
+            onModifierChange={() => undefined}
+          />
+        )
+      })
+
+    await render(false, false)
+    expect(host.querySelector('[data-terminal-key="keyboard"]')).toBeNull()
+
+    await render(false, true)
+    const keyboard = host.querySelector<HTMLButtonElement>('[data-terminal-key="keyboard"]')
+    expect(keyboard?.textContent).toBe("Keyboard")
+    expect(keyboard?.getAttribute("aria-pressed")).toBe("false")
+    await act(async () => keyboard?.click())
+
+    await render(true, true)
+    expect(host.querySelector('[data-terminal-key="keyboard"]')?.getAttribute("aria-pressed")).toBe("true")
+    await act(async () => host.querySelector<HTMLButtonElement>('[data-terminal-key="keyboard"]')?.click())
+    expect(requests).toEqual([true, false])
+  })
+
+  it("offers Paste only with a handler, and keeps it in reach when the keys are hidden", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    let pastes = 0
+    const render = async (withPaste: boolean) =>
+      act(async () => {
+        root.render(
+          <TerminalKeyRail
+            keysHidden
+            modifier={null}
+            onFocusTerminal={() => undefined}
+            onKey={() => undefined}
+            onKeysHiddenChange={() => undefined}
+            onModifierChange={() => undefined}
+            {...(withPaste ? { onPaste: () => (pastes += 1) } : {})}
+          />
+        )
+      })
+
+    await render(false)
+    expect(host.querySelector('[data-terminal-key="paste"]')).toBeNull()
+
+    await render(true)
+    const paste = host.querySelector<HTMLButtonElement>('[data-terminal-key="paste"]')
+    expect(paste?.getAttribute("aria-label")).toBe("Paste from clipboard")
+    expect(paste?.disabled).toBe(false)
+    await act(async () => paste?.click())
+    expect(pastes).toBe(1)
+  })
 })
