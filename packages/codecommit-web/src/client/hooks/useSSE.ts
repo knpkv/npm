@@ -146,7 +146,8 @@ const SsePayload = Schema.Struct({
     operation: Schema.String,
     category: Schema.String,
     context: Schema.String
-  }))
+  })),
+  pendingReads: Schema.optional(Schema.Struct({ count: Schema.Number, contexts: Schema.Array(Schema.String) }))
 })
 
 const decode = Schema.decodeUnknownSync(Schema.fromJsonString(SsePayload))
@@ -186,7 +187,8 @@ const toAppState = (payload: typeof SsePayload.Type): AppState => {
       { unreadNotificationCount: payload.unreadNotificationCount }),
     ...((notifications !== undefined) && { notifications }),
     ...((payload.sandboxes !== undefined) && { sandboxes: payload.sandboxes }),
-    ...((payload.permissionPrompt !== undefined) && { permissionPrompt: payload.permissionPrompt })
+    ...((payload.permissionPrompt !== undefined) && { permissionPrompt: payload.permissionPrompt }),
+    ...((payload.pendingReads !== undefined) && { pendingReads: payload.pendingReads })
   }
 }
 

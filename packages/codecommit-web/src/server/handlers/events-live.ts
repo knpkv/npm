@@ -56,7 +56,9 @@ const SsePayload = Schema.Struct({
     operation: Schema.String,
     category: Schema.String,
     context: Schema.String
-  }))
+  })),
+  /** Reads waiting for an answer in this process, with the first three contexts, while one is shown. */
+  pendingReads: Schema.optional(Schema.Struct({ count: Schema.Number, contexts: Schema.Array(Schema.String) }))
 })
 
 const encode = Schema.encodeEffect(SsePayload)
@@ -131,6 +133,7 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
         )
 
         const pendingPrompt = yield* permGate.getFirstPending()
+        const pendingReads = pendingPrompt?.category === "read" ? yield* permGate.pendingOf("read", 3) : undefined
 
         const payload = yield* encode({
           accounts: prState.accounts,
@@ -146,7 +149,8 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           unreadNotificationCount: unreadCount,
           notifications,
           sandboxes,
-          permissionPrompt: pendingPrompt
+          permissionPrompt: pendingPrompt,
+          pendingReads
         })
 
         return encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)
