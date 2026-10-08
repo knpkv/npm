@@ -2175,3 +2175,20 @@ test("cleans up an open preview when its browser session expires", async ({ page
   await expect(page.locator("body")).not.toHaveAttribute("data-scroll-locked", "1")
   await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeFocused()
 })
+
+test.describe("on a touch phone", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { height: 844, width: 390 } })
+
+  // A navigation target under 44px is hard to hit with a thumb.
+  test("the phone navigation's targets are 44px tall", async ({ page }) => {
+    await page.goto(`/w/${snapshot.workspaceId}/overview`)
+    expect(await page.evaluate<boolean>("matchMedia('(pointer: coarse)').matches")).toBe(true)
+    const links = page.getByRole("navigation", { name: "Primary" }).getByRole("link")
+    await expect(links.first()).toBeVisible()
+    const heights = await links.evaluateAll((links) =>
+      links.map((link) => Math.round(link.getBoundingClientRect().height))
+    )
+    expect(heights.length).toBeGreaterThan(0)
+    expect(heights.filter((height) => height < 44)).toEqual([])
+  })
+})

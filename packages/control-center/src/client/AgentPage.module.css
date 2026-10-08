@@ -16,7 +16,9 @@
   gap: clamp(4rem, 9vw, 8rem);
 }
 
+/* A text-sized link; its ::after extends the target to 44px without moving the text. */
 .back {
+  position: relative;
   inline-size: fit-content;
   color: var(--rly-color-text-2);
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
@@ -247,4 +249,10 @@
       background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
       box-shadow var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
+}
+
+.back::after {
+  position: absolute;
+  inset: min(0px, (100% - 2.75rem) / 2);
+  content: "";
 }
