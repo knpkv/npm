@@ -36,6 +36,8 @@ files:
   - "packages/agent-usage/src/**/*.css"
   - "packages/codecommit-web/src/**/*.css"
   - "packages/herdr-approvals/src/**/*.css"
+  - "packages/control-center/src/**/*.css"
+  - "packages/jcf-web/src/**/*.css"
 
 note: |
   Keep rly's ring (base :focus-visible) on the focused element. A transparent outline is no substitute:
