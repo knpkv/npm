@@ -7,7 +7,7 @@ import {
   type RlyDiffFileContent,
   type RlyDiffInventory
 } from "@knpkv/rly/diff/workbench"
-import { Button, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import { Button, Select, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as Schema from "effect/Schema"
 import * as Result from "effect/Result"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
@@ -24,7 +24,7 @@ import {
   ShieldCheckIcon,
   TestTube2Icon
 } from "lucide-react"
-import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { type ReactElement, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { useInlineSize } from "../hooks/useInlineSize.js"
 import { FindingsDrawer, findingsPlacement } from "./findings-drawer.js"
 import { Link, useNavigate } from "react-router"
@@ -699,6 +699,7 @@ const ReadyReviewWorkspace = ({
   const [wrap, setWrap] = useState(false)
   const config = useAtomValue(configQueryAtom)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
+  const profileLabelId = useId()
   const postFindingMutation = useMemo(() => ApiClient.mutation("prs", "postRelayFinding"), [])
   const postFindingRequest = useAtomSet(postFindingMutation, { mode: "promise" })
   const reviewIdentity = exactReviewIdentity(
@@ -1563,29 +1564,29 @@ const ReadyReviewWorkspace = ({
             No Relay profile yet. <Link to="/settings/relay">Add one in Settings</Link> to run a review.
           </p>
         ) : (
-          <label className={styles.profileChoice}>
-            <span>Profile</span>
-            <select
+          <div className={styles.profileChoice}>
+            <span id={profileLabelId}>Profile</span>
+            <Select
+              aria-labelledby={profileLabelId}
               disabled={isReviewing || !AsyncResult.isSuccess(config)}
-              onChange={(event) => {
-                const profile = profiles.find(({ id }) => id === event.target.value)
-                setSelectedProfileId(event.target.value)
+              onValueChange={(value) => {
+                const profile = profiles.find(({ id }) => id === value)
+                setSelectedProfileId(value)
                 if (profile !== undefined) setKind(profile.kind)
               }}
-              value={selectedProfile?.id ?? ""}
-            >
-              {AsyncResult.isSuccess(config) && selectedProfile === undefined && selectedProfileId !== null ? (
-                <option value="">Selected profile unavailable</option>
-              ) : AsyncResult.isSuccess(config) ? null : (
-                <option value="">{AsyncResult.isFailure(config) ? "Profiles unavailable" : "Loading profiles…"}</option>
-              )}
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              options={profiles.map((profile) => ({ label: profile.name, value: profile.id }))}
+              placeholder={
+                !AsyncResult.isSuccess(config)
+                  ? AsyncResult.isFailure(config)
+                    ? "Profiles unavailable"
+                    : "Loading profiles…"
+                  : selectedProfileId !== null && selectedProfile === undefined
+                    ? "Selected profile unavailable"
+                    : "Choose a profile"
+              }
+              value={selectedProfile?.id}
+            />
+          </div>
         )}
         <Button
           disabled={isReviewing || diff.files.length === 0 || selectedProfile === undefined}

@@ -4,41 +4,6 @@
     {
       "package": "agent-usage",
       "kind": "ast-grep",
-      "file": "packages/agent-usage/src/client/api.ts",
-      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "agent-usage",
-      "kind": "ast-grep",
-      "file": "packages/agent-usage/src/server/ControlSocket.ts",
-      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "agent-usage",
-      "kind": "ast-grep",
-      "file": "packages/agent-usage/src/server/ControlSocket.ts",
-      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "agent-usage",
-      "kind": "ast-grep",
-      "file": "packages/agent-usage/src/server/Live.ts",
-      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "agent-usage",
-      "kind": "ast-grep",
-      "file": "packages/agent-usage/src/server/Live.ts",
-      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "agent-usage",
-      "kind": "ast-grep",
       "file": "packages/agent-usage/test/login.test.ts",
       "text": "ast-grep-ignore: no-released-ephemeral-test-port -- the spawned server takes PORT from its environment; follow-up: let it bind 0 and report its port.",
       "reasoned": true
@@ -3288,6 +3253,13 @@
       "package": "herdr-coordinator",
       "kind": "effect-diagnostics",
       "file": "packages/herdr-coordinator/test/coordinator.test.ts",
+      "text": "@effect-diagnostics-next-line effectSucceedWithVoid:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/coordinator.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
       "reasoned": true
     },
@@ -3310,34 +3282,6 @@
       "kind": "effect-diagnostics",
       "file": "packages/herdr-coordinator/test/orchestrator.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
       "reasoned": false
     },
     {
@@ -3374,20 +3318,6 @@
       "file": "packages/herdr-fleet/test/sqlite.test.ts",
       "text": "@effect-diagnostics strictEffectProvide:skip-file",
       "reasoned": false
-    },
-    {
-      "package": "herdr-monitor",
-      "kind": "ast-grep",
-      "file": "packages/herdr-monitor/src/cli.ts",
-      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "herdr-monitor",
-      "kind": "ast-grep",
-      "file": "packages/herdr-monitor/src/server.ts",
-      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
     },
     {
       "package": "herdr-monitor",
@@ -4248,20 +4178,6 @@
       "kind": "typescript",
       "file": "packages/review/test/export-guide.test.ts",
       "text": "@ts-expect-error Exercise the untyped JavaScript caller boundary.",
-      "reasoned": true
-    },
-    {
-      "package": "rly",
-      "kind": "ast-grep",
-      "file": "packages/rly/scripts/visual/classify-git-changes-effect.ts",
-      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
-      "reasoned": true
-    },
-    {
-      "package": "rly",
-      "kind": "ast-grep",
-      "file": "packages/rly/scripts/visual/classify-git-changes-effect.ts",
-      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
     },
     {

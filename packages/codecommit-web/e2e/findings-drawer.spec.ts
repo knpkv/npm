@@ -151,7 +151,7 @@ test("titles the drawer once, fills it, and names the missing profile", async ({
 
   await expect(drawer.getByText("No Relay profile yet.")).toBeVisible()
   await expect(drawer.getByRole("link", { name: "Add one in Settings" })).toHaveAttribute("href", "/settings/relay")
-  await expect(drawer.getByLabel("Profile")).toHaveCount(0)
+  await expect(drawer.getByRole("combobox", { name: "Profile" })).toHaveCount(0)
   await expect(drawer.getByRole("button", { name: "Run Relay" })).toBeDisabled()
 
   const gap = await drawer.evaluate((dialog) => {
@@ -160,6 +160,36 @@ test("titles the drawer once, fills it, and names the missing profile", async ({
     return dialog.getBoundingClientRect().bottom - pane.getBoundingClientRect().bottom
   })
   expect(gap).toBeLessThanOrEqual(2)
+})
+
+// The profile list opens inside the drawer's modal: a list portalled to the page body would be inert.
+test("chooses a Relay profile from inside the drawer", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  const profile = (id: string, name: string) => ({ id, kind: "review", name, skillIds: [] })
+  await page.route("**/api/config", (route) =>
+    route.fulfill({
+      json: {
+        accounts: [{ enabled: true, profile: "production", regions: ["eu-west-1"] }],
+        autoDetect: false,
+        autoRefresh: false,
+        refreshIntervalSeconds: 300,
+        review: {
+          defaultProfileId: "thorough",
+          profiles: [profile("thorough", "Thorough review"), profile("quick", "Quick review")]
+        }
+      }
+    }))
+  await page.goto(detail)
+
+  await page.getByRole("button", { name: "Relay", exact: true }).click()
+  const drawer = page.getByRole("dialog", { name: "Relay" })
+  const choice = drawer.getByRole("combobox", { name: "Profile" })
+  await expect(choice).toHaveText("Thorough review")
+  await choice.click()
+  await page.getByRole("option", { name: "Quick review" }).click()
+  await expect(choice).toHaveText("Quick review")
+  await expect(drawer).toBeVisible()
 })
 
 test("keeps Relay in the grid on a wide screen and on a phone", async ({ page }) => {
