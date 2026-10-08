@@ -199,7 +199,12 @@ const SheetTrigger = ({ children, className, onClick, type, ...props }: SheetTri
 }
 
 const SheetClose = ({ children, className, type, ...props }: SheetCloseProps): ReactElement => (
-  <RadixDialog.Close {...props} className={classNames(style("close"), className)} type={type ?? "button"}>
+  <RadixDialog.Close
+    data-rly-hit-area=""
+    {...props}
+    className={classNames(style("close"), className)}
+    type={type ?? "button"}
+  >
     {requireVisibleAction(children, "Sheet.Close")}
   </RadixDialog.Close>
 )
@@ -279,7 +284,12 @@ const SheetContent = ({
                     </RadixDialog.Description>
                   )}
                 </div>
-                <RadixDialog.Close aria-label={accessibleCloseLabel} className={style("iconClose")} type="button">
+                <RadixDialog.Close
+                  aria-label={accessibleCloseLabel}
+                  className={style("iconClose")}
+                  data-rly-hit-area=""
+                  type="button"
+                >
                   <Icon decorative name="close" size="default" />
                 </RadixDialog.Close>
               </div>

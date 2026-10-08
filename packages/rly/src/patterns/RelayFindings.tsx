@@ -283,7 +283,13 @@ const Location = ({
   return onOpen === undefined ? (
     <span className={style("location")}>{text}</span>
   ) : (
-    <button aria-label={`Open ${label}`} className={style("open")} onClick={() => onOpen(finding)} type="button">
+    <button
+      aria-label={`Open ${label}`}
+      className={style("open")}
+      data-rly-hit-area=""
+      onClick={() => onOpen(finding)}
+      type="button"
+    >
       {text}
     </button>
   )
@@ -338,7 +344,7 @@ const FindingItem = ({
       />
       <p className={style("summary")}>{requireText(finding.summary, "RelayFindings summary")}</p>
       <details className={style("details")}>
-        <summary>Evidence and recommendation</summary>
+        <summary data-rly-hit-area="">Evidence and recommendation</summary>
         <dl className={style("evidence")}>
           <dt>Evidence</dt>
           <dd>{finding.details}</dd>
