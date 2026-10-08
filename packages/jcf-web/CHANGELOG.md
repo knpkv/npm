@@ -1,5 +1,18 @@
 # @knpkv/jcf-web
 
+## 0.7.0
+
+### Minor Changes
+
+- [#598](https://github.com/knpkv/npm/pull/598) [`0360454`](https://github.com/knpkv/npm/commit/0360454dd4c280b982615173923bb42e93aa2569) Thanks [@konopkov](https://github.com/konopkov)! - jcf no longer reports success for writes that failed, and no longer falls back silently. `ConfigService.set` fails with `ConfigUnreadable` when `~/.jcf/config.json` cannot be read (instead of overwriting it with defaults) and with `ConfigNotSaved` when it cannot be written. `ClockifyAuth.save` fails with `ClockifyKeyNotSaved` when the key cannot be written or made owner-only. A Clockify project or tag that cannot be looked up while starting a timer, an unreadable state, cache or config file, and a Jira identity or search failure keep their fallback but log a warning naming what was dropped and why. Saving defaults during `timer start` or `timer stop` reports a failure without stopping the timer. In jcf-web, a settings save that fails now answers with the reason instead of a generic error.
+
+### Patch Changes
+
+- [#673](https://github.com/knpkv/npm/pull/673) [`a1085a1`](https://github.com/knpkv/npm/commit/a1085a1c000e326e1bb718179df4d590952360b0) Thanks [@konopkov](https://github.com/konopkov)! - The week view uses logical properties and rem sizes, so it mirrors under right-to-left text and follows the browser's font size; hover styles apply only to a fine pointer, a packed stretch opens from its head on touch, and keyboard focus on the entry editor shows the focus ring.
+- Updated dependencies [[`0360454`](https://github.com/knpkv/npm/commit/0360454dd4c280b982615173923bb42e93aa2569), [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6), [`67f7ea1`](https://github.com/knpkv/npm/commit/67f7ea1a5e3c0281da1d627fce940975e2db0cf4), [`f5f5fd9`](https://github.com/knpkv/npm/commit/f5f5fd98dcea7b7df1b226043e89ffb6decaffad), [`ce3234a`](https://github.com/knpkv/npm/commit/ce3234a201e3336b17f22219c8215d11eecc3408), [`4a41bf8`](https://github.com/knpkv/npm/commit/4a41bf82e327ec66a5df1202920f08e8e51554a4), [`e584518`](https://github.com/knpkv/npm/commit/e584518c9c98186e331a9962c4c6347c470cb3c5), [`d476bb0`](https://github.com/knpkv/npm/commit/d476bb0b2e2399c72eb2cd7b8c6005d833464598), [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327), [`765e850`](https://github.com/knpkv/npm/commit/765e850895d4edc16a75b3af072f71d527ad0b8c)]:
+  - @knpkv/jira-clockify@1.7.0
+  - @knpkv/rly@0.16.0
+
 ## 0.6.6
 
 ### Patch Changes
