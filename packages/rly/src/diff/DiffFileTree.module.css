@@ -154,7 +154,6 @@
     /* --rly-diff-tree-turn is 1 in left-to-right text and -1 in right-to-left; see below. */
     transform: rotate(calc(45deg * var(--rly-diff-tree-turn, 1)))
       translate(calc(-1px * var(--rly-diff-tree-turn, 1)), -1px);
-    transition: transform var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 
   .directoryButton[aria-expanded="false"] .chevron {
@@ -258,10 +257,6 @@
     display: block;
   }
 
-  .loadingIcon {
-    animation: rly-diff-file-tree-spin 800ms linear infinite;
-  }
-
   @keyframes rly-diff-file-tree-spin {
     to {
       transform: rotate(360deg);
@@ -278,11 +273,15 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .chevron,
+  /* Under reduced motion the chevron snaps and the loading icon holds still. */
+  @media (prefers-reduced-motion: no-preference) {
+    .chevron {
+      transition: transform var(--rly-motion-fast-duration) var(--rly-easing-in-out);
+    }
+
+    /* 800ms per turn, derived from a token so the in-app reduced-motion setting stops it too. */
     .loadingIcon {
-      animation: none;
-      transition: none;
+      animation: rly-diff-file-tree-spin calc(var(--rly-motion-standard-duration) * 5) linear infinite;
     }
   }
 }

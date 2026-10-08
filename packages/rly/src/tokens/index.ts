@@ -4,6 +4,7 @@ export type { RlyFontFace } from "./fonts.js"
 export {
   RLY_COLOR_TOKEN_NAMES,
   RLY_CONTROL_HEIGHT_TOKEN_NAMES,
+  RLY_EASING_TOKEN_NAMES,
   RLY_MOTION_TOKEN_NAMES,
   RLY_RADIUS_TOKEN_NAMES,
   RLY_SPACE_TOKEN_NAMES,
@@ -12,6 +13,7 @@ export {
 export type {
   RlyColorToken,
   RlyControlHeightToken,
+  RlyEasingToken,
   RlyMotionToken,
   RlyRadiusToken,
   RlySpaceToken,
