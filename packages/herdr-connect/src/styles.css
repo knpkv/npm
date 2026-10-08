@@ -311,10 +311,16 @@
       border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 
-  .connect-agent:hover,
   .connect-agent:focus-visible,
   .connect-agent[data-selected="true"] {
     background: var(--rly-color-surface-2);
+  }
+
+  /* Hover only where a pointer can hover: on touch, :hover sticks to the last tapped element. */
+  @media (hover: hover) and (pointer: fine) {
+    .connect-agent:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .connect-agent:focus-visible {
@@ -474,12 +480,20 @@
     text-decoration: none;
   }
 
-  .connect-agent-work-link:hover,
   .connect-agent-work-link:focus-visible {
     color: var(--rly-color-agent);
     text-decoration: underline;
     text-decoration-thickness: 0.12em;
     text-underline-offset: 0.16em;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .connect-agent-work-link:hover {
+      color: var(--rly-color-agent);
+      text-decoration: underline;
+      text-decoration-thickness: 0.12em;
+      text-underline-offset: 0.16em;
+    }
   }
 
   .connect-agent-identity[data-work-goal-state="missing"] small,
@@ -563,10 +577,17 @@
     white-space: nowrap;
   }
 
-  .terminal-key:hover,
   .terminal-key[aria-pressed="true"] {
     background: var(--rly-color-surface-3);
     border-color: var(--rly-color-agent);
+  }
+
+  /* On touch a tapped key would keep this paint and look like a latched modifier. */
+  @media (hover: hover) and (pointer: fine) {
+    .terminal-key:hover {
+      background: var(--rly-color-surface-3);
+      border-color: var(--rly-color-agent);
+    }
   }
 
   .terminal-key:focus-visible {
@@ -608,9 +629,14 @@
     padding-inline: var(--rly-space-12);
   }
 
-  .terminal-back:hover,
   .terminal-back:focus-visible {
     border-color: var(--rly-color-agent);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .terminal-back:hover {
+      border-color: var(--rly-color-agent);
+    }
   }
 
   .terminal-back:focus-visible {
