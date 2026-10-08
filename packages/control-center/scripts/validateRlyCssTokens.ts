@@ -6,7 +6,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import { declaredRlyCssTokens } from "./rlyCssTokens.js"
-import { inspectRlyCssTokenWorkspace } from "./rlyCssTokenValidation.js"
+import { inspectRlyCssTokenWorkspace, RLY_CSS_TOKEN_SOURCE_ROOTS } from "./rlyCssTokenValidation.js"
 
 class RlyCssTokenValidationError extends Data.TaggedError("RlyCssTokenValidationError")<{
   readonly reason: string
@@ -28,10 +28,7 @@ const program = Effect.gen(function*() {
     return yield* new RlyCssTokenValidationError({ reason: "The generated rly token contract contains no tokens" })
   }
 
-  const { filesChecked, sourceRootsChecked, violations } = yield* inspectRlyCssTokenWorkspace(
-    workspaceRoot,
-    generatedTokens
-  )
+  const { filesChecked, violations } = yield* inspectRlyCssTokenWorkspace(workspaceRoot, generatedTokens)
 
   if (violations.length > 0) {
     return yield* new RlyCssTokenValidationError({
@@ -44,7 +41,7 @@ const program = Effect.gen(function*() {
   }
 
   yield* Console.log(
-    `Workspace rly CSS token references checked ${filesChecked} stylesheets across ${sourceRootsChecked} source trees`
+    `Workspace rly CSS token references checked ${filesChecked} stylesheets across ${RLY_CSS_TOKEN_SOURCE_ROOTS.length} source trees`
   )
 })
 
