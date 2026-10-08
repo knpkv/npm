@@ -8,6 +8,7 @@ import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
@@ -220,10 +221,13 @@ assert.throws(() => changedLinesFromDiff("+++ b/broken.ts\n@@ malformed @@"), /U
 
 const fail = (reason, cause) => Effect.fail(new ChangedEffectDiagnosticsError({ cause, reason }))
 
-const makeGit = Effect.fn("ChangedEffectDiagnostics.makeGit")(function* (repositoryRoot) {
+// Git in `repositoryRoot`. Production inherits the caller's environment (a hook's GIT_INDEX_FILE is the
+// commit being checked); a scratch repository passes its own `env`, which replaces it entirely.
+export const makeGit = Effect.fn("ChangedEffectDiagnostics.makeGit")(function* (repositoryRoot, env) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const options = env === undefined ? { cwd: repositoryRoot } : { cwd: repositoryRoot, env, extendEnv: false }
   return Effect.fn("ChangedEffectDiagnostics.git")(function* (args) {
-    const handle = yield* spawner.spawn(ChildProcess.make("git", args, { cwd: repositoryRoot }))
+    const handle = yield* spawner.spawn(ChildProcess.make("git", args, options))
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
         Stream.decodeText(handle.stdout).pipe(Stream.mkString),
@@ -263,8 +267,28 @@ assert.deepEqual(
   [undefined, undefined, "origin/main", "origin/main", "main"]
 )
 
-const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMergeBase")(function* (git) {
+// The pending merge head of an in-progress merge, or undefined when none is pending. Read from the
+// worktree's MERGE_HEAD file, since rev-parse alone can hide an octopus merge.
+const pendingMergeHead = Effect.fn("ChangedEffectDiagnostics.pendingMergeHead")(function* (git) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const mergeHeadPath = yield* git(["rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD"])
+  if (!(yield* fileSystem.exists(mergeHeadPath))) return undefined
+  const heads = (yield* fileSystem.readFileString(mergeHeadPath)).split("\n").filter((line) => line.trim() !== "")
+  if (heads.length !== 1) {
+    return yield* fail(`Changed Effect diagnostics needs exactly one pending merge head, found ${heads.length}`)
+  }
+  return yield* git(["rev-parse", "--verify", `${heads[0]}^{commit}`])
+})
+
+// An explicit EFFECT_DIAGNOSTICS_BASE wins. During a merge the index holds every change the incoming
+// branch brings, and the fork point would count all of them as this branch's: the pending merge head is
+// the base instead, leaving this branch's own lines and its conflict resolutions.
+export const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMergeBase")(function* (git) {
   const configuredBase = Option.getOrUndefined(yield* Config.option(Config.String("EFFECT_DIAGNOSTICS_BASE")))
+  if (configuredBase === undefined) {
+    const mergeHead = yield* pendingMergeHead(git)
+    if (mergeHead !== undefined) return mergeHead
+  }
   const eventName = Option.getOrUndefined(yield* Config.option(Config.String("GITHUB_EVENT_NAME")))
   const pushBase = Option.getOrUndefined(yield* Config.option(Config.String("GITHUB_EVENT_BEFORE")))
   const githubBase = Option.getOrUndefined(yield* Config.option(Config.String("GITHUB_BASE_REF")))
@@ -277,16 +301,14 @@ const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMergeBase")(
   return yield* fail("Could not resolve a merge base for changed Effect diagnostics")
 })
 
-const changedFiles = Effect.fn("ChangedEffectDiagnostics.changedFiles")(function* (git, mergeBase) {
-  const outputs = yield* Effect.all([
-    git(["diff", "--name-only", "-z", "--diff-filter=ACMR", `${mergeBase}...HEAD`]),
-    git(["diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR"]),
-    git(["diff", "--name-only", "-z", "--diff-filter=ACMR"])
-  ])
-  return [...new Set(outputs.flatMap((output) => output.split("\0")).filter(isCheckedSource))].toSorted()
+export const changedFiles = Effect.fn("ChangedEffectDiagnostics.changedFiles")(function* (git, mergeBase) {
+  // The working tree against the base: committed, staged and unstaged changes alike, the same comparison
+  // changedLines makes.
+  const output = yield* git(["diff", "--name-only", "-z", "--diff-filter=ACMR", mergeBase])
+  return [...new Set(output.split("\0").filter(isCheckedSource))].toSorted()
 })
 
-const changedLines = Effect.fn("ChangedEffectDiagnostics.changedLines")(function* (git, mergeBase, files) {
+export const changedLines = Effect.fn("ChangedEffectDiagnostics.changedLines")(function* (git, mergeBase, files) {
   if (files.length === 0) return new Map()
   const diff = yield* git([
     "diff",
