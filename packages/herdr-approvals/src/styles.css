@@ -225,8 +225,7 @@
     justify-content: center;
   }
 
-  .fleet-mark i,
-  .agent-presence {
+  .fleet-mark i {
     background: var(--rly-color-agent);
     block-size: var(--rly-space-6);
     border-radius: var(--rly-radius-round);
@@ -237,8 +236,7 @@
     background: var(--rly-color-deploying-ink);
   }
 
-  .fleet-mark i:last-child,
-  .agent-presence {
+  .fleet-mark i:last-child {
     background: var(--rly-color-success-ink);
   }
 
@@ -312,8 +310,7 @@
   }
 
   .section-heading,
-  .agenda-heading,
-  .agent-line {
+  .agenda-heading {
     align-items: flex-start;
     display: flex;
     gap: var(--rly-space-16);
@@ -334,28 +331,66 @@
     overflow: hidden;
   }
 
-  .agent-grid {
+  /* This host's agents, in Connect's row shape: a fixed state track, then the name, then the link. */
+  .host-agent-list {
     display: grid;
-    gap: var(--rly-space-8);
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    list-style: none;
+    margin: 0;
+    padding: 0;
   }
 
-  /* The state label drops under the name before it can squeeze it; names and work wrap whole.
-     A zero basis with an 8rem floor keeps the presence dot beside the name at 320. */
-  .agent-line {
+  .host-agent {
     align-items: center;
-    flex-wrap: wrap;
-  }
-
-  .agent-line > div {
+    border-block-end: 1px solid var(--rly-color-border-1);
     display: grid;
-    flex: 1 1 0;
-    min-inline-size: 8rem;
+    gap: var(--rly-space-12);
+    grid-template-columns: 7rem minmax(0, 1fr) auto;
+    padding-block: var(--rly-space-12);
   }
 
-  .agent-line small,
-  .agent-line strong {
+  .host-agent:last-child {
+    border-block-end: 0;
+  }
+
+  .host-agent-state {
+    display: inline-flex;
+    min-inline-size: 0;
     overflow-wrap: break-word;
+  }
+
+  .host-agent-copy {
+    display: grid;
+    min-inline-size: 0;
+  }
+
+  .host-agent-copy small,
+  .host-agent-copy strong {
+    overflow-wrap: break-word;
+  }
+
+  .host-agent-link {
+    color: var(--rly-color-agent);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    white-space: nowrap;
+  }
+
+  .host-agent-link:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  /* At 24rem and below the state sits over the name, with the link beside it. */
+  @media (max-width: 24rem) {
+    .host-agent {
+      grid-template-columns: minmax(0, 1fr) auto;
+      row-gap: var(--rly-space-4);
+    }
+
+    .host-agent-copy {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
   }
 
   .agenda-list {
@@ -1187,7 +1222,6 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .agent-grid,
     .machine-grid {
       grid-template-columns: 1fr;
     }
