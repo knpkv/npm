@@ -1,6 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, FileSystem, Layer, Path } from "effect"
+import { Deferred, Effect, FileSystem, Layer, Path, Schedule } from "effect"
 import * as Reactivity from "effect/reactivity/Reactivity"
 import type { AgentUsageConfig } from "../src/server/Config.js"
 import { controlSocket, requestLimits, ServerAlreadyRunning } from "../src/server/ControlSocket.js"
@@ -19,7 +19,7 @@ describe("server startup", () => {
         yield* fs.chmod(directory, 0o700)
         const secrets = yield* makeOwnerSession(origin)
         // The running server: it holds the store's lock.
-        yield* controlSocket(directory, secrets, Effect.void)
+        yield* controlSocket(directory, secrets, Effect.void, Effect.die("limits were not asked for in this test"))
         // Not a database: opening or migrating it would fail with a store error, or rewrite it.
         const database = path.join(directory, "usage.db")
         yield* fs.writeFileString(database, "sentinel")
@@ -68,12 +68,17 @@ describe("server startup", () => {
         const ready = yield* Deferred.make<string>()
         yield* Layer.build(makeServer({ config, port: 0, ready, security: secrets }))
         yield* Deferred.await(ready)
-        const limits = yield* requestLimits(directory, process.geteuid?.() ?? -1)
+        // The startup poll runs in the background; ask until its first reading is stored.
+        const limits = yield* requestLimits(directory, process.geteuid?.() ?? -1).pipe(
+          Effect.repeat({ until: (answer) => answer.latest.length > 0, schedule: Schedule.spaced("50 millis") }),
+          Effect.timeout("10 seconds")
+        )
         expect(limits.machine).toBe("test")
-        // No credentials or transcripts here: whatever the background poll stored by now is this
-        // Machine's, and none of it claims a level.
-        expect(limits.latest.every((snapshot) => snapshot.machine === "test" && snapshot.reading._tag === "Unknown"))
-          .toBe(true)
+        // No credentials here: the poll stored why, as an Unknown reading of Claude, never a level.
+        expect(
+          limits.latest.map((snapshot) => [snapshot.agent, snapshot.machine, snapshot.label, snapshot.reading._tag])
+        )
+          .toEqual([["claude", "test", "*", "Unknown"]])
       }))
   })
 })

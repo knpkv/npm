@@ -10,7 +10,9 @@
 import { Console, Effect, Runtime, Schema } from "effect"
 import { LimitsNow } from "../shared/contracts.js"
 import {
+  type LimitsNotSupported,
   type LimitsReplyInvalid,
+  type LimitsUnavailable,
   requestLimits,
   type ServerNotRunning,
   type SocketPathTooLong,
@@ -18,7 +20,14 @@ import {
   type SocketRefused
 } from "./ControlSocket.js"
 
-export type LimitsFailure = ServerNotRunning | SocketPathTooLong | SocketPathUnsafe | SocketRefused | LimitsReplyInvalid
+export type LimitsFailure =
+  | ServerNotRunning
+  | SocketPathTooLong
+  | SocketPathUnsafe
+  | SocketRefused
+  | LimitsNotSupported
+  | LimitsUnavailable
+  | LimitsReplyInvalid
 
 /** The failure, already explained on stderr: the runtime exits nonzero without logging it again. */
 export class LimitsFailed extends Schema.TaggedError<LimitsFailed>()("LimitsFailed", {
@@ -38,8 +47,12 @@ export const describeLimitsFailure = (failure: LimitsFailure): string => {
       return `agent-usage's control socket at ${failure.path} could not be used (${failure.reason}).`
     case "SocketPathTooLong":
       return `${failure.message}, so this store has no control socket. Set AGENT_USAGE_HOME to a shorter path.`
+    case "LimitsNotSupported":
+      return "the running agent-usage is an older version without limits. Restart it (or its service) on the installed version."
+    case "LimitsUnavailable":
+      return "the running agent-usage could not read its store; its log says why."
     case "LimitsReplyInvalid":
-      return "the running agent-usage did not answer with limits: its store could not be read, or it is an older version (restart it)."
+      return "the running agent-usage answered with something that is not limits."
   }
 }
 

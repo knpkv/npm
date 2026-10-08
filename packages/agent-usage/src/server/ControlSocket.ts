@@ -93,7 +93,17 @@ export class SocketPathTooLong extends Schema.TaggedError<SocketPathTooLong>()("
   }
 }
 
-/** The server could not read its limits, or answered with something that is not them. */
+/** The server is a version without the `limits` request: upgrade or restart it. */
+export class LimitsNotSupported extends Schema.TaggedError<LimitsNotSupported>()("LimitsNotSupported", {
+  path: Schema.String
+}) {}
+
+/** The server knows the request but could not read its store; its log says why. */
+export class LimitsUnavailable extends Schema.TaggedError<LimitsUnavailable>()("LimitsUnavailable", {
+  path: Schema.String
+}) {}
+
+/** The server answered with something that is neither limits nor one of its error lines. */
 export class LimitsReplyInvalid extends Schema.TaggedError<LimitsReplyInvalid>()("LimitsReplyInvalid", {
   reply: Schema.String
 }) {}
@@ -126,6 +136,12 @@ const decodeReply = Schema.decodeUnknownOption(LoginReply)
 const LimitsReply = Schema.fromJsonString(LimitsNow)
 const encodeLimits = Schema.encodeSync(LimitsReply)
 const decodeLimits = Schema.decodeUnknownOption(LimitsReply)
+const UNKNOWN_REQUEST = "unknown request"
+const LIMITS_UNAVAILABLE = "limits unavailable"
+const errorLine = (error: string): string => `${JSON.stringify({ error })}\n`
+const decodeErrorLine = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ error: Schema.Literals([UNKNOWN_REQUEST, LIMITS_UNAVAILABLE]) }))
+)
 
 /** A Node system error, as far as this module reads one. */
 const Errno = Schema.Struct({ code: Schema.String })
@@ -206,11 +222,12 @@ const answer = <E>(
     const request = (yield* readLine(reader)).trim()
     if (request === "limits") {
       const read = yield* Effect.result(limits)
-      return yield* write.write(
-        read._tag === "Success" ? `${encodeLimits(read.success)}\n` : "{\"error\":\"limits unavailable\"}\n"
-      )
+      if (read._tag === "Success") return yield* write.write(`${encodeLimits(read.success)}\n`)
+      // The client only learns that the read failed; why stays in this server's log.
+      yield* Effect.logWarning("agent-usage control socket: reading limits failed", read.failure)
+      return yield* write.write(errorLine(LIMITS_UNAVAILABLE))
     }
-    if (request !== "mint") return yield* write.write("{\"error\":\"unknown request\"}\n")
+    if (request !== "mint") return yield* write.write(errorLine(UNKNOWN_REQUEST))
     // Never before the HTTP listener is up: a code minted earlier would be one nobody could spend.
     yield* listening
     const url = yield* mintBootstrapUrl(secrets)
@@ -220,10 +237,6 @@ const answer = <E>(
     Effect.timeout(EXCHANGE_DEADLINE),
     Effect.ignore({ log: "Warn", message: "agent-usage control socket: an exchange failed" })
   )
-
-/** A control socket given no limits to read: every `limits` request is answered with an error. */
-class LimitsNotServed extends Schema.TaggedError<LimitsNotServed>()("LimitsNotServed", {}) {}
-const noLimits: Effect.Effect<LimitsNow, LimitsNotServed> = Effect.fail(new LimitsNotServed())
 
 /**
  * Takes the store's exclusive lock for the life of the scope: an SQLite database opened in exclusive
@@ -267,11 +280,11 @@ const holdStoreLock = Effect.fnUntraced(function*(directory: string) {
  * server runs on this store and {@link SocketPathUnsafe} when the path holds anything but this
  * user's socket.
  */
-export const controlSocket = Effect.fn("ControlSocket.listen")(function*<E = LimitsNotServed>(
+export const controlSocket = Effect.fn("ControlSocket.listen")(function*<E>(
   directory: string,
   secrets: OwnerSessionService,
   listening: Effect.Effect<void>,
-  limits?: Effect.Effect<LimitsNow, E>
+  limits: Effect.Effect<LimitsNow, E>
 ) {
   const fs = yield* FileSystem.FileSystem
   // The directory must be the store's, checked, before its lock is taken inside it.
@@ -301,11 +314,11 @@ export const controlSocket = Effect.fn("ControlSocket.listen")(function*<E = Lim
   if ((yield* inspect(directory, socketPath, self)) === undefined) {
     return yield* new SocketPathUnsafe({ path: socketPath, reason: "it vanished after binding" })
   }
-  yield* Effect.forkScoped(server.run(answer<E | LimitsNotServed>(secrets, listening, limits ?? noLimits)))
+  yield* Effect.forkScoped(server.run(answer(secrets, listening, limits)))
   return socketPath
 })
 
-/** Sends one request line to the server on this store and returns its one reply line, trimmed. */
+/** Sends one request line to the server on this store and returns its socket path and one reply line, trimmed. */
 const exchange = Effect.fnUntraced(function*(directory: string, self: number, request: "mint" | "limits") {
   const socketPath = yield* socketPathFor(directory)
   const found = yield* inspect(directory, socketPath, self)
@@ -328,7 +341,7 @@ const exchange = Effect.fnUntraced(function*(directory: string, self: number, re
       orElse: () => Effect.fail(new SocketRefused({ path: socketPath, reason: "the server did not answer in time" }))
     })
   )
-  return reply.trim()
+  return { socketPath, reply: reply.trim() }
 })
 
 /**
@@ -340,7 +353,7 @@ const exchange = Effect.fnUntraced(function*(directory: string, self: number, re
  * {@link EXCHANGE_DEADLINE}, and {@link LoginReplyInvalid} when the answer is not a link.
  */
 export const requestLoginUrl = Effect.fn("ControlSocket.requestLoginUrl")(function*(directory: string, self: number) {
-  const reply = yield* exchange(directory, self, "mint")
+  const { reply } = yield* exchange(directory, self, "mint")
   const decoded = decodeReply(reply)
   if (Option.isNone(decoded)) return yield* new LoginReplyInvalid({ reply: reply.slice(0, 200) })
   return decoded.value.url
@@ -348,12 +361,19 @@ export const requestLoginUrl = Effect.fn("ControlSocket.requestLoginUrl")(functi
 
 /**
  * Asks the server running on this store for this Machine's latest limits, with the same trust and
- * failures as {@link requestLoginUrl}; {@link LimitsReplyInvalid} when the server could not read
- * them (or is a version that does not know the request).
+ * failures as {@link requestLoginUrl}; {@link LimitsNotSupported} when the server is a version
+ * without the request, {@link LimitsUnavailable} when it could not read its store, and
+ * {@link LimitsReplyInvalid} for any other answer.
  */
 export const requestLimits = Effect.fn("ControlSocket.requestLimits")(function*(directory: string, self: number) {
-  const reply = yield* exchange(directory, self, "limits")
+  const { reply, socketPath } = yield* exchange(directory, self, "limits")
   const decoded = decodeLimits(reply)
-  if (Option.isNone(decoded)) return yield* new LimitsReplyInvalid({ reply: reply.slice(0, 200) })
-  return decoded.value
+  if (Option.isSome(decoded)) return decoded.value
+  const error = decodeErrorLine(reply)
+  if (Option.isSome(error)) {
+    return yield* error.value.error === UNKNOWN_REQUEST
+      ? new LimitsNotSupported({ path: socketPath })
+      : new LimitsUnavailable({ path: socketPath })
+  }
+  return yield* new LimitsReplyInvalid({ reply: reply.slice(0, 200) })
 })
