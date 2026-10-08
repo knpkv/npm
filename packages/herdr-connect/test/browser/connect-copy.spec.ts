@@ -23,10 +23,9 @@ const open = async (
   }
 ) => {
   // Opened links land on a stub page instead of a DNS failure, so the popup keeps its URL.
-  await page.context().route(
-    "https://example.test/**",
-    (route) => route.fulfill({ body: "linked", contentType: "text/plain" })
-  )
+  await page
+    .context()
+    .route("https://example.test/**", (route) => route.fulfill({ body: "linked", contentType: "text/plain" }))
   await page.request.post("/__test/reset")
   if (scrollState !== undefined) {
     const query = new URLSearchParams({
@@ -45,15 +44,19 @@ const open = async (
   await expect(page.getByText("connected", { exact: true })).toBeVisible()
   // A session that starts scrolled back never shows the newest line, so wait for any screen instead.
   const newest = (scrollState?.start ?? 0) > 0 ? "" : "300 "
-  await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith(newest) && row.trim() !== ""))
+  await expect
+    .poll(async () => (await screen(page)).rows.some((row) => row.startsWith(newest) && row.trim() !== ""))
     .toBe(true)
   // The hub's first reading is quiet, so it lands a moment after the screen; tests start from it.
   if (scrollState !== undefined && (scrollState.delay ?? 0) === 0) {
-    await expect.poll(async () =>
-      Schema.decodeUnknownSync(Schema.Struct({ sent: Schema.Number }))(
-        await (await page.request.get("/__test/readings")).json()
-      ).sent
-    ).toBeGreaterThan(0)
+    await expect
+      .poll(
+        async () =>
+          Schema.decodeUnknownSync(Schema.Struct({ sent: Schema.Number }))(
+            await (await page.request.get("/__test/readings")).json()
+          ).sent
+      )
+      .toBeGreaterThan(0)
   }
 }
 
@@ -121,18 +124,15 @@ test.describe("desktop", () => {
     const point = await cellPoint(page, second, 3)
     await page.mouse.click(point.x, point.y, { clickCount: 3 })
     await page.keyboard.press("Control+c")
-    await expect.poll(() => clipboard(page)).toBe(
-      `285 ${"long-command --flag ".repeat(6)}https://example.test/wrapped/path`
-    )
+    await expect
+      .poll(() => clipboard(page))
+      .toBe(`285 ${"long-command --flag ".repeat(6)}https://example.test/wrapped/path`)
   })
 
   test("Ctrl+click opens an http link in a new tab and ignores other schemes", async ({ context, page }) => {
     await open(page)
     const link = await cellPoint(page, "281 ", 12)
-    const [popup] = await Promise.all([
-      context.waitForEvent("page"),
-      controlClick(page, link)
-    ])
+    const [popup] = await Promise.all([context.waitForEvent("page"), controlClick(page, link)])
     await expect.poll(() => popup.url()).toBe("https://example.test/guide?step=2")
     expect(await popup.evaluate(() => window.opener)).toBeNull()
     await popup.close()
@@ -164,6 +164,60 @@ test.describe("touch", () => {
     await expect.poll(() => popup.url()).toBe("https://example.test/guide?step=2")
   })
 
+  // iOS opens the keyboard only for a text control focused inside the tap; Ghostty's Terminal.focus()
+  // focused its container div instead.
+  test("a tap on the terminal focuses its text input, and typing reaches the session", async ({ page }) => {
+    await open(page)
+    const cell = await cellPoint(page, "290 ", 2)
+    await page.touchscreen.tap(cell.x, cell.y)
+    await expect.poll(() => page.evaluate(() => document.activeElement?.id)).toBe("connect-terminal-input")
+    await page.keyboard.type("q")
+    await expect
+      .poll(async () => (await commands(page)).some((command) => command.text?.includes("q") === true))
+      .toBe(true)
+  })
+
+  test("the Keys toggle hides the modifier and terminal keys, and the choice survives a reload", async ({ page }) => {
+    await open(page)
+    const keys = page.getByRole("button", { name: "Hide terminal keys" })
+    await expect(page.getByRole("group", { name: "Terminal modifiers" })).toBeVisible()
+    await keys.tap()
+    await expect(page.getByRole("group", { name: "Terminal modifiers" })).toBeHidden()
+    await expect(page.getByRole("group", { name: "Terminal keys" })).toBeHidden()
+    await expect(page.getByRole("button", { name: "Jump to latest output" })).toBeVisible()
+
+    await page.reload()
+    await page.getByRole("button", { name: /fixture-pane/ }).click()
+    await expect(page.getByRole("button", { name: "Show terminal keys" })).toBeVisible()
+    await expect(page.getByRole("group", { name: "Terminal keys" })).toBeHidden()
+    await page.getByRole("button", { name: "Show terminal keys" }).tap()
+    await expect(page.getByRole("group", { name: "Terminal keys" })).toBeVisible()
+  })
+
+  test("hiding the keys releases a latched modifier, so the next letter arrives as itself", async ({ page }) => {
+    await open(page)
+    await page.getByRole("button", { name: "Ctrl", exact: true }).tap()
+    await expect(page.getByRole("button", { name: "Ctrl", exact: true })).toHaveAttribute("aria-pressed", "true")
+    await page.getByRole("button", { name: "Hide terminal keys" }).tap()
+    const cell = await cellPoint(page, "290 ", 2)
+    await page.touchscreen.tap(cell.x, cell.y)
+    await page.keyboard.type("c")
+    await expect.poll(async () => (await commands(page)).some((command) => command.text === "c")).toBe(true)
+    expect((await commands(page)).some((command) => command.text?.includes("\u0003") === true)).toBe(false)
+  })
+
+  // A rail that grows a row when the status appears shrinks the terminal mid-session, and page-sized
+  // scrolls then disagree with the screen (Keys pushed Select onto a fourth row at 390).
+  test("the key rail keeps its height when the lines-back status appears and clears", async ({ page }) => {
+    await open(page, { mode: "known", start: 50 })
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back")
+    const railBox = page.getByRole("toolbar", { name: "Terminal keyboard controls" })
+    const behind = (await railBox.boundingBox())?.height
+    await page.getByRole("button", { name: "Jump to latest output" }).tap()
+    await expect(olderOutput(page)).toHaveCount(0)
+    expect((await railBox.boundingBox())?.height).toBe(behind)
+  })
+
   test("a vertical pan follows the finger, scrolls the server, and never raises the keyboard", async ({ page }) => {
     await open(page)
     const client = await page.context().newCDPSession(page)
@@ -175,16 +229,21 @@ test.describe("touch", () => {
     // 61 px is never a whole number of lines, so the part of a line the server cannot scroll stays
     // drawn under the finger even after every requested line has landed.
     await touch("touchMove", start.y + 61)
-    await expect.poll(() =>
-      page.locator(".ghostty-terminal canvas").evaluate((canvas) =>
-        new DOMMatrixReadOnly(getComputedStyle(canvas).transform).m42
+    await expect
+      .poll(() =>
+        page
+          .locator(".ghostty-terminal canvas")
+          .evaluate((canvas) => new DOMMatrixReadOnly(getComputedStyle(canvas).transform).m42)
       )
-    ).toBeGreaterThan(0)
+      .toBeGreaterThan(0)
     await touch("touchEnd", start.y + 61)
-    await expect.poll(async () =>
-      (await commands(page)).filter((command) => command.type === "terminal.scroll" && command.direction === "up")
-        .reduce((sum, command) => sum + (command.lines ?? 0), 0)
-    ).toBeGreaterThanOrEqual(3)
+    await expect
+      .poll(async () =>
+        (await commands(page))
+          .filter((command) => command.type === "terminal.scroll" && command.direction === "up")
+          .reduce((sum, command) => sum + (command.lines ?? 0), 0)
+      )
+      .toBeGreaterThanOrEqual(3)
     expect(await page.evaluate(() => document.activeElement?.tagName)).not.toBe("TEXTAREA")
     await expect(olderOutput(page)).toHaveAccessibleName(/^Older output, \d+ lines back$/)
   })
@@ -202,7 +261,8 @@ test.describe("touch", () => {
     }
     await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
     const upLines = async () =>
-      (await commands(page)).filter((command) => command.type === "terminal.scroll" && command.direction === "up")
+      (await commands(page))
+        .filter((command) => command.type === "terminal.scroll" && command.direction === "up")
         .reduce((sum, command) => sum + (command.lines ?? 0), 0)
     const atLift = await upLines()
     // The finger covered 120px (8 lines at most); momentum carries well past it.
@@ -221,7 +281,8 @@ test.describe("touch", () => {
       })
     }
     await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
-    const jump = page.getByRole("toolbar", { name: "Terminal keyboard controls" })
+    const jump = page
+      .getByRole("toolbar", { name: "Terminal keyboard controls" })
       .getByRole("button", { name: "Jump to latest output" })
     await expect(jump).toBeVisible()
     await page.waitForTimeout(200)
@@ -238,8 +299,10 @@ test.describe("touch", () => {
   test("the rail's Latest key is always there and stops once a page down changes nothing", async ({ page }) => {
     await open(page)
     await expect(olderOutput(page)).toHaveCount(0)
-    await page.getByRole("toolbar", { name: "Terminal keyboard controls" })
-      .getByRole("button", { name: "Jump to latest output" }).tap()
+    await page
+      .getByRole("toolbar", { name: "Terminal keyboard controls" })
+      .getByRole("button", { name: "Jump to latest output" })
+      .tap()
     const downs = async () =>
       (await commands(page)).filter((command) => command.type === "terminal.scroll" && command.direction === "down")
         .length
@@ -307,7 +370,8 @@ for (const width of [320, 390]) {
 test.describe("scroll position from the hub", () => {
   const rail = (page: Page) => page.getByRole("toolbar", { name: "Terminal keyboard controls" })
   const downs = async (page: Page) =>
-    (await commands(page)).filter((command) => command.type === "terminal.scroll" && command.direction === "down")
+    (await commands(page))
+      .filter((command) => command.type === "terminal.scroll" && command.direction === "down")
       .map((command) => command.lines ?? 0)
 
   test("a pane left scrolled back says so on open, and Latest returns in exact pages", async ({ page }) => {
@@ -351,9 +415,9 @@ test.describe("scroll position from the hub", () => {
     await page.keyboard.press("PageUp")
     await expect.poll(async () => (await commands(page)).some((command) => command.direction === "up")).toBe(true)
     await rail(page).getByRole("button", { name: "Jump to latest output" }).click()
-    const ups = (await commands(page)).filter((command) => command.direction === "up").map((command) =>
-      command.lines ?? 0
-    )
+    const ups = (await commands(page))
+      .filter((command) => command.direction === "up")
+      .map((command) => command.lines ?? 0)
     await expect.poll(() => downs(page)).toEqual(ups)
     await expect.poll(async () => (await screen(page)).rows.some((row) => row.startsWith("300 "))).toBe(true)
   })
@@ -424,9 +488,9 @@ test.describe("scroll position from the hub", () => {
     await page.mouse.click(point.x, point.y)
     await page.keyboard.press("PageUp")
     await expect.poll(async () => (await commands(page)).some((command) => command.direction === "up")).toBe(true)
-    const ups = (await commands(page)).filter((command) => command.direction === "up").map((command) =>
-      command.lines ?? 0
-    )
+    const ups = (await commands(page))
+      .filter((command) => command.direction === "up")
+      .map((command) => command.lines ?? 0)
     // A reading sampled before that scroll reached herdr says the bottom; it must not undo the scroll.
     await page.request.post("/__test/reading?offset=0&scrolls=0")
     await page.waitForTimeout(300)
@@ -463,8 +527,9 @@ test.describe("scroll position from the hub", () => {
     await page.mouse.click(point.x, point.y)
     await page.keyboard.press("PageUp")
     await expect.poll(async () => (await commands(page)).some((command) => command.direction === "up")).toBe(true)
-    const pageLines = (await commands(page)).filter((command) => command.direction === "up")
-      .map((command) => command.lines ?? 0)[0] ?? 0
+    const pageLines =
+      (await commands(page)).filter((command) => command.direction === "up").map((command) => command.lines ?? 0)[0] ??
+        0
     // Long after the scroll landed and went quiet, a reading taken before it finally arrives.
     await page.waitForTimeout(2_500)
     await expect(olderOutput(page)).toHaveAccessibleName(`Older output, ${String(pageLines)} lines back`)

@@ -1,0 +1,122 @@
+@layer rly.components {
+  .root {
+    align-items: center;
+    appearance: none;
+    background: transparent;
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-control);
+    box-sizing: border-box;
+    color: var(--rly-color-text-1);
+    cursor: pointer;
+    display: inline-flex;
+    flex: none;
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    gap: var(--rly-space-8);
+    letter-spacing: var(--rly-type-label-tracking);
+    min-block-size: var(--rly-control-height-dense);
+    padding-block: 0;
+    padding-inline: var(--rly-space-8) var(--rly-space-12);
+    white-space: nowrap;
+  }
+  .root:not(:disabled):hover {
+    background: var(--rly-color-surface-2);
+    border-color: var(--rly-color-text-3);
+  }
+  /* Matches Button: dimmed and no pointer, so a launcher the host turned off never looks live. */
+  .root:disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
+  }
+  .root:not(:disabled):active {
+    background: var(--rly-color-surface-3);
+  }
+  /*
+   * Open is tinted with the agent colour, the mark's own, and edged with a 2px agent line (the inset
+   * shadow adds the second pixel without resizing the button), so it never reads as rest.
+   */
+  .root[aria-expanded="true"] {
+    background: color-mix(in oklab, var(--rly-color-agent) 16%, transparent);
+    border-color: var(--rly-color-agent);
+    box-shadow: inset 0 0 0 1px var(--rly-color-agent);
+  }
+  /* Restates the agent edge: the base hover's border step would otherwise outrank the open rule. */
+  .root[aria-expanded="true"]:not(:disabled):hover {
+    background: color-mix(in oklab, var(--rly-color-agent) 24%, transparent);
+    border-color: var(--rly-color-agent);
+  }
+  .root:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .mark {
+    color: var(--rly-color-agent);
+  }
+  .label {
+    min-inline-size: 0;
+  }
+  /* Wide enough for "Ctrl J", so the switch to "⌘J" after hydration never moves the header. */
+  .hint {
+    border: 1px solid var(--rly-color-border-2);
+    box-sizing: border-box;
+    min-inline-size: 4.5em;
+    text-align: center;
+    border-radius: var(--rly-radius-tag);
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    /* A tight line box keeps the key cap well inside the 32px button. */
+    line-height: 1.25;
+    padding-inline: var(--rly-space-4);
+  }
+  /* A phone has no keyboard to advertise; the label and mark carry the button. */
+  @media (max-width: 40rem) {
+    .hint {
+      display: none;
+    }
+  }
+  @media (forced-colors: active) {
+    .mark {
+      color: ButtonText;
+    }
+    /*
+     * Highlight is the focus ring's colour there, so open is an inverted fill and a heavier border:
+     * two cues, neither of them a colour the system might also use for focus. forced-color-adjust: none
+     * lets author backgrounds through, so the open form of every author hover and active rule is listed:
+     * at least the same specificity, and later, so the inverted fill wins while hovered or pressed.
+     */
+    .root[aria-expanded="true"],
+    .root[aria-expanded="true"]:not(:disabled):hover,
+    .root[aria-expanded="true"]:not(:disabled):active {
+      background: ButtonText;
+      border: 2px solid ButtonText;
+      box-shadow: none;
+      color: ButtonFace;
+      forced-color-adjust: none;
+    }
+    /* forced-color-adjust: none is inherited, so every descendant needs its system colour here. */
+    .root[aria-expanded="true"] .mark,
+    .root[aria-expanded="true"] .hint {
+      border-color: ButtonFace;
+      color: ButtonFace;
+    }
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .mark {
+    color: ButtonText;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"],
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .root[aria-expanded="true"]:not(:disabled):hover,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .root[aria-expanded="true"]:not(:disabled):active {
+    background: ButtonText;
+    border: 2px solid ButtonText;
+    box-shadow: none;
+    color: ButtonFace;
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"] .mark,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"] .hint {
+    border-color: ButtonFace;
+    color: ButtonFace;
+  }
+}

@@ -1,0 +1,13 @@
+id: no-ad-hoc-error-property-check
+valid:
+  - |
+    const hasTag = Predicate.hasProperty(value, "_tag")
+  - |
+    const known = Predicate.isTagged(value, "NotFound")
+invalid:
+  - |
+    if ("message" in error) {
+      report(error.message)
+    }
+  - |
+    const tagged = "_tag" in value

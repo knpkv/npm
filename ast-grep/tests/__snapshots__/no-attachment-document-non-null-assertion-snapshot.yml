@@ -1,0 +1,9 @@
+id: no-attachment-document-non-null-assertion
+snapshots:
+  ? |
+    const body = documentContent!.trim()
+  : labels:
+      - source: documentContent!
+        style: primary
+        start: 13
+        end: 29

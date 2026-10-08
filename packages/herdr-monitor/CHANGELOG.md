@@ -1,5 +1,11 @@
 # @knpkv/herdr-monitor
 
+## 0.3.2
+
+### Patch Changes
+
+- [#599](https://github.com/knpkv/npm/pull/599) [`ed263a1`](https://github.com/knpkv/npm/commit/ed263a1b0d20dd47341dc9ed19175a889b94e44a) Thanks [@konopkov](https://github.com/konopkov)! - Failures that were silently swallowed now say so. agent-usage's page reports a successful reply it cannot read instead of treating it as empty, and logs a failed control-socket exchange. herdr-monitor answers a publish that stalls past its deadline with 408 rather than 400, and logs every failed publish request.
+
 ## 0.3.1
 
 ### Patch Changes

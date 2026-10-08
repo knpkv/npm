@@ -959,6 +959,61 @@
     {
       "capabilities": [
         "agent",
+        "write"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayComposer",
+      "states": [
+        "busy",
+        "default",
+        "draft"
+      ],
+      "terms": [
+        "agent",
+        "busy",
+        "draft",
+        "pattern",
+        "relaycomposer",
+        "write"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
+        "decide"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayDecision",
+      "states": [
+        "confirmed",
+        "declined",
+        "default",
+        "done",
+        "expired",
+        "failed",
+        "pending"
+      ],
+      "terms": [
+        "agent",
+        "confirmed",
+        "danger",
+        "decide",
+        "declined",
+        "default",
+        "done",
+        "expired",
+        "failed",
+        "pattern",
+        "pending",
+        "relaydecision",
+        "tone"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
         "conversation",
         "overlay",
         "select"
@@ -990,6 +1045,156 @@
         "relaydock",
         "select",
         "unavailable"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
+        "review"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayFindings",
+      "states": [
+        "accepted",
+        "default",
+        "dismissed",
+        "empty",
+        "failed",
+        "pending",
+        "posted",
+        "posting",
+        "stale"
+      ],
+      "terms": [
+        "accepted",
+        "agent",
+        "dismissed",
+        "empty",
+        "failed",
+        "pattern",
+        "pending",
+        "posted",
+        "posting",
+        "relayfindings",
+        "review",
+        "stale"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
+        "open"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayLauncher",
+      "states": [
+        "closed",
+        "default",
+        "open"
+      ],
+      "terms": [
+        "agent",
+        "closed",
+        "open",
+        "pattern",
+        "relaylauncher"
+      ]
+    },
+    {
+      "capabilities": [
+        "brand",
+        "present"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayMark",
+      "states": [
+        "bare",
+        "default",
+        "tile"
+      ],
+      "terms": [
+        "bare",
+        "brand",
+        "pattern",
+        "present",
+        "relaymark",
+        "tile"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
+        "overlay"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayPanel",
+      "states": [
+        "default",
+        "fullscreen",
+        "overlay",
+        "pinned"
+      ],
+      "terms": [
+        "agent",
+        "fullscreen",
+        "overlay",
+        "pattern",
+        "pinned",
+        "relaypanel"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
+        "configure"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelaySetup",
+      "states": [
+        "checking",
+        "default",
+        "ready",
+        "unavailable",
+        "unverified"
+      ],
+      "terms": [
+        "agent",
+        "checking",
+        "configure",
+        "pattern",
+        "ready",
+        "relaysetup",
+        "unavailable",
+        "unverified"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
+        "present"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayTranscript",
+      "states": [
+        "conversation",
+        "default",
+        "failed",
+        "streaming"
+      ],
+      "terms": [
+        "agent",
+        "conversation",
+        "failed",
+        "pattern",
+        "present",
+        "relaytranscript",
+        "streaming"
       ]
     },
     {

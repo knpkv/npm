@@ -1,5 +1,29 @@
 # @knpkv/rly
 
+## 0.15.0
+
+### Minor Changes
+
+- [#642](https://github.com/knpkv/npm/pull/642) [`dfa2d94`](https://github.com/knpkv/npm/commit/dfa2d94ea207baeb281ef222c7d28cf98e4962bb) Thanks [@konopkov](https://github.com/konopkov)! - Load Geist and Geist Mono with `font-display: optional`, so a late font keeps the metric-matched fallback for that page view instead of swapping in and shifting text, and add `RLY_FONT_FACES`, the font files a shell must preload for Geist to render on first load.
+
+- [#648](https://github.com/knpkv/npm/pull/648) [`5d21796`](https://github.com/knpkv/npm/commit/5d21796fb856fba44a32395e316a6bd95ecdbdd6) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayComposer`, Relay's auto-growing message box with removable context refs, a run preset, Send and Stop, Ctrl/⌘+Enter to send and an IME guard, and `useRelayDraft`, which keeps each object's draft through close, reopen and resize (optionally a reload) and reuses one request id until the text changes.
+
+- [#646](https://github.com/knpkv/npm/pull/646) [`aa41111`](https://github.com/knpkv/npm/commit/aa411113b76d81637f7af356bf04054246aa30ab) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayPanel`, Relay's frame as a non-modal overlay, a pinned column or a full-screen dialog, with its header, tabs, freshness line, body and composer footer, and `useRelayPresentation` to choose between them; add a `pin` icon.
+
+- [#636](https://github.com/knpkv/npm/pull/636) [`3ddf05b`](https://github.com/knpkv/npm/commit/3ddf05baa285beebba1ebe99bd2458434a613015) Thanks [@konopkov](https://github.com/konopkov)! - Add `useRelaySummon`, Relay's Ctrl/⌘+J keyboard summon: it opens Relay and focuses the composer, takes focus back to the page from inside Relay, closes full-screen Relay, and closes on Escape from inside Relay, handling only the exact chord so other shortcuts reach the host.
+
+## 0.14.0
+
+### Minor Changes
+
+- [#627](https://github.com/knpkv/npm/pull/627) [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayMark`, Relay's new mark (the baton) bare in the current colour or on an agent-coloured `RelayMark.Tile`, with a matching favicon at `@knpkv/rly/relay-mark.svg`, and `RelayLauncher`, the header button that opens Relay with its mark, label and Ctrl/⌘+J hint. `RelayDock`'s trigger now shows the new mark.
+
+### Patch Changes
+
+- [#593](https://github.com/knpkv/npm/pull/593) [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597) Thanks [@konopkov](https://github.com/konopkov)! - Text no longer jumps when Geist loads. rly's font stacks fall back to metric-matched Arial, Liberation Sans or Arimo faces (and Courier New, Liberation Mono or Cousine for mono), sized per weight, so lines break and rows stand the same height before and after the swap wherever glyphs are placed at subpixels (desktop Chrome on Linux as measured, and the usual macOS and Windows defaults); a Linux desktop set to full hinting can still move text slightly. Reading measures and title widths are set in `em` (at the weight each is drawn in) rather than `ch`, whose size follows the font's "0" and changed by 16% on the swap. Product shells preload the Geist file their stylesheet loads, and review's offline guide no longer hides the page until its fonts are ready.
+
+- [#601](https://github.com/knpkv/npm/pull/601) [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae) Thanks [@konopkov](https://github.com/konopkov)! - Region draws one header in every tone; a tray tints only its body. TimelineRow sets detail and provenance in meta type under the title and shows the actor kind as a plain word instead of an uppercase eyebrow.
+
 ## 0.13.0
 
 ### Minor Changes

@@ -117,12 +117,12 @@ test("opens Relay in a drawer beside the rail and returns focus on Escape", asyn
   await serve(page)
   await page.goto(detail)
 
-  const trigger = page.getByRole("button", { name: "Relay", exact: true })
+  const trigger = page.getByRole("button", { name: "Relay review", exact: true })
   await expect(trigger).toBeVisible()
   await expect(page.getByRole("complementary", { name: "Relay findings" })).toBeHidden()
 
   await trigger.click()
-  const drawer = page.getByRole("dialog", { name: "Relay" })
+  const drawer = page.getByRole("dialog", { name: "Relay review" })
   await expect(drawer).toBeVisible()
   await expect(drawer.getByRole("button", { name: "Run Relay" })).toBeVisible()
 
@@ -141,17 +141,17 @@ test("titles the drawer once, fills it, and names the missing profile", async ({
   await serve(page)
   await page.goto(detail)
 
-  await page.getByRole("button", { name: "Relay", exact: true }).click()
-  const drawer = page.getByRole("dialog", { name: "Relay" })
+  await page.getByRole("button", { name: "Relay review", exact: true }).click()
+  const drawer = page.getByRole("dialog", { name: "Relay review" })
   await expect(drawer).toBeVisible()
-  await expect(drawer.getByRole("heading", { exact: true, name: "Relay" })).toHaveCount(1)
+  await expect(drawer.getByRole("heading", { exact: true, name: "Relay review" })).toHaveCount(1)
   // Without its icon row the subtitle starts at the pane's edge rather than under a missing icon.
   const subtitle = drawer.getByText("Review findings and discuss evidence")
   await expect(subtitle).toHaveCSS("padding-inline-start", "0px")
 
   await expect(drawer.getByText("No Relay profile yet.")).toBeVisible()
   await expect(drawer.getByRole("link", { name: "Add one in Settings" })).toHaveAttribute("href", "/settings/relay")
-  await expect(drawer.getByLabel("Profile")).toHaveCount(0)
+  await expect(drawer.getByRole("combobox", { name: "Profile" })).toHaveCount(0)
   await expect(drawer.getByRole("button", { name: "Run Relay" })).toBeDisabled()
 
   const gap = await drawer.evaluate((dialog) => {
@@ -162,13 +162,43 @@ test("titles the drawer once, fills it, and names the missing profile", async ({
   expect(gap).toBeLessThanOrEqual(2)
 })
 
+// The profile list opens inside the drawer's modal: a list portalled to the page body would be inert.
+test("chooses a Relay profile from inside the drawer", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1280 })
+  await serve(page)
+  const profile = (id: string, name: string) => ({ id, kind: "review", name, skillIds: [] })
+  await page.route("**/api/config", (route) =>
+    route.fulfill({
+      json: {
+        accounts: [{ enabled: true, profile: "production", regions: ["eu-west-1"] }],
+        autoDetect: false,
+        autoRefresh: false,
+        refreshIntervalSeconds: 300,
+        review: {
+          defaultProfileId: "thorough",
+          profiles: [profile("thorough", "Thorough review"), profile("quick", "Quick review")]
+        }
+      }
+    }))
+  await page.goto(detail)
+
+  await page.getByRole("button", { name: "Relay review", exact: true }).click()
+  const drawer = page.getByRole("dialog", { name: "Relay review" })
+  const choice = drawer.getByRole("combobox", { name: "Profile" })
+  await expect(choice).toHaveText("Thorough review")
+  await choice.click()
+  await page.getByRole("option", { name: "Quick review" }).click()
+  await expect(choice).toHaveText("Quick review")
+  await expect(drawer).toBeVisible()
+})
+
 test("keeps Relay in the grid on a wide screen and on a phone", async ({ page }) => {
   for (const viewport of [{ height: 1080, width: 1920 }, { height: 844, width: 390 }]) {
     await page.setViewportSize(viewport)
     await serve(page)
     await page.goto(detail)
     await expect(page.getByRole("complementary", { name: "Relay findings" })).toBeVisible()
-    await expect(page.getByRole("button", { name: "Relay", exact: true })).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Relay review", exact: true })).toHaveCount(0)
   }
 })
 
@@ -199,8 +229,8 @@ test("steps aside for the command palette, so the palette takes input", async ({
   await serve(page)
   await page.goto(detail)
 
-  await page.getByRole("button", { name: "Relay", exact: true }).click()
-  const drawer = page.getByRole("dialog", { name: "Relay" })
+  await page.getByRole("button", { name: "Relay review", exact: true }).click()
+  const drawer = page.getByRole("dialog", { name: "Relay review" })
   await expect(drawer).toBeVisible()
   await page.keyboard.press("Control+p")
   await expect(drawer).toBeHidden()
@@ -216,8 +246,8 @@ test("keeps a permission prompt usable while the drawer is open", async ({ page 
   await serve(page)
   await page.goto(detail)
 
-  await page.getByRole("button", { name: "Relay", exact: true }).click()
-  await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  await page.getByRole("button", { name: "Relay review", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Relay review" })).toBeVisible()
   await page.unroute("**/api/events/")
   await page.route("**/api/events/", (route) =>
     route.fulfill({
@@ -239,7 +269,7 @@ test("keeps a permission prompt usable while the drawer is open", async ({ page 
       }\n\n`,
       contentType: "text/event-stream"
     }))
-  await expect(page.getByRole("dialog", { name: "Relay" })).toBeHidden({ timeout: 15_000 })
+  await expect(page.getByRole("dialog", { name: "Relay review" })).toBeHidden({ timeout: 15_000 })
   const allow = page.getByRole("button", { name: "Allow Once" })
   await expect(allow).toBeVisible({ timeout: 15_000 })
   const answered = page.waitForRequest((request) => request.url().includes("/permissions/respond"))
@@ -265,7 +295,7 @@ test("opens the drawer when the window narrows while focus is in Relay", async (
   })
   expect(focusedInPane).toBe(true)
   await page.setViewportSize({ height: 900, width: 1280 })
-  await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Relay review" })).toBeVisible()
 })
 
 // Leaving Relay for plain page content (no focus target) must not open the drawer on a later resize.
@@ -287,8 +317,8 @@ test("keeps the drawer closed on a resize after focus left Relay for page conten
   await page.getByRole("heading", { level: 1, name: "Bound patch reads" }).click()
   await expect.poll(() => page.evaluate(() => document.activeElement === document.body)).toBe(true)
   await page.setViewportSize({ height: 900, width: 1280 })
-  await expect(page.getByRole("button", { name: "Relay", exact: true })).toBeVisible()
-  await expect(page.getByRole("dialog", { name: "Relay" })).toBeHidden()
+  await expect(page.getByRole("button", { name: "Relay review", exact: true })).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Relay review" })).toBeHidden()
 })
 
 // A drawer that opened itself on a resize returns focus to its trigger on Escape, and stays shut
@@ -309,16 +339,16 @@ test("returns focus to the trigger after an auto-opened drawer closes, and does 
   })
   expect(focusedInPane).toBe(true)
   await page.setViewportSize({ height: 900, width: 1280 })
-  const drawer = page.getByRole("dialog", { name: "Relay" })
+  const drawer = page.getByRole("dialog", { name: "Relay review" })
   await expect(drawer).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(drawer).toBeHidden()
-  await expect(page.getByRole("button", { name: "Relay", exact: true })).toBeFocused()
+  await expect(page.getByRole("button", { name: "Relay review", exact: true })).toBeFocused()
 
   await page.setViewportSize({ height: 1080, width: 1920 })
   await expect(page.getByRole("complementary", { name: "Relay findings" })).toBeVisible()
   await page.setViewportSize({ height: 900, width: 1280 })
-  await expect(page.getByRole("button", { name: "Relay", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Relay review", exact: true })).toBeVisible()
   await expect(drawer).toBeHidden()
 })
 
@@ -328,8 +358,8 @@ test("keeps focus in Relay when an open drawer's layout widens into a column", a
   await serve(page)
   await page.goto(detail)
 
-  await page.getByRole("button", { name: "Relay", exact: true }).click()
-  await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  await page.getByRole("button", { name: "Relay review", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Relay review" })).toBeVisible()
   await page.setViewportSize({ height: 1080, width: 1920 })
   const pane = page.getByRole("complementary", { name: "Relay findings" })
   await expect(pane).toBeVisible()
@@ -346,8 +376,8 @@ test("reopens the drawer on narrowing after a layout-forced close", async ({ pag
   await serve(page)
   await page.goto(detail)
 
-  await page.getByRole("button", { name: "Relay", exact: true }).click()
-  const drawer = page.getByRole("dialog", { name: "Relay" })
+  await page.getByRole("button", { name: "Relay review", exact: true }).click()
+  const drawer = page.getByRole("dialog", { name: "Relay review" })
   await expect(drawer).toBeVisible()
   await page.setViewportSize({ height: 1080, width: 1920 })
   await expect(page.getByRole("complementary", { name: "Relay findings" })).toBeVisible()
@@ -368,9 +398,9 @@ test("returns focus to the trigger when the palette that replaced the drawer clo
   await serve(page)
   await page.goto(detail)
 
-  const trigger = page.getByRole("button", { name: "Relay", exact: true })
+  const trigger = page.getByRole("button", { name: "Relay review", exact: true })
   await trigger.click()
-  await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  await expect(page.getByRole("dialog", { name: "Relay review" })).toBeVisible()
   await page.keyboard.press("Control+p")
   await expect(page.getByPlaceholder("Type a command...")).toBeFocused()
   await page.keyboard.press("Escape")
@@ -384,12 +414,12 @@ test("returns focus to the Relay pane when the layout widened while the palette 
   await serve(page)
   await page.goto(detail)
 
-  await page.getByRole("button", { name: "Relay", exact: true }).click()
-  await expect(page.getByRole("dialog", { name: "Relay" })).toBeVisible()
+  await page.getByRole("button", { name: "Relay review", exact: true }).click()
+  await expect(page.getByRole("dialog", { name: "Relay review" })).toBeVisible()
   await page.keyboard.press("Control+p")
   await expect(page.getByPlaceholder("Type a command...")).toBeFocused()
   await page.setViewportSize({ height: 900, width: 1920 })
-  await expect(page.getByRole("button", { name: "Relay", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Relay review", exact: true })).toHaveCount(0)
   await page.keyboard.press("Escape")
   await expect
     .poll(() => page.evaluate(() => document.activeElement?.closest("aside[aria-label='Relay findings']") !== null))
@@ -402,8 +432,8 @@ test("keeps Relay controls reachable in the drawer on a short viewport", async (
   await serve(page)
   await page.goto(detail)
 
-  await page.getByRole("button", { name: "Relay", exact: true }).click()
-  const run = page.getByRole("dialog", { name: "Relay" }).getByRole("button", { name: "Run Relay" })
+  await page.getByRole("button", { name: "Relay review", exact: true }).click()
+  const run = page.getByRole("dialog", { name: "Relay review" }).getByRole("button", { name: "Run Relay" })
   await run.scrollIntoViewIfNeeded()
   await expect(run).toBeInViewport()
 })

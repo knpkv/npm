@@ -84,7 +84,7 @@ const buildLayouts = new Map([
 const builtAssetExports = new Set(["@knpkv/review/guide/styles.css", "@knpkv/rly/styles.css"])
 
 /** Built extension and the source extensions it may come from. */
-const sourceExtensions = [[".js", [".ts", ".tsx"]], [".css", [".css"]]] as const
+const sourceExtensions = [[".js", [".ts", ".tsx"]], [".css", [".css"]], [".svg", [".svg"]]] as const
 
 /** Package-root exports that are published as-is and have no build step. */
 const unbuiltExportPrefixes = new Map([["@knpkv/rly", ["./registry/"]]])

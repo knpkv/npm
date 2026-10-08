@@ -1,0 +1,18 @@
+id: no-console-in-effect
+snapshots:
+  ? |
+    const program = Effect.gen(function* () {
+      console.log("started")
+    })
+  : labels:
+      - source: console.log("started")
+        style: primary
+        start: 44
+        end: 66
+      - source: |-
+          Effect.gen(function* () {
+            console.log("started")
+          })
+        style: secondary
+        start: 16
+        end: 69

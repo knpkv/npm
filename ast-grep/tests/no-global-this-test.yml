@@ -1,0 +1,11 @@
+id: no-global-this
+valid:
+  - |
+    const value = scope.globalThisValue
+  - |
+    const host = window
+invalid:
+  - |
+    const process = globalThis.process
+  - |
+    globalThis.fetch(url)

@@ -1,0 +1,9 @@
+id: no-upload-array-first-non-null
+snapshots:
+  ? |
+    return attachments[0]!
+  : labels:
+      - source: return attachments[0]!
+        style: primary
+        start: 0
+        end: 22

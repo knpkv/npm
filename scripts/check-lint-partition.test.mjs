@@ -57,6 +57,8 @@ test("default lint retains every original check and both CI partitions", () => {
   assert.deepEqual(expandedScript("lint:config:static"), [
     "node scripts/check-eslint-config.mjs",
     "node scripts/check-ast-grep-scopes.mjs",
+    "node scripts/check-ast-grep-rule-languages.mjs",
+    "node --test scripts/check-ast-grep-rule-languages.test.mjs",
     "node scripts/check-effect-tsconfig-coverage.mjs",
     "node scripts/check-effect-reference-alignment.mjs",
     "node scripts/check-changed-effect-diagnostics.mjs",
@@ -71,8 +73,11 @@ test("default lint retains every original check and both CI partitions", () => {
     "node --test scripts/check-debt-ledger.test.mjs",
     "node --test scripts/check-lint-partition.test.mjs",
     "node --test scripts/check-test-partition.test.mjs",
+    "node --test scripts/check-release-workflow.test.mjs",
+    "node --test scripts/check-version-bumps.test.mjs",
     "node scripts/check-test-typecheck-coverage.mjs",
-    "node --test scripts/check-test-typecheck-coverage.test.mjs"
+    "node --test scripts/check-test-typecheck-coverage.test.mjs",
+    "node --test scripts/check-browser-partition.test.mjs"
   ])
   assert.deepEqual(expandedScript("lint"), [...staticCommands, ...coverageCommands])
   assert.deepEqual(expandedScript("lint:config"), [...expandedScript("lint:config:static"), ...coverageCommands])
@@ -88,6 +93,8 @@ test("default lint retains every original check and both CI partitions", () => {
   for (const required of [
     "check-eslint-config.mjs",
     "check-ast-grep-scopes.mjs",
+    "check-ast-grep-rule-languages.mjs",
+    "check-ast-grep-rule-languages.test.mjs",
     "check-effect-tsconfig-coverage.mjs",
     "check-effect-reference-alignment.mjs",
     "check-changed-effect-diagnostics.mjs",

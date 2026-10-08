@@ -12,6 +12,7 @@
  *
  * @module
  */
+import { PortalProvider } from "@knpkv/rly/foundations"
 import { type ReactNode, useEffect, useLayoutEffect, useRef } from "react"
 import styles from "./findings-drawer.module.css"
 
@@ -64,23 +65,26 @@ export function FindingsDrawer({
     if (!open && element.open) element.close()
   }, [open])
   // A native modal sits above every portal-based dialog, which it would leave inert behind it (the
-  // command palette, a permission prompt). So the drawer steps aside for any other dialog, and for an
-  // inline prompt marked `data-needs-answer` (the read permission bar): it closes as soon as one
-  // appears, and hands it the focus it could not take while the modal was open.
+  // command palette, a permission prompt). So the drawer steps aside for any other dialog, for an
+  // inline prompt marked `data-needs-answer` (the read permission bar), and for Relay's panel (a
+  // finding's Discuss opens it): it closes as soon as one appears, and hands it the focus it could not
+  // take while the modal was open, a composer first.
   useEffect(() => {
     const element = dialog.current
     if (!open || element === null) return
     const observer = new MutationObserver(() => {
       const other = [
-        ...document.querySelectorAll<HTMLElement>("[role='dialog'], [role='alertdialog'], [data-needs-answer]")
+        ...document.querySelectorAll<HTMLElement>(
+          "[role='dialog'], [role='alertdialog'], [data-needs-answer], [data-rly-relay-surface]"
+        )
       ].find((candidate) => !element.contains(candidate))
       if (other === undefined || !element.open) return
       element.close()
       // That dialog tried to take focus while the modal still made it inert; give it focus now.
       if (!other.contains(document.activeElement)) {
-        const first = other.querySelector<HTMLElement>(
-          "input, textarea, select, button, [href], [tabindex]:not([tabindex='-1'])"
-        )
+        const first =
+          other.querySelector<HTMLElement>("textarea") ??
+          other.querySelector<HTMLElement>("input, textarea, select, button, [href], [tabindex]:not([tabindex='-1'])")
         ;(first ?? other).focus()
       }
       // Its own focus restore points into the closed drawer; when it goes and focus falls to the
@@ -124,7 +128,10 @@ export function FindingsDrawer({
           Close
         </button>
       </header>
-      <div className={styles.body}>{children}</div>
+      <div className={styles.body}>
+        {/* Menus and listboxes inside the drawer portal into it: the page behind a modal is inert. */}
+        <PortalProvider>{children}</PortalProvider>
+      </div>
     </dialog>
   )
 }

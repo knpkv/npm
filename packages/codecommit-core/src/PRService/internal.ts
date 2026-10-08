@@ -67,6 +67,7 @@ export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
       fetchedAt: row.fetchedAt ? new Date(row.fetchedAt) : undefined,
       approvedBy: row.approvedBy,
       approvedByArns: row.approvedByArns,
+      ...(row.approversUnknown && { approversUnknown: true }),
       commentedBy: row.commentedBy,
       approvalRules: row.approvalRules,
       filesChanged: sumFileChanges(row.filesAdded, row.filesModified, row.filesDeleted)
@@ -91,6 +92,7 @@ export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
       approvalUnknownReason: pr.approvalUnknown?._tag ?? null,
       // A domain pull request carries no baseline: known only when its evaluation succeeded.
       approvalBaselineKnown: pr.approvalUnknown === undefined,
+      approversUnknown: pr.approversUnknown === true,
       // A domain pull request carries no observation: the versions of a fresh, unwritten read.
       observationSeq: 0,
       approvalVersion: pr.lastModifiedDate,
@@ -142,6 +144,7 @@ export const PullRequestToUpsertInput = UpsertInput.pipe(
       fetchedAt: undefined,
       approvedBy: row.approvedBy,
       approvedByArns: row.approvedByArns,
+      ...(row.approversUnknown === true && { approversUnknown: true }),
       approvalRules: row.approvalRules ?? [],
       commentedBy: [],
       filesChanged: undefined
@@ -168,6 +171,7 @@ export const PullRequestToUpsertInput = UpsertInput.pipe(
       link: pr.link,
       approvedBy: pr.approvedBy,
       approvedByArns: pr.approvedByArns ?? [],
+      approversUnknown: pr.approversUnknown === true,
       approvalRules: (pr.approvalRules ?? []).map((rule) => decodeApprovalRule(rule))
     }))
   })
@@ -181,6 +185,19 @@ export const prToUpsertInput = (pr: PullRequest, awsAccountId: string): UpsertIn
   // Explicit: encodePRToUpsert's Encoded type can omit approvalRules when decoding defaults are used,
   // but UpsertInput.Type requires it. Guarantee it's always present.
   approvalRules: pr.approvalRules
+})
+
+/** A detail read's approver columns for the upsert: the list exactly as read, beside its unknown marker. */
+export const approverColumnsOf = (
+  detail: {
+    readonly approvedBy: ReadonlyArray<string>
+    readonly approvedByArns: ReadonlyArray<string>
+    readonly approversUnknown?: true | undefined
+  }
+): Pick<UpsertInput, "approvedBy" | "approvedByArns" | "approversUnknown"> => ({
+  approvedBy: detail.approvedBy,
+  approvedByArns: detail.approvedByArns,
+  approversUnknown: detail.approversUnknown === true
 })
 
 const countThreadComments = (thread: CommentThread): number =>

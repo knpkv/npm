@@ -1,0 +1,13 @@
+id: no-direct-process-access
+valid:
+  - |
+    const env = yield* Config.string("HOME")
+  - |
+    const subprocess = child.process
+invalid:
+  - |
+    const home = process.env.HOME
+  - |
+    import { argv } from "node:process"
+  - |
+    const host = globalThis.process.platform

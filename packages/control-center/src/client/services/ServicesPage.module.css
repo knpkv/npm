@@ -179,6 +179,18 @@
   justify-content: flex-end;
 }
 
+/* A credential failure, said once for the whole account: the cause and fix, then one action. */
+.accountFailure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rly-space-8) var(--rly-space-12);
+  padding-block: var(--rly-space-12);
+  border-block: 1px solid var(--rly-color-border-2);
+  color: var(--rly-color-blocked-ink);
+}
+
 .syncActions {
   display: flex;
   flex-wrap: wrap;

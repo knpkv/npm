@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/control-center",
-  "version": "0.10.4",
+  "version": "0.11.0",
   "description": "Human- and agent-oriented delivery control center",
   "license": "MIT",
   "author": "knpkv",

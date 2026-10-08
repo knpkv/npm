@@ -45,10 +45,8 @@ const emptyWork = JSON.stringify({
   week: emptyWorkWindow("week")
 })
 
-const requestPath = (input: RequestInfo | URL): string => {
-  const url = "href" in input ? input.href : "url" in input ? input.url : input
-  return new URL(url, "http://localhost").pathname
-}
+// The board fetches with absolute URLs or Requests; Request normalizes both to an absolute URL.
+const requestPath = (input: RequestInfo | URL): string => new URL(new Request(input).url).pathname
 
 afterEach(async () => {
   await act(async () => {

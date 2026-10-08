@@ -1,4 +1,3 @@
-import { ChatHistory } from "@knpkv/herdr-coordinator/model"
 import { HostStatus, JobPayload, PendingApprovalCursor } from "@knpkv/herdr-fleet/model"
 import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { Schema } from "effect"
@@ -85,10 +84,10 @@ export const DashboardSnapshot = Schema.Struct({
   approvalApp: Schema.Struct({
     canonical: Schema.Boolean,
     canonicalUrl: Schema.String,
-    chatEnabled: Schema.Boolean,
-    pushEnabled: Schema.Boolean
+    pushEnabled: Schema.Boolean,
+    // Whether this listener serves the Work snapshot, so the page never polls an endpoint it lacks.
+    workEnabled: Schema.Boolean
   }),
-  chat: Schema.NullOr(ChatHistory),
   work: Schema.NullOr(WorkSnapshots),
   status: HostStatus,
   records: Schema.Array(SanitizedJobRecord),

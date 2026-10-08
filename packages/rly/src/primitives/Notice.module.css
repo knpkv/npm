@@ -49,7 +49,7 @@
   .lead {
     align-items: flex-start;
     display: flex;
-    flex: 1 1 20ch;
+    flex: 1 1 13.3em;
     gap: var(--rly-space-12);
     min-inline-size: var(--rly-space-0);
   }
