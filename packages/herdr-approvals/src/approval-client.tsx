@@ -114,7 +114,7 @@ const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 const loadDashboard = fetchJson(DashboardSnapshot, "/v1/dashboard")
 const loadLimits = fetchJson(FleetLimits, "/v1/limits")
 
-const limitsTime = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })
+const limitsTime = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" })
 
 /**
  * The limits as of the last good load, and why the latest load failed when it did. `now` is the

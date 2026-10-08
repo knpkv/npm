@@ -27,7 +27,9 @@ const stateTone = {
   unknown: "neutral"
 } satisfies Record<LimitTone, RlyStateTone>
 
-const percent = (window: LimitWindowView): string => (window.value === null ? "unknown" : `${String(window.value)}%`)
+// An old reading is not the current level: the chip says unknown rather than repeat a stale number.
+const percent = (window: LimitWindowView): string =>
+  window.value === null || window.stale ? "unknown" : `${String(window.value)}%`
 
 /** "Claude" plus every account's headline window, the closest to its limit first. */
 const providerHeadlines = (
@@ -68,7 +70,9 @@ export const LimitsChips = ({
           }}
         >
           <StateLabel label={`${name} ${percent(window)}`} size="compact" tone={stateTone[window.tone]} />
-          <span className="limits-chip-window">{window.name.toLowerCase()}</span>
+          <Text className="limits-chip-window" tone="secondary" variant="meta">
+            {window.name.toLowerCase()}
+          </Text>
         </a>
       ))}
     </nav>

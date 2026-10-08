@@ -57,7 +57,8 @@ describe("limitsView", () => {
       value: 47,
       stale: true,
       usedText: "47% used, old reading",
-      detailText: "No reading for 2h 0m"
+      detailText: null,
+      sourceText: "read on SER8, 2h 0m ago"
     })
   })
 

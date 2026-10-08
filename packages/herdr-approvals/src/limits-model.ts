@@ -33,8 +33,8 @@ export interface LimitWindowView {
   readonly reserveMark: number
   /** "47% used", "47% used, old reading", or "Unknown". */
   readonly usedText: string
-  /** "resets in 3d 4h", or why there is no reading ("No reading for 6h"). */
-  readonly detailText: string
+  /** "resets in 3d 4h", or why there is no reading ("No reading for 6h"); null when the source says it. */
+  readonly detailText: string | null
   /** "lasts until reset", "reaches the reserve Thu 18:30", or null when the pace is unknown. */
   readonly paceText: string | null
   /** "read on SER8, 2m ago"; null when no host has read it. */
@@ -191,7 +191,8 @@ const windowView = (
       stale: true,
       projected: null,
       usedText: `${String(used)}% used, old reading`,
-      detailText: `No reading for ${duration(age)}`,
+      // The source line already says how old it is.
+      detailText: null,
       paceText: null,
       sourceText
     }
