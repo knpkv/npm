@@ -20,6 +20,8 @@
     margin: 0;
   }
   .target {
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
     display: grid;
     gap: var(--rly-space-2) var(--rly-space-12);
     grid-template-columns: max-content minmax(0, 1fr);
@@ -46,6 +48,9 @@
     overflow-wrap: break-word;
     padding: var(--rly-space-8) var(--rly-space-12);
     white-space: pre-wrap;
+  }
+  .quote {
+    margin: 0;
   }
   .body:focus-visible,
   .outcome:focus-visible {

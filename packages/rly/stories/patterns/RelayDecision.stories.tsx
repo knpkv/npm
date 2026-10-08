@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { type ReactElement, useState } from "react"
-import { expect, userEvent } from "storybook/test"
-import { RelayDecision, type RlyRelayDecisionState } from "../../src/patterns/RelayDecision.js"
+import { expect, userEvent, within } from "storybook/test"
+import { RelayDecision, type RelayDecisionProps, type RlyRelayDecisionState } from "../../src/patterns/RelayDecision.js"
 import { pageStyle, stackStyle } from "../primitives/storyStyles.js"
 
 const meta = { component: RelayDecision, tags: ["autodocs"], title: "Patterns/RelayDecision" } satisfies Meta<
@@ -19,7 +19,7 @@ const comment = {
   working: "Posting…"
 }
 const body = "The hunk loop stops one line early, so the trailing context line is never read.\nIt should run to count."
-const pr = [{ label: "Pull request", value: "infra-core #12" }]
+const pr: RelayDecisionProps["target"] = [{ label: "Pull request", value: "infra-core #12" }]
 
 /** A decision the reader answers; the host moves it from confirmed to done with a receipt. */
 const Interactive = (): ReactElement => {
@@ -122,10 +122,12 @@ const decisionArgs: Story["args"] = {
 export const Lifecycle: Story = {
   args: decisionArgs,
   play: async ({ canvas }) => {
-    await userEvent.click(canvas.getByRole("button", { name: "Post comment" }))
-    await expect(canvas.getByText("Posting…")).toBeVisible()
-    await expect(await canvas.findByRole("link", { name: "Comment on infra-core #12" })).toBeVisible()
-    await expect(canvas.getByText(/Posted\./).closest("p")).toHaveFocus()
+    // The first decision is the interactive one; the rest show each other outcome.
+    const live = within(canvas.getAllByRole("group")[0] ?? document.body)
+    await userEvent.click(live.getByRole("button", { name: "Post comment" }))
+    await expect(live.getByText("Posting…")).toBeVisible()
+    await expect(await live.findByRole("link", { name: "Comment on infra-core #12" })).toBeVisible()
+    await expect(live.getByText(/Posted\./).closest("p")).toHaveFocus()
     await expect(canvas.getByText(/may or may not have gone through/)).toBeVisible()
     const danger = canvas.getByRole("button", { name: "Delete branch" })
     await expect(getComputedStyle(danger).backgroundColor).not.toBe(

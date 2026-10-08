@@ -59,8 +59,11 @@ export interface RelayDecisionProps {
   readonly onConfirm: () => void
   readonly onDecline: () => void
   readonly state: RlyRelayDecisionState
-  /** Where it goes, only what the action really pins (a PR comment names the PR, not a line). */
-  readonly target: ReadonlyArray<RlyRelayDecisionTarget>
+  /**
+   * Where it goes, at least one fact and only what the action really pins (a PR comment names the PR,
+   * not a line). A write with no stated destination cannot be confirmed.
+   */
+  readonly target: readonly [RlyRelayDecisionTarget, ...ReadonlyArray<RlyRelayDecisionTarget>]
   /** "danger" for a destructive write (delete, force-merge), so it never looks like a comment. */
   readonly tone?: "default" | "danger"
 }
@@ -103,26 +106,52 @@ export const RelayDecision = ({
   const outcome = useRef<HTMLParagraphElement | null>(null)
   const root = useRef<HTMLElement | null>(null)
   const answered = useRef(false)
+  const focusedOutcome = useRef(false)
   const pressed = useRef(false)
   const [announcement, setAnnouncement] = useState("")
   const ask = requireText(copy.ask, "RelayDecision ask")
 
+  // A new call starts unanswered.
   useEffect(() => {
-    // A new state releases the latch: the host has taken the answer.
+    answered.current = false
+    focusedOutcome.current = false
+  }, [id])
+
+  // Only a different state (or call) releases the latch; a rerender with a fresh Pending object does not.
+  useEffect(() => {
     pressed.current = false
+  }, [id, state._tag])
+
+  useEffect(() => {
     const words = announcementFor(state, ask)
     const key = `${id}:${state._tag}`
     if (words === undefined || announced.has(key)) return
-    announced.add(key)
+    // A decline the reader just made here is heard through the focused outcome; don't say it twice.
+    if (state._tag === "Declined" && answered.current) {
+      announced.add(key)
+      return
+    }
+    // Cleared, then filled a frame later, so the same question for the next call is still a change;
+    // marked announced only when actually set, so a cancelled frame (StrictMode, a quick rerender)
+    // does not swallow it.
+    setAnnouncement("")
+    const say = (): void => {
+      announced.add(key)
+      setAnnouncement(words)
+    }
     const view = root.current?.ownerDocument.defaultView ?? null
-    if (view === null) return setAnnouncement(words)
-    const frame = view.requestAnimationFrame(() => setAnnouncement(words))
+    if (view === null) return say()
+    const frame = view.requestAnimationFrame(say)
     return () => view.cancelAnimationFrame(frame)
-  }, [ask, id, state])
+    // The state's tag, not its object identity, decides what is said.
+  }, [ask, id, state._tag])
 
-  // After the reader answers, the buttons unmount: keep focus on the outcome instead of the page.
+  // After the reader answers, the buttons unmount: keep focus on the outcome instead of the page. Only
+  // once, on leaving Pending: a later Confirmed → Done must not pull the reader back from the composer.
   useEffect(() => {
-    if (state._tag !== "Pending" && answered.current) outcome.current?.focus()
+    if (state._tag === "Pending" || !answered.current || focusedOutcome.current) return
+    focusedOutcome.current = true
+    outcome.current?.focus()
   }, [state._tag])
 
   const answer = (choose: () => void) => () => {
@@ -140,20 +169,18 @@ export const RelayDecision = ({
       {copy.reversible === undefined ? null : (
         <p className={style("meta")}>{requireText(copy.reversible, "RelayDecision reversible")}</p>
       )}
-      {target.length === 0 ? null : (
-        <dl className={style("target")}>
-          {target.map((row) => (
-            <div className={style("row")} key={row.label}>
-              <dt>{requireText(row.label, "RelayDecision target label")}</dt>
-              <dd>{requireText(row.value, "RelayDecision target value")}</dd>
-            </div>
-          ))}
-        </dl>
-      )}
-      {/* Focusable and named, so a long body scrolls by keyboard without pushing the buttons away. */}
-      <blockquote aria-label="Exact text" className={style("body")} tabIndex={0}>
-        {requireText(body, "RelayDecision body")}
-      </blockquote>
+      <dl className={style("target")}>
+        {target.map((row) => (
+          <div className={style("row")} key={row.label}>
+            <dt>{requireText(row.label, "RelayDecision target label")}</dt>
+            <dd>{requireText(row.value, "RelayDecision target value")}</dd>
+          </div>
+        ))}
+      </dl>
+      {/* A named, focusable group (not a landmark, as a thread holds several), so a long body scrolls by keyboard without pushing the buttons away. */}
+      <div aria-label="Exact text" className={style("body")} role="group" tabIndex={0}>
+        <blockquote className={style("quote")}>{requireText(body, "RelayDecision body")}</blockquote>
+      </div>
       {state._tag === "Pending" ? (
         <div className={style("actions")}>
           <Button

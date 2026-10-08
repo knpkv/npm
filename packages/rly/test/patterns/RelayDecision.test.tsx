@@ -20,7 +20,7 @@ const copy = {
   done: "Posted",
   working: "Posting…"
 }
-const target = [{ label: "Pull request", value: "infra-core #12" }]
+const target: readonly [{ label: string; value: string }] = [{ label: "Pull request", value: "infra-core #12" }]
 
 const Decision = ({
   id,
@@ -61,7 +61,7 @@ describe("RelayDecision", () => {
     const group = document.querySelector("[role='group']")
     expect(document.getElementById(group?.getAttribute("aria-labelledby") ?? "")?.textContent).toBe(copy.ask)
     expect(document.querySelector("dd")?.textContent).toBe("infra-core #12")
-    const body = document.querySelector("blockquote")
+    const body = document.querySelector("[aria-label='Exact text']")
     expect(body?.textContent).toBe("The hunk loop stops one line early.\nIt should run to count.")
     expect(body?.getAttribute("aria-label")).toBe("Exact text")
     expect(body?.getAttribute("tabindex")).toBe("0")
@@ -122,5 +122,71 @@ describe("RelayDecision", () => {
     await mount(<Decision id="announce" state={{ _tag: "Pending" }} />)
     await nextFrame()
     expect(announcer()).toBe("")
+  })
+
+  it("moves focus to the outcome only once, so a later state never pulls the reader back", async () => {
+    await mount(
+      <>
+        <textarea aria-label="Message Relay" />
+        <Decision id="focus-once" state={{ _tag: "Pending" }} />
+      </>
+    )
+    await act(async () => button("Post comment")?.click())
+    await act(async () =>
+      root?.render(
+        <>
+          <textarea aria-label="Message Relay" />
+          <Decision id="focus-once" state={{ _tag: "Confirmed" }} />
+        </>
+      )
+    )
+    const composer = document.querySelector("textarea")
+    composer?.focus()
+    await act(async () =>
+      root?.render(
+        <>
+          <textarea aria-label="Message Relay" />
+          <Decision id="focus-once" state={{ _tag: "Done", receipt: { summary: "Comment on infra-core #12" } }} />
+        </>
+      )
+    )
+    expect(document.activeElement).toBe(composer)
+  })
+
+  it("does not announce a decline the reader just made", async () => {
+    await mount(<Decision id="local-decline" state={{ _tag: "Pending" }} />)
+    await nextFrame()
+    await act(async () => button("Don't post")?.click())
+    await act(async () => root?.render(<Decision id="local-decline" state={{ _tag: "Declined" }} />))
+    await nextFrame()
+    expect(announcer()).toBe(copy.ask)
+  })
+
+  it("keeps the latch through a rerender with a fresh Pending object", async () => {
+    const onConfirm = vi.fn()
+    await mount(<Decision id="rerender" onConfirm={onConfirm} state={{ _tag: "Pending" }} />)
+    await act(async () => button("Post comment")?.click())
+    // The host rerenders for an unrelated reason before it has moved the state on.
+    await act(async () => root?.render(<Decision id="rerender" onConfirm={onConfirm} state={{ _tag: "Pending" }} />))
+    await act(async () => button("Post comment")?.click())
+    expect(onConfirm).toHaveBeenCalledTimes(1)
+  })
+
+  it("announces the same question again for the next call, and a cancelled frame does not swallow it", async () => {
+    await mount(<Decision id="call-a" state={{ _tag: "Pending" }} />)
+    // A rerender before the frame cancels it; the call must still be announced afterwards.
+    await act(async () => root?.render(<Decision id="call-a" state={{ _tag: "Pending" }} />))
+    await nextFrame()
+    expect(announcer()).toBe(copy.ask)
+    const region = document.querySelector("[aria-live='polite']")
+    if (region === null) throw new Error("no announcer")
+    const changes: Array<string> = []
+    const observer = new MutationObserver(() => changes.push(region.textContent ?? ""))
+    observer.observe(region, { characterData: true, childList: true, subtree: true })
+    await act(async () => root?.render(<Decision id="call-b" state={{ _tag: "Pending" }} />))
+    await nextFrame()
+    observer.disconnect()
+    expect(changes).toContain("")
+    expect(announcer()).toBe(copy.ask)
   })
 })
