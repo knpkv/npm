@@ -816,6 +816,7 @@ const DockLayer = ({
                 <button
                   aria-label={`Close ${title}`}
                   className={style("close")}
+                  data-rly-hit-area=""
                   onClick={onClose}
                   ref={closeRef}
                   type="button"

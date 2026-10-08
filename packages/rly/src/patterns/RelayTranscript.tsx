@@ -266,6 +266,7 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
       {behind ? (
         <button
           className={style("jump")}
+          data-rly-hit-area=""
           onClick={() => {
             toEnd()
             // The button goes away; focus moves to the scrolling body rather than dropping to the page.
