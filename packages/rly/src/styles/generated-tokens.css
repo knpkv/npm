@@ -117,8 +117,10 @@
     --rly-motion-standard-easing: cubic-bezier(.2, .8, .2, 1);
     --rly-motion-deliberate-duration: 240ms;
     --rly-motion-deliberate-easing: cubic-bezier(.2, .8, .2, 1);
-    --rly-motion-slow-duration: 360ms;
+    --rly-motion-slow-duration: 300ms;
     --rly-motion-slow-easing: cubic-bezier(.2, .8, .2, 1);
+    --rly-easing-out: cubic-bezier(.2, .8, .2, 1);
+    --rly-easing-in-out: cubic-bezier(.65, 0, .35, 1);
   }
 
   :root:is([data-theme="light"], [data-rly-theme="light"]),

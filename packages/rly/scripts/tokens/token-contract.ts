@@ -1,6 +1,6 @@
 import { colorTokenSource, contrastPairSource } from "../../src/tokens/colors.js"
 import { controlHeightTokenSource } from "../../src/tokens/control.js"
-import { motionTokenSource } from "../../src/tokens/motion.js"
+import { easingTokenSource, motionTokenSource } from "../../src/tokens/motion.js"
 import { radiusTokenSource } from "../../src/tokens/shape.js"
 import { spaceTokenSource } from "../../src/tokens/space.js"
 import { typeTokenSource } from "../../src/tokens/typography.js"
@@ -29,6 +29,7 @@ export const validateTokenSource = (): void => {
   uniqueNames(radiusTokenSource, "radius")
   uniqueNames(typeTokenSource, "type")
   uniqueNames(motionTokenSource, "motion")
+  uniqueNames(easingTokenSource, "easing")
   uniqueNames(controlHeightTokenSource, "control height")
   for (const result of measureContrastPairs(colorTokenSource, contrastPairSource)) {
     if (result.ratio < result.minimum) {
@@ -91,7 +92,8 @@ export const renderTokenCss = (): string => {
     ...motionTokenSource.flatMap((token) => [
       declaration(`motion-${token.name}-duration`, token.duration),
       declaration(`motion-${token.name}-easing`, token.easing)
-    ])
+    ]),
+    ...easingTokenSource.map((token) => declaration(`easing-${token.name}`, token.value))
   ].join("\n")
 
   return `${CSS_HEADER}
@@ -155,6 +157,7 @@ ${renderNames("RLY_SPACE_TOKEN_NAMES", "RlySpaceToken", spaceTokenSource.map(({ 
 ${renderNames("RLY_RADIUS_TOKEN_NAMES", "RlyRadiusToken", radiusTokenSource.map(({ name }) => name))}
 ${renderNames("RLY_TYPE_TOKEN_NAMES", "RlyTypeToken", typeTokenSource.map(({ name }) => name))}
 ${renderNames("RLY_MOTION_TOKEN_NAMES", "RlyMotionToken", motionTokenSource.map(({ name }) => name))}
+${renderNames("RLY_EASING_TOKEN_NAMES", "RlyEasingToken", easingTokenSource.map(({ name }) => name))}
 ${
     renderNames(
       "RLY_CONTROL_HEIGHT_TOKEN_NAMES",
@@ -177,6 +180,7 @@ export const renderTokenRegistry = (): string => {
           ...result,
           ratio: Number(result.ratio.toFixed(2))
         })),
+        easing: easingTokenSource,
         motion: motionTokenSource,
         radius: radiusTokenSource,
         space: spaceTokenSource,

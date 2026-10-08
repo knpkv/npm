@@ -4804,6 +4804,10 @@
         },
         {
           "kind": "value",
+          "name": "RLY_EASING_TOKEN_NAMES"
+        },
+        {
+          "kind": "value",
           "name": "RLY_MOTION_TOKEN_NAMES"
         },
         {
@@ -4825,6 +4829,10 @@
         {
           "kind": "type",
           "name": "RlyControlHeightToken"
+        },
+        {
+          "kind": "type",
+          "name": "RlyEasingToken"
         },
         {
           "kind": "type",

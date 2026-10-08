@@ -96,7 +96,7 @@ export const DiffWorkbench = ({
             <span className={style("scopeLabel")}>{scope.mode === "all-files" ? "All files" : "Selected file"}</span>
             <strong className={style("scopeValue")}>{visibleScopeLabel}</strong>
             {scope.mode === "selected-file" ? (
-              <button className={style("showAll")} onClick={onShowAllFiles} type="button">
+              <button className={style("showAll")} data-rly-hit-area="" onClick={onShowAllFiles} type="button">
                 Show all files
               </button>
             ) : null}
