@@ -73,7 +73,7 @@
   min-block-size: 3rem;
   display: inline-flex;
   align-items: center;
-  justify-content: safe center;
+  justify-content: center;
   padding-inline: var(--rly-space-16);
   border-radius: var(--rly-radius-control);
   background: var(--rly-color-action-background);

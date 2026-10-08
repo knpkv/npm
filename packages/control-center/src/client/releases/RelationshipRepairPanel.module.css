@@ -104,7 +104,7 @@
   display: inline-flex;
   block-size: var(--rly-space-24);
   inline-size: var(--rly-space-24);
-  justify-content: safe center;
+  justify-content: center;
 }
 
 .agentIdentity > span:last-child {

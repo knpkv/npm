@@ -16,7 +16,7 @@
   display: inline-flex;
   min-block-size: var(--rly-space-48);
   align-items: center;
-  justify-content: safe center;
+  justify-content: center;
   padding-inline: var(--rly-space-24);
   border-radius: var(--rly-radius-control);
   background: var(--rly-color-action-background);

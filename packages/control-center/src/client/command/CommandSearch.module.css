@@ -101,7 +101,7 @@
 .loading {
   display: grid;
   min-block-size: 10rem;
-  place-content: safe center;
+  place-content: center;
   gap: var(--rly-space-8);
   color: var(--rly-color-text-2);
   text-align: center;

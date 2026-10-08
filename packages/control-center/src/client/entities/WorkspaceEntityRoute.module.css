@@ -53,7 +53,7 @@
   color: var(--rly-color-action-foreground);
   display: inline-flex;
   font-size: var(--rly-type-body-large-size);
-  justify-content: safe center;
+  justify-content: center;
   min-block-size: var(--rly-space-48);
   padding-inline: var(--rly-space-24);
   text-decoration: none;
@@ -80,7 +80,7 @@
   display: inline-flex;
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
-  justify-content: safe center;
+  justify-content: center;
   min-block-size: var(--rly-space-40);
   padding-inline: var(--rly-space-20);
   text-decoration: none;
