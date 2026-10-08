@@ -11,6 +11,7 @@ const provideNodeServices = Effect.provide(NodeServices.layer)
 
 /** `agent-usage limits` as it prints on a host: one window read, one that could not be. */
 const answer: LimitsNow = {
+  v: 1,
   machine: "SER8",
   observedAt: 1_791_481_802_332,
   latest: [
@@ -47,7 +48,7 @@ describe("readHostLimits", () => {
     Effect.gen(function*() {
       const limits = yield* read(printing(JSON.stringify(answer)))
       expect(limits.host).toBe("SER8")
-      expect(limits.reading).toEqual({ _tag: "Read", limits: answer })
+      expect(limits.reading).toEqual({ _tag: "Read", limits: answer, skipped: 0 })
     }))
 
   it.effect("says the host has no command rather than showing empty limits", () =>
@@ -76,6 +77,23 @@ describe("readHostLimits", () => {
       expect(unavailable(yield* read(printing(JSON.stringify({ ...answer, latest: "none" }))))?.reason).toBe(
         "invalid_output"
       )
+    }))
+})
+
+describe("readHostLimits across agent-usage versions", () => {
+  it.effect("calls a newer format unsupported rather than malformed", () =>
+    Effect.gen(function*() {
+      expect(unavailable(yield* read(printing(JSON.stringify({ ...answer, v: 2 }))))?.reason).toBe(
+        "unsupported_version"
+      )
+    }))
+
+  it.effect("keeps the snapshots it can read and counts the one it can't", () =>
+    Effect.gen(function*() {
+      const [known] = answer.latest
+      const newer = { ...known, label: "seven_day", source: "claude-desktop" }
+      const limits = yield* read(printing(JSON.stringify({ ...answer, latest: [known, newer] })))
+      expect(limits.reading).toEqual({ _tag: "Read", limits: { ...answer, latest: [known] }, skipped: 1 })
     }))
 })
 

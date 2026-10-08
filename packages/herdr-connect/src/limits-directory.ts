@@ -8,7 +8,14 @@
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet"
 import { Effect, Result, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
-import { type FleetLimits, HostLimits, PeerLimitsFailureReason } from "./limits.js"
+import {
+  decodeLimitsTolerantly,
+  type FleetLimits,
+  type HostLimits,
+  LooseHostLimits,
+  PeerLimitsFailureReason,
+  readingOf
+} from "./limits.js"
 
 export class PeerLimitsError extends Schema.TaggedError<PeerLimitsError>()("PeerLimitsError", {
   cause: Schema.Defect(),
@@ -24,7 +31,10 @@ export interface PeerLimitsTarget {
 
 const peerLimitsTimeoutMs = 1_500
 
-/** One peer's own read. The answer must name the peer it came from. */
+/**
+ * One peer's own read. The answer must name the peer it came from. The read inside is decoded
+ * tolerantly, so a peer on a newer agent-usage loses only the snapshots this hub cannot read.
+ */
 export const fetchPeerLimits = Effect.fn("ConnectLimits.fetchPeer")(
   function*(peer: PeerLimitsTarget) {
     if (!peer.online) return yield* new PeerLimitsError({ cause: peer.host, host: peer.host, reason: "offline" })
@@ -38,13 +48,16 @@ export const fetchPeerLimits = Effect.fn("ConnectLimits.fetchPeer")(
     if (response.status < 200 || response.status >= 300) {
       return yield* new PeerLimitsError({ cause: response.status, host: peer.host, reason: "request_failed" })
     }
-    const limits = yield* decodeBoundedResponseJson(response, HostLimits).pipe(
+    const loose = yield* decodeBoundedResponseJson(response, LooseHostLimits).pipe(
       Effect.mapError((cause) => new PeerLimitsError({ cause, host: peer.host, reason: "invalid_response" }))
     )
-    if (limits.host.toLowerCase() !== peer.host.toLowerCase()) {
-      return yield* new PeerLimitsError({ cause: limits.host, host: peer.host, reason: "invalid_response" })
+    if (loose.host.toLowerCase() !== peer.host.toLowerCase()) {
+      return yield* new PeerLimitsError({ cause: loose.host, host: peer.host, reason: "invalid_response" })
     }
-    return limits
+    const reading: HostLimits["reading"] = loose.reading._tag === "Unavailable"
+      ? loose.reading
+      : readingOf(decodeLimitsTolerantly(loose.reading.limits), loose.reading.skipped)
+    return { host: loose.host, readAt: loose.readAt, reading } satisfies HostLimits
   },
   (effect, peer) =>
     effect.pipe(

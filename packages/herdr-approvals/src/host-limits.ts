@@ -7,7 +7,7 @@
  * @module
  */
 import { collectBoundedText } from "@knpkv/bounded-io"
-import { type HostLimits, limitsDetailMaxLength, LimitsNow, type LimitsUnavailableReason } from "@knpkv/herdr-connect"
+import { decodeLimitsTolerantly, type HostLimits, limitsUnavailable, RawLimits, readingOf } from "@knpkv/herdr-connect"
 import { Clock, Duration, Effect, Ref, Result, Schema, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
@@ -15,15 +15,9 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 export const hostLimitsOutputMaxBytes = 256 * 1024
 export const hostLimitsTimeout = "10 seconds"
 
-const unavailable = (reason: LimitsUnavailableReason, detail: string): HostLimits["reading"] => ({
-  _tag: "Unavailable",
-  reason,
-  detail: detail.trim().slice(0, limitsDetailMaxLength)
-})
-
 class CommandFailed extends Schema.TaggedError<CommandFailed>()("CommandFailed", { detail: Schema.String }) {}
 
-const decodeLimitsNow = Schema.decodeUnknownResult(Schema.fromJsonString(LimitsNow))
+const decodeRawLimits = Schema.decodeUnknownResult(Schema.fromJsonString(RawLimits))
 
 const runCommand = Effect.fn("HostLimits.run")(function*(command: readonly [string, ...Array<string>]) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
@@ -57,26 +51,28 @@ const readReading = (command: ReadonlyArray<string> | undefined): Effect.Effect<
 > => {
   const executable = command?.[0]
   if (command === undefined || executable === undefined) {
-    return Effect.succeed(unavailable("not_configured", "agentUsageLimitsCommand is not set for this host"))
+    return Effect.succeed(limitsUnavailable("not_configured", "agentUsageLimitsCommand is not set for this host"))
   }
   return runCommand([executable, ...command.slice(1)]).pipe(
     Effect.timeoutOrElse({ duration: hostLimitsTimeout, orElse: () => Effect.succeed(null) }),
     Effect.map((stdout): HostLimits["reading"] => {
-      if (stdout === null) return unavailable("timeout", `no answer within ${hostLimitsTimeout}`)
-      const limits = decodeLimitsNow(stdout.trim())
-      return Result.isSuccess(limits)
-        ? { _tag: "Read", limits: limits.success }
-        : unavailable("invalid_output", String(limits.failure))
+      if (stdout === null) return limitsUnavailable("timeout", `no answer within ${hostLimitsTimeout}`)
+      const json = decodeRawLimits(stdout.trim())
+      if (Result.isFailure(json)) {
+        return limitsUnavailable("invalid_output", "agent-usage printed something that is not a JSON object")
+      }
+      // A newer agent-usage may add sources or reasons: what this hostd can't read is skipped and counted.
+      return readingOf(decodeLimitsTolerantly(json.success))
     }),
     // agent-usage explains its own failures in one sentence on stderr ("is not running", "older version").
-    Effect.catchTag("CommandFailed", ({ detail }) => Effect.succeed(unavailable("failed", detail)))
+    Effect.catchTag("CommandFailed", ({ detail }) => Effect.succeed(limitsUnavailable("failed", detail)))
   )
 }
 
 /**
  * Runs the configured command once and reports what it said. Never fails: no command, a crash, a
- * timeout or output that is not agent-usage's each become `Unavailable` with its own reason, so one
- * broken host cannot blank the fleet view.
+ * timeout, a newer format (`unsupported_version`) or output that is not agent-usage's each become
+ * `Unavailable` with its own reason, so one broken host cannot blank the fleet view.
  */
 export const readHostLimits = Effect.fn("HostLimits.read")(function*(
   host: string,

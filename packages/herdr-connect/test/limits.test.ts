@@ -3,15 +3,15 @@ import { Effect } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { fetchPeerLimits, fleetLimits, hubLimits } from "../src/limits-directory.js"
-import type { HostLimits } from "../src/limits.js"
+import { decodeLimitsTolerantly, type HostLimits, type LooseHostLimits } from "../src/limits.js"
 
 const hostLimits = (host: string): HostLimits => ({
   host,
   readAt: 1_000,
-  reading: { _tag: "Read", limits: { machine: host, observedAt: 1_000, latest: [] } }
+  reading: { _tag: "Read", limits: { v: 1, machine: host, observedAt: 1_000, latest: [] }, skipped: 0 }
 })
 
-const answering = (body: HostLimits) =>
+const answering = (body: typeof LooseHostLimits.Type) =>
   HttpClient.make((request) =>
     Effect.succeed(
       HttpClientResponse.fromWeb(
@@ -51,6 +51,34 @@ describe("fleet limits", () => {
       expect(error.reason).toBe("invalid_response")
     }))
 
+  it.effect("keeps a newer peer's readable snapshots and counts the rest", () =>
+    Effect.gen(function*() {
+      const snapshot = {
+        agent: "claude",
+        machine: "PI",
+        source: "claude-oauth-usage",
+        label: "five_hour",
+        windowMinutes: 300,
+        observedAt: 900,
+        reading: { _tag: "Known", usedPercent: 19, resetsAt: 2_000 }
+      }
+      const newer = {
+        host: "PI",
+        readAt: 1_000,
+        reading: {
+          _tag: "Read",
+          skipped: 1,
+          limits: { v: 1, machine: "PI", observedAt: 1_000, latest: [snapshot, { ...snapshot, agent: "gemini" }] }
+        }
+      }
+      const limits = yield* fetchPeerLimits(peer).pipe(Effect.provideService(HttpClient.HttpClient, answering(newer)))
+      expect(limits.reading).toEqual({
+        _tag: "Read",
+        limits: { v: 1, machine: "PI", observedAt: 1_000, latest: [snapshot] },
+        skipped: 2
+      })
+    }))
+
   it.effect("answers with its own read when it cannot list the fleet", () =>
     Effect.gen(function*() {
       const fleet = yield* hubLimits(Effect.succeed(hostLimits("SER8")), Effect.fail("tailscale status failed")).pipe(
@@ -58,4 +86,11 @@ describe("fleet limits", () => {
       )
       expect(fleet).toEqual({ hosts: [hostLimits("SER8")], failures: [], peersListed: false })
     }))
+})
+
+describe("decodeLimitsTolerantly", () => {
+  it("tells a newer version from a malformed line", () => {
+    expect(decodeLimitsTolerantly({ v: 2, anything: true })).toEqual({ _tag: "UnsupportedVersion", version: "2" })
+    expect(decodeLimitsTolerantly({ v: 1, machine: "PI" })._tag).toBe("Invalid")
+  })
 })
