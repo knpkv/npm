@@ -570,7 +570,6 @@ export const DashboardView = ({
             </a>
           </Surface>
         )}
-        {approvalOnly ? null : <AgentActivity snapshot={snapshot} />}
         {approvalOnly ? null : (
           <Surface as="section" padding="spacious" className="agenda-panel">
             <div className="section-heading">
@@ -643,6 +642,8 @@ export const DashboardView = ({
             </div>
           </Surface>
         )}
+        {/* What needs a decision comes before what is merely running. */}
+        {approvalOnly ? null : <AgentActivity snapshot={snapshot} />}
         {approvalOnly ? null : (
           <ActivityHistory
             hasMore={snapshot.historyNextCursor !== null}

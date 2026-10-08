@@ -419,6 +419,12 @@ describe("dashboard approval capability", () => {
     expect(markup).not.toContain("agent-presence")
   })
 
+  it("puts the agenda, which needs a decision, above this host's agents", () => {
+    const markup = renderMixedAgentStates()
+    expect(markup.indexOf("Needs attention")).toBeGreaterThan(-1)
+    expect(markup.indexOf("Needs attention")).toBeLessThan(markup.indexOf("Agents on ALPHA"))
+  })
+
   it("links only agents with a stable id", () => {
     const markup = renderMixedAgentStates({
       agents: [{ ...workingAgent, agentId: null }]
