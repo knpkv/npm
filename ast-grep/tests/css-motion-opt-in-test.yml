@@ -8,6 +8,10 @@ valid:
     .a { transition: none; }
   - |
     .a { transition-delay: 1s; scroll-behavior: auto; }
+  - |
+    @media (width < 48rem) { @media (prefers-reduced-motion: no-preference) { .a { transition: color 1s; } } }
+  - |
+    @media (prefers-reduced-motion: no-preference) { @media (width < 48rem) { .a { transition: color 1s; } } }
 invalid:
   - |
     .a { transition: color 140ms ease; }
@@ -17,3 +21,5 @@ invalid:
     @media (prefers-reduced-motion: reduce) { .a { transition: color 1s; } }
   - |
     :global(::view-transition-group(*)) { animation-duration: 240ms; }
+  - |
+    @media (width < 48rem) { .a { transition: color 1s; } @media (prefers-reduced-motion: no-preference) { .b { transition: color 1s; } } }

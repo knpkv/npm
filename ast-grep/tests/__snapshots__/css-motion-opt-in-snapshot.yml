@@ -44,3 +44,14 @@ snapshots:
         style: secondary
         start: 47
         end: 57
+  ? |
+    @media (width < 48rem) { .a { transition: color 1s; } @media (prefers-reduced-motion: no-preference) { .b { transition: color 1s; } } }
+  : labels:
+      - source: "transition: color 1s;"
+        style: primary
+        start: 30
+        end: 51
+      - source: transition
+        style: secondary
+        start: 30
+        end: 40

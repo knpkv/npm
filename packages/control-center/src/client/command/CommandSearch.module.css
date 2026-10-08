@@ -18,9 +18,12 @@
   display: block;
 }
 
+/* The field bleeds into the dialog padding so the focus ring clears the text, which stays aligned. */
 .searchField input {
   box-sizing: border-box;
-  inline-size: 100%;
+  inline-size: calc(100% + 2 * var(--rly-space-12));
+  margin-inline: calc(-1 * var(--rly-space-12));
+  padding-inline: var(--rly-space-12);
   min-block-size: 4.5rem;
   border: 0;
   border-block-end: 1px solid var(--rly-color-border-2);
@@ -33,10 +36,6 @@
 
 .searchField input::placeholder {
   color: var(--rly-color-text-3);
-}
-
-.searchField input:focus-visible {
-  border-block-end-color: var(--rly-color-focus);
 }
 
 .results {

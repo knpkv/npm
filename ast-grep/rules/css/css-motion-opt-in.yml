@@ -15,10 +15,15 @@ rule:
       - has:
           kind: plain_value
           regex: "^none$"
+      # Match the query, not the whole @media text: a nested guard inside the block must not excuse
+      # the outer rules.
       - inside:
           kind: media_statement
-          regex: "prefers-reduced-motion:\\s*no-preference"
           stopBy: end
+          has:
+            not:
+              kind: block
+            regex: "(?i)prefers-reduced-motion\\s*:\\s*no-preference"
 
 files:
   - "packages/control-center/src/**/*.css"
