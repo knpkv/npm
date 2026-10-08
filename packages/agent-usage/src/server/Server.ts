@@ -18,10 +18,13 @@ import * as Reactivity from "effect/reactivity/Reactivity"
 import { createServer } from "node:http"
 import { liveClaudeUsageDeps } from "../core/ClaudeLimitsLive.js"
 import { databaseLayer } from "../core/Database.js"
+import { type StoreError, UsageStore } from "../core/Store.js"
 import { acliTicketSearch } from "../core/Tickets.js"
+import type { LimitsNow } from "../shared/contracts.js"
 import type { AgentUsageConfig } from "./Config.js"
 import { controlSocket } from "./ControlSocket.js"
 import { application } from "./HttpApplication.js"
+import { readLimitsNow } from "./LimitsNow.js"
 import { mintBootstrapUrl } from "./OwnerSession.js"
 import { backgroundLayer, RuntimeState } from "./Runtime.js"
 
@@ -50,10 +53,17 @@ export const makeServer = (options: AgentUsageServerOptions) =>
       const hostname = yield* Schema.decodeUnknownEffect(LoopbackHostname)(options.hostname ?? "127.0.0.1")
       // Opened once the HTTP listener is up: the control socket mints nothing before then.
       const listening = yield* Deferred.make<void>()
+      // The store opens after the socket (the socket holds its lock), so `limits` waits for it.
+      const limitsReader = yield* Deferred.make<Effect.Effect<LimitsNow, StoreError>>()
       // The store's lock and login socket. Everything that touches the store or binds a port waits
       // for it, so a second server on this store stops before reading anything or binding.
       const control = Layer.effectDiscard(
-        controlSocket(options.config.storeDirectory, options.security, Deferred.await(listening))
+        controlSocket(
+          options.config.storeDirectory,
+          options.security,
+          Deferred.await(listening),
+          Effect.flatten(Deferred.await(limitsReader))
+        )
       ).pipe(
         Layer.provide(Reactivity.layer),
         Layer.provide(NodeServices.layer)
@@ -67,7 +77,12 @@ export const makeServer = (options: AgentUsageServerOptions) =>
       const listener = NodeHttpServer.layerServer(createServer, { host: hostname, port: options.port }).pipe(
         Layer.provide(control)
       )
-      return Layer.mergeAll(HttpRouter.serve(application), background(options.config)).pipe(
+      const limits = Layer.effectDiscard(Effect.gen(function*() {
+        const opened = yield* UsageStore
+        const state = yield* RuntimeState
+        yield* Deferred.succeed(limitsReader, readLimitsNow(opened, state.machine))
+      }))
+      return Layer.mergeAll(HttpRouter.serve(application), background(options.config), limits).pipe(
         Layer.provide(services),
         Layer.provide(listener),
         Layer.provide(Etag.layer),

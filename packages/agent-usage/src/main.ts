@@ -6,6 +6,7 @@
  *   that gets you in.
  * - `agent-usage login [--open]` asks the running server for a fresh one-time link and prints it.
  * - `agent-usage ingest [--json]` runs one ingest pass and reports what it found.
+ * - `agent-usage limits` asks the running server for this Machine's latest limits, as one JSON line.
  *
  * @module
  */
@@ -22,6 +23,7 @@ import { databaseLayer } from "./core/Database.js"
 import { ingestOnce, type IngestStatus } from "./core/Ingest.js"
 import { loadConfig } from "./server/Config.js"
 import { describeIngest } from "./server/IngestSummary.js"
+import { limits as requestLimits } from "./server/Limits.js"
 import { login as requestLogin } from "./server/Login.js"
 import { makeOwnerSession } from "./server/OwnerSession.js"
 import { makeServer, Port, PublicOrigin } from "./server/Server.js"
@@ -87,9 +89,16 @@ const login = Command.make(
   ({ open }) => requestLogin(config, open, platform(), process.geteuid?.() ?? -1)
 ).pipe(Command.withDescription("Print a fresh one-time link to the running server"))
 
+const limits = Command.make(
+  "limits",
+  {},
+  // The same owner check as `login`: the socket must belong to the user this runs as.
+  () => requestLimits(config, process.geteuid?.() ?? -1)
+).pipe(Command.withDescription("Print this Machine's latest limits from the running server, as JSON"))
+
 const cli = Command.make("agent-usage").pipe(
   Command.withDescription("Claude and Codex subscription usage over time, per ticket and against limits"),
-  Command.withSubcommands([serve, login, ingest]),
+  Command.withSubcommands([serve, login, ingest, limits]),
   Command.run({ version: pkg.version })
 )
 

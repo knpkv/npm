@@ -152,6 +152,19 @@ export const LimitsReport = Schema.Struct({
 })
 export type LimitsReport = typeof LimitsReport.Type
 
+/**
+ * This Machine's limits as of `observedAt`, on the server's clock: what `agent-usage limits` prints.
+ * Every time in it is on that same clock, so a reader elsewhere measures ages against `observedAt`
+ * rather than its own clock. Limits only: balances and spend stay on the authenticated page and
+ * never leave the Machine this way.
+ */
+export const LimitsNow = Schema.Struct({
+  machine: Schema.NonEmptyString,
+  observedAt: Schema.Int,
+  latest: Schema.Array(LimitSnapshot)
+})
+export type LimitsNow = typeof LimitsNow.Type
+
 const SkipCounts = Schema.Struct({ unparseableLine: Count, missingTimestamp: Count, oversizedLine: Count })
 
 export const SourceStatus = Schema.Struct({
