@@ -97,46 +97,64 @@ export const RelaySetup = ({
   const reasonId = useId()
   const [announcement, setAnnouncement] = useState("")
   const previous = useRef(new Map(backends.map((backend) => [backend.id, backend.status._tag])))
+  const root = useRef<HTMLDivElement | null>(null)
+  // The backend whose check button had focus, so a check that ends Ready can hand focus to its radio.
+  const checkingFocus = useRef<string | null>(null)
   const chosen = backends.find((backend) => backend.id === selectedBackend)
   const reason =
     chosen === undefined || chosen.status._tag !== "Ready"
       ? "Choose an agent that is ready."
-      : selectedFocus === undefined
+      : !focuses.some((focus) => focus.value === selectedFocus)
         ? "Choose what to focus on."
         : undefined
 
-  // A finished check is news: say the backend's new status once.
+  // A finished check is news: say the backend's new status once (cleared, then refilled a frame later,
+  // so the same result twice is still heard). A check that ends Ready removes its button, so focus
+  // moves to that backend's now-enabled choice rather than dropping to the page.
   useEffect(() => {
-    for (const backend of backends) {
+    let words: string | undefined
+    for (const [index, backend] of backends.entries()) {
       const before = previous.current.get(backend.id)
       previous.current.set(backend.id, backend.status._tag)
-      if (before === "Checking" && backend.status._tag !== "Checking") {
-        setAnnouncement(`${backend.label}: ${statusText(backend.status)}`)
+      if (before !== "Checking" || backend.status._tag === "Checking") continue
+      words = `${backend.label}: ${statusText(backend.status)}`
+      if (backend.status._tag === "Ready" && checkingFocus.current === backend.id) {
+        root.current?.querySelector<HTMLInputElement>(`[data-backend-index="${index}"]`)?.focus()
       }
+      if (checkingFocus.current === backend.id) checkingFocus.current = null
     }
+    if (words === undefined) return
+    const said = words
+    const view = root.current?.ownerDocument.defaultView ?? null
+    setAnnouncement("")
+    if (view === null) return setAnnouncement(said)
+    const frame = view.requestAnimationFrame(() => setAnnouncement(said))
+    return () => view.cancelAnimationFrame(frame)
   }, [backends])
 
   return (
-    <div className={style("root")}>
+    <div className={style("root")} ref={root}>
       <fieldset className={style("step")}>
         <legend className={style("legend")}>Agent</legend>
         <ul className={style("options")}>
-          {backends.map((backend) => {
+          {backends.map((backend, index) => {
             const ready = backend.status._tag === "Ready"
-            const statusId = `${name}-${backend.id}-status`
+            const label = requireText(backend.label, "RelaySetup backend label")
+            const statusId = `${name}-backend-${index}-status`
             return (
               <li className={style("option")} data-status={backend.status._tag} key={backend.id}>
                 <label className={style("choice")}>
                   <input
                     aria-describedby={statusId}
                     checked={selectedBackend === backend.id}
+                    data-backend-index={index}
                     disabled={!ready}
                     name={`${name}-backend`}
                     onChange={() => onSelectBackend(backend.id)}
                     type="radio"
                     value={backend.id}
                   />
-                  <span className={style("label")}>{requireText(backend.label, "RelaySetup backend label")}</span>
+                  <span className={style("label")}>{label}</span>
                 </label>
                 <p className={style("status")} id={statusId}>
                   <Icon
@@ -160,11 +178,32 @@ export const RelaySetup = ({
                 {backend.status._tag === "Unavailable" ? (
                   <p className={style("fix")}>{requireText(backend.status.fix, "RelaySetup fix")}</p>
                 ) : null}
-                {backend.status._tag === "Unverified" || backend.status._tag === "Unavailable" ? (
-                  <Button onClick={() => onCheck(backend.id)} type="button">
-                    {backend.status._tag === "Unverified" ? "Check now" : "Check again"}
+                {ready ? null : (
+                  // Stays mounted while checking (aria-disabled), so focus is not lost mid-check; each
+                  // button names its backend, so two are told apart.
+                  <Button
+                    aria-disabled={backend.status._tag === "Checking"}
+                    aria-label={
+                      backend.status._tag === "Checking"
+                        ? `Checking ${label}`
+                        : backend.status._tag === "Unverified"
+                          ? `Check ${label} now`
+                          : `Check ${label} again`
+                    }
+                    onClick={() => {
+                      if (backend.status._tag === "Checking") return
+                      checkingFocus.current = backend.id
+                      onCheck(backend.id)
+                    }}
+                    type="button"
+                  >
+                    {backend.status._tag === "Checking"
+                      ? "Checking…"
+                      : backend.status._tag === "Unverified"
+                        ? "Check now"
+                        : "Check again"}
                   </Button>
-                ) : null}
+                )}
               </li>
             )
           })}

@@ -59,7 +59,10 @@ const mount = async (element: ReactElement): Promise<void> => {
 }
 const radio = (value: string): HTMLInputElement | null => document.querySelector(`input[value='${value}']`)
 const button = (name: string): HTMLButtonElement | undefined =>
-  [...document.querySelectorAll("button")].find((element) => element.textContent === name)
+  [...document.querySelectorAll("button")].find(
+    (element) => element.getAttribute("aria-label") === name || element.textContent === name
+  )
+const nextFrame = (): Promise<void> => act(async () => new Promise((resolve) => requestAnimationFrame(() => resolve())))
 
 describe("RelaySetup", () => {
   it("lets only a ready backend be chosen, and names each status with its one repair", async () => {
@@ -74,25 +77,34 @@ describe("RelaySetup", () => {
     // Installed is not ready: a version alone says Not checked yet.
     expect(status("gemini")).toBe("Not checked yet (0.9.2)")
     expect(document.body.textContent).toContain("Run `claude login` in a terminal on this machine.")
-    expect(button("Check again")).toBeDefined()
-    expect(button("Check now")).toBeDefined()
+    expect(button("Check Claude again")).toBeDefined()
+    expect(button("Check Gemini now")).toBeDefined()
   })
 
   it("checks a backend with its repair button and announces the result once the check finishes", async () => {
     const onCheck = vi.fn()
     await mount(<Setup onCheck={onCheck} />)
-    await act(async () => button("Check now")?.click())
+    const check = button("Check Gemini now")
+    check?.focus()
+    await act(async () => check?.click())
     expect(onCheck).toHaveBeenCalledWith("gemini")
     const checking: ReadonlyArray<RlyRelayBackend> = backends.map((backend) =>
       backend.id === "gemini" ? { ...backend, status: { _tag: "Checking" } } : backend
     )
     await act(async () => root?.render(<Setup backends={checking} onCheck={onCheck} />))
     expect(document.body.textContent).toContain("Checking…")
+    // The same button stays mounted and focused while checking, and a second press does nothing.
+    expect(document.activeElement).toBe(button("Checking Gemini"))
+    await act(async () => button("Checking Gemini")?.click())
+    expect(onCheck).toHaveBeenCalledTimes(1)
     const ready: ReadonlyArray<RlyRelayBackend> = backends.map((backend) =>
       backend.id === "gemini" ? { ...backend, status: { _tag: "Ready" } } : backend
     )
     await act(async () => root?.render(<Setup backends={ready} onCheck={onCheck} />))
+    await nextFrame()
     expect(document.querySelector("[aria-live='polite']")?.textContent).toBe("Gemini: Ready")
+    // The check button is gone; focus is on Gemini's now-enabled choice, not the page.
+    expect(document.activeElement).toBe(radio("gemini"))
   })
 
   it("keeps Start reachable but says what is missing until a ready agent and a focus are chosen", async () => {
@@ -113,5 +125,14 @@ describe("RelaySetup", () => {
     expect(start()?.getAttribute("aria-disabled")).toBe("false")
     await act(async () => start()?.click())
     expect(onStart).toHaveBeenCalledTimes(1)
+  })
+
+  it("does not start with a focus that is no longer offered", async () => {
+    const onStart = vi.fn()
+    await mount(<Setup onStart={onStart} selectedBackend="codex" selectedFocus="performance" />)
+    const start = button("Review this pull request")
+    expect(start?.getAttribute("aria-disabled")).toBe("true")
+    await act(async () => start?.click())
+    expect(onStart).not.toHaveBeenCalled()
   })
 })

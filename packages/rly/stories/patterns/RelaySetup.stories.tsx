@@ -87,8 +87,9 @@ export const FirstRunSetup: Story = {
     const start = canvas.getByRole("button", { name: "Review this pull request" })
     await expect(start).toHaveAttribute("aria-disabled", "true")
     await expect(canvas.getByRole("radio", { name: "Claude" })).toBeDisabled()
-    await userEvent.click(canvas.getByRole("button", { name: "Check now" }))
-    await expect(canvas.getByText("Checking…")).toBeVisible()
+    await userEvent.click(canvas.getByRole("button", { name: "Check Gemini now" }))
+    // The button stays, named and focused, while the check runs.
+    await expect(canvas.getByRole("button", { name: "Checking Gemini" })).toHaveFocus()
     await expect(await canvas.findByText("Ready: ran a test prompt just now")).toBeVisible()
     await userEvent.click(canvas.getByRole("radio", { name: "Codex" }))
     await userEvent.click(canvas.getByRole("radio", { name: "Correctness" }))
