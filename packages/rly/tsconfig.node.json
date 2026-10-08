@@ -23,6 +23,7 @@
     "vitest.config.ts",
     "../../playwright-ports.ts",
     "../../playwright-font-swap.ts",
+    "../../browser-target.ts",
     "../../vitest.workspace-sources.ts",
     "vitest.storybook.config.ts"
   ],
