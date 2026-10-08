@@ -8,9 +8,9 @@
   flex-direction: column;
   gap: var(--rly-space-24);
   margin: 0 auto;
-  max-width: none;
+  max-inline-size: none;
   padding: var(--rly-space-24);
-  min-height: 100dvh;
+  min-block-size: 100dvh;
 }
 
 /* Groups wrap as wholes, so a control never lands alone on a row and labels never break. */
@@ -114,28 +114,28 @@
   overflow: auto;
   background: var(--rly-color-surface-1);
   /* Fills the viewport once scrolled to, so a working day shows with as little inner scroll as possible. */
-  max-height: calc(100dvh - 2 * var(--rly-space-16));
+  max-block-size: calc(100dvh - 2 * var(--rly-space-16));
 }
 
 .jcf-calendar-head,
 .jcf-calendar-body {
   display: grid;
   grid-template-columns: 4rem repeat(var(--jcf-columns, 5), minmax(max(9rem, var(--jcf-column-min, 0px)), 1fr));
-  min-width: calc(4rem + var(--jcf-columns, 5) * max(9rem, var(--jcf-column-min, 0px)));
+  min-inline-size: calc(4rem + var(--jcf-columns, 5) * max(9rem, var(--jcf-column-min, 0px)));
 }
 
 .jcf-calendar-head {
   background: var(--rly-color-surface-2);
-  border-bottom: 1px solid var(--rly-color-border-1);
+  border-block-end: 1px solid var(--rly-color-border-1);
   position: sticky;
-  top: 0;
+  inset-block-start: 0;
   z-index: 2;
-  min-height: var(--rly-space-48);
+  min-block-size: var(--rly-space-48);
 }
 
 .jcf-column-head {
   align-items: center;
-  border-left: 1px solid var(--rly-color-border-1);
+  border-inline-start: 1px solid var(--rly-color-border-1);
   display: flex;
   gap: var(--rly-space-6);
   padding: var(--rly-space-8);
@@ -159,14 +159,14 @@
   color: var(--rly-color-text-2);
   font-size: 0.8em;
   font-variant-numeric: tabular-nums;
-  height: var(--jcf-hour);
-  padding-right: var(--rly-space-6);
-  text-align: right;
+  block-size: var(--jcf-hour);
+  padding-inline-end: var(--rly-space-6);
+  text-align: end;
   transform: translateY(-0.6em);
 }
 
 .jcf-column {
-  border-left: 1px solid var(--rly-color-border-1);
+  border-inline-start: 1px solid var(--rly-color-border-1);
   cursor: pointer;
   position: relative;
 }
@@ -178,21 +178,21 @@
 
 .jcf-hour-line {
   pointer-events: none;
-  border-top: 1px solid var(--rly-color-border-1);
+  border-block-start: 1px solid var(--rly-color-border-1);
   display: block;
-  height: var(--jcf-hour);
+  block-size: var(--jcf-hour);
 }
 
 .jcf-hour-line:first-child {
-  border-top-color: transparent;
+  border-block-start-color: transparent;
 }
 
 .jcf-now {
   background: var(--rly-color-action-background);
-  height: 2px;
-  left: 0;
+  block-size: 2px;
+  inset-inline-start: 0;
   position: absolute;
-  right: 0;
+  inset-inline-end: 0;
   z-index: 1;
 }
 
@@ -204,10 +204,10 @@
   font-size: var(--rly-type-meta-size);
   gap: 1px;
   line-height: var(--rly-type-meta-line-height);
-  overflow: hidden;
+  overflow: clip;
   padding: 2px var(--rly-space-4);
   position: absolute;
-  text-align: left;
+  text-align: start;
 }
 
 .jcf-block-gap {
@@ -218,10 +218,16 @@
   border-color: var(--rly-color-action-background);
 }
 
-.jcf-block-gap:hover,
 .jcf-block-gap[data-selected="true"] {
   border-color: var(--rly-color-action-background);
   border-style: solid;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .jcf-block-gap:hover {
+    border-color: var(--rly-color-action-background);
+    border-style: solid;
+  }
 }
 
 .jcf-block-gap:focus-visible {
@@ -237,8 +243,8 @@
   display: flex;
   flex-direction: column;
   gap: 1px;
-  height: var(--jcf-stretch-height);
-  overflow: hidden;
+  block-size: var(--jcf-stretch-height);
+  overflow: clip;
   padding: 2px var(--rly-space-4);
   background: var(--rly-color-surface-1);
   border: 1px dashed var(--rly-color-action-background);
@@ -247,17 +253,34 @@
   line-height: var(--rly-type-meta-line-height);
 }
 
-.jcf-stretch:hover,
-.jcf-stretch:focus-within {
-  height: auto;
-  min-height: var(--jcf-stretch-height);
+/* Focus in the rows opens it (not on the head, which toggles it), and so does its head button. */
+.jcf-stretch:has(ul:focus-within),
+.jcf-stretch[data-expanded="true"] {
+  block-size: auto;
+  min-block-size: var(--jcf-stretch-height);
   overflow: visible;
   z-index: 5;
   border-style: solid;
 }
 
+@media (hover: hover) and (pointer: fine) {
+  .jcf-stretch:hover {
+    block-size: auto;
+    min-block-size: var(--jcf-stretch-height);
+    overflow: visible;
+    z-index: 5;
+    border-style: solid;
+  }
+}
+
 .jcf-stretch-head {
+  padding: 0;
+  border: 0;
+  background: none;
   color: var(--rly-color-text-2);
+  cursor: pointer;
+  font: inherit;
+  text-align: start;
   white-space: nowrap;
 }
 
@@ -280,20 +303,25 @@
   display: flex;
   justify-content: space-between;
   gap: var(--rly-space-4);
-  min-width: 0;
+  min-inline-size: 0;
   padding: 0 var(--rly-space-4);
   color: var(--rly-color-text-1);
   background: transparent;
   border: 1px solid transparent;
   border-radius: var(--rly-radius-tag);
   font: inherit;
-  text-align: left;
+  text-align: start;
   cursor: pointer;
 }
 
-.jcf-stretch-entry:hover,
 .jcf-stretch-entry[data-selected="true"] {
   border-color: var(--rly-color-action-background);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .jcf-stretch-entry:hover {
+    border-color: var(--rly-color-action-background);
+  }
 }
 
 .jcf-stretch-entry[data-overlap="true"] {
@@ -322,8 +350,8 @@
 
 .jcf-block-actions > .jcf-block-gap {
   position: relative;
-  width: 100%;
-  height: 100%;
+  inline-size: 100%;
+  block-size: 100%;
 }
 
 .jcf-quick-approve {
@@ -331,15 +359,15 @@
   place-items: center;
   padding: 0;
   /* 32px square; a block under 16 minutes is shorter than that, and the action keeps inside it. */
-  width: var(--rly-space-32);
-  height: min(var(--rly-space-32), 100%);
-  min-height: var(--rly-space-24);
+  inline-size: var(--rly-space-32);
+  block-size: min(var(--rly-space-32), 100%);
+  min-block-size: var(--rly-space-24);
   color: var(--rly-color-action-foreground);
   background: var(--rly-color-action-background);
   border: 1px solid var(--rly-color-action-background);
   border-radius: var(--rly-radius-tag);
   font: inherit;
-  font-size: 20px;
+  font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
 }
@@ -372,7 +400,7 @@
 .jcf-block-clock {
   font-variant-numeric: tabular-nums;
   opacity: 0.85;
-  overflow: hidden;
+  overflow: clip;
   white-space: nowrap;
 }
 
@@ -451,7 +479,7 @@
 }
 
 .jcf-field-wide input {
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .jcf-preview {
@@ -519,7 +547,7 @@ html,
 body,
 #root {
   margin: 0;
-  min-height: 100%;
+  min-block-size: 100%;
 }
 
 .jcf-app {
@@ -528,8 +556,8 @@ body,
   gap: var(--rly-space-16);
   margin-inline: auto;
   /* A week of parallel work needs every column it can get; the page gutters still bound it. */
-  max-width: none;
-  width: 100%;
+  max-inline-size: none;
+  inline-size: 100%;
 }
 
 .jcf-calendar-tools,
@@ -552,7 +580,8 @@ body,
 }
 
 .jcf-masthead h1 {
-  margin: 0 auto 0 0;
+  margin: 0;
+  margin-inline-end: auto;
 }
 
 .jcf-read-at[data-failed="true"] {
@@ -566,7 +595,7 @@ body,
   font-size: var(--rly-type-label-size);
   font-variant-numeric: tabular-nums;
   margin: 0;
-  min-width: 18ch;
+  min-inline-size: 18ch;
   text-align: end;
 }
 
@@ -574,21 +603,21 @@ body,
   align-items: start;
   display: grid;
   gap: var(--rly-space-20);
-  min-width: 0;
+  min-inline-size: 0;
   /* Keep controls at the same width when saving removes the editor. */
-  grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+  grid-template-columns: minmax(0, 1fr) minmax(21.25rem, 25rem);
 }
 
 .jcf-week-region {
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 /* The idle side column says what the calendar offers, so it is never an empty hole. */
 .jcf-guide {
   grid-column: 2;
-  min-width: 0;
+  min-inline-size: 0;
   position: sticky;
-  top: var(--rly-space-16);
+  inset-block-start: var(--rly-space-16);
 }
 
 .jcf-guide p {
@@ -597,12 +626,12 @@ body,
 }
 
 .jcf-week-view {
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .jcf-calendar-tools {
   align-items: end;
-  margin-bottom: var(--rly-space-16);
+  margin-block-end: var(--rly-space-16);
 }
 
 .jcf-layers {
@@ -610,23 +639,23 @@ body,
   flex: 1 1 auto;
   flex-wrap: wrap;
   gap: var(--rly-space-12) var(--rly-space-24);
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .jcf-block-label {
   display: flex;
   align-items: baseline;
   gap: var(--rly-space-4);
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .jcf-block-label .jcf-block-key {
-  overflow: hidden;
+  overflow: clip;
   text-overflow: ellipsis;
 }
 
 .jcf-block-source {
-  margin-left: auto;
+  margin-inline-start: auto;
   font-size: var(--rly-type-meta-size);
   color: var(--rly-color-text-2);
 }
@@ -653,7 +682,7 @@ body,
   }
 
   .jcf-block-logged .jcf-block-source {
-    margin-left: 0;
+    margin-inline-start: 0;
   }
 }
 
@@ -661,13 +690,13 @@ body,
 .jcf-gutter,
 .jcf-gutter-head {
   position: sticky;
-  left: 0;
+  inset-inline-start: 0;
   z-index: 2;
   background: var(--rly-color-surface-1);
 }
 
 .jcf-gutter {
-  border-right: 1px solid var(--rly-color-border-1);
+  border-inline-end: 1px solid var(--rly-color-border-1);
 }
 
 /* The first label sits on the grid's top edge; lifting it would tuck it under the day header. */
@@ -697,7 +726,7 @@ body,
 }
 
 .jcf-description-status progress {
-  width: 100%;
+  inline-size: 100%;
 }
 
 .jcf-block-gap[data-selected="true"] {
@@ -716,7 +745,7 @@ body,
   display: none;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 68.75rem) {
   .jcf-scrim {
     display: block;
   }
@@ -724,18 +753,14 @@ body,
 
 .jcf-editor {
   grid-column: 2;
-  min-width: 0;
+  min-inline-size: 0;
   background: var(--rly-color-surface-1);
   position: sticky;
-  top: var(--rly-space-16);
-  max-height: calc(100dvh - 2 * var(--rly-space-16));
+  inset-block-start: var(--rly-space-16);
+  max-block-size: calc(100dvh - 2 * var(--rly-space-16));
   overflow: auto;
   border-radius: var(--rly-radius-control);
   scroll-margin-block: var(--rly-space-16);
-}
-
-.jcf-editor:focus {
-  outline: none;
 }
 
 .jcf-editor .jcf-editor-fields h2:focus-visible {
@@ -752,7 +777,7 @@ body,
   gap: var(--rly-space-8);
   inset-block-start: 0;
   margin-block-end: var(--rly-space-12);
-  max-height: 40%;
+  max-block-size: 40%;
   overflow: auto;
   position: sticky;
   z-index: 2;
@@ -771,14 +796,14 @@ body,
   border: 0;
   padding: 0;
   margin: 0;
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .jcf-empty-state {
   grid-column: 2;
-  min-width: 0;
+  min-inline-size: 0;
   position: sticky;
-  top: var(--rly-space-16);
+  inset-block-start: var(--rly-space-16);
 }
 
 .jcf-panel p {
@@ -789,14 +814,14 @@ body,
 .jcf-field input,
 .jcf-field textarea,
 .jcf-field select {
-  min-width: 0;
-  width: 100%;
+  min-inline-size: 0;
+  inline-size: 100%;
 }
 
 /* A note grows with what is typed instead of showing the browser's resize grip. */
 .jcf-field textarea {
   field-sizing: content;
-  min-height: 4lh;
+  min-block-size: 4lh;
   resize: none;
 }
 
@@ -807,27 +832,27 @@ body,
 
 .jcf-description-progress {
   display: block;
-  width: 100%;
-  height: var(--rly-space-8);
-  margin-bottom: var(--rly-space-8);
+  inline-size: 100%;
+  block-size: var(--rly-space-8);
+  margin-block-end: var(--rly-space-8);
   accent-color: var(--rly-color-action-background);
 }
 
 .jcf-field textarea {
   field-sizing: content;
-  min-height: calc(3lh + 2 * var(--rly-space-8));
+  min-block-size: calc(3lh + 2 * var(--rly-space-8));
   resize: none;
 }
 
 .jcf-lane li > *,
 .jcf-lane button {
-  min-width: 0;
-  max-width: 100%;
+  min-inline-size: 0;
+  max-inline-size: 100%;
   overflow-wrap: break-word;
 }
 
 .jcf-lane > p {
-  max-width: 75ch;
+  max-inline-size: 50em;
 }
 
 .jcf-read-status {
@@ -849,8 +874,8 @@ body,
   display: flex;
   flex-direction: column;
   gap: var(--rly-space-8);
-  width: min(400px, calc(100% - 2 * var(--rly-space-24)));
-  max-height: 45dvh;
+  inline-size: min(25rem, calc(100% - 2 * var(--rly-space-24)));
+  max-block-size: 45dvh;
   overflow: auto;
   overscroll-behavior: contain;
   border-radius: var(--rly-radius-control);
@@ -863,7 +888,7 @@ body,
 
 .jcf-read-summary [role="status"] {
   flex: 1;
-  min-width: 200px;
+  min-inline-size: 12.5rem;
 }
 
 .jcf-elapsed {
@@ -872,8 +897,8 @@ body,
 
 .jcf-read-status progress {
   display: block;
-  width: 100%;
-  height: var(--rly-space-8);
+  inline-size: 100%;
+  block-size: var(--rly-space-8);
   accent-color: var(--rly-color-action-background);
   margin-block: var(--rly-space-12);
 }
@@ -923,7 +948,7 @@ body,
 }
 
 .jcf-agenda-day {
-  border-top: 1px solid var(--rly-color-border-1);
+  border-block-start: 1px solid var(--rly-color-border-1);
   padding-block: var(--rly-space-12);
 }
 
@@ -953,9 +978,9 @@ body,
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-2);
   border-radius: var(--rly-radius-field);
-  text-align: left;
+  text-align: start;
   padding: var(--rly-space-12);
-  width: 100%;
+  inline-size: 100%;
   color: var(--rly-color-text-1);
 }
 
@@ -971,14 +996,14 @@ body,
 
 .jcf-agenda-actions {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 44px;
+  grid-template-columns: minmax(0, 1fr) 2.75rem;
   gap: var(--rly-space-4);
   align-items: start;
 }
 
 .jcf-agenda-actions > .jcf-quick-approve {
-  width: 44px;
-  height: 44px;
+  inline-size: 2.75rem;
+  block-size: 2.75rem;
 }
 
 .jcf-agenda-time {
@@ -994,7 +1019,7 @@ body,
   color: var(--rly-color-text-2);
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 68.75rem) {
   .jcf-workspace {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1022,15 +1047,15 @@ body,
     position: fixed;
     inset: var(--rly-space-16);
     inset-block-start: auto;
-    height: min(75dvh, 48rem);
-    max-height: none;
+    block-size: min(75dvh, 48rem);
+    max-block-size: none;
     overscroll-behavior: contain;
     z-index: 5;
   }
 }
 
 /* Five day columns need about 900px; below that the week reads as an agenda unless asked otherwise. */
-@media (max-width: 900px) {
+@media (max-width: 56.25rem) {
   .jcf-week-view[data-view="auto"] .jcf-calendar {
     display: none;
   }
@@ -1040,14 +1065,14 @@ body,
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 40rem) {
   .jcf-shell {
     padding: var(--rly-space-12);
   }
 
   .jcf-bar-group {
     flex-wrap: wrap;
-    width: 100%;
+    inline-size: 100%;
   }
 
   .jcf-bar-group button {
@@ -1064,7 +1089,7 @@ body,
 }
 
 .jcf-block-note {
-  min-height: 0;
+  min-block-size: 0;
 }
 
 .jcf-block[data-density="short"] .jcf-block-clock,
@@ -1078,10 +1103,10 @@ body,
 }
 
 .jcf-agent-terminal {
-  min-width: 0;
+  min-inline-size: 0;
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-control);
-  overflow: hidden;
+  overflow: clip;
 }
 .jcf-terminal-toolbar {
   display: flex;
@@ -1112,12 +1137,12 @@ body,
 }
 /* Request and response share both edges: a transcript, not chat bubbles. */
 .jcf-agent-message {
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .jcf-agent-message + .jcf-agent-message {
-  border-top: 1px solid var(--rly-color-border-1);
-  padding-top: var(--rly-space-16);
+  border-block-start: 1px solid var(--rly-color-border-1);
+  padding-block-start: var(--rly-space-16);
 }
 .jcf-agent-message header {
   display: flex;
@@ -1133,7 +1158,7 @@ body,
 .jcf-agent-message pre {
   white-space: pre-wrap;
   overflow-wrap: break-word;
-  max-height: 280px;
+  max-block-size: 17.5rem;
   overflow: auto;
   font-size: var(--rly-type-meta-size);
   line-height: var(--rly-type-meta-line-height);
@@ -1141,7 +1166,7 @@ body,
   scrollbar-gutter: stable;
 }
 .jcf-agent-message[data-speaker="request"] pre {
-  max-height: 150px;
+  max-block-size: 9.375rem;
 }
 /* Prose reads in the body font; only a complete JSON value is set as code. */
 .jcf-agent-message pre[data-kind="prose"] {
@@ -1156,7 +1181,7 @@ body,
 
 .jcf-conversation-heading {
   position: sticky;
-  top: 0;
+  inset-block-start: 0;
   z-index: 1;
   display: flex;
   align-items: center;
@@ -1182,7 +1207,7 @@ body,
   display: flex;
   flex-direction: column;
   gap: var(--rly-space-6);
-  min-width: 0;
+  min-inline-size: 0;
 }
 
 .jcf-layer-title {
@@ -1237,8 +1262,8 @@ body,
   position: fixed;
   inset-block-start: var(--rly-space-16);
   inset-inline-end: var(--rly-space-24);
-  width: min(400px, calc(100% - 2 * var(--rly-space-24)));
-  max-height: 25dvh;
+  inline-size: min(25rem, calc(100% - 2 * var(--rly-space-24)));
+  max-block-size: 25dvh;
   overflow: auto;
   overscroll-behavior: contain;
   z-index: 5;
@@ -1268,7 +1293,7 @@ body,
 }
 
 .jcf-approval-queue li > span:first-child {
-  min-width: 0;
+  min-inline-size: 0;
   overflow-wrap: break-word;
 }
 
@@ -1281,8 +1306,8 @@ body,
 
 .jcf-agent-settings input,
 .jcf-agent-settings select {
-  width: 100%;
-  min-width: 0;
+  inline-size: 100%;
+  min-inline-size: 0;
   font: inherit;
   color: inherit;
   background: var(--rly-color-surface-1);
@@ -1291,7 +1316,7 @@ body,
   padding: var(--rly-space-8);
 }
 
-@media (max-width: 640px) {
+@media (max-width: 40rem) {
   .jcf-agent-settings-fields {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1347,7 +1372,7 @@ body,
    not reduced to its first lines. */
 @media (max-width: 1100px) and (max-height: 560px) {
   .jcf-editor {
-    height: auto;
+    block-size: auto;
     inset-block-start: var(--rly-space-8);
     inset-block-end: var(--rly-space-8);
   }

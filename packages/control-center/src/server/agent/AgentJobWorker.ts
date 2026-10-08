@@ -246,7 +246,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
           occurredAt
         })
       ),
-      Effect.ignore
+      Effect.ignore({ log: "Warn", message: "Could not record the incomplete review report" })
     )
   })
 

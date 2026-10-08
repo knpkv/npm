@@ -31,7 +31,10 @@ Import the global layers once at the application boundary:
 @import "@knpkv/rly/styles.css";
 ```
 
-The stylesheet contains self-hosted Geist and Geist Mono variable fonts,
+The stylesheet contains self-hosted Geist and Geist Mono variable fonts (with
+`font-display: optional`: preload each file in `RLY_FONT_FACES` from your own
+origin with `crossorigin`, and Geist renders from first paint; a late face keeps
+the metric-matched fallback for that page view rather than swapping),
 semantic `light-dark()` color pairs, typography, spacing, shape, motion, a
 scoped reset, and base styles. Set `data-theme="light|dark|system"` on the rly
 root; system is the default. Forced colors and reduced motion are handled
@@ -204,12 +207,33 @@ never reads as 0%. Under forced colours the track keeps a `CanvasText` edge. Pas
 to expose it as a meter instead. With `value={null}`, it is a named image whose
 accessible label combines `label` and `valueText`, without a numeric range.
 
+`StackedBars` stacks values per period on a time axis, with optional `bands` of
+limit levels above the bars on the same axis, and an optional `window` (such as the
+current limit window) shaded across bands and bars and named in a key under the axis. Narrow containers bin periods so every
+bar's hit area stays at least 24px wide, a full pointer target (the drawn fill is 2px narrower, for the gap). The plot is one tab stop: ←/→ move and select, Shift
+extends, Home/End jump and Escape clears. Click selects, and Shift+click or a second
+tap elsewhere extends the span. The caller owns `selection` and words it through
+`describeSelection`. Only a selection the user makes is announced, politely, once it
+settles: the first render and a data refresh under the same selection stay quiet. Charts
+are presentation only: the application computes columns, bands and any projection.
+`columns` must be in time order without overlaps (gaps are fine), or the chart throws an error naming
+the first column out of place. Every bar stacks its series in one chart-wide order, the order
+each id first appears. Bins group every N columns, so hourly columns that start on the
+hour bin on clock hours. The selection is outlined above the bars, and the window is a
+neutral dashed stretch, never the focus colour. A chart on a surface other than
+`surface-1` sets `--rly-stacked-bars-gap` to that background, so the gaps between bars
+match it.
+Everything the bands draw is named in that key in the caller's words: each band's
+`near: { level, label }` mark, and `noReadingLabel`, which is required once any band has
+a stretch with `level: null`. Zero, negative and non-finite values draw nothing.
+
 `TrackKey` explains the marks the tracks draw, listing only the marks in use.
 `ChartLegend` says which colour is which series, with the swatch before each label.
 Series colours are the tokens `--rly-color-series-1` to `-8` plus
 `--rly-color-series-other` for folded series. Use `rlySeriesColor(series)` in SVG
 fills, and keep an id on the same slot while it is visible. Colour is never the only
-carrier: every chart ships a labelled key and a table equivalent, and forced-colours
+carrier: every chart ships a labelled key and a table equivalent (a readable-resolution
+table, each band's intervals, and a selection announcement naming every series' value), and forced-colours
 mode collapses the series to `CanvasText`.
 
 ```tsx
@@ -426,6 +450,114 @@ human authorization. `GovernedActionReview` repeats the exact capability,
 target, expected revision, impact, and evidence beside a named human reviewer.
 Its owned authorization button stays disabled until the controlled exact-action
 confirmation is checked, and terminal outcomes remain visible after review.
+
+`RelayMark` is Relay's mark, the baton: two open hooks with a stroke passed between
+them. The bare mark is drawn in the current colour, so it follows its host's text in
+every theme and in forced colours; sizes are 16, 20 (default), 24 and 32px, and 16px
+stays legible in one colour. `RelayMark.Tile` sets it on the agent colour (20, 24 or
+32px); in forced colours the tile becomes an outline in its context's colour
+(LinkText in a link, ButtonText in a button). Both are decorative
+unless given a `label`. The same mark on its tile ships as `@knpkv/rly/relay-mark.svg`
+for a host's favicon.
+
+`RelayLauncher` is the header button that opens and closes Relay: the mark, a label
+("Relay" unless the host names it) and the Ctrl/⌘+J hint. It sits in the host's header
+like any other control, never fixed over the page. `expanded` drives `aria-expanded`,
+and `aria-keyshortcuts` names the shortcut while the visible hint stays hidden from
+assistive technology. `shortcut` is required: pass `useRelayShortcut()` (Ctrl/⌘+J for
+the platform) only when the host binds that key and prevents the browser's own Ctrl+J,
+or `null` where it binds none, such as a live terminal that keeps its chords.
+The hint hides at 40rem and below, and the button is 32px tall, 44px for a coarse pointer.
+
+`RelayTranscript` shows a Relay conversation: your turns as bubbles at the inline
+end, Relay's turns as selectable prose whose code blocks scroll in place, each burst of
+tool work as one collapsed row in reading order (each call's summary, a status word and
+citations whose link text is the location), and how each run ended. One polite
+announcer outside the content says when a run starts, finishes, stops or fails, never
+per token; "Relay is writing…" is visible only. Inside `RelayPanel` it follows new
+content only while you are at the end; reading earlier turns, "New messages" appears
+instead, and jumps are instant under reduced motion.
+
+`RelayComposer` is Relay's message box: it grows with its text up to 12 lines or 40%
+of the viewport, Enter adds a line and Ctrl/⌘+Enter sends (said beside Send), and an
+IME composition never sends. Context refs are removable chips. One `preset` slot holds
+the run preset. Stop appears only when the host passes `onStop`. While `busyReason` is
+set, Send stays focusable and announces why it is unavailable. `useRelayDraft(objectKey, { newRequestId })`
+keeps the draft per object (the JSON ObjectRef) for the page, so closing, reopening or
+resizing Relay keeps it and one object's draft never sends as another's; pass
+`storage: () => sessionStorage` to survive a reload (never localStorage). Its
+`submission()` reuses one request id until the text changes, so a retry after an
+uncertain outcome is deduplicated; call `accepted(requestId)` once the server accepts
+that request, which clears the draft unless the user has typed since.
+
+`RelayDecision` asks before one Relay write: the question, exactly where the write
+goes (only what the action pins: a PR comment names the PR, not a line), the exact
+text in its own scroll, and Confirm or Don't for that one call, never "allow all". The
+host writes the words (`copy`: ask, confirm, decline, working, done, and an optional
+`reversible`), and `tone: "danger"` marks a destructive write. The first press is
+latched until the host moves `state` on, so a double click cannot confirm twice.
+Confirmed says "Posting…"; only Done, with its receipt, is past tense; Failed never
+claims nothing was written. Pending, declined and expired are announced once per call
+`id`, without moving focus; after an answer, focus moves to the outcome.
+
+`RelaySetup` is Relay's in-panel first run: an agent, then a focus, then "Review this
+pull request". Each backend shows the server's status, and only a Ready backend can be
+chosen, so an installed CLI (a version on PATH) is never taken for a working one. Not
+checked yet offers Check now; Unavailable names its cause (not installed, signed out,
+needs setup, can't review here), the host's fix and Check again; Checking is the
+client's own request state. rly never collects provider credentials: the fix tells the
+user what to run on their machine. A finished check is announced politely, and Start
+stays reachable while unavailable, saying what is missing.
+
+`RelayFindings` reviews Relay's findings (the shape of codecommit's
+`RelayReviewFinding`): grouped by location, the whole pull request first, most severe
+first in each group, severity as an icon, a word and the P-number (Blocking, Should fix,
+Consider, Nit). Accept and Dismiss are toggles (pressing again returns to pending);
+Discuss attaches the set to the conversation. "Post accepted" hands the host the
+accepted ids to post one confirmed call at a time, never a bulk write. When the head has
+moved since `reviewedHead`, a banner says so with Re-run, and line findings wait for the
+re-run instead of landing on the wrong line. A before-side line is shown as text with
+its old revision and never opens a head line. Posting outcomes are announced once each;
+a failed post offers Try again for that one finding.
+
+`RelayPanel` is Relay's frame: header (mark, title, exact scope with the revision in
+mono, an optional pin, options, close), tabs whose counts are part of their names, a
+freshness line, a body, and a footer for the composer. Only the body scrolls, so the
+composer never leaves the screen. `overlay` floats over the right of the page with
+no backdrop and no focus trap; render it right after the launcher so Tab order
+follows. `pinned` is a sticky column for the host's grid, and `fullscreen` is a modal
+dialog with the page inert. Escape and the close button call `onClose` and return
+focus to the launcher; closing hides Relay in every presentation, and whether it was
+pinned stays the host's remembered preference. `useRelayPresentation({ pinned,
+minHostWidth })` picks the presentation: full screen at 640 CSS px and narrower,
+pinned only when the user pinned it at 1440 and up with the host's minimum beside the
+440px column, otherwise the overlay. Hosts set `--rly-relay-panel-offset` to their
+sticky header's height and `--app-bottom-inset` to any bar docked at the bottom.
+Full screen portals through `PortalProvider`, so render Relay inside one, and set
+`interactive-widget=resizes-content` in the viewport meta so the full-screen footer
+stays above a phone's on-screen keyboard.
+
+`useRelaySummon` binds that shortcut. From the page it opens Relay and focuses the composer (or, if
+Relay is already open, moves focus to the composer); from inside Relay it takes focus back to where it
+came from, and Relay stays open. Full screen, it closes Relay. Escape closes Relay when focus is inside
+it or Relay is full screen, and returns focus. Only the exact chord is handled and prevented, so Ctrl+K,
+`?`, g-sequences and Alt keys reach the host. On a non-Latin layout the physical J key works; a Latin
+layout uses the J the user sees. Escape is left to an IME composition and to a dialog, listbox or menu
+open inside or opened from Relay, including inside shadow roots. When the element Relay came from is
+gone, focus returns to the `launcher`; after a close, focus returns once Relay has actually closed.
+Attach the returned `regionRef` to Relay's region and `composerRef` to the composer, which is focused
+as soon as it mounts. The hook follows Relay into another document (an iframe portal). Pass the same
+`shortcut` the launcher advertises, or `null` while the host's own surface owns the key; Escape inside
+Relay works either way.
+
+```tsx
+import { RelayLauncher, useRelayShortcut, useRelaySummon } from "@knpkv/rly/patterns"
+
+;const shortcut = useRelayShortcut()
+const { composerRef, regionRef } = useRelaySummon({ fullscreen: false, launcher, onOpenChange: setOpen, open, shortcut })
+
+<RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} ref={launcher} shortcut={shortcut} />
+```
 
 `RelayDock` is the shared product frame for one adapter-owned Relay thread. It
 starts collapsed, keeps context plus profile and model selection visible above

@@ -163,6 +163,8 @@
   }
 
   .work-row-caption {
+    /* The clock ticks every second; even digits keep the line from re-wrapping each tick. */
+    font-variant-numeric: tabular-nums;
     grid-area: caption;
   }
 
@@ -210,6 +212,14 @@
     padding-block: var(--rly-space-8);
   }
 
+  /* A narrow page stacks each fact's name above its value, so values are not squeezed into a sliver. */
+  @container work-page (width < 30rem) {
+    .work-facts > div {
+      gap: var(--rly-space-2);
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
   .work-facts > div:last-child {
     border-block-end: 0;
   }
@@ -218,6 +228,11 @@
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
+  }
+
+  /* A note under a fact's value, on its own line. */
+  .work-fact-note {
+    margin: var(--rly-space-0);
   }
 
   .work-facts dd {
@@ -235,6 +250,15 @@
 
   .work-note[data-tone="blocked"] > b:first-child {
     color: var(--rly-color-blocked-ink);
+  }
+
+  .work-note[data-tone="held"] > b:first-child {
+    color: var(--rly-color-held-ink);
+  }
+
+  /* An unreadable source: a dashed edge, like the hatched mark its timeline event carries. */
+  .work-note[data-tone="unknown"] {
+    border-style: dashed;
   }
 
   .work-detail-section {
@@ -262,6 +286,17 @@
     display: flex;
     gap: var(--rly-space-12);
     justify-content: space-between;
+  }
+
+  /* Read out when a request's outcome replaces its bar; the state word already shows it. */
+  .work-request-announcement {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    margin: var(--rly-space-0);
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
   }
 
   .work-activity {

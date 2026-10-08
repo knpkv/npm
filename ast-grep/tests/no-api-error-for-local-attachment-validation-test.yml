@@ -1,0 +1,9 @@
+id: no-api-error-for-local-attachment-validation
+valid:
+  - |
+    return yield* new AttachmentValidationError({ message: "File is empty", path })
+  - |
+    new ApiError({ status: 413, message: "Too large", endpoint: "attachment upload" })
+invalid:
+  - |
+    return yield* new ApiError({ status: 0, message: "File is empty", endpoint: "attachment upload", path })

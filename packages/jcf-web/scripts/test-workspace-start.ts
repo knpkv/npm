@@ -55,7 +55,7 @@ const program = Effect.scoped(
         stdout: "pipe",
         stderr: "pipe"
       })),
-      (handle) => handle.kill().pipe(Effect.ignore)
+      (handle) => handle.kill().pipe(Effect.ignore({ log: "Warn", message: "Could not stop pnpm start" }))
     ).pipe(Effect.mapError(() => new WorkspaceStartError({ message: "pnpm start could not run" })))
 
     // Kept so a start that fails says why, not only that it failed.
@@ -68,7 +68,9 @@ const program = Effect.scoped(
       Effect.mapError(() => new WorkspaceStartError({ message: "pnpm start printed no URL within a minute" }))
     )
     if (Option.isNone(line)) {
-      const output = yield* Fiber.join(stderr).pipe(Effect.orElseSucceed(() => ""))
+      const output = yield* Fiber.join(stderr).pipe(
+        Effect.catch((error) => Effect.succeed(`(its stderr could not be read: ${String(error)})`))
+      )
       return yield* new WorkspaceStartError({
         message: `pnpm start exited before printing its URL. Its stderr ended with:\n${output.slice(-2000)}`
       })

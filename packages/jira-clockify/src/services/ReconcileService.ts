@@ -1139,7 +1139,11 @@ export const layer = Layer.effect(
               ? clockifyTally(period, options?.clockifySnapshot)
               : Effect.succeed({ tally: [], unlinked: [] }),
             options?.tolerateUnavailableJira === true
-              ? jiraSideRead.pipe(Effect.catch(() => Effect.succeed([])))
+              ? jiraSideRead.pipe(
+                Effect.catch((error) =>
+                  Effect.logWarning("Jira could not be read; reconciling Clockify alone", error).pipe(Effect.as([]))
+                )
+              )
               : jiraSideRead
           ],
           { concurrency: 2 }

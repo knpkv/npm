@@ -130,6 +130,7 @@ export const start = Command.make(
             title: `${t.key.padEnd(12)} ${t.summary.slice(0, 45).padEnd(45)} [${t.status}]`,
             value: t.key
           }))
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         }).pipe(Effect.catch(() => Effect.succeed(noSelectedKey())))
 
         if (!selectedKey) return
@@ -161,9 +162,11 @@ export const start = Command.make(
           yield* Console.log(`Using default project: ${config.defaultProjectName ?? config.defaultProjectId}`)
         } else {
           // Prompt: list projects
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
           if (auth) {
             const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.catch(() => Effect.succeed(emptyProjects()))
             )
             if (projects.length > 0) {
@@ -190,19 +193,26 @@ export const start = Command.make(
 
       // Save defaults if requested
       if (saveDefaults && (projectId || billableVal !== undefined)) {
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
         let projectName: string | null = null
         if (projectId && auth) {
           const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.catch(() => Effect.succeed(emptyProjects()))
           )
           projectName = projects.find((p) => p.id === projectId)?.name ?? null
         }
+        // Saving defaults is secondary: the timer still starts, and the user is told the save failed.
         yield* cfg.set({
           ...(projectId && { defaultProjectId: projectId, defaultProjectName: projectName }),
           ...((billableVal !== undefined) && { defaultBillable: billableVal })
-        })
-        yield* Console.log("Defaults saved to ~/.jcf/config.json")
+        }).pipe(
+          Effect.matchEffect({
+            onFailure: (error) => Console.error(`Defaults not saved: ${error.message} The timer starts anyway.`),
+            onSuccess: () => Console.log("Defaults saved to ~/.jcf/config.json")
+          })
+        )
       }
 
       yield* timer.start(ticket, { projectId, billable: billableVal, startedAt }).pipe(Effect.mapError(toCommandFailed))

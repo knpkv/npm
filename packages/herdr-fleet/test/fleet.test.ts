@@ -14,6 +14,7 @@ import {
   decodeBoundedResponseJson,
   FleetOperationError,
   fleetResponseBodyMaxBytes,
+  FleetStoreBusyError,
   HostConfiguration,
   type HostOperationLifecycle,
   type HostOperations,
@@ -1050,6 +1051,46 @@ describe("fleet local authority", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("fails an approval with a retryable busy error while another connection holds the write lock", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-approve-busy-test-"))
+    const databasePath = join(root, "jobs.sqlite")
+    return Effect.acquireUseRelease(
+      JobStore.open(databasePath),
+      (store) =>
+        Effect.gen(function*() {
+          const service = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-approve-busy"),
+            nonce: Effect.succeed("nonce-approve-busy"),
+            now: Effect.succeed(1_000),
+            operations,
+            store
+          })
+          const job = yield* service.submit({ payload: { kind: "nix.apply", ref: "main" } }, "owner")
+          const approval = { hash: job.hash, nonce: "nonce-approve-busy" }
+          const holder = new DatabaseSync(databasePath)
+          holder.exec("BEGIN IMMEDIATE")
+          const busy = yield* Effect.flip(service.approve(job.id, approval, "owner")).pipe(
+            Effect.ensuring(Effect.sync(() => {
+              holder.exec("ROLLBACK")
+              holder.close()
+            }))
+          )
+          expect(busy).toBeInstanceOf(FleetStoreBusyError)
+          expect(busy).toMatchObject({ operation: "transition" })
+          // Nothing was written, so the same approval succeeds once the lock is released.
+          const approved = yield* service.approve(job.id, approval, "owner")
+          expect(approved.status).toBe("queued")
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("accepts coordinator roots only for consult and transition summary", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-coordinator-root-policy-test-"))
     return Effect.acquireUseRelease(
@@ -1851,12 +1892,19 @@ describe("fleet local authority", () => {
       ) => Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, ...change })._tag
       expect(decode({ reason: "r".repeat(1_024) })).toBe("Success")
       expect(decode({ reason: "line\nbreak" })).toBe("Failure")
-      const longName = "n".repeat(1_900)
+      // The summary carries both names and the reason; two of these cannot fit in 4,096 characters.
+      const longName = "n".repeat(2_100)
       expect(decode({ from: { id: "owner-a", name: longName }, to: { id: "owner-b", name: longName } })).toBe(
         "Failure"
       )
       expect(decode({ from: { id: "owner-a", name: "a" }, to: { id: "owner-b", name: longName } })).toBe("Success")
       expect(decode({ from: { id: "owner-a", name: "bad\u0007name" } })).toBe("Failure")
+      // Owner ids are not in the summary any more, but Work still cannot store these.
+      expect(decode({ to: { id: "owner-\ud800", name: "b" } })).toBe("Failure")
+      expect(decode({ from: { id: "owner-\u0007", name: "a" } })).toBe("Failure")
+      // Both ids are length-bounded on their own now that the summary no longer bounds them.
+      expect(decode({ from: { id: "o".repeat(257), name: "a" } })).toBe("Failure")
+      expect(decode({ from: { id: "o".repeat(256), name: "a" } })).toBe("Success")
     }))
 
   it.effect("binds every reassignment field and owner identity into approval", () =>

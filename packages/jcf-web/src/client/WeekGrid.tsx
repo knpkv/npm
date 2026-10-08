@@ -83,6 +83,8 @@ const Block = (props: {
   readonly onOpenSaved: (entry: SavedEntry) => void
 }) => {
   const { block, column, columns, endMinutes, startMinutes } = props.placed
+  // A packed stretch clips its rows to its time; touch has no hover, so the head toggles it open.
+  const [expanded, setExpanded] = useState(false)
   const height = Math.max((endMinutes - startMinutes) * MINUTE_PX, MIN_BLOCK_PX)
   const density = height < 38 ? "short" : height < 56 ? "medium" : "full"
   const style = {
@@ -96,7 +98,7 @@ const Block = (props: {
   if (block.kind === "stretch") {
     const selected = (member: ProposableBlock) =>
       props.selectedRowId === member.rowId && props.selectedBlockIndex === member.blockIndex
-    // The height is a floor, not a cap: hovering or focusing a stretch lets its rows show in full.
+    // The height is a floor, not a cap: opening, hovering or focusing a stretch shows its rows in full.
     const stretchStyle: CSSProperties & Record<"--jcf-stretch-height", string> = {
       left: style.left,
       top: style.top,
@@ -106,13 +108,22 @@ const Block = (props: {
     return (
       <div
         className="jcf-stretch"
+        data-expanded={expanded}
         style={stretchStyle}
         role="group"
         aria-label={`${clock}, ${String(block.members.length)} tickets packed in this stretch`}
       >
-        <span className="jcf-stretch-head">
+        <button
+          type="button"
+          className="jcf-stretch-head"
+          aria-expanded={expanded}
+          onClick={(event) => {
+            event.stopPropagation()
+            setExpanded((open) => !open)
+          }}
+        >
           {clock}, {block.members.length} tickets
-        </span>
+        </button>
         <ul>
           {block.members.map((member) => (
             <li key={member.id} className="jcf-stretch-row">

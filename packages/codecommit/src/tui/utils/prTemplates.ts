@@ -14,6 +14,7 @@ const PlatformLive = BunServices.layer
 const currentWorkingDirectory = Effect.gen(function*() {
   const fileSystem = yield* FileSystem.FileSystem
   return yield* fileSystem.realPath(".").pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catchIf(() => true, () => Effect.succeed("."))
   )
 })
@@ -25,11 +26,13 @@ const scanPRTemplatesAt = (gitRoot: string) =>
     const prsDir = path.join(gitRoot, ".prs")
 
     const exists = yield* fileSystem.exists(prsDir).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catchIf(() => true, () => Effect.succeed(false))
     )
     if (!exists) return []
 
     const files = yield* fileSystem.readDirectory(prsDir).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catchIf(() => true, () => Effect.succeed([]))
     )
     const mdFiles = files.filter((file) => file.endsWith(".md"))

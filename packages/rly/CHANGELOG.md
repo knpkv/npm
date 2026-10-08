@@ -1,5 +1,71 @@
 # @knpkv/rly
 
+## 0.16.0
+
+### Minor Changes
+
+- [#654](https://github.com/knpkv/npm/pull/654) [`4a41bf8`](https://github.com/knpkv/npm/commit/4a41bf82e327ec66a5df1202920f08e8e51554a4) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayDecision`, the confirmation before one Relay write: the exact target and text, Confirm or Don't for that call only, a latch against double confirmation, a danger tone, and outcomes from Posting… to Done with a receipt, Failed, Declined and Expired, announced once per call.
+
+- [#657](https://github.com/knpkv/npm/pull/657) [`e584518`](https://github.com/knpkv/npm/commit/e584518c9c98186e331a9962c4c6347c470cb3c5) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayFindings`, Relay's review findings: grouped by location, severity as icon, word and P-number, Accept and Dismiss toggles, Discuss, posting accepted findings one confirmed call at a time, a stale banner that holds line findings until a re-run, and before-side lines that never open a head line.
+
+- [#656](https://github.com/knpkv/npm/pull/656) [`d476bb0`](https://github.com/knpkv/npm/commit/d476bb0b2e2399c72eb2cd7b8c6005d833464598) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelaySetup`, Relay's in-panel first run: choose a ready agent from real backend status (not checked yet, checking, ready, or unavailable with its cause, fix and Check again), choose a focus, then start, with Start saying what is missing until both are chosen.
+
+- [#659](https://github.com/knpkv/npm/pull/659) [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327) Thanks [@konopkov](https://github.com/konopkov)! - `RelayTranscript` shows a neutral `Note` item for system messages (why a send was refused, a changed registration), attributed to neither turn and not announced.
+
+- [#651](https://github.com/knpkv/npm/pull/651) [`765e850`](https://github.com/knpkv/npm/commit/765e850895d4edc16a75b3af072f71d527ad0b8c) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayTranscript`, Relay's conversation: your turns, Relay's prose with in-place code blocks, collapsed tool activity with location citations, run outcomes, a polite run announcer, and scroll that follows new content only while you are at the end.
+
+### Patch Changes
+
+- [#663](https://github.com/knpkv/npm/pull/663) [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6) Thanks [@konopkov](https://github.com/konopkov)! - `RelayComposer`'s preset slot shrinks with the panel, so a long preset name truncates in its trigger instead of widening the composer past the panel's edge.
+
+- [#676](https://github.com/knpkv/npm/pull/676) [`67f7ea1`](https://github.com/knpkv/npm/commit/67f7ea1a5e3c0281da1d627fce940975e2db0cf4) Thanks [@konopkov](https://github.com/konopkov)! - Hover styles apply only on a hover-capable fine pointer, so touch taps no longer leave controls looking hovered. The composer draws the focus ring around its whole box, and a keyboard-highlighted Select option shows the ring, so it no longer looks the same as the checked option.
+
+- [#677](https://github.com/knpkv/npm/pull/677) [`f5f5fd9`](https://github.com/knpkv/npm/commit/f5f5fd98dcea7b7df1b226043e89ffb6decaffad) Thanks [@konopkov](https://github.com/konopkov)! - The bounded diff view uses logical borders and alignment, and its code is pinned left to right (isolated), so an RTL host never mirrors code. Centred text that can overflow falls back to the start edge where `safe center` is supported (an `@supports` block, so older browsers keep `center`); shrink-wrapped marks and avatars stay plainly centred. Sheets and the Relay dock size to `100dvh` without a `100vh` fallback.
+
+- [#678](https://github.com/knpkv/npm/pull/678) [`ce3234a`](https://github.com/knpkv/npm/commit/ce3234a201e3336b17f22219c8215d11eecc3408) Thanks [@konopkov](https://github.com/konopkov)! - Clipping containers use `overflow: clip` instead of `hidden`, so they are no longer accidental scroll containers: moving focus to a partly clipped child can't scroll their content out of place, and sticky descendants work. Painting is unchanged.
+
+## 0.15.0
+
+### Minor Changes
+
+- [#642](https://github.com/knpkv/npm/pull/642) [`dfa2d94`](https://github.com/knpkv/npm/commit/dfa2d94ea207baeb281ef222c7d28cf98e4962bb) Thanks [@konopkov](https://github.com/konopkov)! - Load Geist and Geist Mono with `font-display: optional`, so a late font keeps the metric-matched fallback for that page view instead of swapping in and shifting text, and add `RLY_FONT_FACES`, the font files a shell must preload for Geist to render on first load.
+
+- [#648](https://github.com/knpkv/npm/pull/648) [`5d21796`](https://github.com/knpkv/npm/commit/5d21796fb856fba44a32395e316a6bd95ecdbdd6) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayComposer`, Relay's auto-growing message box with removable context refs, a run preset, Send and Stop, Ctrl/⌘+Enter to send and an IME guard, and `useRelayDraft`, which keeps each object's draft through close, reopen and resize (optionally a reload) and reuses one request id until the text changes.
+
+- [#646](https://github.com/knpkv/npm/pull/646) [`aa41111`](https://github.com/knpkv/npm/commit/aa411113b76d81637f7af356bf04054246aa30ab) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayPanel`, Relay's frame as a non-modal overlay, a pinned column or a full-screen dialog, with its header, tabs, freshness line, body and composer footer, and `useRelayPresentation` to choose between them; add a `pin` icon.
+
+- [#636](https://github.com/knpkv/npm/pull/636) [`3ddf05b`](https://github.com/knpkv/npm/commit/3ddf05baa285beebba1ebe99bd2458434a613015) Thanks [@konopkov](https://github.com/konopkov)! - Add `useRelaySummon`, Relay's Ctrl/⌘+J keyboard summon: it opens Relay and focuses the composer, takes focus back to the page from inside Relay, closes full-screen Relay, and closes on Escape from inside Relay, handling only the exact chord so other shortcuts reach the host.
+
+## 0.14.0
+
+### Minor Changes
+
+- [#627](https://github.com/knpkv/npm/pull/627) [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayMark`, Relay's new mark (the baton) bare in the current colour or on an agent-coloured `RelayMark.Tile`, with a matching favicon at `@knpkv/rly/relay-mark.svg`, and `RelayLauncher`, the header button that opens Relay with its mark, label and Ctrl/⌘+J hint. `RelayDock`'s trigger now shows the new mark.
+
+### Patch Changes
+
+- [#593](https://github.com/knpkv/npm/pull/593) [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597) Thanks [@konopkov](https://github.com/konopkov)! - Text no longer jumps when Geist loads. rly's font stacks fall back to metric-matched Arial, Liberation Sans or Arimo faces (and Courier New, Liberation Mono or Cousine for mono), sized per weight, so lines break and rows stand the same height before and after the swap wherever glyphs are placed at subpixels (desktop Chrome on Linux as measured, and the usual macOS and Windows defaults); a Linux desktop set to full hinting can still move text slightly. Reading measures and title widths are set in `em` (at the weight each is drawn in) rather than `ch`, whose size follows the font's "0" and changed by 16% on the swap. Product shells preload the Geist file their stylesheet loads, and review's offline guide no longer hides the page until its fonts are ready.
+
+- [#601](https://github.com/knpkv/npm/pull/601) [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae) Thanks [@konopkov](https://github.com/konopkov)! - Region draws one header in every tone; a tray tints only its body. TimelineRow sets detail and provenance in meta type under the title and shows the actor kind as a plain word instead of an uppercase eyebrow.
+
+## 0.13.0
+
+### Minor Changes
+
+- [#588](https://github.com/knpkv/npm/pull/588) [`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047) Thanks [@konopkov](https://github.com/konopkov)! - Add `StackedBars`: stacked values per period with limit bands above, a shaded window such as the current limit window, width-aware binning, and a single-stop keyboard span selection. Columns out of time order throw an error naming the column. The focus-ring lint now also holds SVG focus strokes to the shared width token, and reserves the focus colour for focus; agent-usage's chart focus stroke uses the token.
+
+## 0.12.1
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+
+## 0.12.0
+
+### Minor Changes
+
+- [#571](https://github.com/knpkv/npm/pull/571) [`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6) Thanks [@konopkov](https://github.com/konopkov)! - One focus ring everywhere: a solid 2px outline in the focus colour, 2px outside the control, from the new `--rly-focus-ring-width` and `--rly-focus-ring-offset` tokens. The base ring goes from 3px to 2px, and the diff, table, timeline, and toggle rings that used 3px or ad-hoc offsets now match. `lint:colors` rejects a focus outline with a raw width.
+
 ## 0.11.0
 
 ### Minor Changes

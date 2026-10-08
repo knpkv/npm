@@ -1,0 +1,13 @@
+id: no-direct-fs-import
+valid:
+  - |
+    import * as FileSystem from "effect/FileSystem"
+  - |
+    import { Readable } from "node:stream"
+invalid:
+  - |
+    import * as fs from "node:fs"
+  - |
+    import { readFile } from "fs/promises"
+  - |
+    const fs = require("node:fs")

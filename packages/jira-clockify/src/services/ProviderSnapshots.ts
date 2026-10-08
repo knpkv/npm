@@ -78,7 +78,10 @@ export const make = Effect.gen(function*() {
     const connection = read.success.value
     if (connection.cloudId === "" || connection.siteUrl === "") return { availability: "unverified", snapshot: null }
     const client = makeJiraApi(httpClient, { baseUrl: "", auth: connection.credential })
-    const live = yield* client.getCurrentUser({}).pipe(Effect.orElseSucceed(() => null))
+    // A failed identity check is reported as "unverified" below; the cause is kept for --verbose.
+    const live = yield* client.getCurrentUser({}).pipe(
+      Effect.catch((error) => Effect.logDebug("Jira identity check failed", error).pipe(Effect.as(null)))
+    )
     if (live?.accountId === undefined || live.accountId === "") {
       return { availability: "unverified", snapshot: null }
     }

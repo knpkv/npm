@@ -45,6 +45,54 @@ describe("scroll track", () => {
     expect(track.take()).toEqual({ direction: "down", lines: 2 })
   })
 
+  it("scrolls toward the newest output as far as the floor allows", () => {
+    // A server that says the pane is 3 lines back lets the client come down those 3, no further.
+    const track = makeScrollTrack(() => cell, () => -3)
+    track.pan(-200)
+    expect(track.take()).toEqual({ direction: "down", lines: 3 })
+    expect(track.take()).toBeNull()
+    // Part of a line toward the bottom is never sent.
+    const partial = makeScrollTrack(() => cell, () => -3)
+    partial.pan(-20)
+    expect(partial.take()).toEqual({ direction: "down", lines: 1 })
+  })
+
+  it("a confirmed position settles scrolls herdr drew no frame for", () => {
+    // Page Up at the top: herdr clamps it and draws nothing, so no frame acknowledges it.
+    const track = makeScrollTrack(() => cell)
+    track.pan(45)
+    expect(track.take()).toEqual({ direction: "up", lines: 3 })
+    expect(track.translate()).toBe(45)
+    track.acknowledgeAll()
+    expect(track.translate()).toBe(0)
+    expect(track.take()).toBeNull()
+  })
+
+  it("a positive floor stops scrolling down past a bottom the server confirmed", () => {
+    // Page Up on a pane with no scrollback: herdr clamps it, and the server says the pane is at 0.
+    const track = makeScrollTrack(() => cell, () => 3)
+    track.pan(45)
+    expect(track.take()).toEqual({ direction: "up", lines: 3 })
+    track.pan(-200)
+    expect(track.take()).toBeNull()
+  })
+
+  it("a confirmation keeps travel that was not sent yet", () => {
+    // Part of a line under the finger stays drawn, and still becomes a line once it is covered.
+    const finger = makeScrollTrack(() => cell)
+    finger.pan(25)
+    expect(finger.take()).toEqual({ direction: "up", lines: 1 })
+    finger.acknowledgeAll()
+    expect(finger.translate()).toBe(10)
+    finger.pan(10)
+    expect(finger.take()).toEqual({ direction: "up", lines: 1 })
+    // A page panned but not yet taken (it goes out on the next frame) is still sent.
+    const page = makeScrollTrack(() => cell)
+    page.pan(60)
+    page.acknowledgeAll()
+    expect(page.take()).toEqual({ direction: "up", lines: 4 })
+  })
+
   it("stops following a server that has not answered for three lines", () => {
     const track = makeScrollTrack(() => cell)
     track.pan(200)

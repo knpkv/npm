@@ -1070,7 +1070,10 @@ const removeSetupSecrets = (
 ): Effect.Effect<void> =>
   Effect.forEach(
     references,
-    (reference) => secrets.remove(reference).pipe(Effect.catch(() => Effect.void)),
+    (reference) =>
+      secrets.remove(reference).pipe(
+        Effect.catch((error) => Effect.logWarning("Could not remove a setup secret", error))
+      ),
     { discard: true }
   )
 
@@ -1152,7 +1155,7 @@ const disableAfterSetupFailure = (
     )
   })).pipe(
     Effect.asVoid,
-    Effect.catch(() => Effect.void)
+    Effect.catch((error) => Effect.logError("Could not disable a plugin connection after its setup failed", error))
   )
 
 const persistSetupTestHealth = Effect.fn("PluginAdministration.persistSetupTestHealth")(function*(

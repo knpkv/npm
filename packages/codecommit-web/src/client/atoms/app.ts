@@ -87,6 +87,8 @@ export interface AppState {
     readonly category: string
     readonly context: string
   }
+  /** Reads waiting in the server process while a read prompt is shown: how many, and the first three. */
+  readonly pendingReads?: { readonly count: number; readonly contexts: ReadonlyArray<string> }
 }
 
 const defaultState: AppState = {
@@ -162,6 +164,12 @@ export const configValidateQueryAtom = ApiClient.query("config", "validate", {
  * Save config mutation
  */
 export const configSaveAtom = ApiClient.mutation("config", "save")
+
+/**
+ * The Accounts page's own config save. A separate mutation, so another settings tab writing
+ * `configSaveAtom` can't interrupt an account save that outlives the page, or be mistaken for it.
+ */
+export const accountsConfigSaveAtom = ApiClient.mutation("config", "save")
 
 /**
  * Reset config mutation
@@ -250,6 +258,9 @@ export const refreshSinglePrAtom = perKeyFn(
 // Approval rule CRUD
 export const createApprovalRuleAtom = ApiClient.mutation("prs", "createApprovalRule")
 export const updateApprovalRuleAtom = ApiClient.mutation("prs", "updateApprovalRule")
+/** Sets one permission category (for example every read) in one step. */
+export const permissionsCategoryUpdateAtom = ApiClient.mutation("permissions", "updateCategory")
+
 export const deleteApprovalRuleAtom = ApiClient.mutation("prs", "deleteApprovalRule")
 
 // Permissions

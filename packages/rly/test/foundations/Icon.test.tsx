@@ -39,7 +39,8 @@ describe("Icon", () => {
       "plus",
       "search",
       "user",
-      "close"
+      "close",
+      "pin"
     ])
     expect(RLY_ICON_VARIANTS.size).toMatchObject({
       small: { pixels: 16 },

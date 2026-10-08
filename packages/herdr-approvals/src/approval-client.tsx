@@ -1,14 +1,14 @@
-import { RegistryProvider, useAtom, useAtomMount, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
+import { dashboardRefreshView } from "./internal/dashboard-refresh.js"
+import { RegistryProvider, useAtom, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
-import { Cause, Effect, Exit, Option, Result, Schedule, Schema } from "effect"
+import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import { useEffect, useRef, useState, type TouchEvent } from "react"
 import { createRoot, hydrateRoot } from "react-dom/client"
-import { ChatEntry, ChatHistory, type ChatMode, type ChatRequest } from "@knpkv/herdr-coordinator/model"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
 import { decodeWorkNavigationSelection, workNavigationHref } from "@knpkv/herdr-work/navigation"
 import { WorkBoard } from "@knpkv/herdr-work/react"
@@ -19,7 +19,7 @@ import {
   registerNewPushSubscription,
   unregisterPushSubscription
 } from "./push-subscription.js"
-import { CoordinatorChatPanel, type NotificationState } from "./approval-app-view.js"
+import type { NotificationState } from "./approval-app-view.js"
 import { ActivityHistory } from "./activity-history.js"
 import {
   DashboardSnapshot,
@@ -29,7 +29,7 @@ import {
   PendingApprovalTarget,
   type PendingApprovalTarget as PendingApprovalTargetType
 } from "./dashboard-model.js"
-import { AgentActivity, DashboardView, type ApprovalDecision } from "./dashboard-view.js"
+import { DashboardView, type ApprovalDecision } from "./dashboard-view.js"
 import {
   dashboardHistoryState,
   dashboardHasPendingApprovalTarget,
@@ -43,7 +43,13 @@ import {
 import { FleetShell, FleetWorkPanel, fleetWorkRequestStateFromResult, fleetWorkStateFromRequest } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 import { SanitizedJobRecord } from "./approval-request.js"
+import { answerForStatus, answerSettles, answerText, DecisionAnswer } from "./countdown-model.js"
+import type { DecisionStatus } from "./countdown-view.js"
+import { useHubNow } from "./hub-clock.js"
+import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
+import { RefreshStatus } from "./refresh-status.js"
+import { dashboardPolls } from "./internal/dashboard-polls.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -134,18 +140,31 @@ const loadPendingApprovalTarget = Effect.fn("Dashboard.loadPendingApprovalTarget
 })
 
 const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecision) {
-  yield* fetchJson(SanitizedJobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
+  return yield* fetchJson(SanitizedJobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
     method: "POST"
   })
 })
 
-const loadChat = fetchJson(ChatHistory, "/v1/chat")
-const sendChat = Effect.fn("CoordinatorChat.send")(function* (request: ChatRequest) {
-  return yield* fetchJson(ChatEntry, "/v1/chat", {
-    body: JSON.stringify(request),
-    method: "POST"
-  })
-})
+/**
+ * The hub's answer to one decision: the record it returned, a status, or no answer. A lost
+ * connection or an unreadable success body leaves the outcome open.
+ */
+const decisionAnswerOf = (
+  decision: ApprovalDecision,
+  exit: Exit.Exit<SanitizedJobRecord, BrowserNetworkError | BrowserStatusError | BrowserJsonError>
+): DecisionAnswer => {
+  if (Exit.isSuccess(exit)) return DecisionAnswer.Accepted({ decision: decision.decision, record: exit.value })
+  const failure = Cause.findErrorOption(exit.cause)
+  if (Option.isNone(failure)) return DecisionAnswer.Uncertain({ status: null })
+  switch (failure.value._tag) {
+    case "BrowserStatusError":
+      return answerForStatus(failure.value.status)
+    case "BrowserJsonError":
+      return DecisionAnswer.Unreadable()
+    case "BrowserNetworkError":
+      return DecisionAnswer.Uncertain({ status: null })
+  }
+}
 
 const pushSupported = (): boolean =>
   window.isSecureContext && "Notification" in window && "PushManager" in window && "serviceWorker" in navigator
@@ -338,29 +357,26 @@ const setApprovalBadge = Effect.fn("Notifications.setBadge")((count: number) =>
 )
 
 const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
-  const chat = browserRuntime.atom(loadChat, {
-    initialValue: initial.chat ?? { entries: [] }
-  })
+  // Only what this listener serves is ever requested; a host dashboard has no push or (when it is
+  // cross-host) Work snapshot, and polling them only produced 404s.
+  const served = dashboardPolls(initial.approvalApp)
   const connect = makeConnectAtoms()
-  const work = connect.work
-  const chatPoll = browserRuntime.atom(
-    initial.approvalApp.chatEnabled
-      ? Atom.refresh(chat).pipe(Effect.repeat(Schedule.spaced("3 seconds")))
-      : Effect.never
-  )
+  const work = served.work ? connect.work : browserRuntime.atom(Effect.never)
+  const workPoll = served.work ? connect.workPoll : browserRuntime.atom(Effect.never)
   return {
     badge: browserRuntime.fn(setApprovalBadge),
-    busyChat: Atom.make(false),
     busyJob: Atom.make<string | null>(null),
-    chat,
-    chatPoll,
-    chatSend: browserRuntime.fn(sendChat),
     connect,
+    // The served snapshot: what the page shows until a refresh succeeds, and after one fails.
+    bootstrap: initial,
     dashboard: browserRuntime.atom(loadDashboard, { initialValue: initial }),
     decision: browserRuntime.fn(decide),
-    notification: browserRuntime.atom<NotificationState, NotificationLoadError>(loadNotificationState, {
-      initialValue: "loading"
-    }),
+    notification: browserRuntime.atom<NotificationState, NotificationLoadError>(
+      served.push ? loadNotificationState : Effect.succeed<NotificationState>("unsupported"),
+      {
+        initialValue: "loading"
+      }
+    ),
     notificationAction: browserRuntime.fn((enable: boolean) =>
       enable ? enableNotifications() : disableNotifications()
     ),
@@ -368,7 +384,8 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
     pendingPage: browserRuntime.fn(loadDashboardPending),
     pendingTarget: browserRuntime.fn(loadPendingApprovalTarget),
     pull: Atom.make<PullState>(initialPull),
-    work
+    work,
+    workPoll
   }
 }
 
@@ -376,15 +393,12 @@ type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 
 const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const result = useAtomValue(atoms.dashboard)
-  const chatResult = useAtomValue(atoms.chat)
   const workResult = useAtomValue(atoms.work)
   const notificationResult = useAtomValue(atoms.notification)
   const refresh = useAtomRefresh(atoms.dashboard)
-  const refreshChat = useAtomRefresh(atoms.chat)
   const refreshWork = useAtomRefresh(atoms.work)
   const refreshNotification = useAtomRefresh(atoms.notification)
   const runDecision = useAtomSet(atoms.decision, { mode: "promiseExit" })
-  const runChat = useAtomSet(atoms.chatSend, { mode: "promiseExit" })
   const runBadge = useAtomSet(atoms.badge, { mode: "promiseExit" })
   const runNotificationAction = useAtomSet(atoms.notificationAction, {
     mode: "promiseExit"
@@ -399,7 +413,8 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     mode: "promiseExit"
   })
   const [busyJobId, setBusyJobId] = useAtom(atoms.busyJob)
-  const [busyChat, setBusyChat] = useAtom(atoms.busyChat)
+  const [sendingDecision, setSendingDecision] = useState<ApprovalDecision | null>(null)
+  const [decisionStatus, setDecisionStatus] = useState<DecisionStatus | null>(null)
   const [pull, setPull] = useAtom(atoms.pull)
   const [deepLinkTarget, setDeepLinkTarget] = useState<PendingApprovalTargetType | null>(null)
   const [historyBusy, setHistoryBusy] = useState(false)
@@ -407,7 +422,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const [pendingBusy, setPendingBusy] = useState(false)
   const [pendingState, setPendingState] = useState(dashboardPendingState(0, initial.pendingApprovals))
   const start = useRef<number | null>(null)
-  useAtomMount(atoms.chatPoll)
 
   const resetPull = (): void => {
     start.current = null
@@ -416,7 +430,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const refreshDashboard = (): void => {
     setPull({ ...initialPull, refreshing: true })
     refresh()
-    refreshChat()
     refreshWork()
   }
   const onTouchStart = (event: TouchEvent<HTMLDivElement>): void => {
@@ -446,25 +459,34 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     }
     resetPull()
   }
+  // The latest rendered snapshot's time, read when a decision's answer arrives (the render that
+  // created onDecision may be older by then).
+  const latestObservedAt = useRef(0)
   const onDecision = async (decision: ApprovalDecision): Promise<void> => {
+    // The decided request's expiry, read from the snapshot it was decided on.
+    const expiresAt = decidableExpiry(currentSnapshot, decision.jobId)
     setBusyJobId(decision.jobId)
+    setSendingDecision(decision)
+    setDecisionStatus(null)
     const exit = await runDecision(decision)
     setBusyJobId(null)
+    setSendingDecision(null)
+    const answer = decisionAnswerOf(decision, exit)
+    setDecisionStatus({
+      expiresAt,
+      jobId: decision.jobId,
+      // The snapshot on screen now, when the answer arrived; only a later read may unlock the request.
+      observedAt: latestObservedAt.current,
+      outcome: answerOutcome(answer),
+      settles: answerSettles(answer),
+      text: answerText(answer)
+    })
+    // Whatever the answer, the queue is re-read so the page shows the hub's own state next.
+    if (!Exit.isSuccess(exit)) refreshDashboard()
     if (Exit.isSuccess(exit)) {
       setDeepLinkTarget(null)
       refreshDashboard()
     }
-  }
-  const onChatSubmit = async (mode: ChatMode, message: string): Promise<boolean> => {
-    setBusyChat(true)
-    const exit = await runChat({ message, mode })
-    setBusyChat(false)
-    if (Exit.isSuccess(exit)) {
-      refreshChat()
-      refresh()
-      return true
-    }
-    return false
   }
   const onNotificationAction = async (enable: boolean): Promise<void> => {
     await runNotificationAction(enable)
@@ -495,21 +517,17 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     }
   }
 
-  const snapshot = AsyncResult.isSuccess(result)
-    ? result.value
-    : result._tag === "Failure" && result.previousSuccess._tag === "Some"
-      ? result.previousSuccess.value.value
-      : null
-  const chat = AsyncResult.isSuccess(chatResult)
-    ? chatResult.value
-    : chatResult._tag === "Failure" && chatResult.previousSuccess._tag === "Some"
-      ? chatResult.previousSuccess.value.value
-      : snapshot?.chat
+  const { refreshFailed, snapshot } = dashboardRefreshView(result, atoms.bootstrap)
+  // The page keeps working on the last snapshot; the cause goes to the log, not the screen.
+  useEffect(() => {
+    if (result._tag === "Failure")
+      Effect.runFork(Effect.logWarning("dashboard refresh failed", Cause.pretty(result.cause)))
+  }, [result])
   const work = AsyncResult.isSuccess(workResult)
     ? workResult.value
     : workResult._tag === "Failure" && workResult.previousSuccess._tag === "Some"
       ? workResult.previousSuccess.value.value
-      : snapshot?.work
+      : snapshot.work
   const notificationState: NotificationState = AsyncResult.isSuccess(notificationResult)
     ? notificationResult.value
     : notificationResult._tag === "Failure"
@@ -517,21 +535,16 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       : "loading"
   const waiting = AsyncResult.isWaiting(result)
   const pendingBadgeCount = dashboardPendingBadgeCount(pendingState)
-  const canonical = snapshot?.approvalApp.canonical === true
-  const currentSnapshot =
-    snapshot === null
-      ? null
-      : withPendingApprovalTarget(
-          {
-            ...(chat === undefined && work === undefined
-              ? snapshot
-              : { ...snapshot, chat: chat ?? null, work: work ?? null }),
-            historyNextCursor: historyState.nextCursor,
-            pendingApprovals: pendingState,
-            records: [...snapshot.records, ...historyState.records]
-          },
-          deepLinkTarget
-        )
+  const canonical = snapshot.approvalApp.canonical === true
+  const currentSnapshot = withPendingApprovalTarget(
+    {
+      ...(work === undefined ? snapshot : { ...snapshot, work }),
+      historyNextCursor: historyState.nextCursor,
+      pendingApprovals: pendingState,
+      records: [...snapshot.records, ...historyState.records]
+    },
+    deepLinkTarget
+  )
   useEffect(() => {
     if (!waiting && pull.refreshing) {
       setPull(initialPull)
@@ -546,12 +559,10 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     })
   }, [canonical, pendingBadgeCount, runBadge])
   useEffect(() => {
-    if (snapshot === null) return
     setHistoryState((state) => dashboardHistoryState(state.generation + 1, [], snapshot.historyNextCursor))
     setPendingState((state) => dashboardPendingState(state.generation + 1, snapshot.pendingApprovals))
   }, [snapshot])
   useEffect(() => {
-    if (snapshot === null) return
     const decoded = readApprovalDeepLink(window.location.search)
     if (Result.isFailure(decoded)) {
       Effect.runFork(Effect.logWarning(decoded.failure))
@@ -584,7 +595,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     }
   }, [snapshot, runPendingTarget])
   useEffect(() => {
-    if (currentSnapshot === null) return
     const decoded = readApprovalDeepLink(window.location.search)
     if (Result.isFailure(decoded) || decoded.success === null) return
     const target = [...document.querySelectorAll<HTMLElement>("[data-agenda-item]")].find((item) =>
@@ -597,24 +607,28 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     return () => {
       target.removeAttribute("data-approval-target")
     }
-  }, [currentSnapshot?.observedAt, deepLinkTarget])
-  if (currentSnapshot === null) {
-    return (
-      <>
-        <DashboardWorkPollOwner atom={atoms.connect.work} poll={atoms.connect.workPoll} />
-        <main className="app app-error">
-          <h1>Host activity unavailable</h1>
-          <pre>{result._tag === "Failure" ? Cause.pretty(result.cause) : "Loading host activity"}</pre>
-        </main>
-      </>
-    )
-  }
+  }, [currentSnapshot.observedAt, deepLinkTarget])
+  useEffect(() => {
+    latestObservedAt.current = currentSnapshot.observedAt
+  }, [currentSnapshot.observedAt])
+  // The Work board's request clocks read hub time, like the Approvals countdown.
+  const workNow = useHubNow(
+    currentSnapshot.observedAt,
+    currentSnapshot.pendingApprovals.local.map((record) => record.approvalExpiresAt ?? null)
+  )
   const current = currentSnapshot
   const workSelection = decodeWorkNavigationSelection(window.location.search)
   const workContent =
     current.work === null ? null : (
       <WorkBoard
         {...(workSelection.goalId === null ? {} : { initialGoalId: workSelection.goalId })}
+        decisions={workRequestDecisionsFor({
+          now: workNow,
+          onDecision: (decision) => void onDecision(decision),
+          sending: sendingDecision,
+          snapshot: current,
+          status: decisionStatus
+        })}
         initialWindow={workSelection.window}
         navigation={workNavigationHref}
         snapshots={current.work}
@@ -622,15 +636,17 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     )
   const workRequestState = fleetWorkRequestStateFromResult({ content: workContent, result: workResult })
   const workState = fleetWorkStateFromRequest(workRequestState)
+  // A failed refresh keeps the page; this says so in the page gutter, under the masthead.
+  const refreshNotice = <RefreshStatus failed={refreshFailed} observedAt={current.observedAt} onRetry={refresh} />
   const dashboardView = (
     <DashboardView
       approvalOnly={canonical}
       busyJobId={busyJobId}
-      chatBusy={busyChat}
+      decisionStatus={decisionStatus}
+      sendingDecision={sendingDecision}
       historyLoading={historyBusy}
       pendingLoading={pendingBusy}
       notificationState={notificationState}
-      onChatSubmit={onChatSubmit}
       onDecision={(decision) => void onDecision(decision)}
       onDisableNotifications={() => void onNotificationAction(false)}
       onEnableNotifications={() => void onNotificationAction(true)}
@@ -639,12 +655,13 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       onRefresh={refreshDashboard}
       pull={pull}
       showHeader={!canonical}
+      notice={canonical ? null : refreshNotice}
       snapshot={current}
     />
   )
   return (
     <>
-      <DashboardWorkPollOwner atom={atoms.connect.work} poll={atoms.connect.workPoll} />
+      <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
       <div
         className="dashboard-gesture"
         onTouchStart={onTouchStart}
@@ -655,22 +672,12 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
         {canonical ? (
           <FleetShell
             approvals={dashboardView}
-            connect={
-              <ConnectSurface
-                atoms={atoms.connect}
-                embedded
-                roomFooter={
-                  current.chat === null ? null : (
-                    <CoordinatorChatPanel busy={busyChat} history={current.chat} onSubmit={onChatSubmit} />
-                  )
-                }
-              />
-            }
+            connect={<ConnectSurface atoms={atoms.connect} embedded />}
             hostCount={current.directory === null ? 1 : current.directory.links.length + 1}
+            notice={refreshNotice}
             work={
               <section className="fleet-workspace">
                 <FleetWorkPanel state={workState} />
-                <AgentActivity snapshot={current} />
                 <ActivityHistory
                   hasMore={current.historyNextCursor !== null}
                   loading={historyBusy}

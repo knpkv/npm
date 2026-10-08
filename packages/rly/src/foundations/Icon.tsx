@@ -18,6 +18,7 @@ import {
   LoaderCircle,
   Menu,
   Minus,
+  Pin,
   Plus,
   Search,
   User,
@@ -48,7 +49,8 @@ export const RLY_ICON_NAMES = defineNames([
   "plus",
   "search",
   "user",
-  "close"
+  "close",
+  "pin"
 ])
 
 /** A stable glyph name owned by rly rather than its icon implementation. */
@@ -107,7 +109,8 @@ const glyphs = {
   plus: Plus,
   search: Search,
   user: User,
-  close: X
+  close: X,
+  pin: Pin
 } satisfies Readonly<Record<RlyIconName, Glyph>>
 
 interface IconSharedProps {

@@ -1,5 +1,124 @@
 # @knpkv/codecommit-web
 
+## 0.27.0
+
+### Minor Changes
+
+- [#661](https://github.com/knpkv/npm/pull/661) [`26d9de9`](https://github.com/knpkv/npm/commit/26d9de9c64b78da62ab462856cbd09e9137eb40f) Thanks [@konopkov](https://github.com/konopkov)! - Relay opens from the app header (button or Ctrl/⌘+J) into one panel, replacing the fixed chip. A finding's "Discuss in Relay" opens the panel with that finding attached to the composer; the separate in-page discussion is gone, and earlier per-finding discussions stay readable in the PR thread, each named for what it was about. Run, profile and focus controls, progress and the findings deck stay in the page. No new AWS operations or permissions.
+
+### Patch Changes
+
+- [#612](https://github.com/knpkv/npm/pull/612) [`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26) Thanks [@konopkov](https://github.com/konopkov)! - A refresh held back by the permission gate no longer reads "PermissionDeniedError:." It now says what is missing and where to fix it: "Couldn't list pull requests in dev (eu-central-1): Not allowed yet: the getPullRequests permission prompt has no answer. Allow it in Settings → Permissions." A provider error with no message is named without a dangling colon.
+- Updated dependencies [[`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26)]:
+  - @knpkv/codecommit-core@0.23.1
+
+## 0.26.2
+
+### Patch Changes
+
+- [#585](https://github.com/knpkv/npm/pull/585) [`2bc7cfa`](https://github.com/knpkv/npm/commit/2bc7cfa8678e43920eda987d2049d97f7a4ba58f) Thanks [@konopkov](https://github.com/konopkov)! - An approval revoked down to no approvers is now cleared. Approvers are who approved the pull request now, from the same read as the approval: a read with none clears them, and only a read that couldn't fetch them keeps the last known list. Before, a failed approver read and a real "no approvers" were the same empty list, and the cache kept the old approvers in both cases, so a revoked approval never cleared.
+
+  - `fetchApprovers` returns `Option`: none when the read fails (logged as a warning), never an empty list standing in for a failure.
+  - `PullRequest` and `PullRequestDetail` gain `approversUnknown` (set when the approver read failed; `approvedBy` is then only the last known list), and `UpsertInput` carries it.
+  - Approvers now move with the approval group's version, so a read whose approval is older than the cached one doesn't overwrite them.
+  - The cache keeps the marker (`approvers_unknown`, migration 0025; every row cached before it starts unknown, since its list may hold a revoked approval, until it is re-read), so a published pull request still says its approvers are only last known; the browser's wire schema decodes it.
+  - A bulk refresh, listed or stale re-read, with a pull request whose approvers couldn't be read counts that account as partial, not clean.
+  - `needsMyReview` and the workbench don't claim a definite review while approvers are unknown (the user may already have approved): the workbench lists such a pull request under the pool, and a last known approval never takes the user out of it.
+  - `Domain` adds `approversUnknownLabel` and `currentApprovers` (none while approvers are unknown). The browser shows "Approvers unknown" instead of an approval count, rule progress or approver check marks, and approver filters offer and match only approvers known now.
+  - Reviewer stats don't count approvers that couldn't be read, in top approvers or time to first review.
+  - The approver read logs its failure where it recovers, so its silent-fallback baseline line is gone.
+  - A merged or closed pull request is never listed again, so each refresh re-reads up to 25 of those with unknown approvers, oldest-updated first, until none is left. A failed re-read stays unknown and is logged, and never holds the refresh back. `PullRequestRepo` adds `findClosedWithUnknownApprovers`.
+  - A credential failure on the approver read is no longer unknown approvers: it fails the read, so the account shows signed out.
+  - `Domain` adds `currentApproverArns`. The `no-raw-pull-request-approvers-read` guard also covers `approvedByArns`, optional-chained and indexed reads.
+
+- [#631](https://github.com/knpkv/npm/pull/631) [`2f2925b`](https://github.com/knpkv/npm/commit/2f2925b42d04686ca9da52c056f6d9a177548e05) Thanks [@konopkov](https://github.com/konopkov)! - First-run follow-ups. When more than one read waits for permission, the read bar names them ("2 reads are waiting: Get identity for dev and List PRs for dev"; three at most, then "and N more"), so "Allow every read" is plainly the one answer. `@knpkv/codecommit-core`: `PermissionGateLive.pendingOf(category, limit)` reports the prompts actually waiting in this process. Settings → Accounts says "Checking sign-in…" until an account's identity read answers, instead of "Not logged in" next to a live SSO profile, and a browser without a session gets the sign-in-link guidance in Settings instead of a pointer to the config file.
+
+- [#628](https://github.com/knpkv/npm/pull/628) [`87c1f1b`](https://github.com/knpkv/npm/commit/87c1f1baae40c0e4351de976a6446c8c194e72df) Thanks [@konopkov](https://github.com/konopkov)! - Stats fits a 320px screen: its tiles and charts flow into as many columns as fit instead of three fixed ones. A notification's title wraps onto a second line instead of being cut off on a phone. Settings' tabs on a narrow or zoomed screen are laid out in columns by width, so the row no longer re-wraps and shifts the page when the web font arrives.
+
+- [#635](https://github.com/knpkv/npm/pull/635) [`4ff1f03`](https://github.com/knpkv/npm/commit/4ff1f0386648e41cfee2d0198c7c30c312c60539) Thanks [@konopkov](https://github.com/konopkov)! - The read permission bar docks to the bottom edge instead of entering the page above it, so a prompt that arrives after the page has painted no longer pushes everything down (the Settings layout shift on a first run). The page keeps the bar's height free at its end. While the identity read waits for that permission, Settings → Accounts says "Waiting for read permission" instead of a sign-in state.
+
+  The Relay chip sits above the docked bar instead of covering its answers: `@knpkv/relay-product`'s dock adds the host's `--app-bottom-inset` to its bottom offset. The bar's sentence is shorter, and Accounts says "Waiting for read permission" whenever any read waits.
+
+- [#605](https://github.com/knpkv/npm/pull/605) [`0f93f9a`](https://github.com/knpkv/npm/commit/0f93f9a6310af21bade9563dcf45f8961436f0c0) Thanks [@konopkov](https://github.com/konopkov)! - The pull request page's review header is a flat panel instead of a provider-tinted one, and Relay's profile choice uses the design system's select (named, keyboard-navigable, styled in every theme) instead of the browser's default control. Inside the findings drawer its options open within the drawer, so they can be chosen.
+
+- [#593](https://github.com/knpkv/npm/pull/593) [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597) Thanks [@konopkov](https://github.com/konopkov)! - Text no longer jumps when Geist loads. rly's font stacks fall back to metric-matched Arial, Liberation Sans or Arimo faces (and Courier New, Liberation Mono or Cousine for mono), sized per weight, so lines break and rows stand the same height before and after the swap wherever glyphs are placed at subpixels (desktop Chrome on Linux as measured, and the usual macOS and Windows defaults); a Linux desktop set to full hinting can still move text slightly. Reading measures and title widths are set in `em` (at the weight each is drawn in) rather than `ch`, whose size follows the font's "0" and changed by 16% on the swap. Product shells preload the Geist file their stylesheet loads, and review's offline guide no longer hides the page until its fonts are ready.
+
+- [#639](https://github.com/knpkv/npm/pull/639) [`c33ead7`](https://github.com/knpkv/npm/commit/c33ead79cfcbcdb16bbb468229e5a35454e05998) Thanks [@konopkov](https://github.com/konopkov)! - The web app preloads Geist Mono as well as Geist, so ids and code text paint in the right face sooner and don't re-wrap a line when the font arrives.
+- Updated dependencies [[`2bc7cfa`](https://github.com/knpkv/npm/commit/2bc7cfa8678e43920eda987d2049d97f7a4ba58f), [`2f2925b`](https://github.com/knpkv/npm/commit/2f2925b42d04686ca9da52c056f6d9a177548e05)]:
+  - @knpkv/codecommit-core@0.23.0
+
+## 0.26.1
+
+### Patch Changes
+
+- [#607](https://github.com/knpkv/npm/pull/607) [`a840102`](https://github.com/knpkv/npm/commit/a840102bb71e6777c996b20050074881503d9850) Thanks [@konopkov](https://github.com/konopkov)! - A failing live update no longer pushes its message over the header's navigation or cuts it to an ellipsis: the header shows the status word ("Reconnecting") with its full reason as the status's hover text and accessible name, and spells the reason out inline only on screens wide enough for it.
+
+- [#592](https://github.com/knpkv/npm/pull/592) [`8f8ca48`](https://github.com/knpkv/npm/commit/8f8ca48df183417ba93e927713731abb9cd9c616) Thanks [@konopkov](https://github.com/konopkov)! - A failed statistics or settings read is stated on the page with its cause and a Try again button, instead of replacing the app with an error screen. Each settings tab and Statistics has one level-one heading. Links inside a sentence carry an underline with at least 3:1 contrast. The current page in the navigation stays marked in forced colours.
+
+## 0.26.0
+
+### Minor Changes
+
+- [#603](https://github.com/knpkv/npm/pull/603) [`4ecc3c2`](https://github.com/knpkv/npm/commit/4ecc3c249223f4999e6c7aa868cfa044267412f7) Thanks [@konopkov](https://github.com/konopkov)! - Pull requests whose approval is unknown are said apart from "waiting on your review": the queue's summary adds "N pull requests with approval unknown", naming the reason when they all share one, and only when there are any. A row's "Approval unknown" carries its reason as hover text and as the row's accessible description, in the queue and in the rail.
+
+### Patch Changes
+
+- [#606](https://github.com/knpkv/npm/pull/606) [`d73f798`](https://github.com/knpkv/npm/commit/d73f7988432fbecedde47885f610908d4c405a35) Thanks [@konopkov](https://github.com/konopkov)! - Settings → Relay writes a profile's model, provider and harness as a phrase ("default on codex, through native-codex") and a skill's source on its own line, instead of joining them with middots.
+
+## 0.25.0
+
+### Minor Changes
+
+- [#578](https://github.com/knpkv/npm/pull/578) [`0938903`](https://github.com/knpkv/npm/commit/0938903a17b6d2bdf13b96947471a1d49f10b42f) Thanks [@konopkov](https://github.com/konopkov)! - A first run of the CodeCommit web app now leads somewhere at every step.
+
+  - The page shows whether its live stream is connecting, not signed in (the browser has no session: open the sign-in link `codecommit web` printed), failing (with the cause and "Retry now"), or live. Counts read as unknown, never 0, until the first update arrives. A lost stream no longer looks like an empty queue.
+  - An empty queue says why: no AWS profiles yet (with "Set up accounts"), filters hiding cached pull requests, or nothing open.
+  - Settings → Accounts with no profiles shows where profiles are read from, the `aws configure` commands that create one, and "Detect again", which reports what it found. It never edits AWS files.
+  - Settings → Config says a missing config file means defaults are in use.
+  - Error notifications name what failed, the provider's own error and the fix ("Couldn't list pull requests in dev (eu-central-1): ExpiredTokenException: … Sign in again in Settings → Accounts.") instead of "getPullRequests — AwsApiError".
+  - `@knpkv/codecommit-core`: AWS profile detection follows `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` like the AWS CLI. New exports: `ConfigService.awsProfileSources`, `awsProfileSourcesIn`, `AwsProfileSources`, and `Errors.describeAwsClientError`.
+  - A read the app hasn't been allowed yet asks in a bar at the top of the page instead of a blocking dialog; "Allow every read" grants every read operation in one saved step, and the queue says it is waiting for that answer. Writes still ask in a dialog, now with "Allow once" as the default. Saving that grant releases every read already waiting, not just the one shown. `@knpkv/codecommit-core`: `PermissionService.setCategory` sets a whole category in one atomic write and fails with `ConfigError` when it can't save; every permission change is now serialized, so a concurrent reset or change can't be overwritten. `PermissionGateLive.resolveCategory` answers every pending prompt of a category.
+  - Settings → Accounts lists each profile as a switch named by the profile, and auto-detect is a checkbox. A settings or stats read that fails stays in its region with the reason (and Retry for stats) instead of replacing the page.
+  - `codecommit web` prints the sign-in link on its own, saying it works once within 60 seconds.
+  - Approval rules this page created can be removed; the pull request refreshes once the rule is gone, and a failed removal says why.
+  - Switching an account on and leaving Settings straight away no longer loses the change: a pending save is sent when the page closes and runs to completion. The auto-detect checkbox keeps its choice. "Detect again" reports only after detection finished, and with auto-detect off it switches auto-detect on first. Counts read as unknown, not 0, while the first sync runs or waits for permission.
+
+### Patch Changes
+
+- [#587](https://github.com/knpkv/npm/pull/587) [`d6fb196`](https://github.com/knpkv/npm/commit/d6fb196aaaac44e83450474b345038879f88185a) Thanks [@konopkov](https://github.com/konopkov)! - Installing codecommit no longer downloads the web client's build tooling and browser libraries: the client ships prebuilt, so vite, tailwind, react-dom and the rest are devDependencies of codecommit-web, and codecommit drops an unused tslib.
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`0938903`](https://github.com/knpkv/npm/commit/0938903a17b6d2bdf13b96947471a1d49f10b42f), [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/codecommit-core@0.22.0
+  - @knpkv/ai-claude@0.4.2
+  - @knpkv/ai-codex@0.5.2
+
+## 0.24.0
+
+### Minor Changes
+
+- [#569](https://github.com/knpkv/npm/pull/569) [`5509cb8`](https://github.com/knpkv/npm/commit/5509cb87f90641d14211e2d993443e3cfcf40784) Thanks [@konopkov](https://github.com/konopkov)! - Approval and health now read honestly on real queues.
+
+  - `approvalOf` gains `NotRequired`, labelled "No approval required" (`approvalNotRequiredLabel`): CodeCommit evaluates a pull request with no approval rules as approved, though nobody signed off. "Approved" now appears only when rules exist and are satisfied. The CLI flags, TUI badge, web row, detail page and health score all show it. Status filters and counts treat it as neither approved nor pending.
+  - No "Approval granted" or "revoked" notification is sent for a pull request without rules. An identical pull-request notification that is still unread is not added again, so a restart no longer re-announces it.
+  - The cache records whether a pull request's approval baseline is known (migration 0024). A sign-off or withdrawal made while approval evaluation was failing is announced once evaluation recovers. A pull request first seen while evaluation fails holds only a placeholder, so its recovery is not announced.
+  - The health score uses a saturating curve: a base of 8, minus up to 6 for idleness and up to 2 for age, plus up to 1.5 for comments (3 counted), 2 for an approval and 1 for "No approval required". Long-idle pull requests are now ranked instead of all reading 0.0, and fresh ones stay green. A pull request CodeCommit gave no dates for scores Unknown ("Health —") and sorts last; comments that haven't loaded make the score a lower bound.
+
+- [#503](https://github.com/knpkv/npm/pull/503) [`281ce63`](https://github.com/knpkv/npm/commit/281ce63fec174b26c0c306b58ca4c473e83f9cc8) Thanks [@konopkov](https://github.com/konopkov)! - The Relay findings pane follows the space the pull request page actually has: a third column on wide windows, a "Findings" drawer beside the diff on medium ones (Esc closes it and returns focus), stacked below the diff on phones. Finding and line-comment highlights use a full 1px border instead of a thick stripe.
+
+### Patch Changes
+
+- [#575](https://github.com/knpkv/npm/pull/575) [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c) Thanks [@konopkov](https://github.com/konopkov)! - Focus rings match rly's: a solid 2px outline in the focus colour, 2px outside the control, from `--rly-focus-ring-width` and `--rly-focus-ring-offset`. Hand-rolled 1px to 3px rings, rings in agent, service or text colours, tinted halos and box-shadow rings are gone. Rings inside clipped containers pull the ring width inside.
+
+- [#568](https://github.com/knpkv/npm/pull/568) [`442b11d`](https://github.com/knpkv/npm/commit/442b11db369a5af5e85d4d91d00c334d46f8103d) Thanks [@konopkov](https://github.com/konopkov)! - The test suites of codecommit-core and codecommit-web are now typechecked as part of `check`, and both packages leave the test-typecheck allowlist.
+
+- [#570](https://github.com/knpkv/npm/pull/570) [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9) Thanks [@konopkov](https://github.com/konopkov)! - Executables linked from the repository (`pnpm link --global`, or `node dist/...`) run under plain Node: workspace packages resolve to their build output instead of TypeScript sources. Published `@knpkv/codecommit-core` now serves its `Domain.js`, `CacheService.js` and `SandboxService.js` subpaths; the last two resolved to files that do not exist before.
+- Updated dependencies [[`5509cb8`](https://github.com/knpkv/npm/commit/5509cb87f90641d14211e2d993443e3cfcf40784), [`0a0182c`](https://github.com/knpkv/npm/commit/0a0182c18f237ab420d17d0339f0969d9356c63a), [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c), [`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6), [`442b11d`](https://github.com/knpkv/npm/commit/442b11db369a5af5e85d4d91d00c334d46f8103d), [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9)]:
+  - @knpkv/codecommit-core@0.21.0
+  - @knpkv/review@0.4.2
+  - @knpkv/rly@0.12.0
+  - @knpkv/relay-product@0.2.6
+
 ## 0.23.0
 
 ### Minor Changes

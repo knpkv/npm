@@ -1,0 +1,11 @@
+id: no-direct-fetch
+valid:
+  - |
+    const response = yield* HttpClient.get(url)
+  - |
+    const fetcher = client.fetchAll(url)
+invalid:
+  - |
+    const response = await fetch(url)
+  - |
+    const response = await globalThis.fetch(url, { method: "POST" })

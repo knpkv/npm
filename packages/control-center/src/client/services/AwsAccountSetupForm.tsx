@@ -465,7 +465,7 @@ export const AwsAccountSetupForm = ({
                 {...controlProps}
                 maxLength={4_096}
                 onChange={(event) => setRepositoryNames(event.currentTarget.value)}
-                placeholder="payments-api\nrisk-engine"
+                placeholder={"payments-api\nrisk-engine"}
                 value={repositoryNames}
               />
             )}
@@ -476,7 +476,7 @@ export const AwsAccountSetupForm = ({
                 {...controlProps}
                 maxLength={4_096}
                 onChange={(event) => setPipelineNames(event.currentTarget.value)}
-                placeholder="payments-production\nrisk-production"
+                placeholder={"payments-production\nrisk-production"}
                 value={pipelineNames}
               />
             )}

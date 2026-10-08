@@ -157,7 +157,7 @@ const readProfilesFile = (
     const profilesPath = yield* getProfilesPath(toolName)
 
     const exists = yield* fs.exists(profilesPath).pipe(
-      Effect.catch(() => Effect.succeed(false))
+      Effect.mapError((cause) => new FileSystemError({ operation: "check", path: profilesPath, cause }))
     )
     if (!exists) return null
 

@@ -15,6 +15,14 @@ import { Portal as RadixPortal } from "radix-ui"
 import { Icon } from "../foundations/Icon.js"
 import { PortalBoundary, usePortalTarget } from "../foundations/PortalProvider.js"
 import { classNames, cssClass, requireText } from "../internal/component.js"
+import {
+  activeElementFor,
+  composedParentFor,
+  focusRestoreTarget,
+  hasShadowRootHost,
+  isWithinComposedElement,
+  isWithinPanel
+} from "../internal/composedFocus.js"
 import * as Predicate from "../internal/predicates.js"
 import {
   invalidateModalFocusRestore,
@@ -31,6 +39,7 @@ import { Field } from "../primitives/Field.js"
 import { Select, type RlySelectOption } from "../primitives/Select.js"
 import { StatePanel } from "../primitives/StatePanel.js"
 import styles from "./RelayDock.module.css"
+import { RelayMark } from "./RelayMark.js"
 
 const style = (name: string): string => cssClass(styles, name)
 const compactViewportQuery = "(max-width: 40rem), (max-height: 40rem) and (pointer: coarse)"
@@ -46,82 +55,6 @@ const focusableSelector = [
   '[tabindex]:not([tabindex="-1"])'
 ].join(",")
 const fieldsetDisabledSelector = "button, fieldset, input, object, optgroup, option, output, select, textarea"
-
-const hasActiveElement = (node: Node): node is Node & DocumentOrShadowRoot => "activeElement" in node
-
-interface ShadowRootHost extends Node {
-  readonly host: Element
-}
-
-const hasShadowRootHost = (value: Node): value is ShadowRootHost =>
-  "host" in value && Predicate.isObjectOrArray(value.host)
-
-const deepActiveElement = (root: DocumentOrShadowRoot): Element | null => {
-  const active = root.activeElement
-  if (active === null) return null
-  if (active.shadowRoot !== null) return deepActiveElement(active.shadowRoot) ?? active
-  return active
-}
-
-const activeElementFor = (panel: HTMLElement): Element | null => {
-  const root = panel.getRootNode()
-  return hasActiveElement(root) ? deepActiveElement(root) : panel.ownerDocument.activeElement
-}
-
-const shadowHostFor = (node: Node): HTMLElement | null => {
-  const root = node.getRootNode()
-  if (!hasShadowRootHost(root)) return null
-  return isHTMLElement(root.host) ? root.host : null
-}
-
-interface AssignedSlotNode extends Node {
-  readonly assignedSlot: HTMLSlotElement | null
-}
-
-const hasAssignedSlot = (node: Node): node is AssignedSlotNode => "assignedSlot" in node
-
-const isElementNode = (node: Node): node is Element => node.nodeType === 1
-
-const composedParentFor = (node: Node, composedParents?: ReadonlyMap<Node, Node | null>): Element | null => {
-  if (composedParents !== undefined && composedParents.has(node)) {
-    const parent = composedParents.get(node)
-    return parent !== null && parent !== undefined && isElementNode(parent) ? parent : null
-  }
-  const assignedSlot = hasAssignedSlot(node) ? node.assignedSlot : null
-  return assignedSlot ?? node.parentElement ?? shadowHostFor(node)
-}
-
-const isWithinComposedElement = (
-  ancestor: Element,
-  descendant: Node | null,
-  composedParents?: ReadonlyMap<Node, Node | null>
-): boolean => {
-  if (descendant === null) return false
-  if (ancestor.contains(descendant)) return true
-  const seen = new Set<Node>()
-  let current: Node = descendant
-  while (!seen.has(current)) {
-    seen.add(current)
-    const parent = composedParentFor(current, composedParents)
-    if (parent === null) return false
-    if (parent === ancestor || ancestor.contains(parent)) return true
-    current = parent
-  }
-  return false
-}
-
-const isWithinPanel = (panel: HTMLElement, active: Element | null): boolean => isWithinComposedElement(panel, active)
-
-const deepActiveHTMLElement = (root: DocumentOrShadowRoot): HTMLElement | null => {
-  const active = root.activeElement
-  if (!isHTMLElement(active)) return null
-  return active.shadowRoot === null ? active : (deepActiveHTMLElement(active.shadowRoot) ?? active)
-}
-
-const focusRestoreTarget = (ownerDocument: Document): HTMLElement | null => {
-  const active = deepActiveHTMLElement(ownerDocument)
-  return active === ownerDocument.body || active === ownerDocument.documentElement ? null : active
-}
 
 const isRenderedFocusable = (element: Element, composedParents?: ReadonlyMap<Node, Node | null>): boolean => {
   if (element.matches(":disabled")) return false
@@ -561,15 +494,6 @@ const useCompactViewport = (view: Window | null): boolean => {
   return useSyncExternalStore(subscribe, snapshot, serverCompactViewportSnapshot)
 }
 
-const RelayMark = (): ReactElement => (
-  <span aria-hidden="true" className={style("mark")}>
-    <span className={style("markLine")} />
-    <svg className={style("markGlyph")} focusable="false" viewBox="0 0 24 24">
-      <path d="M12 3.5 14 10l6.5 2-6.5 2-2 6.5L10 14l-6.5-2 6.5-2Z" fill="currentColor" />
-    </svg>
-  </span>
-)
-
 const ContextChips = ({
   context,
   labelId
@@ -874,6 +798,7 @@ const DockLayer = ({
               aria-modal={modal ? true : undefined}
               className={classNames(style("panel"), modal ? style("sheet") : style("rail"))}
               data-rly-relay-dock-presentation={compactViewport ? "mobile-sheet" : modal ? "overlay" : "rail"}
+              data-rly-relay-surface=""
               onKeyDown={handleKeyDown}
               ref={panelRef}
               role={modal ? "dialog" : "complementary"}
@@ -987,7 +912,7 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
         ref={triggerRef}
         type="button"
       >
-        <RelayMark />
+        <RelayMark.Tile size={32} />
         <span>{visibleTriggerLabel}</span>
       </button>
       {!resolvedOpen ? null : (

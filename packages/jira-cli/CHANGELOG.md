@@ -1,5 +1,30 @@
 # @knpkv/jira-cli
 
+## 1.6.4
+
+### Patch Changes
+
+- [#595](https://github.com/knpkv/npm/pull/595) [`a5a7fcf`](https://github.com/knpkv/npm/commit/a5a7fcf055bfa7d0f6a1c1a0ae2cf4bc2eb8ab81) Thanks [@konopkov](https://github.com/konopkov)! - Failures that used to read as "nothing there" are now reported. A token or profile file whose existence cannot be checked fails with a FileSystemError instead of reading as signed out. A token the system refuses to delete fails the logout instead of reporting success; an already-deleted token still succeeds. An unreadable legacy auth file is skipped with a warning naming it. In jira-cli, a Jira user that cannot be read is still shown by account id, now with a warning naming them.
+- Updated dependencies [[`a5a7fcf`](https://github.com/knpkv/npm/commit/a5a7fcf055bfa7d0f6a1c1a0ae2cf4bc2eb8ab81)]:
+  - @knpkv/atlassian-common@1.9.3
+
+## 1.6.3
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/atlassian-common@1.9.2
+  - @knpkv/jira-api-client@2.1.1
+
+## 1.6.2
+
+### Patch Changes
+
+- [#579](https://github.com/knpkv/npm/pull/579) [`61c930e`](https://github.com/knpkv/npm/commit/61c930e88f4a9d735522d6c7b052b72d13450a6f) Thanks [@konopkov](https://github.com/konopkov)! - Tests typecheck as part of `check`. `externalizeAdfMetadata` returns the sidecar type `hydrateAdfMetadata` takes.
+- Updated dependencies [[`61c930e`](https://github.com/knpkv/npm/commit/61c930e88f4a9d735522d6c7b052b72d13450a6f)]:
+  - @knpkv/atlassian-common@1.9.1
+
 ## 1.6.1
 
 ### Patch Changes

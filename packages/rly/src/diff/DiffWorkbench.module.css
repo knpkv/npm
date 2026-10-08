@@ -6,7 +6,7 @@
     color: var(--rly-color-text-1);
     container-type: inline-size;
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   .header {
@@ -90,8 +90,10 @@
     padding: var(--rly-space-8) var(--rly-space-12);
   }
 
-  .showAll:hover {
-    background: var(--rly-color-surface-3);
+  @media (hover: hover) and (pointer: fine) {
+    .showAll:hover {
+      background: var(--rly-color-surface-3);
+    }
   }
 
   .showAll:focus-visible {

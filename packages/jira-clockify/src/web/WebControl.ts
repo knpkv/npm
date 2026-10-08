@@ -77,7 +77,11 @@ const withControlLock = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       )
     )
     yield* take.pipe(Effect.retry({ schedule: Schedule.spaced("25 millis"), times: 80 }))
-    return yield* effect.pipe(Effect.ensuring(fs.remove(lock).pipe(Effect.ignore)))
+    return yield* effect.pipe(Effect.ensuring(
+      fs.remove(lock).pipe(
+        Effect.ignore({ log: "Warn", message: `Could not release ${lock}; the next writer waits until it goes stale` })
+      )
+    ))
   })
 
 /** Records this server's origin and control token, replacing any earlier server's file. */
@@ -90,7 +94,11 @@ export const writeControlFile = (control: ControlFile) =>
     const pending = `${file}.${yield* Random.nextIntBetween(0, 1_000_000_000)}.tmp`
     yield* fs.writeFileString(pending, JSON.stringify(control), { mode: 0o600 })
     yield* fs.chmod(pending, 0o600)
-    yield* fs.rename(pending, file).pipe(Effect.tapError(() => fs.remove(pending).pipe(Effect.ignore)))
+    yield* fs.rename(pending, file).pipe(
+      Effect.tapError(() =>
+        fs.remove(pending).pipe(Effect.ignore({ log: "Warn", message: `Could not remove ${pending}` }))
+      )
+    )
   })).pipe(
     Effect.catch(() => controlFilePath.pipe(Effect.flatMap((path) => Effect.fail(new ControlFileError({ path })))))
   )
@@ -102,7 +110,9 @@ export const removeControlFile = (token: string) =>
     const file = yield* controlFilePath
     const current = yield* fs.readFileString(file).pipe(Effect.flatMap(decodeControlFile))
     if (current.token === token) yield* fs.remove(file)
-  })).pipe(Effect.ignore)
+  })).pipe(
+    Effect.ignore({ log: "Warn", message: "Could not remove the jcf-web control file; the next server replaces it" })
+  )
 
 /** Asks the running jcf-web for a fresh one-time sign-in link. */
 export const requestLoginUrl = Effect.gen(function*() {

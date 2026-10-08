@@ -16,54 +16,35 @@
       var(--rly-type-label-font);
     justify-content: center;
   }
+  @supports (justify-content: safe center) {
+    .trigger,
+    .close {
+      justify-content: safe center;
+    }
+  }
 
   .trigger {
     border-radius: var(--rly-radius-round);
     gap: var(--rly-space-8);
     min-block-size: var(--rly-space-40);
-    padding: var(--rly-space-6) var(--rly-space-16) var(--rly-space-6) var(--rly-space-6);
+    /* The start inset clears the pill's curve for the square tile. */
+    padding: var(--rly-space-6) var(--rly-space-16) var(--rly-space-6) var(--rly-space-8);
   }
 
   .root[data-rly-relay-dock-open="true"] > .trigger {
     visibility: hidden;
   }
 
-  .trigger:hover,
-  .close:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .trigger:hover,
+    .close:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .trigger:active,
   .close:active {
     background: var(--rly-color-surface-3);
-  }
-
-  .mark {
-    align-items: center;
-    align-self: stretch;
-    background: var(--rly-color-agent);
-    border-radius: var(--rly-radius-round);
-    color: var(--rly-color-surface-1);
-    display: inline-flex;
-    inline-size: var(--rly-space-32);
-    justify-content: center;
-    overflow: hidden;
-    position: relative;
-  }
-
-  .markLine {
-    background: currentcolor;
-    block-size: 100%;
-    inline-size: var(--rly-space-2); /* stripe-ok: a stroke inside the 32px Relay mark glyph */
-    inset-inline-start: var(--rly-space-6);
-    opacity: 0.42;
-    position: absolute;
-  }
-
-  .markGlyph {
-    block-size: var(--rly-space-16);
-    inline-size: var(--rly-space-16);
-    position: relative;
   }
 
   .layer {
@@ -87,14 +68,14 @@
 
   .panel {
     background: var(--rly-color-surface-1);
-    block-size: 100vh;
     block-size: 100dvh;
     color: var(--rly-color-text-1);
     display: flex;
     flex-direction: column;
     inset-block: var(--rly-space-0);
     inset-inline-end: var(--rly-space-0);
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
     padding-block-end: env(safe-area-inset-bottom, 0px);
     padding-block-start: env(safe-area-inset-top, 0px);
     pointer-events: auto;
@@ -212,7 +193,8 @@
 
   .chipValue {
     color: var(--rly-color-text-1);
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -245,7 +227,6 @@
 
   @media (max-width: 40rem), (max-height: 40rem) and (pointer: coarse) {
     .sheet {
-      block-size: 100vh;
       block-size: 100dvh;
       border: var(--rly-space-0);
       border-radius: var(--rly-space-0);

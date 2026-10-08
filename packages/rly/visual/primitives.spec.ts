@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures.ts"
 
 const story = (id: string, theme = "dark"): string =>
   `/iframe.html?id=${id}&viewMode=story&globals=theme:${theme};forcedColors:auto;reducedMotion:reduce;locale:en;density:comfortable`
@@ -219,6 +219,14 @@ test("keeps the near mark two-toned over the empty track and over a full fill, i
       if (forcedColors === "active") expect(adjust).toBe("none")
     }
   }
+})
+
+test("keeps no-reading band stretches outlined under the forced-colours toolbar", async ({ page }) => {
+  await page.goto(story("primitives-stackedbars--week").replace("forcedColors:auto", "forcedColors:active"))
+  const unknown = page.locator("#storybook-root [data-band] [class*='unknown']").first()
+  await expect(unknown).toBeAttached()
+  // In forced colours the fill is dropped, so the stretch must keep a visible stroke.
+  expect(await unknown.evaluate((element) => getComputedStyle(element).stroke)).not.toBe("none")
 })
 
 test("keeps primary and pressed button labels readable in forced colours", async ({ page }) => {

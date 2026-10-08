@@ -1,0 +1,168 @@
+@layer rly.components {
+  /*
+   * Host contract: --rly-relay-panel-offset is the sticky header's height, so the overlay and the pinned
+   * column start below it; --app-bottom-inset is the height of any bar docked at the bottom (a
+   * permission bar): the overlay and pinned column end above it, and full screen covers it.
+   */
+  .root {
+    background: var(--rly-color-surface-1);
+    box-sizing: border-box;
+    color: var(--rly-color-text-1);
+    display: flex;
+    flex-direction: column;
+    min-block-size: 0;
+    min-inline-size: 0;
+  }
+
+  /* Over the right of the page: no backdrop, fixed, so opening never moves the page (zero CLS). */
+  .overlay {
+    animation: relay-panel-enter var(--rly-motion-standard-duration) var(--rly-motion-standard-easing);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    box-shadow: 0 12px 32px color-mix(in srgb, var(--rly-color-text-1) 12%, transparent);
+    inline-size: min(440px, calc(100% - 2 * var(--rly-space-12)));
+    inset-block: calc(var(--rly-relay-panel-offset, 0px) + var(--rly-space-12))
+      calc(var(--app-bottom-inset, 0px) + var(--rly-space-12));
+    inset-inline-end: var(--rly-space-12);
+    min-inline-size: 0;
+    overflow: clip;
+    position: fixed;
+    z-index: 95;
+  }
+
+  /* A column in the host's grid that stays in view while the page scrolls. */
+  .pinned {
+    block-size: calc(100dvh - var(--rly-relay-panel-offset, 0px) - var(--app-bottom-inset, 0px));
+    border-inline-start: 1px solid var(--rly-color-border-1);
+    inset-block-start: var(--rly-relay-panel-offset, 0px);
+    position: sticky;
+  }
+
+  /*
+   * The whole viewport, over any bottom-docked bar. dvh follows the browser's toolbars; it follows the
+   * on-screen keyboard only when the host's viewport meta sets interactive-widget=resizes-content.
+   */
+  .fullscreen {
+    block-size: 100dvh;
+    inset: 0;
+    position: fixed;
+    z-index: 100;
+  }
+
+  .header {
+    align-items: center;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: flex;
+    flex: none;
+    gap: var(--rly-space-12);
+    padding: var(--rly-space-12) var(--rly-space-12) var(--rly-space-12) var(--rly-space-16);
+  }
+  .fullscreen .header {
+    padding-block-start: max(var(--rly-space-12), env(safe-area-inset-top));
+  }
+  .heading {
+    flex: 1;
+    min-inline-size: 0;
+  }
+  .title {
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+    margin: 0;
+  }
+  .scope {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    margin: 0;
+    overflow-wrap: break-word;
+  }
+  .revision {
+    font-family: var(--rly-font-mono);
+  }
+  .tools {
+    display: flex;
+    flex: none;
+    gap: var(--rly-space-4);
+  }
+
+  /* Tabs, freshness and body fill the space between header and footer; only the body scrolls. */
+  .tabs {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-block-size: 0;
+  }
+  .tabs > [role="tabpanel"] {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-block-size: 0;
+    padding-block-start: 0;
+  }
+  .tabs > [role="tablist"] {
+    padding-inline: var(--rly-space-8);
+  }
+  .body {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-block-size: 0;
+  }
+  .freshness {
+    border-block-end: 1px solid var(--rly-color-border-1);
+    color: var(--rly-color-text-2);
+    flex: none;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    padding: var(--rly-space-8) var(--rly-space-16);
+  }
+  .scroll {
+    flex: 1;
+    min-block-size: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    padding: var(--rly-space-16);
+  }
+  .scroll:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(-1 * var(--rly-focus-ring-width));
+  }
+  .footer {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    flex: none;
+    padding: var(--rly-space-12) var(--rly-space-16);
+    padding-block-end: max(var(--rly-space-12), env(safe-area-inset-bottom));
+  }
+
+  @keyframes relay-panel-enter {
+    from {
+      opacity: 0;
+      translate: var(--rly-space-16) 0;
+    }
+  }
+  :where([dir="rtl"]) .overlay {
+    animation-name: relay-panel-enter-rtl;
+  }
+  @keyframes relay-panel-enter-rtl {
+    from {
+      opacity: 0;
+      translate: calc(-1 * var(--rly-space-16)) 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .overlay {
+      animation: none;
+    }
+  }
+
+  /* The system drops the shadow; a CanvasText edge keeps the overlay apart from the page. */
+  @media (forced-colors: active) {
+    .overlay {
+      border-color: CanvasText;
+    }
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .overlay {
+    border-color: CanvasText;
+  }
+}

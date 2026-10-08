@@ -275,9 +275,11 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
           <Text as="h1" variant="page-title">
             {humane(guide.title)}
           </Text>
+          {/* Two short tabs fit one row even at 320px; stacked, they read as two lines of text. */}
           <Tabs
             aria-label="Read the change"
             className="review-reading"
+            data-mobile-layout="single-row"
             id={fragmentId("reading")}
             size="large"
             value={reading}

@@ -1,5 +1,132 @@
 # @knpkv/herdr-approvals
 
+## 0.14.0
+
+### Minor Changes
+
+- [#658](https://github.com/knpkv/npm/pull/658) [`504148b`](https://github.com/knpkv/npm/commit/504148b49fef69471bd3772c60d1629758ccf930) Thanks [@konopkov](https://github.com/konopkov)! - Connect is now the hub's one agent list, and the Work tab no longer repeats agents under Agent activity. Each Connect row leads with the agent's state (icon and word) in a fixed column, then its name and work, then when it was last active. Lineage indents the name, not the state. At 24rem and below the state sits above the name. A row's accessible name is its own content plus "open terminal". Status filter options show their counts within the current Host filter, ignoring the search. A host that didn't answer is named in the Host filter (not offered as an option) and, once, in a line above the list with its cause; the summary only counts agents: "GAMMA (timed out) didn't answer; its agents aren't listed." That line now shows on phones too. The directory shows when it was last read ("Updated 09:41:05"), changing only when a poll lands, and says "Stale" when a refresh failed. Empty and failure states read "No agents running on any host." and "The fleet directory didn't answer: …". `AgentDirectory` takes an optional `silentHosts`.
+
+- [#660](https://github.com/knpkv/npm/pull/660) [`ba0d5ba`](https://github.com/knpkv/npm/commit/ba0d5ba68b20b947eb08892b0c94b63347eae78e) Thanks [@konopkov](https://github.com/konopkov)! - The host dashboard lists its agents in Connect's row shape and state language instead of a card grid. Its heading is "Agents on HOST". Each row shows the state (icon and word), the name, kind and work. An agent with a stable id gets an "Open on the hub" link to its terminal in the canonical hub's Connect. The decorative presence dot and the "N agents" chip are gone; the "Agents online" summary still counts the same list. Empty and failure states name their cause: "No agents running on HOST." and "Herdr isn't running on HOST: …. Start Herdr on HOST, then refresh."
+
+### Patch Changes
+
+- [#652](https://github.com/knpkv/npm/pull/652) [`2b79b24`](https://github.com/knpkv/npm/commit/2b79b241a95d5e6d54c1055e0b245bd24a490276) Thanks [@konopkov](https://github.com/konopkov)! - Connect's agents now speak the hub's state language. Each directory row shows the agent's state as an icon and word in its tone, the same label the hub's Agent activity uses, instead of a plain capitalised word. Only working agents spin, and only with motion allowed. `waiting` now counts under the Status filter's "Needs you" (renamed from "Attention") rather than "Ready", because it waits on a person. The work line no longer repeats the state ("Root agent, npm", not "Root agent, Working in npm"), since the label beside it says it. Unknown states keep their own word with a caution alert icon, so they never look idle. `@knpkv/herdr-connect/surface` exports `agentStatePresentation`, `AgentStateLabel`, `agentBuckets` and `agentBucketLabel`. herdr-approvals' Agent activity reads the same mapping, so its state words are now capitalised and blocked and errored agents show in critical tone.
+
+- [#662](https://github.com/knpkv/npm/pull/662) [`991e71e`](https://github.com/knpkv/npm/commit/991e71e413973fb6083f8abf972fc0f66ac701bf) Thanks [@konopkov](https://github.com/konopkov)! - The host dashboard puts its "Needs attention" agenda above the agent rows, so whatever needs a decision comes before what is merely running.
+- Updated dependencies [[`2b79b24`](https://github.com/knpkv/npm/commit/2b79b241a95d5e6d54c1055e0b245bd24a490276), [`504148b`](https://github.com/knpkv/npm/commit/504148b49fef69471bd3772c60d1629758ccf930), [`5199a49`](https://github.com/knpkv/npm/commit/5199a4959d643d029a9b7701bce94d904250abfd), [`8acdf0d`](https://github.com/knpkv/npm/commit/8acdf0dbd0800c27d5dd4d0130e035558f575975), [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6), [`67f7ea1`](https://github.com/knpkv/npm/commit/67f7ea1a5e3c0281da1d627fce940975e2db0cf4), [`f5f5fd9`](https://github.com/knpkv/npm/commit/f5f5fd98dcea7b7df1b226043e89ffb6decaffad), [`ce3234a`](https://github.com/knpkv/npm/commit/ce3234a201e3336b17f22219c8215d11eecc3408), [`4a41bf8`](https://github.com/knpkv/npm/commit/4a41bf82e327ec66a5df1202920f08e8e51554a4), [`e584518`](https://github.com/knpkv/npm/commit/e584518c9c98186e331a9962c4c6347c470cb3c5), [`d476bb0`](https://github.com/knpkv/npm/commit/d476bb0b2e2399c72eb2cd7b8c6005d833464598), [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327), [`765e850`](https://github.com/knpkv/npm/commit/765e850895d4edc16a75b3af072f71d527ad0b8c)]:
+  - @knpkv/herdr-connect@0.9.0
+  - @knpkv/rly@0.16.0
+  - @knpkv/herdr-work@0.9.3
+
+## 0.13.0
+
+### Minor Changes
+
+- [#650](https://github.com/knpkv/npm/pull/650) [`87a811a`](https://github.com/knpkv/npm/commit/87a811a150578ac809316fe3bb0eb190a7f5e051) Thanks [@konopkov](https://github.com/konopkov)! - The hub no longer has a coordinator chat. The chat panel is gone from the Approvals dashboard and from below Connect's terminal, the page stops polling for chat, and the `GET`/`POST /v1/chat` routes are removed. The dashboard snapshot drops `chat` and `approvalApp.chatEnabled`, and `dashboardPolls` no longer reports `chat`. Notifications now show on the canonical hub whether or not chat history exists. A coordinator chat job queued before the upgrade still runs through Fleet's `runCoordinatorChat`. `@knpkv/herdr-coordinator`'s chat model and Fleet's chat operations are unchanged.
+
+### Patch Changes
+
+- [#638](https://github.com/knpkv/npm/pull/638) [`51db213`](https://github.com/knpkv/npm/commit/51db213028b228bfff75f0dbcfd5e9add0fffc9b) Thanks [@konopkov](https://github.com/konopkov)! - The hub preloads Geist Mono as well as Geist. Ids and kickers are set in mono, and loading that face late re-wrapped a line in the Approvals detail at 390, shifting the page.
+
+- [#644](https://github.com/knpkv/npm/pull/644) [`9a0dbd7`](https://github.com/knpkv/npm/commit/9a0dbd7d08661cbcdeaef12be2dbe6c99d08c226) Thanks [@konopkov](https://github.com/konopkov)! - The hub takes the fonts it preloads from rly's list of web font faces instead of naming the files itself, so a face rly adds is preloaded too.
+- Updated dependencies [[`132d46b`](https://github.com/knpkv/npm/commit/132d46bc0ed8a881737a0ead6db9b32cbbac4889), [`5594373`](https://github.com/knpkv/npm/commit/5594373fe3479fa7cbae68608f8b7b84606407e6), [`dfa2d94`](https://github.com/knpkv/npm/commit/dfa2d94ea207baeb281ef222c7d28cf98e4962bb), [`5d21796`](https://github.com/knpkv/npm/commit/5d21796fb856fba44a32395e316a6bd95ecdbdd6), [`aa41111`](https://github.com/knpkv/npm/commit/aa411113b76d81637f7af356bf04054246aa30ab), [`3ddf05b`](https://github.com/knpkv/npm/commit/3ddf05baa285beebba1ebe99bd2458434a613015)]:
+  - @knpkv/herdr-connect@0.8.0
+  - @knpkv/rly@0.15.0
+  - @knpkv/herdr-work@0.9.2
+
+## 0.12.0
+
+### Minor Changes
+
+- [#604](https://github.com/knpkv/npm/pull/604) [`0cb230c`](https://github.com/knpkv/npm/commit/0cb230c3a5ad2bde144f5cc5008dc7f0b5cdda8e) Thanks [@konopkov](https://github.com/konopkov)! - The fleet shell no longer acts on single bare keys. Tabs are `g` then `a` / `c` / `w` (Approvals, Connect, Work) within 1.5 seconds, agent search is Ctrl+K (Cmd+K), and `?` (or the masthead's "Keyboard shortcuts" button) lists every shortcut in a dialog; Alt combinations are left to the window manager. Typing in a field never triggers a sequence. The key rail above each tab is gone. The masthead reads on one line, says "3 hosts" rather than "3 configured hosts", and the Work tab keeps its page heading while its goals load or fail.
+
+- [#621](https://github.com/knpkv/npm/pull/621) [`0b6ee77`](https://github.com/knpkv/npm/commit/0b6ee77ed2f18a4b4e055310e0e6f24194545961) Thanks [@konopkov](https://github.com/konopkov)! - A host's own dashboard page now hydrates cleanly. It was server-rendered as static markup, which merges adjacent text, and the browser then failed with React error [#418](https://github.com/knpkv/npm/issues/418) and re-rendered the page. It also stops polling `/v1/chat`, `/v1/push/config` and (when the fleet is cross-host) `/v1/work`, which that listener doesn't serve and which only answered 404. The dashboard snapshot's `approvalApp` gains `workEnabled`, set by the same rule the server uses to route `/v1/work`.
+
+- [#620](https://github.com/knpkv/npm/pull/620) [`0c82504`](https://github.com/knpkv/npm/commit/0c825043b9911af87b99f3026c403280ea9e36c6) Thanks [@konopkov](https://github.com/konopkov)! - A failed hub refresh no longer replaces the whole app with "Host activity unavailable" and an error stack. The hub keeps showing the last update it had (the page's own snapshot if the very first refresh fails), with an inline "Couldn't refresh host activity. Showing the update from 09:41." notice and a Try again button. The cause goes to the log. `FleetShell` and `DashboardView` take an optional `notice` for page-level messages like this one, shown under the masthead in the page gutter.
+
+### Patch Changes
+
+- [#630](https://github.com/knpkv/npm/pull/630) [`3b3ae7d`](https://github.com/knpkv/npm/commit/3b3ae7d8c6f159e1e2d8ff79e5d3096fdefaefb1) Thanks [@konopkov](https://github.com/konopkov)! - Approvals: a request without an expiry says "No expiry" in its row and on its bar instead of leaving the clock's place empty; the "Waiting for you" count is the number listed, without an unexplained "+" (unchecked hosts and unloaded pages are said in words); and the machines panel is titled "Machines", lists this machine first without a loading spinner, and drops the "Fleet" eyebrow.
+
+- [#626](https://github.com/knpkv/npm/pull/626) [`da04e85`](https://github.com/knpkv/npm/commit/da04e85df105627acbfcc017ee0f15e6f4d6f20d) Thanks [@konopkov](https://github.com/konopkov)! - An approval or other job write that finds the job store locked now answers 503 (`FleetStoreBusyError`, retryable) instead of 500. The approval proof survives, so retrying the same decision succeeds. Push-delivery and host-runner failures are still logged and skipped, now with a logging `Effect.catch` instead of a suppressed `Effect.ignore`.
+
+- [#629](https://github.com/knpkv/npm/pull/629) [`74e28f3`](https://github.com/knpkv/npm/commit/74e28f3c6085b9c75bca7618ee65aedd3679c84f) Thanks [@konopkov](https://github.com/konopkov)! - Agent cards on the hub show each agent's state with its own icon instead of a spinner for everyone. A working agent's icon spins, and stays motionless when reduced motion is requested; idle, blocked and done agents have distinct still icons beside the state's word.
+
+- [#618](https://github.com/knpkv/npm/pull/618) [`83ef4f7`](https://github.com/knpkv/npm/commit/83ef4f7c37fa14d4c43bc34288d57ceb9a5c2294) Thanks [@konopkov](https://github.com/konopkov)! - The hub writes its lines as phrases instead of joining facts with middots: "Showing 24 of 30 matching, 30 jobs in all", "Load earlier (6 remaining)", "claude, arch" for an agent, "knpkv/npm#433: existing owner" for a Work job, and "Host activity on SER8" as the page title. The keyboard hint reads "In the list, J and K move, Enter opens details and Esc clears the search", and J/K never act while a field inside the list has focus or a modifier is held. At phone width the activity filters wrap instead of scrolling sideways, so the last one ("Agent") no longer sits past the screen edge. The middot ast-grep rule now covers herdr-approvals.
+
+- [#623](https://github.com/knpkv/npm/pull/623) [`c47e854`](https://github.com/knpkv/npm/commit/c47e8544c762aeb58a28811106e3acf768af12b1) Thanks [@konopkov](https://github.com/konopkov)! - The hub no longer jumps while its first content loads. Connect's agent directory and the Work board each hold a screen of space until their first content arrives, through a failed first request and its retry, so the coordinator chat (Connect) and the agents and history panels (Work) stay out of view instead of being pushed down when the list or board arrives. CLS on a cold load was 0.60 (Connect, 768) and 0.48 (Work, 1440).
+
+- [#624](https://github.com/knpkv/npm/pull/624) [`321dd50`](https://github.com/knpkv/npm/commit/321dd50955037fa17c5da7c7be96a9b5d43efb31) Thanks [@konopkov](https://github.com/konopkov)! - The hub's agent lines and activity rows wrap instead of cutting text off. At phone width an agent's name and work no longer shrink to a few characters next to its state (the state drops under them instead), and activity titles and descriptions show in full at 768 and below. At 320 the Activity history search field stays inside its card, and the filter chips keep their inline padding. Below 24rem an activity row's time sits above its title, so titles no longer break mid-word, and the search placeholder fits.
+
+- [#593](https://github.com/knpkv/npm/pull/593) [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597) Thanks [@konopkov](https://github.com/konopkov)! - Text no longer jumps when Geist loads. rly's font stacks fall back to metric-matched Arial, Liberation Sans or Arimo faces (and Courier New, Liberation Mono or Cousine for mono), sized per weight, so lines break and rows stand the same height before and after the swap wherever glyphs are placed at subpixels (desktop Chrome on Linux as measured, and the usual macOS and Windows defaults); a Linux desktop set to full hinting can still move text slightly. Reading measures and title widths are set in `em` (at the weight each is drawn in) rather than `ch`, whose size follows the font's "0" and changed by 16% on the swap. Product shells preload the Geist file their stylesheet loads, and review's offline guide no longer hides the page until its fonts are ready.
+
+- [#633](https://github.com/knpkv/npm/pull/633) [`1ba73ff`](https://github.com/knpkv/npm/commit/1ba73ff7cd71d9683175a1ef9df24f325988e04f) Thanks [@konopkov](https://github.com/konopkov)! - The hub's activity filter chips get their inline padding back (they referenced a spacing token rly doesn't define), and keyboard key caps name their bottom edge colour explicitly instead of through an undefined token, with no visual change.
+- Updated dependencies [[`addf81d`](https://github.com/knpkv/npm/commit/addf81ddd5956692b571b5ecfc8ec2f3b3413aa2), [`da04e85`](https://github.com/knpkv/npm/commit/da04e85df105627acbfcc017ee0f15e6f4d6f20d), [`c47e854`](https://github.com/knpkv/npm/commit/c47e8544c762aeb58a28811106e3acf768af12b1), [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597), [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae), [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db)]:
+  - @knpkv/herdr-coordinator@0.3.7
+  - @knpkv/herdr-fleet@0.8.0
+  - @knpkv/herdr-connect@0.7.4
+  - @knpkv/rly@0.14.0
+  - @knpkv/herdr-work@0.9.1
+
+## 0.11.1
+
+### Patch Changes
+
+- Updated dependencies [[`16244c5`](https://github.com/knpkv/npm/commit/16244c58b41cd8dcee799fd8e8e058598df3fb90), [`0d6cc4d`](https://github.com/knpkv/npm/commit/0d6cc4df23eca64c5d29725bf50899776cc52435), [`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/herdr-connect@0.7.3
+  - @knpkv/herdr-work@0.9.0
+  - @knpkv/rly@0.13.0
+  - @knpkv/herdr-coordinator@0.3.6
+
+## 0.11.0
+
+### Minor Changes
+
+- [#602](https://github.com/knpkv/npm/pull/602) [`58aca11`](https://github.com/knpkv/npm/commit/58aca112c21203ee8955b130d5d891dabe2976a2) Thanks [@konopkov](https://github.com/konopkov)! - The Work tab decides a goal's approval request in place: its bar approves or rejects through the same call as the Approvals tab, shows the decision waiting for the hub, and says how the hub answered (taken, refused, or not yet known). Its clock reads hub time, like the Approvals countdown, and both tabs use the same clock words. An answer belongs to the request it decided, so a new request on the same job starts with a ready bar.
+
+### Patch Changes
+
+- Updated dependencies [[`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26), [`bfba87c`](https://github.com/knpkv/npm/commit/bfba87c566ca21d267c0626da60b431757dc5e32)]:
+  - @knpkv/herdr-fleet@0.7.0
+  - @knpkv/herdr-work@0.8.1
+  - @knpkv/herdr-connect@0.7.2
+  - @knpkv/herdr-coordinator@0.3.5
+
+## 0.10.0
+
+### Minor Changes
+
+- [#512](https://github.com/knpkv/npm/pull/512) [`f3e0012`](https://github.com/knpkv/npm/commit/f3e0012b6106b3d142b8469f327f366b9aa2ba1f) Thanks [@konopkov](https://github.com/konopkov)! - The Approvals tab is a countdown:
+
+  - It leads with the request that expires first ("4m 12s until Apply Nix configuration expires").
+  - Every pending request, from this host and others, is listed soonest first, with its time left.
+  - One decision bar sits on the selected request and names what it decides.
+
+  Decisions show the hub's answer, including a refusal, never an assumed success. A request becomes expired only when the hub says so; at zero its clock reads "expiring". Screen readers hear a request once as it enters its last minute and when it expires, not every tick. Keyboard shortcuts follow the same rules as the buttons, so a request decided on another host, or one already being sent, can't be decided by keyboard either.
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa), [`1ef72d9`](https://github.com/knpkv/npm/commit/1ef72d9317a37e8f28563cae113e9908d8242c3a), [`f8e842e`](https://github.com/knpkv/npm/commit/f8e842e901986b50edf55f98fa3591b742a7904e), [`30849c5`](https://github.com/knpkv/npm/commit/30849c598fdf6776a3a4a2c4061d276e843eaa8e)]:
+  - @knpkv/herdr-connect@0.7.1
+  - @knpkv/rly@0.12.1
+  - @knpkv/herdr-work@0.8.0
+  - @knpkv/herdr-coordinator@0.3.4
+
+## 0.9.0
+
+### Minor Changes
+
+- [#548](https://github.com/knpkv/npm/pull/548) [`0125a64`](https://github.com/knpkv/npm/commit/0125a6414d23989eae1d89ab0523dd09a1a7b5e1) Thanks [@konopkov](https://github.com/konopkov)! - Connect knows where a terminal is really scrolled to. The hub reads herdr's scroll position for the open pane (at most twice a second per session and ten times a second across the host) and sends it to the browser, so a pane someone left scrolled back opens with "Older output, N lines back", and Latest returns in exactly that many lines, one command per frame, until a fresh reading says the pane is at the bottom. Readings are taken only while no scroll is in flight and carry the number of scrolls they cover, so the browser uses only those that already include every scroll it sent. Hosts send it only to clients that ask for it, so hubs and hosts can be upgraded in any order. When the position can't be read it is shown as unknown, never as the bottom, and Connect falls back to its previous behaviour.
+
+### Patch Changes
+
+- [#575](https://github.com/knpkv/npm/pull/575) [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c) Thanks [@konopkov](https://github.com/konopkov)! - Focus rings match rly's: a solid 2px outline in the focus colour, 2px outside the control, from `--rly-focus-ring-width` and `--rly-focus-ring-offset`. Hand-rolled 1px to 3px rings, rings in agent, service or text colours, tinted halos and box-shadow rings are gone. Rings inside clipped containers pull the ring width inside.
+- Updated dependencies [[`0125a64`](https://github.com/knpkv/npm/commit/0125a6414d23989eae1d89ab0523dd09a1a7b5e1), [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c), [`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6)]:
+  - @knpkv/herdr-connect@0.7.0
+  - @knpkv/herdr-work@0.7.2
+  - @knpkv/rly@0.12.0
+
 ## 0.8.0
 
 ### Minor Changes

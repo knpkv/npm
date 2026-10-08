@@ -640,7 +640,11 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                   ? Effect.succeed(name)
                   : Effect.fail(sessionError("sandbox-unavailable"))
               ),
-              Effect.tapError(() => forceRemoveSandbox(name).pipe(Effect.ignore))
+              Effect.tapError(() =>
+                forceRemoveSandbox(name).pipe(
+                  Effect.ignore({ log: "Warn", message: "Could not remove a sandbox that failed to start" })
+                )
+              )
             ),
           () =>
             Effect.gen(function*() {

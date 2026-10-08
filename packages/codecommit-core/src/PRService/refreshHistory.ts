@@ -45,6 +45,7 @@ export const syncWeek = Effect.fn("syncWeek")(
       const prRepo = yield* PullRequestRepo
       const configService = yield* ConfigService
 
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       const config = yield* configService.load.pipe(Effect.catch(() => Effect.void.pipe(Effect.as(undefined))))
       if (config === undefined) {
         yield* Effect.logWarning("syncWeek: no config found")
@@ -79,6 +80,7 @@ export const syncWeek = Effect.fn("syncWeek")(
             const identity = yield* awsClient
               .getCallerIdentity({ profile: account.profile, region })
               .pipe(
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                 Effect.catchIf(() => true, () => Effect.succeed(fallbackIdentity(account.profile)))
               )
             const awsAccountId = identity.accountId
@@ -100,6 +102,7 @@ export const syncWeek = Effect.fn("syncWeek")(
                         )
                       )
                     ),
+                    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                     Effect.catchIf(() => true, () => Effect.void)
                   )
                 ),
@@ -119,6 +122,7 @@ export const syncWeek = Effect.fn("syncWeek")(
       }))
 
       const openPRs = yield* prRepo.findStaleOpen("9999-12-31T23:59:59Z").pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catchIf(() => true, () => Effect.succeed([]))
       )
 
@@ -189,6 +193,7 @@ export const syncWeek = Effect.fn("syncWeek")(
       // provider traffic, and this sync runs forked from the stats route rather
       // than behind the refresh semaphore, so a toggle is not serialized with it.
       const syncedRows = yield* prRepo.findAll().pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catchIf(() => true, () => Effect.succeed([]))
       )
       // After the cache read, so a toggle during a slow read still applies.

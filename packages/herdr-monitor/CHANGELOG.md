@@ -1,5 +1,33 @@
 # @knpkv/herdr-monitor
 
+## 0.3.3
+
+### Patch Changes
+
+- [#665](https://github.com/knpkv/npm/pull/665) [`28b9dbd`](https://github.com/knpkv/npm/commit/28b9dbdd6bf0a10e247ecbe36653b0f4273235ee) Thanks [@konopkov](https://github.com/konopkov)! - The board's stylesheet uses logical properties, so it follows the writing direction; no visual change.
+
+## 0.3.2
+
+### Patch Changes
+
+- [#599](https://github.com/knpkv/npm/pull/599) [`ed263a1`](https://github.com/knpkv/npm/commit/ed263a1b0d20dd47341dc9ed19175a889b94e44a) Thanks [@konopkov](https://github.com/konopkov)! - Failures that were silently swallowed now say so. agent-usage's page reports a successful reply it cannot read instead of treating it as empty, and logs a failed control-socket exchange. herdr-monitor answers a publish that stalls past its deadline with 408 rather than 400, and logs every failed publish request.
+
+## 0.3.1
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+
+## 0.3.0
+
+### Minor Changes
+
+- [#577](https://github.com/knpkv/npm/pull/577) [`cf525b3`](https://github.com/knpkv/npm/commit/cf525b35db5f65ee3b71f34656d1a5fe49d4c0d6) Thanks [@konopkov](https://github.com/konopkov)! - `herdr-monitor init` writes the publish and view keys to a private env file. Every CLI failure names the input to fix instead of one generic message: `publisher` fails with `InvalidOrigin`, `InvalidPublishToken`, `InvalidSnapshot`, `SnapshotTooLarge`, `MonitorUnreachable`, `PublishTimedOut` or `PublishRejected` (now with `origin`) instead of `PublishFailed`, and `MonitorConfigurationError` carries the failing `setting`. Commands have descriptions. On the board, cards end at their last fact, identifiers wrap only between words, and going offline no longer moves the board.
+
+### Patch Changes
+
+- [#575](https://github.com/knpkv/npm/pull/575) [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c) Thanks [@konopkov](https://github.com/konopkov)! - Focus rings match rly's: a solid 2px outline in the focus colour, 2px outside the control, from `--rly-focus-ring-width` and `--rly-focus-ring-offset`. Hand-rolled 1px to 3px rings, rings in agent, service or text colours, tinted halos and box-shadow rings are gone. Rings inside clipped containers pull the ring width inside.
+
 ## 0.2.0
 
 ### Minor Changes

@@ -161,6 +161,7 @@ For most people ${CONNECT_JIRA_COMMAND} is simpler.
         Effect.catch(() => exitCode(ChildProcess.make("xdg-open", [url]))),
         Effect.catch(() => exitCode(ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url]))),
         Effect.asVoid,
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.void)
       )
     })

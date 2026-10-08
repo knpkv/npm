@@ -1,0 +1,47 @@
+id: css-no-overflow-hidden
+snapshots:
+  ? |
+    .x { overflow-x: hidden; }
+  : labels:
+      - source: "overflow-x: hidden;"
+        style: primary
+        start: 5
+        end: 24
+      - source: overflow-x
+        style: secondary
+        start: 5
+        end: 15
+      - source: hidden
+        style: secondary
+        start: 17
+        end: 23
+  ? |
+    .x { overflow: hidden auto; }
+  : labels:
+      - source: "overflow: hidden auto;"
+        style: primary
+        start: 5
+        end: 27
+      - source: overflow
+        style: secondary
+        start: 5
+        end: 13
+      - source: hidden
+        style: secondary
+        start: 15
+        end: 21
+  ? |
+    .x { overflow: hidden; }
+  : labels:
+      - source: "overflow: hidden;"
+        style: primary
+        start: 5
+        end: 22
+      - source: overflow
+        style: secondary
+        start: 5
+        end: 13
+      - source: hidden
+        style: secondary
+        start: 15
+        end: 21

@@ -372,7 +372,12 @@ export const prReviewWorkspaceLeaseGuardLayer = (
       return PrReviewWorkspaceLeaseGuard.of({
         isActive: (jobId) =>
           jobs.isLeaseActive(workspaceId, jobId).pipe(
-            Effect.catch(() => Effect.succeed(true))
+            // An unreadable lease counts as active, so its workspace is never removed from under a live job.
+            Effect.catch((error) =>
+              Effect.logWarning("Could not read the review job lease; keeping its workspace", error).pipe(
+                Effect.as(true)
+              )
+            )
           )
       })
     })

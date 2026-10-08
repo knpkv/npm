@@ -24,6 +24,12 @@
     "subpath": "./registry/USAGE.md"
   },
   {
+    "id": "relay-mark",
+    "output": "dist/assets/relay-mark.svg",
+    "source": "src/assets/relay-mark.svg",
+    "subpath": "./relay-mark.svg"
+  },
+  {
     "id": "styles",
     "output": "dist/styles.css",
     "source": "src/styles/styles.css",

@@ -95,24 +95,35 @@ export const layer = Layer.effect(
           const tmpPath = `${filePath}.tmp`
           yield* fs.writeFileString(tmpPath, JSON.stringify(state, null, 2))
           yield* fs.rename(tmpPath, filePath)
-        }).pipe(Effect.catch(() => Effect.void)),
+        }).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(`Could not write ${filePath}; editors that read it show the previous timer`, error)
+          )
+        ),
 
       read: Effect.gen(function*() {
         const exists = yield* fs.exists(filePath)
         if (!exists) return emptyState
         const content = yield* fs.readFileString(filePath)
-        return yield* Effect.try({
-          try: () => parseStateFile(content),
-          catch: () => emptyState
-        })
-      }).pipe(Effect.catch(() => Effect.succeed(emptyState))),
+        return yield* Effect.try({ try: () => parseStateFile(content), catch: (): "invalid-json" => "invalid-json" })
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning(`Could not read ${filePath}; treating the timer as stopped`, error).pipe(
+            Effect.as(emptyState)
+          )
+        )
+      ),
 
       clear: Effect.gen(function*() {
         yield* ensureDir
         const tmpPath = `${filePath}.tmp`
         yield* fs.writeFileString(tmpPath, JSON.stringify(emptyState, null, 2))
         yield* fs.rename(tmpPath, filePath)
-      }).pipe(Effect.catch(() => Effect.void))
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning(`Could not clear ${filePath}; editors that read it still show the stopped timer`, error)
+        )
+      )
     }
   })
 )

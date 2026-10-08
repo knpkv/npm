@@ -840,7 +840,12 @@ const make = (
               (candidate.filename === decodedAttachment.filename && candidate.fileId !== undefined)
             ) ?? decodedAttachment
           ),
-          Effect.catch(() => Effect.succeed(decodedAttachment))
+          // The upload response already describes the attachment; the listing only adds its file id.
+          Effect.catch((error) =>
+            Effect.logDebug("Attachment listing failed; using the upload response", error).pipe(
+              Effect.as(decodedAttachment)
+            )
+          )
         )
       })
 

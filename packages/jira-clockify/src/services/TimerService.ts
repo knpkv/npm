@@ -233,7 +233,12 @@ export const layer = Layer.effect(
           const jiraProject = ticket.key.split("-")[0] ?? ""
           const clockifyProjectName = cfg.projectMap[jiraProject] ?? jiraProject
           const project = yield* clockify.getProjectByName(workspaceId, clockifyProjectName).pipe(
-            Effect.orElseSucceed(() => null)
+            Effect.catch((error) =>
+              Effect.logWarning(
+                `Clockify project "${clockifyProjectName}" could not be looked up; the entry starts without a project`,
+                error
+              ).pipe(Effect.as(null))
+            )
           )
           if (project !== null && project !== undefined) projectId = project.id
         }
@@ -252,7 +257,13 @@ export const layer = Layer.effect(
             continue
           }
           const tag = yield* clockify.findOrCreateTag(workspaceId, tagName).pipe(
-            Effect.orElseSucceed(() => null)
+            Effect.catch((error) =>
+              Effect.logWarning(
+                `Clockify tag "${tagName}" could not be found or created; the entry starts without it`,
+                error
+              )
+                .pipe(Effect.as(null))
+            )
           )
           if (tag !== undefined && tag !== null) {
             tagIds.push(tag.id)
@@ -271,7 +282,13 @@ export const layer = Layer.effect(
       comment?: string
     ): Effect.Effect<JiraWorklogOutcome> =>
       Effect.gen(function*() {
-        const connection = yield* jiraAccess.connection.pipe(Effect.orElseSucceed(() => Option.none()))
+        const connection = yield* jiraAccess.connection.pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(`Could not read the Jira connection; no worklog was posted to ${ticketKey}`, error).pipe(
+              Effect.as(Option.none())
+            )
+          )
+        )
         if (Option.isNone(connection)) {
           yield* Effect.logDebug("Jira worklog skipped: Jira is not connected")
           return { _tag: "NotLoggedIn" }
@@ -319,7 +336,11 @@ export const layer = Layer.effect(
         let projectName: string | null = cfg.defaultProjectName ?? null
         if (projectId !== null && projectId !== "" && (projectName === null || projectName === "")) {
           const projects = yield* clockify.getProjects(auth.workspaceId).pipe(
-            Effect.orElseSucceed(() => [])
+            Effect.catch((error) =>
+              Effect.logWarning("Clockify projects could not be listed; the timer shows no project name", error).pipe(
+                Effect.as([])
+              )
+            )
           )
           projectName = projects.find((p) => p.id === projectId)?.name ?? null
         }
@@ -405,8 +426,16 @@ export const layer = Layer.effect(
 
         // Stop via PUT — preserve existing tagIds from the entry
         if (current.clockifyEntryId !== null) {
+          // Stopping must not wait on this read; without it the stopped entry loses its tags, which the user is told.
           const existing = yield* clockify.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
-            Effect.orElseSucceed(() => null)
+            Effect.catch((error) =>
+              Effect.logWarning(
+                `Could not read Clockify entry ${current.clockifyEntryId}${
+                  current.ticketKey === null ? "" : ` (${current.ticketKey})`
+                }; it is stopped without its tags. Re-add them on that entry in Clockify.`,
+                error
+              ).pipe(Effect.as(null))
+            )
           )
           const tagIds = existing?.tagIds ?? []
 
@@ -557,7 +586,11 @@ export const layer = Layer.effect(
         let resolvedProjectName: string | null = null
         if (running.projectId !== undefined && running.projectId !== null) {
           const projects = yield* clockify.getProjects(auth.workspaceId).pipe(
-            Effect.orElseSucceed(() => [])
+            Effect.catch((error) =>
+              Effect.logWarning("Clockify projects could not be listed; the timer shows no project name", error).pipe(
+                Effect.as([])
+              )
+            )
           )
           resolvedProjectName = projects.find((p) => p.id === running.projectId)?.name ?? null
         }

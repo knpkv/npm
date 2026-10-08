@@ -1,5 +1,39 @@
 # @knpkv/jira-clockify
 
+## 1.7.0
+
+### Minor Changes
+
+- [#598](https://github.com/knpkv/npm/pull/598) [`0360454`](https://github.com/knpkv/npm/commit/0360454dd4c280b982615173923bb42e93aa2569) Thanks [@konopkov](https://github.com/konopkov)! - jcf no longer reports success for writes that failed, and no longer falls back silently. `ConfigService.set` fails with `ConfigUnreadable` when `~/.jcf/config.json` cannot be read (instead of overwriting it with defaults) and with `ConfigNotSaved` when it cannot be written. `ClockifyAuth.save` fails with `ClockifyKeyNotSaved` when the key cannot be written or made owner-only. A Clockify project or tag that cannot be looked up while starting a timer, an unreadable state, cache or config file, and a Jira identity or search failure keep their fallback but log a warning naming what was dropped and why. Saving defaults during `timer start` or `timer stop` reports a failure without stopping the timer. In jcf-web, a settings save that fails now answers with the reason instead of a generic error.
+
+### Patch Changes
+
+- Updated dependencies [[`a5a7fcf`](https://github.com/knpkv/npm/commit/a5a7fcf055bfa7d0f6a1c1a0ae2cf4bc2eb8ab81)]:
+  - @knpkv/atlassian-common@1.9.3
+  - @knpkv/jira-cli@1.6.4
+
+## 1.6.2
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/ai-claude@0.4.2
+  - @knpkv/ai-codex@0.5.2
+  - @knpkv/atlassian-common@1.9.2
+  - @knpkv/clockify-api-client@3.0.1
+  - @knpkv/jira-api-client@2.1.1
+  - @knpkv/jira-cli@1.6.3
+
+## 1.6.1
+
+### Patch Changes
+
+- [#570](https://github.com/knpkv/npm/pull/570) [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9) Thanks [@konopkov](https://github.com/konopkov)! - Executables linked from the repository (`pnpm link --global`, or `node dist/...`) run under plain Node: workspace packages resolve to their build output instead of TypeScript sources. Published `@knpkv/codecommit-core` now serves its `Domain.js`, `CacheService.js` and `SandboxService.js` subpaths; the last two resolved to files that do not exist before.
+- Updated dependencies [[`61c930e`](https://github.com/knpkv/npm/commit/61c930e88f4a9d735522d6c7b052b72d13450a6f)]:
+  - @knpkv/atlassian-common@1.9.1
+  - @knpkv/jira-cli@1.6.2
+
 ## 1.6.0
 
 ### Minor Changes

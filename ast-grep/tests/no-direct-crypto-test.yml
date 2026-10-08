@@ -1,0 +1,13 @@
+id: no-direct-crypto
+valid:
+  - |
+    const id = yield* Random.nextUUIDv4
+  - |
+    import * as Crypto from "effect/Crypto"
+invalid:
+  - |
+    const id = crypto.randomUUID()
+  - |
+    import { createHash } from "node:crypto"
+  - |
+    import { randomBytes } from "crypto"

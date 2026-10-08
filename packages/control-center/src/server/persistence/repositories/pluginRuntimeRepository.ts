@@ -127,7 +127,13 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
 
   const digestUnknown = Effect.fn("PluginRuntimeRepository.digestUnknown")(
     function*<UnparsedInput>(value: UnparsedInput) {
-      const encoded = yield* serialize(value).pipe(Effect.orElseSucceed(() => "<unserializable>"))
+      const encoded = yield* serialize(value).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("Could not serialize a plugin runtime value; digesting a placeholder", error).pipe(
+            Effect.as("<unserializable>")
+          )
+        )
+      )
       return yield* digestText(encoded)
     }
   )

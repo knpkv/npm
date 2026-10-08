@@ -1,0 +1,9 @@
+id: no-attachment-document-non-null-assertion
+valid:
+  - |
+    const body = documentContent ?? ""
+  - |
+    if (documentContent !== undefined) render(documentContent)
+invalid:
+  - |
+    const body = documentContent!.trim()

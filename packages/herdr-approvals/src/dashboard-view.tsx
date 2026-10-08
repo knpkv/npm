@@ -1,42 +1,28 @@
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { FreshnessStamp } from "@knpkv/rly/patterns"
-import type { FormEvent, KeyboardEvent, ReactElement } from "react"
+import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 import type { DashboardSnapshot, PendingApproval, PendingApprovalFailure } from "./dashboard-model.js"
-import type { ChatMode } from "@knpkv/herdr-coordinator/model"
-import { CoordinatorChatPanel, NotificationPanel, type NotificationState } from "./approval-app-view.js"
+import { connectWorkerHref, NotificationPanel, type NotificationState } from "./approval-app-view.js"
 import { requiresApproval } from "@knpkv/herdr-fleet/model"
 import { ActivityHistory, jobTitle, statusLabel, statusTone } from "./activity-history.js"
 import { ApprovalRequestDisclosure } from "./approval-request-view.js"
 import type { SanitizedJobRecord } from "./approval-request.js"
+import { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
+import { ApprovalsCountdown, type DecisionStatus } from "./countdown-view.js"
+import { AgentStateLabel } from "@knpkv/herdr-connect/surface"
 
-export type ApprovalDecision = {
-  readonly decision: "approve" | "reject"
-  readonly jobId: string
-}
-
-export const approvalShortcutFor = ({
-  key,
-  modified,
-  shift
-}: {
-  readonly key: string
-  readonly modified: boolean
-  readonly shift: boolean
-}): ApprovalDecision["decision"] | null => {
-  if (!modified) return null
-  if (key === "Enter" && !shift) return "approve"
-  if (key === "Backspace" && shift) return "reject"
-  return null
-}
+export { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
 
 type DashboardViewProps = {
   readonly approvalOnly?: boolean
   readonly busyJobId: string | null
-  readonly chatBusy: boolean
+  /** The hub's answer to the last decision, shown on that request in the Approvals countdown. */
+  readonly decisionStatus?: DecisionStatus | null
+  /** The decision waiting for the hub, if any; the countdown's bar shows it as sending. */
+  readonly sendingDecision?: ApprovalDecision | null
   readonly notificationState: NotificationState
   readonly historyLoading?: boolean
   readonly pendingLoading?: boolean
-  readonly onChatSubmit: ((mode: ChatMode, message: string) => Promise<boolean>) | undefined
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
   readonly onDisableNotifications: (() => void) | undefined
   readonly onEnableNotifications: (() => void) | undefined
@@ -50,6 +36,8 @@ type DashboardViewProps = {
   }
   readonly snapshot: DashboardSnapshot
   readonly showHeader?: boolean
+  /** A page-level notice (such as a failed refresh), placed under the header in the page gutter. */
+  readonly notice?: ReactNode
 }
 
 type PendingAgendaItem =
@@ -74,19 +62,19 @@ const jobSummary = (record: Pick<SanitizedJobRecord, "payload">): string => {
     case "nix.apply":
       return "Nix configuration request"
     case "agent.delegate":
-      return `${record.payload.mode} · [redacted internal prompt]`
+      return `${record.payload.mode}: [redacted internal prompt]`
     case "agent.message":
-      return `${record.payload.session} · [redacted internal message]`
+      return `${record.payload.session}: [redacted internal message]`
     case "work.reconcile":
-      return `${record.payload.repository}#${record.payload.pullRequest} · existing owner`
+      return `${record.payload.repository}#${record.payload.pullRequest}: existing owner`
     case "work.admit":
-      return `${record.payload.repository}#${record.payload.pullRequest} · prospective owner admission`
+      return `${record.payload.repository}#${record.payload.pullRequest}: prospective owner admission`
     case "work.recover":
-      return `${record.payload.repository}#${record.payload.pullRequest} · existing goal recovery`
+      return `${record.payload.repository}#${record.payload.pullRequest}: existing goal recovery`
     case "work.reassign":
-      return `${record.payload.goalId} · ${record.payload.from.name} → ${record.payload.to.name}`
+      return `${record.payload.goalId}: ${record.payload.from.name} → ${record.payload.to.name}`
     case "work.abandon":
-      return `${record.payload.goalId} · abandon`
+      return `${record.payload.goalId}: abandon`
   }
 }
 
@@ -255,8 +243,9 @@ const RemoteAgendaItem = ({
   >
     <div className="agenda-heading">
       <div>
+        {/* Where it is decided, in words: no coloured edge marks remote requests. */}
         <Text variant="meta" tone="secondary">
-          Remote · {host}
+          Decided on {host}
         </Text>
         <Text as="h3" variant="card-title">
           {jobTitle(approval)}
@@ -305,7 +294,7 @@ const Summary = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
           Agents online
         </Text>
         <strong>{agents}</strong>
-        <small>{snapshot.status.herdr.available ? "Herdr connected" : "Herdr unavailable"}</small>
+        <small>{snapshot.status.herdr.available ? "Herdr connected" : "Herdr isn't running"}</small>
       </Surface>
       <Surface padding="default" tone="secondary">
         <Text variant="meta" tone="secondary">
@@ -334,158 +323,59 @@ const Summary = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
   )
 }
 
-const ApprovalSummary = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
-  const local = snapshot.pendingApprovals.local.length
-  const remote = snapshot.pendingApprovals.remote.length
-  const recentDecisions = snapshot.records.filter(
-    (record) =>
-      requiresApproval(record.payload) &&
-      (record.approvedBy !== null || record.rejectedBy !== null || record.status === "expired")
-  ).length
+/**
+ * This host's agents, read-only, in Connect's state language. Agents live in Connect on the
+ * canonical hub; here each row with a stable id links to its terminal there.
+ */
+export const AgentActivity = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
+  const { agents, available, error } = snapshot.status.herdr
+  const host = snapshot.status.host
+  const hostLabel = host.replaceAll("-", "\u2011")
   return (
-    <section className="summary-grid" aria-label="Approval state">
-      <Surface padding="default" tone="secondary">
-        <Text variant="meta" tone="secondary">
-          Pending
-        </Text>
-        <strong>{local + remote}</strong>
-        <small>Exact decisions waiting</small>
-      </Surface>
-      <Surface padding="default" tone="secondary">
-        <Text variant="meta" tone="secondary">
-          Local decisions
-        </Text>
-        <strong>{local}</strong>
-        <small>Owned by this host</small>
-      </Surface>
-      <Surface padding="default" tone="secondary">
-        <Text variant="meta" tone="secondary">
-          Remote handoffs
-        </Text>
-        <strong>{remote}</strong>
-        <small>Open on owning host</small>
-      </Surface>
-      <Surface padding="default" tone="secondary">
-        <Text variant="meta" tone="secondary">
-          Recent decisions
-        </Text>
-        <strong>{recentDecisions}</strong>
-        <small>Approved, rejected, or expired</small>
-      </Surface>
-    </section>
-  )
-}
-
-export const AgentActivity = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => (
-  <Surface as="section" padding="spacious" className="agents-panel">
-    <div className="section-heading">
-      <div>
-        <Text variant="meta" tone="secondary">
-          Right now
-        </Text>
-        <Text as="h2" variant="section-title">
-          Agent activity
-        </Text>
-      </div>
-      <StateLabel
-        label={`${snapshot.status.herdr.agents.length} agents`}
-        tone={snapshot.status.herdr.available ? "positive" : "critical"}
-        size="compact"
-      />
-    </div>
-    <div className="agent-grid">
-      {snapshot.status.herdr.agents.map((agent) => (
-        <Surface key={agent.paneId} tone="tertiary" padding="compact">
-          <div className="agent-line">
-            <span className="agent-presence" aria-hidden="true" />
-            <div>
-              <Text as="strong" variant="label">
-                {agent.name}
-              </Text>
-              <Text as="small" variant="meta" tone="secondary">
-                {agent.kind} · {agent.work}
-              </Text>
-            </div>
-            <StateLabel label={agent.status} tone="progress" size="compact" />
-          </div>
-        </Surface>
-      ))}
-      {snapshot.status.herdr.agents.length === 0 ? <Text tone="secondary">No active agents.</Text> : null}
-    </div>
-  </Surface>
-)
-
-const ApprovalDecisionHistory = ({ records }: { readonly records: ReadonlyArray<SanitizedJobRecord> }) => {
-  type DecisionPresentation = {
-    readonly actor: string
-    readonly label: "Approved" | "Expired" | "Rejected"
-    readonly timestamp: number
-    readonly tone: "caution" | "critical" | "positive"
-  }
-  const decisionFor = (record: SanitizedJobRecord): DecisionPresentation | null => {
-    if (record.rejectedBy != null) {
-      return {
-        actor: record.rejectedBy,
-        label: "Rejected",
-        timestamp: record.rejectedAt ?? record.updatedAt,
-        tone: "critical"
-      }
-    }
-    if (record.status === "expired") {
-      return { actor: "hostd", label: "Expired", timestamp: record.expiredAt ?? record.updatedAt, tone: "caution" }
-    }
-    if (record.approvedBy !== null) {
-      return {
-        actor: record.approvedBy,
-        label: "Approved",
-        timestamp: record.approvedAt ?? record.updatedAt,
-        tone: "positive"
-      }
-    }
-    return null
-  }
-  const decisions = records
-    .filter((record) => requiresApproval(record.payload))
-    .flatMap((record) => {
-      const decision = decisionFor(record)
-      return decision === null ? [] : [{ decision, record }]
-    })
-    .sort((left, right) => right.decision.timestamp - left.decision.timestamp)
-  const visibleDecisions = decisions.slice(0, 10)
-  return (
-    <Surface as="section" padding="spacious" className="decision-history-panel">
+    <Surface as="section" padding="spacious" className="agents-panel" aria-labelledby="host-agents-heading">
       <div className="section-heading">
-        <div>
-          <Text variant="meta" tone="secondary">
-            Decisions
-          </Text>
-          <Text as="h2" variant="section-title">
-            Recent approval history
-          </Text>
-        </div>
-        <Text variant="meta" tone="secondary">
-          {visibleDecisions.length} recent · {decisions.length} total
+        <Text as="h2" variant="section-title" id="host-agents-heading">
+          Agents on {hostLabel}
         </Text>
       </div>
-      {decisions.length === 0 ? (
-        <Text tone="secondary">No approval decisions yet.</Text>
+      {!available ? (
+        <Text tone="secondary">
+          {error === null ? `Herdr isn't running on ${hostLabel}.` : `Herdr isn't running on ${hostLabel}: ${error}.`}{" "}
+          Start Herdr on {hostLabel}, then refresh.
+        </Text>
+      ) : agents.length === 0 ? (
+        <Text tone="secondary">No agents running on {hostLabel}.</Text>
       ) : (
-        <ol className="decision-history-list">
-          {visibleDecisions.map(({ decision, record }) => (
-            <li key={record.id}>
-              <div>
+        <ul className="host-agent-list">
+          {agents.map((agent) => (
+            <li className="host-agent" key={agent.paneId}>
+              <span className="host-agent-state">
+                <AgentStateLabel state={agent.status} />
+              </span>
+              <span className="host-agent-copy">
                 <Text as="strong" variant="label">
-                  {jobTitle(record)}
+                  {agent.name}
                 </Text>
-                <Text tone="secondary" variant="meta">
-                  {timeLabel(decision.timestamp)} · {decision.actor}
+                <Text as="small" variant="meta" tone="secondary">
+                  {agent.kind}, {agent.work}
                 </Text>
-                <ApprovalRequestDisclosure id={record.id} payload={record.payload} />
-              </div>
-              <StateLabel label={decision.label} size="compact" tone={decision.tone} />
+              </span>
+              {agent.agentId === null ? null : (
+                <a
+                  className="host-agent-link"
+                  href={
+                    new URL(
+                      connectWorkerHref({ agentId: agent.agentId, host, name: agent.name, paneId: agent.paneId }),
+                      snapshot.approvalApp.canonicalUrl
+                    ).href
+                  }
+                >
+                  Open on the hub<span className="connect-visually-hidden">: {agent.name}</span>
+                </a>
+              )}
             </li>
           ))}
-        </ol>
+        </ul>
       )}
     </Surface>
   )
@@ -497,17 +387,16 @@ const Machines = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
     <Surface as="section" padding="spacious" className="machine-panel">
       <div className="section-heading">
         <div>
-          <Text variant="meta" tone="secondary">
-            Fleet
-          </Text>
+          {/* This machine is listed too, first; no eyebrow over the title. */}
           <Text as="h2" variant="section-title">
-            Other machines
+            Machines
           </Text>
         </div>
       </div>
       <nav className="machine-grid" aria-label="Fleet approval pages">
         <a className="machine machine-current" href={snapshot.directory.currentUrl}>
-          <StateLabel label="This machine" tone="progress" size="compact" />
+          {/* Online by definition; the progress tone's spinner said something was loading. */}
+          <StateLabel label="This machine" tone="positive" size="compact" />
           <strong>{snapshot.host}</strong>
         </a>
         {snapshot.directory.links.map((link) =>
@@ -536,10 +425,10 @@ const Machines = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
 export const DashboardView = ({
   approvalOnly = false,
   busyJobId,
-  chatBusy,
+  decisionStatus = null,
   historyLoading = false,
+  notice = null,
   notificationState,
-  onChatSubmit,
   onDecision,
   onDisableNotifications,
   onEnableNotifications,
@@ -548,6 +437,7 @@ export const DashboardView = ({
   onRefresh,
   pendingLoading = false,
   pull,
+  sendingDecision = null,
   showHeader = true,
   snapshot
 }: DashboardViewProps) => {
@@ -567,6 +457,7 @@ export const DashboardView = ({
       record.status !== "queued" &&
       record.status !== "running"
   )
+  const AppColumn = showHeader ? "main" : "div"
   const pullLabel = pull.refreshing ? "Refreshing" : pull.ready ? "Release to refresh" : "Pull to refresh"
   const approvalDecision = snapshot.approvalsEnabled ? onDecision : undefined
   const moveAgendaFocus = (event: KeyboardEvent<HTMLDivElement>): void => {
@@ -607,7 +498,8 @@ export const DashboardView = ({
         <span>↓</span>
         <strong>{pullLabel}</strong>
       </div>
-      <main className="app">
+      {/* Inside the fleet shell, which owns the page's <main>, this is a plain column. */}
+      <AppColumn className="app">
         {showHeader ? (
           <header className="app-header">
             <div className="fleet-mark" aria-hidden="true">
@@ -646,108 +538,113 @@ export const DashboardView = ({
             </div>
           </header>
         ) : null}
-        {approvalOnly ? <ApprovalSummary snapshot={snapshot} /> : <Summary snapshot={snapshot} />}
-        {snapshot.approvalApp.canonical && snapshot.chat !== null ? (
-          <>
-            <NotificationPanel
-              canonicalUrl={snapshot.approvalApp.canonicalUrl}
-              onDisable={onDisableNotifications}
-              onEnable={onEnableNotifications}
-              state={notificationState}
-            />
-            {approvalOnly ? null : (
-              <CoordinatorChatPanel busy={chatBusy} history={snapshot.chat} onSubmit={onChatSubmit} />
-            )}
-          </>
-        ) : snapshot.approvalApp.canonical ? null : (
+        {notice}
+        {approvalOnly ? (
+          <ApprovalsCountdown
+            decisionStatus={decisionStatus}
+            historyLoading={historyLoading}
+            onDecision={approvalDecision}
+            onLoadHistory={onLoadHistory}
+            onLoadPending={onLoadPending}
+            onRevalidate={onRefresh}
+            pendingLoading={pendingLoading}
+            sending={sendingDecision}
+            snapshot={snapshot}
+          />
+        ) : (
+          <Summary snapshot={snapshot} />
+        )}
+        {snapshot.approvalApp.canonical ? (
+          <NotificationPanel
+            canonicalUrl={snapshot.approvalApp.canonicalUrl}
+            onDisable={onDisableNotifications}
+            onEnable={onEnableNotifications}
+            state={notificationState}
+          />
+        ) : (
           <Surface padding="default" tone="secondary" className="hub-link">
-            <Text tone="secondary">Notifications and coordinator chat live on the canonical hub.</Text>
-            <a href={snapshot.approvalApp.canonicalUrl}>Open {new URL(snapshot.approvalApp.canonicalUrl).host}</a>
+            <Text tone="secondary">Notifications live on the canonical hub.</Text>
+            <a href={snapshot.approvalApp.canonicalUrl}>
+              {/* Non-breaking hyphens keep a host like "monster-banana" whole; the href is unchanged. */}
+              Open {new URL(snapshot.approvalApp.canonicalUrl).host.replaceAll("-", "\u2011")}
+            </a>
           </Surface>
         )}
-        {approvalOnly ? null : <AgentActivity snapshot={snapshot} />}
-        <Surface as="section" padding="spacious" className="agenda-panel">
-          <div className="section-heading">
-            <div>
-              <Text variant="meta" tone="secondary">
-                Agenda
-              </Text>
-              <Text as="h2" variant="section-title">
-                Needs attention
-              </Text>
+        {approvalOnly ? null : (
+          <Surface as="section" padding="spacious" className="agenda-panel">
+            <div className="section-heading">
+              <div>
+                <Text variant="meta" tone="secondary">
+                  Agenda
+                </Text>
+                <Text as="h2" variant="section-title">
+                  Needs attention
+                </Text>
+              </div>
+              <StateLabel
+                label={`${agendaCount} ${pendingUnknown ? "known " : ""}open`}
+                tone={agendaCount === 0 && !pendingUnknown ? "positive" : "caution"}
+                size="compact"
+              />
             </div>
-            <StateLabel
-              label={`${agendaCount} ${pendingUnknown ? "known " : ""}open`}
-              tone={agendaCount === 0 && !pendingUnknown ? "positive" : "caution"}
-              size="compact"
-            />
-          </div>
-          <div className="agenda-list" onKeyDown={moveAgendaFocus}>
-            {pendingAgenda.map((item) =>
-              item._tag === "local" ? (
+            <div className="agenda-list" onKeyDown={moveAgendaFocus}>
+              {pendingAgenda.map((item) =>
+                item._tag === "local" ? (
+                  <AgendaItem
+                    key={item.record.id}
+                    busy={busyJobId === item.record.id}
+                    connectBaseUrl={snapshot.approvalApp.canonicalUrl}
+                    host={snapshot.host}
+                    onDecision={approvalDecision}
+                    record={item.record}
+                  />
+                ) : (
+                  <RemoteAgendaItem
+                    key={`${item.remote.host}:${item.remote.approval.id}`}
+                    approval={item.remote.approval}
+                    approvalUrl={item.remote.approvalUrl}
+                    host={item.remote.host}
+                  />
+                )
+              )}
+              {active.map((record) => (
                 <AgendaItem
-                  key={item.record.id}
-                  busy={busyJobId === item.record.id}
+                  key={record.id}
+                  busy={busyJobId === record.id}
                   connectBaseUrl={snapshot.approvalApp.canonicalUrl}
                   host={snapshot.host}
                   onDecision={approvalDecision}
-                  record={item.record}
+                  record={record}
                 />
-              ) : (
-                <RemoteAgendaItem
-                  key={`${item.remote.host}:${item.remote.approval.id}`}
-                  approval={item.remote.approval}
-                  approvalUrl={item.remote.approvalUrl}
-                  host={item.remote.host}
-                />
-              )
-            )}
-            {active.map((record) => (
-              <AgendaItem
-                key={record.id}
-                busy={busyJobId === record.id}
-                connectBaseUrl={snapshot.approvalApp.canonicalUrl}
-                host={snapshot.host}
-                onDecision={approvalDecision}
-                record={record}
-              />
-            ))}
-            {snapshot.pendingApprovals.failures.length === 0 ? null : (
-              <Text className="notice" tone="secondary">
-                Could not check {snapshot.pendingApprovals.failures.map(pendingFailureLabel).join(", ")}. Local
-                approvals still work.
-              </Text>
-            )}
-            {snapshot.pendingApprovals.nextCursors.length === 0 ? null : (
-              <div className="activity-load-more">
-                <Button loading={pendingLoading} onClick={onLoadPending} type="button" variant="quiet">
-                  Load more approvals
-                </Button>
-              </div>
-            )}
-            {agendaCount === 0 && !pendingUnknown ? (
-              <div className="empty">
-                <span>✓</span>
-                <Text as="h3" variant="card-title">
-                  Nothing waiting
+              ))}
+              {snapshot.pendingApprovals.failures.length === 0 ? null : (
+                <Text className="notice" tone="secondary">
+                  Could not check {snapshot.pendingApprovals.failures.map(pendingFailureLabel).join(", ")}. Local
+                  approvals still work.
                 </Text>
-                <Text tone="secondary">All current work is settled.</Text>
-              </div>
-            ) : null}
-          </div>
-        </Surface>
-        {approvalOnly ? (
-          <>
-            <ApprovalDecisionHistory records={snapshot.records} />
-            {snapshot.historyNextCursor === null ? null : (
-              <div className="activity-load-more">
-                <Button loading={historyLoading} onClick={onLoadHistory} type="button" variant="quiet">
-                  Load earlier decisions
-                </Button>
-              </div>
-            )}
-          </>
-        ) : (
+              )}
+              {snapshot.pendingApprovals.nextCursors.length === 0 ? null : (
+                <div className="activity-load-more">
+                  <Button loading={pendingLoading} onClick={onLoadPending} type="button" variant="quiet">
+                    Load more approvals
+                  </Button>
+                </div>
+              )}
+              {agendaCount === 0 && !pendingUnknown ? (
+                <div className="empty">
+                  <span>✓</span>
+                  <Text as="h3" variant="card-title">
+                    Nothing waiting
+                  </Text>
+                  <Text tone="secondary">All current work is settled.</Text>
+                </div>
+              ) : null}
+            </div>
+          </Surface>
+        )}
+        {/* What needs a decision comes before what is merely running. */}
+        {approvalOnly ? null : <AgentActivity snapshot={snapshot} />}
+        {approvalOnly ? null : (
           <ActivityHistory
             hasMore={snapshot.historyNextCursor !== null}
             loading={historyLoading}
@@ -756,7 +653,7 @@ export const DashboardView = ({
           />
         )}
         <Machines snapshot={snapshot} />
-      </main>
+      </AppColumn>
     </div>
   )
 }

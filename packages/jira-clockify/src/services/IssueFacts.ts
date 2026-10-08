@@ -289,15 +289,21 @@ export const layer = Layer.effect(
       const exists = yield* fs.exists(filePath)
       if (!exists) return emptyCache
       const content = yield* fs.readFileString(filePath)
-      return yield* Effect.try({ catch: () => emptyCache, try: () => parseIssueCache(content) })
-    }).pipe(Effect.orElseSucceed(() => emptyCache))
+      return yield* Effect.try({ catch: (): "invalid-json" => "invalid-json", try: () => parseIssueCache(content) })
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning(`Could not read the issue cache at ${filePath}; asking Jira again`, error).pipe(
+          Effect.as(emptyCache)
+        )
+      )
+    )
 
     const writeCache = (cache: IssueCache) =>
       Effect.gen(function*() {
         const exists = yield* fs.exists(dir)
         if (!exists) yield* fs.makeDirectory(dir, { recursive: true })
         yield* fs.writeFileString(filePath, serializeIssueCache(cache))
-      }).pipe(Effect.ignore)
+      }).pipe(Effect.ignore({ log: "Warn", message: `Could not save the issue cache at ${filePath}` }))
 
     /** My own account id. Failure or an unrecognised answer cannot authorize cached ownership. */
     const accountId: Effect.Effect<string | null, "unavailable"> = jira.getCurrentUser({}).pipe(
@@ -342,10 +348,20 @@ export const layer = Layer.effect(
           // A logged-out Jira resolves an empty cloudId into a URL Atlassian answers with a 404,
           // which would otherwise look exactly like "none of these issues exist" — and mark every
           // ticket as somebody else's.
-          const connection = yield* access.connection.pipe(Effect.orElseSucceed(() => Option.none()))
+          const connection = yield* access.connection.pipe(
+            Effect.catch((error) =>
+              Effect.logWarning("Could not read the Jira connection; issue ownership stays unchecked", error).pipe(
+                Effect.as(Option.none())
+              )
+            )
+          )
           if (Option.isNone(connection)) return { checked: false, facts: new Map<string, IssueFact>() }
 
-          const mine = yield* accountId.pipe(Effect.orElseSucceed(() => null))
+          const mine = yield* accountId.pipe(
+            Effect.catch(() =>
+              Effect.logWarning("Jira did not say who you are; issue ownership stays unchecked").pipe(Effect.as(null))
+            )
+          )
           const cloudId = connection.value.cloudId
           if (mine === null || cloudId === "") return { checked: false, facts: new Map<string, IssueFact>() }
 
@@ -359,7 +375,10 @@ export const layer = Layer.effect(
 
           const batches = yield* Effect.all(searchBatches(stale).map(search), { concurrency: 2 }).pipe(
             Effect.map((results) => results.flat()),
-            Effect.orElseSucceed(() => null)
+            Effect.catch((error) =>
+              Effect.logWarning("Jira refused the issue search; ownership of uncached issues stays unknown", error)
+                .pipe(Effect.as(null))
+            )
           )
           // Jira refused. What is cached still stands; what is not stays unknown.
           if (batches === null) return { checked: false, facts: factsOf(scopedCache) }

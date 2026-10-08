@@ -1,9 +1,9 @@
-import { Button, type RlyStateTone, StateLabel, Text } from "@knpkv/rly/primitives"
-import * as DateTime from "effect/DateTime"
-import type { ReactElement } from "react"
+import { Button, StateLabel, Text } from "@knpkv/rly/primitives"
+import { type ReactElement, useEffect, useState } from "react"
 
 import type { PluginSynchronizationState } from "../../api/plugins.js"
 import styles from "./ServicesPage.module.css"
+import { isAccountSyncFailure, type SyncLine, syncFailureSentence, syncLine } from "./syncPresentation.js"
 
 /** Browser lifecycle for one connection's durable manual synchronization state. */
 export type ConnectionSynchronizationViewState =
@@ -12,48 +12,41 @@ export type ConnectionSynchronizationViewState =
   | { readonly _tag: "failed" }
   | { readonly _tag: "ready"; readonly synchronization: PluginSynchronizationState }
 
-interface SynchronizationResultPresentation {
-  readonly label: string
-  readonly tone: RlyStateTone
-}
-
-const resultPresentation = (result: PluginSynchronizationState["result"]): SynchronizationResultPresentation => {
-  switch (result) {
-    case "never":
-      return { label: "Never synchronized", tone: "neutral" }
-    case "running":
-      return { label: "Synchronizing", tone: "progress" }
-    case "synchronized":
-      return { label: "Synchronized", tone: "positive" }
-    case "source-unavailable":
-      return { label: "Source unavailable", tone: "critical" }
-    case "interrupted":
-      return { label: "Interrupted", tone: "critical" }
-  }
+/** The current time, refreshed every half minute so relative times ("2 min ago") stay true. */
+const useNow = (): Date => {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30_000)
+    return () => clearInterval(timer)
+  }, [])
+  return now
 }
 
 const StateDetails = ({
+  hideAccountFailure,
   isSyncing,
   synchronization
 }: {
+  readonly hideAccountFailure: boolean
   readonly isSyncing: boolean
   readonly synchronization: PluginSynchronizationState
 }): ReactElement => {
-  // While an attempt is in flight, surface the in-progress state instead of the
-  // stale prior result. Progress is indeterminate: pages committed only persist
-  // once the attempt completes, so the prior count reads as trailing context.
-  const presentation: ReturnType<typeof resultPresentation> = isSyncing
-    ? { label: "Synchronizing…", tone: "progress" }
-    : resultPresentation(synchronization.result)
+  // While an attempt is in flight, surface the in-progress state instead of the stale prior result.
+  const now = useNow()
+  const line: SyncLine = isSyncing ? { label: "Syncing…", tone: "progress" } : syncLine(synchronization, now)
+  const failureClass = synchronization.failure?.failureClass
+  const sentence =
+    isSyncing || (hideAccountFailure && failureClass !== undefined && isAccountSyncFailure(failureClass))
+      ? null
+      : syncFailureSentence(synchronization)
   return (
     <div className={styles.syncState}>
-      <StateLabel label={presentation.label} size="compact" tone={presentation.tone} />
-      <Text tone="secondary" variant="meta">
-        Last attempt:{" "}
-        {synchronization.lastAttemptAt === null ? "never" : DateTime.formatIso(synchronization.lastAttemptAt)} · Last
-        success: {synchronization.lastSuccessAt === null ? "never" : DateTime.formatIso(synchronization.lastSuccessAt)}
-        {` · ${synchronization.pagesCommitted} ${synchronization.pagesCommitted === 1 ? "page" : "pages"}`}
-      </Text>
+      <StateLabel label={line.label} size="compact" tone={line.tone} />
+      {sentence === null ? null : (
+        <Text as="p" tone="secondary" variant="meta">
+          {sentence}
+        </Text>
+      )}
     </div>
   )
 }
@@ -61,11 +54,14 @@ const StateDetails = ({
 /** Compact read/action presentation for the shared manual-sync API. */
 export const ConnectionSynchronization = ({
   canSynchronize,
+  hideAccountFailure = false,
   onRefresh,
   onSynchronize,
   state
 }: {
   readonly canSynchronize: boolean
+  /** On a resource inside an account: credential failures are stated once on the account instead. */
+  readonly hideAccountFailure?: boolean
   readonly onRefresh: () => void
   readonly onSynchronize: () => void
   readonly state: ConnectionSynchronizationViewState | undefined
@@ -78,19 +74,19 @@ export const ConnectionSynchronization = ({
     <div className={styles.synchronization}>
       {synchronization === null ? (
         isSyncing ? (
-          <StateLabel label="Synchronizing…" size="compact" tone="progress" />
+          <StateLabel label="Syncing…" size="compact" tone="progress" />
         ) : null
       ) : (
-        <StateDetails isSyncing={isSyncing} synchronization={synchronization} />
+        <StateDetails hideAccountFailure={hideAccountFailure} isSyncing={isSyncing} synchronization={synchronization} />
       )}
       {state._tag === "loading" ? (
         <Text tone="secondary" variant="meta">
-          Loading synchronization state…
+          Loading sync state…
         </Text>
       ) : null}
       {state._tag === "failed" ? (
         <Text as="p" className={styles.setupError} role="alert" variant="body">
-          Synchronization state is unavailable.
+          Sync state is unavailable.
         </Text>
       ) : null}
       <div className={styles.syncActions}>

@@ -10,6 +10,7 @@
  * @module
  */
 import * as Context from "effect/Context"
+import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
@@ -105,9 +106,25 @@ export const defaultJcfConfig: JcfConfig = {
   sessionIgnoredTickets: []
 }
 
+/** `~/.jcf/config.json` exists but cannot be read or parsed, so a change to it would lose what it holds. */
+export class ConfigUnreadable extends Data.TaggedError("ConfigUnreadable")<{ readonly path: string }> {
+  override get message() {
+    return `Could not read ${this.path}. Fix or remove it, then try again; nothing was changed.`
+  }
+}
+
+/** The new configuration could not be written. */
+export class ConfigNotSaved extends Data.TaggedError("ConfigNotSaved")<{ readonly path: string }> {
+  override get message() {
+    return `Could not save ${this.path}. Check that the folder is writable.`
+  }
+}
+
 export interface ConfigServiceContract {
+  /** The configuration. An unreadable file is reported as a warning, and jcf's defaults apply. */
   readonly get: Effect.Effect<JcfConfig>
-  readonly set: (patch: Partial<JcfConfig>) => Effect.Effect<void>
+  /** Merge `patch` into the saved configuration. Fails, changing nothing, when the file cannot be read or written. */
+  readonly set: (patch: Partial<JcfConfig>) => Effect.Effect<void, ConfigUnreadable | ConfigNotSaved>
   readonly configDir: Effect.Effect<string>
   /** Whether `~/.jcf/config.json` exists; when it does not, `get` is jcf's defaults. */
   readonly fileExists: Effect.Effect<boolean>
@@ -224,16 +241,24 @@ export const layer = Layer.effect(
       if (!exists) yield* fs.makeDirectory(dir, { recursive: true })
     })
 
-    const read: Effect.Effect<JcfConfig> = Effect.gen(function*() {
+    const readStrict: Effect.Effect<JcfConfig, ConfigUnreadable> = Effect.gen(function*() {
       const exists = yield* fs.exists(filePath)
       if (!exists) return defaultJcfConfig
       const content = yield* fs.readFileString(filePath)
       const parsed = yield* Effect.try({
         try: () => parseConfigPatch(content),
-        catch: () => ({})
+        catch: (): "invalid-json" => "invalid-json"
       })
       return { ...defaultJcfConfig, ...parsed }
-    }).pipe(Effect.catch(() => Effect.succeed(defaultJcfConfig)))
+    }).pipe(Effect.mapError(() => new ConfigUnreadable({ path: filePath })))
+
+    const read: Effect.Effect<JcfConfig> = readStrict.pipe(
+      Effect.catch((error) =>
+        Effect.logWarning(`Could not read ${error.path}; using jcf's defaults until it is fixed.`).pipe(
+          Effect.as(defaultJcfConfig)
+        )
+      )
+    )
 
     const write = (config: JcfConfig) =>
       Effect.gen(function*() {
@@ -245,11 +270,14 @@ export const layer = Layer.effect(
       get: read,
       set: (patch) =>
         Effect.gen(function*() {
-          const current = yield* read
-          yield* write({ ...current, ...patch })
-        }).pipe(Effect.catch(() => Effect.void)),
+          const current = yield* readStrict
+          yield* write({ ...current, ...patch }).pipe(Effect.mapError(() => new ConfigNotSaved({ path: filePath })))
+        }),
       configDir: Effect.succeed(dir),
-      fileExists: fs.exists(filePath).pipe(Effect.orElseSucceed(() => false))
+      // An unreadable folder reads as "no file": `get` then serves defaults, which is what this reports.
+      fileExists: fs.exists(filePath).pipe(
+        Effect.catch((error) => Effect.logWarning(`Could not check for ${filePath}`, error).pipe(Effect.as(false)))
+      )
     }
   })
 )

@@ -20,7 +20,7 @@
 }
 
 .hero h1 {
-  max-inline-size: 10ch;
+  max-inline-size: 6.85em;
   letter-spacing: -0.07em;
   text-wrap: balance;
 }
@@ -32,7 +32,8 @@
 .releaseSelector {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-group);
 }

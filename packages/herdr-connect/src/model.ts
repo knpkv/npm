@@ -97,7 +97,10 @@ export const TerminalSelection = Schema.Struct({
   host: BoundedString,
   agentId: BoundedString,
   cols: TerminalColumns,
-  rows: TerminalRows
+  rows: TerminalRows,
+  // The client understands `terminal.scroll_state`. Absent for older clients, which would close
+  // the terminal on an unknown signal, so hosts send scroll states only when it is set.
+  scrollState: Schema.optionalKey(Schema.Boolean)
 })
 export type TerminalSelection = typeof TerminalSelection.Type
 
@@ -157,11 +160,30 @@ export const HerdrTerminalEvent = Schema.Union([
 ])
 export type HerdrTerminalEvent = typeof HerdrTerminalEvent.Type
 
+/**
+ * How far herdr has the pane scrolled back, read from `herdr pane get`. herdr keeps that position
+ * while output arrives and between viewers, so only the server can know it. `null` means the read
+ * failed and the position is unknown — never "at the bottom".
+ */
+export const TerminalScrollState = Schema.Struct({
+  type: Schema.Literal("terminal.scroll_state"),
+  // Taken only while scrolling was quiet, so it includes every scroll the session forwarded.
+  offsetFromBottom: Schema.NullOr(Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))),
+  // How many `terminal.scroll` commands this session had forwarded when the read started. The
+  // client uses the reading only if it equals the scrolls it sent, so none was in flight.
+  scrollsForwarded: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0))
+})
+export type TerminalScrollState = typeof TerminalScrollState.Type
+
+/** What a terminal session yields: herdr's own events plus the scroll state the connector reads. */
+export type TerminalSessionEvent = HerdrTerminalEvent | TerminalScrollState
+
 export const TerminalServerSignal = Schema.Union([
   Schema.Struct({ type: Schema.Literal("terminal.ready") }),
   Schema.Struct({
     type: Schema.Literal("terminal.closed"),
     reason: Schema.String.check(Schema.isMaxLength(1_024))
-  })
+  }),
+  TerminalScrollState
 ])
 export type TerminalServerSignal = typeof TerminalServerSignal.Type
