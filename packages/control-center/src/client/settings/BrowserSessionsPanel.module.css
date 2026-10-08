@@ -1,7 +1,7 @@
 .panel {
   display: grid;
   gap: var(--rly-space-40);
-  padding: var(--rly-space-48);
+  padding: var(--settings-card-padding, var(--rly-space-48));
 }
 
 .heading,
@@ -10,14 +10,17 @@
 .session {
   align-items: center;
   display: flex;
+  flex-wrap: wrap;
   gap: var(--rly-space-32);
   justify-content: space-between;
 }
 
+/* The text takes the row and the action wraps below it rather than squeezing the words. */
 .heading > div,
 .codeCard > div,
 .session > div {
   display: grid;
+  flex: 1 1 16rem;
   gap: var(--rly-space-12);
 }
 
@@ -30,7 +33,7 @@
   display: grid;
   font-size: var(--rly-type-label-size);
   gap: var(--rly-space-12);
-  min-inline-size: 16rem;
+  min-inline-size: min(100%, 16rem);
 }
 
 .permission > span {
@@ -71,7 +74,7 @@
 
 .session {
   border-block-end: 1px solid var(--rly-color-border-2);
-  padding: var(--rly-space-24) 0;
+  padding-block: var(--rly-space-24);
 }
 
 @media (max-width: 52rem) {
@@ -83,7 +86,10 @@
     flex-direction: column;
   }
 
-  .permission {
-    min-inline-size: 0;
+  /* Stacked, the basis would be a 16rem height. */
+  .heading > div,
+  .codeCard > div,
+  .session > div {
+    flex: none;
   }
 }
