@@ -83,6 +83,9 @@ interface RelayPullRequestDockRegistry {
   /** Whether the Relay panel is open; shared by the header launcher and the panel. */
   readonly open: boolean
   readonly setOpen: (open: boolean | ((current: boolean) => boolean)) => void
+  /** Whether the user pinned Relay beside the page; the host lays out its column from this and `open`. */
+  readonly pinned: boolean
+  readonly setPinned: (pinned: boolean) => void
   /** The header launcher, where the panel returns focus. */
   readonly launcher: RefObject<HTMLButtonElement | null>
   /** How many panels have claimed Relay's Ctrl/⌘+J under this provider; more than one is a bug. */
@@ -103,6 +106,7 @@ const RelayPullRequestDockContext = createContext<RelayPullRequestDockRegistry |
 export const RelayProductDockProvider = ({ children }: { readonly children: ReactNode }): ReactElement => {
   const [registration, setRegistration] = useState<RelayPullRequestDockRegistration | null>(null)
   const [open, setOpen] = useState(false)
+  const [pinned, setPinned] = useState(false)
   const launcher = useRef<HTMLButtonElement | null>(null)
   const summonClaims = useRef(0)
   const register = useCallback((next: RelayPullRequestDockRegistration) => {
@@ -112,8 +116,8 @@ export const RelayProductDockProvider = ({ children }: { readonly children: Reac
     }
   }, [])
   const registry = useMemo<RelayPullRequestDockRegistry>(
-    () => ({ launcher, open, register, registration, setOpen, summonClaims }),
-    [open, register, registration]
+    () => ({ launcher, open, pinned, register, registration, setOpen, setPinned, summonClaims }),
+    [open, pinned, register, registration]
   )
   return <RelayPullRequestDockContext value={registry}>{children}</RelayPullRequestDockContext>
 }
@@ -132,11 +136,23 @@ export const useRelayProductDockRegistration = (): RelayPullRequestDockRegistrat
   return registry.registration
 }
 
-/** The Relay panel's open state and the header launcher, shared through the provider. */
-export const useRelayProductOpen = (): Pick<RelayPullRequestDockRegistry, "launcher" | "open" | "setOpen"> => {
+/**
+ * The Relay panel's open and pinned state and the header launcher, shared through the provider. A host
+ * renders RelayProductPanel in its own column when `open && pinned` and the viewport allows pinning.
+ */
+export const useRelayProductOpen = (): Pick<
+  RelayPullRequestDockRegistry,
+  "launcher" | "open" | "pinned" | "setOpen" | "setPinned"
+> => {
   const registry = useContext(RelayPullRequestDockContext)
   if (registry === undefined) throw new RelayProductDockProviderMissing()
-  return { launcher: registry.launcher, open: registry.open, setOpen: registry.setOpen }
+  return {
+    launcher: registry.launcher,
+    open: registry.open,
+    pinned: registry.pinned,
+    setOpen: registry.setOpen,
+    setPinned: registry.setPinned
+  }
 }
 
 /** Two panels under one provider would both bind Ctrl/⌘+J, so a second one fails loudly. */

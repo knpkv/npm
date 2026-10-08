@@ -118,7 +118,7 @@ const actionFailureDescription = (
   }
 }
 
-const failureFromCause = <Failure extends RelayProductDockContinuationFailure | RelayProductDockLocateFailure>(
+export const failureFromCause = <Failure extends RelayProductDockContinuationFailure | RelayProductDockLocateFailure>(
   cause: Cause.Cause<Failure>
 ): string => {
   const failure = cause.reasons.find(Cause.isFailReason)

@@ -15,7 +15,9 @@ components (`RelayLauncher`, `RelayPanel`, `RelayTranscript`, `RelayComposer`). 
 both under one `RelayProductDockProvider`: the launcher in the app header, the panel
 once, after it. The panel owns Relay's Ctrl/⌘+J; a second panel under the same provider
 throws `RelayProductSummonClaimed`. `minHostWidth` is required: each host states the
-narrowest width its own page stays usable at beside a pinned Relay.
+narrowest width its own page stays usable at beside a pinned Relay. The pin is offered only
+where the viewport allows it; `useRelayProductOpen()` exposes `open` and `pinned`, and the
+host renders the panel in its own column while both hold.
 
 A registered pull request opens straight into its conversation. The composer's draft is
 keyed by the complete, canonically serialised thread identity, so it survives closing,

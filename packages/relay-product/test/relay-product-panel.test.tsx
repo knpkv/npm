@@ -3,7 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { beforeAll, vi } from "vitest"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import { act, Component, type ReactElement, type ReactNode } from "react"
+import { act, Component, type ReactElement, type ReactNode, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 
 import {
@@ -13,12 +13,22 @@ import {
   type RelayProductDockHost,
   RelayProductLauncher,
   RelayProductPanel,
+  RelayAuthenticationRequired,
   type RelayPullRequestDockRegistration,
   RelaySelectorState,
   useRelayPullRequestDock
 } from "../src/index.js"
 
 Object.defineProperty(window, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true })
+
+// happy-dom's viewport control, which drives the panel's width media queries.
+declare global {
+  interface Window {
+    readonly happyDOM?: {
+      readonly setViewport: (viewport: { readonly height: number; readonly width: number }) => void
+    }
+  }
+}
 
 const coupled = Schema.decodeUnknownSync(RelaySelectorState)({
   modelId: "security",
@@ -46,25 +56,28 @@ const host: RelayProductDockHost = {
   selection: coupled
 }
 
-const conversationFor = (selection: RelaySelectorState) =>
+const conversationFor = (selection: RelaySelectorState, pullRequestId = "184") =>
   Schema.decodeUnknownSync(PullRequestConversation)({
     _tag: "codecommit",
-    route: { accountId: "123456789012", href: "/accounts/123456789012/prs/184", pullRequestId: "184" },
+    route: { accountId: "123456789012", href: `/accounts/123456789012/prs/${pullRequestId}`, pullRequestId },
     selection,
-    thread: { accountId: "123456789012", pullRequestId: "184", region: "eu-west-1", repositoryName: "payments" }
+    thread: { accountId: "123456789012", pullRequestId, region: "eu-west-1", repositoryName: "payments" }
   })
+
+type Ready = Extract<RelayPullRequestDockRegistration, { readonly status: "ready" }>
 
 const ready = (
   selection: RelaySelectorState,
-  continuePullRequestConversation: (request: typeof ContinuePullRequestConversationRequest.Type) => Effect.Effect<void>
-): RelayPullRequestDockRegistration => ({
+  continuePullRequestConversation: Ready["continuePullRequestConversation"],
+  pullRequestId = "184"
+): Ready => ({
   context: [
     { id: "repository", label: "Repository", value: "payments" },
     { id: "pull-request", label: "Pull request", value: "#184" },
     { id: "head", label: "Current head", value: "bbbbbbb" }
   ],
   continuePullRequestConversation,
-  conversation: conversationFor(selection),
+  conversation: conversationFor(selection, pullRequestId),
   messages: [
     { id: "m1", role: "operator", text: "Why is the trailing context line skipped?" },
     { id: "m2", role: "relay", text: "The hunk loop stops one line early." },
@@ -87,6 +100,15 @@ class Catch extends Component<{ readonly children: ReactNode }, { readonly error
   override render(): ReactNode {
     return this.state.error === null ? this.props.children : <output data-caught={this.state.error} />
   }
+}
+
+let swap: (registration: RelayPullRequestDockRegistration) => void = () => undefined
+/** A route whose registration a test replaces in place, as navigation under one provider does. */
+const Swappable = ({ initial }: { readonly initial: RelayPullRequestDockRegistration }): null => {
+  const [registration, setRegistration] = useState(initial)
+  swap = setRegistration
+  useRelayPullRequestDock(registration)
+  return null
 }
 
 let root: Root | undefined
@@ -271,6 +293,126 @@ describe("RelayProductPanel", () => {
       expect(document.querySelector("textarea")?.value).toBe("Same thread draft.")
     } finally {
       await unmount()
+    }
+  })
+
+  it("leaves find mode when the located pull request registers", async () => {
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel host={host} minHostWidth={960} />
+        <Swappable initial={ready(coupled, () => Effect.void)} />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      await act(async () => button("Find another pull request")?.click())
+      expect(document.querySelector("form[aria-label='Find a pull request conversation']")).not.toBeNull()
+      // A message update on the same thread keeps find mode.
+      await act(async () => swap({ ...ready(coupled, () => Effect.void), messages: [] }))
+      expect(document.querySelector("form[aria-label='Find a pull request conversation']")).not.toBeNull()
+      await act(async () => swap(ready(coupled, () => Effect.void, "185")))
+      expect(document.querySelector("form[aria-label='Find a pull request conversation']")).toBeNull()
+      expect(document.querySelector("textarea")).not.toBeNull()
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("starts a newly registered pull request with its own failure and selector state", async () => {
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel host={host} minHostWidth={960} />
+        <Swappable initial={ready(coupled, () => Effect.die("transport"))} />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      await setText("Fails on A.")
+      await act(async () => button("Send")?.click())
+      expect(document.querySelector("[role='alert']")).not.toBeNull()
+      await act(async () => swap(ready(uncoupled, () => Effect.void, "185")))
+      expect(document.querySelector("[role='alert']")).toBeNull()
+      expect(document.querySelector("[aria-label='Profile']")).not.toBeNull()
+      expect(document.querySelector("[aria-label='Model']")).not.toBeNull()
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("keeps both selects when an extra or differing model would be hidden by one preset", async () => {
+    const extra = Schema.decodeUnknownSync(RelaySelectorState)({
+      modelId: "m2",
+      models: [
+        { id: "p1", label: "P1 model" },
+        { id: "m2", label: "Other model" }
+      ],
+      profileId: "p1",
+      profiles: [{ id: "p1", label: "P1" }]
+    })
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel host={{ ...host, selection: extra }} minHostWidth={960} />
+        <Registered registration={ready(extra, () => Effect.void)} />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      expect(document.querySelector("[aria-label='Run with']")).toBeNull()
+      expect(document.querySelector("[aria-label='Model']")).not.toBeNull()
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("names a typed send failure's reason instead of a generic retry", async () => {
+    const unauthenticated = () =>
+      Effect.fail(
+        new RelayAuthenticationRequired({ operation: "continue-pull-request-conversation", product: "codecommit" })
+      )
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel host={host} minHostWidth={960} />
+        <Registered registration={ready(coupled, unauthenticated)} />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      await setText("Needs auth.")
+      await act(async () => button("Send")?.click())
+      expect(document.querySelector("[role='alert']")?.textContent).toBe(
+        "Authenticate with this product before using its Relay conversations. Your message is kept."
+      )
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("offers the pin only where the host stays usable beside the column", async () => {
+    const pinnable = async (width: number): Promise<boolean> => {
+      await act(async () => window.happyDOM?.setViewport({ height: 900, width }))
+      await mount(
+        <RelayProductDockProvider>
+          <RelayProductLauncher />
+          <RelayProductPanel host={host} minHostWidth={1100} />
+          <Registered registration={ready(coupled, () => Effect.void)} />
+        </RelayProductDockProvider>
+      )
+      try {
+        await open()
+        return button("Pin beside the page") !== undefined
+      } finally {
+        await unmount()
+      }
+    }
+    try {
+      expect(await pinnable(1600)).toBe(true)
+      expect(await pinnable(1500)).toBe(false)
+    } finally {
+      await act(async () => window.happyDOM?.setViewport({ height: 768, width: 1024 }))
     }
   })
 })

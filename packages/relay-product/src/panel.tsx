@@ -21,7 +21,7 @@ import {
   type PullRequestThreadIdentity,
   pullRequestThreadIdentity
 } from "./conversation.js"
-import { HostConversationLocator, relaySelectionMatchesRegistration } from "./dock.js"
+import { failureFromCause, HostConversationLocator, relaySelectionMatchesRegistration } from "./dock.js"
 import type { RelaySelectorState } from "./model.js"
 import {
   type RelayProductDockHost,
@@ -79,9 +79,23 @@ const itemsOf = (messages: ReadonlyArray<RelayProductDockMessage>): ReadonlyArra
         : { _tag: "Note", id: message.id, text: message.text }
   )
 
-/** Every profile has a model of the same id: one choice sets both, so one preset is offered. */
+/**
+ * Profiles and models pair one to one by id and the active pair matches: one choice sets both, so one
+ * preset is offered. Anything else keeps both selects, so no active or extra model is hidden.
+ */
 const isCoupled = (selection: RelaySelectorState): boolean =>
+  selection.profileId === selection.modelId &&
+  selection.profiles.length === selection.models.length &&
   selection.profiles.every(({ id }) => selection.models.some((model) => model.id === id))
+
+/** The selector's meaning, so an equal selector re-allocated by the host is not a change. */
+const selectorRevision = (selection: RelaySelectorState): string =>
+  JSON.stringify([
+    selection.profileId,
+    selection.modelId,
+    selection.profiles.map(({ id, label }) => [id, label]),
+    selection.models.map(({ id, label }) => [id, label])
+  ])
 
 const sameRun = (left: RelaySelectorState, right: RelaySelectorState): boolean =>
   left.profileId === right.profileId && left.modelId === right.modelId
@@ -102,10 +116,13 @@ const rerunReason = "Rerun Relay with the selected profile or model before conti
  */
 export const RelayProductPanel = ({ host, minHostWidth }: RelayProductPanelProps): ReactElement | null => {
   const registration = useRelayProductDockRegistration()
-  const { launcher, open, setOpen } = useRelayProductOpen()
-  const { presentation } = useRelayPresentation({ minHostWidth, pinned: false })
+  const { launcher, open, pinned, setOpen, setPinned } = useRelayProductOpen()
+  const { canPin, presentation } = useRelayPresentation({ minHostWidth, pinned })
   useSummonClaim()
-  const [finding, setFinding] = useState(false)
+  const thread = registration === null ? null : threadKey(pullRequestThreadIdentity(registration.conversation))
+  // Finding another PR ends when a different thread registers (the locator navigated there).
+  const [finding, setFinding] = useState<string | null>(null)
+  const locatingFrom = finding !== null && finding === thread
   const { composerRef, regionRef } = useRelaySummon({
     fullscreen: presentation === "fullscreen",
     launcher,
@@ -115,7 +132,7 @@ export const RelayProductPanel = ({ host, minHostWidth }: RelayProductPanelProps
   })
   if (!open) return null
   const context = registration?.context ?? host.context
-  const locating = registration === null || finding
+  const locating = registration === null || locatingFrom
   return (
     <RelayPanel
       launcher={launcher}
@@ -124,8 +141,8 @@ export const RelayProductPanel = ({ host, minHostWidth }: RelayProductPanelProps
         registration === null ? undefined : (
           // Moving to another PR is a different thread; this one's draft stays keyed to it.
           <Button
-            aria-pressed={finding}
-            onClick={() => setFinding((current) => !current)}
+            aria-pressed={locatingFrom}
+            onClick={() => setFinding(locatingFrom ? null : thread)}
             type="button"
             variant="quiet"
           >
@@ -133,11 +150,15 @@ export const RelayProductPanel = ({ host, minHostWidth }: RelayProductPanelProps
           </Button>
         )
       }
+      {...(canPin ? { pin: { onPinnedChange: setPinned, pinned } } : {})}
       presentation={presentation}
       ref={regionRef}
       scope={scopeOf(context)}
       {...(registration?.status === "ready" && !locating
-        ? { footer: <Continuation composerRef={composerRef} registration={registration} /> }
+        ? {
+            // Keyed by thread: a different PR starts with its own preset, sending and failure state.
+            footer: <Continuation composerRef={composerRef} key={thread} registration={registration} />
+          }
         : {})}
     >
       {locating ? (
@@ -198,7 +219,9 @@ const Continuation = ({
   const [sending, setSending] = useState(false)
   // Decided once when the panel opens, so the preset never turns into two selects mid-thread.
   const coupled = useRef(isCoupled(registration.selection)).current
-  useEffect(() => setSelection(registration.selection), [registration.selection])
+  const revision = selectorRevision(registration.selection)
+  // Only a selector that means something different resets a pending choice.
+  useEffect(() => setSelection(registration.selection), [revision])
 
   // A different preset applies to the next message; a selection outside this thread's options needs a
   // rerun first, and the composer says so instead of failing on send.
@@ -225,7 +248,7 @@ const Continuation = ({
     void Effect.runPromiseExit(registration.continuePullRequestConversation(decoded.success)).then((exit) => {
       setSending(false)
       if (Exit.isSuccess(exit)) draft.accepted(submission.requestId)
-      else setFailure("Relay could not continue this PR thread. Your message is kept; try again.")
+      else setFailure(`${failureFromCause(exit.cause)} Your message is kept.`)
     })
   }
 
