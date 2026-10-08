@@ -93,6 +93,12 @@
     margin-block-start: var(--rly-space-8);
   }
 
+  /* Standalone, the limits take their own line under the header, on the header's edges. */
+  .connect-header + .connect-limits {
+    margin-block-start: var(--rly-space-0);
+    padding: var(--rly-space-12) var(--rly-space-20);
+  }
+
   .connect-limits-line,
   .connect-limits-notes {
     list-style: none;
@@ -121,9 +127,11 @@
     position: absolute;
   }
 
-  .connect-limits-details[open] {
+  /* Each host's cards are their own region: a clear step between them. */
+  .connect-limits-hosts {
     display: grid;
-    gap: var(--rly-space-12);
+    gap: var(--rly-space-24);
+    padding-block-start: var(--rly-space-12);
   }
 
   .connect-limits-notes {

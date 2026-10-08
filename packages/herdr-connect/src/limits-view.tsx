@@ -50,6 +50,8 @@ export const ConnectLimits = ({
       )}
       <details className="connect-limits-details">
         <summary>{severalHosts ? "Limits on each host" : "Limit details"}</summary>
+        {/* A <details> lays its content out through an internal slot, so the grid is a wrapper's. */}
+        <div className="connect-limits-hosts">
         {problem === null ? null : (
           <Text as="p" tone="secondary" variant="meta">
             {problem}
@@ -75,6 +77,7 @@ export const ConnectLimits = ({
             ))}
           </ul>
         )}
+        </div>
       </details>
     </div>
   )

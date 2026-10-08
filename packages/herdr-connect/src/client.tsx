@@ -1135,9 +1135,10 @@ export const ConnectSurface = ({
               Connect
             </a>
           </nav>
-          <ConnectLimits problem={limits.problem} view={limits.view} />
         </header>
       )}
+      {/* The standalone header is one row; the limits take their own line under it. */}
+      {embedded ? null : <ConnectLimits problem={limits.problem} view={limits.view} />}
       <section
         aria-label="Herdr agents"
         className="connect-agents"
