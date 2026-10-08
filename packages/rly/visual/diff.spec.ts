@@ -1,4 +1,5 @@
-import { expect, type Locator, type Page, test } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
+import { expect, test } from "./fixtures.ts"
 
 const story = (id: string, forcedColors = "auto"): string =>
   `/iframe.html?id=${id}&viewMode=story&globals=theme:dark;forcedColors:${forcedColors};reducedMotion:reduce;locale:en;density:comfortable`
