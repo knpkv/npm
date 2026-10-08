@@ -65,7 +65,7 @@ const agentRows = Array.from({ length: 18 }, (_, index) => {
   return `
     <button class="connect-agent" type="button">
       <time>12:${agent}</time>
-      <span class="connect-agent-copy"><strong>agent-${agent}</strong><small>SER8, Root agent, Working in npm</small></span>
+      <span class="connect-agent-copy"><strong>agent-${agent}</strong><small>SER8, Root agent, npm</small></span>
       <span class="connect-agent-state" data-activity="working">Working</span>
     </button>`
 }).join("")

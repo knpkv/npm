@@ -1,3 +1,10 @@
+import {
+  AgentStateLabel,
+  agentBucketLabel,
+  agentBuckets,
+  type AgentBucket,
+  agentStatePresentation
+} from "./agent-state.js"
 import { Hero, HeroWord } from "@knpkv/rly/patterns"
 import { Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
@@ -12,8 +19,7 @@ import {
 } from "./terminal-keyboard.js"
 import { nextTerminalRailIndex } from "./terminal-rail-navigation.js"
 
-type AgentActivity = "working" | "ready" | "attention" | "finished"
-export type AgentActivityFilter = "all" | AgentActivity
+export type AgentActivityFilter = "all" | AgentBucket
 
 type AgentFilters = {
   readonly activity: AgentActivityFilter
@@ -41,8 +47,7 @@ type CalendarOptions = {
   readonly timeZone?: string
 }
 
-const activityOrder: ReadonlyArray<AgentActivity> = ["working", "attention", "ready", "finished"]
-const activityFilters: ReadonlyArray<AgentActivityFilter> = ["all", ...activityOrder]
+const activityFilters: ReadonlyArray<AgentActivityFilter> = ["all", ...agentBuckets]
 
 const naturalOrder = new Intl.Collator("en", {
   numeric: true,
@@ -59,54 +64,8 @@ export const connectAgentKey = (agent: ConnectAgent): string => `${agent.host}:$
 export const connectAgentHosts = (agents: ReadonlyArray<ConnectAgent>): ReadonlyArray<string> =>
   [...new Set(agents.map(({ host }) => host))].toSorted(naturalOrder.compare)
 
-const activityFor = (state: string): AgentActivity => {
-  switch (state.toLocaleLowerCase("en-US")) {
-    case "running":
-    case "working":
-      return "working"
-    case "idle":
-    case "waiting":
-    case "ready":
-      return "ready"
-    case "blocked":
-    case "unknown":
-      return "attention"
-    case "done":
-      return "finished"
-    default:
-      return "attention"
-  }
-}
-
-const activityLabel = (activity: AgentActivity): string =>
-  activity === "working"
-    ? "Working"
-    : activity === "ready"
-      ? "Ready"
-      : activity === "attention"
-        ? "Attention"
-        : "Finished"
-
 const activityFilterLabel = (activity: AgentActivityFilter): string =>
-  activity === "all" ? "All" : activityLabel(activity)
-
-/** What the agent is doing, before the name of its work. */
-const workPrefix = (agent: ConnectAgent): string => {
-  switch (activityFor(agent.state)) {
-    case "working":
-      return "Working in"
-    case "ready":
-      return "Ready in"
-    case "attention":
-      return "Needs attention in"
-    case "finished":
-      return "Last active in"
-  }
-}
-
-/** The agent's own state word, capitalised; only an agent needing attention takes ink. */
-const stateWord = (state: string): string =>
-  state.length === 0 ? "Unknown" : `${state.charAt(0).toLocaleUpperCase("en-US")}${state.slice(1)}`
+  activity === "all" ? "All" : agentBucketLabel(activity)
 
 const matchesQuery = (agent: ConnectAgent, query: string): boolean => {
   const normalized = query.trim().toLocaleLowerCase("en-US")
@@ -250,7 +209,7 @@ export const calendarConnectAgents = (
   const days = new Map<string, AgentCalendarDay>()
   const filtered = agents
     .filter((agent) => {
-      const activity = activityFor(agent.state)
+      const activity = agentStatePresentation(agent.state).bucket
       return (
         matchesQuery(agent, filters.query) &&
         (filters.host === null || agent.host === filters.host) &&
@@ -314,8 +273,9 @@ export const ConnectSummary = ({
   readonly offlineHosts: ReadonlyArray<string>
   readonly unavailable: boolean
 }) => {
-  const needAttention = agents?.filter((agent) => activityFor(agent.state) === "attention").length ?? 0
-  const working = agents?.filter((agent) => activityFor(agent.state) === "working").length ?? 0
+  const needAttention =
+    agents?.filter((agent) => agentStatePresentation(agent.state).bucket === "needs-you").length ?? 0
+  const working = agents?.filter((agent) => agentStatePresentation(agent.state).bucket === "working").length ?? 0
   const total = agents?.length ?? 0
   return (
     <>
@@ -374,7 +334,7 @@ export const AgentDirectory = ({
   // With one host the filter already names it; rows repeat it only when it tells agents apart.
   const severalHosts = hosts.length > 1
   const rows = connectLineageRows(agents).filter(({ agent }) => {
-    const activity = activityFor(agent.state)
+    const activity = agentStatePresentation(agent.state).bucket
     return (
       matchesQuery(agent, query) &&
       (hostFilter === null || agent.host === hostFilter) &&
@@ -429,7 +389,7 @@ export const AgentDirectory = ({
         <div className="connect-agent-list">
           {rows.map(({ agent, depth, issue }, index) => {
             const key = connectAgentKey(agent)
-            const activity = activityFor(agent.state)
+            const activity = agentStatePresentation(agent.state).bucket
             return (
               <button
                 aria-pressed={selectedKey === key}
@@ -457,12 +417,11 @@ export const AgentDirectory = ({
                         <span className="connect-token">{agent.host}</span>,{" "}
                       </>
                     ) : null}
-                    {relationLabel(agent, issue, names)}, {workPrefix(agent)}{" "}
-                    <span className="connect-token">{agent.work}</span>
+                    {relationLabel(agent, issue, names)}, <span className="connect-token">{agent.work}</span>
                   </Text>
                 </span>
                 <span className="connect-agent-state" data-activity={activity}>
-                  {stateWord(agent.state)}
+                  <AgentStateLabel state={agent.state} />
                 </span>
               </button>
             )

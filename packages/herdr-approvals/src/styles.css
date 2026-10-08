@@ -358,19 +358,6 @@
     overflow-wrap: break-word;
   }
 
-  /* Only an agent at work moves; settled states keep a still, distinct icon. */
-  @media (prefers-reduced-motion: no-preference) {
-    .agent-state-spinning svg {
-      animation: agent-state-spin 1.6s linear infinite;
-    }
-  }
-
-  @keyframes agent-state-spin {
-    to {
-      transform: rotate(1turn);
-    }
-  }
-
   .agenda-list {
     display: grid;
     gap: var(--rly-space-12);

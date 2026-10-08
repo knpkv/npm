@@ -257,6 +257,16 @@ const loadWork = Effect.gen(function* () {
 
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
+/** The shared agent state language, for hosts that list agents outside Connect (the hub's dashboard). */
+export {
+  type AgentBucket,
+  agentBucketLabel,
+  agentBuckets,
+  AgentStateLabel,
+  type AgentStatePresentation,
+  agentStatePresentation
+} from "./agent-state.js"
+
 export const makeConnectAtoms = () => {
   const agents = browserRuntime.atom(loadAgents)
   const work = browserRuntime.atom(loadWork)
