@@ -13,6 +13,7 @@ import {
   accountsConfigSaveAtom,
   notificationsSsoLoginAtom
 } from "../atoms/app.js"
+import type { AppState } from "../atoms/app.js"
 import { ConfigUnavailable } from "./load-failed.js"
 import { Button, ButtonGroup } from "./ui/button.js"
 import { Input } from "./ui/input.js"
@@ -195,6 +196,7 @@ export function SettingsAccounts() {
         .onFailure(() => <ConfigUnavailable />)
         .onSuccess((data) => (
           <AccountsList
+            callerIdentities={appState.callerIdentities}
             currentUser={appState.currentUser}
             autoDetect={autoDetectChoice ?? data.autoDetect}
             data={data}
@@ -332,6 +334,7 @@ function NoProfiles({
 
 function AccountsList({
   autoDetect,
+  callerIdentities,
   currentUser,
   data,
   onSsoLogin,
@@ -346,6 +349,8 @@ function AccountsList({
   toggleAccount
 }: {
   readonly autoDetect: boolean
+  /** Per enabled profile once its identity read finished; a missing key means it hasn't yet. */
+  readonly callerIdentities: AppState["callerIdentities"]
   readonly currentUser: string | undefined
   readonly data: ConfigData
   readonly overrides: Record<string, boolean>
@@ -377,6 +382,8 @@ function AccountsList({
   const enabledAccounts = accounts.filter((a) => a.enabled)
   const enabledCount = enabledAccounts.length
   const signedIn = currentUser !== undefined && currentUser.length > 0
+  // "Not logged in" only once an identity read has answered; while one is still out, say so.
+  const checking = enabledAccounts.some((account) => callerIdentities?.[account.profile] === undefined)
 
   return (
     <>
@@ -401,7 +408,7 @@ function AccountsList({
           </>
         ) : (
           <>
-            <span className="text-muted-foreground">Not logged in</span>
+            <span className="text-muted-foreground">{checking ? "Checking sign-in…" : "Not logged in"}</span>
             {enabledAccounts[0] &&
               (() => {
                 const profile = enabledAccounts[0].profile
