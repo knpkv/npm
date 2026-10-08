@@ -43,6 +43,15 @@
   .box:focus-within {
     border-color: var(--rly-color-text-2);
   }
+  /* The textarea's focus ring encloses the whole box (its text and its controls), not the text alone. */
+  .box:has(.input:focus-visible) {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  /* Its own ring would sit inside the box's; .box:has(.input:focus-visible) draws the one ring. */
+  .input:focus {
+    outline: none;
+  }
   /* Grows with its text (sized in script), then scrolls: at most 12 lines or 40% of the viewport. */
   .input {
     appearance: none;

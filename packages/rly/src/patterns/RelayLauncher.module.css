@@ -90,13 +90,21 @@
      * at least the same specificity, and later, so the inverted fill wins while hovered or pressed.
      */
     .root[aria-expanded="true"],
-    .root[aria-expanded="true"]:not(:disabled):hover,
     .root[aria-expanded="true"]:not(:disabled):active {
       background: ButtonText;
       border: 2px solid ButtonText;
       box-shadow: none;
       color: ButtonFace;
       forced-color-adjust: none;
+    }
+    @media (hover: hover) and (pointer: fine) {
+      .root[aria-expanded="true"]:not(:disabled):hover {
+        background: ButtonText;
+        border: 2px solid ButtonText;
+        box-shadow: none;
+        color: ButtonFace;
+        forced-color-adjust: none;
+      }
     }
     /* forced-color-adjust: none is inherited, so every descendant needs its system colour here. */
     .root[aria-expanded="true"] .mark,
@@ -110,13 +118,20 @@
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"],
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
-    .root[aria-expanded="true"]:not(:disabled):hover,
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
     .root[aria-expanded="true"]:not(:disabled):active {
     background: ButtonText;
     border: 2px solid ButtonText;
     box-shadow: none;
     color: ButtonFace;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+      .root[aria-expanded="true"]:not(:disabled):hover {
+      background: ButtonText;
+      border: 2px solid ButtonText;
+      box-shadow: none;
+      color: ButtonFace;
+    }
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"] .mark,
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"] .hint {
