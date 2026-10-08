@@ -13,6 +13,7 @@ import type { ProviderId } from "../../domain/sourceRevision.js"
 import { ConnectionTestEvidence } from "./ConnectionTestEvidence.js"
 import { ConnectionAdministration, type ConnectionAdministrationViewState } from "./ConnectionAdministration.js"
 import { ConnectionSynchronization, type ConnectionSynchronizationViewState } from "./ConnectionSynchronization.js"
+import { accountSyncFailureSentence, isAccountSyncFailure } from "./syncPresentation.js"
 import type { ConnectionTestTransport } from "./connectionTestTransport.js"
 import { type ConnectionEnablementState, type ConnectionTestState, connectionStatus } from "./connectionState.js"
 import styles from "./ServicesPage.module.css"
@@ -103,10 +104,13 @@ const ConnectedProviderResource = ({
   readonly testState: ConnectionTestState | undefined
   readonly administrationState: ConnectionAdministrationViewState | undefined
 }): ReactElement => {
-  const status = connectionStatus(connection, testState)
+  const status = connectionStatus(connection, testState, synchronizationState)
   const isTesting = testState?._tag === "testing"
   const isChanging = enablementState === "changing"
-  const needsAttention = status.tone === "caution" || status.tone === "critical" || status.tone === "progress"
+  // A resource that hasn't synced opens too, so its Sync now is visible without opening Controls.
+  const isUnsynced = synchronizationState?._tag === "ready" && synchronizationState.synchronization.result === "never"
+  const needsAttention =
+    isUnsynced || status.tone === "caution" || status.tone === "critical" || status.tone === "progress"
   const disclosure = useRef<HTMLDetailsElement>(null)
   const previouslyNeededAttention = useRef(false)
 
@@ -124,6 +128,7 @@ const ConnectedProviderResource = ({
         <ConnectionTestEvidence state={testState} />
         <ConnectionSynchronization
           canSynchronize={canConfigure && connection.isEnabled}
+          hideAccountFailure
           onRefresh={() => onRefreshSynchronization(connection.pluginConnectionId)}
           onSynchronize={() => onSynchronize(connection.pluginConnectionId)}
           state={synchronizationState}
@@ -218,6 +223,22 @@ export const ProviderAccountCard = ({
     })
   }
 
+  // Credential failures are the account's: stated once here, with one action that re-syncs each
+  // resource that hit them, never repeated on every resource row.
+  const accountFailures = account.resources.flatMap((resource) => {
+    const connection = connections.find((candidate) => candidate.followedResourceId === resource.followedResourceId)
+    const state = connection === undefined ? undefined : synchronizationStates.get(connection.pluginConnectionId)
+    const failureClass = state?._tag === "ready" ? state.synchronization.failure?.failureClass : undefined
+    // A disabled resource can't sync; Check again would only trade its known failure for a rejection.
+    return connection !== undefined &&
+      connection.isEnabled &&
+      failureClass !== undefined &&
+      isAccountSyncFailure(failureClass)
+      ? [{ pluginConnectionId: connection.pluginConnectionId, failureClass }]
+      : []
+  })
+  const accountFailure = accountFailures[0]
+
   return (
     <Surface as="article" className={styles.accountCard} padding="default" form="grouped">
       <div className={styles.accountHeading}>
@@ -285,6 +306,22 @@ export const ProviderAccountCard = ({
           </div>
         )
       ) : null}
+      {accountFailure === undefined ? null : (
+        <div className={styles.accountFailure} role="status">
+          <Text as="p" variant="body">
+            {accountSyncFailureSentence(accountFailure.failureClass)}
+          </Text>
+          <Button
+            disabled={!canConfigure}
+            onClick={() => {
+              for (const { pluginConnectionId } of accountFailures) onSynchronize(pluginConnectionId)
+            }}
+            variant="secondary"
+          >
+            Check again
+          </Button>
+        </div>
+      )}
       <div className={styles.resourceList}>
         {account.resources.map((resource) => {
           const connection = connections.find(
@@ -294,7 +331,9 @@ export const ProviderAccountCard = ({
           const enablementState =
             connection === undefined ? undefined : enablementStates.get(connection.pluginConnectionId)
           const status: ReturnType<typeof connectionStatus> =
-            connection === undefined ? { label: "Followed", tone: "neutral" } : connectionStatus(connection, testState)
+            connection === undefined
+              ? { label: "Followed", tone: "neutral" }
+              : connectionStatus(connection, testState, synchronizationStates.get(connection.pluginConnectionId))
           if (connection === undefined) {
             return (
               <div className={styles.resource} data-status-tone={status.tone} key={resource.followedResourceId}>

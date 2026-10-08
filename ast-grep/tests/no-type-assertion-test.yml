@@ -1,0 +1,11 @@
+id: no-type-assertion
+valid:
+  - |
+    const config = { mode: "strict" } satisfies Config
+  - |
+    const user = yield* Schema.decodeUnknownEffect(User)(input)
+invalid:
+  - |
+    const user = input as User
+  - |
+    const modes = ["read", "write"] as const

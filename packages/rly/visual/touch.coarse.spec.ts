@@ -1,4 +1,5 @@
-import { expect, type Locator, test } from "@playwright/test"
+import type { Locator } from "@playwright/test"
+import { expect, test } from "./fixtures.ts"
 
 // Runs in the `coarse` project, whose Chromium reports a coarse primary pointer (see playwright.config.ts).
 const story = (id: string): string =>

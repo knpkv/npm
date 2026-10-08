@@ -8,7 +8,8 @@ import {
   JobRecord,
   JobStore,
   jobTextMaxLength,
-  makeFleetService
+  makeFleetService,
+  type WorkerStarted
 } from "@knpkv/herdr-fleet"
 import { Effect, Result, Schema } from "effect"
 import * as HttpClientRequest from "effect/http/HttpClientRequest"
@@ -52,6 +53,9 @@ const config = (
   stateDirectory: repository,
   tailscaleCommand: "tailscale"
 })
+
+/** For jobs that never start an agent worker (nix.check, agent.message); reaching this callback is a defect. */
+const noWorkerStarted: WorkerStarted = () => Effect.die("a job that starts no worker reported a started worker")
 
 describe("host command output", () => {
   it.effect("accepts root coordinator lifecycle only for coordinator-handled delegates", () => {
@@ -247,13 +251,13 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
           "printf 'exact output'; printf 'diagnostic' >&2"
         ])
       )
-      expect(yield* bounded.run({ kind: "nix.check" })).toBe("exact output")
+      expect(yield* bounded.run({ kind: "nix.check" }, noWorkerStarted, "job-nix-check")).toBe("exact output")
 
       const failed = yield* makeHostOperations(
         config(root, ["sh", "-c", "printf 'plausible'; printf 'fatal' >&2; exit 7"])
       )
       const failedResult = yield* Effect.result(
-        failed.run({ kind: "nix.check" })
+        failed.run({ kind: "nix.check" }, noWorkerStarted, "job-nix-check")
       )
       expect(Result.isFailure(failedResult)).toBe(true)
       if (Result.isFailure(failedResult)) {
@@ -268,7 +272,7 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
           `dd if=/dev/zero bs=${commandOutputMaxBytes + 1} count=1 2>/dev/null`
         ])
       )
-      const result = yield* Effect.result(overflowing.run({ kind: "nix.check" }))
+      const result = yield* Effect.result(overflowing.run({ kind: "nix.check" }, noWorkerStarted, "job-nix-check"))
       expect(Result.isFailure(result)).toBe(true)
       if (Result.isFailure(result)) {
         expect(result.failure).toMatchObject({
@@ -284,7 +288,7 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
           `dd if=/dev/zero bs=${commandOutputMaxBytes} count=1 2>/dev/null | tr '\\000' x`
         ])
       )
-      expect(Buffer.byteLength(yield* exact.run({ kind: "nix.check" }))).toBe(
+      expect(Buffer.byteLength(yield* exact.run({ kind: "nix.check" }, noWorkerStarted, "job-nix-check"))).toBe(
         commandOutputMaxBytes
       )
 
@@ -297,11 +301,15 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
         herdrCommand
       })
       expect(
-        yield* nearLimit.run({
-          kind: "agent.message",
-          message: "x".repeat(jobTextMaxLength),
-          session: "agent-1"
-        })
+        yield* nearLimit.run(
+          {
+            kind: "agent.message",
+            message: "x".repeat(jobTextMaxLength),
+            session: "agent-1"
+          },
+          noWorkerStarted,
+          "job-agent-message"
+        )
       ).toBe("accepted")
 
       writeFileSync(

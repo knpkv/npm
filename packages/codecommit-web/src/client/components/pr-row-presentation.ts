@@ -3,11 +3,14 @@ import {
   approvalNotRequiredLabel,
   approvalOf,
   approvalUnknownLabel,
+  approvalUnknownReasonText,
+  approversUnknownLabel,
+  currentApprovers,
   type PullRequest
 } from "@knpkv/codecommit-core/Domain.js"
 import type { RlyStateTone } from "@knpkv/rly/primitives"
 
-type DecisionFacts = Pick<PullRequest, "approvedBy" | "isMergeable" | "status">
+type DecisionFacts = Pick<PullRequest, "approvedBy" | "approversUnknown" | "isMergeable" | "status">
 type StatusFacts = Pick<PullRequest, "approvalUnknown" | "approvalRules" | "isApproved" | "isMergeable" | "status">
 type TimestampFacts = Pick<PullRequest, "creationDate" | "lastModifiedDate">
 
@@ -25,7 +28,8 @@ export const pullRequestRowDecision = (pr: DecisionFacts): PullRequestRowDecisio
       return { actionLabel: "View pull request", summary: "Closed" }
     case "OPEN": {
       if (!pr.isMergeable) return { actionLabel: "Inspect conflict", summary: "Merge blocked" }
-      const approvedCount = pr.approvedBy.length
+      if (pr.approversUnknown === true) return { actionLabel: "Open review", summary: approversUnknownLabel }
+      const approvedCount = currentApprovers(pr).length
       return {
         actionLabel: "Open review",
         summary: `${approvedCount} ${approvedCount === 1 ? "approval" : "approvals"}`
@@ -46,6 +50,8 @@ export const pullRequestRowTimeLabel = (pr: TimestampFacts, showUpdated: boolean
 export interface PullRequestRowStatus {
   readonly label: string
   readonly tone: RlyStateTone
+  /** Why the label says what it does, when the word alone can't: an unknown approval's reason. */
+  readonly reason?: string
 }
 
 /** The row's state label. An unknown approval is labelled as such, never as approved or pending. */
@@ -54,7 +60,9 @@ export const pullRequestRowStatus = (pr: StatusFacts): PullRequestRowStatus => {
   if (pr.status === "CLOSED") return { label: "Closed", tone: "neutral" }
   if (!pr.isMergeable) return { label: "Conflict", tone: "critical" }
   const approval = approvalOf(pr)
-  if (approval._tag === "Unknown") return { label: approvalUnknownLabel, tone: "neutral" }
+  if (approval._tag === "Unknown") {
+    return { label: approvalUnknownLabel, reason: approvalUnknownReasonText(approval.reason), tone: "neutral" }
+  }
   if (approval._tag === "NotRequired") return { label: approvalNotRequiredLabel, tone: "neutral" }
   if (approval._tag === "Approved") return { label: "Approved", tone: "positive" }
   return { label: "Pending", tone: "caution" }

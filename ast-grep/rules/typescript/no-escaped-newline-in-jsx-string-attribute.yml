@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-escaped-newline-in-jsx-string-attribute
+language: tsx
+severity: error
+message: "A JSX string attribute does not process escapes: `\\n` renders as a backslash and an n. Use an expression, placeholder={\"a\\nb\"}"
+
+rule:
+  kind: string
+  regex: '\\n'
+  inside:
+    kind: jsx_attribute
+
+files:
+  - "packages/**/*.tsx"
+
+ignores:
+  - "**/generated/**"
+
+note: |
+  JSX attribute strings are HTML-like: `placeholder="a\nb"` shows the two characters `\n`. Wrap the
+  value in braces so JavaScript reads the escape: `placeholder={"a\nb"}`.

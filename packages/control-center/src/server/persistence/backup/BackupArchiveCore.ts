@@ -1,6 +1,7 @@
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import { Crypto, DateTime, Effect, Fiber, FileSystem, ManagedRuntime, Path, Ref, Result, Schema } from "effect"
 import { Hex } from "effect/encoding"
+import type * as PlatformError from "effect/PlatformError"
 import type * as Scope from "effect/Scope"
 import * as SqlClient from "effect/sql/SqlClient"
 
@@ -550,6 +551,13 @@ const copySnapshotBlobs = Effect.fn("BackupArchive.copySnapshotBlobs")(function*
   }
 })
 
+/**
+ * Recover an ownership check as "not ours to remove": a missing path is expected, any other failure is
+ * logged first. Rollback then never deletes a destination it could not verify.
+ */
+const notOwnedUnlessUnexpected = (message: string) => (error: PlatformError.PlatformError) =>
+  error.reason._tag === "NotFound" ? Effect.succeed(false) : Effect.logWarning(message, error).pipe(Effect.as(false))
+
 const hasExpectedOwnerId = Effect.fn("BackupArchive.hasExpectedOwnerId")(function*(
   destination: string,
   backupId: BackupId
@@ -568,7 +576,7 @@ const hasExpectedOwnerId = Effect.fn("BackupArchive.hasExpectedOwnerId")(functio
       canonicalOwnerIdFile === ownerIdFile &&
       ownerInfo.type === "File" &&
       ownerId === backupId
-  }).pipe(Effect.orElseSucceed(() => false))
+  }).pipe(Effect.catch(notOwnedUnlessUnexpected("Could not verify a backup destination's owner")))
 })
 
 const removeOwnedDestination = Effect.fn("BackupArchive.removeOwnedDestination")(function*(
@@ -581,7 +589,11 @@ const removeOwnedDestination = Effect.fn("BackupArchive.removeOwnedDestination")
     // Effect's portable FileSystem API does not expose descriptor-relative recursive removal.
     // The random owner marker is therefore revalidated immediately before best-effort rollback.
     const removed = yield* fileSystem.remove(destination, { force: true, recursive: true }).pipe(Effect.result)
-    if (Result.isSuccess(removed)) yield* syncPath(parent).pipe(Effect.ignore)
+    if (Result.isSuccess(removed)) {
+      yield* syncPath(parent).pipe(
+        Effect.ignore({ log: "Warn", message: "Could not sync the backup directory after rollback" })
+      )
+    }
   }
 })
 
@@ -595,7 +607,7 @@ const removeEmptyDestinationClaim = Effect.fn("BackupArchive.removeEmptyDestinat
     const info = yield* fileSystem.stat(destination)
     const entries = yield* fileSystem.readDirectory(destination)
     return canonical === destination && info.type === "Directory" && entries.length === 0
-  }).pipe(Effect.orElseSucceed(() => false))
+  }).pipe(Effect.catch(notOwnedUnlessUnexpected("Could not inspect an empty backup destination claim")))
   if (!removable) return
 
   // Effect FileSystem has no portable rmdir and Node's non-recursive remove rejects
@@ -603,7 +615,11 @@ const removeEmptyDestinationClaim = Effect.fn("BackupArchive.removeEmptyDestinat
   // A hostile same-UID process can race this check; such a process can already alter
   // every owner-only backup artifact, so operators must exclude concurrent writers.
   const removed = yield* fileSystem.remove(destination, { recursive: true }).pipe(Effect.result)
-  if (Result.isSuccess(removed)) yield* syncPath(parent).pipe(Effect.ignore)
+  if (Result.isSuccess(removed)) {
+    yield* syncPath(parent).pipe(
+      Effect.ignore({ log: "Warn", message: "Could not sync the backup directory after removing an empty claim" })
+    )
+  }
 })
 
 const publishPhysicalArchive = Effect.fn("BackupArchive.publishPhysicalArchive")(function*(
@@ -682,7 +698,11 @@ export const createVerifiedArchive = Effect.fn("BackupArchive.create")(function*
     "create-staging-root",
     fileSystem.makeTempDirectory({ directory: parent, prefix: STAGING_PREFIX })
   )
-  yield* Effect.addFinalizer(() => fileSystem.remove(stagingRoot, { force: true, recursive: true }).pipe(Effect.ignore))
+  yield* Effect.addFinalizer(() =>
+    fileSystem.remove(stagingRoot, { force: true, recursive: true }).pipe(
+      Effect.ignore({ log: "Warn", message: "Could not remove the backup staging directory" })
+    )
+  )
   yield* mapStorage("secure-staging-root", fileSystem.chmod(stagingRoot, BACKUP_DIRECTORY_MODE))
   const databaseFile = path.join(stagingRoot, DATABASE_NAME)
   yield* input.writeDatabase(databaseFile)

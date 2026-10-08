@@ -839,7 +839,7 @@ body,
 }
 
 .jcf-lane > p {
-  max-width: 75ch;
+  max-width: 50em;
 }
 
 .jcf-read-status {

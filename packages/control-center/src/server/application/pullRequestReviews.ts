@@ -1492,7 +1492,7 @@ const makePullRequestReviews = Effect.gen(function*() {
             reservationId
           }).pipe(
             Effect.mapError(mapPersistenceWriteError),
-            Effect.ignore
+            Effect.ignore({ log: "Warn", message: "Could not release a review suggestion publication reservation" })
           )
         }
         return yield* mapPublicationFailure(publication.failure)

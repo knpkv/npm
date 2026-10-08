@@ -285,6 +285,7 @@ export const openManagedReviewAtom = runtimeAtom.fn((pullRequestUrl: string) =>
           : Effect.succeed(false)
       ),
       Effect.timeout("2 seconds"),
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catchIf(() => true, () => Effect.succeed(false))
     )
     if (!available) {

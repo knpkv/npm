@@ -1,7 +1,12 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { NodeServices } from "@effect/platform-node"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Path from "effect/Path"
+import * as Stream from "effect/Stream"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import {
   compareToBaseline,
@@ -274,4 +279,38 @@ test("the ledger has no line numbers, so moving code does not change it", () => 
   const ledger = renderLedger([directive({})])
   assert.match(ledger, /packages\/demo\/src\/a\.ts/u)
   assert.doesNotMatch(ledger, /a\.ts:\d/u)
+})
+
+// Three-way merges `ours` and `theirs` over `base` with git's own merge, returning the exit code and result.
+const gitMergeFile = (base, ours, theirs) =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
+    const directory = yield* fs.makeTempDirectoryScoped({ prefix: "debt-ledger-merge-" })
+    const [oursFile, baseFile, theirsFile] = ["ours.md", "base.md", "theirs.md"].map((name) =>
+      path.join(directory, name)
+    )
+    yield* fs.writeFileString(oursFile, ours)
+    yield* fs.writeFileString(baseFile, base)
+    yield* fs.writeFileString(theirsFile, theirs)
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const handle = yield* spawner.spawn(ChildProcess.make("git", ["merge-file", "-p", oursFile, baseFile, theirsFile]))
+    const [merged, exitCode] = yield* Effect.all([Stream.mkString(Stream.decodeText(handle.stdout)), handle.exitCode], {
+      concurrency: 2
+    })
+    return { exitCode, merged }
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
+
+test("changes to two neighbouring packages merge without a conflict", async () => {
+  const entries = (name) =>
+    ["a", "b", "c"].map((file) => directive({ file: `packages/${name}/src/${file}.ts`, package: name }))
+  const [alpha, beta] = [entries("alpha"), entries("beta")]
+  // The worst case: one side drops alpha's last row, the other beta's first, so their sections' edits are as close as they get.
+  const ours = [...alpha.slice(0, 2), ...beta]
+  const theirs = [...alpha, ...beta.slice(1)]
+  const { exitCode, merged } = await Effect.runPromise(
+    gitMergeFile(renderLedger([...alpha, ...beta]), renderLedger(ours), renderLedger(theirs))
+  )
+  assert.equal(exitCode, ChildProcessSpawner.ExitCode(0), merged)
+  assert.equal(merged, renderLedger([...alpha.slice(0, 2), ...beta.slice(1)]))
 })

@@ -1,8 +1,15 @@
+import {
+  AgentStateLabel,
+  agentBucketLabel,
+  agentBuckets,
+  type AgentBucket,
+  agentStatePresentation
+} from "./agent-state.js"
 import { Hero, HeroWord } from "@knpkv/rly/patterns"
 import { Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
 import { useId, useState, type ReactNode, type Ref } from "react"
-import type { ConnectAgent } from "./model.js"
+import type { ConnectAgent, ConnectPeerFailure } from "./model.js"
 import {
   serializeTerminalKey,
   terminalKeyDescriptors,
@@ -12,8 +19,7 @@ import {
 } from "./terminal-keyboard.js"
 import { nextTerminalRailIndex } from "./terminal-rail-navigation.js"
 
-type AgentActivity = "working" | "ready" | "attention" | "finished"
-export type AgentActivityFilter = "all" | AgentActivity
+export type AgentActivityFilter = "all" | AgentBucket
 
 type AgentFilters = {
   readonly activity: AgentActivityFilter
@@ -41,8 +47,7 @@ type CalendarOptions = {
   readonly timeZone?: string
 }
 
-const activityOrder: ReadonlyArray<AgentActivity> = ["working", "attention", "ready", "finished"]
-const activityFilters: ReadonlyArray<AgentActivityFilter> = ["all", ...activityOrder]
+const activityFilters: ReadonlyArray<AgentActivityFilter> = ["all", ...agentBuckets]
 
 const naturalOrder = new Intl.Collator("en", {
   numeric: true,
@@ -59,54 +64,8 @@ export const connectAgentKey = (agent: ConnectAgent): string => `${agent.host}:$
 export const connectAgentHosts = (agents: ReadonlyArray<ConnectAgent>): ReadonlyArray<string> =>
   [...new Set(agents.map(({ host }) => host))].toSorted(naturalOrder.compare)
 
-const activityFor = (state: string): AgentActivity => {
-  switch (state.toLocaleLowerCase("en-US")) {
-    case "running":
-    case "working":
-      return "working"
-    case "idle":
-    case "waiting":
-    case "ready":
-      return "ready"
-    case "blocked":
-    case "unknown":
-      return "attention"
-    case "done":
-      return "finished"
-    default:
-      return "attention"
-  }
-}
-
-const activityLabel = (activity: AgentActivity): string =>
-  activity === "working"
-    ? "Working"
-    : activity === "ready"
-      ? "Ready"
-      : activity === "attention"
-        ? "Attention"
-        : "Finished"
-
 const activityFilterLabel = (activity: AgentActivityFilter): string =>
-  activity === "all" ? "All" : activityLabel(activity)
-
-/** What the agent is doing, before the name of its work. */
-const workPrefix = (agent: ConnectAgent): string => {
-  switch (activityFor(agent.state)) {
-    case "working":
-      return "Working in"
-    case "ready":
-      return "Ready in"
-    case "attention":
-      return "Needs attention in"
-    case "finished":
-      return "Last active in"
-  }
-}
-
-/** The agent's own state word, capitalised; only an agent needing attention takes ink. */
-const stateWord = (state: string): string =>
-  state.length === 0 ? "Unknown" : `${state.charAt(0).toLocaleUpperCase("en-US")}${state.slice(1)}`
+  activity === "all" ? "All" : agentBucketLabel(activity)
 
 const matchesQuery = (agent: ConnectAgent, query: string): boolean => {
   const normalized = query.trim().toLocaleLowerCase("en-US")
@@ -250,7 +209,7 @@ export const calendarConnectAgents = (
   const days = new Map<string, AgentCalendarDay>()
   const filtered = agents
     .filter((agent) => {
-      const activity = activityFor(agent.state)
+      const activity = agentStatePresentation(agent.state).bucket
       return (
         matchesQuery(agent, filters.query) &&
         (filters.host === null || agent.host === filters.host) &&
@@ -296,26 +255,70 @@ type AgentDirectoryProps = {
   readonly now?: number
   readonly query: string
   readonly selectedKey: string | null
+  /** Hosts that didn't answer this read; the Host filter names them so the gap in the list is visible. */
+  readonly silentHosts?: ReadonlyArray<string>
   readonly timeZone?: string
+}
+
+/**
+ * How many agents each Status filter option holds, within the current Host filter. The search
+ * query is ignored, so typing never changes the option labels under the cursor.
+ */
+export const agentBucketCounts = (
+  agents: ReadonlyArray<ConnectAgent>,
+  hostFilter: string | null
+): ReadonlyMap<AgentActivityFilter, number> => {
+  const inHost = agents.filter((agent) => hostFilter === null || agent.host === hostFilter)
+  return new Map<AgentActivityFilter, number>([
+    ["all", inHost.length],
+    ...agentBuckets.map((bucket): readonly [AgentActivityFilter, number] => [
+      bucket,
+      inHost.filter((agent) => agentStatePresentation(agent.state).bucket === bucket).length
+    ])
+  ])
+}
+
+const failureReasonLabel = (reason: ConnectPeerFailure["reason"]): string => {
+  switch (reason) {
+    case "offline":
+      return "offline"
+    case "unavailable":
+      return "Connect unavailable"
+    case "timeout":
+      return "timed out"
+    case "request_failed":
+      return "request failed"
+    case "invalid_response":
+      return "unreadable answer"
+  }
+}
+
+/** One line naming the hosts that didn't answer, each with its cause, and what that means for the list. */
+export const silentHostsSentence = (failures: ReadonlyArray<ConnectPeerFailure>): string | null => {
+  if (failures.length === 0) return null
+  const named = failures.map(({ host, reason }) => `${host} (${failureReasonLabel(reason)})`).join(", ")
+  return failures.length === 1
+    ? `${named} didn't answer; its agents aren't listed.`
+    : `${named} didn't answer; their agents aren't listed.`
 }
 
 const plural = (count: number, one: string, many: string): string => `${String(count)} ${count === 1 ? one : many}`
 
 /**
- * The Connect directory's one sentence: how many agents are listed and how many are working, how
- * many need attention, and which hosts could not be read. `agents` is null while the first list loads or when it failed.
+ * The Connect directory's one sentence: how many agents are listed, how many are working, and how
+ * many need you. Hosts that didn't answer are named once, by the line above the list, not here.
+ * `agents` is null while the first list loads or when it failed.
  */
 export const ConnectSummary = ({
   agents,
-  offlineHosts,
   unavailable
 }: {
   readonly agents: ReadonlyArray<ConnectAgent> | null
-  readonly offlineHosts: ReadonlyArray<string>
   readonly unavailable: boolean
 }) => {
-  const needAttention = agents?.filter((agent) => activityFor(agent.state) === "attention").length ?? 0
-  const working = agents?.filter((agent) => activityFor(agent.state) === "working").length ?? 0
+  const needAttention =
+    agents?.filter((agent) => agentStatePresentation(agent.state).bucket === "needs-you").length ?? 0
+  const working = agents?.filter((agent) => agentStatePresentation(agent.state).bucket === "working").length ?? 0
   const total = agents?.length ?? 0
   return (
     <>
@@ -323,7 +326,7 @@ export const ConnectSummary = ({
         fact={
           agents === null ? (
             unavailable ? (
-              "The fleet directory is unavailable"
+              "The fleet directory didn't answer"
             ) : (
               "Loading the fleet…"
             )
@@ -333,16 +336,7 @@ export const ConnectSummary = ({
               {needAttention === 0 ? null : (
                 <>
                   ,{" "}
-                  <HeroWord tone="held">{`${String(needAttention)} need${needAttention === 1 ? "s" : ""} attention`}</HeroWord>
-                </>
-              )}
-              {offlineHosts.length === 0 ? null : (
-                <>
-                  ;{" "}
-                  <HeroWord tone="blocked">
-                    {/* A host name stays whole; it may only break where it truly cannot fit. */}
-                    {`${offlineHosts.map((host) => host.replaceAll("-", "\u2011")).join(", ")} offline`}
-                  </HeroWord>
+                  <HeroWord tone="held">{`${String(needAttention)} need${needAttention === 1 ? "s" : ""} you`}</HeroWord>
                 </>
               )}
             </>
@@ -365,6 +359,7 @@ export const AgentDirectory = ({
   onSelect,
   query,
   selectedKey,
+  silentHosts = [],
   timeZone
 }: AgentDirectoryProps) => {
   const hostFilterLabelId = useId()
@@ -373,8 +368,9 @@ export const AgentDirectory = ({
   const names: ReadonlyMap<string, string> = new Map(agents.map((entry) => [String(entry.id), entry.name]))
   // With one host the filter already names it; rows repeat it only when it tells agents apart.
   const severalHosts = hosts.length > 1
+  const counts = agentBucketCounts(agents, hostFilter)
   const rows = connectLineageRows(agents).filter(({ agent }) => {
-    const activity = activityFor(agent.state)
+    const activity = agentStatePresentation(agent.state).bucket
     return (
       matchesQuery(agent, query) &&
       (hostFilter === null || agent.host === hostFilter) &&
@@ -397,6 +393,14 @@ export const AgentDirectory = ({
                 {host}
               </button>
             ))}
+            {/* A host that didn't answer has no agents to filter to; it is named, not offered. */}
+            {silentHosts
+              .filter((host) => !hosts.includes(host))
+              .map((host) => (
+                <span className="connect-host-silent" key={host}>
+                  {host} <small>didn't answer</small>
+                </span>
+              ))}
           </div>
         </div>
         <div className="connect-filter-set">
@@ -412,6 +416,8 @@ export const AgentDirectory = ({
                 type="button"
               >
                 {activityFilterLabel(activity)}
+                <span className="connect-visually-hidden">,</span>{" "}
+                <span className="connect-filter-count">{String(counts.get(activity) ?? 0)}</span>
               </button>
             ))}
           </div>
@@ -421,15 +427,15 @@ export const AgentDirectory = ({
         {rows.length === 0 ? <Text tone="secondary">No agents match “{query.trim()}”.</Text> : null}
         {rows.length === 0 ? null : (
           <div aria-hidden="true" className="connect-list-head">
-            <span>Active</span>
-            <span>Agent</span>
             <span>State</span>
+            <span>Agent</span>
+            <span>Active</span>
           </div>
         )}
         <div className="connect-agent-list">
           {rows.map(({ agent, depth, issue }, index) => {
             const key = connectAgentKey(agent)
-            const activity = activityFor(agent.state)
+            const activity = agentStatePresentation(agent.state).bucket
             return (
               <button
                 aria-pressed={selectedKey === key}
@@ -438,15 +444,15 @@ export const AgentDirectory = ({
                 data-agent-key={key}
                 data-lineage-issue={issue ?? "none"}
                 data-selected={selectedKey === key}
-                style={{ paddingInlineStart: `calc(var(--rly-space-12) + ${String(depth * 20)}px)` }}
                 key={`${key}:${String(index)}`}
                 onClick={() => onSelect(agent)}
               >
-                <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
-                  <span className="connect-visually-hidden">Last active at </span>
-                  {timeLabel(agent.lastActivityAt, timeZone)}
-                </time>
-                <span className="connect-agent-copy">
+                {/* The state leads in a fixed track, so names line up whatever the state's word. */}
+                <span className="connect-agent-state" data-activity={activity}>
+                  <AgentStateLabel state={agent.state} />
+                </span>
+                {/* Lineage indents the name, not the state, so the state column stays straight. */}
+                <span className="connect-agent-copy" style={{ paddingInlineStart: `${String(depth * 20)}px` }}>
                   <Text as="strong" variant="label">
                     {agent.name}
                   </Text>
@@ -457,13 +463,15 @@ export const AgentDirectory = ({
                         <span className="connect-token">{agent.host}</span>,{" "}
                       </>
                     ) : null}
-                    {relationLabel(agent, issue, names)}, {workPrefix(agent)}{" "}
-                    <span className="connect-token">{agent.work}</span>
+                    {relationLabel(agent, issue, names)}, <span className="connect-token">{agent.work}</span>
                   </Text>
                 </span>
-                <span className="connect-agent-state" data-activity={activity}>
-                  {stateWord(agent.state)}
-                </span>
+                <time dateTime={new Date(agent.lastActivityAt).toISOString()}>
+                  <span className="connect-visually-hidden">, last active at </span>
+                  {timeLabel(agent.lastActivityAt, timeZone)}
+                </time>
+                {/* The row's own content names it; the action is added, never put in its place. */}
+                <span className="connect-visually-hidden">, open terminal</span>
               </button>
             )
           })}
@@ -524,6 +532,12 @@ type TerminalKeyRailProps = {
   readonly onJumpToLatest?: () => void
   /** Lines this client knows it scrolled back; above 0 the rail says so beside Latest. */
   readonly linesBack?: number
+  /** The position is not confirmed (Latest's last reading never came, or a read failed); the rail says so instead of nothing. */
+  readonly positionUnconfirmed?: boolean
+  /** The modifier and terminal keys are hidden; the view actions and this toggle stay. */
+  readonly keysHidden?: boolean
+  /** Offers a pinned Keys toggle when given; the caller remembers the choice. */
+  readonly onKeysHiddenChange?: (hidden: boolean) => void
 }
 
 const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
@@ -532,21 +546,42 @@ const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctr
 export const TerminalKeyRail = ({
   disabled = false,
   error = null,
+  keysHidden = false,
   linesBack = 0,
   modifier,
   onFocusTerminal,
   onJumpToLatest,
   onKey,
+  onKeysHiddenChange,
   onModifierChange,
-  onSelectText
+  onSelectText,
+  positionUnconfirmed = false
 }: TerminalKeyRailProps) => {
+  const keysId = useId()
   const [activeIndex, setActiveIndex] = useState(0)
   const modifierCount = terminalModifiers.length
   const terminalKeyAvailability = terminalKeyDescriptors.map(
     (descriptor) => serializeTerminalKey(descriptor.key, modifier)._tag === "supported"
   )
   // View actions stay pinned at the rail's end, in reach while the keys scroll under them.
-  const viewActions = [
+  const viewActions: ReadonlyArray<{
+    readonly key: string
+    readonly label: string
+    readonly ariaLabel: string
+    readonly onClick: () => void
+    readonly expanded?: boolean
+  }> = [
+    ...(onKeysHiddenChange === undefined
+      ? []
+      : [
+          {
+            key: "keys",
+            label: "Keys",
+            ariaLabel: keysHidden ? "Show terminal keys" : "Hide terminal keys",
+            onClick: () => onKeysHiddenChange(!keysHidden),
+            expanded: !keysHidden
+          }
+        ]),
     ...(onJumpToLatest === undefined
       ? []
       : [{ key: "latest", label: "Latest", ariaLabel: "Jump to latest output", onClick: onJumpToLatest }]),
@@ -556,8 +591,8 @@ export const TerminalKeyRail = ({
   ]
   const viewActionStart = modifierCount + terminalKeyDescriptors.length
   const enabledRail = [
-    ...terminalModifiers.map(() => !disabled),
-    ...terminalKeyAvailability.map((available) => !disabled && available),
+    ...terminalModifiers.map(() => !disabled && !keysHidden),
+    ...terminalKeyAvailability.map((available) => !disabled && !keysHidden && available),
     ...viewActions.map(() => !disabled)
   ]
   const tabStopIndex = enabledRail[activeIndex] === true ? activeIndex : enabledRail.findIndex((enabled) => enabled)
@@ -587,13 +622,19 @@ export const TerminalKeyRail = ({
       role="toolbar"
     >
       <div className="terminal-key-scroll">
-        <div aria-label="Terminal modifiers" className="terminal-key-group" role="group">
+        <div
+          aria-label="Terminal modifiers"
+          className="terminal-key-group"
+          hidden={keysHidden}
+          id={`${keysId}-modifiers`}
+          role="group"
+        >
           {terminalModifiers.map((item, index) => (
             <button
               aria-pressed={modifier === item}
               className="terminal-key terminal-key-modifier"
               data-terminal-key={item}
-              disabled={disabled}
+              disabled={disabled || keysHidden}
               key={item}
               onClick={(event) => {
                 setActiveIndex(index)
@@ -609,7 +650,13 @@ export const TerminalKeyRail = ({
             </button>
           ))}
         </div>
-        <div aria-label="Terminal keys" className="terminal-key-group" role="group">
+        <div
+          aria-label="Terminal keys"
+          className="terminal-key-group"
+          hidden={keysHidden}
+          id={`${keysId}-keys`}
+          role="group"
+        >
           {terminalKeyDescriptors.map((descriptor, index) => {
             const serialization = serializeTerminalKey(descriptor.key, modifier)
             const unavailable = serialization._tag === "unsupported"
@@ -621,7 +668,7 @@ export const TerminalKeyRail = ({
                 }
                 className="terminal-key"
                 data-terminal-key={descriptor.key}
-                disabled={disabled || unavailable}
+                disabled={disabled || keysHidden || unavailable}
                 key={descriptor.key}
                 onClick={() => onKey(descriptor.key)}
                 onFocus={() => setActiveIndex(railIndex)}
@@ -645,12 +692,18 @@ export const TerminalKeyRail = ({
               >
                 <span aria-hidden="true">{`${linesBack} ${linesBack === 1 ? "line" : "lines"} back`}</span>
               </span>
+            ) : positionUnconfirmed ? (
+              <span aria-label="Position not confirmed" className="terminal-older-output" role="status">
+                <span aria-hidden="true">Not confirmed</span>
+              </span>
             ) : null}
             {viewActions.map((action, index) => (
               <button
+                aria-controls={action.expanded === undefined ? undefined : `${keysId}-modifiers ${keysId}-keys`}
+                aria-expanded={action.expanded}
                 aria-label={action.ariaLabel}
                 className="terminal-key"
-                data-behind={action.key === "latest" && linesBack > 0 ? "true" : undefined}
+                data-behind={action.key === "latest" && (linesBack > 0 || positionUnconfirmed) ? "true" : undefined}
                 data-terminal-key={action.key}
                 disabled={disabled}
                 key={action.key}

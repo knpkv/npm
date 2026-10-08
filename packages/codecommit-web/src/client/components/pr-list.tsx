@@ -14,10 +14,11 @@ import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import { LogInIcon } from "lucide-react"
 import { useCallback, useMemo } from "react"
 import { queuePullRequests } from "../utils/queuePullRequests.js"
-import { useSearchParams } from "react-router"
+import { useNavigate, useSearchParams } from "react-router"
 import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
 import { codeCommitPullRequestHref } from "../codecommit-route.js"
+import { emptyQueueCause, streamConnectionAtom, streamRetryAtom, streamSnapshotSeenAtom } from "../connection.js"
 import { FilterSidebar } from "./filter-sidebar.js"
 import { PRRow } from "./pr-row.js"
 import { RecentActivity } from "./recent-activity.js"
@@ -50,6 +51,10 @@ const replaceStatusFacet = (params: URLSearchParams, status: "approved" | "open"
 
 export function PRList() {
   const appState = useAtomValue(appStateAtom)
+  const connection = useAtomValue(streamConnectionAtom)
+  const snapshotSeen = useAtomValue(streamSnapshotSeenAtom)
+  const setRetry = useAtomSet(streamRetryAtom)
+  const navigate = useNavigate()
   const ssoLogin = useAtomSet(notificationsSsoLoginAtom)
   const { state: filterState, toggleFilter } = useFilterParams()
   const [, setSearchParams] = useSearchParams()
@@ -164,7 +169,102 @@ export function PRList() {
   const activity =
     appState.currentUser !== undefined && appState.currentUser !== "" ? (appState.notifications?.items ?? []) : []
 
+  const enabledAccounts = appState.enabledProfiles?.length ?? profiles.length
+  // A zero is only true once an account's pull requests were read: not before the first snapshot, nor
+  // while the first sync runs or waits for permission.
+  const countsKnown = snapshotSeen && (prs.length > 0 || (!isLoading && appState.permissionPrompt?.category !== "read"))
+
   const listContent = (() => {
+    // Before the first snapshot only the connection is known; after it, the snapshot says why it's empty.
+    if (sorted.length === 0) {
+      const cause = emptyQueueCause({
+        cachedPullRequests: prs.length,
+        connection,
+        detectedAccounts: appState.accounts.length,
+        enabledAccounts,
+        snapshotSeen
+      })
+      switch (cause._tag) {
+        case "Connecting":
+          return (
+            <StatePanel
+              announce="polite"
+              className={styles.queueState}
+              description="Waiting for the first update from the CodeCommit server."
+              title="Connecting"
+              tone="progress"
+            />
+          )
+        case "Unauthenticated":
+          return (
+            <StatePanel
+              className={styles.queueState}
+              description={cause.detail}
+              title="This browser isn't signed in"
+              tone="caution"
+            />
+          )
+        case "Failed":
+          return (
+            <StatePanel
+              action={
+                <Button onClick={() => setRetry((count) => count + 1)} size="compact">
+                  Retry now
+                </Button>
+              }
+              announce="polite"
+              className={styles.queueState}
+              description={cause.retrying ? `${cause.cause} Trying again shortly.` : `${cause.cause} Retries stopped.`}
+              title="Can't reach the CodeCommit server"
+              tone="critical"
+            />
+          )
+        case "NoAccounts":
+          return (
+            <StatePanel
+              action={
+                <Button onClick={() => navigate("/settings")} size="compact" variant="primary">
+                  Set up accounts
+                </Button>
+              }
+              className={styles.queueState}
+              description="Add an AWS profile that can read CodeCommit, and its open pull requests appear here."
+              title="No AWS profiles yet"
+            />
+          )
+        case "NoneSwitchedOn":
+          return (
+            <StatePanel
+              action={
+                <Button onClick={() => navigate("/settings")} size="compact" variant="primary">
+                  Choose accounts
+                </Button>
+              }
+              className={styles.queueState}
+              description={`${String(cause.detected)} AWS ${cause.detected === 1 ? "profile was" : "profiles were"} found, but none is switched on.`}
+              title="No account is switched on"
+            />
+          )
+        case "Filtered":
+        case "NothingOpen":
+          break
+      }
+    }
+
+    // A read waiting on the reader's answer is why nothing has loaded: say that, not "Loading".
+    const readPrompt = appState.permissionPrompt?.category === "read" ? appState.permissionPrompt : undefined
+    if (sorted.length === 0 && readPrompt !== undefined) {
+      return (
+        <StatePanel
+          announce="polite"
+          className={styles.queueState}
+          description={`${readPrompt.context} waits for your answer in the bar above: allow it once, or allow every read.`}
+          title="Waiting for your permission"
+          tone="caution"
+        />
+      )
+    }
+
     if (sorted.length === 0 && isLoading) {
       return (
         <StatePanel
@@ -192,9 +292,9 @@ export function PRList() {
                 ? `${prs.length} pull requests are cached, but none match the current search and filters.`
                 : needsLogin
                   ? "A configured AWS session may have expired. Sign in to load its pull requests."
-                  : "No pull requests are available from the configured accounts yet."
+                  : `No open pull requests in ${String(enabledAccounts)} ${enabledAccounts === 1 ? "account" : "accounts"}.`
             }
-            title={filtered ? "No pull requests match this view" : "The queue is empty"}
+            title={filtered ? "No pull requests match this view" : "Nothing open"}
           />
           {filtered ? (
             <div className={styles.emptyActions}>
@@ -293,38 +393,47 @@ export function PRList() {
         </Text>
       </header>
 
-      <div aria-label="Pull request facets" className={styles.facets} role="group">
-        {facets.map((facet) => (
-          <button
-            aria-pressed={activeFacet === facet.id}
-            className={styles.facet}
-            key={facet.id}
-            onClick={() => applyFacet(facet.id)}
-            type="button"
-          >
-            <span className={styles.facetLabel}>{facet.label}</span>
-            <span aria-label={`${facet.count} pull requests`} className={styles.facetCount}>
-              {facet.count}
-            </span>
-          </button>
-        ))}
-      </div>
+      {/* Nothing to count until an account exists: no row of zeros on a first run. */}
+      {snapshotSeen && enabledAccounts === 0 && appState.pullRequests.length === 0 ? null : (
+        <div aria-label="Pull request facets" className={styles.facets} role="group">
+          {facets.map((facet) => (
+            <button
+              aria-pressed={activeFacet === facet.id}
+              className={styles.facet}
+              key={facet.id}
+              onClick={() => applyFacet(facet.id)}
+              type="button"
+            >
+              <span className={styles.facetLabel}>{facet.label}</span>
+              {/* Unknown until the first snapshot: never a 0 that the page can't vouch for. */}
+              <span aria-label={countsKnown ? `${facet.count} pull requests` : "unknown"} className={styles.facetCount}>
+                {countsKnown ? facet.count : "—"}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
 
       <section aria-labelledby="review-queue-heading" className={styles.queueSection}>
         <div className={styles.sectionHeading}>
           <Text as="h2" id="review-queue-heading" variant="section-title">
             Review queue
           </Text>
-          <Text aria-live="polite" tone="tertiary" variant="meta">
-            {sorted.length} {sorted.length === 1 ? "result" : "results"}
-            {accountCount > 0 ? `, ${accountCount} ${accountCount === 1 ? "AWS account" : "AWS accounts"}` : ""}
-          </Text>
+          {snapshotSeen ? (
+            <Text aria-live="polite" tone="secondary" variant="meta">
+              {sorted.length} {sorted.length === 1 ? "result" : "results"}
+              {accountCount > 0 ? `, ${accountCount} ${accountCount === 1 ? "AWS account" : "AWS accounts"}` : ""}
+            </Text>
+          ) : null}
         </div>
 
-        <div className={styles.controls}>
-          <SearchBar />
-          <FilterSidebar />
-        </div>
+        {/* Search and filters only once there is something to search. */}
+        {snapshotSeen && (enabledAccounts > 0 || appState.pullRequests.length > 0) ? (
+          <div className={styles.controls}>
+            <SearchBar />
+            <FilterSidebar />
+          </div>
+        ) : null}
 
         {listContent}
       </section>

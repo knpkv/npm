@@ -14,8 +14,6 @@ files:
   - "packages/**/*.ts"
   - "packages/**/*.tsx"
   - "scripts/**/*.ts"
-  - "scripts/**/*.mjs"
-  - "scratchpad/**/*.ts"
 
 ignores:
   - "**/generated/**"

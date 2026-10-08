@@ -2,11 +2,12 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { JobStore, makeFleetService } from "@knpkv/herdr-fleet"
-import { Effect, Fiber, FileSystem, Sink, Stream } from "effect"
+import { Effect, Fiber, FileSystem, Logger, Sink, Stream } from "effect"
 import type { KillOptions } from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { TestClock } from "effect/testing"
 import { join } from "node:path"
+import { releaseTerminalControl } from "../src/internal/terminal-release.js"
 import { makeHerdrTerminalConnector } from "../src/terminal.js"
 
 // @effect-diagnostics-next-line strictEffectProvide:off
@@ -102,7 +103,6 @@ describe("Herdr terminal release", () => {
                 observedKillOptions = options
               }),
             pid: ChildProcessSpawner.ProcessId(42),
-            reref: Effect.void,
             stderr: Stream.empty,
             stdin: Sink.drain,
             stdout,
@@ -145,4 +145,45 @@ describe("Herdr terminal release", () => {
     )
     return program.pipe(provideNodeServices, provideTestClock)
   })
+})
+
+describe("Herdr terminal release failures", () => {
+  it.effect("never fails the session, but logs a release and a kill that did not work", () =>
+    Effect.gen(function*() {
+      const logged: Array<{ readonly level: string; readonly message: string }> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        logged.push({ level: entry.logLevel, message: String(entry.message) })
+      })
+      // herdr's stdin is gone, it never exits, and the kill finds no process.
+      const cleanup = yield* releaseTerminalControl(
+        Effect.fail("broken pipe"),
+        Effect.never,
+        Effect.fail("no such process")
+      ).pipe(Effect.withLogger(logger), Effect.forkChild({ startImmediately: true }))
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(cleanup)
+      const warnings = logged.filter(({ level }) => level === "Warn").map(({ message }) => message).join("\n")
+      expect(warnings).toContain("terminal release command could not be sent")
+      expect(warnings).toContain("terminal did not exit within the release timeout; killing it")
+      expect(warnings).toContain("terminal kill after the release timeout failed")
+    }))
+
+  it.effect("warns when herdr outlives the release timeout, even when the kill then works", () =>
+    Effect.gen(function*() {
+      const logged: Array<{ readonly level: string; readonly message: string }> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        logged.push({ level: entry.logLevel, message: String(entry.message) })
+      })
+      // The release goes out, but herdr never exits; the kill succeeds.
+      const cleanup = yield* releaseTerminalControl(Effect.void, Effect.never, Effect.void).pipe(
+        Effect.withLogger(logger),
+        Effect.forkChild({ startImmediately: true })
+      )
+      yield* TestClock.adjust("1 second")
+      yield* Fiber.join(cleanup)
+      expect(logged).toEqual([{
+        level: "Warn",
+        message: "terminal did not exit within the release timeout; killing it"
+      }])
+    }))
 })

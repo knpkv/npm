@@ -1,0 +1,34 @@
+id: no-runpromise-inside-effect
+snapshots:
+  ? |
+    const program = Effect.gen(function* () {
+      return Effect.runSync(inner)
+    })
+  : labels:
+      - source: Effect.runSync(inner)
+        style: primary
+        start: 51
+        end: 72
+      - source: |-
+          Effect.gen(function* () {
+            return Effect.runSync(inner)
+          })
+        style: secondary
+        start: 16
+        end: 75
+  ? |
+    const program = Effect.gen(function* () {
+      return yield* Effect.promise(() => Effect.runPromise(inner))
+    })
+  : labels:
+      - source: Effect.runPromise(inner)
+        style: primary
+        start: 79
+        end: 103
+      - source: |-
+          Effect.gen(function* () {
+            return yield* Effect.promise(() => Effect.runPromise(inner))
+          })
+        style: secondary
+        start: 16
+        end: 107

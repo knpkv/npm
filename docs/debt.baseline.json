@@ -157,6 +157,83 @@
     },
     {
       "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/auth/OAuthOperations.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/cli/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/cli/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/config/AuthProfiles.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/config/ProfileManager.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/config/ProfileManager.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/config/ProfileManager.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/config/ProfileManager.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/config/TokenStorage.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/config/TokenStorage.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
+      "kind": "ast-grep",
+      "file": "packages/atlassian-common/src/config/TokenStorage.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "atlassian-common",
       "kind": "effect-diagnostics",
       "file": "packages/atlassian-common/test/cli.errorHandling.test.ts",
       "text": "@effect-diagnostics strictEffectProvide:skip-file",
@@ -342,6 +419,111 @@
       "kind": "typescript",
       "file": "packages/capability/test/types.test.ts",
       "text": "@ts-expect-error -- the contract declares only Declared, so Undeclared must not typecheck",
+      "reasoned": true
+    },
+    {
+      "package": "clockify-api-client",
+      "kind": "ast-grep",
+      "file": "packages/clockify-api-client/scripts/regenerate.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/bin.ts",
+      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/FilterService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/main.tsx",
+      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/PrList.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/tui/atoms/actions.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/tui/atoms/app.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/tui/atoms/app.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/tui/atoms/details.ts",
+      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/tui/console-launch.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/tui/utils/prTemplates.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/tui/utils/prTemplates.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/tui/utils/prTemplates.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/WorktreeService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit",
+      "kind": "ast-grep",
+      "file": "packages/codecommit/src/WorktreeService.ts",
+      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
     },
     {
@@ -552,6 +734,573 @@
       "kind": "effect-diagnostics",
       "file": "packages/codecommit/test/RelayReview.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/AwsClient/AwsClientGated.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/AwsClient/getPullRequests.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/AwsClient/getPullRequests.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0003_add_health_score.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0004_unify_notifications.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0004_unify_notifications.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0007_stats_columns.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0007_stats_columns.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0007_stats_columns.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0007_stats_columns.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0008_merged_by.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0009_approved_by.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0010_commented_by.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0011_audit_log.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0012_audit_log_indexes.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0013_approval_rules.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0014_approved_by_arns.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/CacheService/migrations/0015_repo_account_id.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/ConfigService/detectProfiles.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/ConfigService/load.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/ConfigService/load.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/ConfigService/reset.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/ConfigService/reset.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PermissionService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PermissionService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PermissionService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PermissionService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/index.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refresh.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshDiffs.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshDiffs.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshEnrich.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshEnrich.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshEnrich.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshEnrich.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshEnrich.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshEnrich.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshFetch.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshFetch.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshFetch.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshFetch.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshFetch.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshFetch.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshHistory.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshHistory.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshHistory.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshHistory.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshHistory.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshResolve.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshResolve.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshResolve.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshResolve.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshScore.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/refreshSinglePR.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/PRService/visibility.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/DockerService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-core",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-core/src/SandboxService/SandboxService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
     },
     {
@@ -794,6 +1543,34 @@
     },
     {
       "package": "codecommit-mock",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-mock/src/ReviewModelFixture.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-mock",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-mock/src/Server.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-mock",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-mock/src/Server.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-mock",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-mock/src/Server.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-mock",
       "kind": "effect-diagnostics",
       "file": "packages/codecommit-mock/src/cli.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
@@ -832,6 +1609,160 @@
       "kind": "effect-diagnostics",
       "file": "packages/codecommit-mock/test/GitFixture.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/pull-request-coordinates.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/handlers/config-live.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/handlers/config-live.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/handlers/config-live.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/handlers/config-live.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/handlers/config-live.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/handlers/events-live.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/handlers/events-live.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/handlers/events-live.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/handlers/notifications-live.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/handlers/prs-live.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/internal/BackgroundWorkers.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/internal/BackgroundWorkers.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/internal/PermissionedReadClient.ts",
+      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/review/ReviewSkillCatalog.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "codecommit-web",
+      "kind": "ast-grep",
+      "file": "packages/codecommit-web/src/server/Server.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
       "reasoned": true
     },
     {
@@ -1015,6 +1946,153 @@
       "file": "packages/codecommit-web/src/client/hooks/useSSE.ts",
       "text": "eslint-disable-next-line no-console",
       "reasoned": false
+    },
+    {
+      "package": "confluence-api-client",
+      "kind": "ast-grep",
+      "file": "packages/confluence-api-client/scripts/regenerate.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/commands/pageInput.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/commands/pageInput.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/commands/pageInput.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/commands/pageInput.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/commands/sync.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/ConfluenceAuth.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/ConfluenceAuth.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/ConfluenceClient.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/ConfluenceConfig.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/ConfluenceConfig.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/SyncEngine.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/SyncEngine.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/SyncEngine.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/SyncEngine.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/SyncEngine.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/SyncEngine.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/SyncEngine.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/SyncEngine.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/SyncEngine.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "confluence-to-markdown",
+      "kind": "ast-grep",
+      "file": "packages/confluence-to-markdown/src/SyncEngine.ts",
+      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
     },
     {
       "package": "confluence-to-markdown",
@@ -1958,6 +3036,13 @@
       "package": "herdr-coordinator",
       "kind": "effect-diagnostics",
       "file": "packages/herdr-coordinator/test/coordinator.test.ts",
+      "text": "@effect-diagnostics-next-line effectSucceedWithVoid:off",
+      "reasoned": true
+    },
+    {
+      "package": "herdr-coordinator",
+      "kind": "effect-diagnostics",
+      "file": "packages/herdr-coordinator/test/coordinator.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
       "reasoned": true
     },
@@ -1980,34 +3065,6 @@
       "kind": "effect-diagnostics",
       "file": "packages/herdr-coordinator/test/orchestrator.test.ts",
       "text": "@effect-diagnostics-next-line strictEffectProvide:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
-      "reasoned": false
-    },
-    {
-      "package": "herdr-coordinator",
-      "kind": "effect-diagnostics",
-      "file": "packages/herdr-coordinator/test/pull-request-evidence.test.ts",
-      "text": "@effect-diagnostics-next-line missingEffectContext:off",
       "reasoned": false
     },
     {
@@ -2151,6 +3208,13 @@
       "reasoned": true
     },
     {
+      "package": "herdr-work",
+      "kind": "typescript",
+      "file": "packages/herdr-work/test/terminal-reconcile.test.ts",
+      "text": "@ts-expect-error -- deliberately not a digest: reconcile must reject malformed options at runtime",
+      "reasoned": true
+    },
+    {
       "package": "jcf-web",
       "kind": "effect-diagnostics",
       "file": "packages/jcf-web/src/client/transport.ts",
@@ -2214,6 +3278,20 @@
       "reasoned": true
     },
     {
+      "package": "jira-api-client",
+      "kind": "ast-grep",
+      "file": "packages/jira-api-client/scripts/regenerate.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-cli",
+      "kind": "ast-grep",
+      "file": "packages/jira-cli/src/VersionService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
       "package": "jira-cli",
       "kind": "effect-diagnostics",
       "file": "packages/jira-cli/src/bin.ts",
@@ -2233,6 +3311,384 @@
       "file": "packages/jira-cli/test/JiraAuth.test.ts",
       "text": "@effect-diagnostics strictEffectProvide:skip-file",
       "reasoned": false
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/auth.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/fuzzySelect.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/layers.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/reconcile.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/setup.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/setup.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/setup.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/setup.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/edit.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/edit.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/edit.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/edit.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/start.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/start.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/start.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/start.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/start.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/status.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/status.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/status.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/status.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/status.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/status.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/stop.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/timer/stop.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/watchLease.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/watchLease.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/watchLease.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/watchLease.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/cli/watchLease.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/ClockifyAuth.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/ClockifyAuth.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/ClockifyAuth.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/ConfigService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/ConfigService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/ConfigService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/IssueFacts.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/IssueFacts.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/IssueFacts.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/IssueFacts.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/IssueFacts.ts",
+      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/JiraAccess.ts",
+      "text": "ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/ProviderSnapshots.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/ReconcileService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/SourceLedger.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/StateWriter.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/StateWriter.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/StateWriter.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/TimerService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/TimerService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/TimerService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/TimerService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/TimerService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
+    },
+    {
+      "package": "jira-clockify",
+      "kind": "ast-grep",
+      "file": "packages/jira-clockify/src/services/TimerService.ts",
+      "text": "ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort",
+      "reasoned": true
     },
     {
       "package": "jira-clockify",

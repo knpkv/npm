@@ -1,0 +1,34 @@
+id: no-direct-timer-api
+snapshots:
+  ? |
+    const program = Effect.gen(function* () {
+      const now = Date.now()
+    })
+  : labels:
+      - source: Date.now()
+        style: primary
+        start: 56
+        end: 66
+      - source: |-
+          Effect.gen(function* () {
+            const now = Date.now()
+          })
+        style: secondary
+        start: 16
+        end: 69
+  ? |
+    const program = Effect.gen(function* () {
+      setTimeout(() => {}, 10)
+    })
+  : labels:
+      - source: setTimeout(() => {}, 10)
+        style: primary
+        start: 44
+        end: 68
+      - source: |-
+          Effect.gen(function* () {
+            setTimeout(() => {}, 10)
+          })
+        style: secondary
+        start: 16
+        end: 71

@@ -13,18 +13,6 @@ export class GuideExportError extends Schema.TaggedError<GuideExportError>()("Gu
   detail: Schema.String
 }) {}
 
-/**
- * The guide's fonts are inlined, but the browser still decodes them after first paint, and text set
- * in the fallback font re-wraps when they arrive. Hold the page invisible until the fonts are ready,
- * for at most a second, so nothing shifts. Without scripts the page shows at once.
- */
-const fontGate =
-  "document.documentElement.dataset.reviewFonts='loading';" +
-  "var reveal=function(){delete document.documentElement.dataset.reviewFonts};" +
-  // fonts.ready only means something once the stylesheet below has asked for the fonts: after load.
-  "if(document.fonts){addEventListener('load',function(){document.fonts.ready.then(reveal,reveal)});" +
-  "setTimeout(reveal,1000)}else reveal()"
-
 export interface GuideExportInput {
   readonly guide: unknown
   readonly patch: string
@@ -74,7 +62,7 @@ export const exportGuide = Effect.fn("Review.exportGuide")(function* (input: Gui
       const content = renderToString(<GuideRoot guide={guide} patch={patch} findings={findings} />)
       const payload = JSON.stringify({ guide, findings, patch: patchText, prefixes }).replaceAll("<", "\\u003c")
       const inlineScript = (text: string) => text.replaceAll(/<\/script/gi, "<\\/script")
-      return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(guide.title)}</title><script id="review-font-gate">${fontGate}</script><style>body{margin:0}${css}</style></head><body><div id="review-root">${content}</div><script id="review-data" type="application/json">${payload}</script><script>${inlineScript(client)}</script>${content.includes('class="mermaid"') ? `<script>${inlineScript(diagrams)}</script>` : ""}</body></html>`
+      return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(guide.title)}</title><style>body{margin:0}${css}</style></head><body><div id="review-root">${content}</div><script id="review-data" type="application/json">${payload}</script><script>${inlineScript(client)}</script>${content.includes('class="mermaid"') ? `<script>${inlineScript(diagrams)}</script>` : ""}</body></html>`
     },
     catch: (cause) => new GuideExportError({ stage: "render", detail: String(cause) })
   })

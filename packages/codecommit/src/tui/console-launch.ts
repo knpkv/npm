@@ -109,6 +109,7 @@ export const openConsoleAfterClipboard = <E, R>(
   // so cancelling the action or shutting the application scope down would still let the
   // continuation hand the terminal to `assume` and hold exit open until the child ends.
   copy.pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.void),
     Effect.catchDefect(() => Effect.void),
     Effect.andThen(openAssumeConsole(input))

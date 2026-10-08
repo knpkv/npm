@@ -1,0 +1,9 @@
+id: no-unsafe-json-stringify-in-error-handler
+snapshots:
+  ? |
+    const rendered = JSON.stringify(Object.keys(props).length > 0 ? props : error)
+  : labels:
+      - source: "JSON.stringify(Object.keys(props).length > 0 ? props : error)"
+        style: primary
+        start: 17
+        end: 78

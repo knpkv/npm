@@ -29,7 +29,8 @@ const synchronizationState = (result: PluginSynchronizationResult): PluginSynchr
   lastAttemptAt: null,
   lastSuccessAt: null,
   result,
-  pagesCommitted: 0
+  pagesCommitted: 0,
+  failure: null
 })
 const setDocumentVisibility = (visibilityState: DocumentVisibilityState): void => {
   Object.defineProperty(document, "visibilityState", { configurable: true, value: visibilityState })

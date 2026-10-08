@@ -1,0 +1,94 @@
+@layer rly.components {
+  .root {
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: 0;
+  }
+  .refs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-4);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .ref {
+    align-items: center;
+    background: var(--rly-color-surface-2);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-tag);
+    display: inline-flex;
+    gap: var(--rly-space-2);
+    max-inline-size: 100%;
+    padding-inline-start: var(--rly-space-8);
+  }
+  .refLabel {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    min-inline-size: 0;
+    overflow-wrap: break-word;
+  }
+  .box {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-field);
+    display: grid;
+    gap: var(--rly-space-8);
+    padding: var(--rly-space-8);
+  }
+  .box:focus-within {
+    border-color: var(--rly-color-text-2);
+  }
+  /* Grows with its text (sized in script), then scrolls: at most 12 lines or 40% of the viewport. */
+  .input {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    box-sizing: border-box;
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    inline-size: 100%;
+    max-block-size: min(calc(12 * var(--rly-type-body-line-height)), 40dvh);
+    min-block-size: calc(2 * var(--rly-type-body-line-height));
+    outline: none;
+    overflow-y: auto;
+    padding: var(--rly-space-4);
+    resize: none;
+  }
+  /* The preset sits at the start; the hint, Stop and Send stay together at the end and wrap as one. */
+  .foot {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+  }
+  .actions {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-8);
+    margin-inline-start: auto;
+  }
+  .hint,
+  .busy {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+  .hint {
+    white-space: nowrap;
+  }
+  .busy {
+    flex-basis: 100%;
+    order: -1;
+  }
+  @media (forced-colors: active) {
+    .box:focus-within {
+      border-color: Highlight;
+    }
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .box:focus-within {
+    border-color: Highlight;
+  }
+}

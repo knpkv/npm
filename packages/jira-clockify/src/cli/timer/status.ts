@@ -93,6 +93,7 @@ export const statusCmd = Command.make(
         if (state.active) {
           const clockifyAuth = yield* ClockifyAuth
           const clockifyClient = yield* ClockifyApiClient
+          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
           const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
           if (auth !== null) {
             let apiReachable = false
@@ -108,6 +109,7 @@ export const statusCmd = Command.make(
                   apiReachable = true
                 })
               ),
+              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
               Effect.catch(() => Effect.succeed(null))
             )
             // Only clear if API was reachable and confirmed no running timer
@@ -145,10 +147,12 @@ export const statusCmd = Command.make(
         // Show project/billable from Clockify entry
         const clockifyAuth = yield* ClockifyAuth
         const clockifyClient = yield* ClockifyApiClient
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
         if (auth !== null && state.clockifyEntryId !== null) {
           const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, state.clockifyEntryId).pipe(
             Effect.timeout(API_TIMEOUT),
+            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
             Effect.catch(() => Effect.succeed(null))
           )
           if (entry !== null) {
@@ -156,6 +160,7 @@ export const statusCmd = Command.make(
             if (entry.projectId !== null && entry.projectId !== undefined) {
               const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
                 Effect.timeout(API_TIMEOUT),
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                 Effect.catch(() => Effect.succeed([]))
               )
               projectName = projects.find((p) => p.id === entry.projectId)?.name ?? entry.projectId
@@ -167,6 +172,7 @@ export const statusCmd = Command.make(
             if (entry.tagIds !== null && entry.tagIds !== undefined && entry.tagIds.length > 0) {
               const allTags = yield* clockifyClient.getTags(auth.workspaceId).pipe(
                 Effect.timeout(API_TIMEOUT),
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                 Effect.catch(() => Effect.succeed([]))
               )
               const tagNames = entry.tagIds

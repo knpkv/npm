@@ -22,6 +22,9 @@
     "test",
     "vite.config.ts",
     "vitest.config.ts",
+    "../../playwright-font-swap.ts",
+    "../../vite-font-preload.ts",
+    "../rly/src/tokens/fonts.ts",
     "../../vitest.workspace-sources.ts"
   ],
   "exclude": ["dist", "node_modules", "test/client"],

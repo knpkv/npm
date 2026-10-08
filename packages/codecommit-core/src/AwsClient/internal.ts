@@ -266,6 +266,8 @@ export class PullRequestDetail extends Schema.Class<PullRequestDetail>("PullRequ
   mergedBy: Schema.optional(Schema.String),
   approvedBy: Schema.Array(Schema.String),
   approvedByArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
+  /** Set when the last approver read failed: `approvedBy` is then only the last known list. */
+  approversUnknown: Schema.optionalKey(Schema.Literal(true)),
   repoAccountId: Schema.optional(Schema.String),
   /** Whether the source merges cleanly into the destination, set by the merge check after decoding. */
   isMergeable: Schema.Boolean.pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(false))),

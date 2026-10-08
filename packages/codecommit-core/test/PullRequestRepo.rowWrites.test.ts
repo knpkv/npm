@@ -19,6 +19,7 @@ import {
   UpsertInput,
   versionsOf
 } from "../src/CacheService/repos/PullRequestRepo/index.js"
+import { decodeCachedPR, PullRequestToUpsertInput } from "../src/PRService/internal.js"
 
 const account = "123456789012"
 const coordinates = { repositoryName: "payments", accountRegion: "eu-west-1" }
@@ -491,4 +492,68 @@ describe("pull-request row writes", () => {
       const second = yield* repo.upsert(listed(older, "older"), yield* repo.observe())
       expect(Option.map(second.replaced, (row) => [row.title, row.isApproved])).toEqual(Option.some(["PR seed", true]))
     })))
+
+  // Approvers are who approved now, not who ever approved: a read with none clears them, and only a
+  // read that couldn't fetch them keeps the last known list.
+  describe("approvers", () => {
+    const approvers = Effect.flatMap(
+      PullRequestRepo,
+      (repo) => repo.findByCoordinates(account, "60", coordinates.repositoryName, coordinates.accountRegion)
+    ).pipe(Effect.map(Option.map((row) => [row.approvedBy, row.approvedByArns])))
+    const stored = Effect.flatMap(
+      PullRequestRepo,
+      (repo) => repo.findByCoordinates(account, "60", coordinates.repositoryName, coordinates.accountRegion)
+    )
+    const withApprovers = (lastActivity: Date, names: ReadonlyArray<string>, unknown = false) => ({
+      ...listed(lastActivity, "seed"),
+      approvedBy: [...names],
+      approvedByArns: names.map((name) => `arn:aws:iam::123456789012:user/${name}`),
+      ...(unknown && { approversUnknown: true })
+    })
+
+    it("keeps the unknown marker through the pull request codec, both ways", () => {
+      const toDomain = (input: UpsertInput) =>
+        Schema.decodeSync(PullRequestToUpsertInput)(Schema.encodeSync(UpsertInput)(input))
+      expect(toDomain(withApprovers(t0, ["alice"], true)).approversUnknown).toBe(true)
+      expect(toDomain(withApprovers(t0, ["alice"])).approversUnknown).toBeUndefined()
+      expect(Schema.encodeSync(PullRequestToUpsertInput)(toDomain(withApprovers(t0, [], true))).approversUnknown)
+        .toBe(true)
+    })
+
+    it.effect("clears an approval revoked down to no approvers", () =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        yield* repo.upsert(withApprovers(t0, ["alice"]), yield* repo.observe())
+        yield* repo.upsert(withApprovers(older, []), yield* repo.observe())
+        expect(yield* approvers).toEqual(Option.some([[], []]))
+      })))
+
+    it.effect("keeps the last known approvers when a read couldn't fetch them", () =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        yield* repo.upsert(withApprovers(t0, ["alice"]), yield* repo.observe())
+        yield* repo.upsert(withApprovers(older, [], true), yield* repo.observe())
+        expect(yield* approvers).toEqual(Option.some([["alice"], ["arn:aws:iam::123456789012:user/alice"]]))
+        // The published pull request still says the approvers are only last known.
+        const published = Option.map(yield* stored, decodeCachedPR)
+        expect(Option.map(published, (pr) => pr.approversUnknown)).toEqual(Option.some(true))
+        // A later read that fetched them clears the marker.
+        yield* repo.upsert(withApprovers(newer, ["alice"]), yield* repo.observe())
+        expect(Option.map(Option.map(yield* stored, decodeCachedPR), (pr) => pr.approversUnknown))
+          .toEqual(Option.some(undefined))
+      })))
+
+    // Approvers move with approval's version: a read whose approval is older than the stored one writes
+    // its row group but not its approvers.
+    it.effect("writes approvers only when the read's approval group applies", () =>
+      withCache(Effect.gen(function*() {
+        const repo = yield* PullRequestRepo
+        const sql = yield* SqlClient.SqlClient
+        yield* repo.upsert(withApprovers(t0, ["alice"]), yield* repo.observe())
+        yield* sql`UPDATE pull_requests SET approval_version = ${newer.toISOString()}`
+        yield* repo.upsert({ ...withApprovers(older, ["bob"]), title: "Row moved" }, yield* repo.observe())
+        const row = yield* repo.findByCoordinates(account, "60", coordinates.repositoryName, coordinates.accountRegion)
+        expect(Option.map(row, (r) => [r.title, r.approvedBy])).toEqual(Option.some(["Row moved", ["alice"]]))
+      })))
+  })
 })

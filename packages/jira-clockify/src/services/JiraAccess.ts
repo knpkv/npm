@@ -272,6 +272,7 @@ export const layer = Layer.effect(
         const pending = `${file}.${yield* Random.nextIntBetween(0, 1_000_000_000)}.tmp`
         yield* fs.writeFileString(pending, JSON.stringify(token, null, 2), { mode: 0o600 })
         yield* fs.chmod(pending, 0o600)
+        // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         yield* fs.rename(pending, file).pipe(Effect.tapError(() => fs.remove(pending).pipe(Effect.ignore)))
       }).pipe(Effect.mapError(() => new JiraTokenNotSaved({ path: file })))
 

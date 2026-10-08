@@ -13,7 +13,7 @@ export function SettingsAbout() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">About</h2>
+        <h1 className="text-lg font-semibold">About</h1>
         <p className="text-sm text-muted-foreground">Keyboard shortcuts and info</p>
       </div>
       <Separator />

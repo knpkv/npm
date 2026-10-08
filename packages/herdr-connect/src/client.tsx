@@ -10,7 +10,7 @@ import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { FitAddon, init, Terminal } from "ghostty-web"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { buildConnectForest } from "./forest.js"
-import { applyTerminalInputIdentity } from "./terminal-input-identity.js"
+import { applyTerminalInputIdentity, focusTerminalInput } from "./terminal-input-identity.js"
 import { clampTerminalDimensions, type TerminalDimensions, terminalResizeCommand } from "./terminal-dimensions.js"
 import {
   type ConnectAgent,
@@ -37,6 +37,7 @@ import {
   AgentDirectory,
   connectAgentKey,
   ConnectSummary,
+  silentHostsSentence,
   ConnectWorkspace,
   TerminalKeyRail,
   type AgentActivityFilter
@@ -153,6 +154,30 @@ const storeRememberedAgent = (key: string) =>
     )
   )
 
+/** Whether this device hides the terminal key rail's keys; nothing stored means shown, as before. */
+const TerminalKeysVisibility = Schema.Literals(["shown", "hidden"])
+const terminalKeysStorageKey = "fleet-connect-terminal-keys"
+
+const loadTerminalKeysHidden = Effect.try({
+  try: () => window.localStorage.getItem(terminalKeysStorageKey),
+  catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.read", cause })
+}).pipe(
+  Effect.flatMap((value) =>
+    value === null
+      ? Effect.succeed(false)
+      : Schema.decodeUnknownEffect(TerminalKeysVisibility)(value).pipe(
+          Effect.map((visibility) => visibility === "hidden"),
+          Effect.mapError((cause) => new ConnectPreferenceError({ operation: "local_storage.decode", cause }))
+        )
+  )
+)
+
+const storeTerminalKeysHidden = (hidden: boolean) =>
+  Effect.try({
+    try: () => window.localStorage.setItem(terminalKeysStorageKey, hidden ? "hidden" : "shown"),
+    catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.write", cause })
+  })
+
 /** One line for a failure a person reads: the error's own message, never a stack trace. */
 const causeSummary = (cause: Cause.Cause<unknown>): string => {
   const error = Cause.squash(cause)
@@ -233,6 +258,16 @@ const loadWork = Effect.gen(function* () {
 
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
+/** The shared agent state language, for hosts that list agents outside Connect (the hub's dashboard). */
+export {
+  type AgentBucket,
+  agentBucketLabel,
+  agentBuckets,
+  AgentStateLabel,
+  type AgentStatePresentation,
+  agentStatePresentation
+} from "./agent-state.js"
+
 export const makeConnectAtoms = () => {
   const agents = browserRuntime.atom(loadAgents)
   const work = browserRuntime.atom(loadWork)
@@ -244,6 +279,7 @@ export const makeConnectAtoms = () => {
     connectionRequest: Atom.make<ConnectionRequest | null>(null),
     hostFilter: Atom.make<string | null>(null),
     preference: Atom.make(loadRememberedAgent),
+    terminalKeysHidden: Atom.make(loadTerminalKeysHidden),
     preferenceError: Atom.make<string | null>(null),
     query: Atom.make(""),
     selectedKey: Atom.make<string | null>(null),
@@ -262,6 +298,7 @@ const socketUrl = (agent: ConnectAgent, dimensions: TerminalDimensions): string 
   url.searchParams.set("agent", agent.id)
   url.searchParams.set("cols", String(cols))
   url.searchParams.set("rows", String(rows))
+  url.searchParams.set("scrollState", "1")
   return url.toString()
 }
 
@@ -351,7 +388,7 @@ const terminalWorker = (
         })
       }
       applyTerminalInputIdentity(textarea)
-      const releaseTerminalFocus = keyboard.setTerminalFocus(textarea, () => terminal.terminal.focus())
+      const releaseTerminalFocus = keyboard.setTerminalFocus(textarea, () => focusTerminalInput(textarea))
       yield* Effect.addFinalizer(() => Effect.sync(releaseTerminalFocus))
       let ready = false
       let socket: WebSocket | null = null
@@ -418,9 +455,7 @@ const terminalWorker = (
       const interaction = bindTerminalInteraction(
         terminal.terminal,
         container,
-        (command) => {
-          if (ready) send(command)
-        },
+        (command) => ready && send(command),
         keyboard.interactionView
       )
       const releaseInteraction = keyboard.setInteraction(interaction)
@@ -491,6 +526,10 @@ const terminalWorker = (
               detail: `invalid terminal server message: ${String(decoded.failure)}`
             })
             connectedSocket.close(4400, "invalid terminal server message")
+            return
+          }
+          if (decoded.success.type === "terminal.scroll_state") {
+            interaction.serverScrollState(decoded.success.offsetFromBottom, decoded.success.scrollsForwarded)
             return
           }
           if (decoded.success.type === "terminal.ready") {
@@ -572,8 +611,30 @@ export const ConnectSurface = ({
   const terminalModifierRef = useRef<TerminalModifier | null>(null)
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
+  // The stored choice seeds it; this session's toggle wins once made. Unreadable storage shows the keys.
+  const storedKeysHidden = useAtomValue(atoms.terminalKeysHidden)
+  const [keysHiddenChoice, setKeysHiddenChoice] = useState<boolean | null>(null)
+  const terminalKeysHidden =
+    keysHiddenChoice ?? (AsyncResult.isSuccess(storedKeysHidden) ? storedKeysHidden.value : false)
+  const changeTerminalKeysHidden = (hidden: boolean): void => {
+    setKeysHiddenChoice(hidden)
+    // A latched Ctrl or Alt would stay applied with no visible indicator or way to cancel it, so a
+    // plain "c" would arrive as Ctrl-C. Hiding the keys releases it.
+    if (hidden) {
+      terminalModifierRef.current = null
+      setTerminalModifier(null)
+    }
+    Effect.runFork(
+      storeTerminalKeysHidden(hidden).pipe(
+        Effect.catch(() =>
+          Effect.sync(() => setTerminalKeyError("Couldn't remember this on this device; it applies until you reload."))
+        )
+      )
+    )
+  }
   const terminalInteractionRef = useRef<TerminalInteraction | null>(null)
   const [terminalLinesBack, setTerminalLinesBack] = useState(0)
+  const [terminalPositionUnconfirmed, setTerminalPositionUnconfirmed] = useState(false)
   const [terminalTextLines, setTerminalTextLines] = useState<ReadonlyArray<string> | null>(null)
   const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
   useAtomMount(atoms.agentsPoll)
@@ -737,6 +798,7 @@ export const ConnectSurface = ({
           },
           interactionView: {
             onLinesBack: setTerminalLinesBack,
+            onPositionUnconfirmed: setTerminalPositionUnconfirmed,
             onSelectText: setTerminalTextLines,
             openUrl: (url) => {
               window.open(url, "_blank", "noopener,noreferrer")
@@ -750,6 +812,7 @@ export const ConnectSurface = ({
               if (terminalInteractionRef.current !== interaction) return
               terminalInteractionRef.current = null
               setTerminalLinesBack(0)
+              setTerminalPositionUnconfirmed(false)
               setTerminalTextLines(null)
             }
           }
@@ -797,6 +860,9 @@ export const ConnectSurface = ({
       ? directory.previousSuccess.value.timestamp
       : null
   const offlineHosts = (current?.failures ?? []).map((failure) => failure.host)
+  const silentHosts = silentHostsSentence(current?.failures ?? [])
+  // The directory's own read time: it changes only when a poll lands, so nothing ticks between reads.
+  const updatedAt = AsyncResult.isSuccess(directory) ? directory.timestamp : staleSince
   const selected =
     agents.find((agent) => connectAgentKey(agent) === selectedKey) ??
     (connectionRequest !== null && connectAgentKey(connectionRequest.agent) === selectedKey
@@ -936,7 +1002,6 @@ export const ConnectSurface = ({
           </Text>
           <ConnectSummary
             agents={current === null ? null : agents}
-            offlineHosts={offlineHosts}
             unavailable={current === null && directory._tag === "Failure"}
           />
         </header>
@@ -953,7 +1018,12 @@ export const ConnectSurface = ({
           </nav>
         </header>
       )}
-      <section className="connect-agents" aria-label="Herdr agents" onKeyDown={moveAgentFocus}>
+      <section
+        aria-label="Herdr agents"
+        className="connect-agents"
+        data-loading={current === null ? "true" : undefined}
+        onKeyDown={moveAgentFocus}
+      >
         <label className="connect-search">
           <span>Find agent</span>
           <input
@@ -982,14 +1052,29 @@ export const ConnectSurface = ({
             value={query}
           />
         </label>
+        {updatedAt === null ? null : (
+          <small className="connect-updated" data-stale={staleSince === null ? undefined : "true"}>
+            {staleSince === null ? "Updated " : "Stale, last updated "}
+            <time dateTime={new Date(updatedAt).toISOString()}>
+              {new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            </time>
+          </small>
+        )}
+        {silentHosts === null ? null : (
+          <p className="connect-failures" role="status">
+            {silentHosts}
+          </p>
+        )}
         {current === null ? (
           <Text tone="secondary">
             {directory._tag === "Failure"
-              ? `Couldn't load the fleet directory: ${causeSummary(directory.cause)}. Retrying every 5 seconds.`
+              ? `The fleet directory didn't answer: ${causeSummary(directory.cause)}. Retrying every 5 seconds.`
               : "Loading fleet agents…"}
           </Text>
         ) : agents.length === 0 ? (
-          <Text tone="secondary">No live agents.</Text>
+          silentHosts === null ? (
+            <Text tone="secondary">No agents running on any host.</Text>
+          ) : null
         ) : (
           <AgentDirectory
             activityFilter={activityFilter}
@@ -1000,6 +1085,7 @@ export const ConnectSurface = ({
             onSelect={selectAgent}
             query={query}
             selectedKey={selectedKey}
+            silentHosts={offlineHosts}
           />
         )}
         {connection._tag === "connecting" ? (
@@ -1025,19 +1111,10 @@ export const ConnectSurface = ({
         )}
         {staleSince === null || directory._tag !== "Failure" ? null : (
           <small className="connect-status-message" data-tone="caution">
-            Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
+            The list is stale. Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
             {new Date(staleSince).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; retrying every 5
             seconds.
           </small>
-        )}
-        {(current?.failures.length ?? 0) === 0 ? null : (
-          <div className="connect-failures">
-            {current?.failures.map((failure) => (
-              <small key={failure.host}>
-                {failure.host}: {failure.reason.replaceAll("_", " ")}
-              </small>
-            ))}
-          </div>
         )}
       </section>
     </>
@@ -1078,12 +1155,15 @@ export const ConnectSurface = ({
         disabled={connection._tag !== "connected"}
         error={terminalKeyError}
         modifier={terminalModifier}
+        keysHidden={terminalKeysHidden}
         onFocusTerminal={() => terminalFocusRef.current()}
         onKey={sendTerminalRailKey}
+        onKeysHiddenChange={changeTerminalKeysHidden}
         onModifierChange={changeTerminalModifier}
         onSelectText={() => terminalInteractionRef.current?.selectText()}
         onJumpToLatest={() => terminalInteractionRef.current?.jumpToLatest()}
         linesBack={terminalLinesBack}
+        positionUnconfirmed={terminalPositionUnconfirmed}
       />
       <div className="terminal-viewport-stage">
         <div

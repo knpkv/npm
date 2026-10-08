@@ -18,7 +18,8 @@
 
 .workspaceHeader {
   align-items: flex-start;
-  background: color-mix(in srgb, var(--rly-color-service-codecommit) 7%, var(--rly-color-surface-2));
+  /* A flat panel: provider colour marks provenance (the service mark), not a whole header. */
+  background: var(--rly-color-surface-2);
   border-block-end: 1px solid var(--rly-color-border-1);
   gap: var(--rly-space-20);
   justify-content: space-between;
@@ -48,10 +49,12 @@
   justify-content: center;
 }
 
+/* Choices wrap to a second row on a narrow pane rather than scrolling or clipping a label. */
 .focusChoices {
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-control);
+  flex-wrap: wrap;
   gap: var(--rly-space-2);
   padding: var(--rly-space-2);
 }
@@ -68,7 +71,16 @@
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
   gap: var(--rly-space-4);
+  min-block-size: 32px;
   padding: var(--rly-space-6) var(--rly-space-8);
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .focusChoices button,
+  .diffToolbar button {
+    min-block-size: 44px;
+  }
 }
 
 .focusChoices svg,
@@ -103,6 +115,45 @@
   grid-template-columns: minmax(10rem, 0.2fr) minmax(28rem, 1fr) minmax(31rem, 0.84fr);
   min-block-size: var(--rly-space-0);
   min-inline-size: var(--rly-space-0);
+}
+
+/*
+ * The measured grid width (findings-drawer.tsx) decides the layout above phone widths, so it wins
+ * over the container queries below: three columns, or file tree and diff with Relay in a drawer.
+ */
+.workbench[data-findings="column"] {
+  block-size: clamp(40rem, calc(100vh - 8rem), 56rem);
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.2fr) minmax(28rem, 1fr) minmax(31rem, 0.84fr);
+}
+
+.workbench[data-findings="column"] > .agentPane {
+  block-size: auto;
+  border-block-start: 0;
+  border-inline-start: 1px solid var(--rly-color-border-1);
+  grid-column: auto;
+  min-block-size: var(--rly-space-0);
+}
+
+/*
+ * File tree beside the diff, sized by content: the diff keeps rly's own bounded scroller
+ * (min(70vh, 56rem)) and the tree scrolls at the same cap, so nothing is set to a fixed height
+ * that a long diff could run past.
+ */
+.workbench[data-findings="drawer"] {
+  block-size: auto;
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.28fr) minmax(24rem, 1fr);
+}
+
+.workbench[data-findings="drawer"] .diffViewport {
+  block-size: auto;
+}
+
+.workbench[data-findings="drawer"] > .fileTree {
+  border-block-end: 0;
+  border-inline-end: 1px solid var(--rly-color-border-1);
+  max-block-size: min(70vh, 56rem);
 }
 
 .fileTree {
@@ -278,10 +329,16 @@
 }
 
 .agentTitle > small {
-  color: var(--rly-color-text-3);
+  /* text-2: tertiary ink on the pane's surface-2 header fell below 4.5:1 in light. */
+  color: var(--rly-color-text-2);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
   padding-inline-start: calc(var(--rly-space-16) + var(--rly-space-8));
+}
+
+/* In the drawer the icon-and-title row is dropped, so the subtitle starts at the edge. */
+.agentTitle > small:first-child {
+  padding-inline-start: var(--rly-space-0);
 }
 
 .agentEmpty {
@@ -431,15 +488,22 @@
   gap: var(--rly-space-6);
 }
 
-.profileChoice select {
-  background: var(--rly-color-surface-1);
-  border: 1px solid var(--rly-color-border-1);
-  border-radius: var(--rly-radius-control);
+.noProfile {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  margin: 0;
+}
+
+.noProfile a {
   color: var(--rly-color-text-1);
-  min-block-size: var(--rly-space-32);
+  text-decoration: underline;
+  text-decoration-color: var(--rly-color-action-background);
+}
+
+.profileChoice > :last-child {
   flex: 1;
   min-inline-size: var(--rly-space-0);
-  padding-inline: var(--rly-space-8);
 }
 
 .progressRail {
@@ -702,9 +766,10 @@
     flex-direction: column;
   }
 
+  /* Four choices on a phone read as a 2 x 2 grid rather than 3 + 1 with one left alone. */
   .focusChoices {
-    display: flex;
-    overflow-x: auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
   }
 
   .relayControls {
@@ -732,9 +797,10 @@
     block-size: min(36rem, 70vh);
   }
 
+  /* Sized by its content up to the cap, so an idle pane is not a tall empty box. */
   .agentPane {
-    block-size: min(42rem, 75vh);
-    min-block-size: 30rem;
+    block-size: auto;
+    max-block-size: min(42rem, 75vh);
   }
 }
 

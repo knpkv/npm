@@ -1,0 +1,11 @@
+id: no-upload-array-first-non-null
+valid:
+  - |
+    const first = attachments[0]
+    if (first === undefined) return yield* new EmptyUpload()
+    return first
+  - |
+    return attachments[0]
+invalid:
+  - |
+    return attachments[0]!

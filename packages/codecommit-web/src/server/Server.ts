@@ -210,6 +210,7 @@ const AuditPrune = Layer.effectDiscard(
     const auditLog = yield* AuditLogRepo
     const permService = yield* PermissionService.PermissionService
     const retentionDays = yield* permService.getAuditRetention()
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const deleted = yield* auditLog.prune(retentionDays).pipe(Effect.catchIf(() => true, () => Effect.succeed(0)))
     if (deleted > 0) yield* Effect.logInfo(`Pruned ${deleted} audit log entries older than ${retentionDays} days`)
   })
@@ -352,7 +353,10 @@ export const serveCodeCommit = Effect.fn("CodeCommitServer.serve")(function*(opt
           Effect.gen(function*() {
             yield* Ref.set(listening, true)
             yield* Effect.logInfo(`Authenticated server ready at ${directOrigin}`)
-            yield* Stream.make(`Authenticated bootstrap URL: ${url}\n`).pipe(Stream.run(stdio.stdout()))
+            // The one line a new user needs, set apart from the logs above it.
+            yield* Stream.make(
+              `\nCodeCommit is ready. Open this sign-in link (it works once, within 60 seconds):\n\n  ${url}\n\n`
+            ).pipe(Stream.run(stdio.stdout()))
             if (options.onReady !== undefined) yield* options.onReady(url)
           })
       )

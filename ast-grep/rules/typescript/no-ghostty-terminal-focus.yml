@@ -1,0 +1,20 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-ghostty-terminal-focus
+language: tsx
+severity: error
+message: "Focus the terminal with focusTerminalInput(textarea), not Ghostty's Terminal.focus()"
+
+rule:
+  any:
+    - pattern: $T.terminal.focus()
+    - pattern: terminal.focus()
+
+files:
+  - "packages/herdr-connect/src/**/*.tsx"
+  - "packages/herdr-connect/src/**/*.ts"
+
+note: |
+  Ghostty Web 0.4's Terminal.focus() focuses its container div, not the hidden textarea, so a tap
+  on iOS focused something that raises no keyboard. focusTerminalInput focuses the textarea inside
+  the gesture. Other `.focus()` calls (buttons, the agent list) are unaffected.

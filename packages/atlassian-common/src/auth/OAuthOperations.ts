@@ -202,6 +202,7 @@ export const refreshToken = (
       // leaves it absent — which callers read as "no verdict", not "rejected".
       const errorCode = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TokenErrorSchema))(text).pipe(
         Effect.map((decoded) => decoded.error),
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(undefined))
       )
       return yield* new OAuthError({

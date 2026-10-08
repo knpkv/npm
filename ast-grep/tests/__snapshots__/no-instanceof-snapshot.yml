@@ -1,0 +1,16 @@
+id: no-instanceof
+snapshots:
+  ? |
+    const isDate = value instanceof Date
+  : labels:
+      - source: value instanceof Date
+        style: primary
+        start: 15
+        end: 36
+  ? |
+    if (error instanceof NotFound) return
+  : labels:
+      - source: error instanceof NotFound
+        style: primary
+        start: 4
+        end: 29

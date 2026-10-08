@@ -40,7 +40,8 @@ describe("AwsClientGated", () => {
           resetAll: () => Effect.void,
           isAuditEnabled: () => Effect.succeed(false),
           getAuditRetention: () => Effect.succeed(30),
-          setAudit: () => Effect.void
+          setAudit: () => Effect.void,
+          setCategory: () => Effect.void
         })
       ),
       Layer.succeed(PermissionGate, PermissionGate.of({ request: () => Effect.succeed("allow_once") })),

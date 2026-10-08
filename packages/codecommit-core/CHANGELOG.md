@@ -1,5 +1,67 @@
 # @knpkv/codecommit-core
 
+## 0.23.0
+
+### Minor Changes
+
+- [#585](https://github.com/knpkv/npm/pull/585) [`2bc7cfa`](https://github.com/knpkv/npm/commit/2bc7cfa8678e43920eda987d2049d97f7a4ba58f) Thanks [@konopkov](https://github.com/konopkov)! - An approval revoked down to no approvers is now cleared. Approvers are who approved the pull request now, from the same read as the approval: a read with none clears them, and only a read that couldn't fetch them keeps the last known list. Before, a failed approver read and a real "no approvers" were the same empty list, and the cache kept the old approvers in both cases, so a revoked approval never cleared.
+
+  - `fetchApprovers` returns `Option`: none when the read fails (logged as a warning), never an empty list standing in for a failure.
+  - `PullRequest` and `PullRequestDetail` gain `approversUnknown` (set when the approver read failed; `approvedBy` is then only the last known list), and `UpsertInput` carries it.
+  - Approvers now move with the approval group's version, so a read whose approval is older than the cached one doesn't overwrite them.
+  - The cache keeps the marker (`approvers_unknown`, migration 0025; every row cached before it starts unknown, since its list may hold a revoked approval, until it is re-read), so a published pull request still says its approvers are only last known; the browser's wire schema decodes it.
+  - A bulk refresh, listed or stale re-read, with a pull request whose approvers couldn't be read counts that account as partial, not clean.
+  - `needsMyReview` and the workbench don't claim a definite review while approvers are unknown (the user may already have approved): the workbench lists such a pull request under the pool, and a last known approval never takes the user out of it.
+  - `Domain` adds `approversUnknownLabel` and `currentApprovers` (none while approvers are unknown). The browser shows "Approvers unknown" instead of an approval count, rule progress or approver check marks, and approver filters offer and match only approvers known now.
+  - Reviewer stats don't count approvers that couldn't be read, in top approvers or time to first review.
+  - The approver read logs its failure where it recovers, so its silent-fallback baseline line is gone.
+  - A merged or closed pull request is never listed again, so each refresh re-reads up to 25 of those with unknown approvers, oldest-updated first, until none is left. A failed re-read stays unknown and is logged, and never holds the refresh back. `PullRequestRepo` adds `findClosedWithUnknownApprovers`.
+  - A credential failure on the approver read is no longer unknown approvers: it fails the read, so the account shows signed out.
+  - `Domain` adds `currentApproverArns`. The `no-raw-pull-request-approvers-read` guard also covers `approvedByArns`, optional-chained and indexed reads.
+
+- [#631](https://github.com/knpkv/npm/pull/631) [`2f2925b`](https://github.com/knpkv/npm/commit/2f2925b42d04686ca9da52c056f6d9a177548e05) Thanks [@konopkov](https://github.com/konopkov)! - First-run follow-ups. When more than one read waits for permission, the read bar names them ("2 reads are waiting: Get identity for dev and List PRs for dev"; three at most, then "and N more"), so "Allow every read" is plainly the one answer. `@knpkv/codecommit-core`: `PermissionGateLive.pendingOf(category, limit)` reports the prompts actually waiting in this process. Settings → Accounts says "Checking sign-in…" until an account's identity read answers, instead of "Not logged in" next to a live SSO profile, and a browser without a session gets the sign-in-link guidance in Settings instead of a pointer to the config file.
+
+## 0.22.0
+
+### Minor Changes
+
+- [#578](https://github.com/knpkv/npm/pull/578) [`0938903`](https://github.com/knpkv/npm/commit/0938903a17b6d2bdf13b96947471a1d49f10b42f) Thanks [@konopkov](https://github.com/konopkov)! - A first run of the CodeCommit web app now leads somewhere at every step.
+
+  - The page shows whether its live stream is connecting, not signed in (the browser has no session: open the sign-in link `codecommit web` printed), failing (with the cause and "Retry now"), or live. Counts read as unknown, never 0, until the first update arrives. A lost stream no longer looks like an empty queue.
+  - An empty queue says why: no AWS profiles yet (with "Set up accounts"), filters hiding cached pull requests, or nothing open.
+  - Settings → Accounts with no profiles shows where profiles are read from, the `aws configure` commands that create one, and "Detect again", which reports what it found. It never edits AWS files.
+  - Settings → Config says a missing config file means defaults are in use.
+  - Error notifications name what failed, the provider's own error and the fix ("Couldn't list pull requests in dev (eu-central-1): ExpiredTokenException: … Sign in again in Settings → Accounts.") instead of "getPullRequests — AwsApiError".
+  - `@knpkv/codecommit-core`: AWS profile detection follows `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` like the AWS CLI. New exports: `ConfigService.awsProfileSources`, `awsProfileSourcesIn`, `AwsProfileSources`, and `Errors.describeAwsClientError`.
+  - A read the app hasn't been allowed yet asks in a bar at the top of the page instead of a blocking dialog; "Allow every read" grants every read operation in one saved step, and the queue says it is waiting for that answer. Writes still ask in a dialog, now with "Allow once" as the default. Saving that grant releases every read already waiting, not just the one shown. `@knpkv/codecommit-core`: `PermissionService.setCategory` sets a whole category in one atomic write and fails with `ConfigError` when it can't save; every permission change is now serialized, so a concurrent reset or change can't be overwritten. `PermissionGateLive.resolveCategory` answers every pending prompt of a category.
+  - Settings → Accounts lists each profile as a switch named by the profile, and auto-detect is a checkbox. A settings or stats read that fails stays in its region with the reason (and Retry for stats) instead of replacing the page.
+  - `codecommit web` prints the sign-in link on its own, saying it works once within 60 seconds.
+  - Approval rules this page created can be removed; the pull request refreshes once the rule is gone, and a failed removal says why.
+  - Switching an account on and leaving Settings straight away no longer loses the change: a pending save is sent when the page closes and runs to completion. The auto-detect checkbox keeps its choice. "Detect again" reports only after detection finished, and with auto-detect off it switches auto-detect on first. Counts read as unknown, not 0, while the first sync runs or waits for permission.
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+
+## 0.21.0
+
+### Minor Changes
+
+- [#569](https://github.com/knpkv/npm/pull/569) [`5509cb8`](https://github.com/knpkv/npm/commit/5509cb87f90641d14211e2d993443e3cfcf40784) Thanks [@konopkov](https://github.com/konopkov)! - Approval and health now read honestly on real queues.
+
+  - `approvalOf` gains `NotRequired`, labelled "No approval required" (`approvalNotRequiredLabel`): CodeCommit evaluates a pull request with no approval rules as approved, though nobody signed off. "Approved" now appears only when rules exist and are satisfied. The CLI flags, TUI badge, web row, detail page and health score all show it. Status filters and counts treat it as neither approved nor pending.
+  - No "Approval granted" or "revoked" notification is sent for a pull request without rules. An identical pull-request notification that is still unread is not added again, so a restart no longer re-announces it.
+  - The cache records whether a pull request's approval baseline is known (migration 0024). A sign-off or withdrawal made while approval evaluation was failing is announced once evaluation recovers. A pull request first seen while evaluation fails holds only a placeholder, so its recovery is not announced.
+  - The health score uses a saturating curve: a base of 8, minus up to 6 for idleness and up to 2 for age, plus up to 1.5 for comments (3 counted), 2 for an approval and 1 for "No approval required". Long-idle pull requests are now ranked instead of all reading 0.0, and fresh ones stay green. A pull request CodeCommit gave no dates for scores Unknown ("Health —") and sorts last; comments that haven't loaded make the score a lower bound.
+
+- [#570](https://github.com/knpkv/npm/pull/570) [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9) Thanks [@konopkov](https://github.com/konopkov)! - Executables linked from the repository (`pnpm link --global`, or `node dist/...`) run under plain Node: workspace packages resolve to their build output instead of TypeScript sources. Published `@knpkv/codecommit-core` now serves its `Domain.js`, `CacheService.js` and `SandboxService.js` subpaths; the last two resolved to files that do not exist before.
+
+### Patch Changes
+
+- [#574](https://github.com/knpkv/npm/pull/574) [`0a0182c`](https://github.com/knpkv/npm/commit/0a0182c18f237ab420d17d0339f0969d9356c63a) Thanks [@konopkov](https://github.com/konopkov)! - A failed comment fetch no longer reads as "no comments". The bulk and the single refresh write nothing: the comment count stays as it was (not loaded until a fetch succeeds), the cached comments are kept, and nothing is announced. Before, a failure stored 0 comments, and the single refresh also replaced the comment cache with an empty set, so the next successful fetch re-announced every existing comment.
+
+- [#568](https://github.com/knpkv/npm/pull/568) [`442b11d`](https://github.com/knpkv/npm/commit/442b11db369a5af5e85d4d91d00c334d46f8103d) Thanks [@konopkov](https://github.com/konopkov)! - The test suites of codecommit-core and codecommit-web are now typechecked as part of `check`, and both packages leave the test-typecheck allowlist.
+
 ## 0.20.0
 
 ### Minor Changes

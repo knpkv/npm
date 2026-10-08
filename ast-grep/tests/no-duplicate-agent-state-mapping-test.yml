@@ -1,0 +1,7 @@
+id: no-duplicate-agent-state-mapping
+valid:
+  - "const presentation = agentStatePresentation(agent.state)"
+  - 'switch (goal.state) { case "open": return 1 }'
+invalid:
+  - 'switch (state.toLocaleLowerCase("en-US")) { case "working": return "Working" }'
+  - 'switch (status) { case "idle": return "minus" }'

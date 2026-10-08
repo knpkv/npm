@@ -77,6 +77,13 @@ export const componentManifest = {
   schemaVersion: 1,
   assets: [
     { id: "styles", output: "dist/styles.css", source: "src/styles/styles.css", subpath: "./styles.css" },
+    // Relay's mark on its agent tile, for a host's favicon or app icon.
+    {
+      id: "relay-mark",
+      output: "dist/assets/relay-mark.svg",
+      source: "src/assets/relay-mark.svg",
+      subpath: "./relay-mark.svg"
+    },
     {
       id: "registry-components",
       output: "registry/components.json",
@@ -239,6 +246,210 @@ export const componentManifest = {
         tests: ["test/patterns/DecisionBar.test.tsx"]
       }
     },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayMark" },
+        { kind: "value", name: "RLY_RELAY_MARK_SIZES" },
+        { kind: "value", name: "RLY_RELAY_MARK_TILE_SIZES" },
+        { kind: "type", name: "RelayMarkProps" },
+        { kind: "type", name: "RelayMarkTileProps" },
+        { kind: "type", name: "RlyRelayMarkSize" },
+        { kind: "type", name: "RlyRelayMarkTileSize" }
+      ],
+      name: "RelayMark",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayMark.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayMark.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayMark.stories.tsx",
+        storyId: "patterns-relaymark--sizes",
+        tests: ["test/patterns/RelayMark.test.tsx", "test/patterns/RelayMark.favicon.test.ts"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayLauncher" },
+        { kind: "value", name: "relayShortcut" },
+        { kind: "value", name: "useRelayShortcut" },
+        { kind: "value", name: "useRelaySummon" },
+        { kind: "type", name: "RelayLauncherProps" },
+        { kind: "type", name: "RlyRelayShortcut" },
+        { kind: "type", name: "RlyRelaySummon" },
+        { kind: "type", name: "UseRelaySummonOptions" }
+      ],
+      name: "RelayLauncher",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayLauncher.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayLauncher.module.css"],
+      // expanded is required, so it has no default to record; the closed and open states live in the
+      // registry metadata.
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayLauncher.stories.tsx",
+        storyId: "patterns-relaylauncher--header",
+        tests: [
+          "test/patterns/RelayLauncher.test.tsx",
+          "test/patterns/RelayLauncher.css.test.ts",
+          "test/patterns/RelayLauncher.summon.test.tsx",
+          "test/patterns/relaySummon.test.ts"
+        ]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayPanel" },
+        { kind: "value", name: "RLY_RELAY_PANEL_PRESENTATIONS" },
+        { kind: "value", name: "RLY_RELAY_PANEL_WIDTH" },
+        { kind: "value", name: "useRelayPresentation" },
+        { kind: "type", name: "RelayPanelProps" },
+        { kind: "type", name: "RlyRelayPanelPresentation" },
+        { kind: "type", name: "RlyRelayPanelPin" },
+        { kind: "type", name: "RlyRelayPanelTab" },
+        { kind: "type", name: "RlyRelayPresentation" },
+        { kind: "type", name: "RlyRelayScope" },
+        { kind: "type", name: "UseRelayPresentationOptions" }
+      ],
+      name: "RelayPanel",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayPanel.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayPanel.module.css"],
+      // presentation is required (or chosen by useRelayPresentation), so it has no default to record;
+      // overlay, pinned and fullscreen are registry states.
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayPanel.stories.tsx",
+        storyId: "patterns-relaypanel--overlay",
+        tests: ["test/patterns/RelayPanel.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayTranscript" },
+        { kind: "type", name: "RelayTranscriptProps" },
+        { kind: "type", name: "RlyRelayCite" },
+        { kind: "type", name: "RlyRelayTool" },
+        { kind: "type", name: "RlyRelayTranscriptItem" }
+      ],
+      name: "RelayTranscript",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayTranscript.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayTranscript.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayTranscript.stories.tsx",
+        storyId: "patterns-relaytranscript--conversation",
+        coverageStoryIds: ["patterns-relaytranscript--streaming", "patterns-relaytranscript--failed"],
+        tests: ["test/patterns/RelayTranscript.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayComposer" },
+        { kind: "value", name: "useRelayDraft" },
+        { kind: "type", name: "RelayComposerProps" },
+        { kind: "type", name: "RlyRelayContextRef" },
+        { kind: "type", name: "RlyRelayDraft" },
+        { kind: "type", name: "RlyRelayDraftStorage" },
+        { kind: "type", name: "RlyRelaySubmission" },
+        { kind: "type", name: "UseRelayDraftOptions" }
+      ],
+      name: "RelayComposer",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayComposer.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayComposer.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayComposer.stories.tsx",
+        storyId: "patterns-relaycomposer--draft",
+        tests: ["test/patterns/RelayComposer.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayDecision" },
+        { kind: "type", name: "RelayDecisionProps" },
+        { kind: "type", name: "RlyRelayDecisionCopy" },
+        { kind: "type", name: "RlyRelayDecisionReceipt" },
+        { kind: "type", name: "RlyRelayDecisionState" },
+        { kind: "type", name: "RlyRelayDecisionTarget" }
+      ],
+      name: "RelayDecision",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayDecision.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayDecision.module.css"],
+      variants: [{ defaultValue: "default", name: "tone", values: ["default", "danger"] }],
+      visual: {
+        story: "stories/patterns/RelayDecision.stories.tsx",
+        storyId: "patterns-relaydecision--lifecycle",
+        tests: ["test/patterns/RelayDecision.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelaySetup" },
+        { kind: "type", name: "RelaySetupProps" },
+        { kind: "type", name: "RlyRelayBackend" },
+        { kind: "type", name: "RlyRelayBackendCause" },
+        { kind: "type", name: "RlyRelayBackendStatus" },
+        { kind: "type", name: "RlyRelaySetupFocus" }
+      ],
+      name: "RelaySetup",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelaySetup.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelaySetup.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelaySetup.stories.tsx",
+        storyId: "patterns-relaysetup--first-run-setup",
+        tests: ["test/patterns/RelaySetup.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayFindings" },
+        { kind: "type", name: "RelayFindingsProps" },
+        { kind: "type", name: "RlyRelayFinding" },
+        { kind: "type", name: "RlyRelayFindingDisposition" },
+        { kind: "type", name: "RlyRelayFindingLocation" },
+        { kind: "type", name: "RlyRelayFindingPriority" }
+      ],
+      name: "RelayFindings",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayFindings.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayFindings.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayFindings.stories.tsx",
+        storyId: "patterns-relayfindings--review-findings",
+        coverageStoryIds: ["patterns-relayfindings--stale", "patterns-relayfindings--empty"],
+        tests: ["test/patterns/RelayFindings.test.tsx"]
+      }
+    },
     // scaffold:components:insert
     {
       category: "primitive",
@@ -285,6 +496,32 @@ export const componentManifest = {
         story: "stories/primitives/LimitTrack.stories.tsx",
         storyId: "primitives-limittrack--gallery",
         tests: ["test/primitives/LimitTrack.test.tsx"]
+      }
+    },
+    {
+      category: "primitive",
+      exports: [
+        { kind: "value", name: "StackedBars" },
+        { kind: "type", name: "StackedBarsProps" },
+        { kind: "type", name: "RlyStepBand" },
+        { kind: "type", name: "RlyBandMark" },
+        { kind: "type", name: "RlyChartBin" },
+        { kind: "type", name: "RlyChartColumn" },
+        { kind: "type", name: "RlyChartSegment" },
+        { kind: "type", name: "RlyChartSelection" },
+        { kind: "type", name: "RlyChartWindow" }
+      ],
+      name: "StackedBars",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/StackedBars.tsx",
+      status: "experimental",
+      styles: ["src/primitives/StackedBars.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/primitives/StackedBars.stories.tsx",
+        storyId: "primitives-stackedbars--week",
+        tests: ["test/primitives/StackedBars.test.tsx", "test/primitives/chart.test.ts"]
       }
     },
     {
@@ -366,6 +603,25 @@ export const componentManifest = {
         story: "stories/foundations/Tokens.stories.tsx",
         storyId: "foundations-tokens--overview",
         tests: ["test/tokens/token-contract.test.ts"]
+      }
+    },
+    {
+      category: "foundation",
+      exports: [
+        { kind: "value", name: "RLY_FONT_FACES" },
+        { kind: "type", name: "RlyFontFace" }
+      ],
+      name: "FontFaces",
+      publicEntry: "tokens",
+      registry: false,
+      source: "src/tokens/fonts.ts",
+      status: "stable",
+      styles: [],
+      variants: [],
+      visual: {
+        story: "stories/foundations/FontFaces.stories.tsx",
+        storyId: "foundations-fontfaces--specimen",
+        tests: ["test/tokens/font-faces.test.ts"]
       }
     },
     {

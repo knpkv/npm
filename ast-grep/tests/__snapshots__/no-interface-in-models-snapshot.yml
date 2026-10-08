@@ -1,0 +1,14 @@
+id: no-interface-in-models
+snapshots:
+  ? |
+    export interface User {
+      readonly id: string
+    }
+  : labels:
+      - source: |-
+          export interface User {
+            readonly id: string
+          }
+        style: primary
+        start: 0
+        end: 47
