@@ -17,6 +17,8 @@ rule:
 
 files:
   - "packages/herdr-monitor/src/**/*.css"
+  - "packages/review/src/**/*.css"
+  - "packages/agent-usage/src/**/*.css"
 
 note: |
   overflow: clip cuts the same way without a scroll container. Keep hidden only where script scrolls
