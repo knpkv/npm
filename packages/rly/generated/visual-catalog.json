@@ -721,7 +721,9 @@
         ],
         "tests": [
           "packages/rly/test/patterns/RelayLauncher.css.test.ts",
-          "packages/rly/test/patterns/RelayLauncher.test.tsx"
+          "packages/rly/test/patterns/RelayLauncher.summon.test.tsx",
+          "packages/rly/test/patterns/RelayLauncher.test.tsx",
+          "packages/rly/test/patterns/relaySummon.test.ts"
         ]
       },
       "storyId": "patterns-relaylauncher--header",

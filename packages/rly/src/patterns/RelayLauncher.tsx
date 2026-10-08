@@ -1,6 +1,8 @@
-import type { ComponentPropsWithRef, ReactElement } from "react"
-import { useSyncExternalStore } from "react"
+import type { ComponentPropsWithRef, ReactElement, RefObject } from "react"
+import { useEffect, useRef, useSyncExternalStore } from "react"
 import { classNames, cssClass, requireText } from "../internal/component.js"
+import { focusRestoreTarget, isWithinComposedElement } from "../internal/composedFocus.js"
+import { matchesShortcutKeys, relaySummonTransition } from "../internal/relaySummon.js"
 import styles from "./RelayLauncher.module.css"
 import { RelayMark } from "./RelayMark.js"
 
@@ -32,6 +34,100 @@ const noSubscription = (): (() => void) => () => undefined
  */
 export const useRelayShortcut = (): RlyRelayShortcut =>
   relayShortcut(useSyncExternalStore(noSubscription, isApplePlatform, () => false))
+
+/** Inputs for {@link useRelaySummon}. */
+export interface UseRelaySummonOptions {
+  readonly open: boolean
+  readonly onOpenChange: (open: boolean) => void
+  /** The Relay region; focus inside it counts as being in Relay. */
+  readonly region: RefObject<HTMLElement | null>
+  /** Where a summon puts focus, the composer. Focused once it renders after opening. */
+  readonly composer: RefObject<HTMLElement | null>
+  /** Relay is the full-screen dialog (phone): the shortcut closes it. */
+  readonly fullscreen: boolean
+  /**
+   * The shortcut to listen for, the same value the launcher advertises; `null` while the host's own
+   * surface owns the key (a live terminal), when the launcher button is the only way in.
+   */
+  readonly shortcut: RlyRelayShortcut | null
+}
+
+/**
+ * Relay's keyboard summon (Relay UX decision). The shortcut opens Relay and focuses the composer; open
+ * with focus on the page, it moves focus to the composer; open with focus in Relay, it returns focus to
+ * where it came from and Relay stays open; full screen, it closes. Escape closes when focus is in Relay
+ * or Relay is full screen, returning focus. Only the exact chord is handled and prevented, so Ctrl+K,
+ * `?`, g-sequences and the browser's other keys pass through.
+ */
+export const useRelaySummon = (options: UseRelaySummonOptions): void => {
+  const latest = useRef(options)
+  latest.current = options
+  const returnTo = useRef<HTMLElement | null>(null)
+  const focusComposerOnOpen = useRef(false)
+
+  // Opened any way (the shortcut or the launcher), Relay remembers where focus was so the shortcut can
+  // take you back; a summon then focuses the composer once it has rendered.
+  useEffect(() => {
+    if (!options.open) {
+      returnTo.current = null
+      return
+    }
+    if (returnTo.current === null) returnTo.current = focusOutside(options.region.current)
+    if (!focusComposerOnOpen.current) return
+    focusComposerOnOpen.current = false
+    options.composer.current?.focus()
+  }, [options.open, options.composer, options.region])
+
+  const keys = options.shortcut?.keys ?? null
+  useEffect(() => {
+    if (keys === null) return
+    const rememberFocus = (): void => {
+      returnTo.current = focusOutside(latest.current.region.current)
+    }
+    const restoreFocus = (): void => {
+      const target = returnTo.current
+      returnTo.current = null
+      if (target?.isConnected === true) target.focus()
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented) return
+      const key = event.key === "Escape" ? "escape" : matchesShortcutKeys(keys, event) ? "chord" : undefined
+      if (key === undefined) return
+      const { composer, fullscreen, onOpenChange, open, region } = latest.current
+      const active = focusRestoreTarget(document)
+      const focusInRelay = region.current !== null && active !== null && isWithinComposedElement(region.current, active)
+      const effect = relaySummonTransition({ focusInRelay, fullscreen, open }, key)
+      if (effect === "Ignore") return
+      event.preventDefault()
+      switch (effect) {
+        case "Open":
+          rememberFocus()
+          focusComposerOnOpen.current = true
+          onOpenChange(true)
+          return
+        case "FocusComposer":
+          rememberFocus()
+          composer.current?.focus()
+          return
+        case "ReturnFocus":
+          restoreFocus()
+          return
+        case "Close":
+          onOpenChange(false)
+          restoreFocus()
+          return
+      }
+    }
+    document.addEventListener("keydown", onKeyDown)
+    return () => document.removeEventListener("keydown", onKeyDown)
+  }, [keys])
+}
+
+/** The focused element when it is on the page rather than in Relay (shadow roots included), else null. */
+const focusOutside = (region: HTMLElement | null): HTMLElement | null => {
+  const active = focusRestoreTarget(document)
+  return active !== null && region !== null && isWithinComposedElement(region, active) ? null : active
+}
 
 /** Inputs for the launcher. */
 export type RelayLauncherProps = Omit<ComponentPropsWithRef<"button">, "children" | "type"> & {

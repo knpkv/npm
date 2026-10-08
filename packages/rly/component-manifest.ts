@@ -276,8 +276,10 @@ export const componentManifest = {
         { kind: "value", name: "RelayLauncher" },
         { kind: "value", name: "relayShortcut" },
         { kind: "value", name: "useRelayShortcut" },
+        { kind: "value", name: "useRelaySummon" },
         { kind: "type", name: "RelayLauncherProps" },
-        { kind: "type", name: "RlyRelayShortcut" }
+        { kind: "type", name: "RlyRelayShortcut" },
+        { kind: "type", name: "UseRelaySummonOptions" }
       ],
       name: "RelayLauncher",
       publicEntry: "patterns",
@@ -291,7 +293,12 @@ export const componentManifest = {
       visual: {
         story: "stories/patterns/RelayLauncher.stories.tsx",
         storyId: "patterns-relaylauncher--header",
-        tests: ["test/patterns/RelayLauncher.test.tsx", "test/patterns/RelayLauncher.css.test.ts"]
+        tests: [
+          "test/patterns/RelayLauncher.test.tsx",
+          "test/patterns/RelayLauncher.css.test.ts",
+          "test/patterns/RelayLauncher.summon.test.tsx",
+          "test/patterns/relaySummon.test.ts"
+        ]
       }
     },
     // scaffold:components:insert

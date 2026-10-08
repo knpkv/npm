@@ -466,10 +466,20 @@ the platform) only when the host binds that key and prevents the browser's own C
 or `null` where it binds none, such as a live terminal that keeps its chords.
 The hint hides at 40rem and below, and the button is 32px tall, 44px for a coarse pointer.
 
-```tsx
-import { RelayLauncher, useRelayShortcut } from "@knpkv/rly/patterns"
+`useRelaySummon` binds that shortcut. From the page it opens Relay and focuses the composer (or, if
+Relay is already open, moves focus to the composer); from inside Relay it takes focus back to where it
+came from, and Relay stays open. Full screen, it closes Relay. Escape closes Relay when focus is inside
+it or Relay is full screen, and returns focus. Only the exact chord is handled and prevented, so Ctrl+K,
+`?`, g-sequences and Alt keys reach the host. Pass the same `shortcut` the launcher advertises, or `null`
+while the host's own surface owns the key.
 
-;<RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} shortcut={useRelayShortcut()} />
+```tsx
+import { RelayLauncher, useRelayShortcut, useRelaySummon } from "@knpkv/rly/patterns"
+
+;const shortcut = useRelayShortcut()
+useRelaySummon({ composer, fullscreen: false, onOpenChange: setOpen, open, region, shortcut })
+
+<RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} shortcut={shortcut} />
 ```
 
 `RelayDock` is the shared product frame for one adapter-owned Relay thread. It

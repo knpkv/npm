@@ -3699,6 +3699,14 @@
         {
           "kind": "value",
           "name": "useRelayShortcut"
+        },
+        {
+          "kind": "value",
+          "name": "useRelaySummon"
+        },
+        {
+          "kind": "type",
+          "name": "UseRelaySummonOptions"
         }
       ],
       "files": {
@@ -3709,7 +3717,9 @@
         ],
         "tests": [
           "test/patterns/RelayLauncher.css.test.ts",
-          "test/patterns/RelayLauncher.test.tsx"
+          "test/patterns/RelayLauncher.summon.test.tsx",
+          "test/patterns/RelayLauncher.test.tsx",
+          "test/patterns/relaySummon.test.ts"
         ]
       },
       "importPath": "@knpkv/rly/patterns",
