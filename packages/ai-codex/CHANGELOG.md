@@ -1,5 +1,11 @@
 # @knpkv/ai-codex
 
+## 0.5.3
+
+### Patch Changes
+
+- [#597](https://github.com/knpkv/npm/pull/597) [`1118080`](https://github.com/knpkv/npm/commit/1118080aad8616fa9f19c15cbcf5b3f4df0160a1) Thanks [@konopkov](https://github.com/konopkov)! - Claude's output decoding falls back to line-delimited events only when the whole output isn't one result document, never on other failures. Codex logs a warning when it can't remove its temporary output-schema directory, instead of ignoring that silently.
+
 ## 0.5.2
 
 ### Patch Changes

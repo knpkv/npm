@@ -1,5 +1,21 @@
 # @knpkv/herdr-approvals
 
+## 0.13.0
+
+### Minor Changes
+
+- [#650](https://github.com/knpkv/npm/pull/650) [`87a811a`](https://github.com/knpkv/npm/commit/87a811a150578ac809316fe3bb0eb190a7f5e051) Thanks [@konopkov](https://github.com/konopkov)! - The hub no longer has a coordinator chat. The chat panel is gone from the Approvals dashboard and from below Connect's terminal, the page stops polling for chat, and the `GET`/`POST /v1/chat` routes are removed. The dashboard snapshot drops `chat` and `approvalApp.chatEnabled`, and `dashboardPolls` no longer reports `chat`. Notifications now show on the canonical hub whether or not chat history exists. A coordinator chat job queued before the upgrade still runs through Fleet's `runCoordinatorChat`. `@knpkv/herdr-coordinator`'s chat model and Fleet's chat operations are unchanged.
+
+### Patch Changes
+
+- [#638](https://github.com/knpkv/npm/pull/638) [`51db213`](https://github.com/knpkv/npm/commit/51db213028b228bfff75f0dbcfd5e9add0fffc9b) Thanks [@konopkov](https://github.com/konopkov)! - The hub preloads Geist Mono as well as Geist. Ids and kickers are set in mono, and loading that face late re-wrapped a line in the Approvals detail at 390, shifting the page.
+
+- [#644](https://github.com/knpkv/npm/pull/644) [`9a0dbd7`](https://github.com/knpkv/npm/commit/9a0dbd7d08661cbcdeaef12be2dbe6c99d08c226) Thanks [@konopkov](https://github.com/konopkov)! - The hub takes the fonts it preloads from rly's list of web font faces instead of naming the files itself, so a face rly adds is preloaded too.
+- Updated dependencies [[`132d46b`](https://github.com/knpkv/npm/commit/132d46bc0ed8a881737a0ead6db9b32cbbac4889), [`5594373`](https://github.com/knpkv/npm/commit/5594373fe3479fa7cbae68608f8b7b84606407e6), [`dfa2d94`](https://github.com/knpkv/npm/commit/dfa2d94ea207baeb281ef222c7d28cf98e4962bb), [`5d21796`](https://github.com/knpkv/npm/commit/5d21796fb856fba44a32395e316a6bd95ecdbdd6), [`aa41111`](https://github.com/knpkv/npm/commit/aa411113b76d81637f7af356bf04054246aa30ab), [`3ddf05b`](https://github.com/knpkv/npm/commit/3ddf05baa285beebba1ebe99bd2458434a613015)]:
+  - @knpkv/herdr-connect@0.8.0
+  - @knpkv/rly@0.15.0
+  - @knpkv/herdr-work@0.9.2
+
 ## 0.12.0
 
 ### Minor Changes

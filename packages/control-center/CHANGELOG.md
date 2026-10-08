@@ -1,5 +1,26 @@
 # @knpkv/control-center
 
+## 0.11.0
+
+### Minor Changes
+
+- [#637](https://github.com/knpkv/npm/pull/637) [`2743acd`](https://github.com/knpkv/npm/commit/2743acd2a373b18b744503c63780230429a12583) Thanks [@konopkov](https://github.com/konopkov)! - Connecting a resource now syncs it. Before, nothing synced until someone found **Sync now** behind a resource's collapsed controls, so a first run showed "Healthy" next to empty Items.
+
+  - Connecting a resource whose connection test passes starts its first sync. Opening Services never starts one.
+  - Until it first syncs, a resource reads "Not synced yet", "Syncing…" or "Sync failed", never "Healthy". Inside an account it opens so **Sync now** is visible.
+  - A failed sync says why, as a sentence with its fix. `PluginSynchronizationState` gains `failure` (failure class and safe message, from the failure recorded on the connection's health); an absent field decodes as null, and code that builds the type sets `failure` (null when the sync didn't fail).
+  - Credential failures are stated once on the account card, with **Check again**, not on each resource.
+  - Sync copy uses "sync": "Synced 2 min ago, 19:33" replaces ISO timestamps.
+
+### Patch Changes
+
+- Updated dependencies [[`1118080`](https://github.com/knpkv/npm/commit/1118080aad8616fa9f19c15cbcf5b3f4df0160a1), [`dfa2d94`](https://github.com/knpkv/npm/commit/dfa2d94ea207baeb281ef222c7d28cf98e4962bb), [`5d21796`](https://github.com/knpkv/npm/commit/5d21796fb856fba44a32395e316a6bd95ecdbdd6), [`aa41111`](https://github.com/knpkv/npm/commit/aa411113b76d81637f7af356bf04054246aa30ab), [`3ddf05b`](https://github.com/knpkv/npm/commit/3ddf05baa285beebba1ebe99bd2458434a613015)]:
+  - @knpkv/ai-claude@0.4.3
+  - @knpkv/ai-codex@0.5.3
+  - @knpkv/rly@0.15.0
+  - @knpkv/relay-product@0.2.9
+  - @knpkv/review@0.4.5
+
 ## 0.10.5
 
 ### Patch Changes
