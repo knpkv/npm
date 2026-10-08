@@ -123,10 +123,13 @@ const selectorRevision = (selection: RelaySelectorState): string =>
 const sameRun = (left: RelaySelectorState, right: RelaySelectorState): boolean =>
   left.profileId === right.profileId && left.modelId === right.modelId
 
+/** An HTML element, told by its focus contract rather than a realm-specific constructor. */
+const isHTMLElement = (element: Element): element is HTMLElement => "focus" in element && "inert" in element
+
 /** The control that has focus, when it is a real control rather than the page body. */
 const focusedControl = (owner: Document): HTMLElement | null => {
   const active = owner.activeElement
-  return active instanceof HTMLElement && active !== owner.body ? active : null
+  return active !== null && active !== owner.body && isHTMLElement(active) ? active : null
 }
 
 let requests = 0
