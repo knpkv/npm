@@ -249,7 +249,7 @@ test("on a phone, every column's breakdown stays inside the chart", async ({ pag
   }
 })
 
-test("a long ticket title stays inside its cell at desktop width", async ({ page }) => {
+test("a long ticket title stays inside its cell at desktop width, with the full text in its title", async ({ page }) => {
   const summary = "A ticket summary long enough to run across every column of the table if nothing stopped it ".repeat(
     3
   )
@@ -269,6 +269,7 @@ test("a long ticket title stays inside its cell at desktop width", async ({ page
     const cellBox = await cell.boundingBox()
     if (titleBox === null || cellBox === null) throw new Error("title not laid out")
     expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(cellBox.x + cellBox.width + 0.5)
+    await expect(title).toHaveAttribute("title", /if nothing stopped it A ticket summary/)
   }
 })
 

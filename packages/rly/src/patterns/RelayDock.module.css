@@ -16,6 +16,12 @@
       var(--rly-type-label-font);
     justify-content: center;
   }
+  @supports (justify-content: safe center) {
+    .trigger,
+    .close {
+      justify-content: safe center;
+    }
+  }
 
   .trigger {
     border-radius: var(--rly-radius-round);
@@ -29,9 +35,11 @@
     visibility: hidden;
   }
 
-  .trigger:hover,
-  .close:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .trigger:hover,
+    .close:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .trigger:active,
@@ -60,7 +68,6 @@
 
   .panel {
     background: var(--rly-color-surface-1);
-    block-size: 100vh;
     block-size: 100dvh;
     color: var(--rly-color-text-1);
     display: flex;
@@ -218,7 +225,6 @@
 
   @media (max-width: 40rem), (max-height: 40rem) and (pointer: coarse) {
     .sheet {
-      block-size: 100vh;
       block-size: 100dvh;
       border: var(--rly-space-0);
       border-radius: var(--rly-space-0);

@@ -134,8 +134,10 @@
     text-align: start;
   }
 
-  .directoryButton:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .directoryButton:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .directoryButton:focus-visible {
@@ -202,8 +204,10 @@
     text-align: start;
   }
 
-  .file:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .file:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .file[aria-current="true"] {

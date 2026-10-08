@@ -161,4 +161,36 @@ describe("TerminalKeyRail", () => {
     await act(async () => host.querySelector<HTMLButtonElement>('[data-terminal-key="keyboard"]')?.click())
     expect(requests).toEqual([true, false])
   })
+
+  it("offers Paste only with a handler, and keeps it in reach when the keys are hidden", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    let pastes = 0
+    const render = async (withPaste: boolean) =>
+      act(async () => {
+        root.render(
+          <TerminalKeyRail
+            keysHidden
+            modifier={null}
+            onFocusTerminal={() => undefined}
+            onKey={() => undefined}
+            onKeysHiddenChange={() => undefined}
+            onModifierChange={() => undefined}
+            {...(withPaste ? { onPaste: () => (pastes += 1) } : {})}
+          />
+        )
+      })
+
+    await render(false)
+    expect(host.querySelector('[data-terminal-key="paste"]')).toBeNull()
+
+    await render(true)
+    const paste = host.querySelector<HTMLButtonElement>('[data-terminal-key="paste"]')
+    expect(paste?.getAttribute("aria-label")).toBe("Paste from clipboard")
+    expect(paste?.disabled).toBe(false)
+    await act(async () => paste?.click())
+    expect(pastes).toBe(1)
+  })
 })

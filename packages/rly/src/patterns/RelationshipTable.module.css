@@ -84,8 +84,10 @@
     text-underline-offset: var(--rly-space-2);
   }
 
-  .endpointLink:hover {
-    text-decoration-color: currentcolor;
+  @media (hover: hover) and (pointer: fine) {
+    .endpointLink:hover {
+      text-decoration-color: currentcolor;
+    }
   }
 
   .endpointLink:focus-visible {

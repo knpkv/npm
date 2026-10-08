@@ -542,6 +542,8 @@ type TerminalKeyRailProps = {
   readonly keyboardOpen?: boolean
   /** Offers a pinned Keyboard toggle when given; it must focus or blur within the click. */
   readonly onKeyboardToggle?: (open: boolean) => void
+  /** Offers a pinned Paste action when given; it must start reading the clipboard within the click. */
+  readonly onPaste?: () => void
 }
 
 const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
@@ -560,6 +562,7 @@ export const TerminalKeyRail = ({
   onKeyboardToggle,
   onKeysHiddenChange,
   onModifierChange,
+  onPaste,
   onSelectText,
   positionUnconfirmed = false
 }: TerminalKeyRailProps) => {
@@ -600,6 +603,9 @@ export const TerminalKeyRail = ({
             expanded: !keysHidden
           }
         ]),
+    ...(onPaste === undefined
+      ? []
+      : [{ key: "paste", label: "Paste", ariaLabel: "Paste from clipboard", onClick: onPaste }]),
     ...(onJumpToLatest === undefined
       ? []
       : [{ key: "latest", label: "Latest", ariaLabel: "Jump to latest output", onClick: onJumpToLatest }]),
