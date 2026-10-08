@@ -82,12 +82,24 @@ const InPanel = ({
   )
 }
 
+/** The overlay enters from opacity 0; visibility is judged once its entrance has finished. */
+const settled = async (canvasElement: HTMLElement): Promise<void> => {
+  const region = canvasElement.querySelector("[data-rly-relay-panel]")
+  await Promise.all((region?.getAnimations() ?? []).map((animation) => animation.finished))
+}
+
 const transcriptArgs = { items: [], streaming: false }
 
 /** conversation: turns, a collapsed activity row with a citation, a code block that scrolls in place. */
 export const Conversation: Story = {
   args: transcriptArgs,
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
+    await settled(canvasElement)
+    // Followed to the end when it opened, before the reader expands anything.
+    const scroller = canvas.getByRole("complementary", { name: "Relay" }).querySelector("[data-rly-relay-scroll]")
+    await expect(
+      scroller === null ? -1 : scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
+    ).toBeLessThanOrEqual(24)
     // A multi-line turn keeps its line breaks.
     const bubble = canvas.getByText(/Why is the trailing context line skipped/)
     await expect(getComputedStyle(bubble).whiteSpace).toBe("pre-wrap")
@@ -96,11 +108,6 @@ export const Conversation: Story = {
     await expect(canvas.getByRole("link", { name: "src/patch-reader.ts:14" })).toBeVisible()
     const code = canvas.getByText(/for \(let index/).closest("pre")
     await expect(code === null ? "" : getComputedStyle(code).overflowX).toBe("auto")
-    // Followed to the end when it opened.
-    const scroller = canvas.getByRole("complementary", { name: "Relay" }).querySelector("[data-rly-relay-scroll]")
-    await expect(
-      scroller === null ? -1 : scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
-    ).toBeLessThanOrEqual(24)
   },
   render: () => <InPanel items={conversation} />
 }
@@ -109,6 +116,7 @@ export const Conversation: Story = {
 export const Streaming: Story = {
   args: transcriptArgs,
   play: async ({ canvas, canvasElement }) => {
+    await settled(canvasElement)
     await expect(canvas.getByText("Relay is writing…")).toBeVisible()
     await expect(canvasElement.querySelector("[aria-live='polite']")?.textContent).not.toContain("writing")
   },
@@ -118,7 +126,8 @@ export const Streaming: Story = {
 /** failed: the cause and the next action stay in the transcript with what was written before. */
 export const Failed: Story = {
   args: transcriptArgs,
-  play: async ({ canvas }) => {
+  play: async ({ canvas, canvasElement }) => {
+    await settled(canvasElement)
     await expect(canvas.getByText("Codex is signed out.")).toBeVisible()
     await expect(canvas.getByText(/Sign in to Codex on this machine/)).toBeVisible()
   },
@@ -135,4 +144,16 @@ export const Failed: Story = {
       ]}
     />
   )
+}
+
+/** Forced colours: your turns keep an edge where the bubble's fill is dropped. */
+export const ForcedColors: Story = {
+  args: transcriptArgs,
+  globals: { forcedColors: "active" },
+  play: async ({ canvas, canvasElement }) => {
+    await settled(canvasElement)
+    const bubble = canvas.getByText(/Why is the trailing context line skipped/)
+    await expect(getComputedStyle(bubble).borderTopStyle).toBe("solid")
+  },
+  render: () => <InPanel items={conversation} />
 }

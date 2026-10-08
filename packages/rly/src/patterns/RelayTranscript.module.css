@@ -145,7 +145,18 @@
     outline-offset: var(--rly-focus-ring-offset);
   }
 
-  .announcer {
+  /* Forced colours drop the bubble's fill; an edge keeps your turns apart from Relay's prose. */
+  @media (forced-colors: active) {
+    .bubble {
+      border: 1px solid CanvasText;
+    }
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .bubble {
+    border: 1px solid CanvasText;
+  }
+
+  .announcer,
+  .speaker {
     block-size: 1px;
     clip-path: inset(50%);
     inline-size: 1px;

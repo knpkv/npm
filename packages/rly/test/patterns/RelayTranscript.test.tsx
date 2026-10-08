@@ -3,6 +3,7 @@
 import { act, type ReactElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { LinkProvider, type RlyLinkComponent } from "../../src/foundations/LinkProvider.js"
 import { RelayTranscript, type RlyRelayTranscriptItem } from "../../src/patterns/RelayTranscript.js"
 
 /** Lets the announcer's refill frame run. */
@@ -179,5 +180,65 @@ describe("RelayTranscript", () => {
     await act(async () => root?.render(<Scroller items={mine} streaming={false} />))
     expect(scrollTo).toHaveBeenCalledTimes(1)
     expect(document.body.textContent).not.toContain("New messages")
+  })
+
+  it("still announces the start when a token arrives before the next frame", async () => {
+    await mount(<Scroller items={conversation} streaming={false} />)
+    await act(async () => root?.render(<Scroller items={conversation} streaming />))
+    // A token commits before the announcer's frame runs.
+    const token: ReadonlyArray<RlyRelayTranscriptItem> = [
+      ...conversation.slice(0, -1),
+      { _tag: "Relay", id: "r1", text: "The hunk loop" }
+    ]
+    await act(async () => root?.render(<Scroller items={token} streaming />))
+    await nextFrame()
+    expect(document.querySelector("[aria-live='polite']")?.textContent).toBe("Relay is answering.")
+  })
+
+  it("names each turn's speaker for assistive technology and routes citations through LinkProvider", async () => {
+    const Bridged: RlyLinkComponent = ({ children, href, ...props }) => (
+      <a {...props} data-bridged="" href={`/app${href}`}>
+        {children}
+      </a>
+    )
+    await mount(
+      <LinkProvider component={Bridged}>
+        <Scroller items={conversation} streaming={false} />
+      </LinkProvider>
+    )
+    const turns = [...document.querySelectorAll("li")].map((li) => li.textContent ?? "")
+    expect(turns[0]?.startsWith("You: ")).toBe(true)
+    expect(turns.some((turn) => turn.startsWith("Relay: The hunk loop"))).toBe(true)
+    const cite = document.querySelector("a[data-bridged]")
+    expect(cite?.getAttribute("href")).toBe("/app#src/patch-reader.ts:14")
+  })
+
+  it("re-measures when content grows without scrolling, so opening activity does not pull the reader down", async () => {
+    let resized: () => void = () => undefined
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: () => void) {
+          resized = callback
+        }
+        disconnect(): void {}
+        observe(): void {}
+      }
+    )
+    await mount(<Scroller items={conversation} streaming={false} />)
+    const scroller = document.querySelector<HTMLElement>("[data-rly-relay-scroll]")
+    if (scroller === null) throw new Error("no scroller")
+    const scrollTo = vi.fn()
+    scroller.scrollTo = scrollTo
+    fakeGeometry(scroller, { clientHeight: 400, scrollHeight: 1000, scrollTop: 600 })
+    await act(async () => scroller.dispatchEvent(new Event("scroll")))
+    // The reader opens an activity row: the content grows, scrollTop stays, no scroll event fires.
+    fakeGeometry(scroller, { clientHeight: 400, scrollHeight: 1300, scrollTop: 600 })
+    await act(async () => resized())
+    const more: ReadonlyArray<RlyRelayTranscriptItem> = [...conversation, { _tag: "Relay", id: "r2", text: "More." }]
+    await act(async () => root?.render(<Scroller items={more} streaming={false} />))
+    expect(scrollTo).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain("New messages")
+    vi.unstubAllGlobals()
   })
 })

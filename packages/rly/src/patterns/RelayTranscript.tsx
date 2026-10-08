@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from "react"
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Icon } from "../foundations/Icon.js"
+import { RlyLink } from "../foundations/LinkProvider.js"
 import { cssClass, requireText } from "../internal/component.js"
 import styles from "./RelayTranscript.module.css"
 
@@ -83,9 +84,9 @@ const Activity = ({ item }: { readonly item: Extract<RlyRelayTranscriptItem, { _
             {tool.cites === undefined || tool.cites.length === 0 ? null : (
               <span className={style("cites")}>
                 {tool.cites.map((cite) => (
-                  <a className={style("cite")} href={cite.href} key={cite.href}>
+                  <RlyLink className={style("cite")} href={cite.href} key={cite.href}>
                     {requireText(cite.label, "RelayTranscript cite label")}
-                  </a>
+                  </RlyLink>
                 ))}
               </span>
             )}
@@ -136,14 +137,19 @@ const AT_END_SLACK = 24
  * are plain prose, its code blocks scrolling in place. Each burst of tool work is one collapsed row in
  * reading order, expanding to each call's summary, status and citations (link text is the location).
  * One polite announcer, outside the scrolling content, says when a run starts, finishes, stops or
- * fails, never per token. Inside RelayPanel the transcript follows new content only while you are at
- * the end; reading earlier turns, a "New messages" button appears instead, so scroll is never taken.
+ * fails, never per token. Each turn names its speaker for assistive technology ("You", "Relay").
+ * Inside RelayPanel the transcript follows new content only while you are at the end, or when the new
+ * turn is yours; reading earlier turns, a "New messages" button appears instead, so scroll is never
+ * taken. Citations route through LinkProvider, so a host keeps its own navigation.
  */
 export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): ReactElement => {
   const root = useRef<HTMLDivElement | null>(null)
   const atEnd = useRef(true)
   const [behind, setBehind] = useState(false)
   const [announcement, setAnnouncement] = useState("")
+  // Words waiting to be announced, numbered so a repeat of the same words is still a change. Kept
+  // apart from the items, so a token arriving before the next frame cannot cancel the delivery.
+  const [pending, setPending] = useState<{ readonly count: number; readonly words: string } | null>(null)
   // Runs already over when the transcript mounts (history, a reopen, a presentation change) are not news.
   const announced = useRef<ReadonlySet<string> | null>(null)
   if (announced.current === null) {
@@ -153,28 +159,35 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
   const wasStreaming = useRef(streaming)
 
   const scroller = useCallback((): HTMLElement | null => root.current?.closest("[data-rly-relay-scroll]") ?? null, [])
-  const reducedMotion = (): boolean =>
-    root.current?.ownerDocument.defaultView?.matchMedia("(prefers-reduced-motion: reduce)").matches ?? true
-  const toEnd = useCallback(
-    (smooth: boolean) => {
-      const element = scroller()
-      if (element === null) return
-      element.scrollTo({ behavior: smooth && !reducedMotion() ? "smooth" : "auto", top: element.scrollHeight })
-      atEnd.current = true
-      setBehind(false)
-    },
-    [scroller]
-  )
+  // Always instant: a smooth jump's intermediate scroll events would read as the reader scrolling away
+  // while content keeps arriving.
+  const toEnd = useCallback(() => {
+    const element = scroller()
+    if (element === null) return
+    element.scrollTo({ behavior: "auto", top: element.scrollHeight })
+    atEnd.current = true
+    setBehind(false)
+  }, [scroller])
 
   useEffect(() => {
     const element = scroller()
     if (element === null) return
-    const onScroll = (): void => {
+    const measure = (): void => {
       atEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight <= AT_END_SLACK
       if (atEnd.current) setBehind(false)
     }
-    element.addEventListener("scroll", onScroll, { passive: true })
-    return () => element.removeEventListener("scroll", onScroll)
+    element.addEventListener("scroll", measure, { passive: true })
+    // Content can grow without a scroll event (the reader opening an activity row), which moves the end
+    // away from the reader; re-measure so the next update does not pull them back down.
+    const view = element.ownerDocument.defaultView
+    const content = root.current
+    const observer =
+      view !== null && "ResizeObserver" in view && content !== null ? new view.ResizeObserver(measure) : null
+    if (content !== null) observer?.observe(content)
+    return () => {
+      element.removeEventListener("scroll", measure)
+      observer?.disconnect()
+    }
   }, [scroller])
 
   // New content: follow it if the reader was at the end, or if it is the reader's own new turn;
@@ -182,12 +195,11 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
   useLayoutEffect(() => {
     const fresh = items.filter((item) => !seen.current.has(item.id))
     for (const item of fresh) seen.current.add(item.id)
-    if (atEnd.current || fresh.some((item) => item._tag === "You")) toEnd(false)
+    if (atEnd.current || fresh.some((item) => item._tag === "You")) toEnd()
     else setBehind(true)
   }, [items, streaming, toEnd])
 
-  // Announce run state changes once each; tokens never reach the live region. The region is cleared
-  // first and refilled a frame later, so a repeat of the same words ("Relay finished.") is still heard.
+  // Announce run state changes once each; tokens never reach the live region.
   useEffect(() => {
     let words: string | undefined
     if (streaming && !wasStreaming.current) words = "Relay is answering."
@@ -200,13 +212,21 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
       words = said
     }
     announced.current = known
-    if (words === undefined) return
+    if (words !== undefined) {
+      const said = words
+      setPending((previous) => ({ count: (previous?.count ?? 0) + 1, words: said }))
+    }
+  }, [items, streaming])
+
+  // Clear, then refill on the next frame, so a repeat of the same words is heard.
+  useEffect(() => {
+    if (pending === null) return
     const view = root.current?.ownerDocument.defaultView
     setAnnouncement("")
-    if (view === null || view === undefined) return setAnnouncement(words)
-    const frame = view.requestAnimationFrame(() => setAnnouncement(words))
+    if (view === null || view === undefined) return setAnnouncement(pending.words)
+    const frame = view.requestAnimationFrame(() => setAnnouncement(pending.words))
     return () => view.cancelAnimationFrame(frame)
-  }, [items, streaming])
+  }, [pending])
 
   return (
     <div className={style("root")} ref={root}>
@@ -215,10 +235,12 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
           <Fragment key={item.id}>
             {item._tag === "You" ? (
               <li className={style("you")}>
+                <span className={style("speaker")}>You: </span>
                 <p className={style("bubble")}>{requireText(item.text, "RelayTranscript turn")}</p>
               </li>
             ) : item._tag === "Relay" ? (
               <li className={style("relay")}>
+                <span className={style("speaker")}>Relay: </span>
                 <Prose text={item.text} />
               </li>
             ) : item._tag === "Activity" ? (
@@ -238,7 +260,7 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
         <button
           className={style("jump")}
           onClick={() => {
-            toEnd(true)
+            toEnd()
             // The button goes away; focus moves to the scrolling body rather than dropping to the page.
             scroller()?.focus({ preventScroll: true })
           }}
