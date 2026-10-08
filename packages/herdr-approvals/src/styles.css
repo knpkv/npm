@@ -320,7 +320,9 @@
     justify-content: space-between;
   }
 
+  /* A count that doesn't fit beside the heading drops under it instead of squeezing into a column. */
   .section-heading {
+    flex-wrap: wrap;
     margin-block-end: var(--rly-space-20);
   }
 
