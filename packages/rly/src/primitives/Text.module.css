@@ -18,30 +18,35 @@
   }
 
   /*
-   * Display type sits on a line height under 1, so Geist's descenders hang below the box and a focus ring
-   * (drawn just outside the box) cuts through them. The box grows by the overhang and gives it back with a
-   * matching negative margin: the ring encloses the glyphs and nothing around the heading moves.
-   * Overhang below the baseline, from Geist's metrics (font descent 0.30em, content area 1.31em, ink
-   * descent 0.17em): 0.17em - (0.30em + (line-height - 1.31) / 2em).
+   * Display type sits on a line height under 1, so Geist's accented capitals rise above the box and its
+   * descenders hang below it, and a focus ring (drawn just outside the box) cuts through them. Each edge
+   * grows by its overhang and gives it back with a matching negative margin: the ring encloses the glyphs
+   * and nothing around the heading moves. From Geist's metrics (font ascent 1.01em, descent 0.30em, so a
+   * 1.31em content area; tallest accented capital, Å, 0.97em; descenders 0.17em), the half-leading
+   * (line-height - 1.31) / 2 leaves the overhangs:
+   *   above: 0.97em - (1.01em + half-leading) = (1.31 - line-height) / 2em - 0.04em
+   *   below: 0.17em - (0.30em + half-leading) = (1.31 - line-height) / 2em - 0.13em
    */
   .verdict,
   .pageTitle {
-    margin-block-end: calc(-1 * var(--text-overhang));
-    padding-block-end: var(--text-overhang);
+    margin-block: calc(-1 * var(--text-overhang-start)) calc(-1 * var(--text-overhang-end));
+    padding-block: var(--text-overhang-start) var(--text-overhang-end);
   }
 
   .verdict {
     font: var(--rly-type-verdict-weight) var(--rly-type-verdict-size) / var(--rly-type-verdict-line-height)
       var(--rly-type-verdict-font);
     letter-spacing: var(--rly-type-verdict-tracking);
-    --text-overhang: max(0px, calc((1.31 - var(--rly-type-verdict-line-height)) * 0.5em - 0.13em));
+    --text-overhang-start: max(0px, calc((1.31 - var(--rly-type-verdict-line-height)) * 0.5em - 0.04em));
+    --text-overhang-end: max(0px, calc((1.31 - var(--rly-type-verdict-line-height)) * 0.5em - 0.13em));
   }
 
   .pageTitle {
     font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / var(--rly-type-page-title-line-height)
       var(--rly-type-page-title-font);
     letter-spacing: var(--rly-type-page-title-tracking);
-    --text-overhang: max(0px, calc((1.31 - var(--rly-type-page-title-line-height)) * 0.5em - 0.13em));
+    --text-overhang-start: max(0px, calc((1.31 - var(--rly-type-page-title-line-height)) * 0.5em - 0.04em));
+    --text-overhang-end: max(0px, calc((1.31 - var(--rly-type-page-title-line-height)) * 0.5em - 0.13em));
   }
 
   .sectionTitle {
