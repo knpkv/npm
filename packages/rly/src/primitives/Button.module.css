@@ -67,6 +67,11 @@
     min-inline-size: var(--rly-space-0);
     padding-block: var(--rly-space-8);
   }
+  @supports (justify-content: safe center) {
+    .content {
+      justify-content: safe center;
+    }
+  }
 
   .label {
     min-inline-size: var(--rly-space-0);

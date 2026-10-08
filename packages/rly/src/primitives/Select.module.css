@@ -133,6 +133,11 @@
     justify-content: center;
     min-block-size: var(--rly-space-32);
   }
+  @supports (justify-content: safe center) {
+    .scrollButton {
+      justify-content: safe center;
+    }
+  }
 
   @media (max-width: 30rem) {
     .content {

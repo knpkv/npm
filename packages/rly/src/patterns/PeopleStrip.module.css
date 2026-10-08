@@ -46,6 +46,11 @@
     justify-content: center;
     padding: var(--rly-space-4) var(--rly-space-12);
   }
+  @supports (justify-content: safe center) {
+    .overflow {
+      justify-content: safe center;
+    }
+  }
 
   @media (hover: hover) and (pointer: fine) {
     .overflow:hover {

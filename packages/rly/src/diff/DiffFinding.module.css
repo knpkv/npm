@@ -30,6 +30,11 @@
     min-block-size: var(--rly-space-32);
     min-inline-size: var(--rly-space-32);
   }
+  @supports (justify-content: safe center) {
+    .avatar {
+      justify-content: safe center;
+    }
+  }
 
   .human {
     border-radius: var(--rly-radius-round);
