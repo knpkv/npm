@@ -128,13 +128,33 @@ export const useRelaySummon = (options: UseRelaySummonOptions): void => {
   }, [keys])
 }
 
-const nestedLayer = "dialog[open], [role='dialog'], [role='alertdialog'], [role='listbox'], [role='menu']"
+const dialogLayer = "dialog[open], [role='dialog'], [role='alertdialog']"
+const popupLayer = "[role='listbox'], [role='menu']"
 
-/** Whether an event comes from a layer nested inside Relay, not from Relay's own region. */
+/**
+ * Whether an event comes from a layer nested inside Relay: a dialog, or a listbox or menu while it is an
+ * open popup (Radix's data-state, or the target of an expanded aria-controls). Relay's own surface,
+ * marked data-rly-relay-surface (the dock's full-screen dialog), and always-rendered lists never count,
+ * so Escape still closes Relay from them.
+ */
 const hasNestedLayer = (region: HTMLElement, target: EventTarget | null): boolean => {
-  const layer = isElementTarget(target) ? target.closest(nestedLayer) : null
-  return layer !== null && layer !== region && region.contains(layer)
+  let current = isElementTarget(target) ? target : null
+  while (current !== null && current !== region && region.contains(current)) {
+    if (!current.hasAttribute("data-rly-relay-surface")) {
+      if (current.matches(dialogLayer)) return true
+      if (current.matches(popupLayer) && isOpenPopup(region, current)) return true
+    }
+    current = current.parentElement
+  }
+  return false
 }
+
+const isOpenPopup = (region: HTMLElement, element: Element): boolean =>
+  element.getAttribute("data-state") === "open" ||
+  (element.id !== "" &&
+    [...region.ownerDocument.querySelectorAll("[aria-expanded='true'][aria-controls]")].some((control) =>
+      (control.getAttribute("aria-controls") ?? "").split(/\s+/).includes(element.id)
+    ))
 
 const isElementTarget = (target: EventTarget | null): target is Element =>
   target !== null && "closest" in target && "nodeType" in target && target.nodeType === 1

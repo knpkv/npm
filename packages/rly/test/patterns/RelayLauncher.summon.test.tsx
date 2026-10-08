@@ -52,8 +52,14 @@ const Host = ({ bound = true, fullscreen = false }: { readonly bound?: boolean; 
           <button data-testid="remove-page" onClick={() => setPageControl(false)} type="button">
             Remove page control
           </button>
-          <div data-testid="menu" role="listbox" tabIndex={-1}>
+          <button aria-controls="relay-options" aria-expanded="true" type="button">
+            Options
+          </button>
+          <div data-testid="menu" id="relay-options" role="listbox" tabIndex={-1}>
             Options menu
+          </div>
+          <div data-testid="chips" role="listbox" tabIndex={-1}>
+            Always-rendered suggestions
           </div>
           <div
             data-testid="prevented"
@@ -65,6 +71,30 @@ const Host = ({ bound = true, fullscreen = false }: { readonly bound?: boolean; 
             Popup that handles Escape
           </div>
         </aside>
+      ) : null}
+    </>
+  )
+}
+
+/** A host whose region is a wrapper around a modal surface, like the dock's full-screen dialog. */
+const SurfaceHost = (): ReactElement => {
+  const [open, setOpen] = useState(false)
+  const region = useRef<HTMLDivElement>(null)
+  const composer = useRef<HTMLTextAreaElement>(null)
+  const launcher = useRef<HTMLButtonElement>(null)
+  useRelaySummon({ composer, fullscreen: true, launcher, onOpenChange: setOpen, open, region, shortcut: ctrlJ })
+  return (
+    <>
+      <button data-testid="page" type="button">
+        Page control
+      </button>
+      <RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} ref={launcher} shortcut={ctrlJ} />
+      {open ? (
+        <div ref={region}>
+          <section aria-label="Relay" aria-modal data-rly-relay-surface="" role="dialog">
+            <textarea aria-label="Message Relay" ref={composer} />
+          </section>
+        </div>
       ) : null}
     </>
   )
@@ -174,6 +204,25 @@ describe("useRelaySummon", () => {
     byTestId("prevented").focus()
     expect(await press("Escape")).toBe(true)
     expect(composer()).not.toBeNull()
+  })
+
+  it("still closes from a list that is always rendered, not an open popup", async () => {
+    await mount(<Host />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    byTestId("chips").focus()
+    expect(await press("Escape")).toBe(true)
+    expect(composer()).toBeNull()
+  })
+
+  it("closes a full-screen Relay whose region wraps the dock's dialog surface", async () => {
+    await mount(<SurfaceHost />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    expect(document.activeElement).toBe(composer())
+    expect(await press("Escape")).toBe(true)
+    expect(composer()).toBeNull()
+    expect(document.activeElement).toBe(byTestId("page"))
   })
 
   it("returns focus to the launcher when the element Relay came from is gone", async () => {

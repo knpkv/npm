@@ -798,6 +798,7 @@ const DockLayer = ({
               aria-modal={modal ? true : undefined}
               className={classNames(style("panel"), modal ? style("sheet") : style("rail"))}
               data-rly-relay-dock-presentation={compactViewport ? "mobile-sheet" : modal ? "overlay" : "rail"}
+              data-rly-relay-surface=""
               onKeyDown={handleKeyDown}
               ref={panelRef}
               role={modal ? "dialog" : "complementary"}
