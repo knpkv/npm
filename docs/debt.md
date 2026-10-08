@@ -110,11 +110,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## codecommit
 
-44 directives (ast-grep 14, effect-diagnostics 30), 24 without a reason.
+43 directives (ast-grep 13, effect-diagnostics 30), 24 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/codecommit/src/bin.ts](../packages/codecommit/src/bin.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit/src/FilterService.ts](../packages/codecommit/src/FilterService.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit/src/main.tsx](../packages/codecommit/src/main.tsx) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit/src/PrList.ts](../packages/codecommit/src/PrList.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
