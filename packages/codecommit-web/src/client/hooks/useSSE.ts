@@ -71,6 +71,7 @@ const PullRequestWire = Schema.Struct({
   fetchedAt: Schema.optional(Schema.DateFromString),
   approvedBy: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed([]))),
   approvedByArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed([]))),
+  approversUnknown: Schema.optionalKey(Schema.Literal(true)),
   commentedBy: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultType(Effect.succeed([]))),
   filesChanged: Schema.optional(Schema.Number),
   approvalRules: Schema.Array(

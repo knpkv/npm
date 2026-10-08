@@ -4,11 +4,13 @@ import {
   approvalOf,
   approvalUnknownLabel,
   approvalUnknownReasonText,
+  approversUnknownLabel,
+  currentApprovers,
   type PullRequest
 } from "@knpkv/codecommit-core/Domain.js"
 import type { RlyStateTone } from "@knpkv/rly/primitives"
 
-type DecisionFacts = Pick<PullRequest, "approvedBy" | "isMergeable" | "status">
+type DecisionFacts = Pick<PullRequest, "approvedBy" | "approversUnknown" | "isMergeable" | "status">
 type StatusFacts = Pick<PullRequest, "approvalUnknown" | "approvalRules" | "isApproved" | "isMergeable" | "status">
 type TimestampFacts = Pick<PullRequest, "creationDate" | "lastModifiedDate">
 
@@ -26,7 +28,8 @@ export const pullRequestRowDecision = (pr: DecisionFacts): PullRequestRowDecisio
       return { actionLabel: "View pull request", summary: "Closed" }
     case "OPEN": {
       if (!pr.isMergeable) return { actionLabel: "Inspect conflict", summary: "Merge blocked" }
-      const approvedCount = pr.approvedBy.length
+      if (pr.approversUnknown === true) return { actionLabel: "Open review", summary: approversUnknownLabel }
+      const approvedCount = currentApprovers(pr).length
       return {
         actionLabel: "Open review",
         summary: `${approvedCount} ${approvedCount === 1 ? "approval" : "approvals"}`
