@@ -561,6 +561,8 @@ export const HostConfiguration = Schema.Struct({
   checkCommand: Command,
   applyCommand: Schema.NullOr(Command),
   browserMcpRecoverCommand: Schema.NullOr(Command),
+  /** Prints the host's Claude and Codex subscription windows as JSON (`agent-limits --json`); absent turns limits off. */
+  agentLimitsCommand: Schema.optionalKey(Command),
   coordinatorCommand: Command,
   herdrCommand: Schema.String,
   tailscaleCommand: Schema.String,

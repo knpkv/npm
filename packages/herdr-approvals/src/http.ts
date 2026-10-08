@@ -90,6 +90,7 @@ import {
 } from "effect"
 import type { Redacted } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
+import { ChildProcessSpawner } from "effect/process"
 import type * as SemaphoreModule from "effect/Semaphore"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { createServer as createSecureServer } from "node:https"
@@ -97,6 +98,7 @@ import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import WebSocketClient, { WebSocketServer } from "ws"
+import { fleetLimits, readAgentLimits } from "./agent-limits.js"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
@@ -305,6 +307,7 @@ type PeerTarget = {
   readonly approvalUrl: string | null
   readonly pendingUrl: string | null
   readonly connectAgentsUrl: string | null
+  readonly limitsUrl: string | null
   readonly terminalUrl: string | null
 }
 
@@ -670,6 +673,9 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
       connectAgentsUrl: address === undefined
         ? null
         : `http://${address}:${config.port}/v1/connect/agents/local`,
+      limitsUrl: address === undefined
+        ? null
+        : `http://${address}:${config.port}/v1/limits/local`,
       terminalUrl: address === undefined
         ? null
         : `ws://${address}:${config.port}/v1/connect/terminal`
@@ -1493,6 +1499,20 @@ export const startHttpServer = async (
       () => activeRequestControllers.delete(controller)
     )
   }
+  // One read answers every tab and the hub for 30 seconds; each run rereads the CLI's files.
+  const spawner = await httpRuntime.runPromise(
+    Effect.gen(function*() {
+      return yield* ChildProcessSpawner.ChildProcessSpawner
+    })
+  )
+  const localLimits = await httpRuntime.runPromise(
+    Effect.cachedWithTTL(
+      readAgentLimits(config.host, config.agentLimitsCommand).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+      ),
+      "30 seconds"
+    )
+  )
   const shutdown = async (): Promise<void> => {
     if (closed) return
     closed = true
@@ -3058,6 +3078,37 @@ export const startHttpServer = async (
                 ).pipe(
                   Effect.provideService(Crypto.Crypto, cryptoService)
                 )
+              )
+            )
+            return
+          }
+
+          // The hub's own question to a peer: only the approval hub's node may ask.
+          if (
+            mode === "tailnet" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/limits/local"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(tailnetActor(request, config, [config.approvalHub.nodeId]), localLimits)
+            )
+            return
+          }
+
+          // The page's view: on the hub every peer's read, on a host's own listener just its own.
+          if (
+            (mode === "serve" || mode === "local") &&
+            request.method === "GET" &&
+            url.pathname === "/v1/limits"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(
+                authorized,
+                mode === "serve"
+                  ? Effect.flatMap(fleetPeers(config), (peers) => fleetLimits(localLimits, peers))
+                  : fleetLimits(localLimits, [])
               )
             )
             return
