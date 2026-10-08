@@ -74,6 +74,15 @@ export type {
 } from "./RelationshipChain.js"
 export { RelationshipTable } from "./RelationshipTable.js"
 export type { RelationshipTableProps } from "./RelationshipTable.js"
+export { RelayComposer, useRelayDraft } from "./RelayComposer.js"
+export type {
+  RelayComposerProps,
+  RlyRelayContextRef,
+  RlyRelayDraft,
+  RlyRelayDraftStorage,
+  RlyRelaySubmission,
+  UseRelayDraftOptions
+} from "./RelayComposer.js"
 export { RelayDock } from "./RelayDock.js"
 export type {
   RelayDockProps,
