@@ -56,11 +56,13 @@ describe("OKLCH palette", () => {
     }
   })
 
-  it("writes neutrals with hue none", () => {
+  it("writes a neutral (chroma 0) with hue none, and only a neutral", () => {
     for (const token of colorTokenSource) {
       for (const value of [token.light, token.dark]) {
-        if (value.endsWith(" 0 none)")) continue
-        expect(value).toMatch(/^oklch\([\d.]+% [\d.]+ [\d.]+\)$/)
+        const match = /^oklch\(([\d.]+)% ([\d.]+) ([\d.]+|none)\)$/.exec(value)
+        expect(match, `${token.name}: ${value}`).not.toBeNull()
+        if (match === null) continue
+        expect([token.name, Number(match[2]) === 0], value).toEqual([token.name, match[3] === "none"])
       }
     }
   })
