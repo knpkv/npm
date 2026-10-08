@@ -110,7 +110,7 @@
   .keyboard-hints kbd {
     background: var(--rly-color-surface-2);
     border: 1px solid var(--rly-color-border-2);
-    border-block-end-color: var(--rly-color-border-3);
+    border-block-end-color: currentcolor;
     border-radius: var(--rly-radius-field);
     color: var(--rly-color-text-2);
     font: inherit;
@@ -615,7 +615,7 @@
     font: inherit;
     font-size: var(--rly-type-meta-size);
     min-block-size: 2rem;
-    padding-inline: var(--rly-space-10);
+    padding-inline: var(--rly-space-12);
   }
 
   .activity-filters button[aria-pressed="true"] {
