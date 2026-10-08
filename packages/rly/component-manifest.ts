@@ -458,6 +458,25 @@ export const componentManifest = {
       }
     },
     {
+      category: "foundation",
+      exports: [
+        { kind: "value", name: "RLY_FONT_FACES" },
+        { kind: "type", name: "RlyFontFace" }
+      ],
+      name: "FontFaces",
+      publicEntry: "tokens",
+      registry: false,
+      source: "src/tokens/fonts.ts",
+      status: "stable",
+      styles: [],
+      variants: [],
+      visual: {
+        story: "stories/foundations/Tokens.stories.tsx",
+        storyId: "foundations-tokens--overview",
+        tests: ["test/tokens/font-faces.test.ts"]
+      }
+    },
+    {
       category: "diff",
       exports: [{ kind: "value", name: "DiffCodeView" }],
       name: "DiffCodeView",

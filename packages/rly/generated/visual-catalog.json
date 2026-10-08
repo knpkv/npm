@@ -426,6 +426,21 @@
       ]
     },
     {
+      "name": "FontFaces",
+      "paths": {
+        "source": "packages/rly/src/tokens/fonts.ts",
+        "story": "packages/rly/stories/foundations/Tokens.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/tokens/font-faces.test.ts"
+        ]
+      },
+      "storyId": "foundations-tokens--overview",
+      "storyIds": [
+        "foundations-tokens--overview"
+      ]
+    },
+    {
       "name": "FreshnessStamp",
       "paths": {
         "source": "packages/rly/src/patterns/FreshnessStamp.tsx",

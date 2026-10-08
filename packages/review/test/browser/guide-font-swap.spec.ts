@@ -24,7 +24,7 @@ const guideHtml = () =>
 for (const width of [390, 1440]) {
   // The guide no longer hides itself until its inlined fonts decode: the metric-matched fallback it
   // paints first must hold every line and row when Geist arrives (rly font-swap budget).
-  test(`Geist swaps in without moving the guide at ${width}px`, async ({ page }, testInfo) => {
+  test(`a late Geist never moves the guide at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const { fonts, text } = externaliseInlineFonts(await guideHtml())
     const file = testInfo.outputPath("guide.html")
