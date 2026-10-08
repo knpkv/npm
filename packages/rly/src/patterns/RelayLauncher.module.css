@@ -21,6 +21,7 @@
   }
   .root:hover {
     background: var(--rly-color-surface-2);
+    border-color: var(--rly-color-text-3);
   }
   .root:active {
     background: var(--rly-color-surface-3);
