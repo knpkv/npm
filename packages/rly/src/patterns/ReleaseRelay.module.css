@@ -33,8 +33,13 @@
     color: var(--rly-color-text-1);
     display: inline-flex;
     flex: none;
-    justify-content: safe center;
+    justify-content: center;
     position: relative;
+  }
+  @supports (justify-content: safe center) {
+    .tile {
+      justify-content: safe center;
+    }
   }
 
   .tile + .tile {

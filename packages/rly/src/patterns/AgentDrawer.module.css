@@ -48,7 +48,12 @@
     color: var(--rly-color-surface-1);
     display: inline-flex;
     inline-size: var(--rly-space-48);
-    justify-content: safe center;
+    justify-content: center;
+  }
+  @supports (justify-content: safe center) {
+    .mark {
+      justify-content: safe center;
+    }
   }
 
   .glyph {

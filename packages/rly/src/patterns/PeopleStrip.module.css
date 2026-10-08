@@ -43,8 +43,13 @@
     display: inline-flex;
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
-    justify-content: safe center;
+    justify-content: center;
     padding: var(--rly-space-4) var(--rly-space-12);
+  }
+  @supports (justify-content: safe center) {
+    .overflow {
+      justify-content: safe center;
+    }
   }
 
   .overflow:hover {

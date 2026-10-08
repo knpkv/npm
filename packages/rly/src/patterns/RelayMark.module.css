@@ -15,7 +15,7 @@
     display: inline-flex;
     flex: none;
     inline-size: var(--rly-space-24);
-    justify-content: safe center;
+    justify-content: center;
   }
   .tile[data-size="20"] {
     block-size: var(--rly-space-20);

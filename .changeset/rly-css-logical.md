@@ -2,4 +2,4 @@
 "@knpkv/rly": patch
 ---
 
-The bounded diff view uses logical borders and alignment, so it mirrors in right-to-left layouts. Centred content falls back to the start edge when it overflows (`safe center`) instead of being cut off on both sides. Sheets and the Relay dock size to `100dvh` without a `100vh` fallback.
+The bounded diff view uses logical borders and alignment, and its code is pinned left to right (isolated), so an RTL host never mirrors code. Centred text that can overflow falls back to the start edge where `safe center` is supported (an `@supports` block, so older browsers keep `center`); shrink-wrapped marks and avatars stay plainly centred. Sheets and the Relay dock size to `100dvh` without a `100vh` fallback.

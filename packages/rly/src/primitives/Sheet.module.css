@@ -19,7 +19,14 @@
     display: inline-flex;
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
-    justify-content: safe center;
+    justify-content: center;
+  }
+  @supports (justify-content: safe center) {
+    .trigger,
+    .close,
+    .iconClose {
+      justify-content: safe center;
+    }
   }
 
   .trigger,

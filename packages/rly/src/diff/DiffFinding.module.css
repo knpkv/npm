@@ -26,9 +26,14 @@
     color: var(--rly-color-text-1);
     display: inline-flex;
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / 1 var(--rly-type-meta-font);
-    justify-content: safe center;
+    justify-content: center;
     min-block-size: var(--rly-space-32);
     min-inline-size: var(--rly-space-32);
+  }
+  @supports (justify-content: safe center) {
+    .avatar {
+      justify-content: safe center;
+    }
   }
 
   .human {

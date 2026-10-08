@@ -1,4 +1,7 @@
+/* Code reads left to right whatever the page's direction; isolated so it never mirrors with an RTL host. */
 .root {
+  direction: ltr;
+  unicode-bidi: isolate;
   overflow: hidden;
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-field);
