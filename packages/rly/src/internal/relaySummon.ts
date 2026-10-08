@@ -107,5 +107,7 @@ const isElementTarget = (target: EventTarget): target is Element =>
 /** Where a popup's controls live: its own shadow root when it has one, else its document. */
 const controlScope = (element: Element): ParentNode => {
   const root = element.getRootNode()
-  return "querySelectorAll" in root && root !== element ? root : element.ownerDocument
+  return isShadowRoot(root) ? root : element.ownerDocument
 }
+
+const isShadowRoot = (node: Node): node is ShadowRoot => node.nodeType === 11 && "host" in node
