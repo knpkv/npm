@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "@effect/vitest"
 import {
   connectAgentPageMaxRecords,
   FleetConnectAgentPage,
+  FleetLimits,
   terminalCommandMaxPayloadBytes,
   type TerminalConnector,
   terminalFrameMaxEncodedBytes,
@@ -1740,6 +1741,59 @@ esac
             error: "FleetOperationError",
             detail: "backend unavailable"
           })
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("serves this host's limits on its own listener and keeps the peer route off it", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-limits-"))
+    const report = {
+      v: 1,
+      machine: "ALPHA",
+      observedAt: 1_000,
+      latest: [{
+        agent: "claude",
+        machine: "ALPHA",
+        source: "claude-oauth-usage",
+        label: "*",
+        windowMinutes: null,
+        observedAt: 900,
+        reading: { _tag: "Unknown", reason: "Fetch" }
+      }]
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(
+                {
+                  ...config(root),
+                  agentUsageLimitsCommand: ["sh", "-c", "printf '%s' \"$1\"", "agent-usage", JSON.stringify(report)]
+                },
+                fleet,
+                assets,
+                { terminalConnector: unusedTerminal }
+              )
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits`))
+          expect(response.status).toBe(200)
+          const body = Schema.decodeUnknownSync(FleetLimits)(yield* Effect.promise(() => response.json()))
+          expect(body.failures).toEqual([])
+          expect(body.hosts.map(({ host, reading }) => [host, reading])).toEqual([
+            ["ALPHA", { _tag: "Read", limits: report, skipped: 0 }]
+          ])
+          // Only a peer's tailnet listener answers the hub's per-host question.
+          expect((yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits/local`))).status).toBe(404)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {

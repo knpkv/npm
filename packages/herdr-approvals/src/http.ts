@@ -12,6 +12,8 @@ import {
   AgentRelationshipStore,
   ConnectAgentCursor,
   fleetConnectAgents,
+  fleetLimits,
+  hubLimits,
   localConnectAgents,
   makeHerdrTerminalConnector,
   pageFleetConnectAgents,
@@ -74,6 +76,7 @@ import {
   Cause,
   Clock,
   Crypto,
+  Duration,
   Effect,
   Equal,
   Exit,
@@ -90,6 +93,7 @@ import {
 } from "effect"
 import type { Redacted } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
+import { ChildProcessSpawner } from "effect/process"
 import type * as SemaphoreModule from "effect/Semaphore"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { createServer as createSecureServer } from "node:https"
@@ -114,6 +118,7 @@ import {
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { fontPreloadLink } from "./font-preload.js"
+import { readHostLimits, staleWhileRevalidate } from "./host-limits.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
@@ -305,6 +310,7 @@ type PeerTarget = {
   readonly approvalUrl: string | null
   readonly pendingUrl: string | null
   readonly connectAgentsUrl: string | null
+  readonly limitsUrl: string | null
   readonly terminalUrl: string | null
 }
 
@@ -670,6 +676,9 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
       connectAgentsUrl: address === undefined
         ? null
         : `http://${address}:${config.port}/v1/connect/agents/local`,
+      limitsUrl: address === undefined
+        ? null
+        : `http://${address}:${config.port}/v1/connect/limits/local`,
       terminalUrl: address === undefined
         ? null
         : `ws://${address}:${config.port}/v1/connect/terminal`
@@ -1493,6 +1502,20 @@ export const startHttpServer = async (
       () => activeRequestControllers.delete(controller)
     )
   }
+  // A read older than 30 seconds is refreshed in the background, so a peer answers the hub's
+  // 1.5-second fetch from its last read even while agent-usage is slow.
+  const spawner = await httpRuntime.runPromise(Effect.service(ChildProcessSpawner.ChildProcessSpawner))
+  // Background refreshes live in this scope; closing the server closes it before the runtime.
+  const limitsScope = await httpRuntime.runPromise(Scope.make())
+  finalizers.unshift(() => httpRuntime.runPromise(Scope.close(limitsScope, Exit.void)))
+  const { read: localLimits } = await httpRuntime.runPromise(
+    staleWhileRevalidate(
+      readHostLimits(config.host, config.agentUsageLimitsCommand).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+      ),
+      Duration.seconds(30)
+    ).pipe(Effect.provideService(Scope.Scope, limitsScope))
+  )
   const shutdown = async (): Promise<void> => {
     if (closed) return
     closed = true
@@ -3058,6 +3081,32 @@ export const startHttpServer = async (
                 ).pipe(
                   Effect.provideService(Crypto.Crypto, cryptoService)
                 )
+              )
+            )
+            return
+          }
+
+          // The hub's own question to a peer: only the approval hub's node may ask.
+          if (
+            mode === "tailnet" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/connect/limits/local"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(tailnetActor(request, config, [config.approvalHub.nodeId]), localLimits)
+            )
+            return
+          }
+
+          // Every listener that serves a dashboard serves its limits: on the hub every peer's read,
+          // anywhere else just this host's.
+          if (request.method === "GET" && url.pathname === "/v1/connect/limits") {
+            await respond(
+              response,
+              Effect.andThen(
+                authorized,
+                mode === "serve" ? hubLimits(localLimits, fleetPeers(config)) : fleetLimits(localLimits, [])
               )
             )
             return
