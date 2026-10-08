@@ -13,6 +13,14 @@ const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selectors = "",
 // In forced colours the open fill sets forced-color-adjust: none, which also lets the author hover tint
 // through; storybook's synthetic hover never matches :hover, so this keeps the selectors honest.
 describe("RelayLauncher forced-colours CSS", () => {
+  it("keeps the agent edge when the open launcher is hovered", () => {
+    const openHovers = rules.filter(({ body, selectors }) =>
+      !/ButtonText/.test(body) && /^\s*\.root\[aria-expanded="true"\][^,]*:hover\s*$/.test(selectors)
+    )
+    expect(openHovers.length).toBeGreaterThan(0)
+    for (const { body } of openHovers) expect(body).toMatch(/border-color:\s*var\(--rly-color-agent\)/)
+  })
+
   it("keeps the inverted open fill when the open launcher is hovered", () => {
     const inverted = rules.filter(({ body }) => /background:\s*ButtonText/.test(body))
     expect(inverted).toHaveLength(2)

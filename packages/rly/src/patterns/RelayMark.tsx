@@ -16,6 +16,29 @@ export type RlyRelayMarkTileSize = (typeof RLY_RELAY_MARK_TILE_SIZES)[number]
 
 type MarkBaseProps = Omit<ComponentPropsWithRef<"svg">, "children" | "height" | "viewBox" | "width">
 
+/** The ARIA naming a caller may pass natively instead of `label`. */
+interface NativeNaming {
+  readonly "aria-hidden"?: boolean | "true" | "false" | undefined
+  readonly "aria-label"?: string | undefined
+  readonly "aria-labelledby"?: string | undefined
+  readonly role?: string | undefined
+}
+
+/**
+ * Named by `label`, or natively by `aria-label`/`aria-labelledby`: a named mark is an image, an
+ * unnamed one is decorative and hidden. Native naming is kept rather than overwritten.
+ */
+const naming = (label: string | undefined, native: NativeNaming, what: string): NativeNaming => {
+  const named = label !== undefined || native["aria-label"] !== undefined || native["aria-labelledby"] !== undefined
+  if (!named) return { "aria-hidden": "true", role: native.role }
+  return {
+    "aria-hidden": native["aria-hidden"],
+    "aria-label": label === undefined ? native["aria-label"] : requireText(label, what),
+    "aria-labelledby": native["aria-labelledby"],
+    role: native.role ?? "img"
+  }
+}
+
 /** Inputs for the bare mark. */
 export type RelayMarkProps = MarkBaseProps & {
   /** 20px unless given. */
@@ -61,11 +84,9 @@ const RelayMarkTile = ({ className, label, size, ...props }: RelayMarkTileProps)
   return (
     <span
       {...props}
-      aria-hidden={label === undefined ? "true" : undefined}
-      aria-label={label === undefined ? undefined : requireText(label, "RelayMark.Tile label")}
+      {...naming(label, props, "RelayMark.Tile label")}
       className={classNames(style("tile"), className)}
       data-size={pixels}
-      role={label === undefined ? undefined : "img"}
     >
       <Glyph aria-hidden="true" className={style("tileGlyph")} size={pixels / 2} />
     </span>
@@ -80,10 +101,8 @@ export const RelayMark = Object.assign(
   ({ className, label, size, ...props }: RelayMarkProps): ReactElement => (
     <Glyph
       {...props}
-      aria-hidden={label === undefined ? "true" : undefined}
-      aria-label={label === undefined ? undefined : requireText(label, "RelayMark label")}
+      {...naming(label, props, "RelayMark label")}
       className={classNames(style("root"), className)}
-      role={label === undefined ? undefined : "img"}
       size={size ?? 20}
     />
   ),

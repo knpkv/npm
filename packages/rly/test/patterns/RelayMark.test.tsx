@@ -33,6 +33,15 @@ describe("RelayMark", () => {
     expect(named.getAttribute("aria-label")).toBe("Relay")
     expect(named.getAttribute("aria-hidden")).toBeNull()
     expect(() => renderToStaticMarkup(<RelayMark label=" " />)).toThrow(/visible text/)
+    // Native naming is honoured, not overwritten by the decorative default.
+    const native = parse(renderToStaticMarkup(<RelayMark aria-label="Relay" />))
+    expect(native.getAttribute("aria-label")).toBe("Relay")
+    expect(native.getAttribute("aria-hidden")).toBeNull()
+    expect(native.getAttribute("role")).toBe("img")
+    const referenced = parse(renderToStaticMarkup(<RelayMark.Tile aria-labelledby="relay-name" />))
+    expect(referenced.getAttribute("aria-labelledby")).toBe("relay-name")
+    expect(referenced.getAttribute("aria-hidden")).toBeNull()
+    expect(referenced.getAttribute("role")).toBe("img")
   })
 
   it("sets a half-size glyph on the tile", () => {
