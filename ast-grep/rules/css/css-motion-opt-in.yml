@@ -29,6 +29,7 @@ files:
   - "packages/control-center/src/**/*.css"
   - "packages/jcf-web/src/**/*.css"
   - "packages/rly/src/**/*.css"
+  - "packages/herdr-approvals/src/**/*.css"
 
 note: |
   good-css: motion only when the reader has not asked to reduce it. An opt-out `reduce`
