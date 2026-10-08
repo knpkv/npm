@@ -4,6 +4,12 @@ import { useCallback, useId, useRef, useSyncExternalStore } from "react"
 import { PortalBoundary } from "../foundations/PortalProvider.js"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import * as Predicate from "../internal/predicates.js"
+import {
+  restoreModalFocusAfterCleanup,
+  useModalContentRegistration,
+  useModalIsolation,
+  useModalScrollLock
+} from "../internal/modal.js"
 import { hasNestedLayer, isImeKey } from "../internal/relaySummon.js"
 import { IconButton } from "../primitives/IconButton.js"
 import { Tabs } from "../primitives/Tabs.js"
@@ -96,6 +102,8 @@ const assignRef = <T,>(ref: Ref<T> | undefined, value: T | null): void => {
  * the host's grid. `fullscreen` is a modal dialog with the page inert. Only the body scrolls, so the
  * header and the footer's composer stay on screen. Escape and the close button call `onClose` and return
  * focus to the launcher; Escape is left to an IME composition and to dialogs or open popups inside.
+ * Changing presentation remounts the views and footer, so state that must survive (a composer draft)
+ * lives with the host or the composer, keyed by the object Relay is about.
  */
 export const RelayPanel = (props: RelayPanelProps): ReactElement => {
   const { launcher, onClose, presentation, ref } = props
@@ -126,32 +134,35 @@ export const RelayPanel = (props: RelayPanelProps): ReactElement => {
             open
           >
             <RadixDialog.Portal container={container}>
-              <RadixDialog.Content
-                aria-describedby={undefined}
-                className={classNames(style("root"), style("fullscreen"))}
-                data-rly-relay-panel="fullscreen"
-                data-rly-relay-surface=""
-                onCloseAutoFocus={(event) => {
-                  event.preventDefault()
-                  launcher.current?.focus()
-                }}
-                onEscapeKeyDown={(event) => {
-                  if (isImeKey(event) || hasNestedLayer(region.current, event.composedPath())) {
+              <FullscreenLayer>
+                <RadixDialog.Content
+                  aria-describedby={undefined}
+                  className={classNames(style("root"), style("fullscreen"))}
+                  data-rly-relay-panel="fullscreen"
+                  data-rly-relay-surface=""
+                  onCloseAutoFocus={(event) => {
+                    // The page is inert until the layer's cleanup, so focus returns after it.
                     event.preventDefault()
-                  }
-                }}
-                ref={setRegion}
-              >
-                <PanelChrome
-                  {...props}
-                  close={close}
-                  heading={
-                    <RadixDialog.Title asChild>
-                      <p className={style("title")}>{panelTitle(props.title)}</p>
-                    </RadixDialog.Title>
-                  }
-                />
-              </RadixDialog.Content>
+                    restoreModalFocusAfterCleanup(launcher.current)
+                  }}
+                  onEscapeKeyDown={(event) => {
+                    if (isImeKey(event) || hasNestedLayer(region.current, event.composedPath())) {
+                      event.preventDefault()
+                    }
+                  }}
+                  ref={setRegion}
+                >
+                  <PanelChrome
+                    {...props}
+                    close={close}
+                    heading={
+                      <RadixDialog.Title asChild>
+                        <p className={style("title")}>{panelTitle(props.title)}</p>
+                      </RadixDialog.Title>
+                    }
+                  />
+                </RadixDialog.Content>
+              </FullscreenLayer>
             </RadixDialog.Portal>
           </RadixDialog.Root>
         )}
@@ -195,6 +206,22 @@ export const RelayPanel = (props: RelayPanelProps): ReactElement => {
   )
 }
 
+/**
+ * Full screen joins rly's shared modal stack: the page behind is inert and cannot scroll, and an rly
+ * Dialog or Sheet around Relay treats this layer as its nested modal rather than as background.
+ */
+const FullscreenLayer = ({ children }: { readonly children: ReactNode }): ReactElement => {
+  const layer = useRef<HTMLDivElement>(null)
+  useModalContentRegistration()
+  useModalIsolation(layer, true)
+  useModalScrollLock(layer, true)
+  return (
+    <div data-rly-modal-layer="" ref={layer}>
+      {children}
+    </div>
+  )
+}
+
 const panelTitle = (title: string | undefined): string => requireText(title ?? "Relay", "RelayPanel title")
 
 /** Header, views and footer, shared by every presentation; only the title element differs. */
@@ -205,7 +232,10 @@ const PanelChrome = (
   const body = (content: ReactNode): ReactElement => (
     <div className={style("body")}>
       {freshness === undefined ? null : <div className={style("freshness")}>{freshness}</div>}
-      <div className={style("scroll")}>{content}</div>
+      {/* Focusable so a keyboard user can scroll a transcript that has no focusable content. */}
+      <div className={style("scroll")} tabIndex={0}>
+        {content}
+      </div>
     </div>
   )
   return (
@@ -244,6 +274,8 @@ const PanelChrome = (
         <Tabs
           aria-label="Relay views"
           className={style("tabs")}
+          // Two short views: one row on a phone too, never a stacked list above the transcript.
+          data-mobile-layout="single-row"
           items={props.tabs.map((tab) => ({
             content: body(tab.content),
             label: tab.count === undefined ? tab.label : `${tab.label} ${tab.count}`,

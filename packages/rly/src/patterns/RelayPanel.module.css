@@ -2,7 +2,7 @@
   /*
    * Host contract: --rly-relay-panel-offset is the sticky header's height, so the overlay and the pinned
    * column start below it; --app-bottom-inset is the height of any bar docked at the bottom (a
-   * permission bar), so the composer is never covered.
+   * permission bar): the overlay and pinned column end above it, and full screen covers it.
    */
   .root {
     background: var(--rly-color-surface-1);
@@ -37,7 +37,10 @@
     position: sticky;
   }
 
-  /* The whole viewport; dvh keeps the footer above a phone's on-screen keyboard. */
+  /*
+   * The whole viewport, over any bottom-docked bar. dvh follows the browser's toolbars; it follows the
+   * on-screen keyboard only when the host's viewport meta sets interactive-widget=resizes-content.
+   */
   .fullscreen {
     block-size: 100dvh;
     inset: 0;
@@ -94,6 +97,10 @@
     flex: 1;
     flex-direction: column;
     min-block-size: 0;
+    padding-block-start: 0;
+  }
+  .tabs > [role="tablist"] {
+    padding-inline: var(--rly-space-8);
   }
   .body {
     display: flex;
@@ -116,11 +123,15 @@
     overscroll-behavior: contain;
     padding: var(--rly-space-16);
   }
+  .scroll:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(-1 * var(--rly-focus-ring-width));
+  }
   .footer {
     border-block-start: 1px solid var(--rly-color-border-1);
     flex: none;
     padding: var(--rly-space-12) var(--rly-space-16);
-    padding-block-end: calc(max(var(--rly-space-12), env(safe-area-inset-bottom)) + var(--app-bottom-inset, 0px));
+    padding-block-end: max(var(--rly-space-12), env(safe-area-inset-bottom));
   }
 
   @keyframes relay-panel-enter {

@@ -479,6 +479,9 @@ minHostWidth })` picks the presentation: full screen at 640 CSS px and narrower,
 pinned only when the user pinned it at 1440 and up with the host's minimum beside the
 440px column, otherwise the overlay. Hosts set `--rly-relay-panel-offset` to their
 sticky header's height and `--app-bottom-inset` to any bar docked at the bottom.
+Full screen portals through `PortalProvider`, so render Relay inside one, and set
+`interactive-widget=resizes-content` in the viewport meta so the full-screen footer
+stays above a phone's on-screen keyboard.
 
 `useRelaySummon` binds that shortcut. From the page it opens Relay and focuses the composer (or, if
 Relay is already open, moves focus to the composer); from inside Relay it takes focus back to where it

@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { type CSSProperties, type ReactElement, useRef, useState } from "react"
 import { expect, userEvent } from "storybook/test"
+import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import { RelayLauncher, useRelayShortcut, useRelaySummon } from "../../src/patterns/RelayLauncher.js"
 import { RelayPanel, type RelayPanelProps, type RlyRelayPanelPresentation } from "../../src/patterns/RelayPanel.js"
 import { Text } from "../../src/primitives/Text.js"
@@ -55,10 +56,13 @@ const HostPage = ({
   const [open, setOpen] = useState(true)
   const [tab, setTab] = useState("conversation")
   const [pinned, setPinned] = useState(presentation === "pinned")
+  // The pin moves Relay between the overlay and the column; full screen has no pin.
+  const effective: RlyRelayPanelPresentation =
+    presentation === "fullscreen" ? "fullscreen" : pinned ? "pinned" : "overlay"
   const launcher = useRef<HTMLButtonElement>(null)
   const shortcut = useRelayShortcut()
   const { composerRef, regionRef } = useRelaySummon({
-    fullscreen: presentation === "fullscreen",
+    fullscreen: effective === "fullscreen",
     launcher,
     onOpenChange: setOpen,
     open,
@@ -68,14 +72,14 @@ const HostPage = ({
     freshness: "Current head. Reads freely, asks before writes.",
     launcher,
     onClose: () => setOpen(false),
-    presentation,
+    presentation: effective,
     ref: regionRef,
     scope: { label: "infra-core #12", revision: "bbbbbbb" },
     // Setup has no composer; full screen has no room to pin.
     footer: setup ? undefined : (
       <textarea aria-label="Message Relay" ref={composerRef} rows={2} style={{ inlineSize: "100%" }} />
     ),
-    pin: presentation === "fullscreen" ? undefined : { onPinnedChange: setPinned, pinned }
+    pin: effective === "fullscreen" ? undefined : { onPinnedChange: setPinned, pinned }
   }
   const panel = setup ? (
     <RelayPanel {...shared}>
@@ -84,29 +88,32 @@ const HostPage = ({
   ) : (
     <RelayPanel {...shared} onTabChange={setTab} selectedTab={tab} tabs={tabs} />
   )
+  // Full screen portals out of the page, so the host provides the portal target.
   return (
-    <div style={page(open && presentation === "pinned")}>
-      <div>
-        <header style={header}>
-          <Text as="h1" variant="card-title">
-            infra-core #12
-          </Text>
-          <RelayLauncher
-            expanded={open}
-            onClick={() => setOpen((value) => !value)}
-            ref={launcher}
-            shortcut={shortcut}
-          />
-        </header>
-        {open && presentation !== "pinned" ? panel : null}
-        <main data-page-content="" style={{ padding: "var(--rly-space-16)" }}>
-          {Array.from({ length: 40 }, (_, index) => (
-            <p key={index}>Diff line {index + 1} of src/patch-reader.ts</p>
-          ))}
-        </main>
+    <PortalProvider>
+      <div style={page(open && effective === "pinned")}>
+        <div>
+          <header style={header}>
+            <Text as="h1" variant="card-title">
+              infra-core #12
+            </Text>
+            <RelayLauncher
+              expanded={open}
+              onClick={() => setOpen((value) => !value)}
+              ref={launcher}
+              shortcut={shortcut}
+            />
+          </header>
+          {open && effective !== "pinned" ? panel : null}
+          <main data-page-content="" style={{ padding: "var(--rly-space-16)" }}>
+            {Array.from({ length: 40 }, (_, index) => (
+              <p key={index}>Diff line {index + 1} of src/patch-reader.ts</p>
+            ))}
+          </main>
+        </div>
+        {open && effective === "pinned" ? panel : null}
       </div>
-      {open && presentation === "pinned" ? panel : null}
-    </div>
+    </PortalProvider>
   )
 }
 
@@ -158,6 +165,9 @@ export const Pinned: Story = {
     const region = canvas.getByRole("complementary", { name: "Relay" })
     await expect(getComputedStyle(region).position).toBe("sticky")
     await expect(canvas.getByRole("button", { name: "Unpin" })).toHaveAttribute("aria-pressed", "true")
+    // Unpinning turns the column back into the overlay.
+    await userEvent.click(canvas.getByRole("button", { name: "Unpin" }))
+    await expect(getComputedStyle(canvas.getByRole("complementary", { name: "Relay" })).position).toBe("fixed")
   },
   render: () => <HostPage presentation="pinned" />
 }
@@ -169,6 +179,8 @@ export const Fullscreen: Story = {
     const dialog = canvasElement.ownerDocument.querySelector("[data-rly-relay-panel='fullscreen']")
     await expect(dialog?.getAttribute("role")).toBe("dialog")
     await expect(dialog?.getBoundingClientRect().width).toBe(window.innerWidth)
+    // The page behind is inert while Relay is full screen.
+    await expect(canvasElement.closest("[inert]") ?? canvasElement.querySelector("[inert]")).not.toBeNull()
     await userEvent.keyboard("{Escape}")
     await expect(canvasElement.ownerDocument.querySelector("[data-rly-relay-panel]")).toBeNull()
   },
@@ -180,6 +192,9 @@ export const Setup: Story = {
   args: panelArgs,
   play: async ({ canvas }) => {
     await expect(canvas.queryByRole("tablist")).toBeNull()
+    // The overlay enters from opacity 0; visibility is judged once its entrance has finished.
+    const region = canvas.getByRole("complementary", { name: "Relay" })
+    await Promise.all(region.getAnimations().map((animation) => animation.finished))
     await expect(canvas.getByText(/Choose the agent/)).toBeVisible()
   },
   render: () => <HostPage presentation="overlay" setup />

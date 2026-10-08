@@ -78,6 +78,8 @@ const Host = ({
   )
 }
 
+const nextTimer = (): Promise<void> => act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)))
+
 const mount = async (element: ReactElement): Promise<void> => {
   const host = document.createElement("div")
   document.body.append(host)
@@ -170,9 +172,13 @@ describe("RelayPanel", () => {
     const dialog = document.querySelector("[role='dialog'][data-rly-relay-panel='fullscreen']")
     expect(dialog).not.toBeNull()
     expect(dialog?.hasAttribute("data-rly-relay-surface")).toBe(true)
+    // The page behind is inert while Relay is full screen.
+    expect(byTestId("launcher")?.closest("[inert]")).not.toBeNull()
     await press(dialog, "Escape")
-    // Radix hands focus back from a timer once the dialog has unmounted and released the page.
-    await act(async () => new Promise((resolve) => window.setTimeout(resolve, 0)))
+    // Radix calls back from a timer once the dialog unmounts, and rly restores focus one timer later,
+    // after the modal layer has released the page.
+    await nextTimer()
+    await nextTimer()
     expect(document.querySelector("[data-rly-relay-panel]")).toBeNull()
     expect(document.activeElement).toBe(byTestId("launcher"))
   })
