@@ -29,7 +29,7 @@ import {
   PendingApprovalTarget,
   type PendingApprovalTarget as PendingApprovalTargetType
 } from "./dashboard-model.js"
-import { AgentActivity, DashboardView, type ApprovalDecision } from "./dashboard-view.js"
+import { DashboardView, type ApprovalDecision } from "./dashboard-view.js"
 import {
   dashboardHistoryState,
   dashboardHasPendingApprovalTarget,
@@ -678,7 +678,6 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
             work={
               <section className="fleet-workspace">
                 <FleetWorkPanel state={workState} />
-                <AgentActivity snapshot={current} />
                 <ActivityHistory
                   hasMore={current.historyNextCursor !== null}
                   loading={historyBusy}
