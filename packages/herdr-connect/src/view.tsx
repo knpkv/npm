@@ -526,6 +526,10 @@ type TerminalKeyRailProps = {
   readonly linesBack?: number
   /** The position is not confirmed (Latest's last reading never came, or a read failed); the rail says so instead of nothing. */
   readonly positionUnconfirmed?: boolean
+  /** The modifier and terminal keys are hidden; the view actions and this toggle stay. */
+  readonly keysHidden?: boolean
+  /** Offers a pinned Keys toggle when given; the caller remembers the choice. */
+  readonly onKeysHiddenChange?: (hidden: boolean) => void
 }
 
 const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
@@ -534,22 +538,42 @@ const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctr
 export const TerminalKeyRail = ({
   disabled = false,
   error = null,
+  keysHidden = false,
   linesBack = 0,
   modifier,
   onFocusTerminal,
   onJumpToLatest,
   onKey,
+  onKeysHiddenChange,
   onModifierChange,
   onSelectText,
   positionUnconfirmed = false
 }: TerminalKeyRailProps) => {
+  const keysId = useId()
   const [activeIndex, setActiveIndex] = useState(0)
   const modifierCount = terminalModifiers.length
   const terminalKeyAvailability = terminalKeyDescriptors.map(
     (descriptor) => serializeTerminalKey(descriptor.key, modifier)._tag === "supported"
   )
   // View actions stay pinned at the rail's end, in reach while the keys scroll under them.
-  const viewActions = [
+  const viewActions: ReadonlyArray<{
+    readonly key: string
+    readonly label: string
+    readonly ariaLabel: string
+    readonly onClick: () => void
+    readonly expanded?: boolean
+  }> = [
+    ...(onKeysHiddenChange === undefined
+      ? []
+      : [
+          {
+            key: "keys",
+            label: "Keys",
+            ariaLabel: keysHidden ? "Show terminal keys" : "Hide terminal keys",
+            onClick: () => onKeysHiddenChange(!keysHidden),
+            expanded: !keysHidden
+          }
+        ]),
     ...(onJumpToLatest === undefined
       ? []
       : [{ key: "latest", label: "Latest", ariaLabel: "Jump to latest output", onClick: onJumpToLatest }]),
@@ -559,8 +583,8 @@ export const TerminalKeyRail = ({
   ]
   const viewActionStart = modifierCount + terminalKeyDescriptors.length
   const enabledRail = [
-    ...terminalModifiers.map(() => !disabled),
-    ...terminalKeyAvailability.map((available) => !disabled && available),
+    ...terminalModifiers.map(() => !disabled && !keysHidden),
+    ...terminalKeyAvailability.map((available) => !disabled && !keysHidden && available),
     ...viewActions.map(() => !disabled)
   ]
   const tabStopIndex = enabledRail[activeIndex] === true ? activeIndex : enabledRail.findIndex((enabled) => enabled)
@@ -590,13 +614,19 @@ export const TerminalKeyRail = ({
       role="toolbar"
     >
       <div className="terminal-key-scroll">
-        <div aria-label="Terminal modifiers" className="terminal-key-group" role="group">
+        <div
+          aria-label="Terminal modifiers"
+          className="terminal-key-group"
+          hidden={keysHidden}
+          id={`${keysId}-modifiers`}
+          role="group"
+        >
           {terminalModifiers.map((item, index) => (
             <button
               aria-pressed={modifier === item}
               className="terminal-key terminal-key-modifier"
               data-terminal-key={item}
-              disabled={disabled}
+              disabled={disabled || keysHidden}
               key={item}
               onClick={(event) => {
                 setActiveIndex(index)
@@ -612,7 +642,13 @@ export const TerminalKeyRail = ({
             </button>
           ))}
         </div>
-        <div aria-label="Terminal keys" className="terminal-key-group" role="group">
+        <div
+          aria-label="Terminal keys"
+          className="terminal-key-group"
+          hidden={keysHidden}
+          id={`${keysId}-keys`}
+          role="group"
+        >
           {terminalKeyDescriptors.map((descriptor, index) => {
             const serialization = serializeTerminalKey(descriptor.key, modifier)
             const unavailable = serialization._tag === "unsupported"
@@ -624,7 +660,7 @@ export const TerminalKeyRail = ({
                 }
                 className="terminal-key"
                 data-terminal-key={descriptor.key}
-                disabled={disabled || unavailable}
+                disabled={disabled || keysHidden || unavailable}
                 key={descriptor.key}
                 onClick={() => onKey(descriptor.key)}
                 onFocus={() => setActiveIndex(railIndex)}
@@ -655,6 +691,8 @@ export const TerminalKeyRail = ({
             ) : null}
             {viewActions.map((action, index) => (
               <button
+                aria-controls={action.expanded === undefined ? undefined : `${keysId}-modifiers ${keysId}-keys`}
+                aria-expanded={action.expanded}
                 aria-label={action.ariaLabel}
                 className="terminal-key"
                 data-behind={action.key === "latest" && (linesBack > 0 || positionUnconfirmed) ? "true" : undefined}
