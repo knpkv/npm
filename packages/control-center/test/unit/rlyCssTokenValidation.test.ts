@@ -22,6 +22,13 @@ describe("workspace rly CSS token validation", () => {
       yield* fileSystem.makeDirectory(herdrSource, { recursive: true })
       yield* fileSystem.makeDirectory(path.join(workspaceRoot, "packages", "no-source"), { recursive: true })
       yield* fileSystem.writeFileString(path.join(workspaceRoot, "packages", "notes.md"), "not a package")
+      // A directory without a package.json is not a package, even with a src tree.
+      const strayCss = path.join(workspaceRoot, "packages", "not-a-package", "src")
+      yield* fileSystem.makeDirectory(strayCss, { recursive: true })
+      yield* fileSystem.writeFileString(path.join(strayCss, "stray.css"), ".x { gap: var(--rly-space-stray); }")
+      for (const name of ["rly", "control-center", "codecommit-web", "herdr-approvals"]) {
+        yield* fileSystem.writeFileString(path.join(workspaceRoot, "packages", name, "package.json"), "{}")
+      }
       yield* fileSystem.writeFileString(
         path.join(herdrSource, "styles.css"),
         ".chip { padding-inline: var(--rly-space-10); }"

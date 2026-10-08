@@ -5,8 +5,9 @@ import type * as PlatformError from "effect/PlatformError"
 import { inspectRlyCssTokens, type RlyCssTokenViolation } from "./rlyCssTokens.js"
 
 /**
- * Every workspace package's `src` tree, found on disk rather than listed: a hand-kept list missed
- * the herdr packages, whose stylesheets referenced tokens rly never defined.
+ * The `src` tree of every package under `packages/` (a directory with a package.json), found on
+ * disk rather than listed: a hand-kept list missed the herdr packages, whose stylesheets referenced
+ * tokens rly never defined. The workspace's root members (scratchpad, scripts) hold no stylesheets.
  */
 const rlyCssTokenSourceRoots: (
   fileSystem: FileSystem.FileSystem,
@@ -20,7 +21,11 @@ const rlyCssTokenSourceRoots: (
       // packages/ also holds loose files, such as notes; only a directory is a package.
       if ((yield* fileSystem.stat(path.join(packages, entry))).type !== "Directory") continue
       const source = path.join(packages, entry, "src")
-      if (yield* fileSystem.exists(source)) roots.push(source)
+      if (
+        (yield* fileSystem.exists(path.join(packages, entry, "package.json"))) && (yield* fileSystem.exists(source))
+      ) {
+        roots.push(source)
+      }
     }
     return roots
   }
