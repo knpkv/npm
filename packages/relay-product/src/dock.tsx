@@ -167,7 +167,7 @@ const useRelayDockAction = (): readonly [
   return [state, run]
 }
 
-const HostConversationLocator = ({ host }: { readonly host: RelayProductDockHost }): ReactElement => {
+export const HostConversationLocator = ({ host }: { readonly host: RelayProductDockHost }): ReactElement => {
   const [accountId, setAccountId] = useState("")
   const [pullRequestId, setPullRequestId] = useState("")
   const [region, setRegion] = useState("")

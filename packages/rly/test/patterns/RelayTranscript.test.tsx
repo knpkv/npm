@@ -241,4 +241,17 @@ describe("RelayTranscript", () => {
     expect(document.body.textContent).toContain("New messages")
     vi.unstubAllGlobals()
   })
+
+  it("shows a system note between the turns, attributed to neither and not announced", async () => {
+    const withNote: ReadonlyArray<RlyRelayTranscriptItem> = [
+      ...conversation,
+      { _tag: "Note", id: "n1", text: "Rerun Relay with the selected profile before continuing this PR thread." }
+    ]
+    await mount(<Scroller items={withNote} streaming={false} />)
+    const note = [...document.querySelectorAll("li")].at(-1)
+    expect(note?.textContent).toBe("Note: Rerun Relay with the selected profile before continuing this PR thread.")
+    expect(note?.querySelector(".bubble, [class*='bubble']")).toBeNull()
+    await nextFrame()
+    expect(document.querySelector("[aria-live='polite']")?.textContent).toBe("")
+  })
 })
