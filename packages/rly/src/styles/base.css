@@ -4,6 +4,14 @@
   :where([data-rly-root], [data-rly-catalog]) *::before,
   :where([data-rly-root], [data-rly-catalog]) *::after {
     box-sizing: border-box;
+    /* Flex and grid items may shrink below their content; a component that must not states its own minimum. */
+    min-inline-size: 0;
+  }
+
+  /* Long words and URLs wrap instead of overflowing; paragraphs avoid a lone last word. */
+  :where([data-rly-root], [data-rly-catalog]) {
+    overflow-wrap: break-word;
+    text-wrap: pretty;
   }
 
   :where([data-rly-root], [data-rly-catalog]) :where(button, input, select, textarea) {
