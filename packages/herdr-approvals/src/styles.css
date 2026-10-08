@@ -1355,6 +1355,34 @@
     }
   }
 
+  /* Below 24rem a time column left the title about 80px, and words broke mid-word: the time
+     moves onto its own line above the title, and the copy takes the row's full width. */
+  @media (max-width: 24rem) {
+    .activity-row {
+      grid-template-columns: minmax(0, 1fr) 1rem;
+    }
+
+    .activity-row > time {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .activity-row-copy {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .activity-status {
+      grid-column: 1;
+      grid-row: 3;
+    }
+
+    .activity-disclosure {
+      grid-column: 2;
+      grid-row: 1 / span 3;
+    }
+  }
+
   @media (max-width: 21rem) {
     .summary-grid,
     .approval-actions {
