@@ -5,13 +5,22 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { build, type BuildOptions } from "esbuild"
+import { BROWSER_TARGET } from "../../../browser-target.ts"
 
 class GuideAssetError extends Schema.TaggedError<GuideAssetError>()("GuideAssetError", { cause: Schema.Defect() }) {}
 
 const bundle = Effect.fn("Review.bundleAsset")(function*(entry: string, options: BuildOptions) {
   const result = yield* Effect.tryPromise({
     try: () =>
-      build({ entryPoints: [entry], bundle: true, write: false, minify: true, legalComments: "inline", ...options }),
+      build({
+        entryPoints: [entry],
+        bundle: true,
+        write: false,
+        minify: true,
+        legalComments: "inline",
+        target: BROWSER_TARGET,
+        ...options
+      }),
     catch: (cause) => new GuideAssetError({ cause })
   })
   const file = result.outputFiles[0]

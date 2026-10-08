@@ -1,0 +1,23 @@
+id: css-clip-keeps-min-size
+valid:
+  - |
+    .a { overflow: clip; min-inline-size: 0; text-overflow: ellipsis; }
+  - |
+    .a { min-width: var(--rly-space-0); overflow-x: clip; }
+  - |
+    .sr { position: absolute; inline-size: 1px; block-size: 1px; overflow: clip; }
+  - |
+    .sr { position: absolute; clip-path: inset(50%); overflow: clip; }
+  - |
+    .a { overflow: hidden; }
+invalid:
+  - |
+    .a { overflow: clip; text-overflow: ellipsis; white-space: nowrap; }
+  - |
+    .a { overflow-x: clip; }
+  - |
+    .sr { position: absolute; block-size: 1px; overflow: clip; }
+  - |
+    .a { min-block-size: 0; overflow: clip; }
+  - |
+    .a { overflow: clip; } .b { min-inline-size: 0; }

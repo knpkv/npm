@@ -8,7 +8,7 @@
     /* One bounded track: an implicit auto track can't shrink below its content, so it overflowed at 320. */
     grid-template-columns: minmax(var(--rly-space-0), 1fr);
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   /* Heading and count share a row while they fit; the count wraps below in a narrow tree. */
@@ -134,8 +134,10 @@
     text-align: start;
   }
 
-  .directoryButton:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .directoryButton:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .directoryButton:focus-visible {
@@ -202,8 +204,10 @@
     text-align: start;
   }
 
-  .file:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .file:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .file[aria-current="true"] {

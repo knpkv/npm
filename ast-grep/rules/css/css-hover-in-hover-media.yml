@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: css-hover-in-hover-media
+language: css
+severity: error
+message: ":hover must sit inside @media (hover: hover) and (pointer: fine); on touch a tap leaves it stuck"
+
+rule:
+  kind: pseudo_class_selector
+  has:
+    kind: class_name
+    regex: "(?i)^hover$"
+  # Match the query, not the whole @media text: a nested guard inside the block must not excuse the
+  # outer rules.
+  not:
+    inside:
+      kind: media_statement
+      stopBy: end
+      has:
+        not:
+          kind: block
+        regex: "(?i)\\(\\s*hover\\s*:\\s*hover\\s*\\)"
+
+files:
+  - "packages/herdr-monitor/src/**/*.css"
+  - "packages/herdr-connect/src/**/*.css"
+  - "packages/review/src/**/*.css"
+  - "packages/agent-usage/src/**/*.css"
+
+note: |
+  Wrap hover styles: @media (hover: hover) and (pointer: fine) { .link:hover { … } }.
+  :focus-visible and :active need no guard.

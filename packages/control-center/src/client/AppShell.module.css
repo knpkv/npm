@@ -87,14 +87,24 @@
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
     var(--rly-type-label-font);
   text-decoration: none;
-  transition:
-    color 140ms ease,
-    background-color 140ms ease;
 }
 
-.navLink:hover,
+@media (prefers-reduced-motion: no-preference) {
+  .navLink {
+    transition-duration: var(--rly-motion-fast-duration);
+    transition-property: color, background-color;
+    transition-timing-function: var(--rly-motion-fast-easing);
+  }
+}
+
 .navLink:focus-visible {
   color: var(--rly-color-text-1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .navLink:hover {
+    color: var(--rly-color-text-1);
+  }
 }
 
 .navLinkActive {
@@ -173,9 +183,11 @@
   padding-block: clamp(var(--rly-space-16), 2vw, var(--rly-space-32)) clamp(2.5rem, 6vw, 5rem);
 }
 
-:global(::view-transition-group(*)) {
-  animation-duration: var(--rly-motion-deliberate-duration);
-  animation-timing-function: var(--rly-motion-deliberate-easing);
+@media (prefers-reduced-motion: no-preference) {
+  :global(::view-transition-group(*)) {
+    animation-duration: var(--rly-motion-deliberate-duration);
+    animation-timing-function: var(--rly-motion-deliberate-easing);
+  }
 }
 
 @media (max-width: 48rem) {
@@ -205,7 +217,7 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     max-inline-size: calc(100% - 2rem);
-    box-shadow: 0 1rem 3rem rgb(0 0 0 / 35%);
+    box-shadow: 0 1rem 3rem oklch(0% 0 none / 35%);
   }
 
   .mobileNav .navLink {
@@ -229,15 +241,9 @@
     position: absolute;
     inline-size: 1px;
     block-size: 1px;
-    overflow: hidden;
+    overflow: clip;
     clip-path: inset(50%);
     white-space: nowrap;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .navLink {
-    transition: none;
   }
 }
 

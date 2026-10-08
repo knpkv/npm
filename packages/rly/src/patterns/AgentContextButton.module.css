@@ -20,8 +20,10 @@
     text-align: start;
   }
 
-  .root:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .root:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .root:active {
@@ -43,6 +45,11 @@
     flex: none;
     inline-size: var(--rly-space-48);
     justify-content: center;
+  }
+  @supports (justify-content: safe center) {
+    .mark {
+      justify-content: safe center;
+    }
   }
 
   .glyph {

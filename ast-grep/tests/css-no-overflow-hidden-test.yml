@@ -1,0 +1,15 @@
+id: css-no-overflow-hidden
+valid:
+  - |
+    .x { overflow: clip; }
+  - |
+    .x { overflow: clip visible; }
+  - |
+    .x { overflow-x: auto; }
+invalid:
+  - |
+    .x { overflow: hidden; }
+  - |
+    .x { overflow-x: hidden; }
+  - |
+    .x { overflow: hidden auto; }

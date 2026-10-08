@@ -63,6 +63,16 @@ export class FontSwapHintedRenderingError extends Data.TaggedError("FontSwapHint
   }
 }
 
+/** The metric-matched mono fallback face never loaded, so nothing about the swap can be measured. */
+export class FontFallbackNotLoadedError extends Data.TaggedError("FontFallbackNotLoadedError")<{
+  readonly url: string
+}> {
+  override get message(): string {
+    return `'Geist Mono Fallback' did not load on ${this.url}: the page declares no such @font-face, ` +
+      `or the runner lacks its local font (Liberation Mono)`
+  }
+}
+
 /** The fallback never rendered: the runner lacks the fonts, or the stack skips the fallback face. */
 export class FontSwapFallbackMissingError extends Data.TaggedError("FontSwapFallbackMissingError")<{
   readonly families: ReadonlyArray<string>
@@ -220,7 +230,12 @@ new PerformanceObserver((list) => {
 `
 
 /** Ten "0"s in the mono fallback at 14px: exactly 84px unless glyph advances are hinted. */
-const MEASURE_ZEROS = `(() => {
+// Canvas measures with a substitute font until the local() face has loaded, and whether the page has
+// loaded it yet depends on what it drew first; so the face is loaded explicitly, and null means it
+// never did (no such @font-face, or its local font is missing).
+const MEASURE_ZEROS = `(async () => {
+  const faces = await document.fonts.load("14px 'Geist Mono Fallback'").catch(() => []);
+  if (faces.length === 0) return null;
   const canvas = document.createElement("canvas").getContext("2d");
   if (canvas === null) return 0;
   canvas.font = "14px 'Geist Mono Fallback'";
@@ -275,7 +290,8 @@ export const measureFontSwapShift = async (page: Page, options: FontSwapOptions)
     await page.locator(options.ready).first().waitFor()
     const probe = options.probe ?? options.ready
     // Liberation Mono's "0" is exactly 0.6em, so ten of them at 14px are 84px unless advances are hinted.
-    const zeros = Schema.decodeUnknownSync(Schema.Number)(await page.evaluate(MEASURE_ZEROS))
+    const zeros = Schema.decodeUnknownSync(Schema.NullOr(Schema.Number))(await page.evaluate(MEASURE_ZEROS))
+    if (zeros === null) throw new FontFallbackNotLoadedError({ url: page.url() })
     if (!HINTED && Math.abs(zeros - 84) > 0.5) throw new FontSwapHintedRenderingError({ measured: zeros })
     const fallback = await platformFamilies(page, probe)
     if (fontRequests === 0) throw new FontSwapNoFontError({ url: page.url() })

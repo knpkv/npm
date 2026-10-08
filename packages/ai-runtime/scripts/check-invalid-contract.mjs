@@ -43,6 +43,19 @@ export const unexpectedDiagnostics = (output) => {
   }
 }
 
+// The expected rejection is an Effect language-service diagnostic, which plain tsc never reports: the root
+// `prepare` script patches TypeScript (`effect-tsgo patch --typescript`), and an install run with
+// --ignore-scripts skips it. A clean compile therefore usually means that, not a stale contract.
+const unpatchedOrStale = [
+  "dtslint/public-contract.ts compiled with no errors. Either:",
+  "- this TypeScript does not report Effect language-service diagnostics (an install with --ignore-scripts",
+  "  skipped the root prepare script); fix: pnpm exec effect-tsgo patch --typescript, or pnpm install; or",
+  "- the contract stopped rejecting an adapter that raises AgentRuntimeProtocolError; fix the contract."
+].join("\n")
+
+// TS2307 here almost always means a workspace dependency has no built output yet.
+const unbuiltDependency = "TS2307 usually means a workspace dependency is not built: run pnpm build first."
+
 const program = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   yield* fileSystem.remove("tsconfig.contract-invalid.tsbuildinfo", { force: true })
@@ -55,7 +68,7 @@ const program = Effect.gen(function* () {
     { concurrency: 2 }
   )
   if (exitCode === ChildProcessSpawner.ExitCode(0)) {
-    return yield* fail("dtslint/public-contract.ts compiled: the invalid contract no longer rejects anything")
+    return yield* fail(unpatchedOrStale)
   }
   const { missing, unexpected } = unexpectedDiagnostics(output)
   if (missing.length > 0 || unexpected.length > 0) {
@@ -63,7 +76,8 @@ const program = Effect.gen(function* () {
       [
         "dtslint/public-contract.ts failed for the wrong reason.",
         ...missing.map(({ file, code, mentions }) => `missing: ${file} ${code} mentioning ${mentions}`),
-        ...unexpected.map(({ file, code, text }) => `unexpected: ${file} ${code}: ${text}`)
+        ...unexpected.map(({ file, code, text }) => `unexpected: ${file} ${code}: ${text}`),
+        ...(unexpected.some(({ code }) => code === "TS2307") ? [unbuiltDependency] : [])
       ].join("\n")
     )
   }

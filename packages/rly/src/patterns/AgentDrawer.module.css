@@ -50,6 +50,11 @@
     inline-size: var(--rly-space-48);
     justify-content: center;
   }
+  @supports (justify-content: safe center) {
+    .mark {
+      justify-content: safe center;
+    }
+  }
 
   .glyph {
     block-size: var(--rly-space-24);

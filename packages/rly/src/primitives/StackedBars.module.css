@@ -177,7 +177,8 @@
     clip-path: inset(50%);
     inline-size: 1px;
     margin: 0;
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
     position: absolute;
     white-space: nowrap;
   }
