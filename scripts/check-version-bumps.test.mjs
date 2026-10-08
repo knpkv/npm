@@ -251,10 +251,17 @@ test("the script fails a feature branch or a fork that bumps a version, and pass
   assert.match(outcome.wentPublic.output, /@knpkv\/internal \(packages\/internal\/package\.json\): ## 0\.0\.0/u)
 })
 
-// A registry that knows `@knpkv/released` at 1.0.0 and nothing else.
+// A registry whose metadata knows `@knpkv/released` at 1.0.0 only; `tarballs` lists the tarball paths it
+// serves, so a test can model npm serving a tarball before its metadata lists the version.
+const tarballs = new Set(["/@knpkv/released/-/released-1.0.0.tgz"])
 const fakeRegistry = Effect.acquireRelease(
   Effect.callback((resume) => {
     const server = createServer((request, response) => {
+      if (request.url?.endsWith(".tgz")) {
+        response.writeHead(tarballs.has(request.url) ? 200 : 404)
+        response.end()
+        return
+      }
       const known = request.url === "/@knpkv%2Freleased"
       response.writeHead(known ? 200 : 404, { "content-type": "application/json" })
       response.end(known ? JSON.stringify({ versions: { "1.0.0": {} } }) : "{}")
@@ -313,6 +320,10 @@ test("preparing a release sets changesets aside only when every unpublished vers
       yield* write("packages/released/package.json", manifest("released", "1.1.0"))
       yield* write("packages/released/CHANGELOG.md", "# @knpkv/released\n\n## 1.1.0\n\n## 1.0.0\n")
       yield* commit("Version Packages")
+      // npm already serves the 1.1.0 tarball but its metadata does not list it yet: nothing is published.
+      tarballs.add("/@knpkv/released/-/released-1.1.0.tgz")
+      const propagating = yield* prepare
+      tarballs.delete("/@knpkv/released/-/released-1.1.0.tgz")
       const ready = yield* prepare
       yield* run("git", ["checkout", "-q", "HEAD", "--", ".changeset"], directory, env)
       // A new package arrives with its changeset before the release is published: publishing now would
@@ -327,14 +338,17 @@ test("preparing a release sets changesets aside only when every unpublished vers
       yield* commit("drop fresh's changeset")
       const output = path.join(directory, "github-output")
       const orphaned = yield* run("node", [script, "--prepare-release"], directory, { ...env, GITHUB_OUTPUT: output })
-      return { idle, orphaned, ready, waiting }
+      return { idle, orphaned, propagating, ready, waiting }
     }).pipe(Effect.scoped)
   )
-  assert.equal(outcome.idle.written, "outstanding=false\npending=true\n")
+  assert.equal(outcome.idle.written, "outstanding=false\npending=true\npropagating=false\n")
   assert.deepEqual(outcome.idle.changesets, ["AGENTS.md", "README.md", "later.md"])
-  assert.equal(outcome.ready.written, "outstanding=true\npending=true\n")
+  assert.equal(outcome.ready.written, "outstanding=true\npending=true\npropagating=false\n")
+  assert.equal(outcome.propagating.written, "outstanding=false\npending=true\npropagating=true\n")
+  assert.deepEqual(outcome.propagating.changesets, ["AGENTS.md", "README.md", "later.md"])
+  assert.match(outcome.propagating.log, /Published, npm metadata still catching up: @knpkv\/released@1\.1\.0/u)
   assert.deepEqual(outcome.ready.changesets, ["AGENTS.md", "README.md"])
-  assert.equal(outcome.waiting.written, "outstanding=false\npending=true\n")
+  assert.equal(outcome.waiting.written, "outstanding=false\npending=true\npropagating=false\n")
   assert.deepEqual(outcome.waiting.changesets, ["AGENTS.md", "README.md", "fresh.md", "later.md"])
   assert.match(outcome.waiting.log, /::warning title=Release waits::@knpkv\/released@1\.1\.0 stay unpublished/u)
   assert.notEqual(outcome.orphaned.exitCode, ChildProcessSpawner.ExitCode(0), outcome.orphaned.output)
