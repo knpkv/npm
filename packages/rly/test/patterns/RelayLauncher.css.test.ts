@@ -21,16 +21,20 @@ describe("RelayLauncher forced-colours CSS", () => {
     for (const { body } of openHovers) expect(body).toMatch(/border-color:\s*var\(--rly-color-agent\)/)
   })
 
-  it("keeps the inverted open fill when the open launcher is hovered", () => {
+  it("keeps the inverted open fill while the open launcher is hovered or pressed", () => {
     const inverted = rules.filter(({ body }) => /background:\s*ButtonText/.test(body))
     expect(inverted).toHaveLength(2)
-    // Every author hover rule on the open launcher, repeated verbatim so specificity is equal and the
-    // later forced rule wins.
-    const authorHovers = rules
-      .filter(({ body }) => !/ButtonText/.test(body))
+    // The open form of every author hover/active background rule: the open attribute plus the same
+    // state suffix is never less specific, and the forced rules come later, so they win.
+    const open = ".root[aria-expanded=\"true\"]"
+    const required = rules
+      .filter(({ body }) => !/ButtonText/.test(body) && /(^|;|\s)background:/.test(body))
       .flatMap(({ selectors }) => selectors.split(",").map((selector) => selector.trim()))
-      .filter((selector) => selector.startsWith(".root[aria-expanded=\"true\"]") && selector.includes(":hover"))
-    expect(authorHovers.length).toBeGreaterThan(0)
-    for (const { selectors } of inverted) for (const hover of authorHovers) expect(selectors).toContain(hover)
+      .filter((selector) => selector.startsWith(".root") && /:(hover|active)/.test(selector))
+      .map((selector) => (selector.startsWith(open) ? selector : `${open}${selector.slice(".root".length)}`))
+    expect(required).toEqual(expect.arrayContaining([`${open}:not(:disabled):hover`, `${open}:not(:disabled):active`]))
+    for (const { selectors } of inverted) {
+      for (const selector of required) expect(selectors.replace(/\s+/g, " ")).toContain(selector)
+    }
   })
 })

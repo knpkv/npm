@@ -81,12 +81,13 @@
     }
     /*
      * Highlight is the focus ring's colour there, so open is an inverted fill and a heavier border:
-     * two cues, neither of them a colour the system might also use for focus. Hover is listed so the
-     * author hover tint never replaces the fill (forced-color-adjust: none lets it through). It repeats
-     * the author hover selector exactly, so it has the same specificity and wins by coming later.
+     * two cues, neither of them a colour the system might also use for focus. forced-color-adjust: none
+     * lets author backgrounds through, so the open form of every author hover and active rule is listed:
+     * at least the same specificity, and later, so the inverted fill wins while hovered or pressed.
      */
     .root[aria-expanded="true"],
-    .root[aria-expanded="true"]:not(:disabled):hover {
+    .root[aria-expanded="true"]:not(:disabled):hover,
+    .root[aria-expanded="true"]:not(:disabled):active {
       background: ButtonText;
       border: 2px solid ButtonText;
       box-shadow: none;
@@ -105,7 +106,9 @@
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"],
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
-    .root[aria-expanded="true"]:not(:disabled):hover {
+    .root[aria-expanded="true"]:not(:disabled):hover,
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .root[aria-expanded="true"]:not(:disabled):active {
     background: ButtonText;
     border: 2px solid ButtonText;
     box-shadow: none;
