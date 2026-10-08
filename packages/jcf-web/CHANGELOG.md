@@ -1,5 +1,28 @@
 # @knpkv/jcf-web
 
+## 0.8.0
+
+### Minor Changes
+
+- [#545](https://github.com/knpkv/npm/pull/545) [`391e9e3`](https://github.com/knpkv/npm/commit/391e9e3e5a66ebc770264222e51e10e1983bf2eb) Thanks [@konopkov](https://github.com/konopkov)! - The agent conversation no longer moves while the agent works. Below 1100px the sheet has a fixed height, and new output scrolls inside it. A read's progress sits below the conversation, so the conversation stays put when the progress goes. On a short window, such as a laptop at 200% zoom, the sheet uses the full height. The masthead status keeps room for its longest wording, so the page no longer re-wraps as the status changes. The editor picks layers with the same buttons as the calendar, instead of browser checkboxes, and its note grows with what you type, with no resize grip. A failed read is stated once, in the alert; the totals line just says how old the totals are. After a failed or cancelled read, the agent conversation stops saying it is waiting.
+
+- [#542](https://github.com/knpkv/npm/pull/542) [`fc2ccc3`](https://github.com/knpkv/npm/commit/fc2ccc38179d3a0a0c89c55b7adf0d6ba6638ecc) Thanks [@konopkov](https://github.com/konopkov)! - The week view says what is missing instead of showing zeros, and a signed-out tab can get back in:
+
+  - A tab without a valid session shows one screen naming `jcf web login`, instead of the whole app with zeros, enabled controls and three red panels. A link pasted into that tab signs it in. An expired link in the address bar no longer signs out a tab whose session is still valid.
+  - `jcf web login` (or `jcf-web login`) asks the running jcf-web for a fresh one-time link, so a second browser or an expired tab no longer needs a restart. jcf-web leaves its address and a control token in `~/.jcf/web.json` (owner-only) while it runs, and removes it on exit.
+  - A system that is not connected reads "— Not connected. Run jcf auth jira token" (or the Clockify command) in the week totals, never "nothing saved". Its saved layer is hidden, and it is never a write target. With nothing connected, the page shows one panel naming both commands.
+  - With no session folder chosen, the empty state says so and names the setting, instead of offering a Scan sessions that cannot find anything. The empty-state copy names only the connected systems.
+  - `pnpm --filter @knpkv/jcf-web start` works in the workspace (it runs the server with `tsx`), and `test:pack` checks it.
+
+### Patch Changes
+
+- [#699](https://github.com/knpkv/npm/pull/699) [`192e70e`](https://github.com/knpkv/npm/commit/192e70e46108974287865d3ec0c379aa4c418055) Thanks [@konopkov](https://github.com/konopkov)! - Ticket keys that are wider than their calendar block end in "…" again instead of being cut off mid-character, and a packed stretch's heading is a full-width target at least 24px tall.
+
+- [#687](https://github.com/knpkv/npm/pull/687) [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44) Thanks [@konopkov](https://github.com/konopkov)! - Browser builds now target Chrome 123, Edge 123, Firefox 120 and Safari 17.6, the floor the CSS already relies on for `light-dark()` and `safe` alignment. Before, they targeted Vite's default (Chrome 111, Safari 16.4), so Lightning CSS rewrote `light-dark()` into its custom-property polyfill. Built CSS now keeps `light-dark()` native. For `@knpkv/rly` consumers, the published stylesheet assumes those browsers.
+- Updated dependencies [[`fc2ccc3`](https://github.com/knpkv/npm/commit/fc2ccc38179d3a0a0c89c55b7adf0d6ba6638ecc), [`8f49d5b`](https://github.com/knpkv/npm/commit/8f49d5bafad19c7e3163538f7acb2f0f7de4d2d1), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1cecd7c`](https://github.com/knpkv/npm/commit/1cecd7c454fdbdf042f7a3fd25a200805500881f), [`48830f8`](https://github.com/knpkv/npm/commit/48830f89057919d23ca408192cb68ac1893c8e96), [`799414f`](https://github.com/knpkv/npm/commit/799414f37422e7aeaf0a36bb80d8d878d75f5a10), [`2540508`](https://github.com/knpkv/npm/commit/2540508d00dc60c3842817df8ca37ce6c6a6179b), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1902d84`](https://github.com/knpkv/npm/commit/1902d84417dc050cd7fe7a2472071275424f1e4f), [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44)]:
+  - @knpkv/jira-clockify@1.8.0
+  - @knpkv/rly@0.17.0
+
 ## 0.7.0
 
 ### Minor Changes

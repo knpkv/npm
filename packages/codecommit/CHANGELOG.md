@@ -1,5 +1,13 @@
 # @knpkv/codecommit
 
+## 0.17.1
+
+### Patch Changes
+
+- Updated dependencies [[`faddacc`](https://github.com/knpkv/npm/commit/faddacc829272ec3b580af00ee6e581294be76e7), [`e2f406b`](https://github.com/knpkv/npm/commit/e2f406bc0e3941cc4d349aba844ec04822e82585), [`fcbd310`](https://github.com/knpkv/npm/commit/fcbd310bc0de959847246d1d7b3b93fa944c6cd3), [`28e5c8c`](https://github.com/knpkv/npm/commit/28e5c8ca02373f7b6cdcc9af4a25380e97ddb8fe), [`3be1bf6`](https://github.com/knpkv/npm/commit/3be1bf63e9b6e933ba38063ebd23e6e84e0c4d22), [`6016906`](https://github.com/knpkv/npm/commit/60169060a04688084c7e47ebec4b28d538be9811), [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44)]:
+  - @knpkv/codecommit-core@0.24.0
+  - @knpkv/codecommit-web@0.28.0
+
 ## 0.17.0
 
 ### Minor Changes

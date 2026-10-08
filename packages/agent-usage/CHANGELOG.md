@@ -1,5 +1,23 @@
 # @knpkv/agent-usage
 
+## 0.6.0
+
+### Minor Changes
+
+- [#702](https://github.com/knpkv/npm/pull/702) [`1f6cc4a`](https://github.com/knpkv/npm/commit/1f6cc4ae3e3302681ad52fd667515f13cbfbeb40) Thanks [@konopkov](https://github.com/konopkov)! - `agent-usage limits` prints this Machine's latest limits from the running server as one JSON line. Balances and spend stay on the authenticated page. It asks over the owner-only control socket, so another program on the same account (hostd, for Connect) can read them without a session cookie or a provider credential.
+
+- [#703](https://github.com/knpkv/npm/pull/703) [`d19931f`](https://github.com/knpkv/npm/commit/d19931f8abbdf82ca154f0be10d74c58b8d09f64) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/agent-usage/limits` exports the limit schemas, the limits model and the "Limits now" cards (`LimitsSummary`), safe to bundle for a browser, with their stylesheet at `@knpkv/agent-usage/limits.css`. Connect uses it to show the same cards. Each window's bar is now Rly's `LimitTrack`: the near mark sits at 80%, and an old reading is hatched.
+
+- [#704](https://github.com/knpkv/npm/pull/704) [`fea24ef`](https://github.com/knpkv/npm/commit/fea24ef8e52da5918feb8a45ae314a6b670c0c6b) Thanks [@konopkov](https://github.com/konopkov)! - Connect shows Claude and Codex limits. A line under the summary names each agent's window closest to its limit ("Claude 86% 5-hour", "Codex unknown"), and a disclosure holds each host's "Limits now" cards from agent-usage. agent-usage's `LimitsSummary` takes an optional `title`, and gives each instance its own heading id.
+
+### Patch Changes
+
+- [#704](https://github.com/knpkv/npm/pull/704) [`fea24ef`](https://github.com/knpkv/npm/commit/fea24ef8e52da5918feb8a45ae314a6b670c0c6b) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/agent-usage/limits` resolves from the built package. Its modules now live in `src/limits/`, so they build to `dist/limits/` instead of `dist/client/`, which the page build empties. The stylesheet moves to `src/limits/limits.css`; its `@knpkv/agent-usage/limits.css` path is unchanged.
+
+- [#687](https://github.com/knpkv/npm/pull/687) [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44) Thanks [@konopkov](https://github.com/konopkov)! - Browser builds now target Chrome 123, Edge 123, Firefox 120 and Safari 17.6, the floor the CSS already relies on for `light-dark()` and `safe` alignment. Before, they targeted Vite's default (Chrome 111, Safari 16.4), so Lightning CSS rewrote `light-dark()` into its custom-property polyfill. Built CSS now keeps `light-dark()` native. For `@knpkv/rly` consumers, the published stylesheet assumes those browsers.
+- Updated dependencies [[`8f49d5b`](https://github.com/knpkv/npm/commit/8f49d5bafad19c7e3163538f7acb2f0f7de4d2d1), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1cecd7c`](https://github.com/knpkv/npm/commit/1cecd7c454fdbdf042f7a3fd25a200805500881f), [`48830f8`](https://github.com/knpkv/npm/commit/48830f89057919d23ca408192cb68ac1893c8e96), [`799414f`](https://github.com/knpkv/npm/commit/799414f37422e7aeaf0a36bb80d8d878d75f5a10), [`2540508`](https://github.com/knpkv/npm/commit/2540508d00dc60c3842817df8ca37ce6c6a6179b), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1902d84`](https://github.com/knpkv/npm/commit/1902d84417dc050cd7fe7a2472071275424f1e4f), [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44)]:
+  - @knpkv/rly@0.17.0
+
 ## 0.5.9
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @knpkv/codecommit-core
 
+## 0.24.0
+
+### Minor Changes
+
+- [#613](https://github.com/knpkv/npm/pull/613) [`faddacc`](https://github.com/knpkv/npm/commit/faddacc829272ec3b580af00ee6e581294be76e7) Thanks [@konopkov](https://github.com/konopkov)! - A pull request URL for a switched-off account no longer spins on "Loading pull request" while every refresh returns 500. `refreshSinglePR` fails with `AccountSwitchedOff` (naming the profile) when a disabled profile owns the account, or with `AccountUnknown` when no profile is known to; the web API answers those with 409 and 404. The page says why it can't read the pull request, links to Settings → Accounts when that fixes it, and offers Try again for any other failure.
+
 ## 0.23.1
 
 ### Patch Changes
