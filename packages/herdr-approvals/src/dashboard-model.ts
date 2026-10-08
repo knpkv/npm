@@ -86,7 +86,9 @@ export const DashboardSnapshot = Schema.Struct({
     canonical: Schema.Boolean,
     canonicalUrl: Schema.String,
     chatEnabled: Schema.Boolean,
-    pushEnabled: Schema.Boolean
+    pushEnabled: Schema.Boolean,
+    // Whether this listener serves the Work snapshot, so the page never polls an endpoint it lacks.
+    workEnabled: Schema.Boolean
   }),
   chat: Schema.NullOr(ChatHistory),
   work: Schema.NullOr(WorkSnapshots),

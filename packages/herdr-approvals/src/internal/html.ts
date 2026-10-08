@@ -6,4 +6,4 @@ export const escapeHtmlText = (value: string): string =>
     .replaceAll("\"", "&quot;")
     .replaceAll("'", "&#39;")
 
-export const dashboardDocumentTitle = (host: string): string => `Host activity · ${escapeHtmlText(host)}`
+export const dashboardDocumentTitle = (host: string): string => `Host activity on ${escapeHtmlText(host)}`

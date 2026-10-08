@@ -1,5 +1,6 @@
 import { ByteSize, Clock, Effect, Ref, Schedule, Schema } from "effect"
 import { HttpIncomingMessage, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { failureStatus } from "./failure-status.js"
 import { BoardId, decodeSnapshot, MAX_BYTES, RETENTION_MS, Snapshot, STALE_MS } from "./model.js"
 
 /** The option that failed: a malformed value, or two keys that are the same. Carries no value. */
@@ -118,7 +119,11 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
       Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Snapshot), { onExcessProperty: "error" })),
       Effect.result
     )
-    if (decoded._tag === "Failure") return empty(400)
+    if (decoded._tag === "Failure") {
+      // Logged by kind only, never the submitted body.
+      yield* Effect.logWarning(`monitor publish rejected: ${decoded.failure._tag}`)
+      return empty(400)
+    }
     const snapshot = yield* decodeSnapshot(decoded.success)
     if (
       snapshot.boardId !== config.boardId || snapshot.sourceAt > now + 30000 || snapshot.sourceAt < now - 300000 ||
@@ -136,8 +141,11 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
   }).pipe(
     Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_BYTES)),
     Effect.timeout("5 seconds"),
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    Effect.catch(() => Effect.succeed(empty(400)))
+    // Logged by kind only, so a broken or stalling publisher shows in the server log without its
+    // payload: a decode error would otherwise echo the submitted snapshot into the log.
+    Effect.catch((error) =>
+      Effect.logWarning(`monitor request failed: ${error._tag}`).pipe(Effect.as(empty(failureStatus(error))))
+    )
   )
   return { handler }
 })
