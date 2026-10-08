@@ -2,21 +2,21 @@ id: no-duplicate-agent-state-mapping
 snapshots:
   'switch (state.toLocaleLowerCase("en-US")) { case "working": return "Working" }':
     labels:
-    - source: 'case "working": return "Working"'
-      style: primary
-      start: 44
-      end: 76
-    - source: '"working"'
-      style: secondary
-      start: 49
-      end: 58
+      - source: 'case "working": return "Working"'
+        style: primary
+        start: 44
+        end: 76
+      - source: '"working"'
+        style: secondary
+        start: 49
+        end: 58
   'switch (status) { case "idle": return "minus" }':
     labels:
-    - source: 'case "idle": return "minus"'
-      style: primary
-      start: 18
-      end: 45
-    - source: '"idle"'
-      style: secondary
-      start: 23
-      end: 29
+      - source: 'case "idle": return "minus"'
+        style: primary
+        start: 18
+        end: 45
+      - source: '"idle"'
+        style: secondary
+        start: 23
+        end: 29
