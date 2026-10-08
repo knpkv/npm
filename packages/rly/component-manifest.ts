@@ -302,6 +302,36 @@ export const componentManifest = {
         ]
       }
     },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelayPanel" },
+        { kind: "value", name: "RLY_RELAY_PANEL_PRESENTATIONS" },
+        { kind: "value", name: "RLY_RELAY_PANEL_WIDTH" },
+        { kind: "value", name: "useRelayPresentation" },
+        { kind: "type", name: "RelayPanelProps" },
+        { kind: "type", name: "RlyRelayPanelPresentation" },
+        { kind: "type", name: "RlyRelayPanelPin" },
+        { kind: "type", name: "RlyRelayPanelTab" },
+        { kind: "type", name: "RlyRelayPresentation" },
+        { kind: "type", name: "RlyRelayScope" },
+        { kind: "type", name: "UseRelayPresentationOptions" }
+      ],
+      name: "RelayPanel",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayPanel.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayPanel.module.css"],
+      // presentation is required (or chosen by useRelayPresentation), so it has no default to record;
+      // overlay, pinned and fullscreen are registry states.
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelayPanel.stories.tsx",
+        storyId: "patterns-relaypanel--overlay",
+        tests: ["test/patterns/RelayPanel.test.tsx"]
+      }
+    },
     // scaffold:components:insert
     {
       category: "primitive",

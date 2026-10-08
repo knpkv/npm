@@ -56,6 +56,11 @@ export const COMPONENT_REGISTRY_METADATA = {
     purpose: "Open and close Relay from the host's header, with its mark, a label and the Ctrl/⌘+J hint",
     states: ["closed", "open"]
   },
+  RelayPanel: registryMetadata(
+    "Frame Relay as a non-modal overlay, a pinned column or a full-screen dialog, with its header, tabs, freshness line, body and footer",
+    ["overlay", "pinned", "fullscreen"],
+    ["agent", "overlay"]
+  ),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"
