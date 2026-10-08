@@ -25,6 +25,8 @@ export interface RlyRelayTool {
 export type RlyRelayTranscriptItem =
   | { readonly _tag: "You"; readonly id: string; readonly text: string }
   | { readonly _tag: "Relay"; readonly id: string; readonly text: string }
+  /** A system note (why a send was refused, a changed registration): neither turn, not announced. */
+  | { readonly _tag: "Note"; readonly id: string; readonly text: string }
   /** A contiguous burst of tool work between prose, with its summary ("Read 4 files and ran 1 check"). */
   | {
       readonly _tag: "Activity"
@@ -242,6 +244,11 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
               <li className={style("relay")}>
                 <span className={style("speaker")}>Relay: </span>
                 <Prose text={item.text} />
+              </li>
+            ) : item._tag === "Note" ? (
+              <li className={style("note")}>
+                <span className={style("speaker")}>Note: </span>
+                {requireText(item.text, "RelayTranscript note")}
               </li>
             ) : item._tag === "Activity" ? (
               <li className={style("relay")}>

@@ -27,6 +27,15 @@
     white-space: pre-wrap;
   }
 
+  /* A system note sits between the turns, attributed to neither. */
+  .note {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    overflow-wrap: break-word;
+    text-align: center;
+  }
+
   /* Relay's turns: plain, selectable prose. */
   .relay {
     min-inline-size: 0;

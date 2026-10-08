@@ -43,6 +43,7 @@ const conversation: ReadonlyArray<RlyRelayTranscriptItem> = [
     id: "r1",
     text: "The hunk loop stops one line early:\n```ts\nfor (let index = 0; index < count - 1; index++) { readLine(source, offset + index) }\n```\nIt should run to `count`, so the trailing context line is read."
   },
+  { _tag: "Note", id: "n1", text: "The profile changed; it applies to your next message." },
   { _tag: "RunFinished", id: "f1", seconds: 38 }
 ]
 
