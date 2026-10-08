@@ -8,6 +8,7 @@ import {
   RLY_PRELOADED_FONTS,
   RlyFontPreloadMissingError
 } from "../../../vite-font-preload.ts"
+import { RLY_FONT_FACES } from "../../rly/src/tokens/fonts.ts"
 
 const repoRoot = join(import.meta.dirname, "../../..")
 const bundle = (...assets: ReadonlyArray<readonly [fileName: string, name: string]>): FontBundle =>
@@ -19,7 +20,8 @@ const bundle = (...assets: ReadonlyArray<readonly [fileName: string, name: strin
  */
 const INLINED_FONTS = new Set(["herdr-monitor"])
 
-const [UI_FONT, MONO_FONT] = RLY_PRELOADED_FONTS
+const UI_FONT = RLY_FONT_FACES[0].file
+const MONO_FONT = RLY_FONT_FACES[1].file
 const bothFaces = bundle(
   ["assets/geist-mono-latin-wght-normal-X.woff2", "geist-mono-latin-wght-normal.woff2"],
   ["assets/geist-latin-wght-normal-Bg.woff2", "geist-latin-wght-normal.woff2"]

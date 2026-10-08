@@ -14,12 +14,11 @@
  */
 import { Data } from "effect"
 import type { HtmlTagDescriptor, Plugin } from "vite"
+// A relative source import: the workspace root does not depend on @knpkv/rly, and fonts.ts has no imports.
+import { RLY_FONT_FACES } from "./packages/rly/src/tokens/fonts.ts"
 
-/** The rly woff2 files a shell preloads, as Fontsource names them: every face rly's fonts.css loads. */
-export const RLY_PRELOADED_FONTS: readonly [string, string] = [
-  "geist-latin-wght-normal.woff2",
-  "geist-mono-latin-wght-normal.woff2"
-]
+/** The rly woff2 files a shell preloads: rly's own list of every face its styles load. */
+export const RLY_PRELOADED_FONTS: ReadonlyArray<string> = RLY_FONT_FACES.map(({ file }) => file)
 
 /** The build emitted no asset for a Geist face, so the shell does not load rly's styles or the font was renamed. */
 export class RlyFontPreloadMissingError extends Data.TaggedError("RlyFontPreloadMissingError")<{
