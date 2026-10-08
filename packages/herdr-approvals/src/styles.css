@@ -320,7 +320,9 @@
     justify-content: space-between;
   }
 
+  /* A count that doesn't fit beside the heading drops under it instead of squeezing into a column. */
   .section-heading {
+    flex-wrap: wrap;
     margin-block-end: var(--rly-space-20);
   }
 
@@ -338,21 +340,22 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  /* The state label drops under the name before it can squeeze it; names and work wrap whole.
+     A zero basis with an 8rem floor keeps the presence dot beside the name at 320. */
   .agent-line {
     align-items: center;
+    flex-wrap: wrap;
   }
 
   .agent-line > div {
     display: grid;
-    flex: 1;
-    min-inline-size: 0;
+    flex: 1 1 0;
+    min-inline-size: 8rem;
   }
 
   .agent-line small,
   .agent-line strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
   }
 
   /* Only an agent at work moves; settled states keep a still, distinct icon. */
@@ -593,6 +596,8 @@
     color: var(--rly-color-text-1);
     font: inherit;
     min-block-size: 2.5rem;
+    /* An input's intrinsic width would hold the toolbar column open past the card at 320. */
+    min-inline-size: 0;
     padding-inline: var(--rly-space-12);
   }
 
@@ -620,7 +625,7 @@
     font: inherit;
     font-size: var(--rly-type-meta-size);
     min-block-size: 2rem;
-    padding-inline: var(--rly-space-10);
+    padding-inline: var(--rly-space-12);
   }
 
   .activity-filters button[aria-pressed="true"] {
@@ -674,10 +679,9 @@
     min-inline-size: 0;
   }
 
+  /* Titles and descriptions wrap: at phone width an ellipsis left a third of the sentence. */
   .activity-row-copy > * {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
   }
 
   .activity-actor {
@@ -1318,7 +1322,7 @@
     }
 
     .activity-toolbar {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
       position: static;
     }
 
@@ -1361,6 +1365,34 @@
 
     .activity-detail {
       padding: var(--rly-space-12);
+    }
+  }
+
+  /* Below 24rem a time column left the title about 80px, and words broke mid-word: the time
+     moves onto its own line above the title, and the copy takes the row's full width. */
+  @media (max-width: 24rem) {
+    .activity-row {
+      grid-template-columns: minmax(0, 1fr) 1rem;
+    }
+
+    .activity-row > time {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .activity-row-copy {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .activity-status {
+      grid-column: 1;
+      grid-row: 3;
+    }
+
+    .activity-disclosure {
+      grid-column: 2;
+      grid-row: 1 / span 3;
     }
   }
 

@@ -423,7 +423,7 @@ export const ActivityHistory = ({
                 event.currentTarget.closest("section")?.querySelector<HTMLButtonElement>("[data-activity-row]")?.focus()
               }
             }}
-            placeholder="Agent, status, or operation"
+            placeholder="Agent, status, job"
             type="search"
             value={query}
           />
