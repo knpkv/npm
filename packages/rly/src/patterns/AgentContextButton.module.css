@@ -20,8 +20,10 @@
     text-align: start;
   }
 
-  .root:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .root:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .root:active {

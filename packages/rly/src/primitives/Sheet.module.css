@@ -29,10 +29,12 @@
     padding: var(--rly-space-8) var(--rly-space-16);
   }
 
-  .trigger:hover,
-  .close:hover,
-  .iconClose:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .trigger:hover,
+    .close:hover,
+    .iconClose:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .trigger:active,

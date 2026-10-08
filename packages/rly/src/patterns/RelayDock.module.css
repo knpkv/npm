@@ -29,9 +29,11 @@
     visibility: hidden;
   }
 
-  .trigger:hover,
-  .close:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .trigger:hover,
+    .close:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .trigger:active,

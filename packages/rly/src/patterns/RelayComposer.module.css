@@ -43,6 +43,11 @@
   .box:focus-within {
     border-color: var(--rly-color-text-2);
   }
+  /* The textarea's focus ring is drawn around the whole box, so it encloses the text and its controls. */
+  .box:has(.input:focus-visible) {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
   /* Grows with its text (sized in script), then scrolls: at most 12 lines or 40% of the viewport. */
   .input {
     appearance: none;
@@ -55,6 +60,8 @@
     inline-size: 100%;
     max-block-size: min(calc(12 * var(--rly-type-body-line-height)), 40dvh);
     min-block-size: calc(2 * var(--rly-type-body-line-height));
+    /* Ring drawn on .box:has(.input:focus-visible). */
+    /* ast-grep-ignore: css-no-outline-none */
     outline: none;
     overflow-y: auto;
     padding: var(--rly-space-4);
