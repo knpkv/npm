@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
+import { BROWSER_TARGET } from "../../browser-target.ts"
 import { rlyFontPreload } from "../../vite-font-preload.ts"
 import { controlCenterBuildGraph } from "./scripts/build-graph.js"
 
@@ -49,6 +50,7 @@ export default defineConfig(({ mode }) => {
         ssr: true
       }
       : {
+        target: BROWSER_TARGET,
         // Vite warns when a large lazy syntax-language chunk exceeds this threshold.
         chunkSizeWarningLimit: 800,
         emptyOutDir: true,
