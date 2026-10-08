@@ -22,27 +22,26 @@ const summary = (props: Parameters<typeof ConnectSummary>[0]): string =>
   renderToStaticMarkup(<ConnectSummary {...props} />)
 
 describe("Connect summary", () => {
-  it("says how many agents are live, how many need you, and which hosts didn't answer", () => {
-    const markup = summary({ agents: fleet, offlineHosts: ["GAMMA"], unavailable: false })
+  it("says how many agents are live and how many need you, and leaves hosts to the line above the list", () => {
+    const markup = summary({ agents: fleet, unavailable: false })
     // The count says what it counts: listed agents, and how many of them are working.
     expect(markup).toContain("3 agents, 1 working")
     expect(markup).toContain(">1 needs you<")
-    expect(markup).toContain(">GAMMA didn&#x27;t answer<")
+    // A host that didn't answer is named once, above the list; the summary only counts.
+    expect(markup).not.toContain("answer")
     expect(markup).toContain('aria-label="Connect summary"')
   })
 
-  it("leaves out attention and offline hosts when there are none", () => {
-    const markup = summary({ agents: [fleet[0] ?? agent("agent-a", "working")], offlineHosts: [], unavailable: false })
+  it("leaves out the needs-you count when there is none", () => {
+    const markup = summary({ agents: [fleet[0] ?? agent("agent-a", "working")], unavailable: false })
     expect(markup).toContain("1 agent, 1 working")
     expect(markup).not.toContain("needs you")
     expect(markup).not.toContain("answer")
   })
 
   it("says the directory is unavailable rather than claiming zero agents", () => {
-    expect(summary({ agents: null, offlineHosts: [], unavailable: true })).toContain(
-      "The fleet directory didn&#x27;t answer"
-    )
-    expect(summary({ agents: null, offlineHosts: [], unavailable: false })).toContain("Loading the fleet")
+    expect(summary({ agents: null, unavailable: true })).toContain("The fleet directory didn&#x27;t answer")
+    expect(summary({ agents: null, unavailable: false })).toContain("Loading the fleet")
   })
 })
 

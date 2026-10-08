@@ -305,16 +305,15 @@ export const silentHostsSentence = (failures: ReadonlyArray<ConnectPeerFailure>)
 const plural = (count: number, one: string, many: string): string => `${String(count)} ${count === 1 ? one : many}`
 
 /**
- * The Connect directory's one sentence: how many agents are listed and how many are working, how
- * many need attention, and which hosts could not be read. `agents` is null while the first list loads or when it failed.
+ * The Connect directory's one sentence: how many agents are listed, how many are working, and how
+ * many need you. Hosts that didn't answer are named once, by the line above the list, not here.
+ * `agents` is null while the first list loads or when it failed.
  */
 export const ConnectSummary = ({
   agents,
-  offlineHosts,
   unavailable
 }: {
   readonly agents: ReadonlyArray<ConnectAgent> | null
-  readonly offlineHosts: ReadonlyArray<string>
   readonly unavailable: boolean
 }) => {
   const needAttention =
@@ -338,15 +337,6 @@ export const ConnectSummary = ({
                 <>
                   ,{" "}
                   <HeroWord tone="held">{`${String(needAttention)} need${needAttention === 1 ? "s" : ""} you`}</HeroWord>
-                </>
-              )}
-              {offlineHosts.length === 0 ? null : (
-                <>
-                  ;{" "}
-                  <HeroWord tone="blocked">
-                    {/* A host name stays whole; it may only break where it truly cannot fit. */}
-                    {`${offlineHosts.map((host) => host.replaceAll("-", "\u2011")).join(", ")} didn't answer`}
-                  </HeroWord>
                 </>
               )}
             </>

@@ -1002,7 +1002,6 @@ export const ConnectSurface = ({
           </Text>
           <ConnectSummary
             agents={current === null ? null : agents}
-            offlineHosts={offlineHosts}
             unavailable={current === null && directory._tag === "Failure"}
           />
         </header>
