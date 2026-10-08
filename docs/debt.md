@@ -16,22 +16,20 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## ai-claude
 
-4 directives (ast-grep 1, effect-diagnostics 3), 2 without a reason.
+3 directives (effect-diagnostics 3), 2 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/ai-claude/src/protocol.ts](../packages/ai-claude/src/protocol.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/ai-claude/test/model.test.ts](../packages/ai-claude/test/model.test.ts) | effect-diagnostics | `@effect-diagnostics multipleEffectProvide:off` | **missing** |
 | [packages/ai-claude/test/model.test.ts](../packages/ai-claude/test/model.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/ai-claude/test/relay-boundary.test.ts](../packages/ai-claude/test/relay-boundary.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 
 ## ai-codex
 
-9 directives (ast-grep 1, effect-diagnostics 7, typescript 1), 1 without a reason.
+8 directives (effect-diagnostics 7, typescript 1), 1 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/ai-codex/src/internal/outputSchema.ts](../packages/ai-codex/src/internal/outputSchema.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/ai-codex/test/events.test.ts](../packages/ai-codex/test/events.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/ai-codex/test/events.test.ts](../packages/ai-codex/test/events.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/ai-codex/test/events.test.ts](../packages/ai-codex/test/events.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |

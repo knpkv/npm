@@ -1,6 +1,6 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it, layer } from "@effect/vitest"
 import {
   Cause,
   ConfigProvider,
@@ -10,11 +10,13 @@ import {
   Fiber,
   FileSystem,
   Layer,
+  Logger,
   Path,
   Schema,
   Sink,
   Stream
 } from "effect"
+import * as PlatformError from "effect/PlatformError"
 import * as ChildProcess from "effect/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as TestClock from "effect/testing/TestClock"
@@ -468,4 +470,36 @@ describe("streamEvents", () => {
       expectProviderPhase(error, "process")
       expect(releases).toEqual(["released"])
     }))
+})
+
+layer(nodeFileSystemAndPath)("Codex output schema cleanup", (it) => {
+  it.effect("logs a schema directory it could not remove, and still completes the cleanup", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const stuck = FileSystem.FileSystem.of({
+        ...fileSystem,
+        remove: (target) =>
+          Effect.fail(
+            PlatformError.systemError({
+              _tag: "PermissionDenied",
+              module: "test",
+              method: "remove",
+              pathOrDescriptor: target
+            })
+          )
+      })
+      const warnings: Array<string> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        if (entry.logLevel === "Warn") warnings.push(String(entry.message))
+      })
+      const paths = yield* Path.Path
+      // The real directory is removed by the scope, registered as soon as it exists, so a failing
+      // assertion below cannot leak it.
+      const file = yield* Effect.acquireRelease(
+        makeStreamOutputSchemaFile(stuck, Schema.Struct({ verdict: Schema.String })),
+        (created) => fileSystem.remove(paths.dirname(created.path), { recursive: true }).pipe(Effect.orDie)
+      )
+      yield* file.cleanup.pipe(Effect.withLogger(logger))
+      expect(warnings.join("\n")).toContain("Could not remove the Codex output schema directory")
+    }).pipe(Effect.scoped))
 })

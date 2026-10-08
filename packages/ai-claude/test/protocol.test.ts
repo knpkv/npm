@@ -12,6 +12,13 @@ describe("Claude output protocol", () => {
       expect(result.result).toBe("ok")
     }))
 
+  it.effect("reads line-delimited output and keeps the last result", () =>
+    Effect.gen(function*() {
+      const line = (result: string) => JSON.stringify({ type: "result", subtype: "success", is_error: false, result })
+      const result = yield* decodeClaudeOutput(`${line("first")}\n\n${line("last")}\n`, "test")
+      expect(result.result).toBe("last")
+    }))
+
   it.effect("rejects malformed output", () =>
     Effect.gen(function*() {
       const exit = yield* decodeClaudeOutput("not-json", "test").pipe(Effect.exit)
