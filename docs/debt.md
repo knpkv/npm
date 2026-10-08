@@ -55,21 +55,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## atlassian-common
 
-18 directives (ast-grep 11, effect-diagnostics 7), 7 without a reason.
+7 directives (effect-diagnostics 7), 7 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/atlassian-common/src/auth/OAuthOperations.ts](../packages/atlassian-common/src/auth/OAuthOperations.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/cli/index.ts](../packages/atlassian-common/src/cli/index.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/cli/index.ts](../packages/atlassian-common/src/cli/index.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/AuthProfiles.ts](../packages/atlassian-common/src/config/AuthProfiles.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/ProfileManager.ts](../packages/atlassian-common/src/config/ProfileManager.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/ProfileManager.ts](../packages/atlassian-common/src/config/ProfileManager.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/ProfileManager.ts](../packages/atlassian-common/src/config/ProfileManager.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/ProfileManager.ts](../packages/atlassian-common/src/config/ProfileManager.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/TokenStorage.ts](../packages/atlassian-common/src/config/TokenStorage.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/TokenStorage.ts](../packages/atlassian-common/src/config/TokenStorage.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/TokenStorage.ts](../packages/atlassian-common/src/config/TokenStorage.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/atlassian-common/test/cli.errorHandling.test.ts](../packages/atlassian-common/test/cli.errorHandling.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 | [packages/atlassian-common/test/cliAuth.authCommand.test.ts](../packages/atlassian-common/test/cliAuth.authCommand.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 | [packages/atlassian-common/test/cliAuth.guardrails.test.ts](../packages/atlassian-common/test/cliAuth.guardrails.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
@@ -118,14 +107,6 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/capability/test/types.test.ts](../packages/capability/test/types.test.ts) | typescript | `@ts-expect-error -- a write contract without describe and reversible must not typecheck` | yes |
 | [packages/capability/test/types.test.ts](../packages/capability/test/types.test.ts) | typescript | `@ts-expect-error -- describeCall accepts gated (write or host) contracts only` | yes |
 | [packages/capability/test/types.test.ts](../packages/capability/test/types.test.ts) | typescript | `@ts-expect-error -- the contract declares only Declared, so Undeclared must not typecheck` | yes |
-
-## clockify-api-client
-
-1 directives (ast-grep 1), 0 without a reason.
-
-| File | Kind | Directive | Reason |
-| --- | --- | --- | --- |
-| [packages/clockify-api-client/scripts/regenerate.ts](../packages/clockify-api-client/scripts/regenerate.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 
 ## codecommit
 
@@ -371,14 +352,6 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/codecommit-web/test/review-skill-catalog.test.ts](../packages/codecommit-web/test/review-skill-catalog.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-web/test/review-skill-catalog.test.ts](../packages/codecommit-web/test/review-skill-catalog.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-web/src/client/hooks/useSSE.ts](../packages/codecommit-web/src/client/hooks/useSSE.ts) | eslint | `eslint-disable-next-line no-console` | **missing** |
-
-## confluence-api-client
-
-1 directives (ast-grep 1), 0 without a reason.
-
-| File | Kind | Directive | Reason |
-| --- | --- | --- | --- |
-| [packages/confluence-api-client/scripts/regenerate.ts](../packages/confluence-api-client/scripts/regenerate.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 
 ## confluence-to-markdown
 
@@ -646,21 +619,12 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/jcf-web/test/recordedWeek.test.ts](../packages/jcf-web/test/recordedWeek.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/savedEntryRoutes.test.ts](../packages/jcf-web/test/savedEntryRoutes.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 
-## jira-api-client
-
-1 directives (ast-grep 1), 0 without a reason.
-
-| File | Kind | Directive | Reason |
-| --- | --- | --- | --- |
-| [packages/jira-api-client/scripts/regenerate.ts](../packages/jira-api-client/scripts/regenerate.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-
 ## jira-cli
 
-4 directives (ast-grep 1, effect-diagnostics 3), 2 without a reason.
+3 directives (effect-diagnostics 3), 2 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/jira-cli/src/VersionService.ts](../packages/jira-cli/src/VersionService.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/jira-cli/src/bin.ts](../packages/jira-cli/src/bin.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/jira-cli/test/authCommand.test.ts](../packages/jira-cli/test/authCommand.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 | [packages/jira-cli/test/JiraAuth.test.ts](../packages/jira-cli/test/JiraAuth.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
