@@ -2,7 +2,7 @@ import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { FreshnessStamp } from "@knpkv/rly/patterns"
 import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 import type { DashboardSnapshot, PendingApproval, PendingApprovalFailure } from "./dashboard-model.js"
-import { NotificationPanel, type NotificationState } from "./approval-app-view.js"
+import { connectWorkerHref, NotificationPanel, type NotificationState } from "./approval-app-view.js"
 import { requiresApproval } from "@knpkv/herdr-fleet/model"
 import { ActivityHistory, jobTitle, statusLabel, statusTone } from "./activity-history.js"
 import { ApprovalRequestDisclosure } from "./approval-request-view.js"
@@ -294,7 +294,7 @@ const Summary = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
           Agents online
         </Text>
         <strong>{agents}</strong>
-        <small>{snapshot.status.herdr.available ? "Herdr connected" : "Herdr unavailable"}</small>
+        <small>{snapshot.status.herdr.available ? "Herdr connected" : "Herdr isn't running"}</small>
       </Surface>
       <Surface padding="default" tone="secondary">
         <Text variant="meta" tone="secondary">
@@ -323,44 +323,63 @@ const Summary = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
   )
 }
 
-export const AgentActivity = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => (
-  <Surface as="section" padding="spacious" className="agents-panel">
-    <div className="section-heading">
-      <div>
-        <Text variant="meta" tone="secondary">
-          Right now
-        </Text>
-        <Text as="h2" variant="section-title">
-          Agent activity
+/**
+ * This host's agents, read-only, in Connect's state language. Agents live in Connect on the
+ * canonical hub; here each row with a stable id links to its terminal there.
+ */
+export const AgentActivity = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
+  const { agents, available, error } = snapshot.status.herdr
+  const host = snapshot.status.host
+  const hostLabel = host.replaceAll("-", "\u2011")
+  return (
+    <Surface as="section" padding="spacious" className="agents-panel" aria-labelledby="host-agents-heading">
+      <div className="section-heading">
+        <Text as="h2" variant="section-title" id="host-agents-heading">
+          Agents on {hostLabel}
         </Text>
       </div>
-      <StateLabel
-        label={`${snapshot.status.herdr.agents.length} agents`}
-        tone={snapshot.status.herdr.available ? "positive" : "critical"}
-        size="compact"
-      />
-    </div>
-    <div className="agent-grid">
-      {snapshot.status.herdr.agents.map((agent) => (
-        <Surface key={agent.paneId} tone="tertiary" padding="compact">
-          <div className="agent-line">
-            <span className="agent-presence" aria-hidden="true" />
-            <div>
-              <Text as="strong" variant="label">
-                {agent.name}
-              </Text>
-              <Text as="small" variant="meta" tone="secondary">
-                {agent.kind}, {agent.work}
-              </Text>
-            </div>
-            <AgentStateLabel state={agent.status} />
-          </div>
-        </Surface>
-      ))}
-      {snapshot.status.herdr.agents.length === 0 ? <Text tone="secondary">No active agents.</Text> : null}
-    </div>
-  </Surface>
-)
+      {!available ? (
+        <Text tone="secondary">
+          {error === null ? `Herdr isn't running on ${hostLabel}.` : `Herdr isn't running on ${hostLabel}: ${error}.`}{" "}
+          Start Herdr on {hostLabel}, then refresh.
+        </Text>
+      ) : agents.length === 0 ? (
+        <Text tone="secondary">No agents running on {hostLabel}.</Text>
+      ) : (
+        <ul className="host-agent-list">
+          {agents.map((agent) => (
+            <li className="host-agent" key={agent.paneId}>
+              <span className="host-agent-state">
+                <AgentStateLabel state={agent.status} />
+              </span>
+              <span className="host-agent-copy">
+                <Text as="strong" variant="label">
+                  {agent.name}
+                </Text>
+                <Text as="small" variant="meta" tone="secondary">
+                  {agent.kind}, {agent.work}
+                </Text>
+              </span>
+              {agent.agentId === null ? null : (
+                <a
+                  className="host-agent-link"
+                  href={
+                    new URL(
+                      connectWorkerHref({ agentId: agent.agentId, host, name: agent.name, paneId: agent.paneId }),
+                      snapshot.approvalApp.canonicalUrl
+                    ).href
+                  }
+                >
+                  Open on the hub<span className="connect-visually-hidden">: {agent.name}</span>
+                </a>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </Surface>
+  )
+}
 
 const Machines = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
   if (snapshot.directory === null) return null

@@ -104,31 +104,36 @@ const renderApprovedFailure = (): string => {
   )
 }
 
-const renderMixedAgentStates = (): string => {
-  const agents: DashboardSnapshot["status"]["herdr"]["agents"] = [
-    {
-      activityRevision: 2,
-      agentId: "agent-working",
-      kind: "codex",
-      name: "worker",
-      paneId: "w1:p1",
-      parentAgentId: null,
-      relation: null,
-      status: "working",
-      work: "package migration"
-    },
-    {
-      activityRevision: 1,
-      agentId: "agent-done",
-      kind: "codex",
-      name: "reviewer",
-      paneId: "w1:p2",
-      parentAgentId: null,
-      relation: null,
-      status: "done",
-      work: "UI review"
-    }
-  ]
+type HostAgent = DashboardSnapshot["status"]["herdr"]["agents"][number]
+
+const workingAgent: HostAgent = {
+  activityRevision: 2,
+  agentId: "agent-working",
+  kind: "codex",
+  name: "worker",
+  paneId: "w1:p1",
+  parentAgentId: null,
+  relation: null,
+  status: "working",
+  work: "package migration"
+}
+
+const mixedAgents: ReadonlyArray<HostAgent> = [
+  workingAgent,
+  {
+    activityRevision: 1,
+    agentId: "agent-done",
+    kind: "codex",
+    name: "reviewer",
+    paneId: "w1:p2",
+    parentAgentId: null,
+    relation: null,
+    status: "done",
+    work: "UI review"
+  }
+]
+
+const renderMixedAgentStates = (herdr: Partial<DashboardSnapshot["status"]["herdr"]> = {}): string => {
   const base = snapshot(true)
   return renderToStaticMarkup(
     <DashboardView
@@ -141,7 +146,7 @@ const renderMixedAgentStates = (): string => {
       pull={{ distance: 0, ready: false, refreshing: false }}
       snapshot={{
         ...base,
-        status: { ...base.status, herdr: { ...base.status.herdr, agents } }
+        status: { ...base.status, herdr: { ...base.status.herdr, agents: mixedAgents, ...herdr } }
       }}
     />
   )
@@ -404,10 +409,32 @@ describe("dashboard approval capability", () => {
     expect(markup).not.toContain(">Failed<")
   })
 
-  it("counts observed agents without calling finished agents running", () => {
+  it("lists this host's agents read-only, each with a stable id linked to its terminal on the hub", () => {
     const markup = renderMixedAgentStates()
-    expect(markup).toContain("2 agents")
-    expect(markup).not.toContain("2 running")
+    const panel = markup.slice(markup.indexOf('class="host-agent-list"'))
+    expect(markup).toContain("Agents on ALPHA")
+    expect(panel.slice(0, panel.indexOf("</ul>"))).not.toContain("<button")
+    expect(markup).toContain('href="https://ser8.example.test/connect/?agent=agent-working&amp;host=ALPHA"')
+    expect(markup).toContain('Open on the hub<span class="connect-visually-hidden">: worker</span>')
+    expect(markup).not.toContain("agent-presence")
+  })
+
+  it("links only agents with a stable id", () => {
+    const markup = renderMixedAgentStates({
+      agents: [{ ...workingAgent, agentId: null }]
+    })
+    expect(markup).toContain(">worker<")
+    expect(markup).not.toContain("Open on the hub")
+  })
+
+  it("names the cause and fix when there are no agents, or Herdr isn't running", () => {
+    expect(renderMixedAgentStates({ agents: [] })).toContain("No agents running on ALPHA.")
+    expect(renderMixedAgentStates({ agents: [], available: false, error: null })).toContain(
+      "Herdr isn&#x27;t running on ALPHA. Start Herdr on ALPHA, then refresh."
+    )
+    expect(renderMixedAgentStates({ agents: [], available: false, error: "socket missing" })).toContain(
+      "Herdr isn&#x27;t running on ALPHA: socket missing. Start Herdr on ALPHA, then refresh."
+    )
   })
 
   it("requires a modified shortcut for approval decisions", () => {
