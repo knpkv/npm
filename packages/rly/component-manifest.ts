@@ -403,6 +403,29 @@ export const componentManifest = {
         tests: ["test/patterns/RelayDecision.test.tsx"]
       }
     },
+    {
+      category: "pattern",
+      exports: [
+        { kind: "value", name: "RelaySetup" },
+        { kind: "type", name: "RelaySetupProps" },
+        { kind: "type", name: "RlyRelayBackend" },
+        { kind: "type", name: "RlyRelayBackendCause" },
+        { kind: "type", name: "RlyRelayBackendStatus" },
+        { kind: "type", name: "RlyRelaySetupFocus" }
+      ],
+      name: "RelaySetup",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelaySetup.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelaySetup.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/patterns/RelaySetup.stories.tsx",
+        storyId: "patterns-relaysetup--first-run-setup",
+        tests: ["test/patterns/RelaySetup.test.tsx"]
+      }
+    },
     // scaffold:components:insert
     {
       category: "primitive",

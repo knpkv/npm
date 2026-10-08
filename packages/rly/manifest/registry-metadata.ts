@@ -76,6 +76,11 @@ export const COMPONENT_REGISTRY_METADATA = {
     ["pending", "confirmed", "done", "failed", "declined", "expired"],
     ["agent", "decide"]
   ),
+  RelaySetup: registryMetadata(
+    "Set up Relay in the panel: pick a ready agent from real backend status with one repair action each, pick a focus, then start",
+    ["checking", "unverified", "ready", "unavailable"],
+    ["agent", "configure"]
+  ),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"

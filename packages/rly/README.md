@@ -500,6 +500,15 @@ Confirmed says "Posting…"; only Done, with its receipt, is past tense; Failed 
 claims nothing was written. Pending, declined and expired are announced once per call
 `id`, without moving focus; after an answer, focus moves to the outcome.
 
+`RelaySetup` is Relay's in-panel first run: an agent, then a focus, then "Review this
+pull request". Each backend shows the server's status, and only a Ready backend can be
+chosen, so an installed CLI (a version on PATH) is never taken for a working one. Not
+checked yet offers Check now; Unavailable names its cause (not installed, signed out,
+needs setup, can't review here), the host's fix and Check again; Checking is the
+client's own request state. rly never collects provider credentials: the fix tells the
+user what to run on their machine. A finished check is announced politely, and Start
+stays reachable while unavailable, saying what is missing.
+
 `RelayPanel` is Relay's frame: header (mark, title, exact scope with the revision in
 mono, an optional pin, options, close), tabs whose counts are part of their names, a
 freshness line, a body, and a footer for the composer. Only the body scrolls, so the

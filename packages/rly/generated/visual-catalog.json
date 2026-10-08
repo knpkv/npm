@@ -816,6 +816,23 @@
       ]
     },
     {
+      "name": "RelaySetup",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelaySetup.tsx",
+        "story": "packages/rly/stories/patterns/RelaySetup.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelaySetup.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelaySetup.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaysetup--first-run-setup",
+      "storyIds": [
+        "patterns-relaysetup--first-run-setup"
+      ]
+    },
+    {
       "name": "RelayTranscript",
       "paths": {
         "source": "packages/rly/src/patterns/RelayTranscript.tsx",

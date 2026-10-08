@@ -1116,6 +1116,32 @@
     {
       "capabilities": [
         "agent",
+        "configure"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelaySetup",
+      "states": [
+        "checking",
+        "default",
+        "ready",
+        "unavailable",
+        "unverified"
+      ],
+      "terms": [
+        "agent",
+        "checking",
+        "configure",
+        "pattern",
+        "ready",
+        "relaysetup",
+        "unavailable",
+        "unverified"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
         "present"
       ],
       "category": "pattern",
