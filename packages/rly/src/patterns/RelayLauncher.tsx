@@ -1,5 +1,5 @@
 import type { ComponentPropsWithRef, ReactElement, RefCallback, RefObject } from "react"
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import { focusRestoreTarget, isWithinComposedElement } from "../internal/composedFocus.js"
 import { hasNestedLayer, isImeKey, matchesShortcutKeys, relaySummonTransition } from "../internal/relaySummon.js"
@@ -69,17 +69,21 @@ export interface RlyRelaySummon {
  */
 export const useRelaySummon = (options: UseRelaySummonOptions): RlyRelaySummon => {
   const latest = useRef(options)
-  latest.current = options
+  // Read by the key listener; updated only once a render commits, never from a discarded one.
+  useLayoutEffect(() => {
+    latest.current = options
+  })
   const [region, setRegion] = useState<HTMLElement | null>(null)
   const regionNode = useRef<HTMLElement | null>(null)
   const composer = useRef<HTMLElement | null>(null)
   const returnTo = useRef<HTMLElement | null>(null)
   const pendingComposerFocus = useRef(false)
   const pendingRestore = useRef(false)
+  const escapeOwnedByLayer = useRef<KeyboardEvent | null>(null)
 
+  // The target is kept while Relay stays open, so a later Escape or shortcut returns to the same place.
   const restoreFocus = useCallback((): void => {
     const target = returnTo.current
-    returnTo.current = null
     if (target?.isConnected === true) target.focus()
     else latest.current.launcher.current?.focus()
   }, [])
@@ -130,7 +134,7 @@ export const useRelaySummon = (options: UseRelaySummonOptions): RlyRelaySummon =
         const { fullscreen, onOpenChange, open } = latest.current
         const surface = regionNode.current
         // Escape belongs to a dialog, listbox or menu open inside (or opened from) Relay.
-        if (key === "escape" && hasNestedLayer(surface, event.composedPath())) return
+        if (key === "escape" && escapeOwnedByLayer.current === event) return
         const active = focusRestoreTarget(owner)
         const focusInRelay = surface !== null && active !== null && isWithinComposedElement(surface, active)
         const effect = relaySummonTransition({ focusInRelay, fullscreen, open }, key)
@@ -158,8 +162,19 @@ export const useRelaySummon = (options: UseRelaySummonOptions): RlyRelaySummon =
             return
         }
       }
+      // A popup's own handler may close it before the event reaches the document, so whether Escape belongs
+      // to a nested layer is decided in the capture phase, while the layer is still open.
+      const onKeyDownCapture = (event: KeyboardEvent): void => {
+        if (event.key === "Escape" && hasNestedLayer(regionNode.current, event.composedPath())) {
+          escapeOwnedByLayer.current = event
+        }
+      }
+      owner.addEventListener("keydown", onKeyDownCapture, true)
       owner.addEventListener("keydown", onKeyDown)
-      return [() => owner.removeEventListener("keydown", onKeyDown)]
+      return [
+        () => owner.removeEventListener("keydown", onKeyDownCapture, true),
+        () => owner.removeEventListener("keydown", onKeyDown)
+      ]
     })
     return () => {
       for (const remove of listeners) remove()

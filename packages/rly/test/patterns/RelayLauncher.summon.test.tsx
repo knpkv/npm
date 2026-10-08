@@ -141,6 +141,43 @@ const MountedHost = (): ReactElement => {
   )
 }
 
+/** A host whose popup closes itself on Escape (flipping its open state) without preventing the key. */
+const SelfClosingPopupHost = (): ReactElement => {
+  const [open, setOpen] = useState(false)
+  const launcher = useRef<HTMLButtonElement>(null)
+  const { composerRef, regionRef } = useRelaySummon({
+    fullscreen: false,
+    launcher,
+    onOpenChange: setOpen,
+    open,
+    shortcut: ctrlJ
+  })
+  return (
+    <>
+      <button data-testid="page" type="button">
+        Page control
+      </button>
+      <RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} ref={launcher} shortcut={ctrlJ} />
+      {open ? (
+        <aside aria-label="Relay" ref={regionRef}>
+          <textarea aria-label="Message Relay" ref={composerRef} />
+          <div
+            data-state="open"
+            data-testid="self-closing"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") event.currentTarget.setAttribute("data-state", "closed")
+            }}
+            role="listbox"
+            tabIndex={-1}
+          >
+            Suggestions
+          </div>
+        </aside>
+      ) : null}
+    </>
+  )
+}
+
 /** Records whether the page control received focus while Relay's surface was still mounted. */
 let focusedWhileRelayMounted: boolean | undefined
 
@@ -432,6 +469,27 @@ describe("useRelaySummon", () => {
     await act(async () => byTestId("composer-ready").click())
     expect(composer()).not.toBeNull()
     expect(document.activeElement).not.toBe(composer())
+  })
+
+  it("leaves Escape to a popup that closes itself without preventing it", async () => {
+    await mount(<SelfClosingPopupHost />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    byTestId("self-closing").focus()
+    expect(await press("Escape")).toBe(false)
+    expect(composer()).not.toBeNull()
+    expect(byTestId("self-closing").getAttribute("data-state")).toBe("closed")
+  })
+
+  it("returns to the same place after going back once and coming in again", async () => {
+    await mount(<Host />)
+    byTestId("page").focus()
+    await press("j", { ctrlKey: true })
+    await press("j", { ctrlKey: true })
+    expect(document.activeElement).toBe(byTestId("page"))
+    byTestId("relay-option").focus()
+    await press("Escape")
+    expect(document.activeElement).toBe(byTestId("page"))
   })
 
   it("keeps Escape working when the host's own surface owns the shortcut", async () => {

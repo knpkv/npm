@@ -55,6 +55,10 @@ const HostHeader = ({ bindsShortcut = true }: { readonly bindsShortcut?: boolean
   )
 }
 
+/** The platform's summon chord for userEvent, matching what useRelayShortcut advertises. */
+const summonChord = (): string =>
+  /Mac|iPhone|iPad/.test(navigator.platform) ? "{Meta>}j{/Meta}" : "{Control>}j{/Control}"
+
 /** The launcher in a header: it toggles, keeps a 32px (44px coarse) target and hides its hint on phones. */
 export const Header: Story = {
   args: { expanded: false, shortcut: null },
@@ -67,12 +71,12 @@ export const Header: Story = {
     // The advertised shortcut is bound: from the page it focuses the composer, from Relay it goes back,
     // and Escape in Relay closes it and returns focus to the launcher.
     const composer = canvas.getByRole("textbox", { name: "Message Relay" })
-    await userEvent.keyboard("{Control>}j{/Control}")
+    await userEvent.keyboard(summonChord())
     await expect(composer).toHaveFocus()
-    await userEvent.keyboard("{Control>}j{/Control}")
+    await userEvent.keyboard(summonChord())
     await expect(launcher).toHaveFocus()
     await expect(launcher).toHaveAttribute("aria-expanded", "true")
-    await userEvent.keyboard("{Control>}j{/Control}")
+    await userEvent.keyboard(summonChord())
     await userEvent.keyboard("{Escape}")
     await expect(launcher).toHaveAttribute("aria-expanded", "false")
     await expect(launcher).toHaveFocus()
