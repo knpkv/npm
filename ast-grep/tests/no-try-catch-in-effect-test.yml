@@ -1,0 +1,21 @@
+id: no-try-catch-in-effect
+valid:
+  - |
+    const program = Effect.gen(function* () {
+      return yield* Effect.try({ try: () => parse(text), catch: (cause) => new ParseFailure({ cause }) })
+    })
+  - |
+    try {
+      run()
+    } catch {
+      recover()
+    }
+invalid:
+  - |
+    const program = Effect.gen(function* () {
+      try {
+        return parse(text)
+      } catch {
+        return undefined
+      }
+    })
