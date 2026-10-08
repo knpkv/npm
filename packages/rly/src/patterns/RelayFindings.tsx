@@ -115,8 +115,8 @@ const Heading = ({
  * is an icon, a word and the P-number, never colour alone. Accept and Dismiss are toggles; Discuss
  * attaches the set to the conversation. "Post accepted" starts one confirmed call per finding, never a
  * bulk write. When the head has moved since the review, a banner says so, and line findings wait for a
- * re-run rather than land on the wrong line. A before-side line is shown as text and never opens a
- * head line. Posting outcomes, which the reader did not just do, are announced once per finding.
+ * re-run rather than land on the wrong line (posting, retrying and opening them alike). A before-side
+ * line is shown as text and never opens a head line. Posting outcomes, which the reader did not just do, are announced once per finding.
  */
 export const RelayFindings = (props: RelayFindingsProps): ReactElement => {
   const { currentHead, dispositions, findings, headingLevel, reviewedHead } = props
@@ -132,16 +132,17 @@ export const RelayFindings = (props: RelayFindingsProps): ReactElement => {
 
   const accepted = findings.filter((finding) => disposition(finding.id)._tag === "Accepted")
   const postable = accepted.filter((finding) => !(stale && finding.location.scope === "line"))
+  const held = accepted.length - postable.length
+  const heldNote =
+    held === 0
+      ? ""
+      : `${held} line ${held === 1 ? "finding waits" : "findings wait"} for a re-run: the head moved since the review.`
   const postReason =
-    accepted.length === 0
-      ? "Accept findings to post them."
-      : postable.length === 0
-        ? "Line findings wait for a re-run: the head moved since the review."
-        : undefined
+    accepted.length === 0 ? "Accept findings to post them." : postable.length === 0 ? heldNote : undefined
 
   // Posting outcomes arrive asynchronously; say each once. Cleared first so a repeat is still heard.
   useEffect(() => {
-    let words: string | undefined
+    const said: Array<string> = []
     for (const finding of findings) {
       const now = disposition(finding.id)._tag
       const before = previous.current.get(finding.id)
@@ -149,11 +150,12 @@ export const RelayFindings = (props: RelayFindingsProps): ReactElement => {
       const key = `${finding.id}:${now}`
       if (before !== "Posting" || (now !== "Posted" && now !== "Failed") || announced.current.has(key)) continue
       announced.current.add(key)
-      words = now === "Posted" ? `Posted ${finding.id}: ${finding.title}` : `${finding.id} was not confirmed posted`
+      said.push(now === "Posted" ? `Posted ${finding.id}: ${finding.title}` : `${finding.id} was not confirmed posted`)
     }
-    if (words === undefined) return
-    const said = words
-    setPending((before) => ({ count: (before?.count ?? 0) + 1, words: said }))
+    // Several outcomes in one update are said together, none dropped.
+    if (said.length === 0) return
+    const words = said.join(". ")
+    setPending((before) => ({ count: (before?.count ?? 0) + 1, words }))
   }, [dispositions, findings])
 
   useEffect(() => {
@@ -206,7 +208,8 @@ export const RelayFindings = (props: RelayFindingsProps): ReactElement => {
               {`Post accepted (${postable.length})`}
             </Button>
             <p className={style("meta")} id={postId}>
-              {postReason ?? "Each is posted as its own comment, after you confirm it."}
+              {postReason ??
+                `Each is posted as its own comment, after you confirm it.${heldNote === "" ? "" : ` ${heldNote}`}`}
             </p>
           </div>
           {ordered.map(([key, group]) => {
@@ -226,6 +229,7 @@ export const RelayFindings = (props: RelayFindingsProps): ReactElement => {
                 <ol className={style("list")}>
                   {sorted.map((finding) => (
                     <FindingItem
+                      stale={stale}
                       baseRevision={props.baseRevision}
                       disposition={disposition(finding.id)}
                       finding={finding}
@@ -292,8 +296,10 @@ const FindingItem = ({
   onDiscuss,
   onDispositionChange,
   onOpen,
-  onRetry
+  onRetry,
+  stale
 }: {
+  readonly stale: boolean
   readonly baseRevision: string | undefined
   readonly disposition: RlyRelayFindingDisposition
   readonly finding: RlyRelayFinding
@@ -304,6 +310,17 @@ const FindingItem = ({
 }): ReactElement => {
   const { icon, word } = severity[finding.priority]
   const decided = disposition._tag === "Posting" || disposition._tag === "Posted"
+  const title = useRef<HTMLParagraphElement | null>(null)
+  const retryReasonId = useId()
+  // A line anchored at the reviewed head must not be re-posted onto a moved head.
+  const heldRetry = stale && finding.location.scope === "line"
+  const retried = useRef(false)
+  // Try again hands the finding back to posting and its buttons go away: keep focus on the finding.
+  useEffect(() => {
+    if (!retried.current || !decided) return
+    retried.current = false
+    title.current?.focus()
+  }, [decided])
   return (
     <li className={style("finding")} data-disposition={disposition._tag}>
       <p className={style("severity")}>
@@ -311,8 +328,14 @@ const FindingItem = ({
         {`${word} (${finding.priority})`}
         <span className={style("state")}>{dispositionWord[disposition._tag]}</span>
       </p>
-      <p className={style("title")}>{requireText(finding.title, "RelayFindings title")}</p>
-      <Location baseRevision={baseRevision} finding={finding} onOpen={onOpen} />
+      <p className={style("title")} ref={title} tabIndex={-1}>
+        {requireText(finding.title, "RelayFindings title")}
+      </p>
+      <Location
+        baseRevision={baseRevision}
+        finding={finding}
+        onOpen={stale && finding.location.scope === "line" ? undefined : onOpen}
+      />
       <p className={style("summary")}>{requireText(finding.summary, "RelayFindings summary")}</p>
       <details className={style("details")}>
         <summary>Evidence and recommendation</summary>
@@ -342,9 +365,25 @@ const FindingItem = ({
       {decided ? null : (
         <div className={style("actions")}>
           {disposition._tag === "Failed" ? (
-            <Button onClick={() => onRetry(finding.id)} type="button">
-              Try again
-            </Button>
+            <>
+              <Button
+                aria-describedby={heldRetry ? retryReasonId : undefined}
+                aria-disabled={heldRetry}
+                onClick={() => {
+                  if (heldRetry) return
+                  retried.current = true
+                  onRetry(finding.id)
+                }}
+                type="button"
+              >
+                Try again
+              </Button>
+              {heldRetry ? (
+                <span className={style("meta")} id={retryReasonId}>
+                  Waits for a re-run: the head moved since the review.
+                </span>
+              ) : null}
+            </>
           ) : (
             <>
               <Button

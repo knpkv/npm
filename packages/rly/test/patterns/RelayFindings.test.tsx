@@ -141,6 +141,11 @@ describe("RelayFindings", () => {
       root?.render(<View currentHead="c41e9a0" dispositions={accepted} onPostAccepted={onPostAccepted} />)
     )
     expect(document.body.textContent).toContain("Reviewed bbbbbbb; the head is now c41e9a0.")
+    // The held line finding is named next to the post, not hidden behind it.
+    const mixed = button("Post accepted (1)")
+    expect(document.getElementById(mixed?.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      "Each is posted as its own comment, after you confirm it. 1 line finding waits for a re-run: the head moved since the review."
+    )
     await act(async () => button("Post accepted (1)")?.click())
     expect(onPostAccepted).toHaveBeenLastCalledWith(["F5"])
     await act(async () =>
@@ -151,7 +156,7 @@ describe("RelayFindings", () => {
     const post = button("Post accepted (0)")
     expect(post?.getAttribute("aria-disabled")).toBe("true")
     expect(document.getElementById(post?.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
-      "Line findings wait for a re-run: the head moved since the review."
+      "1 line finding waits for a re-run: the head moved since the review."
     )
   })
 
@@ -190,10 +195,60 @@ describe("RelayFindings", () => {
     expect(document.body.textContent).toContain("It may or may not have been posted")
     await act(async () => button("Try again")?.click())
     expect(onRetry).toHaveBeenCalledWith("F5")
+    // The host moves it back to posting; the buttons go away and focus stays on the finding.
+    await act(async () =>
+      root?.render(
+        <View
+          dispositions={{
+            F2: { _tag: "Posted", receipt: { href: "#c1", summary: "Comment on src/patch-reader.ts:14" } },
+            F5: { _tag: "Posting" }
+          }}
+          onRetry={onRetry}
+        />
+      )
+    )
+    expect(document.activeElement?.textContent).toBe("Docs still describe the old parser")
   })
 
   it("says an empty review is a result, with what was reviewed", async () => {
     await mount(<View findings={[]} />)
     expect(document.body.textContent).toContain("No findings at bbbbbbb. Reviewed for correctness with Codex.")
+  })
+
+  it("while stale, neither opens nor retries a line finding against the moved head", async () => {
+    const onOpen = vi.fn()
+    const onRetry = vi.fn()
+    await mount(
+      <View
+        currentHead="c41e9a0"
+        dispositions={{ F2: { _tag: "Failed", cause: "CodeCommit returned an error." } }}
+        onOpen={onOpen}
+        onRetry={onRetry}
+      />
+    )
+    expect(button("Open src/patch-reader.ts:14")).toBeUndefined()
+    expect(button("Open README.md")).toBeDefined()
+    const retry = button("Try again")
+    expect(retry?.getAttribute("aria-disabled")).toBe("true")
+    await act(async () => retry?.click())
+    expect(onRetry).not.toHaveBeenCalled()
+  })
+
+  it("says every posting outcome that lands in one update", async () => {
+    await mount(<View dispositions={{ F2: { _tag: "Posting" }, F5: { _tag: "Posting" } }} />)
+    await act(async () =>
+      root?.render(
+        <View
+          dispositions={{
+            F2: { _tag: "Posted", receipt: { summary: "Comment on src/patch-reader.ts:14" } },
+            F5: { _tag: "Failed", cause: "CodeCommit returned an error." }
+          }}
+        />
+      )
+    )
+    await nextFrame()
+    expect(document.querySelector("[aria-live='polite']")?.textContent).toBe(
+      "Posted F2: Trailing context line is skipped. F5 was not confirmed posted"
+    )
   })
 })

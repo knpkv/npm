@@ -15,13 +15,14 @@
     justify-content: space-between;
     padding: var(--rly-space-8) var(--rly-space-12);
   }
+  /* Inline text, so the revisions sit in the sentence rather than becoming separate flex items. */
   .staleText,
   .empty {
-    align-items: center;
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--rly-space-4);
     margin: 0;
+  }
+  .staleText svg {
+    margin-inline-end: var(--rly-space-4);
+    vertical-align: -0.15em;
   }
   .post {
     display: grid;
@@ -76,11 +77,16 @@
     margin-inline-start: auto;
   }
   .title {
-    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
-      var(--rly-type-label-font);
+    font: var(--rly-type-label-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
     margin: 0;
   }
+  .title:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
   .summary {
+    color: var(--rly-color-text-2);
     margin: 0;
   }
   .location {

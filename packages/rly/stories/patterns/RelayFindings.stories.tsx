@@ -127,7 +127,8 @@ export const ReviewFindings: Story = {
     if (acceptFirst !== undefined) await userEvent.click(acceptFirst)
     if (acceptSecond !== undefined) await userEvent.click(acceptSecond)
     await expect(acceptFirst).toHaveAttribute("aria-pressed", "true")
-    const [dismiss] = canvas.getAllByRole("button", { name: "Dismiss" })
+    // The last finding's Dismiss, so the two accepted above stay accepted.
+    const dismiss = canvas.getAllByRole("button", { name: "Dismiss" }).at(-1)
     if (dismiss !== undefined) {
       await userEvent.click(dismiss)
       await expect(dismiss).toHaveAttribute("aria-pressed", "true")
