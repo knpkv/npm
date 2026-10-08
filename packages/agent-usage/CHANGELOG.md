@@ -1,5 +1,17 @@
 # @knpkv/agent-usage
 
+## 0.5.7
+
+### Patch Changes
+
+- [#593](https://github.com/knpkv/npm/pull/593) [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597) Thanks [@konopkov](https://github.com/konopkov)! - Text no longer jumps when Geist loads. rly's font stacks fall back to metric-matched Arial, Liberation Sans or Arimo faces (and Courier New, Liberation Mono or Cousine for mono), sized per weight, so lines break and rows stand the same height before and after the swap wherever glyphs are placed at subpixels (desktop Chrome on Linux as measured, and the usual macOS and Windows defaults); a Linux desktop set to full hinting can still move text slightly. Reading measures and title widths are set in `em` (at the weight each is drawn in) rather than `ch`, whose size follows the font's "0" and changed by 16% on the swap. Product shells preload the Geist file their stylesheet loads, and review's offline guide no longer hides the page until its fonts are ready.
+
+- [#639](https://github.com/knpkv/npm/pull/639) [`c33ead7`](https://github.com/knpkv/npm/commit/c33ead79cfcbcdb16bbb468229e5a35454e05998) Thanks [@konopkov](https://github.com/konopkov)! - The web app preloads Geist Mono as well as Geist, so ids and code text paint in the right face sooner and don't re-wrap a line when the font arrives.
+
+- [#599](https://github.com/knpkv/npm/pull/599) [`ed263a1`](https://github.com/knpkv/npm/commit/ed263a1b0d20dd47341dc9ed19175a889b94e44a) Thanks [@konopkov](https://github.com/konopkov)! - Failures that were silently swallowed now say so. agent-usage's page reports a successful reply it cannot read instead of treating it as empty, and logs a failed control-socket exchange. herdr-monitor answers a publish that stalls past its deadline with 408 rather than 400, and logs every failed publish request.
+- Updated dependencies [[`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597), [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae), [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db)]:
+  - @knpkv/rly@0.14.0
+
 ## 0.5.6
 
 ### Patch Changes

@@ -1,5 +1,22 @@
 # @knpkv/control-center
 
+## 0.10.5
+
+### Patch Changes
+
+- [#616](https://github.com/knpkv/npm/pull/616) [`02c28c0`](https://github.com/knpkv/npm/commit/02c28c03617bdd3bdb8ead6468eac9a7d7c2ad4b) Thanks [@konopkov](https://github.com/konopkov)! - The AWS account form's manual-name placeholders show two example names on separate lines instead of a literal `\n`.
+
+- [#615](https://github.com/knpkv/npm/pull/615) [`35d159e`](https://github.com/knpkv/npm/commit/35d159e1fbff3220963977119dd2562a4c4a4e7a) Thanks [@konopkov](https://github.com/konopkov)! - Failed cleanup, cache writes, lease reads and rollbacks are now logged instead of silently dropped, and an Atlassian sign-in no longer saves when the pre-save snapshot cannot tell whether an auth file exists.
+
+- [#593](https://github.com/knpkv/npm/pull/593) [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597) Thanks [@konopkov](https://github.com/konopkov)! - Text no longer jumps when Geist loads. rly's font stacks fall back to metric-matched Arial, Liberation Sans or Arimo faces (and Courier New, Liberation Mono or Cousine for mono), sized per weight, so lines break and rows stand the same height before and after the swap wherever glyphs are placed at subpixels (desktop Chrome on Linux as measured, and the usual macOS and Windows defaults); a Linux desktop set to full hinting can still move text slightly. Reading measures and title widths are set in `em` (at the weight each is drawn in) rather than `ch`, whose size follows the font's "0" and changed by 16% on the swap. Product shells preload the Geist file their stylesheet loads, and review's offline guide no longer hides the page until its fonts are ready.
+
+- [#639](https://github.com/knpkv/npm/pull/639) [`c33ead7`](https://github.com/knpkv/npm/commit/c33ead79cfcbcdb16bbb468229e5a35454e05998) Thanks [@konopkov](https://github.com/konopkov)! - The web app preloads Geist Mono as well as Geist, so ids and code text paint in the right face sooner and don't re-wrap a line when the font arrives.
+- Updated dependencies [[`2bc7cfa`](https://github.com/knpkv/npm/commit/2bc7cfa8678e43920eda987d2049d97f7a4ba58f), [`2f2925b`](https://github.com/knpkv/npm/commit/2f2925b42d04686ca9da52c056f6d9a177548e05), [`4ff1f03`](https://github.com/knpkv/npm/commit/4ff1f0386648e41cfee2d0198c7c30c312c60539), [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597), [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae), [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db)]:
+  - @knpkv/codecommit-core@0.23.0
+  - @knpkv/relay-product@0.2.8
+  - @knpkv/rly@0.14.0
+  - @knpkv/review@0.4.4
+
 ## 0.10.4
 
 ### Patch Changes

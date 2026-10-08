@@ -1,5 +1,17 @@
 # @knpkv/rly
 
+## 0.14.0
+
+### Minor Changes
+
+- [#627](https://github.com/knpkv/npm/pull/627) [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayMark`, Relay's new mark (the baton) bare in the current colour or on an agent-coloured `RelayMark.Tile`, with a matching favicon at `@knpkv/rly/relay-mark.svg`, and `RelayLauncher`, the header button that opens Relay with its mark, label and Ctrl/⌘+J hint. `RelayDock`'s trigger now shows the new mark.
+
+### Patch Changes
+
+- [#593](https://github.com/knpkv/npm/pull/593) [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597) Thanks [@konopkov](https://github.com/konopkov)! - Text no longer jumps when Geist loads. rly's font stacks fall back to metric-matched Arial, Liberation Sans or Arimo faces (and Courier New, Liberation Mono or Cousine for mono), sized per weight, so lines break and rows stand the same height before and after the swap wherever glyphs are placed at subpixels (desktop Chrome on Linux as measured, and the usual macOS and Windows defaults); a Linux desktop set to full hinting can still move text slightly. Reading measures and title widths are set in `em` (at the weight each is drawn in) rather than `ch`, whose size follows the font's "0" and changed by 16% on the swap. Product shells preload the Geist file their stylesheet loads, and review's offline guide no longer hides the page until its fonts are ready.
+
+- [#601](https://github.com/knpkv/npm/pull/601) [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae) Thanks [@konopkov](https://github.com/konopkov)! - Region draws one header in every tone; a tray tints only its body. TimelineRow sets detail and provenance in meta type under the title and shows the actor kind as a plain word instead of an uppercase eyebrow.
+
 ## 0.13.0
 
 ### Minor Changes
