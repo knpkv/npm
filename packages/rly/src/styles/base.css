@@ -4,7 +4,15 @@
   :where([data-rly-root], [data-rly-catalog]) *::before,
   :where([data-rly-root], [data-rly-catalog]) *::after {
     box-sizing: border-box;
-    /* Flex and grid items may shrink below their content; a component that must not states its own minimum. */
+  }
+
+  /*
+   * Block containers may shrink below their content as flex and grid items, so a long child can't push a
+   * layout wider. Inline content (svg, img, span, button, input) keeps its automatic minimum, so marks,
+   * icons and labels never collapse; a component that needs it to shrink says so.
+   */
+  :where([data-rly-root], [data-rly-catalog])
+    :where(div, section, article, main, aside, header, footer, nav, ul, ol, li, form, fieldset, p) {
     min-inline-size: 0;
   }
 
