@@ -1,5 +1,17 @@
 # @knpkv/rly
 
+## 0.15.0
+
+### Minor Changes
+
+- [#642](https://github.com/knpkv/npm/pull/642) [`dfa2d94`](https://github.com/knpkv/npm/commit/dfa2d94ea207baeb281ef222c7d28cf98e4962bb) Thanks [@konopkov](https://github.com/konopkov)! - Load Geist and Geist Mono with `font-display: optional`, so a late font keeps the metric-matched fallback for that page view instead of swapping in and shifting text, and add `RLY_FONT_FACES`, the font files a shell must preload for Geist to render on first load.
+
+- [#648](https://github.com/knpkv/npm/pull/648) [`5d21796`](https://github.com/knpkv/npm/commit/5d21796fb856fba44a32395e316a6bd95ecdbdd6) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayComposer`, Relay's auto-growing message box with removable context refs, a run preset, Send and Stop, Ctrl/⌘+Enter to send and an IME guard, and `useRelayDraft`, which keeps each object's draft through close, reopen and resize (optionally a reload) and reuses one request id until the text changes.
+
+- [#646](https://github.com/knpkv/npm/pull/646) [`aa41111`](https://github.com/knpkv/npm/commit/aa411113b76d81637f7af356bf04054246aa30ab) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayPanel`, Relay's frame as a non-modal overlay, a pinned column or a full-screen dialog, with its header, tabs, freshness line, body and composer footer, and `useRelayPresentation` to choose between them; add a `pin` icon.
+
+- [#636](https://github.com/knpkv/npm/pull/636) [`3ddf05b`](https://github.com/knpkv/npm/commit/3ddf05baa285beebba1ebe99bd2458434a613015) Thanks [@konopkov](https://github.com/konopkov)! - Add `useRelaySummon`, Relay's Ctrl/⌘+J keyboard summon: it opens Relay and focuses the composer, takes focus back to the page from inside Relay, closes full-screen Relay, and closes on Escape from inside Relay, handling only the exact chord so other shortcuts reach the host.
+
 ## 0.14.0
 
 ### Minor Changes
