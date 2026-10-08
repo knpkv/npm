@@ -363,7 +363,8 @@ it("keeps embedded guide styles inside the host document layout", async () => {
     expect(page.getComputedStyle(page.document.body).marginTop).toBe("23px")
     const guide = page.document.querySelector(".review-guide")
     if (guide === null) throw new TypeError("Missing guide fixture")
-    expect(page.getComputedStyle(guide).minHeight).toBe(`${page.innerHeight}px`)
+    // svh, not vh: a phone's collapsing URL bar must not hide the bottom of the guide.
+    expect(page.getComputedStyle(guide).minBlockSize).toBe("100svh")
   } finally {
     await page.happyDOM.close()
   }
