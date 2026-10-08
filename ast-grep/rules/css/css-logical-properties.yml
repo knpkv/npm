@@ -22,6 +22,7 @@ files:
   - "packages/herdr-monitor/src/**/*.css"
   - "packages/review/src/**/*.css"
   - "packages/agent-usage/src/**/*.css"
+  - "packages/herdr-approvals/src/**/*.css"
 
 note: |
   good-css: margin-block-start, padding-inline, inset-inline-end, inline-size, max-block-size,

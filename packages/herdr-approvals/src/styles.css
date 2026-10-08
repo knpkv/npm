@@ -237,6 +237,7 @@
   }
 
   .app-title h1 {
+    min-inline-size: 0;
     overflow: clip;
     text-overflow: ellipsis;
   }
@@ -293,6 +294,7 @@
   .summary-grid .summary-branch {
     font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
       var(--rly-type-card-title-font);
+    min-inline-size: 0;
     overflow: clip;
     text-overflow: ellipsis;
   }
@@ -320,6 +322,7 @@
   .decision-history-panel,
   .history-panel,
   .machine-panel {
+    min-inline-size: 0;
     overflow: clip;
   }
 
@@ -407,6 +410,7 @@
 
   .agenda-heading p {
     display: -webkit-box;
+    min-inline-size: 0;
     overflow: clip;
     overflow-wrap: break-word;
     -webkit-box-orient: vertical;
@@ -651,6 +655,7 @@
     border-radius: var(--rly-radius-control);
     list-style: none;
     margin: var(--rly-space-12) 0 0;
+    min-inline-size: 0;
     overflow: clip;
     padding: 0;
   }
@@ -696,6 +701,7 @@
   }
 
   .activity-actor {
+    min-inline-size: 0;
     overflow: clip;
     text-align: end;
     text-overflow: ellipsis;
