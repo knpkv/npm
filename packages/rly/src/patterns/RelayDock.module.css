@@ -21,7 +21,8 @@
     border-radius: var(--rly-radius-round);
     gap: var(--rly-space-8);
     min-block-size: var(--rly-space-40);
-    padding: var(--rly-space-6) var(--rly-space-16) var(--rly-space-6) var(--rly-space-6);
+    /* The start inset clears the pill's curve for the square tile. */
+    padding: var(--rly-space-6) var(--rly-space-16) var(--rly-space-6) var(--rly-space-8);
   }
 
   .root[data-rly-relay-dock-open="true"] > .trigger {
