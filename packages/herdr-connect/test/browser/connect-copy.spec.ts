@@ -206,6 +206,18 @@ test.describe("touch", () => {
     expect((await commands(page)).some((command) => command.text?.includes("\u0003") === true)).toBe(false)
   })
 
+  // A rail that grows a row when the status appears shrinks the terminal mid-session, and page-sized
+  // scrolls then disagree with the screen (Keys pushed Select onto a fourth row at 390).
+  test("the key rail keeps its height when the lines-back status appears and clears", async ({ page }) => {
+    await open(page, { mode: "known", start: 50 })
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back")
+    const railBox = page.getByRole("toolbar", { name: "Terminal keyboard controls" })
+    const behind = (await railBox.boundingBox())?.height
+    await page.getByRole("button", { name: "Jump to latest output" }).tap()
+    await expect(olderOutput(page)).toHaveCount(0)
+    expect((await railBox.boundingBox())?.height).toBe(behind)
+  })
+
   test("a vertical pan follows the finger, scrolls the server, and never raises the keyboard", async ({ page }) => {
     await open(page)
     const client = await page.context().newCDPSession(page)

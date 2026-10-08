@@ -833,9 +833,14 @@
       min-inline-size: 0;
     }
 
+    /* One column, wrapping: with Keys, Latest and Select it fills the last row exactly, so the rail
+       keeps its height when the status appears and the terminal is never resized mid-session. */
     .terminal-older-output {
-      grid-column: span 2;
       justify-self: end;
+      /* Two wrapped lines stay inside the 44px keys beside it ("120400 lines" / "back"). */
+      line-height: 1.2;
+      text-align: end;
+      white-space: normal;
     }
   }
 
