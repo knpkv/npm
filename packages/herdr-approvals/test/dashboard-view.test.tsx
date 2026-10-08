@@ -107,31 +107,31 @@ const renderApprovedFailure = (): string => {
 type HostAgent = DashboardSnapshot["status"]["herdr"]["agents"][number]
 
 const workingAgent: HostAgent = {
-      activityRevision: 2,
-      agentId: "agent-working",
-      kind: "codex",
-      name: "worker",
-      paneId: "w1:p1",
-      parentAgentId: null,
-      relation: null,
-      status: "working",
-      work: "package migration"
-    }
+  activityRevision: 2,
+  agentId: "agent-working",
+  kind: "codex",
+  name: "worker",
+  paneId: "w1:p1",
+  parentAgentId: null,
+  relation: null,
+  status: "working",
+  work: "package migration"
+}
 
 const mixedAgents: ReadonlyArray<HostAgent> = [
   workingAgent,
-    {
-      activityRevision: 1,
-      agentId: "agent-done",
-      kind: "codex",
-      name: "reviewer",
-      paneId: "w1:p2",
-      parentAgentId: null,
-      relation: null,
-      status: "done",
-      work: "UI review"
-    }
-  ]
+  {
+    activityRevision: 1,
+    agentId: "agent-done",
+    kind: "codex",
+    name: "reviewer",
+    paneId: "w1:p2",
+    parentAgentId: null,
+    relation: null,
+    status: "done",
+    work: "UI review"
+  }
+]
 
 const renderMixedAgentStates = (herdr: Partial<DashboardSnapshot["status"]["herdr"]> = {}): string => {
   const base = snapshot(true)
