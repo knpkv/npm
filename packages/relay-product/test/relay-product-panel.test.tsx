@@ -15,6 +15,7 @@ import {
   RelayProductPanel,
   RelayAuthenticationRequired,
   type RelayProductPin,
+  useRelayProductOpen,
   type RelayPullRequestDockRegistration,
   RelaySelectorState,
   useRelayPullRequestDock
@@ -37,6 +38,15 @@ const coupled = Schema.decodeUnknownSync(RelaySelectorState)({
     { id: "security", label: "Security, Codex" },
     { id: "thorough", label: "Thorough, Claude" }
   ],
+  profileId: "security",
+  profiles: [
+    { id: "security", label: "Security review" },
+    { id: "thorough", label: "Thorough review" }
+  ]
+})
+const twoSelects = Schema.decodeUnknownSync(RelaySelectorState)({
+  modelId: "configured-default",
+  models: [{ id: "configured-default", label: "Configured default" }],
   profileId: "security",
   profiles: [
     { id: "security", label: "Security review" },
@@ -213,7 +223,7 @@ describe("RelayProductPanel", () => {
       <RelayProductDockProvider>
         <RelayProductLauncher />
         <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
-        <Registered registration={ready(uncoupled, () => Effect.void)} />
+        <Registered registration={ready(twoSelects, () => Effect.void)} />
       </RelayProductDockProvider>
     )
     try {
@@ -333,10 +343,27 @@ describe("RelayProductPanel", () => {
       await setText("Fails on A.")
       await act(async () => button("Send")?.click())
       expect(document.querySelector("[role='alert']")).not.toBeNull()
-      await act(async () => swap(ready(uncoupled, () => Effect.void, "185")))
+      await act(async () => swap(ready(twoSelects, () => Effect.void, "185")))
       expect(document.querySelector("[role='alert']")).toBeNull()
       expect(document.querySelector("[aria-label='Profile']")).not.toBeNull()
       expect(document.querySelector("[aria-label='Model']")).not.toBeNull()
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("names a single profile and its differently named model as one preset", async () => {
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel host={host} pin={{ _tag: "Unavailable" }} />
+        <Registered registration={ready(uncoupled, () => Effect.void)} />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      expect(document.querySelector("[aria-label='Model']")).toBeNull()
+      expect(document.querySelector("[aria-label='Run with']")?.textContent).toBe("Security review, Configured default")
     } finally {
       await unmount()
     }
@@ -417,6 +444,123 @@ describe("RelayProductPanel", () => {
       expect(await pinnable(1920, { _tag: "Unavailable" })).toBe(false)
     } finally {
       await act(async () => window.happyDOM?.setViewport({ height: 768, width: 1024 }))
+    }
+  })
+
+  it("shows what the next message is about as a removable reference, and says when it changes under a draft", async () => {
+    const cleared = vi.fn()
+    const about = (id: string, label: string) => ({ about: { id, label, onClear: cleared } })
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel host={host} pin={{ _tag: "Unavailable" }} />
+        <Swappable initial={{ ...ready(coupled, () => Effect.void), ...about("F1", "Finding: Trailing line") }} />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      expect(document.body.textContent).toContain("Finding: Trailing line")
+      await setText("About the trailing line.")
+      await act(async () => swap({ ...ready(coupled, () => Effect.void), ...about("F2", "Finding: Header parse") }))
+      expect(document.body.textContent).toContain("Context changed to Finding: Header parse. Your draft is kept.")
+      expect(document.querySelector("textarea")?.value).toBe("About the trailing line.")
+      // Closing and reopening Relay still says it.
+      await act(async () => button("Close Relay")?.click())
+      await open()
+      expect(document.body.textContent).toContain("Context changed to Finding: Header parse. Your draft is kept.")
+      const remove = [...document.querySelectorAll("button")].find((element) =>
+        (element.getAttribute("aria-label") ?? "").startsWith("Remove")
+      )
+      await act(async () => remove?.click())
+      expect(cleared).toHaveBeenCalledTimes(1)
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("returns focus on close to the page control that opened Relay", async () => {
+    const Discuss = (): ReactElement => {
+      const { openFrom } = useRelayProductOpen()
+      return (
+        <button data-discuss="" onClick={(event) => openFrom(event.currentTarget)} type="button">
+          Discuss in Relay
+        </button>
+      )
+    }
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel host={host} pin={{ _tag: "Unavailable" }} />
+        <Registered registration={ready(coupled, () => Effect.void)} />
+        <Discuss />
+        <button data-other="" type="button">
+          Elsewhere
+        </button>
+      </RelayProductDockProvider>
+    )
+    try {
+      const discuss = document.querySelector<HTMLButtonElement>("[data-discuss]")
+      await act(async () => discuss?.click())
+      expect(document.querySelector("[data-rly-relay-panel]")).not.toBeNull()
+      await act(async () => button("Close Relay")?.click())
+      expect(document.activeElement).toBe(discuss)
+      await open()
+      await act(async () => button("Close Relay")?.click())
+      expect(document.activeElement).toBe(launcher())
+      // A shortcut open from another control returns there, not to the earlier Discuss.
+      const other = document.querySelector<HTMLButtonElement>("[data-other]")
+      other?.focus()
+      await act(async () =>
+        other?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, code: "KeyJ", ctrlKey: true, key: "j" }))
+      )
+      expect(document.querySelector("[data-rly-relay-panel]")).not.toBeNull()
+      await act(async () => button("Close Relay")?.click())
+      expect(document.activeElement).toBe(other)
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("says a changed preset applies to the next message, and keeps it across an equal re-registration", async () => {
+    const choose = async (label: string): Promise<void> => {
+      const trigger = document.querySelector<HTMLElement>("[aria-label='Run with']")
+      await act(async () =>
+        trigger?.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0, pointerType: "mouse" }))
+      )
+      const option = [...document.querySelectorAll<HTMLElement>("[role='option']")].find(
+        (item) => item.textContent?.startsWith(label) === true
+      )
+      expect(option).toBeDefined()
+      await act(async () => option?.click())
+    }
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel host={host} pin={{ _tag: "Unavailable" }} />
+        <Swappable initial={ready(coupled, () => Effect.void)} />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      expect(document.body.textContent).not.toContain("Applies to your next message.")
+      await choose("Thorough review")
+      expect(document.body.textContent).toContain("Applies to your next message.")
+      // The host re-allocates an equal selector (a progress update): the pending choice stays.
+      const equal = Schema.decodeUnknownSync(RelaySelectorState)(JSON.parse(JSON.stringify(coupled)))
+      await act(async () => swap(ready(equal, () => Effect.void)))
+      expect(document.body.textContent).toContain("Applies to your next message.")
+      // A selector that means something different resets it.
+      const changed = Schema.decodeUnknownSync(RelaySelectorState)({
+        ...JSON.parse(JSON.stringify(coupled)),
+        profiles: [
+          { id: "security", label: "Security review, revised" },
+          { id: "thorough", label: "Thorough review" }
+        ]
+      })
+      await act(async () => swap(ready(changed, () => Effect.void)))
+      expect(document.body.textContent).not.toContain("Applies to your next message.")
+    } finally {
+      await unmount()
     }
   })
 })

@@ -43,7 +43,7 @@ export function PermissionBar({
   readonly prompt: NonNullable<AppState["permissionPrompt"]>
 }) {
   const waiting = pendingReads === undefined ? null : waitingReadsText(pendingReads)
-  // Shared with the Relay chip, which sits above the bar instead of on its actions.
+  // Shared with Relay's panel, which ends above the bar instead of on its actions.
   const publishBlockSize = usePublishedBlockSize<HTMLDivElement>("--app-bottom-inset")
   const respond = useAtomSet(permissionRespondAtom)
   const grantCategory = useAtomSet(permissionsCategoryUpdateAtom, { mode: "promiseExit" })

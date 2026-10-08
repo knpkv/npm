@@ -31,6 +31,7 @@ import { commandPaletteAtom } from "../atoms/ui.js"
 import { usePublishedBlockSize } from "../hooks/usePublishedBlockSize.js"
 import { queuePullRequests } from "../utils/queuePullRequests.js"
 import { callerOf, yourReviewCount } from "./workbench-queue.js"
+import { CodeCommitRelayEntry } from "../codecommitRelayDock.js"
 import styles from "./header.module.css"
 import { useTheme } from "./theme-provider.js"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "./ui/dropdown-menu.js"
@@ -211,6 +212,8 @@ export function Header() {
             </span>
           ) : null}
         </button>
+
+        <CodeCommitRelayEntry />
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>

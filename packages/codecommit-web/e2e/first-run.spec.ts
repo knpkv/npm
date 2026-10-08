@@ -34,8 +34,7 @@ test("says this browser isn't signed in when the session is refused, with no zer
   await expect(page.getByText("This browser isn't signed in", { exact: true })).toBeVisible()
   await expect(
     page.getByRole("main").getByText("Run codecommit web again and open the link it prints", { exact: false })
-  )
-    .toBeVisible()
+  ).toBeVisible()
   await expect(page.getByRole("status").filter({ hasText: "Not signed in" })).toBeVisible()
   const facets = page.getByRole("group", { name: "Pull request facets" })
   await expect(facets.getByLabel("unknown")).toHaveCount(4)
@@ -55,8 +54,9 @@ test("names an unreachable server and retries on request", async ({ page }) => {
   await page.goto("/")
   await expect(page.getByText("Can't reach the CodeCommit server", { exact: true })).toBeVisible()
   // The queue's panel names the cause; the header keeps it on its status (inline only on wide screens).
-  await expect(page.getByRole("main").getByText("The CodeCommit server answered 503.", { exact: false }).first())
-    .toBeVisible()
+  await expect(
+    page.getByRole("main").getByText("The CodeCommit server answered 503.", { exact: false }).first()
+  ).toBeVisible()
   const before = streamCalls
   await page.getByRole("button", { name: "Retry now" }).click()
   await expect.poll(() => streamCalls).toBeGreaterThan(before)
@@ -223,7 +223,10 @@ test("finishes a switched-on account's save after leaving Settings", async ({ pa
   })
   await page.route("**/api/config/save", async (route) => {
     await held.promise
-    await route.fulfill({ json: "saved" }).then(() => saved.push(route.request().postData() ?? ""), () => {})
+    await route.fulfill({ json: "saved" }).then(
+      () => saved.push(route.request().postData() ?? ""),
+      () => {}
+    )
   })
 
   await page.goto("/settings/accounts")
@@ -260,8 +263,9 @@ test("names every read waiting behind the shown one, so one grant clearly answer
   await page.route("**/api/config", (route) => route.fulfill({ json: config }))
 
   await page.goto("/")
-  await expect(page.getByText("2 reads are waiting: Get identity for dev and List PRs for dev.", { exact: false }))
-    .toBeVisible()
+  await expect(
+    page.getByText("2 reads are waiting: Get identity for dev and List PRs for dev.", { exact: false })
+  ).toBeVisible()
 })
 
 test("tells a signed-out browser in Settings how to sign in, not to check the config file", async ({ page }) => {
@@ -277,14 +281,11 @@ test("tells a signed-out browser in Settings how to sign in, not to check the co
 
 test("says it is checking sign-in until an account's identity read answers", async ({ page }) => {
   await routeCommon(page)
-  await page.route(
-    "**/api/events/",
-    (route) =>
-      route.fulfill({
-        body: `data: ${JSON.stringify({ ...emptySnapshot, enabledProfiles: ["dev"] })}\n\n`,
-        contentType: "text/event-stream"
-      })
-  )
+  await page.route("**/api/events/", (route) =>
+    route.fulfill({
+      body: `data: ${JSON.stringify({ ...emptySnapshot, enabledProfiles: ["dev"] })}\n\n`,
+      contentType: "text/event-stream"
+    }))
   await page.route(
     "**/api/config",
     (route) =>
@@ -303,7 +304,9 @@ test("docks the read prompt so a late one doesn't push the page down", async ({ 
   await page.route("**/api/events/", (route) =>
     route.fulfill({
       body: `data: ${
-        JSON.stringify(prompt ? withPrompt("read", "getCallerIdentity", "Get identity for dev") : emptySnapshot)
+        JSON.stringify(
+          prompt ? withPrompt("read", "getCallerIdentity", "Get identity for dev") : emptySnapshot
+        )
       }\n\n`,
       contentType: "text/event-stream"
     }))
@@ -327,13 +330,23 @@ test("docks the read prompt so a late one doesn't push the page down", async ({ 
   const room = await page.locator("main").evaluate((main) => Number.parseFloat(getComputedStyle(main).paddingBottom))
   expect(room).toBeGreaterThanOrEqual((await bar.boundingBox())?.height ?? Number.POSITIVE_INFINITY)
   await expect(page.getByText("Waiting for read permission", { exact: true })).toBeVisible()
-  // The Relay chip sits above the bar, never on its answers.
-  const chip = page.locator("[data-relay-product-dock-chrome]")
-  await expect(chip).toBeVisible()
-  const chipBox = await chip.boundingBox()
+  // On a desktop width Relay's overlay ends above the bar, never on its answers. (At phone width Relay is a
+  // full-screen dialog instead, and the bar waits behind it until Relay closes.)
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await page
+    .getByRole("banner")
+    .getByRole("button", { name: /^Relay/ })
+    .click()
+  const panel = page.getByRole("complementary", { exact: true, name: "Relay" })
+  await expect(panel).toBeVisible()
+  // Measured once its entrance animation has settled.
+  await panel.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished))
+  })
+  const panelBox = await panel.boundingBox()
   const barBox = await bar.boundingBox()
-  // The bar's box includes its 8px clear band, so a chip ending at its top keeps that gap from the notice.
-  expect((chipBox?.y ?? Number.POSITIVE_INFINITY) + (chipBox?.height ?? 0)).toBeLessThanOrEqual(barBox?.y ?? 0)
+  // The bar's box includes its 8px clear band, so a panel ending at its top keeps that gap from the notice.
+  expect((panelBox?.y ?? Number.POSITIVE_INFINITY) + (panelBox?.height ?? 0)).toBeLessThanOrEqual(barBox?.y ?? 0)
   await expect(page.getByRole("button", { name: "Deny" })).toBeVisible()
 })
 
@@ -358,8 +371,9 @@ test("asks for a read inline, so the first account isn't blocked by a modal", as
   await page.goto("/")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(page.getByText("Waiting for your permission", { exact: true })).toBeVisible()
-  await expect(page.getByText("Allow CodeCommit to read from AWS: Get identity for dev?", { exact: false }))
-    .toBeVisible()
+  await expect(
+    page.getByText("Allow CodeCommit to read from AWS: Get identity for dev?", { exact: false })
+  ).toBeVisible()
   await page.getByRole("button", { name: "Allow every read" }).click()
   await expect.poll(() => calls.length).toBe(1)
   expect(calls[0]).toContain("\"category\":\"read\"")
@@ -398,6 +412,7 @@ test("lists each profile as a switch named by its row, big enough to hit", async
   await expect(toggle).not.toBeChecked()
   const row = await toggle.evaluate((element) => element.closest("label")?.getBoundingClientRect().height ?? 0)
   expect(row).toBeGreaterThanOrEqual(32)
-  await expect(page.getByRole("checkbox", { name: "Add new profiles from your AWS configuration automatically" }))
-    .toBeChecked()
+  await expect(
+    page.getByRole("checkbox", { name: "Add new profiles from your AWS configuration automatically" })
+  ).toBeChecked()
 })

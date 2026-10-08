@@ -14,8 +14,6 @@ import * as AsyncResult from "effect/reactivity/AsyncResult"
 import {
   BotIcon,
   CheckCircle2Icon,
-  ChevronDownIcon,
-  ChevronUpIcon,
   CircleCheckIcon,
   CircleXIcon,
   FileSearchIcon,
@@ -45,6 +43,7 @@ import {
   CodeCommitRelayThread,
   type CodeCommitRelayContinuationOutcome
 } from "../codecommitRelayDock.js"
+import { useRelayProductOpen } from "@knpkv/relay-product"
 import { useComments } from "../hooks/useComments.js"
 import {
   applyFindingDecision,
@@ -515,6 +514,7 @@ const ReviewFindings = ({
   dispositions,
   isReviewing,
   onAcknowledge,
+  onDiscuss,
   onPost,
   onReject,
   onSelect,
@@ -522,6 +522,8 @@ const ReviewFindings = ({
   selectedFindingId
 }: {
   readonly canPost: boolean
+  /** Discuss this finding in Relay; the control is where closing Relay returns focus. */
+  readonly onDiscuss: (finding: RelayReviewFinding, control: HTMLElement) => void
   readonly dispositions: FindingDispositions
   readonly isReviewing: boolean
   readonly onAcknowledge: (finding: RelayReviewFinding) => void
@@ -657,6 +659,9 @@ const ReviewFindings = ({
                 >
                   <CircleXIcon /> Reject
                 </button>
+                <button onClick={(event) => onDiscuss(finding, event.currentTarget)} type="button">
+                  <MessageSquareMoreIcon aria-hidden="true" /> Discuss in Relay
+                </button>
               </div>
             </article>
           </li>
@@ -789,9 +794,7 @@ const ReadyReviewWorkspace = ({
   const [turns, setTurns] = useState<ReadonlyArray<RelayReviewConversationTurn>>([])
   const turnsRef = useRef<ReadonlyArray<RelayReviewConversationTurn>>([])
   turnsRef.current = turns
-  const [message, setMessage] = useState("")
   const [dispositions, setDispositions] = useState<FindingDispositions>({})
-  const [conversationCollapsed, setConversationCollapsed] = useState(true)
   const dispositionsRef = useRef(dispositions)
   dispositionsRef.current = dispositions
   const abortRef = useRef<AbortController | null>(null)
@@ -1328,7 +1331,7 @@ const ReadyReviewWorkspace = ({
       }
     )
     if (outcome.completed) {
-      if (await persistReviewSnapshot()) setMessage("")
+      await persistReviewSnapshot()
     }
   }, [
     accountId,
@@ -1398,7 +1401,6 @@ const ReadyReviewWorkspace = ({
         appendedTurnIdsRef.current = [userTurnId, assistantTurnId]
         setTurns(appendReviewTurn(nextTurns, assistantTurn))
       }
-      setMessage("")
       return { _tag: "completed" }
     },
     [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, pullRequest, review, reviewIsStale, runStream]
@@ -1478,23 +1480,19 @@ const ReadyReviewWorkspace = ({
     ]
   )
 
+  const { openFrom: openRelayFrom } = useRelayProductOpen()
+  // What Relay's next message is about: set only by Discuss and cleared only by removing it, never by the
+  // deck's own selection (which follows runs and reloads).
+  const [relayAboutId, setRelayAboutId] = useState<string | null>(null)
+  const clearFinding = useCallback(() => setRelayAboutId(null), [])
   const selectFinding = useCallback(
     (finding: RelayReviewFinding): void => {
       setSelectedFindingId(finding.id)
-      setConversationCollapsed(false)
       const fileIndex = fileIndexForFinding(diff.files, finding)
       if (fileIndex !== undefined) setSelectedFileIndex(fileIndex)
     },
     [diff.files]
   )
-  const selectedFinding = review?.result.findings.find(({ id }) => id === selectedFindingId) ?? null
-  const conversationFindingId =
-    selectedFinding?.id ??
-    (selectedFindingId !== null && turns.some(({ findingId }) => findingId === selectedFindingId)
-      ? selectedFindingId
-      : null)
-  const selectedTurns =
-    conversationFindingId === null ? [] : turns.filter(({ findingId }) => findingId === conversationFindingId)
   const visibleProgress = progress.slice(-4)
   const [workbenchRef, workbenchWidth] = useInlineSize<HTMLDivElement>()
   const placement = findingsPlacement(workbenchWidth, rootFontSizePx())
@@ -1507,7 +1505,8 @@ const ReadyReviewWorkspace = ({
   useEffect(() => {
     setFindingsOpen(placement === "drawer" && relayHasFocus.current)
   }, [placement])
-  const findingsLabel = review === null ? "Relay" : `Findings (${String(review.result.findings.length)})`
+  // Before a review this names the review controls, distinct from the header's Relay launcher.
+  const findingsLabel = review === null ? "Relay review" : `Findings (${String(review.result.findings.length)})`
 
   const relayPane = (
     <aside
@@ -1709,91 +1708,18 @@ const ReadyReviewWorkspace = ({
         onAcknowledge={(finding) =>
           setDispositions((current) => applyFindingDecision(current, finding.id, "acknowledged"))
         }
+        onDiscuss={(finding, control) => {
+          selectFinding(finding)
+          setRelayAboutId(finding.id)
+          // In drawer layout the Discuss button closes with the drawer, so Relay returns to its trigger.
+          openRelayFrom(placement === "drawer" ? (findingsTrigger.current ?? control) : control)
+        }}
         onPost={(finding) => void postFinding(finding)}
         onReject={(finding) => setDispositions((current) => applyFindingDecision(current, finding.id, "rejected"))}
         onSelect={selectFinding}
         review={review}
         selectedFindingId={selectedFindingId}
       />
-      {conversationFindingId === null ? null : (
-        <section
-          aria-label={`Conversation about ${conversationFindingId}`}
-          className={styles.conversation}
-          data-collapsed={conversationCollapsed ? "true" : undefined}
-        >
-          <header>
-            <span>
-              <MessageSquareMoreIcon aria-hidden="true" />
-              <span className={styles.conversationTitle}>
-                <strong>{selectedFinding === null ? "Discuss withdrawn finding" : "Discuss finding"}</strong>
-                <small>
-                  {selectedFinding === null
-                    ? `${conversationFindingId} is no longer in the current deck`
-                    : selectedFinding.title}
-                </small>
-              </span>
-            </span>
-            <button
-              aria-expanded={!conversationCollapsed}
-              onClick={() => setConversationCollapsed((current) => !current)}
-              type="button"
-            >
-              {conversationCollapsed ? <ChevronUpIcon aria-hidden="true" /> : <ChevronDownIcon aria-hidden="true" />}
-              {conversationCollapsed ? "Open" : "Collapse"}
-            </button>
-          </header>
-          {conversationCollapsed ? null : (
-            <>
-              <div
-                aria-label={`Conversation history about ${conversationFindingId}`}
-                aria-live="polite"
-                className={styles.conversationHistory}
-                role="log"
-              >
-                {selectedTurns.length === 0 ? (
-                  <small>Ask Relay to verify, refine, or withdraw this finding.</small>
-                ) : (
-                  <ol>
-                    {selectedTurns.map((turn, index) => (
-                      <li data-role={turn.role} key={`${turn.role}:${String(index)}`}>
-                        <b>{turn.role === "user" ? "You" : "Relay"}</b>
-                        {turn.message}
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
-              <form
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  const submitted = message.trim()
-                  if (submitted.length > 0 && !isReviewing && !reviewIsStale) {
-                    void continueReview(conversationFindingId, submitted)
-                  }
-                }}
-              >
-                <textarea
-                  aria-label="Message Relay"
-                  disabled={isReviewing || reviewIsStale}
-                  maxLength={8_000}
-                  onChange={(event) => setMessage(event.target.value)}
-                  placeholder="Ask Relay about this finding…"
-                  rows={2}
-                  value={message}
-                />
-                <Button
-                  disabled={isReviewing || reviewIsStale || message.trim().length === 0}
-                  size="compact"
-                  type="submit"
-                  variant="secondary"
-                >
-                  Send
-                </Button>
-              </form>
-            </>
-          )}
-        </section>
-      )}
     </aside>
   )
 
@@ -1801,6 +1727,7 @@ const ReadyReviewWorkspace = ({
     <>
       <CodeCommitRelayThread
         accountId={accountId}
+        onClearFinding={clearFinding}
         continueReview={continueReview}
         diff={diff}
         isReviewing={isReviewing}
@@ -1808,7 +1735,7 @@ const ReadyReviewWorkspace = ({
         pullRequest={pullRequest}
         review={review}
         reviewIsStale={reviewIsStale}
-        selectedFindingId={conversationFindingId}
+        selectedFindingId={relayAboutId}
         turns={turns}
       />
       <Surface as="section" className={styles.workspace} padding="none" form="grouped">

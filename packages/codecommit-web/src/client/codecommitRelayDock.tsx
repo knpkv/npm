@@ -9,8 +9,11 @@ import {
   PullRequestConversationRedirectFailed,
   pullRequestThreadIdentity,
   RelayAuthenticationRequired,
-  RelayProductDock,
+  type RelayProductDockAbout,
   type RelayProductDockHost,
+  RelayProductDockProvider,
+  RelayProductLauncher,
+  RelayProductPanel,
   type RelayProductDockMessage,
   RelaySelectorState,
   type RelayPullRequestDockRegistration,
@@ -36,7 +39,7 @@ import {
 
 const hostSelection = Schema.decodeUnknownSync(RelaySelectorState)({
   modelId: "configured-default",
-  models: [{ id: "configured-default", label: "Configured default" }],
+  models: [{ id: "configured-default", label: "Default model" }],
   profileId: "configured-review",
   profiles: [{ id: "configured-review", label: "Configured review" }]
 })
@@ -78,8 +81,17 @@ export const makeCodeCommitRelayConversation = (
   })
 }
 
-/** Install CodeCommit's authenticated PR locator behind the shared Relay dock. */
-export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode }): ReactElement => {
+/** Hold Relay's shared state (the registered PR thread, open and pin) for the whole app. */
+export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode }): ReactElement => (
+  <RelayProductDockProvider>{children}</RelayProductDockProvider>
+)
+
+/**
+ * Relay's entry in the app header: the launcher, then the panel right after it so Tab order follows,
+ * with CodeCommit's authenticated PR locator behind it. The PR pages are not measured beside a pinned
+ * column yet, so the pin is unavailable here.
+ */
+export const CodeCommitRelayEntry = (): ReactElement => {
   const state = useAtomValue(appStateAtom)
   const navigate = useNavigate()
   const host = useMemo<RelayProductDockHost>(
@@ -146,7 +158,12 @@ export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode
     }),
     [navigate, state.currentUser, state.pullRequests]
   )
-  return <RelayProductDock host={host}>{children}</RelayProductDock>
+  return (
+    <>
+      <RelayProductLauncher />
+      <RelayProductPanel host={host} pin={{ _tag: "Unavailable" }} />
+    </>
+  )
 }
 
 export interface ReviewProfileSelection {
@@ -155,10 +172,14 @@ export interface ReviewProfileSelection {
   readonly name: string
 }
 
+/** A model as people read it: the provider's default is "Default model", never its raw id. */
+export const relayModelLabel = (model: string | undefined): string =>
+  model === undefined || model === "default" || model === "configured-default" ? "Default model" : model
+
 export const makeCodeCommitRelaySelection = (profile: ReviewProfileSelection | undefined): RelaySelectorState =>
   Schema.decodeUnknownSync(RelaySelectorState)({
     modelId: profile?.model ?? "configured-default",
-    models: [{ id: profile?.model ?? "configured-default", label: profile?.model ?? "Configured default" }],
+    models: [{ id: profile?.model ?? "configured-default", label: relayModelLabel(profile?.model) }],
     profileId: profile?.id ?? "configured-review",
     profiles: [{ id: profile?.id ?? "configured-review", label: profile?.name ?? "Configured review" }]
   })
@@ -170,6 +191,8 @@ export const codeCommitRelayExecutionProfile = (
 
 interface CodeCommitRelayThreadProps {
   readonly accountId: string
+  /** Stop discussing the selected finding; the next message goes to the whole PR. */
+  readonly onClearFinding: () => void
   readonly continueReview: (findingId: string, message: string) => Promise<CodeCommitRelayContinuationOutcome>
   readonly diff: PullRequestDiffResponse
   readonly isReviewing: boolean
@@ -191,20 +214,44 @@ const reviewExplanationMessages = (review: PullRequestRelayReviewResponse): Read
     ? []
     : [{ id: `explanation:${review.revisionId}`, role: "relay", text: review.result.explanation }]
 
+/** What a finding discussion is about, named by the finding's title while the deck still has it. */
+const aboutFinding = (review: PullRequestRelayReviewResponse, findingId: string): string => {
+  if (findingId === "PR") return "About the whole pull request"
+  const finding = review.result.findings.find(({ id }) => id === findingId)
+  return finding === undefined ? `About ${findingId}, no longer in the current deck` : `About ${finding.title}`
+}
+
+/**
+ * The whole PR thread: the verdict, then every discussion turn in order. A note names the finding
+ * each run of turns is about, so earlier per-finding discussions stay readable in one thread.
+ */
 const threadMessages = (
   review: PullRequestRelayReviewResponse,
   turns: ReadonlyArray<RelayReviewConversationTurn>
 ): ReadonlyArray<RelayProductDockMessage> => [
   { id: `review:${review.revisionId}`, role: "relay", text: review.result.verdict },
   ...reviewExplanationMessages(review),
-  ...turns.map((turn, index) => ({
-    id: `${turn.findingId}:${turn.role}:${String(index)}`,
-    role: relayMessageRole(turn.role),
-    text: turn.message
-  }))
+  ...turns.flatMap((turn, index): ReadonlyArray<RelayProductDockMessage> => {
+    const message: RelayProductDockMessage = {
+      id: `${turn.findingId}:${turn.role}:${String(index)}`,
+      role: relayMessageRole(turn.role),
+      text: turn.message
+    }
+    return turns[index - 1]?.findingId === turn.findingId
+      ? [message]
+      : [
+          {
+            id: `about:${turn.findingId}:${String(index)}`,
+            role: "system",
+            text: aboutFinding(review, turn.findingId)
+          },
+          message
+        ]
+  })
 ]
 
 interface CodeCommitRelayThreadRegistrationInput {
+  readonly about?: RelayProductDockAbout | undefined
   readonly available: boolean
   readonly context: RelayPullRequestDockRegistration["context"]
   readonly continueReview: (findingId: string, message: string) => Promise<CodeCommitRelayContinuationOutcome>
@@ -219,6 +266,7 @@ interface CodeCommitRelayThreadRegistrationInput {
 
 /** Build the CodeCommit registration without hiding transport or selection failures behind React state. */
 export const makeCodeCommitRelayThreadRegistration = ({
+  about,
   available,
   context,
   continueReview,
@@ -283,9 +331,27 @@ export const makeCodeCommitRelayThreadRegistration = ({
         )
       )
     },
+    about,
     messages: threadMessages(review, turns),
     status: "ready"
   }
+}
+
+/**
+ * What the next message is about: the finding being discussed. Its identity is the finding's whole
+ * snapshot, so a rerun that reuses the id for a changed finding counts as a new context and a kept draft
+ * says so; a withdrawn finding keeps its id.
+ */
+export const codeCommitRelayAbout = (
+  findingId: string | null,
+  review: PullRequestRelayReviewResponse | null,
+  onClear: () => void
+): RelayProductDockAbout | undefined => {
+  if (findingId === null) return undefined
+  const finding = review?.result.findings.find(({ id }) => id === findingId)
+  return finding === undefined
+    ? { id: findingId, label: `Finding: ${findingId}`, onClear }
+    : { id: JSON.stringify(finding), label: `Finding: ${finding.title}`, onClear }
 }
 
 /** Register CodeCommit's persisted per-PR review conversation with the shared shell dock. */
@@ -294,6 +360,7 @@ export const CodeCommitRelayThread = ({
   continueReview,
   diff,
   isReviewing,
+  onClearFinding,
   profile,
   pullRequest,
   review,
@@ -309,6 +376,7 @@ export const CodeCommitRelayThread = ({
   )
   const registration = useMemo<RelayPullRequestDockRegistration>(() => {
     return makeCodeCommitRelayThreadRegistration({
+      about: codeCommitRelayAbout(selectedFindingId, review, onClearFinding),
       available: profile !== undefined,
       context: [
         { id: "repository", label: "Repository", value: pullRequest.repositoryName },
@@ -329,6 +397,7 @@ export const CodeCommitRelayThread = ({
     continueReview,
     diff.headCommit,
     isReviewing,
+    onClearFinding,
     profile,
     pullRequest.id,
     pullRequest.repositoryName,

@@ -59,6 +59,13 @@ interface RelayPullRequestDockRegistrationBase {
   readonly selection: RelaySelectorState
 }
 
+/** One thing inside a pull request the next message is about. */
+export interface RelayProductDockAbout {
+  readonly id: string
+  readonly label: string
+  readonly onClear: () => void
+}
+
 export type RelayPullRequestDockRegistration = RelayPullRequestDockRegistrationBase &
   (
     | {
@@ -69,6 +76,11 @@ export type RelayPullRequestDockRegistration = RelayPullRequestDockRegistrationB
           request: typeof ContinuePullRequestConversationRequest.Type
         ) => Effect.Effect<void, RelayProductDockContinuationFailure>
         readonly messages: ReadonlyArray<RelayProductDockMessage>
+        /**
+         * What the next message is about inside this PR (a finding, say), shown as a removable
+         * reference on the composer; clearing it sends to the whole pull request.
+         */
+        readonly about?: RelayProductDockAbout | undefined
         readonly status: "ready"
       }
     | {
@@ -86,8 +98,14 @@ interface RelayPullRequestDockRegistry {
   /** Whether the user pinned Relay beside the page; the host lays out its column from this and `open`. */
   readonly pinned: boolean
   readonly setPinned: (pinned: boolean) => void
-  /** The header launcher, where the panel returns focus. */
+  /** The header launcher, where the panel returns focus unless something else opened it. */
   readonly launcher: RefObject<HTMLButtonElement | null>
+  /** Where closing returns focus: the launcher, or the control that last opened Relay (openFrom). */
+  readonly returnTo: RefObject<HTMLElement | null>
+  /** Open Relay from a page control (Discuss, say); closing returns focus to that control. */
+  readonly openFrom: (control: HTMLElement) => void
+  /** Per thread, what its kept draft was written about, so a change survives closing Relay. */
+  readonly draftAbout: RefObject<Map<string, string | null>>
   /** How many panels have claimed Relay's Ctrl/⌘+J under this provider; more than one is a bug. */
   readonly summonClaims: RefObject<number>
 }
@@ -109,6 +127,12 @@ export const RelayProductDockProvider = ({ children }: { readonly children: Reac
   const [pinned, setPinned] = useState(false)
   const launcher = useRef<HTMLButtonElement | null>(null)
   const summonClaims = useRef(0)
+  const returnTo = useRef<HTMLElement | null>(null)
+  const draftAbout = useRef(new Map<string, string | null>())
+  const openFrom = useCallback((control: HTMLElement) => {
+    returnTo.current = control
+    setOpen(true)
+  }, [])
   const register = useCallback((next: RelayPullRequestDockRegistration) => {
     setRegistration(next)
     return () => {
@@ -116,7 +140,19 @@ export const RelayProductDockProvider = ({ children }: { readonly children: Reac
     }
   }, [])
   const registry = useMemo<RelayPullRequestDockRegistry>(
-    () => ({ launcher, open, pinned, register, registration, setOpen, setPinned, summonClaims }),
+    () => ({
+      draftAbout,
+      launcher,
+      open,
+      openFrom,
+      pinned,
+      register,
+      registration,
+      returnTo,
+      setOpen,
+      setPinned,
+      summonClaims
+    }),
     [open, pinned, register, registration]
   )
   return <RelayPullRequestDockContext value={registry}>{children}</RelayPullRequestDockContext>
@@ -142,14 +178,17 @@ export const useRelayProductDockRegistration = (): RelayPullRequestDockRegistrat
  */
 export const useRelayProductOpen = (): Pick<
   RelayPullRequestDockRegistry,
-  "launcher" | "open" | "pinned" | "setOpen" | "setPinned"
+  "draftAbout" | "launcher" | "open" | "openFrom" | "pinned" | "returnTo" | "setOpen" | "setPinned"
 > => {
   const registry = useContext(RelayPullRequestDockContext)
   if (registry === undefined) throw new RelayProductDockProviderMissing()
   return {
+    draftAbout: registry.draftAbout,
     launcher: registry.launcher,
     open: registry.open,
+    openFrom: registry.openFrom,
     pinned: registry.pinned,
+    returnTo: registry.returnTo,
     setOpen: registry.setOpen,
     setPinned: registry.setPinned
   }
