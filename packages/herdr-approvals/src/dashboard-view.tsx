@@ -340,7 +340,8 @@ export const AgentActivity = ({ snapshot }: { readonly snapshot: DashboardSnapsh
       </div>
       {!available ? (
         <Text tone="secondary">
-          {error === null ? `Herdr isn't running on ${hostLabel}.` : `Herdr isn't running on ${hostLabel}: ${error}.`}
+          {error === null ? `Herdr isn't running on ${hostLabel}.` : `Herdr isn't running on ${hostLabel}: ${error}.`}{" "}
+          Start Herdr on {hostLabel}, then refresh.
         </Text>
       ) : agents.length === 0 ? (
         <Text tone="secondary">No agents running on {hostLabel}.</Text>

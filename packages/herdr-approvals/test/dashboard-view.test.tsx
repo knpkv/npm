@@ -430,10 +430,10 @@ describe("dashboard approval capability", () => {
   it("names the cause and fix when there are no agents, or Herdr isn't running", () => {
     expect(renderMixedAgentStates({ agents: [] })).toContain("No agents running on ALPHA.")
     expect(renderMixedAgentStates({ agents: [], available: false, error: null })).toContain(
-      "Herdr isn&#x27;t running on ALPHA."
+      "Herdr isn&#x27;t running on ALPHA. Start Herdr on ALPHA, then refresh."
     )
     expect(renderMixedAgentStates({ agents: [], available: false, error: "socket missing" })).toContain(
-      "Herdr isn&#x27;t running on ALPHA: socket missing."
+      "Herdr isn&#x27;t running on ALPHA: socket missing. Start Herdr on ALPHA, then refresh."
     )
   })
 
