@@ -18,11 +18,16 @@ for (const id of stories) {
     const misses = await page.evaluate(() => {
       const found: Array<string> = []
       for (const element of document.querySelectorAll<HTMLElement>("[data-rly-hit-area]")) {
+        // elementFromPoint only sees the viewport, so bring each control into it first.
+        element.scrollIntoView({ block: "center", inline: "center" })
         const box = element.getBoundingClientRect()
         if (box.width === 0 || box.height === 0) continue
         const reach = (side: number): number => Math.max(0, (44 - side) / 2 - 1)
         const centreX = box.left + box.width / 2
         const centreY = box.top + box.height / 2
+        // A control the layout hides (a compact table's visually hidden header row) takes no taps at all.
+        const centre = document.elementFromPoint(centreX, centreY)
+        if (centre === null || !element.contains(centre)) continue
         const points: Array<readonly [string, number, number]> = []
         if (box.height < 44) {
           points.push(["above", centreX, box.top - reach(box.height)], [
