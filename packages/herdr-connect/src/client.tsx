@@ -10,7 +10,7 @@ import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { FitAddon, init, Terminal } from "ghostty-web"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { buildConnectForest } from "./forest.js"
-import { applyTerminalInputIdentity, focusTerminalInput } from "./terminal-input-identity.js"
+import { applyTerminalInputIdentity, focusTerminalInput, trackTerminalInputFocus } from "./terminal-input-identity.js"
 import { clampTerminalDimensions, type TerminalDimensions, terminalResizeCommand } from "./terminal-dimensions.js"
 import {
   type ConnectAgent,
@@ -611,6 +611,15 @@ export const ConnectSurface = ({
   const terminalModifierRef = useRef<TerminalModifier | null>(null)
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
+  // Follows the terminal input's real focus, so the Keyboard button matches what iOS shows.
+  const [keyboardOpen, setKeyboardOpen] = useState(false)
+  // Synchronous inside the button's click: iOS raises its keyboard only within the gesture.
+  const toggleKeyboard = (open: boolean): void => {
+    const target = terminalFocusTargetRef.current
+    if (target === null) return
+    if (open) terminalFocusRef.current()
+    else target.blur()
+  }
   // The stored choice seeds it; this session's toggle wins once made. Unreadable storage shows the keys.
   const storedKeysHidden = useAtomValue(atoms.terminalKeysHidden)
   const [keysHiddenChoice, setKeysHiddenChoice] = useState<boolean | null>(null)
@@ -765,9 +774,15 @@ export const ConnectSurface = ({
           setTerminalFocus: (target, focus) => {
             terminalFocusTargetRef.current = target
             terminalFocusRef.current = focus
+            setKeyboardOpen(target.ownerDocument.activeElement === target)
+            const releaseFocusTracking = trackTerminalInputFocus(target, setKeyboardOpen)
             return () => {
+              releaseFocusTracking()
               if (terminalFocusRef.current === focus) terminalFocusRef.current = () => {}
-              if (terminalFocusTargetRef.current === target) terminalFocusTargetRef.current = null
+              if (terminalFocusTargetRef.current === target) {
+                terminalFocusTargetRef.current = null
+                setKeyboardOpen(false)
+              }
             }
           },
           reportError: () => setTerminalKeyError("That modifier combination is not supported."),
@@ -1155,9 +1170,11 @@ export const ConnectSurface = ({
         disabled={connection._tag !== "connected"}
         error={terminalKeyError}
         modifier={terminalModifier}
+        keyboardOpen={keyboardOpen}
         keysHidden={terminalKeysHidden}
         onFocusTerminal={() => terminalFocusRef.current()}
         onKey={sendTerminalRailKey}
+        onKeyboardToggle={toggleKeyboard}
         onKeysHiddenChange={changeTerminalKeysHidden}
         onModifierChange={changeTerminalModifier}
         onSelectText={() => terminalInteractionRef.current?.selectText()}

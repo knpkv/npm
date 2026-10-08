@@ -884,14 +884,24 @@
       min-inline-size: 0;
     }
 
-    /* One column, wrapping: with Keys, Latest and Select it fills the last row exactly, so the rail
-       keeps its height when the status appears and the terminal is never resized mid-session. */
+    /* The anchor for the lines-back badge below. */
+    .terminal-key-rail {
+      position: relative;
+    }
+
+    /* Out of the grid, so the last row is Keyboard, Keys, Latest and Select and the status can never
+       add a rail row or resize the terminal: a solid badge over the terminal's top corner, inside the
+       safe area, that lets every tap through to the terminal. */
     .terminal-older-output {
-      justify-self: end;
-      /* Two wrapped lines stay inside the 44px keys beside it ("120400 lines" / "back"). */
-      line-height: 1.2;
-      text-align: end;
-      white-space: normal;
+      background: var(--rly-color-surface-2);
+      border: 1px solid var(--rly-color-border-2);
+      border-radius: var(--rly-radius-control);
+      inset-block-start: calc(100% + var(--rly-space-8));
+      inset-inline-end: max(var(--rly-space-8), env(safe-area-inset-right));
+      padding: var(--rly-space-2) var(--rly-space-8);
+      pointer-events: none;
+      position: absolute;
+      z-index: 2;
     }
   }
 

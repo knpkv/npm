@@ -1,6 +1,10 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from "@effect/vitest"
-import { applyTerminalInputIdentity, focusTerminalInput } from "../src/terminal-input-identity.js"
+import {
+  applyTerminalInputIdentity,
+  focusTerminalInput,
+  trackTerminalInputFocus
+} from "../src/terminal-input-identity.js"
 
 describe("terminal input identity", () => {
   it("gives the Ghostty terminal input stable form identity", () => {
@@ -31,5 +35,24 @@ describe("terminal input focus", () => {
     const calls: Array<FocusOptions | undefined> = []
     focusTerminalInput({ focus: (options) => calls.push(options) })
     expect(calls).toEqual([{ preventScroll: true }])
+  })
+})
+
+describe("terminal input focus tracking", () => {
+  it("reports focus and blur as they happen, and nothing after release", () => {
+    const textarea = document.createElement("textarea")
+    const other = document.createElement("button")
+    document.body.append(textarea, other)
+    const seen: Array<boolean> = []
+    const release = trackTerminalInputFocus(textarea, (focused) => seen.push(focused))
+
+    textarea.focus()
+    other.focus()
+    release()
+    textarea.focus()
+
+    expect(seen).toEqual([true, false])
+    textarea.remove()
+    other.remove()
   })
 })
