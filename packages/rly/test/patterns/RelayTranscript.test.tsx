@@ -5,6 +5,9 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { RelayTranscript, type RlyRelayTranscriptItem } from "../../src/patterns/RelayTranscript.js"
 
+/** Lets the announcer's refill frame run. */
+const nextFrame = (): Promise<void> => act(async () => new Promise((resolve) => requestAnimationFrame(() => resolve())))
+
 let root: Root | undefined
 
 afterEach(async () => {
@@ -44,7 +47,7 @@ const Scroller = ({
   readonly items: ReadonlyArray<RlyRelayTranscriptItem>
   readonly streaming: boolean
 }): ReactElement => (
-  <div data-rly-relay-scroll="">
+  <div data-rly-relay-scroll="" tabIndex={0}>
     <RelayTranscript items={items} streaming={streaming} />
   </div>
 )
@@ -86,6 +89,7 @@ describe("RelayTranscript", () => {
     const announcer = (): HTMLElement | null => document.querySelector("[aria-live='polite']")
     expect(announcer()?.textContent).toBe("")
     await act(async () => root?.render(<Scroller items={conversation} streaming />))
+    await nextFrame()
     expect(announcer()?.textContent).toBe("Relay is answering.")
     expect(document.body.textContent).toContain("Relay is writing…")
     expect(announcer()?.textContent).not.toContain("writing")
@@ -94,6 +98,7 @@ describe("RelayTranscript", () => {
       { _tag: "RunFinished", id: "f1", seconds: 38 }
     ]
     await act(async () => root?.render(<Scroller items={finished} streaming={false} />))
+    await nextFrame()
     expect(announcer()?.textContent).toBe("Relay finished.")
     expect(document.body.textContent).toContain("Done in 38s.")
     const failed: ReadonlyArray<RlyRelayTranscriptItem> = [
@@ -101,6 +106,7 @@ describe("RelayTranscript", () => {
       { _tag: "RunFailed", cause: "Codex is signed out.", fix: "Sign in, then try again.", id: "x1" }
     ]
     await act(async () => root?.render(<Scroller items={failed} streaming={false} />))
+    await nextFrame()
     expect(announcer()?.textContent).toBe("Relay failed: Codex is signed out.")
   })
 
@@ -125,6 +131,53 @@ describe("RelayTranscript", () => {
     expect(jump).toBeDefined()
     await act(async () => jump?.click())
     expect(scrollTo).toHaveBeenCalledTimes(2)
+    expect(document.body.textContent).not.toContain("New messages")
+    // Focus lands on the scrolling body, not the page.
+    expect(document.activeElement).toBe(scroller)
+  })
+
+  it("does not announce runs that ended before it mounted, and repeats a repeated announcement", async () => {
+    const history: ReadonlyArray<RlyRelayTranscriptItem> = [
+      ...conversation,
+      { _tag: "RunFinished", id: "old", seconds: 12 }
+    ]
+    await mount(<Scroller items={history} streaming={false} />)
+    await nextFrame()
+    const announcer = (): HTMLElement | null => document.querySelector("[aria-live='polite']")
+    expect(announcer()?.textContent).toBe("")
+    const next: ReadonlyArray<RlyRelayTranscriptItem> = [...history, { _tag: "RunFinished", id: "new-1" }]
+    await act(async () => root?.render(<Scroller items={next} streaming={false} />))
+    await nextFrame()
+    expect(announcer()?.textContent).toBe("Relay finished.")
+    // The same words again: the region is cleared, then refilled, so the repeat is a DOM change a
+    // screen reader hears, not a no-op.
+    const region = announcer()
+    if (region === null) throw new Error("no announcer")
+    const changes: Array<string> = []
+    const observer = new MutationObserver(() => changes.push(region.textContent ?? ""))
+    observer.observe(region, { characterData: true, childList: true, subtree: true })
+    const again: ReadonlyArray<RlyRelayTranscriptItem> = [...next, { _tag: "RunFinished", id: "new-2" }]
+    await act(async () => root?.render(<Scroller items={again} streaming={false} />))
+    await nextFrame()
+    observer.disconnect()
+    expect(changes).toContain("")
+    expect(region.textContent).toBe("Relay finished.")
+  })
+
+  it("jumps to the end for the reader's own new turn even while reading earlier", async () => {
+    await mount(<Scroller items={conversation} streaming={false} />)
+    const scroller = document.querySelector<HTMLElement>("[data-rly-relay-scroll]")
+    if (scroller === null) throw new Error("no scroller")
+    const scrollTo = vi.fn()
+    scroller.scrollTo = scrollTo
+    fakeGeometry(scroller, { clientHeight: 400, scrollHeight: 1400, scrollTop: 100 })
+    await act(async () => scroller.dispatchEvent(new Event("scroll")))
+    const mine: ReadonlyArray<RlyRelayTranscriptItem> = [
+      ...conversation,
+      { _tag: "You", id: "u2", text: "And the stacked view?" }
+    ]
+    await act(async () => root?.render(<Scroller items={mine} streaming={false} />))
+    expect(scrollTo).toHaveBeenCalledTimes(1)
     expect(document.body.textContent).not.toContain("New messages")
   })
 })

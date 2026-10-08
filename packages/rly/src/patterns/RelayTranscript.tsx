@@ -144,7 +144,12 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
   const atEnd = useRef(true)
   const [behind, setBehind] = useState(false)
   const [announcement, setAnnouncement] = useState("")
-  const announced = useRef(new Set<string>())
+  // Runs already over when the transcript mounts (history, a reopen, a presentation change) are not news.
+  const announced = useRef<ReadonlySet<string> | null>(null)
+  if (announced.current === null) {
+    announced.current = new Set(items.filter((item) => announcementFor(item) !== undefined).map((item) => item.id))
+  }
+  const seen = useRef(new Set(items.map((item) => item.id)))
   const wasStreaming = useRef(streaming)
 
   const scroller = useCallback((): HTMLElement | null => root.current?.closest("[data-rly-relay-scroll]") ?? null, [])
@@ -172,22 +177,35 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
     return () => element.removeEventListener("scroll", onScroll)
   }, [scroller])
 
-  // New content: follow it only if the reader was at the end; otherwise offer the jump.
+  // New content: follow it if the reader was at the end, or if it is the reader's own new turn;
+  // otherwise offer the jump.
   useLayoutEffect(() => {
-    if (atEnd.current) toEnd(false)
+    const fresh = items.filter((item) => !seen.current.has(item.id))
+    for (const item of fresh) seen.current.add(item.id)
+    if (atEnd.current || fresh.some((item) => item._tag === "You")) toEnd(false)
     else setBehind(true)
   }, [items, streaming, toEnd])
 
-  // Announce run state changes once each; tokens never reach the live region.
+  // Announce run state changes once each; tokens never reach the live region. The region is cleared
+  // first and refilled a frame later, so a repeat of the same words ("Relay finished.") is still heard.
   useEffect(() => {
-    if (streaming && !wasStreaming.current) setAnnouncement("Relay is answering.")
+    let words: string | undefined
+    if (streaming && !wasStreaming.current) words = "Relay is answering."
     wasStreaming.current = streaming
+    const known = new Set(announced.current)
     for (const item of items) {
-      const words = announcementFor(item)
-      if (words === undefined || announced.current.has(item.id)) continue
-      announced.current.add(item.id)
-      setAnnouncement(words)
+      const said = announcementFor(item)
+      if (said === undefined || known.has(item.id)) continue
+      known.add(item.id)
+      words = said
     }
+    announced.current = known
+    if (words === undefined) return
+    const view = root.current?.ownerDocument.defaultView
+    setAnnouncement("")
+    if (view === null || view === undefined) return setAnnouncement(words)
+    const frame = view.requestAnimationFrame(() => setAnnouncement(words))
+    return () => view.cancelAnimationFrame(frame)
   }, [items, streaming])
 
   return (
@@ -217,7 +235,15 @@ export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): Rea
       </ol>
       {streaming ? <p className={style("streaming")}>Relay is writing…</p> : null}
       {behind ? (
-        <button className={style("jump")} onClick={() => toEnd(true)} type="button">
+        <button
+          className={style("jump")}
+          onClick={() => {
+            toEnd(true)
+            // The button goes away; focus moves to the scrolling body rather than dropping to the page.
+            scroller()?.focus({ preventScroll: true })
+          }}
+          type="button"
+        >
           New messages
         </button>
       ) : null}

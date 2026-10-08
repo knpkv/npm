@@ -22,7 +22,7 @@ const earlier: ReadonlyArray<RlyRelayTranscriptItem> = Array.from(
 
 const conversation: ReadonlyArray<RlyRelayTranscriptItem> = [
   ...earlier,
-  { _tag: "You", id: "u1", text: "Why is the trailing context line skipped?" },
+  { _tag: "You", id: "u1", text: "Why is the trailing context line skipped?\nAnd does it affect the stacked view?" },
   {
     _tag: "Activity",
     id: "a1",
@@ -88,6 +88,9 @@ const transcriptArgs = { items: [], streaming: false }
 export const Conversation: Story = {
   args: transcriptArgs,
   play: async ({ canvas }) => {
+    // A multi-line turn keeps its line breaks.
+    const bubble = canvas.getByText(/Why is the trailing context line skipped/)
+    await expect(getComputedStyle(bubble).whiteSpace).toBe("pre-wrap")
     const summary = canvas.getByText("Read 2 files and ran 1 check, 38s")
     await userEvent.click(summary)
     await expect(canvas.getByRole("link", { name: "src/patch-reader.ts:14" })).toBeVisible()
