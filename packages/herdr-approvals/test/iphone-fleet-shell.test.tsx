@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, useEffect } from "react"
+import { act, useEffect, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
@@ -32,6 +32,68 @@ const render = async (element: React.ReactNode): Promise<void> => {
 }
 
 describe("iPhone fleet shell regressions", () => {
+  const shell = (
+    <FleetShell
+      approvals={<section>Approvals</section>}
+      connect={<section>Terminal</section>}
+      hostCount={1}
+      work={<section>Work board</section>}
+    />
+  )
+
+  // rly's dialog renders into a portal target: without the shell's provider it would never mount.
+  it("opens the shortcut list from the masthead button", async () => {
+    await render(shell)
+    const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(
+      (candidate) => candidate.textContent === "Keyboard shortcuts"
+    )
+    await act(async () => button?.click())
+    expect(document.querySelector("[role='dialog']")?.textContent).toContain("Go to Connect")
+  })
+
+  it("opens the shortcut list with ?", async () => {
+    await render(shell)
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "?" })))
+    expect(document.querySelector("[role='dialog']")?.textContent).toContain("Search agents")
+  })
+
+  it("closes the shortcut list from its own Close action, for a screen with no Esc", async () => {
+    await render(shell)
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "?" })))
+    const close = [...document.querySelectorAll<HTMLButtonElement>("[role='dialog'] button")].find(
+      (candidate) => candidate.textContent === "Close"
+    )
+    await act(async () => close?.click())
+    expect(document.querySelector("[role='dialog']")).toBeNull()
+  })
+
+  // The search field can mount after Connect is selected (its panel renders later, its data later still).
+  it("focuses agent search with Ctrl+K even when the field appears after the tab switch", async () => {
+    const LateSearch = () => {
+      const [shown, setShown] = useState(false)
+      useEffect(() => {
+        const timer = window.setTimeout(() => setShown(true), 120)
+        return () => window.clearTimeout(timer)
+      }, [])
+      return shown ? <input aria-label="Search agents" id="connect-agent-search" /> : <p>Loading agents</p>
+    }
+    await render(
+      <FleetShell
+        approvals={<section>Approvals</section>}
+        connect={<LateSearch />}
+        hostCount={1}
+        work={<section>Work board</section>}
+      />
+    )
+    await act(async () =>
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, ctrlKey: true, key: "k" }))
+    )
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 400))
+    })
+    expect(document.activeElement?.id).toBe("connect-agent-search")
+  })
+
   it("moves focus to the selected tab before hiding a focused panel", async () => {
     window.history.replaceState(null, "", "/?tab=connect")
     await render(
@@ -54,7 +116,9 @@ describe("iPhone fleet shell regressions", () => {
     await act(async () => terminalControl?.focus())
     expect(document.activeElement).toBe(terminalControl)
 
-    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "3" })))
+    // g then w: the Work tab's sequence (bare digits no longer select tabs).
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "g" })))
+    await act(async () => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "w" })))
 
     expect(document.activeElement?.getAttribute("role")).toBe("tab")
     expect(document.activeElement?.textContent).toBe("Work")
@@ -70,13 +134,16 @@ describe("iPhone fleet shell regressions", () => {
         work={<section>Work board</section>}
       />
     )
-    const approvalControl = document.querySelector<HTMLButtonElement>("button:not([role=tab])")
+    const approvalControl = [...document.querySelectorAll<HTMLButtonElement>("button:not([role=tab])")].find(
+      (button) => button.textContent === "Focused approval control"
+    )
     await act(async () => approvalControl?.focus())
     document.querySelector('[role="tab"][data-tab-value="work"]')?.remove()
 
     await expect(
       act(async () => {
-        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "3" }))
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "g" }))
+        window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "w" }))
       })
     ).resolves.toBeUndefined()
 
