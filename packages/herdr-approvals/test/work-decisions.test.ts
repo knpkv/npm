@@ -49,12 +49,10 @@ const snapshot = (local: ReadonlyArray<JobRecord>, approvalsEnabled = true): Das
   approvalApp: {
     canonical: true,
     canonicalUrl: "https://hub.example.test/",
-    chatEnabled: false,
     pushEnabled: false,
     workEnabled: false
   },
   approvalsEnabled,
-  chat: null,
   directory: null,
   historyNextCursor: null,
   host: "ALPHA",

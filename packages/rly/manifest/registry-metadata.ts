@@ -66,6 +66,11 @@ export const COMPONENT_REGISTRY_METADATA = {
     ["conversation", "streaming", "failed"],
     ["agent", "present"]
   ),
+  RelayComposer: registryMetadata(
+    "Write to Relay: an auto-growing message box with context refs, a run preset, send and stop, and drafts kept per object",
+    ["draft", "busy"],
+    ["agent", "write"]
+  ),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"

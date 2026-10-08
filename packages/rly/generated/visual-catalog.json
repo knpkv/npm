@@ -704,6 +704,23 @@
       ]
     },
     {
+      "name": "RelayComposer",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayComposer.tsx",
+        "story": "packages/rly/stories/patterns/RelayComposer.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayComposer.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayComposer.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaycomposer--draft",
+      "storyIds": [
+        "patterns-relaycomposer--draft"
+      ]
+    },
+    {
       "name": "RelayDock",
       "paths": {
         "source": "packages/rly/src/patterns/RelayDock.tsx",
