@@ -120,7 +120,7 @@ export const LooseHostLimits = Schema.Struct({
   host: Schema.String,
   readAt: Schema.Number,
   reading: Schema.Union([
-    Schema.TaggedStruct("Read", { limits: RawLimits, skipped: Schema.Int }),
+    Schema.TaggedStruct("Read", { limits: RawLimits, skipped: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)) }),
     HostLimits.fields.reading.members[1]
   ])
 })
