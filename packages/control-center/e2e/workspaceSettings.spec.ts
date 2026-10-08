@@ -152,9 +152,12 @@ test("validates, persists, and reflows workspace settings in a real browser", as
       .map((element) => element.tagName.toLowerCase())
   })
   expect(escaping).toEqual([])
-  const headingLines = await browsersHeading.evaluate((heading) =>
-    Math.round(heading.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(heading).lineHeight))
-  )
+  const headingLines = await browsersHeading.evaluate((heading) => {
+    const lineHeight = heading.ownerDocument.defaultView?.getComputedStyle(heading).lineHeight
+    return lineHeight === undefined
+      ? Number.NaN
+      : Math.round(heading.getBoundingClientRect().height / Number.parseFloat(lineHeight))
+  })
   expect(headingLines).toBe(1)
   await page.setViewportSize({ width: 1280, height: 900 })
 
