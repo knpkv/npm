@@ -11,7 +11,7 @@ import * as Path from "effect/Path"
 import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { compareVersions, isReleasePullRequest, releaseBranch } from "./check-version-bumps.mjs"
+import { compareVersions, isReleasePullRequest, outstandingReleases, releaseBranch } from "./check-version-bumps.mjs"
 
 const manifest = (version, extra = {}) => ({ name: "@knpkv/demo", version, ...extra })
 const at = (file, value) => ({ file, manifest: value })
@@ -55,6 +55,31 @@ test("only this repository's own Version Packages branch is exempt", () => {
   assert.equal(isReleasePullRequest({ headRef: "feat/x", headRepository: repository, repository }), false)
 })
 
+test("a release stays outstanding until npm has it, however many runs were skipped or failed", () => {
+  // Version Packages moved demo to 1.1.0; its own run was cancelled and later pushes changed no version.
+  // Only npm's state decides, so the next run still publishes it.
+  const versions = new Set(["1.0.0"])
+  assert.deepEqual(outstandingReleases([demo(manifest("1.1.0"))], new Map([["@knpkv/demo", versions]])), {
+    firstReleases: [],
+    outstanding: [{ name: "@knpkv/demo", version: "1.1.0" }]
+  })
+  versions.add("1.1.0")
+  assert.deepEqual(outstandingReleases([demo(manifest("1.1.0"))], new Map([["@knpkv/demo", versions]])).outstanding, [])
+})
+
+test("a package npm has never seen is a first release, not outstanding, and private packages are skipped", () => {
+  // A feature pull request adds it with its changeset: publishing now would release 0.1.0 before the
+  // changeset versions it.
+  assert.deepEqual(outstandingReleases([demo(manifest("0.1.0"))], new Map([["@knpkv/demo", undefined]])), {
+    firstReleases: [{ name: "@knpkv/demo", version: "0.1.0" }],
+    outstanding: []
+  })
+  assert.deepEqual(
+    outstandingReleases([demo(manifest("2.0.0", { private: true }))], new Map([["@knpkv/demo", new Set(["1.0.0"])]])),
+    { firstReleases: [], outstanding: [] }
+  )
+})
+
 const runtime = ManagedRuntime.make(NodeServices.layer)
 after(() => runtime.dispose())
 const script = fileURLToPath(new URL("./check-version-bumps.mjs", import.meta.url))
@@ -72,7 +97,7 @@ const run = (command, args, cwd, env) =>
     return { exitCode, output }
   }).pipe(Effect.scoped)
 
-test("the script fails a feature branch or a fork that bumps a version, passes the release branch, and reports releases", async () => {
+test("the script fails a feature branch or a fork that bumps a version, and passes the release branch", async () => {
   const outcome = await runtime.runPromise(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem
@@ -120,23 +145,10 @@ test("the script fails a feature branch or a fork that bumps a version, passes t
             GITHUB_REPOSITORY: "knpkv/npm"
           })
         })
-      // Release mode on the same commits: the bump commit released a version, the base commit did not.
-      const output = path.join(directory, "github-output")
-      const released = (since) =>
-        Effect.gen(function* () {
-          yield* fileSystem.writeFileString(output, "")
-          const result = yield* run("node", [script, "--released-since", since], directory, {
-            ...env,
-            GITHUB_OUTPUT: output
-          })
-          return { ...result, written: yield* fileSystem.readFileString(output) }
-        })
       return {
         feature: yield* check("feat/x", "knpkv/npm"),
         fork: yield* check(releaseBranch, "fork/npm"),
-        release: yield* check(releaseBranch, "knpkv/npm"),
-        bumped: yield* released("HEAD~1"),
-        unchanged: yield* released("HEAD")
+        release: yield* check(releaseBranch, "knpkv/npm")
       }
     }).pipe(Effect.scoped)
   )
@@ -144,6 +156,4 @@ test("the script fails a feature branch or a fork that bumps a version, passes t
   assert.match(outcome.feature.output, /@knpkv\/demo \(packages\/demo\/package\.json\): 1\.0\.0 -> 1\.1\.0/u)
   assert.notEqual(outcome.fork.exitCode, ChildProcessSpawner.ExitCode(0), outcome.fork.output)
   assert.equal(outcome.release.exitCode, ChildProcessSpawner.ExitCode(0), outcome.release.output)
-  assert.equal(outcome.bumped.written, "moved=true\n", outcome.bumped.output)
-  assert.equal(outcome.unchanged.written, "moved=false\n", outcome.unchanged.output)
 })

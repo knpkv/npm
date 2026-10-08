@@ -11,15 +11,19 @@ import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 // Release publishes every public package whose version is not on npm yet, so only the Version Packages
-// pull request may move an existing package's version. Two modes, both on a full-history checkout:
-// - pull request (GITHUB_EVENT_NAME, GITHUB_BASE_REF, GITHUB_HEAD_REF, GITHUB_REPOSITORY, GITHUB_EVENT_PATH):
-//   fails when a version moved outside the repository's own changeset-release/main branch;
-// - `--released-since <rev>` (Release workflow): writes `moved=true|false` to GITHUB_OUTPUT, saying whether
-//   the push moved an existing package's version, which after the pull-request check means a Version
-//   Packages merge.
+// pull request may move an existing package's version. Two modes:
+// - pull request (GITHUB_EVENT_NAME, GITHUB_BASE_REF, GITHUB_HEAD_REF, GITHUB_REPOSITORY, GITHUB_EVENT_PATH),
+//   on a full-history checkout: fails when a version moved outside the repository's own
+//   changeset-release/main branch;
+// - `--outstanding` (Release workflow): writes `outstanding=true|false` to GITHUB_OUTPUT, saying whether
+//   a package already on npm has a version on main that npm does not. After the pull-request check only a
+//   Version Packages merge makes one, and it stays outstanding until it is published, however many runs
+//   are skipped or fail in between. A package npm has never seen is a first release instead: it waits for
+//   its own changeset, so it is reported and does not count.
 
 class VersionBumpError extends Data.TaggedError("VersionBumpError") {
   get message() {
@@ -135,27 +139,67 @@ const checkPullRequest = Effect.gen(function* () {
   )
 })
 
-const reportRelease = Effect.fn("VersionBumps.reportRelease")(function* (since) {
-  // The range must be history main actually has; anything else fails rather than guessing.
-  yield* git(["merge-base", "--is-ancestor", since, "HEAD"]).pipe(
-    Effect.mapError(() => fail(`${since} is not an ancestor of HEAD; cannot tell what this push released`))
+const Packument = Schema.Struct({ versions: Schema.Record(Schema.String, Schema.Unknown) })
+
+/**
+ * Splits publishable packages by what npm has: `outstanding` are versions of packages npm knows that it
+ * does not have yet; `firstReleases` are packages npm has never seen. `published` maps a package name to
+ * its published versions, or to undefined when npm has no such package.
+ */
+export const outstandingReleases = (manifests, published) => {
+  const outstanding = []
+  const firstReleases = []
+  for (const { manifest } of manifests.filter((entry) => publishable(entry.manifest))) {
+    const versions = published.get(manifest.name)
+    if (versions === undefined) firstReleases.push({ name: manifest.name, version: manifest.version })
+    else if (manifest.version !== undefined && !versions.has(manifest.version)) {
+      outstanding.push({ name: manifest.name, version: manifest.version })
+    }
+  }
+  return { firstReleases, outstanding }
+}
+
+// The versions npm has for a package, or undefined when npm has no such package. Any other answer fails.
+const publishedVersions = Effect.fn("VersionBumps.publishedVersions")(function* (registry, name) {
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client.execute(
+    HttpClientRequest.get(`${registry}/${name.replace("/", "%2F")}`).pipe(
+      HttpClientRequest.setHeaders({ accept: "application/vnd.npm.install-v1+json" })
+    )
   )
-  const { changes } = compareVersions(yield* manifestsAt(since), yield* manifestsAt("HEAD"))
-  for (const change of changes) yield* Console.log(`Released by this push: ${describe(change).slice(2)}`)
+  if (response.status === 404) return undefined
+  if (response.status !== 200) return yield* fail(`npm answered ${response.status} for ${name}`)
+  const packument = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Packument))(yield* response.text).pipe(
+    Effect.mapError((cause) => fail(`npm's metadata for ${name} is unreadable: ${cause.message}`))
+  )
+  return new Set(Object.keys(packument.versions))
+})
+
+const reportOutstanding = Effect.gen(function* () {
+  const registry = yield* Config.String("NPM_REGISTRY_URL").pipe(Config.withDefault("https://registry.npmjs.org"))
+  const manifests = (yield* manifestsAt("HEAD")).filter((entry) => publishable(entry.manifest))
+  const published = new Map(
+    yield* Effect.forEach(
+      manifests,
+      ({ manifest }) =>
+        publishedVersions(registry, manifest.name).pipe(Effect.map((versions) => [manifest.name, versions])),
+      { concurrency: 4 }
+    )
+  )
+  const { firstReleases, outstanding } = outstandingReleases(manifests, published)
+  for (const { name, version } of outstanding) yield* Console.log(`Released, not yet on npm: ${name}@${version}`)
+  for (const { name, version } of firstReleases) {
+    yield* Console.log(`First release, waits for its changeset: ${name}@${version ?? "(no version)"}`)
+  }
   const fileSystem = yield* FileSystem.FileSystem
-  yield* fileSystem.writeFileString(yield* Config.String("GITHUB_OUTPUT"), `moved=${changes.length > 0}\n`, {
+  yield* fileSystem.writeFileString(yield* Config.String("GITHUB_OUTPUT"), `outstanding=${outstanding.length > 0}\n`, {
     flag: "a"
   })
-})
+}).pipe(Effect.provide(FetchHttpClient.layer))
 
 const program = Effect.gen(function* () {
   const args = yield* (yield* Stdio.Stdio).args
-  const sinceIndex = args.indexOf("--released-since")
-  if (sinceIndex >= 0) {
-    const since = args[sinceIndex + 1]
-    if (since === undefined || since === "") return yield* fail("--released-since needs a revision")
-    return yield* reportRelease(since)
-  }
+  if (args.includes("--outstanding")) return yield* reportOutstanding
   const event = yield* Config.String("GITHUB_EVENT_NAME")
   if (event !== "pull_request") {
     // Pushes to main include Version Packages merges, which are the one place versions move.

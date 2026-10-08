@@ -23,10 +23,10 @@ const steps = parseDocument(workflowText).toJS().jobs.release.steps
 const stepIndex = (name) => steps.findIndex((step) => step.name === name)
 const changesetsAction = (step) => String(step.uses).startsWith("changesets/action@")
 
-const released = "steps.released.outputs.moved == 'true'"
+const released = "steps.released.outputs.outstanding == 'true'"
 
 test("a release publishes its versions before pending changesets are versioned", () => {
-  const detect = stepIndex("Detect a Version Packages release")
+  const detect = stepIndex("Find released versions not yet on npm")
   const aside = stepIndex("Set pending changesets aside")
   const publish = stepIndex("Publish the released versions")
   const restore = stepIndex("Restore pending changesets")
@@ -38,10 +38,9 @@ test("a release publishes its versions before pending changesets are versioned",
   )
   assert.equal(steps[detect].if, undefined)
   assert.equal(steps[detect].id, "released")
-  assert.match(steps[detect].run, /check-version-bumps\.mjs --released-since "\$\{PUSH_BEFORE\}"/u)
-  assert.equal(steps[detect].env.PUSH_BEFORE, "${{ github.event.before }}")
+  assert.equal(steps[detect].run, "node scripts/check-version-bumps.mjs --outstanding")
 
-  // Only a push that moved a version takes the publish-first path. With no changeset in view the action
+  // Only a release npm does not have yet takes the publish-first path. With no changeset in view the action
   // can only publish, and it fails the step when publishing fails.
   assert.equal(steps[aside].if, released)
   assert.equal(steps[publish].if, released)
@@ -52,7 +51,7 @@ test("a release publishes its versions before pending changesets are versioned",
 
   // Any other push keeps the action's own choice, so a new package's pending changeset versions it before
   // it is ever published; after a release, the usual step runs only to version what is pending.
-  assert.equal(steps[usual].if, "steps.released.outputs.moved != 'true' || steps.pending.outputs.count != '0'")
+  assert.equal(steps[usual].if, "steps.released.outputs.outstanding != 'true' || steps.pending.outputs.count != '0'")
   assert.equal(steps[usual].with["version-script"], "pnpm changeset:version")
   assert.equal(steps[usual].with["publish-script"], "pnpm changeset:publish")
 })
