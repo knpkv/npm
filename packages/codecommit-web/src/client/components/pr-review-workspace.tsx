@@ -1505,7 +1505,8 @@ const ReadyReviewWorkspace = ({
   useEffect(() => {
     setFindingsOpen(placement === "drawer" && relayHasFocus.current)
   }, [placement])
-  const findingsLabel = review === null ? "Relay" : `Findings (${String(review.result.findings.length)})`
+  // Before a review this names the review controls, distinct from the header's Relay launcher.
+  const findingsLabel = review === null ? "Relay review" : `Findings (${String(review.result.findings.length)})`
 
   const relayPane = (
     <aside

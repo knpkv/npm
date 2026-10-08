@@ -333,6 +333,23 @@ export const makeCodeCommitRelayThreadRegistration = ({
   }
 }
 
+/**
+ * What the next message is about: the finding being discussed. Its identity is the finding's whole
+ * snapshot, so a rerun that reuses the id for a changed finding counts as a new context and a kept draft
+ * says so; a withdrawn finding keeps its id.
+ */
+export const codeCommitRelayAbout = (
+  findingId: string | null,
+  review: PullRequestRelayReviewResponse | null,
+  onClear: () => void
+): RelayProductDockAbout | undefined => {
+  if (findingId === null) return undefined
+  const finding = review?.result.findings.find(({ id }) => id === findingId)
+  return finding === undefined
+    ? { id: findingId, label: `Finding: ${findingId}`, onClear }
+    : { id: JSON.stringify(finding), label: `Finding: ${finding.title}`, onClear }
+}
+
 /** Register CodeCommit's persisted per-PR review conversation with the shared shell dock. */
 export const CodeCommitRelayThread = ({
   accountId,
@@ -354,17 +371,8 @@ export const CodeCommitRelayThread = ({
     [accountId, pullRequest.account.region, pullRequest.id, pullRequest.repositoryName, repositoryAccountId, selection]
   )
   const registration = useMemo<RelayPullRequestDockRegistration>(() => {
-    const finding =
-      selectedFindingId === null ? undefined : review?.result.findings.find(({ id }) => id === selectedFindingId)
     return makeCodeCommitRelayThreadRegistration({
-      about:
-        selectedFindingId === null
-          ? undefined
-          : {
-              id: selectedFindingId,
-              label: `Finding: ${finding?.title ?? selectedFindingId}`,
-              onClear: onClearFinding
-            },
+      about: codeCommitRelayAbout(selectedFindingId, review, onClearFinding),
       available: profile !== undefined,
       context: [
         { id: "repository", label: "Repository", value: pullRequest.repositoryName },

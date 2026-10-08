@@ -493,6 +493,9 @@ describe("RelayProductPanel", () => {
         <RelayProductPanel host={host} pin={{ _tag: "Unavailable" }} />
         <Registered registration={ready(coupled, () => Effect.void)} />
         <Discuss />
+        <button data-other="" type="button">
+          Elsewhere
+        </button>
       </RelayProductDockProvider>
     )
     try {
@@ -504,6 +507,15 @@ describe("RelayProductPanel", () => {
       await open()
       await act(async () => button("Close Relay")?.click())
       expect(document.activeElement).toBe(launcher())
+      // A shortcut open from another control returns there, not to the earlier Discuss.
+      const other = document.querySelector<HTMLButtonElement>("[data-other]")
+      other?.focus()
+      await act(async () =>
+        other?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, code: "KeyJ", ctrlKey: true, key: "j" }))
+      )
+      expect(document.querySelector("[data-rly-relay-panel]")).not.toBeNull()
+      await act(async () => button("Close Relay")?.click())
+      expect(document.activeElement).toBe(other)
     } finally {
       await unmount()
     }

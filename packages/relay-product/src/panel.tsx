@@ -123,6 +123,12 @@ const selectorRevision = (selection: RelaySelectorState): string =>
 const sameRun = (left: RelaySelectorState, right: RelaySelectorState): boolean =>
   left.profileId === right.profileId && left.modelId === right.modelId
 
+/** The control that has focus, when it is a real control rather than the page body. */
+const focusedControl = (owner: Document): HTMLElement | null => {
+  const active = owner.activeElement
+  return active instanceof HTMLElement && active !== owner.body ? active : null
+}
+
 let requests = 0
 const newRequestId = (): string => `relay-product-${(requests += 1)}`
 
@@ -156,7 +162,12 @@ export const RelayProductPanel = ({ host, pin }: RelayProductPanelProps): ReactE
   const { composerRef, regionRef } = useRelaySummon({
     fullscreen: presentation === "fullscreen",
     launcher,
-    onOpenChange: setOpen,
+    // A shortcut open returns, on close, to the control that had focus when it was pressed, never to an
+    // earlier Discuss target.
+    onOpenChange: (next: boolean) => {
+      if (next) returnTo.current = focusedControl(launcher.current?.ownerDocument ?? document)
+      setOpen(next)
+    },
     open,
     shortcut: useRelayShortcut()
   })

@@ -17,6 +17,7 @@ import {
   matchesCodeCommitPullRequestRoute
 } from "../src/client/codecommit-route.js"
 import {
+  codeCommitRelayAbout,
   codeCommitRelayAccountKind,
   codeCommitRelayExecutionProfile,
   codeCommitRepositoryAccountIdentity,
@@ -376,4 +377,20 @@ describe("CodeCommit Relay dock adapter", () => {
         "operator"
       ])
     }))
+
+  it("names the discussed finding by its whole snapshot, so a changed finding under a reused id is a new context", () => {
+    const onClear = (): void => undefined
+    const review = { ...explainReview, result: { ...explainReview.result, findings: [retryFinding] } }
+    const changed = {
+      ...review,
+      result: { ...review.result, findings: [{ ...retryFinding, summary: "Retries now back off." }] }
+    }
+    const before = codeCommitRelayAbout("F1", review, onClear)
+    const after = codeCommitRelayAbout("F1", changed, onClear)
+    expect(before?.label).toBe("Finding: Retry amplification")
+    expect(after?.label).toBe("Finding: Retry amplification")
+    expect(after?.id).not.toBe(before?.id)
+    expect(codeCommitRelayAbout("F1", null, onClear)).toMatchObject({ id: "F1", label: "Finding: F1" })
+    expect(codeCommitRelayAbout(null, review, onClear)).toBeUndefined()
+  })
 })

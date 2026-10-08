@@ -575,6 +575,36 @@ test("opens Relay from the header and discusses findings in its panel", async ({
   await expect(page.getByLabel("Message Relay")).toHaveCount(1)
 })
 
+test("hands a finding from the findings drawer to Relay, which takes input", async ({ page }) => {
+  const targets: Array<string> = []
+  page.on("request", (request) => {
+    if (request.url().includes("/relay-review/continue")) {
+      targets.push(Schema.decodeUnknownSync(ContinuationTarget)(request.postDataJSON()).findingId)
+    }
+  })
+  await page.setViewportSize({ height: 800, width: 1000 })
+  await routeReviewWorkspace(page)
+  await page.goto("/accounts/111111111111/prs/42")
+  await page.getByRole("button", { exact: true, name: "Relay review" }).click()
+  await page.getByRole("dialog", { exact: true, name: "Relay review" }).getByRole("button", { name: "Run Relay" })
+    .click()
+  const drawer = page.getByRole("dialog", { name: /^Findings/ })
+  await expect(drawer).toBeVisible()
+
+  // Discuss closes the modal drawer, which would otherwise leave Relay inert behind it.
+  await discussInRelay(page, /Retry amplification/)
+  await expect(drawer).toBeHidden()
+  const composer = relayPanel(page).getByLabel("Message Relay")
+  await expect(composer).toBeFocused()
+  await composer.fill("Is the retry bounded?")
+  await relayPanel(page).getByRole("button", { exact: true, name: "Send" }).click()
+  await expect.poll(() => targets).toEqual(["F1"])
+
+  // Closing Relay returns to the drawer's trigger, the visible control behind the Discuss.
+  await closeRelay(page)
+  await expect(page.getByRole("button", { name: /^Findings/ })).toBeFocused()
+})
+
 test("shows an actionable error when Relay profiles cannot load", async ({ page }) => {
   await routeReviewWorkspace(page, "review", undefined, undefined, { configStatus: 500 })
 
