@@ -258,6 +258,39 @@ test.describe("touch", () => {
     expect(await resizes()).toBe(before)
   })
 
+  test("Paste sends the clipboard as input and releases a latched modifier first", async ({ page }) => {
+    await open(page)
+    await page.evaluate(() => navigator.clipboard.writeText("echo pasted"))
+    const ctrl = page.getByRole("button", { name: "Ctrl", exact: true })
+    await ctrl.tap()
+    await expect(ctrl).toHaveAttribute("aria-pressed", "true")
+    await page.getByRole("button", { name: "Paste from clipboard" }).tap()
+    await expect
+      .poll(async () => (await commands(page)).some((command) => command.text?.includes("echo pasted") === true))
+      .toBe(true)
+    await expect(ctrl).toHaveAttribute("aria-pressed", "false")
+  })
+
+  for (const width of [320, 390]) {
+    test(`every rail label fits inside its button at ${String(width)}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 700 })
+      await open(page)
+      const overflowing = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLButtonElement>("[data-terminal-key]")]
+          .filter((button) => button.scrollWidth > button.clientWidth)
+          .map((button) => button.textContent ?? "")
+      )
+      expect(overflowing).toEqual([])
+    })
+  }
+
+  test("an empty clipboard says there is nothing to paste", async ({ page }) => {
+    await open(page)
+    await page.evaluate(() => navigator.clipboard.writeText(""))
+    await page.getByRole("button", { name: "Paste from clipboard" }).tap()
+    await expect(page.getByText("Nothing to paste: the clipboard has no text.")).toBeVisible()
+  })
+
   test("a vertical pan follows the finger, scrolls the server, and never raises the keyboard", async ({ page }) => {
     await open(page)
     const client = await page.context().newCDPSession(page)

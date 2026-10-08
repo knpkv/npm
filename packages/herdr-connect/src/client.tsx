@@ -87,6 +87,28 @@ class ConnectPreferenceError extends Schema.TaggedError<ConnectPreferenceError>(
   cause: Schema.Defect()
 }) {}
 
+/** The clipboard could not be read: no clipboard API here, or the reader refused or failed. */
+class ConnectClipboardError extends Schema.TaggedError<ConnectClipboardError>()("ConnectClipboardError", {
+  reason: Schema.Literals(["unavailable", "refused"]),
+  cause: Schema.Defect()
+}) {}
+
+/**
+ * Start reading the clipboard now, inside the tap that asked: iOS shows its Paste confirmation only
+ * for a read begun within the gesture. The result is awaited later as an Effect.
+ */
+const startClipboardRead = (): Effect.Effect<string, ConnectClipboardError> => {
+  const clipboard = Predicate.hasProperty(window.navigator, "clipboard") ? window.navigator.clipboard : undefined
+  if (clipboard === undefined || !Predicate.isFunction(clipboard.readText)) {
+    return Effect.fail(new ConnectClipboardError({ reason: "unavailable", cause: "navigator.clipboard.readText" }))
+  }
+  const reading = clipboard.readText()
+  return Effect.tryPromise({
+    try: () => reading,
+    catch: (cause) => new ConnectClipboardError({ reason: "refused", cause })
+  })
+}
+
 class ConnectInputQueueError extends Schema.TaggedError<ConnectInputQueueError>()("ConnectInputQueueError", {
   detail: Schema.String
 }) {}
@@ -310,6 +332,8 @@ type TerminalKeyboardCallbacks = {
   readonly setTerminalFocus: (target: HTMLElement, focus: () => void) => () => void
   readonly reportError: (error: TerminalInputApplication) => void
   readonly setInputSender: (sendInput: (command: TerminalInputCommand) => boolean) => () => void
+  /** Registers the terminal's paste, which brackets the text when the program asked for it. */
+  readonly setPaste: (paste: (text: string) => void) => () => void
   readonly setCursorModeReader: (read: () => TerminalCursorMode) => () => void
   readonly interactionView: TerminalInteractionView
   readonly setInteraction: (interaction: TerminalInteraction) => () => void
@@ -409,6 +433,8 @@ const terminalWorker = (
       const sendInput = (text: string): boolean => send({ type: "terminal.input", text })
       const releaseInputSender = keyboard.setInputSender((command) => send(command))
       yield* Effect.addFinalizer(() => Effect.sync(releaseInputSender))
+      const releasePaste = keyboard.setPaste((text) => terminal.terminal.paste(text))
+      yield* Effect.addFinalizer(() => Effect.sync(releasePaste))
       const releaseCursorModeReader = keyboard.setCursorModeReader(() =>
         terminal.terminal.getMode(1) ? "application" : "normal"
       )
@@ -613,6 +639,35 @@ export const ConnectSurface = ({
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
   // Follows the terminal input's real focus, so the Keyboard button matches what iOS shows.
   const [keyboardOpen, setKeyboardOpen] = useState(false)
+  const terminalPasteRef = useRef<((text: string) => void) | null>(null)
+  const pasteClipboard = (): void => {
+    const paste = terminalPasteRef.current
+    if (paste === null) return
+    Effect.runFork(
+      startClipboardRead().pipe(
+        Effect.tap((text) =>
+          Effect.sync(() => {
+            if (text === "") {
+              setTerminalKeyError("Nothing to paste: the clipboard has no text.")
+              return
+            }
+            // A latched Ctrl or Alt would be applied to the pasted text; pasting releases it.
+            terminalModifierRef.current = null
+            setTerminalModifier(null)
+            setTerminalKeyError(null)
+            paste(text)
+          })
+        ),
+        Effect.catch((error) =>
+          Effect.sync(() =>
+            setTerminalKeyError(
+              error.reason === "unavailable" ? "Paste isn't available in this browser." : "Paste was not allowed."
+            )
+          )
+        )
+      )
+    )
+  }
   // Synchronous inside the button's click: iOS raises its keyboard only within the gesture.
   const toggleKeyboard = (open: boolean): void => {
     const target = terminalFocusTargetRef.current
@@ -794,6 +849,12 @@ export const ConnectSurface = ({
               if (terminalInputOwnerRef.current !== owner) return
               terminalInputOwnerRef.current = null
               terminalInputRef.current = () => false
+            }
+          },
+          setPaste: (paste) => {
+            terminalPasteRef.current = paste
+            return () => {
+              if (terminalPasteRef.current === paste) terminalPasteRef.current = null
             }
           },
           setCursorModeReader: (read) => {
@@ -1175,6 +1236,7 @@ export const ConnectSurface = ({
         onFocusTerminal={() => terminalFocusRef.current()}
         onKey={sendTerminalRailKey}
         onKeyboardToggle={toggleKeyboard}
+        onPaste={pasteClipboard}
         onKeysHiddenChange={changeTerminalKeysHidden}
         onModifierChange={changeTerminalModifier}
         onSelectText={() => terminalInteractionRef.current?.selectText()}
