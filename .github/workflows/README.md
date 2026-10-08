@@ -267,7 +267,10 @@ concurrency:
   cancel-in-progress: true
 ```
 
-This prevents resource waste and speeds up CI feedback.
+This prevents resource waste and speeds up CI feedback. `check.yml` is the exception on main: it
+sets `cancel-in-progress: ${{ github.event_name == 'pull_request' }}`, because main receives pushes faster
+than a full run completes, and cancelling there left main with no completed check run. Main runs queue
+instead; GitHub keeps one running and only the newest pending one.
 
 ---
 
