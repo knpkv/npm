@@ -3,7 +3,7 @@
  * Both are preloaded: the mono face sets ids and kickers, and loading it late re-wrapped a line in
  * the Approvals detail at 390 (CLS 0.069).
  */
-export const PRELOADED_FONTS: ReadonlyArray<string> = [
+export const PRELOADED_FONTS: readonly [string, string] = [
   "geist-latin-wght-normal.woff2",
   "geist-mono-latin-wght-normal.woff2"
 ]

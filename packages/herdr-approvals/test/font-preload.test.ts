@@ -25,6 +25,6 @@ describe("approval pages preload Geist", () => {
   it("preloads every face rly's styles load", () => {
     const fonts = readFileSync(join(import.meta.dirname, "../../rly/src/styles/fonts.css"), "utf8")
     const loaded = [...fonts.matchAll(/url\("[^"]*\/([^"/]+\.woff2)"\)/g)].map(([, file]) => file)
-    expect(loaded.toSorted()).toEqual([...PRELOADED_FONTS].toSorted())
+    expect([...loaded].sort()).toEqual([...PRELOADED_FONTS].sort())
   })
 })
