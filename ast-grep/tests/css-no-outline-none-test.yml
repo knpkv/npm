@@ -1,6 +1,8 @@
 id: css-no-outline-none
 valid:
   - |
+    @media (width < 48rem) { @media (forced-colors: active) { .b { outline: none; } } }
+  - |
     .x:focus-visible { outline: var(--rly-focus-ring-width) solid transparent; }
   - |
     @media (forced-colors: active) { .x { outline: none; } }
@@ -13,3 +15,5 @@ invalid:
     .x:focus:not(:focus-visible) { outline: 0; }
   - |
     .x { outline-style: none; }
+  - |
+    @media (width < 48rem) { .a { outline: none; } @media (forced-colors: active) { .b { outline: none; } } }

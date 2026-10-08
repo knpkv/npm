@@ -45,3 +45,18 @@ snapshots:
         style: secondary
         start: 40
         end: 41
+  ? |
+    @media (width < 48rem) { .a { outline: none; } @media (forced-colors: active) { .b { outline: none; } } }
+  : labels:
+      - source: "outline: none;"
+        style: primary
+        start: 30
+        end: 44
+      - source: outline
+        style: secondary
+        start: 30
+        end: 37
+      - source: none
+        style: secondary
+        start: 39
+        end: 43

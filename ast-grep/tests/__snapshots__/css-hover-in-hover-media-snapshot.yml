@@ -33,3 +33,14 @@ snapshots:
         style: secondary
         start: 28
         end: 33
+  ? |
+    @media (width < 48rem) { .a:hover { color: red; } @media (hover: hover) { .b:hover { color: red; } } }
+  : labels:
+      - source: .a:hover
+        style: primary
+        start: 25
+        end: 33
+      - source: hover
+        style: secondary
+        start: 28
+        end: 33

@@ -18,11 +18,16 @@ rule:
         - has:
             kind: integer_value
             regex: "^0$"
+  # Match the query, not the whole @media text: a nested forced-colours block must not excuse the
+  # outer rules.
   not:
     inside:
       kind: media_statement
-      regex: "(?i)forced-colors"
       stopBy: end
+      has:
+        not:
+          kind: block
+        regex: "(?i)forced-colors"
 
 files:
   - "packages/herdr-monitor/src/**/*.css"
