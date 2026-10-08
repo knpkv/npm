@@ -46,7 +46,7 @@
     inline-size: var(--rly-control-height-principal);
   }
 
-  @media (hover: hover) {
+  @media (hover: hover) and (pointer: fine) {
     .root:not(:disabled):hover {
       border-color: var(--rly-color-text-2);
     }

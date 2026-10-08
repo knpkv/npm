@@ -61,7 +61,11 @@ const renderSchemeColors = (): string =>
     .map((token) => declaration(`color-${token.name}`, `light-dark(${token.light}, ${token.dark})`))
     .join("\n")
 
-/** Render the complete central token/theme layer. */
+/**
+ * Render the complete central token/theme layer. Colours are declared once, on :root, as light-dark(): an
+ * unregistered custom property resolves light-dark() where it is used, so a [data-theme] subtree only
+ * sets color-scheme and its descendants pick the matching value without the tokens being re-declared.
+ */
 export const renderTokenCss = (): string => {
   validateTokenSource()
   const root = [
@@ -104,26 +108,8 @@ ${root}
   :root:is([data-theme="system"], [data-rly-theme="system"]),
   :where([data-theme="system"], [data-rly-theme="system"]) { color-scheme: light dark; }
 
-  :root:is(
-    [data-theme="light"], [data-rly-theme="light"],
-    [data-theme="dark"], [data-rly-theme="dark"],
-    [data-theme="system"], [data-rly-theme="system"]
-  ),
-  :where(
-    [data-theme="light"], [data-rly-theme="light"],
-    [data-theme="dark"], [data-rly-theme="dark"],
-    [data-theme="system"], [data-rly-theme="system"]
-  ) {
-${renderSchemeColors()}
-  }
-
   @media (forced-colors: active) {
-    :root,
-    :where(
-      [data-theme="light"], [data-rly-theme="light"],
-      [data-theme="dark"], [data-rly-theme="dark"],
-      [data-theme="system"], [data-rly-theme="system"]
-    ) {
+    :root {
 ${renderForcedColors()}
     }
   }

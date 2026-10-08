@@ -177,6 +177,15 @@ test.describe("touch", () => {
       .toBe(true)
   })
 
+  // iOS zooms into a field under 16px when it takes focus; the page no longer locks zoom to hide it.
+  test("the terminal's text input is at least 16px, so focusing it does not zoom the page", async ({ page }) => {
+    await open(page)
+    const fontSize = await page
+      .locator("#connect-terminal-input")
+      .evaluate((input) => Number.parseFloat(getComputedStyle(input).fontSize))
+    expect(fontSize).toBeGreaterThanOrEqual(16)
+  })
+
   test("the Keys toggle hides the modifier and terminal keys, and the choice survives a reload", async ({ page }) => {
     await open(page)
     const keys = page.getByRole("button", { name: "Hide terminal keys" })
@@ -216,6 +225,79 @@ test.describe("touch", () => {
     await page.getByRole("button", { name: "Jump to latest output" }).tap()
     await expect(olderOutput(page)).toHaveCount(0)
     expect((await railBox.boundingBox())?.height).toBe(behind)
+  })
+
+  test("the Keyboard button opens and closes the keyboard, and follows a tap on the terminal", async ({ page }) => {
+    await open(page)
+    const keyboard = page.getByRole("button", { name: "Keyboard", exact: true })
+    const focusedId = () => page.evaluate(() => document.activeElement?.id ?? "")
+    await expect(keyboard).toHaveAttribute("aria-pressed", "false")
+
+    await keyboard.tap()
+    await expect.poll(focusedId).toBe("connect-terminal-input")
+    await expect(keyboard).toHaveAttribute("aria-pressed", "true")
+
+    await keyboard.tap()
+    await expect.poll(focusedId).not.toBe("connect-terminal-input")
+    await expect(keyboard).toHaveAttribute("aria-pressed", "false")
+
+    const cell = await cellPoint(page, "290 ", 2)
+    await page.touchscreen.tap(cell.x, cell.y)
+    await expect(keyboard).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("the lines-back badge never changes the terminal's rows, and lets taps through", async ({ page }) => {
+    await open(page, { mode: "known", start: 50 })
+    await expect(olderOutput(page)).toHaveAccessibleName("Older output, 50 lines back")
+    const canvas = page.locator(".ghostty-terminal canvas")
+    const behind = (await canvas.boundingBox())?.height
+    const badge = await olderOutput(page).boundingBox()
+    if (badge === null) throw new Error("lines-back badge missing")
+    // The badge sits over the terminal but the tap lands on the terminal under it.
+    const under = await page.evaluate(({ x, y }) => document.elementFromPoint(x, y)?.tagName ?? "", {
+      x: badge.x + badge.width / 2,
+      y: badge.y + badge.height / 2
+    })
+    expect(under).toBe("CANVAS")
+    const resizes = async () => (await commands(page)).filter((command) => command.type === "terminal.resize").length
+    const before = await resizes()
+    await page.getByRole("button", { name: "Jump to latest output" }).tap()
+    await expect(olderOutput(page)).toHaveCount(0)
+    expect((await canvas.boundingBox())?.height).toBe(behind)
+    expect(await resizes()).toBe(before)
+  })
+
+  test("Paste sends the clipboard as input and releases a latched modifier first", async ({ page }) => {
+    await open(page)
+    await page.evaluate(() => navigator.clipboard.writeText("echo pasted"))
+    const ctrl = page.getByRole("button", { name: "Ctrl", exact: true })
+    await ctrl.tap()
+    await expect(ctrl).toHaveAttribute("aria-pressed", "true")
+    await page.getByRole("button", { name: "Paste from clipboard" }).tap()
+    await expect
+      .poll(async () => (await commands(page)).some((command) => command.text?.includes("echo pasted") === true))
+      .toBe(true)
+    await expect(ctrl).toHaveAttribute("aria-pressed", "false")
+  })
+
+  for (const width of [320, 390]) {
+    test(`every rail label fits inside its button at ${String(width)}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 700 })
+      await open(page)
+      const overflowing = await page.evaluate(() =>
+        [...document.querySelectorAll<HTMLButtonElement>("[data-terminal-key]")]
+          .filter((button) => button.scrollWidth > button.clientWidth)
+          .map((button) => button.textContent ?? "")
+      )
+      expect(overflowing).toEqual([])
+    })
+  }
+
+  test("an empty clipboard says there is nothing to paste", async ({ page }) => {
+    await open(page)
+    await page.evaluate(() => navigator.clipboard.writeText(""))
+    await page.getByRole("button", { name: "Paste from clipboard" }).tap()
+    await expect(page.getByText("Nothing to paste: the clipboard has no text.")).toBeVisible()
   })
 
   test("a vertical pan follows the finger, scrolls the server, and never raises the keyboard", async ({ page }) => {

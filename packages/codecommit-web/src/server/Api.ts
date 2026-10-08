@@ -57,6 +57,20 @@ export class ForbiddenApiError extends Schema.TaggedError<ForbiddenApiError>()(
   { httpApiStatus: 403 }
 ) {}
 
+/** The route's account is configured but switched off; the browser offers to switch it on. */
+export class AccountSwitchedOffApiError extends Schema.TaggedError<AccountSwitchedOffApiError>()(
+  "AccountSwitchedOffApiError",
+  { message: Schema.String, profile: Schema.String },
+  { httpApiStatus: 409 }
+) {}
+
+/** No configured profile is known to own the route's account. */
+export class AccountUnknownApiError extends Schema.TaggedError<AccountUnknownApiError>()(
+  "AccountUnknownApiError",
+  { message: Schema.String },
+  { httpApiStatus: 404 }
+) {}
+
 /** Process-scoped owner session required by every CodeCommit API endpoint. */
 export class OwnerSessionAuth extends HttpApiMiddleware.Service<OwnerSessionAuth>()(
   "@knpkv/codecommit-web/OwnerSessionAuth",
@@ -403,7 +417,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
       query: PullRequestRefreshCoordinates,
       success: PullRequestRefreshResponse,
-      error: ApiError
+      error: [ApiError, AccountSwitchedOffApiError, AccountUnknownApiError]
     })
   )
   .add(

@@ -1,0 +1,21 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-viewport-zoom-lock
+language: tsx
+severity: error
+message: "Don't lock zoom in the viewport meta (maximum-scale, user-scalable=no); keep fields at 16px instead"
+
+rule:
+  any:
+    - kind: string_fragment
+    - kind: template_string
+  regex: "(?i)name=\"viewport\"[^>]*(maximum-scale|user-scalable\\s*=\\s*(no|0))"
+
+files:
+  - "packages/*/src/**/*.ts"
+  - "packages/*/src/**/*.tsx"
+
+note: |
+  good-css: never block pinch zoom. iOS zooms into a field under 16px when it takes focus, which is
+  what a zoom lock was usually hiding; set `font-size: max(16px, 1rem)` on the field instead
+  (herdr-connect: the search and Ghostty's hidden #connect-terminal-input).

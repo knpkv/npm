@@ -141,6 +141,26 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   await page.getByLabel("Theme").selectOption("dark")
   await expect.poll(() => page.evaluate(() => localStorage.getItem("cc_theme"))).toBe("dark")
 
+  // At 320px the stacked gutters once left the Browsers card no room: its Retry button poked past the
+  // card edge, and with rly's shrinkable reset the heading split mid-word ("Brows/ers").
+  await page.setViewportSize({ width: 320, height: 900 })
+  const browsersHeading = page.getByRole("heading", { name: "Browsers" })
+  const browsersCard = browsersHeading.locator("xpath=ancestor::section[1]")
+  const escaping = await browsersCard.evaluate((card) => {
+    const edge = card.getBoundingClientRect().right
+    return [...card.querySelectorAll("*")].filter((element) => element.getBoundingClientRect().right > edge + 0.5)
+      .map((element) => element.tagName.toLowerCase())
+  })
+  expect(escaping).toEqual([])
+  const headingLines = await browsersHeading.evaluate((heading) => {
+    const lineHeight = heading.ownerDocument.defaultView?.getComputedStyle(heading).lineHeight
+    return lineHeight === undefined
+      ? Number.NaN
+      : Math.round(heading.getBoundingClientRect().height / Number.parseFloat(lineHeight))
+  })
+  expect(headingLines).toBe(1)
+  await page.setViewportSize({ width: 1280, height: 900 })
+
   const presentationAudit = productionRouteAuditCase(
     "workspace-settings",
     "settings",

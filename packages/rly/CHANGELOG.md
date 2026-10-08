@@ -1,5 +1,29 @@
 # @knpkv/rly
 
+## 0.16.0
+
+### Minor Changes
+
+- [#654](https://github.com/knpkv/npm/pull/654) [`4a41bf8`](https://github.com/knpkv/npm/commit/4a41bf82e327ec66a5df1202920f08e8e51554a4) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayDecision`, the confirmation before one Relay write: the exact target and text, Confirm or Don't for that call only, a latch against double confirmation, a danger tone, and outcomes from Posting… to Done with a receipt, Failed, Declined and Expired, announced once per call.
+
+- [#657](https://github.com/knpkv/npm/pull/657) [`e584518`](https://github.com/knpkv/npm/commit/e584518c9c98186e331a9962c4c6347c470cb3c5) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayFindings`, Relay's review findings: grouped by location, severity as icon, word and P-number, Accept and Dismiss toggles, Discuss, posting accepted findings one confirmed call at a time, a stale banner that holds line findings until a re-run, and before-side lines that never open a head line.
+
+- [#656](https://github.com/knpkv/npm/pull/656) [`d476bb0`](https://github.com/knpkv/npm/commit/d476bb0b2e2399c72eb2cd7b8c6005d833464598) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelaySetup`, Relay's in-panel first run: choose a ready agent from real backend status (not checked yet, checking, ready, or unavailable with its cause, fix and Check again), choose a focus, then start, with Start saying what is missing until both are chosen.
+
+- [#659](https://github.com/knpkv/npm/pull/659) [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327) Thanks [@konopkov](https://github.com/konopkov)! - `RelayTranscript` shows a neutral `Note` item for system messages (why a send was refused, a changed registration), attributed to neither turn and not announced.
+
+- [#651](https://github.com/knpkv/npm/pull/651) [`765e850`](https://github.com/knpkv/npm/commit/765e850895d4edc16a75b3af072f71d527ad0b8c) Thanks [@konopkov](https://github.com/konopkov)! - Add `RelayTranscript`, Relay's conversation: your turns, Relay's prose with in-place code blocks, collapsed tool activity with location citations, run outcomes, a polite run announcer, and scroll that follows new content only while you are at the end.
+
+### Patch Changes
+
+- [#663](https://github.com/knpkv/npm/pull/663) [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6) Thanks [@konopkov](https://github.com/konopkov)! - `RelayComposer`'s preset slot shrinks with the panel, so a long preset name truncates in its trigger instead of widening the composer past the panel's edge.
+
+- [#676](https://github.com/knpkv/npm/pull/676) [`67f7ea1`](https://github.com/knpkv/npm/commit/67f7ea1a5e3c0281da1d627fce940975e2db0cf4) Thanks [@konopkov](https://github.com/konopkov)! - Hover styles apply only on a hover-capable fine pointer, so touch taps no longer leave controls looking hovered. The composer draws the focus ring around its whole box, and a keyboard-highlighted Select option shows the ring, so it no longer looks the same as the checked option.
+
+- [#677](https://github.com/knpkv/npm/pull/677) [`f5f5fd9`](https://github.com/knpkv/npm/commit/f5f5fd98dcea7b7df1b226043e89ffb6decaffad) Thanks [@konopkov](https://github.com/konopkov)! - The bounded diff view uses logical borders and alignment, and its code is pinned left to right (isolated), so an RTL host never mirrors code. Centred text that can overflow falls back to the start edge where `safe center` is supported (an `@supports` block, so older browsers keep `center`); shrink-wrapped marks and avatars stay plainly centred. Sheets and the Relay dock size to `100dvh` without a `100vh` fallback.
+
+- [#678](https://github.com/knpkv/npm/pull/678) [`ce3234a`](https://github.com/knpkv/npm/commit/ce3234a201e3336b17f22219c8215d11eecc3408) Thanks [@konopkov](https://github.com/konopkov)! - Clipping containers use `overflow: clip` instead of `hidden`, so they are no longer accidental scroll containers: moving focus to a partly clipped child can't scroll their content out of place, and sticky descendants work. Painting is unchanged.
+
 ## 0.15.0
 
 ### Minor Changes

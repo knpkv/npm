@@ -3,6 +3,7 @@ import { Atom, AtomRegistry } from "effect/reactivity"
 import {
   MAX_CONFIRM_BATCH,
   type ReadProgress,
+  type Sources,
   type WeekPlanResponse,
   type WeekScopeName,
   type WriteResultResponse
@@ -44,6 +45,8 @@ export interface WeekTransport {
   readonly confirmRow: typeof Api.confirmRow
   /** Absent in a transport without the batch route; the queue then confirms one at a time. */
   readonly confirmRows?: typeof Api.confirmRows | undefined
+  /** Absent in a transport without the sources route; every system then counts as connected. */
+  readonly readSources?: typeof Api.readSources | undefined
   readonly logManual: typeof Api.logManual
   readonly updateSavedEntry: typeof Api.updateSavedEntry
   readonly mapStandingAttribution: typeof Api.mapStandingAttribution
@@ -79,7 +82,14 @@ interface ReviewStatus {
   readonly written: WriteResultResponse | null
   readonly configurationChanged: boolean
   readonly fresh: boolean
+  /** The server refused this tab's session: only a new link from the terminal gets back in. */
+  readonly signedOut: boolean
+  /** Which systems are connected; null until the first read answers. */
+  readonly sources: Sources | null
 }
+
+/** A 401 means this tab holds no valid session, whichever request saw it first. */
+const isSignedOut = (cause: unknown): boolean => Predicate.hasProperty(cause, "status") && cause.status === 401
 
 const messageOf = (cause: unknown): string => Predicate.isError(cause) ? cause.message : String(cause)
 const excerpt = (text: string): string =>
@@ -110,15 +120,18 @@ export const makeWeekReview = (
     actionFailure: null,
     written: null,
     configurationChanged: false,
-    fresh: false
+    fresh: false,
+    signedOut: false,
+    sources: null
   })
   const state = Atom.make((get) => {
     const current = get(status)
     const view = get(atoms.visible)
     const queued = get(atoms.queued)
+    // A system that is not connected is never a write target, whatever the layers say.
     const writeTargets = {
-      jira: current.layers.jira && current.scope !== "clockify",
-      clockify: current.layers.clockify && current.scope !== "jira"
+      jira: current.layers.jira && current.scope !== "clockify" && current.sources?.jira.connected !== false,
+      clockify: current.layers.clockify && current.scope !== "jira" && current.sources?.clockify.connected !== false
     }
     const queueUnavailable = current.busy || current.loading || !current.fresh ||
       (!writeTargets.jira && !writeTargets.clockify) || view.plan === null ||
@@ -152,7 +165,8 @@ export const makeWeekReview = (
 
   const load = async (request: ReadRequest) => {
     if (readLocked()) return
-    const { mode, scope, week } = request
+    const { mode, week } = request
+    let scope = request.scope
     lastRead = request
     active?.abort()
     const controller = new AbortController()
@@ -181,6 +195,26 @@ export const makeWeekReview = (
         throw cause
       }
       if (!isCurrent()) return
+      if (transport.readSources !== undefined) {
+        // Only a sign-out stops the read. Any other failure leaves the last known state and lets each
+        // provider's own read report what is wrong with it.
+        const sources = await transport.readSources(controller.signal).catch((cause: unknown) => {
+          if (isSignedOut(cause)) throw cause
+          return null
+        })
+        if (!isCurrent()) return
+        if (sources !== null) {
+          update({ sources })
+          // A remembered single-system scope whose system is no longer connected would read nothing
+          // and leave no scope selected; read both, which shows whatever is connected.
+          if ((scope === "jira" && !sources.jira.connected) || (scope === "clockify" && !sources.clockify.connected)) {
+            scope = "both"
+            lastRead = { ...request, scope }
+            update({ scope })
+            preferences.rememberScope(scope)
+          }
+        }
+      }
       const onProgress = (progress: ReadProgress) => {
         if (!isCurrent()) return
         const previous = registry.get(status)
@@ -235,7 +269,8 @@ export const makeWeekReview = (
       update({ monday: next.monday, fresh: true, missingPlan: next.sessionScanAvailable === false })
       preferences.rememberWeek(next.monday)
     } catch (cause) {
-      if (isCurrent()) update({ failure: messageOf(cause) })
+      if (isSignedOut(cause)) update({ signedOut: true })
+      else if (isCurrent()) update({ failure: messageOf(cause) })
     } finally {
       if (active === controller) update({ loading: false })
     }
@@ -256,7 +291,7 @@ export const makeWeekReview = (
       await action()
       return true
     } catch (cause) {
-      update({ actionFailure: messageOf(cause) })
+      update(isSignedOut(cause) ? { signedOut: true } : { actionFailure: messageOf(cause) })
       return false
     } finally {
       update({ busy: false })
@@ -372,7 +407,8 @@ export const makeWeekReview = (
             if (failures.length > 0) recordQueueFailure(failures.join("; "))
           }
         } catch (cause) {
-          recordQueueFailure(messageOf(cause))
+          if (isSignedOut(cause)) update({ signedOut: true })
+          else recordQueueFailure(messageOf(cause))
         }
       }
     } finally {

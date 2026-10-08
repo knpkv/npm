@@ -169,8 +169,15 @@ test("resolves compact Relay layout from a cross-window portal target", async ({
     await sheet.evaluate((element) => {
       const box = element.getBoundingClientRect()
       const computed = getComputedStyle(element)
+      // The background as the sRGB it paints, whatever colour space the token is written in.
+      const context = element.ownerDocument.createElement("canvas").getContext("2d")
+      if (context !== null) {
+        context.fillStyle = computed.backgroundColor
+        context.fillRect(0, 0, 1, 1)
+      }
+      const [r = 0, g = 0, b = 0] = context?.getImageData(0, 0, 1, 1).data ?? []
       return {
-        backgroundColor: computed.backgroundColor,
+        backgroundColor: `rgb(${String(r)}, ${String(g)}, ${String(b)})`,
         height: box.height,
         position: computed.position,
         styleSheets: element.ownerDocument.styleSheets.length,

@@ -147,6 +147,10 @@ All packages in this repository follow:
 - **Changesets** - Semantic versioning and changelog generation
 - **CI/CD automation** - Automated checks, tests, and releases
 
+## Browser Support
+
+Every browser build targets one list, `BROWSER_TARGET` in [`browser-target.ts`](browser-target.ts): Chrome 123, Edge 123, Firefox 120 and Safari 17.6. Each Vite build sets `build.target` from it (Lightning CSS reads the same list through `build.cssTarget`), and so do the esbuild asset scripts. The floor is what the CSS uses without fallbacks: `light-dark()` (Chrome 123, Safari 17.5) and `safe` alignment (Safari 17.6). Vite's own default is older (Chrome 111, Safari 16.4), so a build left on it would rewrite those features for browsers the apps don't support. `scripts/check-browser-target.test.mjs`, part of `pnpm lint`, fails when a build sets its own target or none.
+
 ## Publishing
 
 Packages are published to npm under the [@knpkv scope](https://www.npmjs.com/org/knpkv).

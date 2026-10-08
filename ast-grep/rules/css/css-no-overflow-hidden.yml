@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: css-no-overflow-hidden
+language: css
+severity: error
+message: "Use overflow: clip, not hidden; hidden makes a scroll container and breaks position: sticky"
+
+rule:
+  kind: declaration
+  all:
+    - has:
+        kind: property_name
+        regex: "(?i)^overflow(-x|-y|-inline|-block)?$"
+    - has:
+        kind: plain_value
+        regex: "(?i)^hidden$"
+
+files:
+  - "packages/herdr-monitor/src/**/*.css"
+  - "packages/review/src/**/*.css"
+  - "packages/agent-usage/src/**/*.css"
+
+note: |
+  overflow: clip cuts the same way without a scroll container. Keep hidden only where script scrolls
+  the element programmatically, with a preceding /* ast-grep-ignore: css-no-overflow-hidden */.

@@ -30,7 +30,7 @@ import { heldWriteProviders, ignoredTicketTotals } from "./writeHolds.js"
 import { WeekGrid } from "./WeekGrid.js"
 import { makeRowDescriptions } from "./rowDescriptions.js"
 import { SavedEntryPanel } from "./SavedEntryPanel.js"
-import type { SavedEntry, WriteResultResponse } from "../shared/contracts.js"
+import type { SavedEntry, Sources, WriteResultResponse } from "../shared/contracts.js"
 
 const AgentSettingsPanel = lazy(() => import("./AgentSettingsPanel.js"))
 
@@ -59,16 +59,19 @@ const logTimeReason = (state: {
   readonly plan: unknown
   readonly writeTargets: { readonly jira: boolean; readonly clockify: boolean }
   readonly queueActive: boolean
+  readonly sources: Sources | null
 }): string =>
-  state.loading
-    ? "Waiting for the week to load."
-    : state.plan === null
-      ? "Load a week first."
-      : state.busy || state.queueActive
-        ? "Waiting for the current save to finish."
-        : !state.writeTargets.jira && !state.writeTargets.clockify
-          ? "Show the Jira or Clockify layer to log time to it."
-          : "Refresh totals to read current time before logging."
+  state.sources !== null && !state.sources.jira.connected && !state.sources.clockify.connected
+    ? "Connect Jira or Clockify first."
+    : state.loading
+      ? "Waiting for the week to load."
+      : state.plan === null
+        ? "Load a week first."
+        : state.busy || state.queueActive
+          ? "Waiting for the current save to finish."
+          : !state.writeTargets.jira && !state.writeTargets.clockify
+            ? "Show the Jira or Clockify layer to log time to it."
+            : "Refresh totals to read current time before logging."
 
 /**
  * The cause as the server named it, what the page still shows, and what to do. A failed read never
@@ -85,6 +88,81 @@ const incompleteWrite = (result: WriteResultResponse | null): boolean =>
   [result.clockify, result.jira].some(
     (outcome) => outcome._tag === "Refused" || outcome._tag === "NotLoggedIn" || outcome._tag === "PartiallyWritten"
   )
+
+/**
+ * A terminal command the reader has to run, with a Copy button: the one thing they must type, made
+ * one click. If the clipboard is unavailable the button says so and the command stays selectable.
+ */
+const Command = (props: { readonly command: string }) => {
+  const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle")
+  return (
+    <span className="jcf-command">
+      <code>{props.command}</code>
+      <Button
+        aria-label={`Copy ${props.command}`}
+        onClick={() => {
+          navigator.clipboard.writeText(props.command).then(
+            () => setCopied("copied"),
+            () => setCopied("failed")
+          )
+        }}
+        size="compact"
+      >
+        {copied === "copied" ? "Copied" : copied === "failed" ? "Select to copy" : "Copy"}
+      </Button>
+    </span>
+  )
+}
+
+/** A system jcf cannot read: its totals are unknown, not zero, and this says what connects it. */
+const NotConnected = (props: { readonly command: string }) => (
+  <span className="jcf-not-connected">
+    not connected. Run <Command command={props.command} />
+  </span>
+)
+
+/** A first-run screen: a heading in text ink and the step that gets past it. */
+const FirstRun = (props: { readonly title: string; readonly children: ReactNode }) => (
+  <section className="jcf-first-run" aria-labelledby="jcf-first-run-title">
+    <Text as="h2" id="jcf-first-run-title" variant="card-title">
+      {props.title}
+    </Text>
+    {props.children}
+  </section>
+)
+
+/**
+ * The page without a valid session: one screen naming the command that mints a new link. Nothing else
+ * renders, because nothing else can work until the tab is signed in.
+ */
+const SignedOut = (props: { readonly theme: RlyTheme }) => {
+  // A link pasted into this tab changes only the fragment, which loads nothing: start over with it.
+  useEffect(() => {
+    const signIn = () => {
+      if (window.location.hash.includes("bootstrap_token=")) window.location.reload()
+    }
+    window.addEventListener("hashchange", signIn)
+    return () => window.removeEventListener("hashchange", signIn)
+  }, [])
+  return (
+    <ThemeProvider className="jcf-shell" theme={props.theme}>
+      <main className="jcf-app jcf-signed-out">
+        <Text as="h1" variant="section-title">
+          Jira and Clockify week
+        </Text>
+        <FirstRun title="This tab is not signed in">
+          <p>In a terminal on this machine, run this and open the link it prints:</p>
+          <p>
+            <Command command="jcf web login" />
+          </p>
+          <p className="jcf-muted">
+            A link works once, within a minute. If jcf-web is not running, start it with <code>jcf-web</code>.
+          </p>
+        </FirstRun>
+      </main>
+    </ThemeProvider>
+  )
+}
 
 export const App = () => {
   const registry = useContext(RegistryContext)
@@ -107,10 +185,22 @@ export const App = () => {
     progress,
     readMode,
     scope,
+    signedOut,
+    sources,
     startedAt,
     unavailable,
     written
   } = state
+  // Not known yet counts as connected: "Not connected" is shown only once the server has said so.
+  const jiraConnected = sources?.jira.connected !== false
+  const clockifyConnected = sources?.clockify.connected !== false
+  const nothingConnected = !jiraConnected && !clockifyConnected
+  const savedShown =
+    jiraConnected && clockifyConnected
+      ? "Saved Jira and Clockify time is shown."
+      : jiraConnected
+        ? "Saved Jira time is shown."
+        : "Saved Clockify time is shown."
   const busy = writing || state.queueActive
   const agentLogUnavailable = (activity.length === 0 && !loading) || cancelled
   const writeIncomplete = incompleteWrite(written)
@@ -176,7 +266,24 @@ export const App = () => {
       {loading && readMode === "recorded" ? (
         <ReadStatus key={startedAt} progress={progress} startedAt={startedAt} onCancel={cancel} mode={readMode} />
       ) : null}
-      {readFailure === null ? null : (
+      {nothingConnected && sources !== null ? (
+        <FirstRun title="Connect Jira or Clockify">
+          <p>Nothing is connected yet. In a terminal on this machine, run one or both:</p>
+          <ul className="jcf-commands">
+            <li>
+              Jira: <Command command={sources.jira.connect} />
+            </li>
+            <li>
+              Clockify: <Command command={sources.clockify.connect} />
+            </li>
+          </ul>
+          <p>
+            <Button onClick={retry} size="compact" variant="primary">
+              Show my week
+            </Button>
+          </p>
+        </FirstRun>
+      ) : readFailure === null ? null : (
         <StatePanel
           announce="assertive"
           title={readMode === "recorded" ? "Could not update logged time" : "Could not load the week"}
@@ -223,6 +330,8 @@ export const App = () => {
     </>
   )
 
+  if (signedOut) return <SignedOut theme={theme} />
+
   return (
     <ThemeProvider className="jcf-shell" theme={theme}>
       <PortalProvider>
@@ -231,18 +340,26 @@ export const App = () => {
             <Text as="h1" variant="section-title">
               Jira and Clockify week
             </Text>
-            <p className="jcf-read-at" data-failed={readFailure !== null}>
+            <p className="jcf-read-at" data-failed={readFailure !== null && !nothingConnected}>
               {loading
                 ? "Reading the week…"
-                : readFailure !== null
-                  ? "Last read failed"
-                  : readAt === null
-                    ? "Not read yet"
-                    : `Read at ${readAt}`}
+                : nothingConnected
+                  ? "Nothing connected"
+                  : readFailure !== null
+                    ? "Last read failed"
+                    : readAt === null
+                      ? "Not read yet"
+                      : `Read at ${readAt}`}
             </p>
             <ThemeSelect labelVisibility="hidden" onValueChange={setTheme} value={theme} />
           </header>
-          <div className="jcf-bar" role="toolbar" aria-label="Week controls" inert={sheetOpen}>
+          <div
+            className="jcf-bar"
+            role="toolbar"
+            aria-label="Week controls"
+            inert={sheetOpen}
+            hidden={nothingConnected}
+          >
             <div className="jcf-bar-group" role="group" aria-label="Week">
               <Button
                 aria-label="Previous week"
@@ -265,21 +382,27 @@ export const App = () => {
               </Button>
             </div>
             <div className="jcf-bar-group" role="group" aria-label="Systems to reconcile">
-              {scopeLabels.map((option) => (
-                <Button
-                  aria-pressed={scope === option.scope}
-                  disabled={busy}
-                  key={option.scope}
-                  onClick={() => {
-                    setOpen(null)
-                    chooseScope(option.scope)
-                  }}
-                  size="compact"
-                  variant={option.scope === scope ? "primary" : "quiet"}
-                >
-                  {option.label}
-                </Button>
-              ))}
+              {scopeLabels
+                .filter(
+                  (option) =>
+                    // A system that is not connected has no week of its own to show.
+                    (option.scope !== "jira" || jiraConnected) && (option.scope !== "clockify" || clockifyConnected)
+                )
+                .map((option) => (
+                  <Button
+                    aria-pressed={scope === option.scope}
+                    disabled={busy}
+                    key={option.scope}
+                    onClick={() => {
+                      setOpen(null)
+                      chooseScope(option.scope)
+                    }}
+                    size="compact"
+                    variant={option.scope === scope ? "primary" : "quiet"}
+                  >
+                    {option.label}
+                  </Button>
+                ))}
             </div>
             <div className="jcf-bar-group jcf-bar-primary">
               <span hidden id="jcf-log-time-reason">
@@ -367,43 +490,45 @@ export const App = () => {
               className="jcf-week-region"
               title={plan === null ? "Your week" : weekLabel(plan.days)}
               actions={
-                <div className="jcf-region-actions" role="group" aria-label="Sessions">
-                  <Button
-                    size="compact"
-                    disabled={busy || loading || agentSettingsSaving}
-                    aria-expanded={agentSettingsOpen}
-                    onClick={() => setAgentSettingsOpen((open) => !open)}
-                  >
-                    Agent settings
-                  </Button>
-                  <Button
-                    aria-expanded={open?.kind === "agent"}
-                    aria-disabled={agentLogUnavailable ? "true" : undefined}
-                    aria-describedby={agentLogUnavailable ? "jcf-agent-log-reason" : undefined}
-                    onClick={() => {
-                      if (agentLogUnavailable) return
-                      setOpen(open?.kind === "agent" ? null : { kind: "agent" })
-                    }}
-                    size="compact"
-                  >
-                    Agent log
-                  </Button>
-                  <span hidden id="jcf-agent-log-reason">
-                    {cancelled ? "The read was cancelled." : "No agent has run yet. Rescan sessions to start one."}
-                  </span>
-                  <Button disabled={busy || loading} onClick={refreshRecorded} size="compact">
-                    Refresh totals
-                  </Button>
-                  <Button
-                    disabled={busy || loading || agentSettingsSaving}
-                    onClick={() => {
-                      void rescan()
-                    }}
-                    size="compact"
-                  >
-                    {missingPlan ? "Scan sessions" : "Rescan sessions"}
-                  </Button>
-                </div>
+                nothingConnected ? undefined : (
+                  <div className="jcf-region-actions" role="group" aria-label="Sessions">
+                    <Button
+                      size="compact"
+                      disabled={busy || loading || agentSettingsSaving}
+                      aria-expanded={agentSettingsOpen}
+                      onClick={() => setAgentSettingsOpen((open) => !open)}
+                    >
+                      Agent settings
+                    </Button>
+                    <Button
+                      aria-expanded={open?.kind === "agent"}
+                      aria-disabled={agentLogUnavailable ? "true" : undefined}
+                      aria-describedby={agentLogUnavailable ? "jcf-agent-log-reason" : undefined}
+                      onClick={() => {
+                        if (agentLogUnavailable) return
+                        setOpen(open?.kind === "agent" ? null : { kind: "agent" })
+                      }}
+                      size="compact"
+                    >
+                      Agent log
+                    </Button>
+                    <span hidden id="jcf-agent-log-reason">
+                      {cancelled ? "The read was cancelled." : "No agent has run yet. Rescan sessions to start one."}
+                    </span>
+                    <Button disabled={busy || loading} onClick={refreshRecorded} size="compact">
+                      Refresh totals
+                    </Button>
+                    <Button
+                      disabled={busy || loading || agentSettingsSaving}
+                      onClick={() => {
+                        void rescan()
+                      }}
+                      size="compact"
+                    >
+                      {missingPlan ? "Scan sessions" : "Rescan sessions"}
+                    </Button>
+                  </div>
+                )
               }
             >
               {agentSettingsOpen ? (
@@ -424,18 +549,29 @@ export const App = () => {
                 <>
                   <div className="jcf-totals" role="group" aria-label="Week totals">
                     {readFailure === null || readAt === null ? null : (
+                      // The alert above says the read failed and why; here the totals are only marked old.
                       <p className="jcf-totals-age">
-                        <strong>Last read failed:</strong> totals are from {readAt}.
+                        <strong>Totals from {readAt}</strong>
                       </p>
                     )}
                     {plan.scope === "clockify" ? null : (
                       <p aria-label="Jira totals" role="group">
-                        <strong>Jira</strong> <span>{totalLine(totals.jira, totals.jiraSuggested)}</span>
+                        <strong>Jira</strong>{" "}
+                        {jiraConnected || sources === null ? (
+                          <span>{totalLine(totals.jira, totals.jiraSuggested)}</span>
+                        ) : (
+                          <NotConnected command={sources.jira.connect} />
+                        )}
                       </p>
                     )}
                     {plan.scope === "jira" ? null : (
                       <p aria-label="Clockify totals" role="group">
-                        <strong>Clockify</strong> <span>{totalLine(totals.clockify, totals.clockifySuggested)}</span>
+                        <strong>Clockify</strong>{" "}
+                        {clockifyConnected || sources === null ? (
+                          <span>{totalLine(totals.clockify, totals.clockifySuggested)}</span>
+                        ) : (
+                          <NotConnected command={sources.clockify.connect} />
+                        )}
                       </p>
                     )}
                   </div>
@@ -469,6 +605,7 @@ export const App = () => {
                     </span>
                   </div>
                   <WeekGrid
+                    connected={{ jira: jiraConnected, clockify: clockifyConnected }}
                     onOpenSaved={(entry) => {
                       actions.clearWritten()
                       setOpen({ kind: "saved", entry })
@@ -510,10 +647,15 @@ export const App = () => {
             !loading &&
             (missingPlan || (plan.rows.length === 0 && plan.unlinkedClockify.length === 0)) ? (
               <aside className="jcf-empty-state" aria-label="Session suggestions">
-                {missingPlan ? (
+                {missingPlan && plan.sessionRootCount === 0 ? (
+                  <StatePanel
+                    title="No session folders chosen"
+                    description={`${savedShown} jcf suggests time from coding sessions in folders you choose; run jcf config set session-root with a folder to start.`}
+                  />
+                ) : missingPlan ? (
                   <StatePanel
                     title="No session suggestions for this week"
-                    description="Saved Jira and Clockify time is shown. Scan your coding sessions to add suggestions."
+                    description={`${savedShown} Scan your coding sessions to add suggestions.`}
                     action={
                       <Button
                         disabled={busy || agentSettingsSaving}
@@ -560,6 +702,8 @@ export const App = () => {
             {open === null ? null : (
               <EditorFrame
                 notice={plan === null ? undefined : feedback}
+                // The conversation stays put while the read's progress comes and goes below it.
+                noticeAt={open.kind === "agent" ? "end" : "start"}
                 busy={open.kind === "agent" ? false : writing}
                 label={
                   open.kind === "agent"
@@ -602,6 +746,12 @@ export const App = () => {
                         Close
                       </Button>
                     </div>
+                    <AgentTerminal
+                      key={startedAt}
+                      activity={activity}
+                      ended={readFailure !== null ? "failed" : cancelled ? "cancelled" : null}
+                    />
+                    {/* Below the conversation, so it can come and go without moving what is being read. */}
                     {loading && readMode === "full" ? (
                       <>
                         <ReadStatus
@@ -616,7 +766,6 @@ export const App = () => {
                         )}
                       </>
                     ) : null}
-                    <AgentTerminal key={startedAt} activity={activity} />
                   </>
                 ) : null}
                 {openRow === undefined || open?.kind !== "confirm" || plan === null ? null : (
