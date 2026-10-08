@@ -3,7 +3,13 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { readFileSync, writeFileSync } from "node:fs"
 import { pathToFileURL } from "node:url"
+import { FONT_SWAP_LAUNCH_OPTIONS } from "../../../../playwright-font-swap.ts"
 import { exportGuide } from "../../dist/guide/export.js"
+
+// The guide paints at once in its metric-matched fallback, so these shift sums include the font swap.
+// The headless shell hints that fallback to whole-pixel advances and re-wraps code-heavy prose, which
+// desktop browsers placing glyphs at subpixels never do; measure as they render.
+test.use({ launchOptions: FONT_SWAP_LAUNCH_OPTIONS })
 
 const patch = readFileSync("examples/approval-guide/guide.patch", "utf8")
 

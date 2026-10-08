@@ -18,7 +18,8 @@
 
 .workspaceHeader {
   align-items: flex-start;
-  background: color-mix(in srgb, var(--rly-color-service-codecommit) 7%, var(--rly-color-surface-2));
+  /* A flat panel: provider colour marks provenance (the service mark), not a whole header. */
+  background: var(--rly-color-surface-2);
   border-block-end: 1px solid var(--rly-color-border-1);
   gap: var(--rly-space-20);
   justify-content: space-between;
@@ -500,15 +501,9 @@
   text-decoration-color: var(--rly-color-action-background);
 }
 
-.profileChoice select {
-  background: var(--rly-color-surface-1);
-  border: 1px solid var(--rly-color-border-1);
-  border-radius: var(--rly-radius-control);
-  color: var(--rly-color-text-1);
-  min-block-size: var(--rly-space-32);
+.profileChoice > :last-child {
   flex: 1;
   min-inline-size: var(--rly-space-0);
-  padding-inline: var(--rly-space-8);
 }
 
 .progressRail {

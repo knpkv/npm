@@ -48,6 +48,7 @@ import type { DecisionStatus } from "./countdown-view.js"
 import { useHubNow } from "./hub-clock.js"
 import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
+import { dashboardPolls } from "./internal/dashboard-polls.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -363,11 +364,15 @@ const setApprovalBadge = Effect.fn("Notifications.setBadge")((count: number) =>
 )
 
 const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
-  const chat = browserRuntime.atom(loadChat, {
+  // Only what this listener serves is ever requested; a host dashboard has no chat, push or (when
+  // it is cross-host) Work snapshot, and polling them only produced 404s.
+  const served = dashboardPolls(initial.approvalApp)
+  const chat = browserRuntime.atom(served.chat ? loadChat : Effect.succeed(initial.chat ?? { entries: [] }), {
     initialValue: initial.chat ?? { entries: [] }
   })
   const connect = makeConnectAtoms()
-  const work = connect.work
+  const work = served.work ? connect.work : browserRuntime.atom(Effect.never)
+  const workPoll = served.work ? connect.workPoll : browserRuntime.atom(Effect.never)
   const chatPoll = browserRuntime.atom(
     initial.approvalApp.chatEnabled
       ? Atom.refresh(chat).pipe(Effect.repeat(Schedule.spaced("3 seconds")))
@@ -383,9 +388,12 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
     connect,
     dashboard: browserRuntime.atom(loadDashboard, { initialValue: initial }),
     decision: browserRuntime.fn(decide),
-    notification: browserRuntime.atom<NotificationState, NotificationLoadError>(loadNotificationState, {
-      initialValue: "loading"
-    }),
+    notification: browserRuntime.atom<NotificationState, NotificationLoadError>(
+      served.push ? loadNotificationState : Effect.succeed<NotificationState>("unsupported"),
+      {
+        initialValue: "loading"
+      }
+    ),
     notificationAction: browserRuntime.fn((enable: boolean) =>
       enable ? enableNotifications() : disableNotifications()
     ),
@@ -393,7 +401,8 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
     pendingPage: browserRuntime.fn(loadDashboardPending),
     pendingTarget: browserRuntime.fn(loadPendingApprovalTarget),
     pull: Atom.make<PullState>(initialPull),
-    work
+    work,
+    workPoll
   }
 }
 
@@ -656,7 +665,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   if (currentSnapshot === null) {
     return (
       <>
-        <DashboardWorkPollOwner atom={atoms.connect.work} poll={atoms.connect.workPoll} />
+        <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
         <main className="app app-error">
           <h1>Host activity unavailable</h1>
           <pre>{result._tag === "Failure" ? Cause.pretty(result.cause) : "Loading host activity"}</pre>
@@ -708,7 +717,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   )
   return (
     <>
-      <DashboardWorkPollOwner atom={atoms.connect.work} poll={atoms.connect.workPoll} />
+      <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
       <div
         className="dashboard-gesture"
         onTouchStart={onTouchStart}
