@@ -10,6 +10,7 @@ import { ApprovalRequestDisclosure } from "./approval-request-view.js"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
 import { ApprovalsCountdown, type DecisionStatus } from "./countdown-view.js"
+import { agentStatePresentation } from "./internal/agent-state.js"
 
 export { type ApprovalDecision, approvalShortcutFor } from "./approval-decision.js"
 
@@ -353,7 +354,7 @@ export const AgentActivity = ({ snapshot }: { readonly snapshot: DashboardSnapsh
                 {agent.kind}, {agent.work}
               </Text>
             </div>
-            <StateLabel label={agent.status} tone="progress" size="compact" />
+            <AgentStateLabel status={agent.status} />
           </div>
         </Surface>
       ))}
@@ -401,6 +402,20 @@ const Machines = ({ snapshot }: { readonly snapshot: DashboardSnapshot }) => {
         </Text>
       )}
     </Surface>
+  )
+}
+
+/** An agent's state as its word and its own icon; only work in progress spins. */
+const AgentStateLabel = ({ status }: { readonly status: string }): ReactElement => {
+  const presentation = agentStatePresentation(status)
+  return (
+    <StateLabel
+      className={presentation.spins ? "agent-state-spinning" : undefined}
+      icon={presentation.icon}
+      label={status}
+      size="compact"
+      tone={presentation.tone}
+    />
   )
 }
 
