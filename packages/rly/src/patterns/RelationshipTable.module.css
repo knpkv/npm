@@ -148,7 +148,8 @@
       clip: rect(0 0 0 0);
       clip-path: inset(50%);
       inline-size: 1px;
-      overflow: hidden;
+      min-inline-size: 0;
+      overflow: clip;
       position: absolute;
       white-space: nowrap;
     }
@@ -164,7 +165,7 @@
       border-radius: var(--rly-radius-control);
       display: grid;
       min-inline-size: var(--rly-space-0);
-      overflow: hidden;
+      overflow: clip;
     }
 
     .cell {
