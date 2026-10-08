@@ -109,12 +109,7 @@ ${root}
   :where([data-theme="system"], [data-rly-theme="system"]) { color-scheme: light dark; }
 
   @media (forced-colors: active) {
-    :root,
-    :where(
-      [data-theme="light"], [data-rly-theme="light"],
-      [data-theme="dark"], [data-rly-theme="dark"],
-      [data-theme="system"], [data-rly-theme="system"]
-    ) {
+    :root {
 ${renderForcedColors()}
     }
   }
