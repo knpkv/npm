@@ -5,10 +5,6 @@ import { Duration, Effect, Ref } from "effect"
 import { TestClock } from "effect/testing"
 import { readHostLimits, staleWhileRevalidate } from "../src/host-limits.js"
 
-// Each test effect is an application boundary; @effect/vitest scopes its Node services.
-// @effect-diagnostics-next-line strictEffectProvide:off
-const provideNodeServices = Effect.provide(NodeServices.layer)
-
 /** `agent-usage limits` as it prints on a host: one window read, one that could not be. */
 const answer: LimitsNow = {
   v: 1,
@@ -39,11 +35,12 @@ const answer: LimitsNow = {
 /** A command that prints its one argument, standing in for agent-usage. */
 const printing = (output: string) => ["sh", "-c", "printf '%s\\n' \"$1\"", "agent-usage", output]
 
-const read = (command: ReadonlyArray<string> | undefined) => readHostLimits("SER8", command).pipe(provideNodeServices)
+const read = (command: ReadonlyArray<string> | undefined) => readHostLimits("SER8", command)
 
 const unavailable = (limits: HostLimits) => (limits.reading._tag === "Unavailable" ? limits.reading : null)
 
-describe("readHostLimits", () => {
+// The command runs as a real child process: these tests get Node's services from the test layer.
+it.layer(NodeServices.layer)("readHostLimits", (it) => {
   it.effect("serves agent-usage's answer as is, an unknown window included", () =>
     Effect.gen(function*() {
       const limits = yield* read(printing(JSON.stringify(answer)))
@@ -80,7 +77,7 @@ describe("readHostLimits", () => {
     }))
 })
 
-describe("readHostLimits across agent-usage versions", () => {
+it.layer(NodeServices.layer)("readHostLimits across agent-usage versions", (it) => {
   it.effect("calls a newer format unsupported rather than malformed", () =>
     Effect.gen(function*() {
       expect(unavailable(yield* read(printing(JSON.stringify({ ...answer, v: 2 }))))?.reason).toBe(
