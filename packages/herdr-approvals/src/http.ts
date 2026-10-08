@@ -74,6 +74,7 @@ import {
   Cause,
   Clock,
   Crypto,
+  Duration,
   Effect,
   Equal,
   Exit,
@@ -98,7 +99,7 @@ import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import WebSocketClient, { WebSocketServer } from "ws"
-import { fleetLimits, readAgentLimits } from "./agent-limits.js"
+import { fleetLimits, hubLimits, readAgentLimits, staleWhileRevalidate } from "./agent-limits.js"
 import type { SanitizedJobRecord } from "./approval-request.js"
 import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
@@ -1499,19 +1500,23 @@ export const startHttpServer = async (
       () => activeRequestControllers.delete(controller)
     )
   }
-  // One read answers every tab and the hub for 30 seconds; each run rereads the CLI's files.
+  // A read older than 30 seconds is refreshed in the background, so a peer answers the hub's
+  // 1.5-second fetch from its last read even while agent-limits is slow.
   const spawner = await httpRuntime.runPromise(
     Effect.gen(function*() {
       return yield* ChildProcessSpawner.ChildProcessSpawner
     })
   )
+  // Background refreshes live in this scope; closing the server closes it before the runtime.
+  const limitsScope = await httpRuntime.runPromise(Scope.make())
+  finalizers.unshift(() => httpRuntime.runPromise(Scope.close(limitsScope, Exit.void)))
   const localLimits = await httpRuntime.runPromise(
-    Effect.cachedWithTTL(
+    staleWhileRevalidate(
       readAgentLimits(config.host, config.agentLimitsCommand).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
       ),
-      "30 seconds"
-    )
+      Duration.seconds(30)
+    ).pipe(Effect.provideService(Scope.Scope, limitsScope))
   )
   const shutdown = async (): Promise<void> => {
     if (closed) return
@@ -3103,9 +3108,7 @@ export const startHttpServer = async (
               response,
               Effect.andThen(
                 authorized,
-                mode === "serve"
-                  ? Effect.flatMap(fleetPeers(config), (peers) => fleetLimits(localLimits, peers))
-                  : fleetLimits(localLimits, [])
+                mode === "serve" ? hubLimits(localLimits, fleetPeers(config)) : fleetLimits(localLimits, [])
               )
             )
             return

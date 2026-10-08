@@ -1,6 +1,6 @@
 import { collectBoundedText } from "@knpkv/bounded-io"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet"
-import { Clock, Effect, Result, Schema } from "effect"
+import { Clock, Duration, Effect, Ref, Result, Schema, type Scope } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
@@ -98,10 +98,15 @@ export const PeerLimitsFailureReason = Schema.Literals([
   "invalid_response"
 ])
 
-/** Every host the hub could ask, and the ones it could not reach, by name. */
+/**
+ * Every host the hub could ask, and the ones it could not reach, by name. `peersListed` is false
+ * when the hub could not list the fleet at all: `hosts` is then only its own read, and the page
+ * says the other machines are unknown rather than implying there are none.
+ */
 export const FleetLimits = Schema.Struct({
   hosts: Schema.Array(HostLimits),
-  failures: Schema.Array(Schema.Struct({ host: Schema.String, reason: PeerLimitsFailureReason }))
+  failures: Schema.Array(Schema.Struct({ host: Schema.String, reason: PeerLimitsFailureReason })),
+  peersListed: Schema.Boolean
 })
 export type FleetLimits = typeof FleetLimits.Type
 
@@ -246,5 +251,48 @@ export const fleetLimits = Effect.fn("AgentLimits.fleet")(function*(
     if (Result.isSuccess(result)) hosts.push(result.success)
     else failures.push({ host: peer.host, reason: result.failure.reason })
   }
-  return { hosts, failures } satisfies FleetLimits
+  return { hosts, failures, peersListed: true } satisfies FleetLimits
+})
+
+/**
+ * The hub's view: its own read plus every peer it can list. When listing the fleet fails (for
+ * example `tailscale status`), it still answers with its own read and `peersListed: false`.
+ */
+export const hubLimits = Effect.fn("AgentLimits.hub")(function*<E, R>(
+  local: Effect.Effect<HostLimits>,
+  peers: Effect.Effect<ReadonlyArray<PeerLimitsTarget>, E, R>
+) {
+  const listed = yield* Effect.result(peers)
+  if (Result.isSuccess(listed)) return yield* fleetLimits(local, listed.success)
+  return { hosts: [yield* local], failures: [], peersListed: false } satisfies FleetLimits
+})
+
+/**
+ * Serves `read`'s last value and refreshes it in the background once it is older than `ttl`, so a
+ * caller never waits on a slow read after the first. Only the first call blocks, and concurrent
+ * first calls share that one read. At most one refresh runs at a time; it lives in the caller's
+ * scope, so closing the scope stops it.
+ */
+export const staleWhileRevalidate = Effect.fn("AgentLimits.staleWhileRevalidate")(function*<A>(
+  read: Effect.Effect<A>,
+  ttl: Duration.Duration
+) {
+  const scope: Scope.Scope = yield* Effect.scope
+  const ttlMillis = Duration.toMillis(ttl)
+  const latest = yield* Ref.make<{ readonly value: A; readonly at: number } | null>(null)
+  const refreshing = yield* Ref.make(false)
+  const refresh = Effect.gen(function*() {
+    const value = yield* read
+    yield* Ref.set(latest, { value, at: yield* Clock.currentTimeMillis })
+    return value
+  })
+  const first = yield* Effect.cached(refresh)
+  return Effect.gen(function*() {
+    const current = yield* Ref.get(latest)
+    if (current === null) return yield* first
+    if ((yield* Clock.currentTimeMillis) - current.at >= ttlMillis && !(yield* Ref.getAndSet(refreshing, true))) {
+      yield* Effect.forkIn(refresh.pipe(Effect.ensuring(Ref.set(refreshing, false))), scope)
+    }
+    return current.value
+  })
 })

@@ -1,9 +1,17 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Duration, Effect, Ref } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
-import { fetchPeerLimits, fleetLimits, type HostLimits, readAgentLimits } from "../src/agent-limits.js"
+import { TestClock } from "effect/testing"
+import {
+  fetchPeerLimits,
+  fleetLimits,
+  type HostLimits,
+  hubLimits,
+  readAgentLimits,
+  staleWhileRevalidate
+} from "../src/agent-limits.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
 // @effect-diagnostics-next-line strictEffectProvide:off
@@ -138,7 +146,7 @@ describe("fleetLimits", () => {
       const fleet = yield* fleetLimits(Effect.succeed(hostLimits("SER8")), [peer]).pipe(
         Effect.provideService(HttpClient.HttpClient, answering(hostLimits("PI")))
       )
-      expect(fleet).toEqual({ hosts: [hostLimits("SER8"), hostLimits("PI")], failures: [] })
+      expect(fleet).toEqual({ hosts: [hostLimits("SER8"), hostLimits("PI")], failures: [], peersListed: true })
     }))
 
   it.effect("lists a peer it could not ask instead of dropping it", () =>
@@ -159,4 +167,39 @@ describe("fleetLimits", () => {
       )
       expect(error.reason).toBe("invalid_response")
     }))
+})
+
+describe("hubLimits", () => {
+  it.effect("answers with its own read when it cannot list the fleet", () =>
+    Effect.gen(function*() {
+      const fleet = yield* hubLimits(Effect.succeed(hostLimits("SER8")), Effect.fail("tailscale status failed")).pipe(
+        Effect.provideService(HttpClient.HttpClient, answering(hostLimits("PI")))
+      )
+      expect(fleet).toEqual({ hosts: [hostLimits("SER8")], failures: [], peersListed: false })
+    }))
+})
+
+describe("staleWhileRevalidate", () => {
+  it.effect("blocks only on the first read, then serves the last value while a slow refresh runs", () =>
+    Effect.gen(function*() {
+      const reads = yield* Ref.make(0)
+      // Every read after the first takes five seconds, longer than a peer fetch may wait.
+      const read = Ref.updateAndGet(reads, (count) => count + 1).pipe(
+        Effect.tap((count) => (count > 1 ? Effect.sleep("5 seconds") : Effect.void))
+      )
+      const cached = yield* staleWhileRevalidate(read, Duration.seconds(30))
+      expect(yield* cached).toBe(1)
+      expect(yield* cached).toBe(1)
+      expect(yield* Ref.get(reads)).toBe(1)
+      yield* TestClock.adjust("31 seconds")
+      // Stale: answered at once from the last read, and one refresh starts.
+      expect(yield* cached).toBe(1)
+      yield* Effect.yieldNow
+      expect(yield* cached).toBe(1)
+      expect(yield* Ref.get(reads)).toBe(2)
+      yield* TestClock.adjust("5 seconds")
+      yield* Effect.yieldNow
+      expect(yield* cached).toBe(2)
+      expect(yield* Ref.get(reads)).toBe(2)
+    }).pipe(Effect.scoped))
 })
