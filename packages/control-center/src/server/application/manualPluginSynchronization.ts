@@ -192,11 +192,17 @@ const failureHealth = Effect.fn("ManualPluginSynchronization.failureHealth")(fun
   })
 })
 
+/**
+ * The state of a stream's syncs. A failed last sync says why from the failure it recorded on the
+ * connection's health (`persistHealth` records it before completing the attempt); a later health
+ * write that isn't a failure leaves the reason unknown (null) rather than inventing one.
+ */
 const stateFromAttemptState = (
   pluginConnectionId: PluginConnectionId,
   providerId: ProviderId,
   streamKey: string,
-  attemptState: PluginSyncAttemptState
+  attemptState: PluginSyncAttemptState,
+  health: PluginHealthType | null
 ): PluginSynchronizationState => {
   const lastAttempt: PluginSyncAttemptRecord | undefined = attemptState.latestAttempt ?? undefined
   const lastSuccess: PluginSyncAttemptRecord | undefined = attemptState.latestSynchronized ?? undefined
@@ -211,7 +217,11 @@ const stateFromAttemptState = (
       : lastAttempt.outcome === null
       ? "running"
       : lastAttempt.outcome,
-    pagesCommitted: lastAttempt?.pagesCommitted ?? 0
+    pagesCommitted: lastAttempt?.pagesCommitted ?? 0,
+    failure: lastAttempt?.outcome === SOURCE_UNAVAILABLE_OUTCOME &&
+        health !== null && (health._tag === "unavailable" || health._tag === "degraded")
+      ? { failureClass: health.failureClass, safeMessage: health.safeMessage }
+      : null
   }
 }
 
@@ -333,11 +343,15 @@ export const makeManualPluginSynchronization = Effect.fn(
       bound.pluginConnectionId,
       bound.streamKey
     ).pipe(Effect.mapError(() => unavailable()))
+    const runtime = yield* persistence.pluginRuntime.getRuntime(bound.workspaceId, bound.pluginConnectionId).pipe(
+      Effect.mapError(() => unavailable())
+    )
     return stateFromAttemptState(
       bound.pluginConnectionId,
       bound.providerId,
       bound.streamKey,
-      attemptState
+      attemptState,
+      runtime.health
     )
   })
 
