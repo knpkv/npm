@@ -24,6 +24,7 @@
     inset-block: calc(var(--rly-relay-panel-offset, 0px) + var(--rly-space-12))
       calc(var(--app-bottom-inset, 0px) + var(--rly-space-12));
     inset-inline-end: var(--rly-space-12);
+    min-inline-size: 0;
     overflow: clip;
     position: fixed;
     z-index: 95;

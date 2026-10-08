@@ -79,6 +79,7 @@
     flex-direction: column;
     inset-block: var(--rly-space-0);
     max-inline-size: min(92vw, 30rem);
+    min-inline-size: 0;
     overflow: clip;
     pointer-events: auto;
     position: fixed;

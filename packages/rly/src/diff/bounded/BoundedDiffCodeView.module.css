@@ -2,6 +2,7 @@
 .root {
   direction: ltr;
   unicode-bidi: isolate;
+  min-inline-size: 0;
   overflow: clip;
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-field);

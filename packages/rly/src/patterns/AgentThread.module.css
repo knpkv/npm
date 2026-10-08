@@ -173,6 +173,7 @@
     clip-path: inset(50%);
     inline-size: 1px;
     margin: -1px;
+    min-inline-size: 0;
     overflow: clip;
     padding: var(--rly-space-0);
     position: absolute;

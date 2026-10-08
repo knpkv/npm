@@ -190,6 +190,7 @@
       clip: rect(0 0 0 0);
       clip-path: inset(50%);
       inline-size: 1px;
+      min-inline-size: 0;
       overflow: clip;
       position: absolute;
       white-space: nowrap;
