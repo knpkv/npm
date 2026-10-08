@@ -469,6 +469,15 @@ the platform) only when the host binds that key and prevents the browser's own C
 or `null` where it binds none, such as a live terminal that keeps its chords.
 The hint hides at 40rem and below, and the button is 32px tall, 44px for a coarse pointer.
 
+`RelayTranscript` shows a Relay conversation: your turns as bubbles at the inline
+end, Relay's turns as selectable prose whose code blocks scroll in place, each burst of
+tool work as one collapsed row in reading order (each call's summary, a status word and
+citations whose link text is the location), and how each run ended. One polite
+announcer outside the content says when a run starts, finishes, stops or fails, never
+per token; "Relay is writing…" is visible only. Inside `RelayPanel` it follows new
+content only while you are at the end; reading earlier turns, "New messages" appears
+instead, and jumps are instant under reduced motion.
+
 `RelayPanel` is Relay's frame: header (mark, title, exact scope with the revision in
 mono, an optional pin, options, close), tabs whose counts are part of their names, a
 freshness line, a body, and a footer for the composer. Only the body scrolls, so the

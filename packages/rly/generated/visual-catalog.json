@@ -782,6 +782,25 @@
       ]
     },
     {
+      "name": "RelayTranscript",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayTranscript.tsx",
+        "story": "packages/rly/stories/patterns/RelayTranscript.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayTranscript.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayTranscript.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaytranscript--conversation",
+      "storyIds": [
+        "patterns-relaytranscript--conversation",
+        "patterns-relaytranscript--streaming",
+        "patterns-relaytranscript--failed"
+      ]
+    },
+    {
       "name": "ReleasePreview",
       "paths": {
         "source": "packages/rly/src/patterns/ReleasePreview.tsx",

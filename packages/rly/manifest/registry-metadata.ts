@@ -61,6 +61,11 @@ export const COMPONENT_REGISTRY_METADATA = {
     ["overlay", "pinned", "fullscreen"],
     ["agent", "overlay"]
   ),
+  RelayTranscript: registryMetadata(
+    "Show a Relay conversation: your turns, Relay's prose, tool activity with citations, run outcomes, and a polite announcer",
+    ["conversation", "streaming", "failed"],
+    ["agent", "present"]
+  ),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"

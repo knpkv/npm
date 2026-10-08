@@ -233,7 +233,7 @@ const PanelChrome = (
     <div className={style("body")}>
       {freshness === undefined ? null : <div className={style("freshness")}>{freshness}</div>}
       {/* Focusable so a keyboard user can scroll a transcript that has no focusable content. */}
-      <div className={style("scroll")} tabIndex={0}>
+      <div className={style("scroll")} data-rly-relay-scroll="" tabIndex={0}>
         {content}
       </div>
     </div>

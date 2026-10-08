@@ -1060,6 +1060,30 @@
     },
     {
       "capabilities": [
+        "agent",
+        "present"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayTranscript",
+      "states": [
+        "conversation",
+        "default",
+        "failed",
+        "streaming"
+      ],
+      "terms": [
+        "agent",
+        "conversation",
+        "failed",
+        "pattern",
+        "present",
+        "relaytranscript",
+        "streaming"
+      ]
+    },
+    {
+      "capabilities": [
         "inspect",
         "release"
       ],

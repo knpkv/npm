@@ -1,0 +1,229 @@
+import type { ReactElement, ReactNode } from "react"
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
+import { Icon } from "../foundations/Icon.js"
+import { cssClass, requireText } from "../internal/component.js"
+import styles from "./RelayTranscript.module.css"
+
+const style = (name: string): string => cssClass(styles, name)
+
+/** A cited object: the link text is the location itself ("src/patch-reader.ts:14"). */
+export interface RlyRelayCite {
+  readonly href: string
+  readonly label: string
+}
+
+/** One tool call in an activity burst, from ToolStarted and ToolFinished (server-built summaries). */
+export interface RlyRelayTool {
+  readonly call: string
+  readonly cites?: ReadonlyArray<RlyRelayCite>
+  readonly status: "running" | "ok" | "failed"
+  readonly summary: string
+}
+
+/** One entry in a Relay conversation, in the order it happened. */
+export type RlyRelayTranscriptItem =
+  | { readonly _tag: "You"; readonly id: string; readonly text: string }
+  | { readonly _tag: "Relay"; readonly id: string; readonly text: string }
+  /** A contiguous burst of tool work between prose, with its summary ("Read 4 files and ran 1 check"). */
+  | {
+      readonly _tag: "Activity"
+      readonly id: string
+      readonly summary: string
+      readonly tools: ReadonlyArray<RlyRelayTool>
+    }
+  /** How a run ended; Finished may carry its duration, Failed its cause and the next action. */
+  | { readonly _tag: "RunFinished"; readonly id: string; readonly seconds?: number }
+  | { readonly _tag: "RunCancelled"; readonly id: string }
+  | { readonly _tag: "RunFailed"; readonly cause: string; readonly fix: string; readonly id: string }
+
+/** Inputs for the transcript. */
+export interface RelayTranscriptProps {
+  readonly items: ReadonlyArray<RlyRelayTranscriptItem>
+  /** A run is in flight; shows "Relay is writing…" (not announced; the announcer covers start and end). */
+  readonly streaming: boolean
+}
+
+const statusWord = {
+  failed: "Failed",
+  ok: "Done",
+  running: "Running"
+} satisfies Readonly<Record<RlyRelayTool["status"], string>>
+
+/** Prose with fenced code blocks; a block scrolls inside itself rather than breaking its lines. */
+const Prose = ({ text }: { readonly text: string }): ReactElement => (
+  <div className={style("prose")}>
+    {text.split(/^```[^\n]*\n?/m).map((part, index) =>
+      index % 2 === 1 ? (
+        <pre className={style("code")} key={index} tabIndex={0}>
+          <code>{part.replace(/\n$/, "")}</code>
+        </pre>
+      ) : part.trim() === "" ? null : (
+        <p className={style("paragraph")} key={index}>
+          {part.trim()}
+        </p>
+      )
+    )}
+  </div>
+)
+
+const Activity = ({ item }: { readonly item: Extract<RlyRelayTranscriptItem, { _tag: "Activity" }> }): ReactElement => {
+  const running = item.tools.some((tool) => tool.status === "running")
+  const failed = item.tools.some((tool) => tool.status === "failed")
+  return (
+    <details className={style("activity")} data-state={running ? "running" : failed ? "failed" : "done"}>
+      <summary className={style("activitySummary")}>
+        <Icon decorative name={running ? "loader" : failed ? "alert" : "check"} size="small" />
+        <span>{requireText(item.summary, "RelayTranscript activity summary")}</span>
+      </summary>
+      <ul className={style("tools")}>
+        {item.tools.map((tool) => (
+          <li className={style("tool")} data-status={tool.status} key={tool.call}>
+            <span className={style("toolSummary")}>{requireText(tool.summary, "RelayTranscript tool summary")}</span>
+            <span className={style("toolStatus")}>{statusWord[tool.status]}</span>
+            {tool.cites === undefined || tool.cites.length === 0 ? null : (
+              <span className={style("cites")}>
+                {tool.cites.map((cite) => (
+                  <a className={style("cite")} href={cite.href} key={cite.href}>
+                    {requireText(cite.label, "RelayTranscript cite label")}
+                  </a>
+                ))}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
+const RunOutcome = ({ item }: { readonly item: RlyRelayTranscriptItem }): ReactNode => {
+  switch (item._tag) {
+    case "RunFinished":
+      return <p className={style("outcome")}>{item.seconds === undefined ? "Done." : `Done in ${item.seconds}s.`}</p>
+    case "RunCancelled":
+      return <p className={style("outcome")}>Stopped. What Relay wrote and did before stays here.</p>
+    case "RunFailed":
+      return (
+        <p className={style("outcome")} data-outcome="failed">
+          <strong>{requireText(item.cause, "RelayTranscript failure cause")}</strong>{" "}
+          {requireText(item.fix, "RelayTranscript failure fix")}
+        </p>
+      )
+    default:
+      return null
+  }
+}
+
+/** What the announcer says when an item ends a run; undefined for every other item. */
+const announcementFor = (item: RlyRelayTranscriptItem): string | undefined => {
+  switch (item._tag) {
+    case "RunFinished":
+      return "Relay finished."
+    case "RunCancelled":
+      return "Relay stopped."
+    case "RunFailed":
+      return `Relay failed: ${item.cause}`
+    default:
+      return undefined
+  }
+}
+
+/** Within this distance of the end counts as reading the latest. */
+const AT_END_SLACK = 24
+
+/**
+ * A Relay conversation (Relay UX decision). Your turns sit at the inline end as bubbles; Relay's turns
+ * are plain prose, its code blocks scrolling in place. Each burst of tool work is one collapsed row in
+ * reading order, expanding to each call's summary, status and citations (link text is the location).
+ * One polite announcer, outside the scrolling content, says when a run starts, finishes, stops or
+ * fails, never per token. Inside RelayPanel the transcript follows new content only while you are at
+ * the end; reading earlier turns, a "New messages" button appears instead, so scroll is never taken.
+ */
+export const RelayTranscript = ({ items, streaming }: RelayTranscriptProps): ReactElement => {
+  const root = useRef<HTMLDivElement | null>(null)
+  const atEnd = useRef(true)
+  const [behind, setBehind] = useState(false)
+  const [announcement, setAnnouncement] = useState("")
+  const announced = useRef(new Set<string>())
+  const wasStreaming = useRef(streaming)
+
+  const scroller = useCallback((): HTMLElement | null => root.current?.closest("[data-rly-relay-scroll]") ?? null, [])
+  const reducedMotion = (): boolean =>
+    root.current?.ownerDocument.defaultView?.matchMedia("(prefers-reduced-motion: reduce)").matches ?? true
+  const toEnd = useCallback(
+    (smooth: boolean) => {
+      const element = scroller()
+      if (element === null) return
+      element.scrollTo({ behavior: smooth && !reducedMotion() ? "smooth" : "auto", top: element.scrollHeight })
+      atEnd.current = true
+      setBehind(false)
+    },
+    [scroller]
+  )
+
+  useEffect(() => {
+    const element = scroller()
+    if (element === null) return
+    const onScroll = (): void => {
+      atEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight <= AT_END_SLACK
+      if (atEnd.current) setBehind(false)
+    }
+    element.addEventListener("scroll", onScroll, { passive: true })
+    return () => element.removeEventListener("scroll", onScroll)
+  }, [scroller])
+
+  // New content: follow it only if the reader was at the end; otherwise offer the jump.
+  useLayoutEffect(() => {
+    if (atEnd.current) toEnd(false)
+    else setBehind(true)
+  }, [items, streaming, toEnd])
+
+  // Announce run state changes once each; tokens never reach the live region.
+  useEffect(() => {
+    if (streaming && !wasStreaming.current) setAnnouncement("Relay is answering.")
+    wasStreaming.current = streaming
+    for (const item of items) {
+      const words = announcementFor(item)
+      if (words === undefined || announced.current.has(item.id)) continue
+      announced.current.add(item.id)
+      setAnnouncement(words)
+    }
+  }, [items, streaming])
+
+  return (
+    <div className={style("root")} ref={root}>
+      <ol className={style("items")}>
+        {items.map((item) => (
+          <Fragment key={item.id}>
+            {item._tag === "You" ? (
+              <li className={style("you")}>
+                <p className={style("bubble")}>{requireText(item.text, "RelayTranscript turn")}</p>
+              </li>
+            ) : item._tag === "Relay" ? (
+              <li className={style("relay")}>
+                <Prose text={item.text} />
+              </li>
+            ) : item._tag === "Activity" ? (
+              <li className={style("relay")}>
+                <Activity item={item} />
+              </li>
+            ) : (
+              <li className={style("relay")}>
+                <RunOutcome item={item} />
+              </li>
+            )}
+          </Fragment>
+        ))}
+      </ol>
+      {streaming ? <p className={style("streaming")}>Relay is writing…</p> : null}
+      {behind ? (
+        <button className={style("jump")} onClick={() => toEnd(true)} type="button">
+          New messages
+        </button>
+      ) : null}
+      <p aria-live="polite" className={style("announcer")}>
+        {announcement}
+      </p>
+    </div>
+  )
+}

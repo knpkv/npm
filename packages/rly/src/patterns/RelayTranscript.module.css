@@ -1,0 +1,158 @@
+@layer rly.components {
+  .root {
+    display: grid;
+    gap: var(--rly-space-12);
+    min-inline-size: 0;
+  }
+  .items {
+    display: grid;
+    gap: var(--rly-space-16);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  /* Your turns: bubbles at the inline end (the right in LTR, the left in RTL). */
+  .you {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .bubble {
+    background: var(--rly-color-surface-2);
+    border-radius: var(--rly-radius-field);
+    margin: 0;
+    max-inline-size: 85%;
+    overflow-wrap: break-word;
+    padding: var(--rly-space-8) var(--rly-space-12);
+    white-space: pre-wrap;
+  }
+
+  /* Relay's turns: plain, selectable prose. */
+  .relay {
+    min-inline-size: 0;
+  }
+  .prose {
+    display: grid;
+    gap: var(--rly-space-8);
+  }
+  .paragraph {
+    margin: 0;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+  }
+  /* Code and long paths scroll inside their own block; lines never break mid-token. */
+  .code {
+    background: var(--rly-color-surface-2);
+    border-radius: var(--rly-radius-tag);
+    font-family: var(--rly-font-mono);
+    font-size: var(--rly-type-code-size);
+    margin: 0;
+    overflow-x: auto;
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+  .code:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  .activity {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+  }
+  .activitySummary {
+    align-items: center;
+    color: var(--rly-color-text-2);
+    cursor: pointer;
+    display: flex;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-8);
+    min-block-size: var(--rly-control-height-dense);
+    padding-inline: var(--rly-space-12);
+  }
+  .activitySummary:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .tools {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    display: grid;
+    gap: var(--rly-space-8);
+    list-style: none;
+    margin: 0;
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+  .tool {
+    display: grid;
+    gap: var(--rly-space-2) var(--rly-space-8);
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .toolSummary {
+    overflow-wrap: break-word;
+  }
+  .toolStatus {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+  .tool[data-status="failed"] .toolStatus {
+    color: var(--rly-color-blocked-ink);
+  }
+  .cites {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+    grid-column: 1 / -1;
+  }
+  .cite {
+    color: var(--rly-color-text-1);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    font-family: var(--rly-font-mono);
+    font-size: var(--rly-type-code-size);
+    overflow-wrap: break-word;
+  }
+
+  .outcome {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    margin: 0;
+  }
+  .outcome[data-outcome="failed"] strong {
+    color: var(--rly-color-blocked-ink);
+  }
+  .streaming {
+    color: var(--rly-color-text-2);
+    margin: 0;
+  }
+
+  /* Sticks to the bottom of the panel's scrolling body while new content is below. */
+  .jump {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-round);
+    color: var(--rly-color-text-1);
+    cursor: pointer;
+    inset-block-end: var(--rly-space-8);
+    justify-self: center;
+    min-block-size: var(--rly-control-height-dense);
+    padding-inline: var(--rly-space-12);
+    position: sticky;
+  }
+  .jump:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  .announcer {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    margin: -1px;
+    overflow: hidden;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+  }
+}
