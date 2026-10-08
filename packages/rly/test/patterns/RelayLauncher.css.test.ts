@@ -23,7 +23,8 @@ describe("RelayLauncher forced-colours CSS", () => {
 
   it("keeps the inverted open fill while the open launcher is hovered or pressed", () => {
     const inverted = rules.filter(({ body }) => /background:\s*ButtonText/.test(body))
-    expect(inverted).toHaveLength(2)
+    // Each forced form (the media query and the data attribute) splits its hover rule into a hover-guarded copy.
+    expect(inverted).toHaveLength(4)
     // The open form of every author hover/active background rule: the open attribute plus the same
     // state suffix is never less specific, and the forced rules come later, so they win.
     const open = ".root[aria-expanded=\"true\"]"
@@ -33,8 +34,12 @@ describe("RelayLauncher forced-colours CSS", () => {
       .filter((selector) => selector.startsWith(".root") && /:(hover|active)/.test(selector))
       .map((selector) => (selector.startsWith(open) ? selector : `${open}${selector.slice(".root".length)}`))
     expect(required).toEqual(expect.arrayContaining([`${open}:not(:disabled):hover`, `${open}:not(:disabled):active`]))
-    for (const { selectors } of inverted) {
-      for (const selector of required) expect(selectors.replace(/\s+/g, " ")).toContain(selector)
+    for (const attributeForm of [false, true]) {
+      const covered = inverted
+        .filter(({ selectors }) => selectors.includes("data-forced-colors") === attributeForm)
+        .map(({ selectors }) => selectors.replace(/\s+/g, " "))
+        .join(", ")
+      for (const selector of required) expect(covered).toContain(selector)
     }
   })
 })
