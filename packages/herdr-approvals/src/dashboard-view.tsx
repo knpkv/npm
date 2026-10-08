@@ -18,6 +18,8 @@ type DashboardViewProps = {
   readonly busyJobId: string | null
   /** The hub's answer to the last decision, shown on that request in the Approvals countdown. */
   readonly decisionStatus?: DecisionStatus | null
+  /** The usage-limits panel, placed before Machines. */
+  readonly limits?: ReactNode
   /** The decision waiting for the hub, if any; the countdown's bar shows it as sending. */
   readonly sendingDecision?: ApprovalDecision | null
   readonly notificationState: NotificationState
@@ -427,6 +429,7 @@ export const DashboardView = ({
   busyJobId,
   decisionStatus = null,
   historyLoading = false,
+  limits = null,
   notice = null,
   notificationState,
   onDecision,
@@ -652,6 +655,7 @@ export const DashboardView = ({
             records={history}
           />
         )}
+        {limits}
         <Machines snapshot={snapshot} />
       </AppColumn>
     </div>

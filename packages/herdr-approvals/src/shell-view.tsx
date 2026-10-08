@@ -3,6 +3,7 @@ import { Button, Dialog, StatePanel, Tabs, Text, type RlyTabItem } from "@knpkv/
 import { Cause, Option, Predicate } from "effect"
 import type * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react"
+import { limitsPanelHeadingId } from "./limits-view.js"
 
 export type FleetShellTab = "approvals" | "connect" | "work"
 
@@ -258,12 +259,18 @@ export const FleetShell = ({
   approvals,
   connect,
   hostCount,
+  limits = null,
   notice = null,
   work
 }: {
   readonly approvals: ReactNode
   readonly connect: ReactNode
   readonly hostCount: number
+  /**
+   * The usage-limit chips, given a way to show their panel: they live on Approvals, so opening
+   * them selects that tab and moves focus to the panel heading.
+   */
+  readonly limits?: ((open: () => void) => ReactNode) | null
   /** A page-level notice (such as a failed refresh): under the masthead, in the gutter, above the tabs. */
   readonly notice?: ReactNode
   readonly work: ReactNode
@@ -398,6 +405,12 @@ export const FleetShell = ({
             </Text>
           </div>
           <div className="fleet-shell-meta">
+            {limits === null
+              ? null
+              : limits(() => {
+                  selectTab("approvals")
+                  focusWhenShown(limitsPanelHeadingId)
+                })}
             {/* Configured, not reachable: the shell doesn't know which hosts answer, so it doesn't say. */}
             <Text tone="secondary" variant="meta">
               {hostCount === 1 ? "1 host" : `${String(hostCount)} hosts`}

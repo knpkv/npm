@@ -2,7 +2,7 @@ import { dashboardRefreshView } from "./internal/dashboard-refresh.js"
 import { RegistryProvider, useAtom, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
-import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
+import { Cause, Effect, Exit, Option, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
@@ -49,6 +49,9 @@ import { useHubNow } from "./hub-clock.js"
 import { answerOutcome, decidableExpiry, workRequestDecisionsFor } from "./work-decisions.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 import { RefreshStatus } from "./refresh-status.js"
+import { FleetLimits } from "./limits-schema.js"
+import { limitsView } from "./limits-model.js"
+import { LimitsChips, LimitsPanel } from "./limits-view.js"
 import { dashboardPolls } from "./internal/dashboard-polls.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
@@ -109,6 +112,21 @@ const fetchJson = Effect.fn("ApprovalClient.fetchJson")(function* <A>(
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
 const loadDashboard = fetchJson(DashboardSnapshot, "/v1/dashboard")
+const loadLimits = fetchJson(FleetLimits, "/v1/limits")
+
+const limitsTime = new Intl.DateTimeFormat(undefined, { weekday: "short", hour: "2-digit", minute: "2-digit" })
+
+/**
+ * The limits as of the last good load, and why the latest load failed when it did. `now` is the
+ * browser's clock: ages and reset countdowns are read against it on every render.
+ */
+const limitsState = (result: AsyncResult.AsyncResult<FleetLimits, unknown>, now: number) => {
+  const last = AsyncResult.value(result)
+  return {
+    problem: AsyncResult.isFailure(result) ? "Couldn't load limits. Trying again every minute." : null,
+    view: Option.isSome(last) ? limitsView(last.value, now, (millis) => limitsTime.format(millis)) : null
+  }
+}
 
 const loadDashboardPending = Effect.fn("Dashboard.loadPending")((
   continuation: DashboardSnapshotType["pendingApprovals"]["nextCursors"][number]
@@ -363,6 +381,7 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
   const connect = makeConnectAtoms()
   const work = served.work ? connect.work : browserRuntime.atom(Effect.never)
   const workPoll = served.work ? connect.workPoll : browserRuntime.atom(Effect.never)
+  const limits = browserRuntime.atom(loadLimits)
   return {
     badge: browserRuntime.fn(setApprovalBadge),
     busyJob: Atom.make<string | null>(null),
@@ -381,6 +400,9 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
       enable ? enableNotifications() : disableNotifications()
     ),
     historyPage: browserRuntime.fn(loadDashboardHistory),
+    limits,
+    // Each host rereads its limits at most every 30 seconds; a minute keeps the page within two reads.
+    limitsPoll: browserRuntime.atom(Atom.refresh(limits).pipe(Effect.repeat(Schedule.spaced("60 seconds")))),
     pendingPage: browserRuntime.fn(loadDashboardPending),
     pendingTarget: browserRuntime.fn(loadPendingApprovalTarget),
     pull: Atom.make<PullState>(initialPull),
@@ -394,6 +416,8 @@ type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const result = useAtomValue(atoms.dashboard)
   const workResult = useAtomValue(atoms.work)
+  // A host API at the UI boundary: limit ages are relative to the viewer's clock.
+  const limits = limitsState(useAtomValue(atoms.limits), Date.now())
   const notificationResult = useAtomValue(atoms.notification)
   const refresh = useAtomRefresh(atoms.dashboard)
   const refreshWork = useAtomRefresh(atoms.work)
@@ -638,6 +662,9 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const workState = fleetWorkStateFromRequest(workRequestState)
   // A failed refresh keeps the page; this says so in the page gutter, under the masthead.
   const refreshNotice = <RefreshStatus failed={refreshFailed} observedAt={current.observedAt} onRetry={refresh} />
+  const limitsViewNow = limits.view
+  const limitsChips =
+    limitsViewNow === null ? null : (open: () => void) => <LimitsChips onOpen={open} view={limitsViewNow} />
   const dashboardView = (
     <DashboardView
       approvalOnly={canonical}
@@ -654,6 +681,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       onLoadPending={() => void onLoadPending()}
       onRefresh={refreshDashboard}
       pull={pull}
+      limits={<LimitsPanel problem={limits.problem} view={limits.view} />}
       showHeader={!canonical}
       notice={canonical ? null : refreshNotice}
       snapshot={current}
@@ -662,6 +690,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   return (
     <>
       <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
+      <DashboardWorkPollOwner atom={atoms.limits} poll={atoms.limitsPoll} />
       <div
         className="dashboard-gesture"
         onTouchStart={onTouchStart}
@@ -674,6 +703,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
             approvals={dashboardView}
             connect={<ConnectSurface atoms={atoms.connect} embedded />}
             hostCount={current.directory === null ? 1 : current.directory.links.length + 1}
+            limits={limitsChips}
             notice={refreshNotice}
             work={
               <section className="fleet-workspace">

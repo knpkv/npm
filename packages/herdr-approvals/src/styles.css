@@ -834,6 +834,131 @@
     overflow-wrap: break-word;
   }
 
+  /* The masthead wraps rather than overflow once the limit chips join the host count. */
+  .fleet-shell-masthead {
+    flex-wrap: wrap;
+    gap: var(--rly-space-8) var(--rly-space-16);
+  }
+
+  /* One chip per provider: the window closest to its limit, linked to the panel. */
+  .limits-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-12);
+  }
+
+  .limits-chip {
+    align-items: center;
+    border-radius: var(--rly-radius-control);
+    color: inherit;
+    display: inline-flex;
+    gap: var(--rly-space-6);
+    position: relative;
+    text-decoration: none;
+  }
+
+  /* Drawn at label size; the pseudo-element grows the touch target to 44px. */
+  .limits-chip::after {
+    content: "";
+    inset: min(0px, (100% - 2.75rem) / 2);
+    position: absolute;
+  }
+
+  .limits-chip-window {
+    color: var(--rly-color-text-3);
+    font-size: var(--rly-type-meta-size);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .limits-chip:hover .limits-chip-window {
+      color: var(--rly-color-text-1);
+    }
+  }
+
+  .limits-accounts {
+    display: grid;
+    gap: var(--rly-space-20);
+  }
+
+  .limits-account-heading {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+    margin-block-end: var(--rly-space-8);
+  }
+
+  /* An account email is one long word; it breaks rather than widening the panel. */
+  .limits-account-label {
+    min-inline-size: 0;
+    overflow-wrap: break-word;
+  }
+
+  .limits-windows,
+  .limits-notes {
+    display: grid;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .limits-windows {
+    gap: var(--rly-space-16);
+  }
+
+  /* Name, track, number and state on one line; the reset, pace and source under the track. */
+  .limits-window {
+    align-items: center;
+    display: grid;
+    gap: var(--rly-space-4) var(--rly-space-12);
+    grid-template-areas:
+      "name track used state"
+      ". detail detail detail";
+    grid-template-columns: minmax(0, 5rem) minmax(4rem, 1fr) auto auto;
+  }
+
+  .limits-window-name {
+    grid-area: name;
+  }
+
+  .limits-window-track {
+    grid-area: track;
+  }
+
+  .limits-window-used {
+    grid-area: used;
+  }
+
+  .limits-window-state {
+    grid-area: state;
+  }
+
+  .limits-window-detail {
+    grid-area: detail;
+    min-inline-size: 0;
+  }
+
+  .limits-notes {
+    gap: var(--rly-space-4);
+    margin-block-start: var(--rly-space-16);
+  }
+
+  /* Phones: the chips drop the window word, and each window stacks under its name. */
+  @media (max-width: 40rem) {
+    .limits-chip-window {
+      display: none;
+    }
+
+    .limits-window {
+      grid-template-areas:
+        "name state"
+        "track track"
+        "used used"
+        "detail detail";
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+  }
+
   .notification-status {
     align-items: center;
     display: flex;

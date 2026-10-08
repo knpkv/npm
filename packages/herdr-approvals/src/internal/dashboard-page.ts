@@ -7,6 +7,7 @@ import { createElement } from "react"
 import { renderToString } from "react-dom/server"
 import type { DashboardSnapshot } from "../dashboard-model.js"
 import { DashboardView } from "../dashboard-view.js"
+import { LimitsPanel } from "../limits-view.js"
 import { dashboardDocumentTitle } from "./html.js"
 
 /**
@@ -21,6 +22,8 @@ export const dashboardPage = (snapshot: DashboardSnapshot, fontPreload: string):
       { className: "dashboard-gesture" },
       createElement(DashboardView, {
         busyJobId: null,
+        // The client's first render has no limits read yet; the same panel keeps hydration exact.
+        limits: createElement(LimitsPanel, { view: null }),
         notificationState: "loading",
         onDecision: () => undefined,
         onDisableNotifications: undefined,
