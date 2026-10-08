@@ -381,6 +381,7 @@
   display: -webkit-box;
   line-height: 1.4;
   margin: 0 0 var(--rly-space-8);
+  min-inline-size: 0;
   overflow: clip;
   padding-block-end: var(--rly-space-8);
   -webkit-box-orient: vertical;
@@ -432,6 +433,7 @@
 
 .findingBody > span:not(.findingMeta) {
   display: -webkit-box;
+  min-inline-size: 0;
   overflow: clip;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -604,6 +606,7 @@
   display: grid;
   gap: var(--rly-space-8);
   grid-template-rows: auto minmax(var(--rly-space-0), 1fr) auto;
+  min-inline-size: 0;
   overflow: clip;
   padding: var(--rly-space-12) var(--rly-space-16);
 }
@@ -639,6 +642,7 @@
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
   max-inline-size: 22rem;
+  min-inline-size: 0;
   overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -725,6 +729,7 @@
 .findingMeta code {
   color: var(--rly-color-text-3);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height) var(--rly-font-mono);
+  min-inline-size: 0;
   overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -780,6 +785,7 @@
     border-block-end: 1px solid var(--rly-color-border-1);
     border-inline-end: 0;
     max-block-size: 20rem;
+    min-inline-size: 0;
     overflow: clip;
   }
 

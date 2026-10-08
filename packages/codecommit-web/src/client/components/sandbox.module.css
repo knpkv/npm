@@ -59,6 +59,7 @@
 
 .sandboxList {
   display: grid;
+  min-inline-size: 0;
   overflow: clip;
   border-block-start: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-group);
@@ -116,6 +117,7 @@
 }
 
 .repository {
+  min-inline-size: 0;
   overflow: clip;
   color: var(--rly-color-text-1);
   font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
@@ -137,6 +139,7 @@
 }
 
 .branch {
+  min-inline-size: 0;
   overflow: clip;
   max-inline-size: 28rem;
   padding: var(--rly-space-4) var(--rly-space-8);
@@ -227,6 +230,7 @@
 }
 
 .workspaceTitle {
+  min-inline-size: 0;
   overflow: clip;
   color: var(--rly-color-text-1);
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
@@ -236,6 +240,7 @@
 }
 
 .workspaceMeta {
+  min-inline-size: 0;
   overflow: clip;
   color: var(--rly-color-text-3);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
@@ -310,6 +315,7 @@
 
 .workspaceContent {
   display: flex;
+  min-inline-size: 0;
   overflow: clip;
   flex: 1 1 auto;
   flex-direction: column;

@@ -56,6 +56,7 @@
 }
 
 .brandName {
+  min-inline-size: 0;
   overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -292,6 +293,7 @@
 }
 
 .userName {
+  min-inline-size: 0;
   overflow: clip;
   color: var(--rly-color-text-1);
   text-overflow: ellipsis;
@@ -323,6 +325,7 @@
 }
 
 .menuIdentity strong {
+  min-inline-size: 0;
   overflow: clip;
   color: var(--rly-color-text-1);
   font-weight: 600;

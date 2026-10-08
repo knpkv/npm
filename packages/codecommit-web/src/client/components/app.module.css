@@ -10,6 +10,7 @@
 
 .fullWidthRoot {
   block-size: 100dvh;
+  min-inline-size: 0;
   overflow: clip;
 }
 

@@ -357,6 +357,7 @@
 }
 
 .queueSurface {
+  min-inline-size: 0;
   overflow: clip;
 }
 
@@ -430,6 +431,7 @@
 }
 
 .prDescription {
+  min-inline-size: 0;
   overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -474,6 +476,7 @@
 }
 
 .prFact dd {
+  min-inline-size: 0;
   overflow: clip;
   margin: 0;
   color: var(--rly-color-text-1);
@@ -630,6 +633,7 @@
 .activityList {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
+  min-inline-size: 0;
   overflow: clip;
 }
 
@@ -710,6 +714,7 @@ a.activityItem:focus-visible {
 
 .activityItemTitle {
   display: -webkit-box;
+  min-inline-size: 0;
   overflow: clip;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
