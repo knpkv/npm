@@ -338,7 +338,8 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  /* The state label drops under the name before it can squeeze it; names and work wrap whole. */
+  /* The state label drops under the name before it can squeeze it; names and work wrap whole.
+     A zero basis with an 8rem floor keeps the presence dot beside the name at 320. */
   .agent-line {
     align-items: center;
     flex-wrap: wrap;
@@ -346,8 +347,8 @@
 
   .agent-line > div {
     display: grid;
-    flex: 1 1 12rem;
-    min-inline-size: 0;
+    flex: 1 1 0;
+    min-inline-size: 8rem;
   }
 
   .agent-line small,
