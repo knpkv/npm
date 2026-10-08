@@ -1,5 +1,11 @@
-.bar {
-  margin-block-end: var(--rly-space-16);
+/* Fixed to the bottom edge, inside the page gutter, above page content but below dialogs. */
+.dock {
+  position: fixed;
+  z-index: 30;
+  inset-block-end: var(--rly-space-16);
+  inset-inline: var(--rly-space-16);
+  margin-inline: auto;
+  max-inline-size: 72rem;
 }
 
 .actions {

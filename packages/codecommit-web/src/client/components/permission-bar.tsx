@@ -15,6 +15,7 @@ import * as Predicate from "effect/Predicate"
 import { useState } from "react"
 import type { AppState } from "../atoms/app.js"
 import { permissionRespondAtom, permissionsCategoryUpdateAtom } from "../atoms/app.js"
+import { usePublishedBlockSize } from "../hooks/usePublishedBlockSize.js"
 import styles from "./permission-bar.module.css"
 
 /**
@@ -42,6 +43,7 @@ export function PermissionBar({
   readonly prompt: NonNullable<AppState["permissionPrompt"]>
 }) {
   const waiting = pendingReads === undefined ? null : waitingReadsText(pendingReads)
+  const publishBlockSize = usePublishedBlockSize<HTMLDivElement>("--permission-bar-block-size")
   const respond = useAtomSet(permissionRespondAtom)
   const grantCategory = useAtomSet(permissionsCategoryUpdateAtom, { mode: "promiseExit" })
   const [failure, setFailure] = useState<string | null>(null)
@@ -59,8 +61,10 @@ export function PermissionBar({
   }
 
   return (
+    // Docked to the bottom edge: a prompt arriving after the page has painted must not push it down.
+    // Its height is published, and the page keeps that much room at its end so nothing hides under it.
     // Marked so a modal drawer steps aside for it: the page behind a modal is inert.
-    <div data-needs-answer="">
+    <div className={styles.dock} data-needs-answer="" ref={publishBlockSize}>
       <Notice
         action={
           <div className={styles.actions}>
@@ -80,7 +84,6 @@ export function PermissionBar({
           </div>
         }
         announce="polite"
-        className={styles.bar}
         tone="caution"
       >
         {waiting === null ? (

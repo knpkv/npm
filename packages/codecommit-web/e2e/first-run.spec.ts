@@ -296,6 +296,39 @@ test("says it is checking sign-in until an account's identity read answers", asy
   await expect(page.getByText("Not logged in", { exact: true })).toHaveCount(0)
 })
 
+// A read prompt arrives after the page has painted: docked to the bottom edge, it never moves the page.
+test("docks the read prompt so a late one doesn't push the page down", async ({ page }) => {
+  await routeCommon(page)
+  let prompt = false
+  await page.route("**/api/events/", (route) =>
+    route.fulfill({
+      body: `data: ${
+        JSON.stringify(prompt ? withPrompt("read", "getCallerIdentity", "Get identity for dev") : emptySnapshot)
+      }\n\n`,
+      contentType: "text/event-stream"
+    }))
+  await page.route(
+    "**/api/config",
+    (route) =>
+      route.fulfill({ json: { ...config, accounts: [{ enabled: true, profile: "dev", regions: ["eu-central-1"] }] } })
+  )
+  await page.setViewportSize({ height: 800, width: 390 })
+
+  await page.goto("/settings/accounts")
+  const heading = page.getByRole("heading", { level: 1 })
+  const before = (await heading.boundingBox())?.y
+  prompt = true
+  await page.reload()
+  const bar = page.locator("[data-needs-answer]")
+  await expect(bar).toBeVisible()
+  expect((await heading.boundingBox())?.y).toBe(before)
+  expect(await bar.evaluate((element) => getComputedStyle(element).position)).toBe("fixed")
+  // The page keeps the bar's height free at its end, so its last row isn't hidden under it.
+  const room = await page.locator("main").evaluate((main) => Number.parseFloat(getComputedStyle(main).paddingBottom))
+  expect(room).toBeGreaterThanOrEqual((await bar.boundingBox())?.height ?? Number.POSITIVE_INFINITY)
+  await expect(page.getByText("Waiting for read permission", { exact: true })).toBeVisible()
+})
+
 test("asks for a read inline, so the first account isn't blocked by a modal", async ({ page }) => {
   await routeCommon(page)
   const calls: Array<string> = []
