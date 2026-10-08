@@ -120,9 +120,18 @@
     }
   }
 
+  /*
+   * A scroller clips at its padding box, and overflow-x: auto makes overflow-y auto too, so the
+   * selected underline, which sits 1px down over the hairline, would overflow by that pixel and show a
+   * scrollbar. Here the hairline is drawn inside the padding instead of as a border: the underline still
+   * covers it exactly, and nothing overflows.
+   */
   .root[data-mobile-layout="single-row"] .list {
+    background: linear-gradient(var(--rly-color-border-1), var(--rly-color-border-1)) bottom / 100% 1px no-repeat;
+    border-block-end: var(--rly-space-0);
     flex-wrap: nowrap;
     overflow-x: auto;
+    padding-block-end: 1px;
   }
 
   .root[data-mobile-layout="single-row"] .trigger {
