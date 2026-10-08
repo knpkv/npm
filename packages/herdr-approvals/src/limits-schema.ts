@@ -100,9 +100,14 @@ export const PeerLimitsFailureReason = Schema.Literals([
   "invalid_response"
 ])
 
-/** Every host the hub could ask, and the ones it could not reach, by name. */
+/**
+ * Every host the hub could ask, and the ones it could not reach, by name. `peersListed` is false
+ * when the hub could not list the fleet at all: `hosts` is then only its own read, and the page
+ * says the other machines are unknown rather than implying there are none.
+ */
 export const FleetLimits = Schema.Struct({
   hosts: Schema.Array(HostLimits),
-  failures: Schema.Array(Schema.Struct({ host: Schema.String, reason: PeerLimitsFailureReason }))
+  failures: Schema.Array(Schema.Struct({ host: Schema.String, reason: PeerLimitsFailureReason })),
+  peersListed: Schema.Boolean
 })
 export type FleetLimits = typeof FleetLimits.Type
