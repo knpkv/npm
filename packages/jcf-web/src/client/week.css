@@ -595,7 +595,7 @@ body,
   font-size: var(--rly-type-label-size);
   font-variant-numeric: tabular-nums;
   margin: 0;
-  min-inline-size: 18ch;
+  min-width: 18ch;
   text-align: end;
 }
 
