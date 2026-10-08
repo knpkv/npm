@@ -40,15 +40,14 @@
     var(--rly-type-label-font);
   text-align: start;
   text-decoration: none;
-  transition:
-    background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
-    color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   white-space: nowrap;
 }
 
-.tab:hover {
-  background: var(--rly-color-surface-2);
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .tab:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .tab[data-active="true"] {
@@ -102,8 +101,10 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .tab {
-    transition: none;
+    transition:
+      background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 }

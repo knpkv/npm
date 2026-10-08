@@ -26,6 +26,7 @@ files:
   - "packages/herdr-connect/src/**/*.css"
   - "packages/review/src/**/*.css"
   - "packages/agent-usage/src/**/*.css"
+  - "packages/codecommit-web/src/**/*.css"
   - "packages/herdr-approvals/src/**/*.css"
 
 note: |

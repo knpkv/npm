@@ -140,3 +140,11 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Touch keyboards zoom the page into a field whose text is under 16px. */
+@media (pointer: coarse) {
+  .filters select,
+  .filters input {
+    font-size: max(16px, 1rem);
+  }
+}

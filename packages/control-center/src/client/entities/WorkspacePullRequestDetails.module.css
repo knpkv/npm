@@ -1033,3 +1033,13 @@
     inline-size: 38%;
   }
 }
+
+/* Touch keyboards zoom the page into a field whose text is under 16px. */
+@media (pointer: coarse) {
+  .revisionAdvanced textarea,
+  .publicationEditor textarea,
+  .revisionEditor textarea,
+  .reviewThreadComposer textarea {
+    font-size: max(16px, 1rem);
+  }
+}

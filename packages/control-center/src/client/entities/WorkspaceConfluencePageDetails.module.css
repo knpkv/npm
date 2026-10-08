@@ -335,3 +335,9 @@
     scroll-behavior: auto;
   }
 }
+
+@media (pointer: coarse) {
+  .editorToolbar button {
+    min-block-size: 2.75rem;
+  }
+}
