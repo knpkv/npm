@@ -3096,12 +3096,9 @@ export const startHttpServer = async (
             return
           }
 
-          // The page's view: on the hub every peer's read, on a host's own listener just its own.
-          if (
-            (mode === "serve" || mode === "local") &&
-            request.method === "GET" &&
-            url.pathname === "/v1/limits"
-          ) {
+          // Every listener that serves a dashboard serves its limits: on the hub every peer's read,
+          // anywhere else just this host's.
+          if (request.method === "GET" && url.pathname === "/v1/limits") {
             await respond(
               response,
               Effect.andThen(
