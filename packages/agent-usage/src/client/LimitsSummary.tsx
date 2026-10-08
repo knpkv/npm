@@ -42,6 +42,7 @@ const WindowRow = (props: { readonly agent: string; readonly window: WindowSumma
         <div className="usage-window-meter">
           {/* Rly's track: the near mark at the same 80% the tone word uses, hatched when the reading is old. */}
           <LimitTrack
+            className="usage-window-track"
             decorative={false}
             label={`${props.agent} ${window.name} used`}
             near={NEAR_PERCENT}
@@ -49,7 +50,8 @@ const WindowRow = (props: { readonly agent: string; readonly window: WindowSumma
             value={window.usedPercent}
             valueText={`${formatPercent(window.usedPercent)} used${window.freshness === "stale" ? ", old reading" : ""}`}
           />
-          <span className="usage-window-value">{formatPercent(window.usedPercent)}</span>
+          {/* The meter already announces the value; read once, not twice. */}
+          <span aria-hidden="true" className="usage-window-value">{formatPercent(window.usedPercent)}</span>
         </div>
       )}
       <div className="usage-window-meta">

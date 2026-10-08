@@ -57,7 +57,7 @@
 }
 
 /* The track takes the row; the value keeps its width beside it. */
-.usage-window-meter > :first-child {
+.usage-window-track {
   flex: 1;
   min-inline-size: 0;
 }
