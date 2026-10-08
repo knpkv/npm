@@ -52,31 +52,31 @@ export const ConnectLimits = ({
         <summary>{severalHosts ? "Limits on each host" : "Limit details"}</summary>
         {/* A <details> lays its content out through an internal slot, so the grid is a wrapper's. */}
         <div className="connect-limits-hosts">
-        {problem === null ? null : (
-          <Text as="p" tone="secondary" variant="meta">
-            {problem}
-          </Text>
-        )}
-        {view.hosts.map((host) => (
-          <LimitsSummary
-            balances={[]}
-            key={host.host}
-            latest={host.latest}
-            now={host.now}
-            title={severalHosts ? `Limits on ${host.host}` : "Limits now"}
-          />
-        ))}
-        {view.notes.length === 0 ? null : (
-          <ul className="connect-limits-notes">
-            {view.notes.map((note) => (
-              <li key={note}>
-                <Text as="span" tone="secondary" variant="meta">
-                  {note}
-                </Text>
-              </li>
-            ))}
-          </ul>
-        )}
+          {problem === null ? null : (
+            <Text as="p" tone="secondary" variant="meta">
+              {problem}
+            </Text>
+          )}
+          {view.hosts.map((host) => (
+            <LimitsSummary
+              balances={[]}
+              key={host.host}
+              latest={host.latest}
+              now={host.now}
+              title={severalHosts ? `Limits on ${host.host}` : "Limits now"}
+            />
+          ))}
+          {view.notes.length === 0 ? null : (
+            <ul className="connect-limits-notes">
+              {view.notes.map((note) => (
+                <li key={note}>
+                  <Text as="span" tone="secondary" variant="meta">
+                    {note}
+                  </Text>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </details>
     </div>
