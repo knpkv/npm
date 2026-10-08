@@ -98,7 +98,7 @@
 .richText {
   font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
     var(--rly-type-body-large-font);
-  max-inline-size: 62ch;
+  max-inline-size: 41.3em;
   min-inline-size: 0;
   overflow-wrap: break-word;
 }
@@ -146,7 +146,7 @@
   border: 1px solid color-mix(in srgb, var(--rly-color-service-confluence) 28%, var(--rly-color-border-1));
   border-radius: var(--rly-radius-group);
   gap: var(--rly-space-16);
-  max-inline-size: 62ch;
+  max-inline-size: 41.3em;
   padding: var(--rly-space-20);
 }
 
@@ -246,8 +246,8 @@
 }
 
 .editorToolbar button:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 1px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .editorCanvas {
@@ -262,7 +262,8 @@
 
 .editorCanvas:focus {
   border-color: var(--rly-color-service-confluence);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--rly-color-service-confluence) 22%, transparent);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .collections {

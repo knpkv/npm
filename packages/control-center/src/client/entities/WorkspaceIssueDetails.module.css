@@ -34,7 +34,7 @@
 .richText {
   font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
     var(--rly-type-body-large-font);
-  max-inline-size: 58ch;
+  max-inline-size: 38.6em;
 }
 
 .richText > :first-child,

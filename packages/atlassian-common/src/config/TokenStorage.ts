@@ -73,6 +73,7 @@ export const loadToken = (
     const tokenPath = yield* getAuthPath(toolName)
 
     const exists = yield* fs.exists(tokenPath).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(false))
     )
     if (!exists) {
@@ -139,6 +140,7 @@ export const deleteToken = (
     const tokenPath = yield* getAuthPath(toolName)
 
     yield* fs.remove(tokenPath).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.void)
     )
   })
@@ -163,6 +165,7 @@ export const loadOAuthConfig = (
     const configPath = yield* getOAuthConfigPath(toolName)
 
     const exists = yield* fs.exists(configPath).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed(false))
     )
     if (!exists) {

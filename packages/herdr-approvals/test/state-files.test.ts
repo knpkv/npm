@@ -72,7 +72,7 @@ const startOn = (root: string, stateDirectory: string) =>
     type Outcome = "started" | "refused"
     return yield* Effect.promise((): Promise<Outcome> =>
       startHttpServer(config(stateDirectory), fleet, assets).then(
-        async (running) => {
+        async (running): Promise<Outcome> => {
           await running.close()
           return "started"
         },

@@ -181,24 +181,37 @@ describe("hostd runtime operations injection", () => {
                 const receipt = yield* (() => {
                   switch (payload.mode) {
                     case "consult":
-                    case "transition_summary":
                       return orchestrator.submitRouted({
-                        command: durableCommand,
+                        command: { ...durableCommand, payload: { ...payload, mode: payload.mode } },
                         idempotencyKey: `dispatch:${jobId}`,
                         route: {
                           protocol: "hostd.coordinator.route.v1",
                           action: "dispatch",
                           model: "gpt-5.6-luna",
-                          reasoningEffort: payload.mode === "consult" ? "medium" : "low",
-                          reason: payload.mode === "consult"
-                            ? "bounded coordination uses Luna medium"
-                            : "transition summaries use Luna low",
+                          reasoningEffort: "medium",
+                          reason: "bounded coordination uses Luna medium",
+                          linkedRequestId: null
+                        },
+                        workLink: null
+                      }).pipe(Effect.mapError(operationError("hostd.orchestrator.submit")))
+                    case "transition_summary":
+                      return orchestrator.submitRouted({
+                        command: { ...durableCommand, payload: { ...payload, mode: payload.mode } },
+                        idempotencyKey: `dispatch:${jobId}`,
+                        route: {
+                          protocol: "hostd.coordinator.route.v1",
+                          action: "dispatch",
+                          model: "gpt-5.6-luna",
+                          reasoningEffort: "low",
+                          reason: "transition summaries use Luna low",
                           linkedRequestId: null
                         },
                         workLink: null
                       }).pipe(Effect.mapError(operationError("hostd.orchestrator.submit")))
                     case "review":
-                    case "work":
+                    case "work": {
+                      // Closures drop narrowing, so keep the Sol mode the switch established.
+                      const solMode = payload.mode
                       return Option.match(authority, {
                         onNone: () =>
                           Effect.fail(
@@ -210,12 +223,22 @@ describe("hostd runtime operations injection", () => {
                           ),
                         onSome: (reference) =>
                           orchestrator.submitSolEscalation({
-                            command: { ...durableCommand, payload },
+                            command: {
+                              ...durableCommand,
+                              // Sol escalations never carry the coordinator-chat channel.
+                              payload: {
+                                kind: payload.kind,
+                                mode: solMode,
+                                prompt: payload.prompt,
+                                repository: payload.repository
+                              }
+                            },
                             idempotencyKey: `dispatch:${jobId}`,
                             reason: "failed Luna work requires an explicit linked Sol escalation",
                             reference
                           }).pipe(Effect.mapError(operationError("hostd.orchestrator.submit")))
                       })
+                    }
                   }
                 })()
                 const encodedReceipt = yield* Schema.encodeEffect(
@@ -286,7 +309,7 @@ describe("hostd runtime operations injection", () => {
           }, "andrey")
           const acceptedLunaJob = yield* fleet.run(lunaJob.id)
           expect(acceptedLunaJob.status).toBe("running")
-          const luna = yield* Schema.decodeEffect(Schema.fromJsonString(OrchestratorReceipt))(
+          const luna = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(OrchestratorReceipt))(
             acceptedLunaJob.result
           )
           expect((yield* orchestrator.request(luna.dispatchRequestId)).status).toBe("accepted")
@@ -315,7 +338,7 @@ describe("hostd runtime operations injection", () => {
             }
           }, "andrey")
           const acceptedTransitionSummary = yield* fleet.run(transitionSummaryJob.id)
-          const transitionSummary = yield* Schema.decodeEffect(Schema.fromJsonString(OrchestratorReceipt))(
+          const transitionSummary = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(OrchestratorReceipt))(
             acceptedTransitionSummary.result
           )
           expect(yield* orchestrator.request(transitionSummary.dispatchRequestId)).toMatchObject({
@@ -380,7 +403,7 @@ describe("hostd runtime operations injection", () => {
           )
           const acceptedSolJob = yield* fleet.run(solJob.id)
           expect(acceptedSolJob.status).toBe("running")
-          const sol = yield* Schema.decodeEffect(Schema.fromJsonString(OrchestratorReceipt))(
+          const sol = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(OrchestratorReceipt))(
             acceptedSolJob.result
           )
           const acceptedSol = yield* orchestrator.request(sol.dispatchRequestId)
@@ -421,16 +444,21 @@ describe("hostd runtime operations injection", () => {
       withRuntime(path, (orchestrator) =>
         Effect.gen(function*() {
           yield* TestClock.setTime(3_000)
-          const payload: Parameters<HostOperations["run"]>[0] = {
+          const payload = {
             kind: "agent.delegate",
             mode: "consult",
             prompt: "resume the committed request",
             repository: "/repo"
-          }
+          } satisfies Parameters<HostOperations["run"]>[0]
           const fleetJobId = "fleet-crash-window"
           const releaseTerminal = yield* Deferred.make<void>()
           const terminalObserved = yield* Deferred.make<void>()
-          const durableCommand = command("andrey", `activity:${fleetJobId}`, payload)
+          const durableCommand = {
+            kind: "fleet.job",
+            actor: "andrey",
+            activityIdempotencyKey: `activity:${fleetJobId}`,
+            payload
+          } satisfies OrchestratorCommand
           const submit = () =>
             orchestrator.submitRouted({
               command: durableCommand,
@@ -519,7 +547,7 @@ describe("hostd runtime operations injection", () => {
           yield* Deferred.succeed(releaseTerminal, undefined)
           yield* Deferred.await(terminalObserved)
           const recovered = yield* fleet.get(fleetJobId)
-          const receipt = yield* Schema.decodeEffect(Schema.fromJsonString(OrchestratorReceipt))(
+          const receipt = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(OrchestratorReceipt))(
             recovered.acceptedReceipt
           )
           expect(receipt.dispatchRequestId).toBe(committed.dispatchRequestId)
@@ -541,19 +569,31 @@ describe("hostd runtime operations injection", () => {
         })
         let compositionKeys: ReadonlyArray<string> = []
         let pendingCheck: Effect.Effect<boolean, unknown> = Effect.succeed(true)
+        let workerCheck: Effect.Effect<unknown, unknown> = Effect.succeed(null)
         yield* makeHostdOperations(
           config(root),
           (composition) =>
             Effect.sync(() => {
               compositionKeys = Object.keys(composition).sort()
               pendingCheck = composition.hasOutstandingWorkJob
+              workerCheck = composition.startedWorker("job-1")
               return composition.defaultOperations
             })
         )
-        expect(compositionKeys).toEqual(["config", "defaultOperations", "fork", "hasOutstandingWorkJob"])
-        // Composed without the job store, the question fails loudly instead of reading "none pending".
+        expect(compositionKeys).toEqual([
+          "config",
+          "defaultOperations",
+          "fork",
+          "hasOutstandingWorkJob",
+          "startedWorker"
+        ])
+        // Composed without the job store, each question fails loudly instead of
+        // reading "none pending" or "no worker".
         expect(yield* Effect.result(pendingCheck)).toMatchObject({
           failure: { _tag: "FleetStoreError", operation: "outstanding-work-job" }
+        })
+        expect(yield* Effect.result(workerCheck)).toMatchObject({
+          failure: { _tag: "FleetStoreError", operation: "started-worker" }
         })
         const jobs = yield* Effect.acquireRelease(
           JobStore.open(join(root, "pending-jobs.sqlite")),
@@ -564,11 +604,13 @@ describe("hostd runtime operations injection", () => {
           (composition) =>
             Effect.sync(() => {
               pendingCheck = composition.hasOutstandingWorkJob
+              workerCheck = composition.startedWorker("job-unknown")
               return composition.defaultOperations
             }),
           jobs
         )
         expect(yield* pendingCheck).toBe(false)
+        expect(yield* workerCheck).toBeNull()
 
         const invalid = yield* Effect.result(
           makeHostdOperations(

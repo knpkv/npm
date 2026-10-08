@@ -1,13 +1,13 @@
 import { NodeHttpClient, NodeHttpServer } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { Schema } from "effect"
-import { Clock, Effect, Layer, Redacted, Tracer } from "effect"
+import { Clock, Effect, Layer, Logger, Redacted, Tracer } from "effect"
 import { HttpBody, HttpClient, HttpServer, HttpServerResponse } from "effect/http"
 import { TestClock } from "effect/testing"
 import { createServer } from "node:http"
 import type { Snapshot } from "../src/model.js"
 import { publish } from "../src/publisher.js"
-import { makeMonitor } from "../src/server.js"
+import { makeMonitor, type MonitorSetting } from "../src/server.js"
 
 const testServer = HttpServer.layerTestClient.pipe(
   Layer.provide(NodeHttpClient.layerNodeHttp),
@@ -147,6 +147,24 @@ describe("actual HTTP authority boundary", () => {
       ).toBe(415)
     }).pipe(withServer))
 
+  // Review finding (#599): a malformed publish returned 400 without any trace in the server log.
+  it.effect("logs a rejected publish by its failure kind, never its body", () => {
+    const logged: Array<string> = []
+    const capture = Logger.make(({ message }) => {
+      logged.push((Array.isArray(message) ? message : [message]).map(String).join(" "))
+    })
+    return Effect.gen(function*() {
+      const { client } = yield* setup
+      const sent = yield* client.put("/boards/main", {
+        headers: { authorization: `Bearer ${publishToken}`, "content-type": "application/json" },
+        body: HttpBody.text("{\"title\": \"secret-payload\"", "application/json")
+      })
+      expect(sent.status).toBe(400)
+      expect(logged.filter((line) => line.startsWith("monitor publish rejected: "))).toHaveLength(1)
+      expect(logged.join("\n")).not.toContain("secret-payload")
+    }).pipe(withServer, Effect.provideService(Logger.CurrentLoggers, new Set([capture])))
+  })
+
   it.effect("unauthenticated and view-only traffic cannot spend the publisher budget", () =>
     Effect.gen(function*() {
       const { client, get, put } = yield* setup
@@ -186,17 +204,22 @@ describe("actual HTTP authority boundary", () => {
       expect(spans.some((span) => Array.from(span.attributes.values()).includes(publishToken))).toBe(false)
     }).pipe(withServer))
 
-  it.effect("fails startup for missing, confused or reused credentials", () =>
+  // QA-J50: startup failed with no name; the error now says which setting to fix, and nothing of its value.
+  it.effect("fails startup for missing, confused or reused credentials, naming the setting", () =>
     Effect.gen(function*() {
-      for (
-        const options of [{ publishToken: "", viewToken }, { publishToken: viewToken, viewToken }, {
-          publishToken,
-          viewToken: `view_${"p".repeat(43)}`
-        }]
-      ) {
-        const result = yield* makeMonitor({ boardId: "main", origin: "http://127.0.0.1:4319", ...options }, assets)
-          .pipe(Effect.result)
-        expect(result._tag).toBe("Failure")
+      const cases: ReadonlyArray<
+        readonly [{ readonly publishToken: string; readonly viewToken: string }, MonitorSetting]
+      > = [
+        [{ publishToken: "", viewToken }, "publishToken"],
+        [{ publishToken: viewToken, viewToken }, "publishToken"],
+        [{ publishToken, viewToken: publishToken }, "viewToken"],
+        [{ publishToken, viewToken: `view_${publishToken.slice(8)}` }, "independentTokens"]
+      ]
+      for (const [options, setting] of cases) {
+        const error = yield* makeMonitor({ boardId: "main", origin: "http://127.0.0.1:4319", ...options }, assets)
+          .pipe(Effect.flip)
+        expect(error.setting).toBe(setting)
+        expect(JSON.stringify(error)).not.toContain(publishToken.slice(8))
       }
     }))
 

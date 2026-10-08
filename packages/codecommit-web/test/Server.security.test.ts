@@ -5,7 +5,7 @@ import * as ChildEnv from "@knpkv/codecommit-core/ChildEnv.js"
 import { AwsApiError, PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/PermissionService/index.js"
-import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
+import { PermissionGate, type PermissionResponse } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
 import {
   Cause,
   Crypto,
@@ -57,7 +57,8 @@ const makePermissionService = (
       ? Effect.void
       : Ref.update(updates, (current) => [...current, update])
   },
-  setAudit: () => Effect.void
+  setAudit: () => Effect.void,
+  setCategory: () => Effect.void
 })
 
 const makeAuditLog = (entries: Ref.Ref<ReadonlyArray<NewAuditLogEntry>>): AuditLogRepo["Service"] => ({
@@ -89,7 +90,12 @@ const makeObservedReadClient = (
   discoverAccount: () => unused(),
   getBlob: ({ blobId }) =>
     Ref.update(calls, (count) => ({ ...count, blob: count.blob + 1 })).pipe(
-      Effect.as(new ReadClient.CodeCommitBlobContent({ blobId, bytes: new Uint8Array() }))
+      Effect.as(
+        new ReadClient.CodeCommitBlobContent({
+          blobId: ReadClient.CodeCommitBlobId.make(blobId),
+          bytes: new Uint8Array()
+        })
+      )
     ),
   getChangedFilesPage: () =>
     Ref.update(calls, (count) => ({ ...count, differences: count.differences + 1 })).pipe(
@@ -127,14 +133,10 @@ const makeTestPermissionedReadClient = Effect.fn("ServerSecurityTest.makePermiss
 describe("CodeCommit web security boundary", () => {
   it.effect("issues independent redacted 256-bit credentials for each browser proof", () =>
     Effect.gen(function*() {
-      const counter = yield* Ref.make(1)
-      const pairingCrypto = Crypto.Crypto.of({
-        randomBytes: (size) =>
-          Ref.getAndUpdate(counter, (value) => value + 1).pipe(
-            Effect.map((value) => new Uint8Array(size).fill(value))
-          ),
-        randomUUIDv4: Effect.succeed("00000000-0000-4000-8000-000000000000"),
-        randomUUIDv7: Effect.succeed("01900000-0000-7000-8000-000000000000"),
+      // Each draw fills with the next byte value, so the three credentials differ only by draw.
+      let draws = 0
+      const pairingCrypto = Crypto.make({
+        randomBytes: (size) => new Uint8Array(size).fill(++draws),
         digest: (_algorithm, bytes) => Effect.succeed(new Uint8Array(32).fill(bytes[0] ?? 0))
       })
       const session = yield* makeOwnerSession(authorityOrigin).pipe(
@@ -151,9 +153,11 @@ describe("CodeCommit web security boundary", () => {
   it.effect("keeps a committed config mutation successful when its refresh fails", () =>
     Effect.gen(function*() {
       const originalReview = ConfigService.defaultReviewConfig
+      const [baseProfile] = ConfigService.defaultReviewProfiles
+      if (baseProfile === undefined) return yield* Effect.die("the default review profiles are empty")
       const updatedReview = {
         defaultProfileId: "quick",
-        profiles: [{ id: "quick", name: "Quick review", kind: "review", skillIds: [] }]
+        profiles: [{ ...baseProfile, id: "quick", name: "Quick review", skillIds: [] }]
       } satisfies ConfigService.ReviewConfig
       const persisted = yield* Ref.make(originalReview)
       const refreshCalls = yield* Ref.make(0)
@@ -744,9 +748,9 @@ describe("CodeCommit web security boundary", () => {
             Ref.update(calls, (count) => ({ ...count, detail: count.detail + 1 })).pipe(
               Effect.as(
                 new ReadClient.CodeCommitPullRequestRevision({
-                  pullRequestId,
+                  pullRequestId: Domain.PullRequestId.make(pullRequestId),
                   revisionId: `revision-${pullRequestId}`,
-                  repositoryName: request.repositoryName,
+                  repositoryName: Domain.RepositoryName.make(request.repositoryName),
                   title: `PR ${pullRequestId}`,
                   authorArn: null,
                   status: "OPEN",
@@ -809,9 +813,9 @@ describe("CodeCommit web security boundary", () => {
           Ref.update(detailCalls, (count) => count + 1).pipe(
             Effect.as(
               new ReadClient.CodeCommitPullRequestRevision({
-                pullRequestId,
+                pullRequestId: Domain.PullRequestId.make(pullRequestId),
                 revisionId: `revision-${pullRequestId}`,
-                repositoryName: request.repositoryName,
+                repositoryName: Domain.RepositoryName.make(request.repositoryName),
                 title: `PR ${pullRequestId}`,
                 authorArn: null,
                 status: "OPEN",
@@ -839,7 +843,7 @@ describe("CodeCommit web security boundary", () => {
                 Effect.flatMap((index) =>
                   Deferred.succeed(promptStarted[index]!, undefined).pipe(
                     Effect.andThen(Deferred.await(promptRelease[index]!)),
-                    Effect.andThen(Effect.succeed("allow_once"))
+                    Effect.as<PermissionResponse>("allow_once")
                   )
                 )
               )
@@ -873,6 +877,7 @@ describe("CodeCommit web security boundary", () => {
       sourceBranch: "feature",
       accessPassword: "server-private-password",
       containerId: "container",
+      legacyRetiredAt: null,
       port: 18080,
       workspacePath: "/private/workspace",
       status: "running",

@@ -110,8 +110,8 @@ const currentGoal = (work: Effect.Success<typeof fixture>["work"]) =>
 
 /** Confirms every stored fact, as a pass that has just re-read them all would, then reconciles. */
 const reconcileConfirmed = (
-  store: { readonly snapshotInput: WorkStore["snapshotInput"] },
-  work: { readonly reconcile: WorkStore["reconcile"] }
+  store: Effect.Success<typeof fixture>["store"],
+  work: Effect.Success<typeof fixture>["work"]
 ) =>
   store.snapshotInput().pipe(
     Effect.flatMap(({ facts }) =>
@@ -290,7 +290,13 @@ describe("terminal reconcile", () => {
       const history = yield* store.list()
       expect(
         yield* Effect.result(
-          work.reconcile({ confirmed: [{ observationId: "not-a-digest", subject: "github:knpkv/npm#7" }] })
+          work.reconcile({
+            confirmed: [{
+              // @ts-expect-error -- deliberately not a digest: reconcile must reject malformed options at runtime
+              observationId: "not-a-digest",
+              subject: "github:knpkv/npm#7"
+            }]
+          })
         )
       ).toMatchObject({
         failure: { _tag: "WorkStoreError", operation: "reconcile.options" }

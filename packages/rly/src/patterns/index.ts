@@ -83,6 +83,10 @@ export type {
   RlyRelayDockSelectionControl,
   RlyRelayDockState
 } from "./RelayDock.js"
+export { RelayLauncher, relayShortcut, useRelayShortcut } from "./RelayLauncher.js"
+export type { RelayLauncherProps, RlyRelayShortcut } from "./RelayLauncher.js"
+export { RelayMark, RLY_RELAY_MARK_SIZES, RLY_RELAY_MARK_TILE_SIZES } from "./RelayMark.js"
+export type { RelayMarkProps, RelayMarkTileProps, RlyRelayMarkSize, RlyRelayMarkTileSize } from "./RelayMark.js"
 export { ReleasePreview } from "./ReleasePreview.js"
 export type { ReleasePreviewProps, RlyReleasePreviewPresentation } from "./ReleasePreview.js"
 export {
@@ -107,7 +111,7 @@ export type {
   RlyReleaseTransitionNames
 } from "./ReleaseRow.js"
 export { RLY_SERVICE_MARK_DEFAULT_VARIANTS, RLY_SERVICE_MARK_VARIANTS, ServiceMark } from "./ServiceMark.js"
-export type { RlyService, RlyServiceMarkSize, ServiceMarkProps } from "./ServiceMark.js"
+export type { RlyService, RlyServiceMarkName, RlyServiceMarkSize, ServiceMarkProps } from "./ServiceMark.js"
 export { RLY_STAGE_RAIL_DEFAULT_VARIANTS, RLY_STAGE_RAIL_VARIANTS, StageRail } from "./StageRail.js"
 export type { RlyStage, RlyStageRailSize, StageRailProps } from "./StageRail.js"
 export { TimelineProvenanceKey, TimelineRow } from "./TimelineRow.js"

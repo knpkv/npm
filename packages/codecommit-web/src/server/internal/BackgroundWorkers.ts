@@ -69,6 +69,7 @@ export const autoRefreshLayer = Layer.effectDiscard(
 
     const refreshIteration = Effect.gen(function*() {
       const config = yield* configService.load.pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.succeed(defaultRefreshConfig))
       )
       if (config.autoRefresh) {
@@ -93,6 +94,7 @@ export const sandboxStartupLayer = Layer.effectDiscard(
   Effect.gen(function*() {
     const sandboxService = yield* SandboxService.SandboxService
     const docker = yield* SandboxService.DockerService
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const dockerAvailable = () => docker.isAvailable().pipe(Effect.catch(() => Effect.succeed(false)))
     const hasLegacyUnauthenticated = yield* sandboxService.hasLegacyUnauthenticated()
     if (hasLegacyUnauthenticated) {

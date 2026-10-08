@@ -69,7 +69,8 @@ const MockConfigLayer = Layer.succeed(ConfigService, {
     Effect.sync(() => {
       savedPatches.push(patch)
     }),
-  configDir: Effect.succeed("/tmp/.jcf")
+  configDir: Effect.succeed("/tmp/.jcf"),
+  fileExists: Effect.succeed(true)
 })
 
 // NodeTerminal.layer satisfies the Terminal requirement the resolvers carry

@@ -1,5 +1,61 @@
 # @knpkv/control-center
 
+## 0.10.4
+
+### Patch Changes
+
+- Updated dependencies [[`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/rly@0.13.0
+  - @knpkv/relay-product@0.2.7
+  - @knpkv/review@0.4.3
+
+## 0.10.3
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`0938903`](https://github.com/knpkv/npm/commit/0938903a17b6d2bdf13b96947471a1d49f10b42f), [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/codecommit-core@0.22.0
+  - @knpkv/ai-claude@0.4.2
+  - @knpkv/ai-codex@0.5.2
+  - @knpkv/atlassian-common@1.9.2
+  - @knpkv/clockify-api-client@3.0.1
+  - @knpkv/confluence-api-client@2.0.1
+  - @knpkv/confluence-to-markdown@2.5.2
+  - @knpkv/jira-api-client@2.1.1
+  - @knpkv/rly@0.12.1
+
+## 0.10.2
+
+### Patch Changes
+
+- [#575](https://github.com/knpkv/npm/pull/575) [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c) Thanks [@konopkov](https://github.com/konopkov)! - Focus rings match rly's: a solid 2px outline in the focus colour, 2px outside the control, from `--rly-focus-ring-width` and `--rly-focus-ring-offset`. Hand-rolled 1px to 3px rings, rings in agent, service or text colours, tinted halos and box-shadow rings are gone. Rings inside clipped containers pull the ring width inside.
+
+- [#570](https://github.com/knpkv/npm/pull/570) [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9) Thanks [@konopkov](https://github.com/konopkov)! - Executables linked from the repository (`pnpm link --global`, or `node dist/...`) run under plain Node: workspace packages resolve to their build output instead of TypeScript sources. Published `@knpkv/codecommit-core` now serves its `Domain.js`, `CacheService.js` and `SandboxService.js` subpaths; the last two resolved to files that do not exist before.
+- Updated dependencies [[`5509cb8`](https://github.com/knpkv/npm/commit/5509cb87f90641d14211e2d993443e3cfcf40784), [`0a0182c`](https://github.com/knpkv/npm/commit/0a0182c18f237ab420d17d0339f0969d9356c63a), [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c), [`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6), [`9c09dd9`](https://github.com/knpkv/npm/commit/9c09dd97535117fc7c698361ddf66ae9d6bc4a0d), [`61c930e`](https://github.com/knpkv/npm/commit/61c930e88f4a9d735522d6c7b052b72d13450a6f), [`442b11d`](https://github.com/knpkv/npm/commit/442b11db369a5af5e85d4d91d00c334d46f8103d), [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9)]:
+  - @knpkv/codecommit-core@0.21.0
+  - @knpkv/review@0.4.2
+  - @knpkv/rly@0.12.0
+  - @knpkv/ai-runtime@0.5.2
+  - @knpkv/confluence-to-markdown@2.5.1
+  - @knpkv/atlassian-common@1.9.1
+  - @knpkv/relay-product@0.2.6
+
+## 0.10.1
+
+### Patch Changes
+
+- [#519](https://github.com/knpkv/npm/pull/519) [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5) Thanks [@konopkov](https://github.com/konopkov)! - `ServiceMark` takes a `name` variant: `visible` (default) prints the provider name, and `hidden` prints the glyph only, where an adjacent title already names the provider. The accessible name is present either way. The mark no longer draws a provider-coloured rail.
+
+  Control Center's Services cards use the hidden name, so the provider is no longer printed twice.
+
+- Updated dependencies [[`fd9d510`](https://github.com/knpkv/npm/commit/fd9d5103e3558561274b16c258023bee73b4b233), [`3a59848`](https://github.com/knpkv/npm/commit/3a598483979960e71bfc880f182c73d499001091), [`0573403`](https://github.com/knpkv/npm/commit/057340343fcc727fd0c56329d840a668170376ad), [`286f23e`](https://github.com/knpkv/npm/commit/286f23ece7fc85b9a7a754b7b5f96b5e65868244), [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5), [`8f64bdf`](https://github.com/knpkv/npm/commit/8f64bdfee2ab758c53d0555850be42cfe9f3626e)]:
+  - @knpkv/codecommit-core@0.20.0
+  - @knpkv/jira-api-client@2.1.0
+  - @knpkv/rly@0.11.0
+  - @knpkv/relay-product@0.2.5
+  - @knpkv/review@0.4.1
+
 ## 0.10.0
 
 ### Minor Changes

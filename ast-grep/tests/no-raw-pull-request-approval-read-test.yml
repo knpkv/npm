@@ -1,0 +1,12 @@
+id: no-raw-pull-request-approval-read
+valid:
+  - |
+    const approval = approvalOf(pr)
+    const bonus = approval._tag === "Approved" ? 2 : 0
+  - |
+    const row = { isApproved: 1 }
+invalid:
+  - |
+    const bonus = pr.isApproved ? 2 : 0
+  - |
+    return !pullRequest.isApproved

@@ -9,7 +9,7 @@ const TEST_HOME = "/tmp/codecommit-permissions-test"
 const permissionPath = `${TEST_HOME}/.codecommit/permissions.json`
 
 const permissionLayer = (content: string) => {
-  const fileSystem = FileSystem.FileSystem.of({
+  const fileSystem = FileSystem.makeNoop({
     readFileString: (path) =>
       path === permissionPath
         ? Effect.succeed(content)
@@ -131,4 +131,66 @@ describe("PermissionService", () => {
       expect(yield* Fiber.join(second)).toBe("allow_once")
       expect(yield* gate.getFirstPending()).toBeUndefined()
     }).pipe(Effect.provide(PermissionGateLiveTag.Default)))
+})
+
+describe("PermissionGateLive.resolveCategory", () => {
+  it.layer(PermissionGateLiveTag.Default)((it) => {
+    it.effect("releases every waiting read, and only reads, when the read category is answered", () =>
+      Effect.gen(function*() {
+        const gate = yield* PermissionGateLiveTag
+        const ask = (id: string, category: "read" | "write") =>
+          gate.request({ id, operation: "getBlob", category, context: id }).pipe(Effect.forkChild)
+        const identity = yield* ask("identity", "read")
+        yield* Effect.yieldNow
+        const listing = yield* ask("listing", "read")
+        yield* Effect.yieldNow
+        const merge = yield* ask("merge", "write")
+        yield* Effect.yieldNow
+
+        yield* gate.resolveCategory("read", "allow_once")
+        expect(yield* Fiber.join(identity)).toBe("allow_once")
+        expect(yield* Fiber.join(listing)).toBe("allow_once")
+        expect((yield* gate.getFirstPending())?.id).toBe("merge")
+        yield* gate.resolve("merge", "deny")
+        yield* Fiber.await(merge)
+      }))
+
+    it.effect("answers a prompt from a grant saved after its check, without anyone resolving it", () =>
+      Effect.gen(function*() {
+        const gate = yield* PermissionGateLiveTag
+        // The call checked "ask" before the grant; by the time it registers, the grant is saved.
+        const response = yield* gate.request(
+          { id: "late", operation: "getPullRequests", category: "read", context: "late" },
+          { standing: Effect.succeed("allow_once") }
+        )
+        expect(response).toBe("allow_once")
+        expect(yield* gate.getFirstPending()).toBeUndefined()
+      }))
+  })
+})
+
+// Its own layer: a gate shared with other tests would count their prompts too.
+describe("PermissionGateLive.pendingOf", () => {
+  it.layer(PermissionGateLiveTag.Default)((it) => {
+    it.effect("counts only the prompts waiting now, per category, naming the first few", () =>
+      Effect.gen(function*() {
+        const gate = yield* PermissionGateLiveTag
+        const ask = (id: string, category: "read" | "write") =>
+          gate.request({ id, operation: "getBlob", category, context: `ctx ${id}` }).pipe(Effect.forkChild)
+        const fibers = [
+          yield* ask("r1", "read"),
+          yield* ask("r2", "read"),
+          yield* ask("w1", "write"),
+          yield* ask("r3", "read")
+        ]
+        yield* Effect.yieldNow
+        expect(yield* gate.pendingOf("read", 2)).toEqual({ contexts: ["ctx r1", "ctx r2"], count: 3 })
+        yield* gate.resolve("r1", "allow_once")
+        yield* Fiber.join(fibers[0]!)
+        expect((yield* gate.pendingOf("read", 3)).count).toBe(2)
+        yield* gate.resolveCategory("read", "deny")
+        yield* gate.resolve("w1", "deny")
+        for (const fiber of fibers.slice(1)) yield* Fiber.await(fiber)
+      }))
+  })
 })

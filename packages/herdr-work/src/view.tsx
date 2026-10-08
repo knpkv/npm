@@ -1,12 +1,25 @@
 import { Button, StateLabel, Text, type RlyStateTone } from "@knpkv/rly/primitives"
-import { Hero, Region, StageRail, TimelineRow, type RlyStage } from "@knpkv/rly/patterns"
+import {
+  DecisionBar,
+  Hero,
+  Region,
+  StageRail,
+  TimelineRow,
+  type RlyDecisionBarState,
+  type RlyTimelineEvent,
+  type RlyStage
+} from "@knpkv/rly/patterns"
 import { useEffect, useRef, useState, type ReactElement } from "react"
 import type {
   DeliveryStage,
   WorkActivity,
+  WorkAgentObservation,
   WorkApprovalTarget,
+  WorkDisplayState,
   WorkGoal,
   WorkGoalFamilyGroup,
+  WorkGoalObserved,
+  WorkPullRequestObservation,
   WorkRequest,
   WorkReview,
   WorkSnapshot,
@@ -15,6 +28,8 @@ import type {
   WorkBlocker
 } from "./model.js"
 import { decodeWorkBoardNavigationGoal, encodeWorkBoardNavigationGoal } from "./navigation.js"
+import { workRequestClockText, workRequestDecidability, type WorkRequestDecisions } from "./request-decision.js"
+import { displayStateOf, observedFor } from "./display-state.js"
 import {
   type WorkTriageSummary,
   workTriage,
@@ -23,6 +38,10 @@ import {
   workTriageSentence,
   type WorkTriageTense
 } from "./work-triage.js"
+
+export type { WorkRequestAnswer, WorkRequestDecision, WorkRequestDecisions } from "./request-decision.js"
+/** The request clock's wording ("52s", "4m 12s", "11m", "expiring"), shared with hosts that show the same clocks. */
+export { workRequestClockText } from "./request-decision.js"
 
 const windows: ReadonlyArray<WorkSnapshotWindow> = ["now", "day", "week", "month"]
 const stageOrder: ReadonlyArray<DeliveryStage> = ["local", "review", "pull_request", "merged", "deployed"]
@@ -55,6 +74,39 @@ const statePresentation = {
   completed: { label: "Completed", tone: "positive" },
   abandoned: { label: "Abandoned", tone: "neutral" }
 } satisfies Readonly<Record<WorkGoal["state"], { readonly label: string; readonly tone: RlyStateTone }>>
+
+/** Every state the tab can show: the recorded ones, plus `abandoned`, which only an observation can show today. */
+const displayPresentation = {
+  ...statePresentation,
+  abandoned: { label: "Abandoned", tone: "neutral" }
+} satisfies Readonly<Record<WorkDisplayState, { readonly label: string; readonly tone: RlyStateTone }>>
+
+const sourceLabel = {
+  github: "GitHub",
+  herdr: "herdr",
+  git: "git"
+} satisfies Readonly<Record<NonNullable<WorkGoalObserved["unknown"]>["source"], string>>
+
+const pullRequestStateLabel = {
+  open: "open",
+  merged: "merged",
+  closed: "closed without merging"
+} satisfies Readonly<Record<WorkPullRequestObservation["state"], string>>
+
+const checksLabel = {
+  none: "no checks",
+  pending: "checks running",
+  passing: "checks passing",
+  failing: "checks failing"
+} satisfies Readonly<Record<WorkPullRequestObservation["checks"], string>>
+
+const agentStatusLabel = {
+  idle: "idle",
+  working: "working",
+  blocked: "blocked",
+  done: "done",
+  gone: "gone"
+} satisfies Readonly<Record<WorkAgentObservation["status"], string>>
 
 const deliveryLabel = {
   local: "Local",
@@ -135,15 +187,25 @@ const reviewLabel = (review: WorkReview | null | undefined): ReactElement => {
 }
 
 /** Delivery as words: past stages are done, the current one is "now" in the goal's state ink. */
-const stagesFor = (goal: WorkGoal): ReadonlyArray<RlyStage> => {
+const stagesFor = (goal: WorkGoal, shown: WorkDisplayState): ReadonlyArray<RlyStage> => {
   const current = stageOrder.indexOf(goal.delivery)
   return stageOrder.map((stage, index) => ({
     id: `${goal.id}-${stage}`,
     name: deliveryLabel[stage],
     state: index < current ? "done" : index === current ? "now" : "not yet",
-    tone: index === current ? statePresentation[goal.state].tone : "neutral"
+    tone: index === current ? displayPresentation[shown].tone : "neutral"
   }))
 }
+
+/**
+ * The repository as a row names it: its last path segment ("npm" for a checkout at
+ * /home/…/knpkv.dev/npm, or for "knpkv/npm"). The detail keeps the full value.
+ */
+const repositoryName = (repository: string): string =>
+  repository
+    .split("/")
+    .filter((segment) => segment.length > 0)
+    .at(-1) ?? repository
 
 /** A row's caption: the one fact that explains its group, and whether that fact blocks. */
 /** The one line under a goal row; `blocking` gives it the blocked ink. */
@@ -152,16 +214,45 @@ interface WorkRowCaption {
   readonly blocking: boolean
 }
 
-const rowCaption = (goal: WorkGoal): WorkRowCaption => {
+const rowCaption = (
+  goal: WorkGoal,
+  observed: WorkGoalObserved | null,
+  decisions: WorkRequestDecisions | undefined
+): WorkRowCaption => {
   const open = requestsFor(goal).filter(({ state }) => state === "open")
   if (open.length > 0) {
+    // The soonest clock among requests this page can decide, beside the request it belongs to.
+    const soonest = open
+      .map((request) => ({ decidability: workRequestDecidability(request, decisions), request }))
+      .flatMap(({ decidability, request }) =>
+        decidability._tag === "Here" && decidability.expiresAt !== null
+          ? [{ expiresAt: decidability.expiresAt, request }]
+          : []
+      )
+      .toSorted((left, right) => left.expiresAt - right.expiresAt)[0]
+    const clock =
+      soonest === undefined || decisions === undefined
+        ? ""
+        : `, ${workRequestClockText(soonest.expiresAt, decisions.now)}${soonest.expiresAt > decisions.now ? " left" : ""}`
     return {
       blocking: false,
-      text: open.length === 1 ? `Needs approval: ${open[0]?.summary ?? ""}` : `${open.length} requests need approval`
+      text:
+        open.length === 1
+          ? `Needs approval: ${open[0]?.summary ?? ""}${clock}`
+          : `${open.length} requests need approval${clock}`
     }
   }
   const blockers = blockersFor(goal)
   if (blockers.length > 0) return { blocking: true, text: blockers[0]?.summary ?? "Blocked" }
+  if (observed?.stale === true && observed.agent !== null) {
+    return { blocking: false, text: `Owner gone since ${formatTimestamp(observed.agent.observedAt)}` }
+  }
+  if (observed?.unknown != null) {
+    return {
+      blocking: false,
+      text: `Couldn't read ${sourceLabel[observed.unknown.source]} since ${formatTimestamp(observed.unknown.since)}`
+    }
+  }
   const latest = activityFor(goal).toSorted((a, b) => b.occurredAt - a.occurredAt)[0]
   if (latest !== undefined) return { blocking: false, text: `${latest.summary}, ${formatTimestamp(latest.occurredAt)}` }
   return { blocking: false, text: `${goal.owner.name}, ${deliveryLabel[goal.delivery].toLowerCase()}` }
@@ -179,22 +270,199 @@ const summaryCaption = (summary: WorkTriageSummary, tense: WorkTriageTense): str
         ? undefined
         : `${summary.moving} moving. Last change: ${summary.latest.title}, ${formatTimestamp(summary.latest.updatedAt)}.`
     case "Empty":
-      return "A goal appears once an agent's work is admitted."
+      return "Delegate work to an agent and its goal appears here once the hub admits it."
   }
+}
+
+/**
+ * What the timeline shows for one goal, newest first: the owner's recorded activity, plus what the
+ * reconciler observed (a pull request, the owner's agent) and any source it could not read. Observed
+ * events carry their provenance as a shape and words; an unreadable source is drawn hatched.
+ */
+const timelineFor = (goal: WorkGoal, observed: WorkGoalObserved | null): ReadonlyArray<RlyTimelineEvent> => {
+  const recorded = activityFor(goal).map((entry): RlyTimelineEvent => ({
+    actorKind: "system",
+    dateTime: new Date(entry.occurredAt).toISOString(),
+    detail: activityKindLabel[entry.kind],
+    id: entry.id,
+    time: formatTimestamp(entry.occurredAt),
+    title: entry.summary
+  }))
+  const seen: Array<RlyTimelineEvent> = []
+  if (observed?.pullRequest != null) {
+    const { confirmedAt, fact, observedAt } = observed.pullRequest
+    const at = fact.closedAt ?? observedAt
+    seen.push({
+      actorKind: "system",
+      dateTime: new Date(at).toISOString(),
+      detail: `${checksLabel[fact.checks]}, last read ${formatTimestamp(confirmedAt)}`,
+      id: `observed-pull-request-${fact.repository}-${fact.pullRequest}`,
+      provenance: { kind: "auto", label: "Observed on GitHub" },
+      time: formatTimestamp(at),
+      title: `Pull request #${fact.pullRequest} ${pullRequestStateLabel[fact.state]}`
+    })
+  }
+  if (observed?.agent != null) {
+    const { confirmedAt, fact, observedAt } = observed.agent
+    seen.push({
+      actorKind: "agent",
+      dateTime: new Date(observedAt).toISOString(),
+      detail: `${fact.host}, last read ${formatTimestamp(confirmedAt)}`,
+      id: `observed-agent-${fact.host}-${fact.agentId}`,
+      provenance: { kind: "auto", label: "Observed in herdr" },
+      time: formatTimestamp(observedAt),
+      title: `Agent ${agentStatusLabel[fact.status]}`
+    })
+  }
+  if (observed?.unknown != null) {
+    const { lastGoodAt, reason, since, source } = observed.unknown
+    seen.push({
+      actorKind: "system",
+      dateTime: new Date(since).toISOString(),
+      detail: reason,
+      id: `observed-unknown-${source}`,
+      provenance: {
+        kind: "unknown",
+        label: lastGoodAt === null ? "Never read" : `Last good read ${formatTimestamp(lastGoodAt)}`
+      },
+      time: formatTimestamp(since),
+      title: `Couldn't read ${sourceLabel[source]}`
+    })
+  }
+  return [...recorded, ...seen].toSorted((left, right) => Date.parse(right.dateTime) - Date.parse(left.dateTime))
+}
+
+/**
+ * How this page shows a request it can decide. `Bar` while there is something to decide or wait for;
+ * `Settled` once the snapshot proves the outcome, when buttons would decide nothing: the request
+ * then reads as its title and state word, and only a refusal adds a line. `Elsewhere` keeps the hub
+ * link. The hub decides expiry, never this page's clock.
+ */
+type RequestDecision =
+  | { readonly _tag: "Elsewhere" }
+  | { readonly _tag: "Bar"; readonly bar: ReactElement }
+  | { readonly _tag: "Settled"; readonly announcement: string; readonly refusal: string | null }
+
+const requestDecisionFor = (request: WorkRequest, decisions: WorkRequestDecisions | undefined): RequestDecision => {
+  const decidability = workRequestDecidability(request, decisions)
+  if (decidability._tag === "Elsewhere" || decisions === undefined) return { _tag: "Elsewhere" }
+  const { expiresAt, jobId } = decidability
+  const answer = decisions.answer?.jobId === jobId ? decisions.answer : null
+  // Once the request has left the hub's queue, the snapshot's outcome is the proven one.
+  if (request.state !== "open") {
+    return {
+      _tag: "Settled",
+      announcement: `${request.summary}: ${requestPresentation[request.state].label}.`,
+      refusal: answer?.outcome === "refused" ? answer.text : null
+    }
+  }
+  const pending = decisions.expiresAt(jobId) !== undefined
+  const state: RlyDecisionBarState =
+    decisions.sending?.jobId === jobId
+      ? { _tag: "sending", action: decisions.sending.decision }
+      : decisions.sending !== null
+        ? { _tag: "off", reason: "Another decision is waiting for the hub." }
+        : // The hub took a decision; the host's pending list has not caught up yet, so nothing else may be sent.
+          answer?.outcome === "accepted" && pending
+          ? { _tag: "off", reason: "Waiting for the hub's queue to update." }
+          : pending
+            ? { _tag: "ready" }
+            : { _tag: "off", reason: "Left the hub's queue." }
+  const decide = (decision: "approve" | "reject") => () => {
+    if (state._tag === "ready") decisions.onDecision({ decision, jobId })
+  }
+  return {
+    _tag: "Bar",
+    bar: (
+      <DecisionBar
+        {...(expiresAt === null || !pending
+          ? {}
+          : {
+              clock: `${workRequestClockText(expiresAt, decisions.now)}${expiresAt > decisions.now ? " left" : ""}`
+            })}
+        onApprove={decide("approve")}
+        onReject={decide("reject")}
+        state={state}
+        {...(answer === null ? {} : { status: answer.text })}
+        target={request.summary}
+      />
+    )
+  }
+}
+
+/** One request in a goal's detail: its title once, then the bar, the hub link or the outcome. */
+const RequestItem = ({
+  decisions,
+  externalLinks,
+  request
+}: {
+  readonly decisions: WorkRequestDecisions | undefined
+  readonly externalLinks: "disabled" | "enabled"
+  readonly request: WorkRequest
+}): ReactElement => {
+  const decision = requestDecisionFor(request, externalLinks === "enabled" ? decisions : undefined)
+  const presentation = requestPresentation[request.state]
+  return (
+    <li>
+      {/* While a bar is shown its target names the request, so the heading would say it twice. */}
+      {decision._tag === "Bar" ? null : (
+        <span className="work-request-heading">
+          <Text>{request.summary}</Text>
+          <span className="work-row-state" data-tone={presentation.tone}>
+            {presentation.label}
+          </span>
+        </span>
+      )}
+      {decision._tag === "Bar" ? (
+        decision.bar
+      ) : decision._tag === "Settled" ? (
+        decision.refusal === null ? null : (
+          <Text tone="secondary" variant="meta">
+            {decision.refusal}
+          </Text>
+        )
+      ) : request.state !== "open" ? null : request.approvalTarget === null ? (
+        <Text tone="secondary" variant="meta">
+          No approval link recorded.
+        </Text>
+      ) : externalLinks === "disabled" ? (
+        <Text tone="secondary" variant="meta">
+          Approve this on the hub ({request.approvalTarget.host}).
+        </Text>
+      ) : (
+        exactLink(request.approvalTarget, `Approve on ${request.approvalTarget.host}`)
+      )}
+      {/*
+        Mounted from the bar onwards, so the outcome is announced when the bar gives way to it; the
+        heading's state word already shows it, so it is for screen readers only.
+      */}
+      {decision._tag === "Elsewhere" ? null : (
+        <p aria-atomic="true" className="work-request-announcement" role="status">
+          {decision._tag === "Settled" ? decision.announcement : ""}
+        </p>
+      )}
+    </li>
+  )
 }
 
 /** Everything about one goal, in reading order: what it is, where it is, what blocks it, what happened. */
 const GoalDetail = ({
+  decisions,
   externalLinks,
   goal,
   snapshot
 }: {
+  readonly decisions: WorkRequestDecisions | undefined
   readonly externalLinks: "disabled" | "enabled"
   readonly goal: WorkGoal
   readonly snapshot: WorkSnapshot
 }): ReactElement => {
   const family = familyForGoal(snapshot, goal.id)
-  const activity = activityFor(goal).toSorted((a, b) => b.occurredAt - a.occurredAt)
+  const observed = observedFor(snapshot, goal.id)
+  const shown = observed?.displayState ?? goal.state
+  const activity = timelineFor(goal, observed)
+  // Only the live window carries the overlay; there "nothing observed" is itself a reading.
+  const overlay = snapshot.observed !== undefined
   // A goal-level approval target (older checkpoints carry one without requests); skipped when a
   // request already links the same approval.
   const goalApproval =
@@ -206,12 +474,31 @@ const GoalDetail = ({
   return (
     <div className="work-detail">
       <Text tone="secondary">{goal.detail}</Text>
-      <StageRail heading={`Delivery of ${goal.title}`} size="words" stages={stagesFor(goal)} />
+      <StageRail heading={`Delivery of ${goal.title}`} size="words" stages={stagesFor(goal, shown)} />
       <dl className="work-facts">
         <div>
           <dt>State</dt>
-          <dd>{statePresentation[goal.state].label}</dd>
+          <dd>
+            {displayPresentation[shown].label}
+            {shown === goal.state ? null : (
+              <Text as="p" className="work-fact-note" tone="secondary" variant="meta">
+                Observed; recorded as {statePresentation[goal.state].label.toLowerCase()}
+              </Text>
+            )}
+          </dd>
         </div>
+        {overlay ? (
+          <div>
+            <dt>Pull request</dt>
+            <dd>
+              {observed?.pullRequest == null
+                ? observed === null && snapshot.observedOmitted !== undefined
+                  ? "Not in this read: live state was trimmed to the most recently updated goals"
+                  : "None known"
+                : `#${observed.pullRequest.fact.pullRequest} ${pullRequestStateLabel[observed.pullRequest.fact.state]}, ${checksLabel[observed.pullRequest.fact.checks]}`}
+            </dd>
+          </div>
+        ) : null}
         <div>
           <dt>Owner</dt>
           <dd>{goal.owner.name}</dd>
@@ -251,6 +538,20 @@ const GoalDetail = ({
           <dd>{formatSpend(goal)}</dd>
         </div>
       </dl>
+      {observed?.stale === true && observed.agent !== null ? (
+        <p className="work-note" data-tone="held">
+          <b>Owner gone</b> since {formatTimestamp(observed.agent.observedAt)}: this unfinished goal has no live agent.
+        </p>
+      ) : null}
+      {observed?.unknown == null ? null : (
+        <p className="work-note" data-tone="unknown">
+          <b>Couldn't read {sourceLabel[observed.unknown.source]}</b> since {formatTimestamp(observed.unknown.since)}:{" "}
+          {observed.unknown.reason}.{" "}
+          {observed.unknown.lastGoodAt === null
+            ? "It has never been read, so nothing here comes from it."
+            : `Facts from it are as of ${formatTimestamp(observed.unknown.lastGoodAt)}.`}
+        </p>
+      )}
       {blockersFor(goal).map((blocker) => (
         <p className="work-note" data-tone="blocked" key={`${blocker.since}-${blocker.summary}`}>
           <b>Blocked</b> since {formatTimestamp(blocker.since)}: {blocker.summary}
@@ -267,25 +568,7 @@ const GoalDetail = ({
         ) : (
           <ul className="work-detail-list">
             {requestsFor(goal).map((request) => (
-              <li key={request.id}>
-                <span className="work-request-heading">
-                  <Text>{request.summary}</Text>
-                  <span className="work-row-state" data-tone={requestPresentation[request.state].tone}>
-                    {requestPresentation[request.state].label}
-                  </span>
-                </span>
-                {request.state !== "open" ? null : request.approvalTarget === null ? (
-                  <Text tone="secondary" variant="meta">
-                    No approval link recorded.
-                  </Text>
-                ) : externalLinks === "disabled" ? (
-                  <Text tone="secondary" variant="meta">
-                    Approve this on the hub ({request.approvalTarget.host}).
-                  </Text>
-                ) : (
-                  exactLink(request.approvalTarget, `Approve on ${request.approvalTarget.host}`)
-                )}
-              </li>
+              <RequestItem decisions={decisions} externalLinks={externalLinks} key={request.id} request={request} />
             ))}
           </ul>
         )}
@@ -298,19 +581,8 @@ const GoalDetail = ({
           <Text tone="secondary">{goal.activity === undefined ? "No activity recorded." : "Activity is clear."}</Text>
         ) : (
           <ol aria-label={`Activity on ${goal.title}`} className="work-activity">
-            {activity.map((entry, index) => (
-              <TimelineRow
-                continued={index < activity.length - 1}
-                event={{
-                  actorKind: "system",
-                  dateTime: new Date(entry.occurredAt).toISOString(),
-                  detail: activityKindLabel[entry.kind],
-                  id: entry.id,
-                  time: formatTimestamp(entry.occurredAt),
-                  title: entry.summary
-                }}
-                key={entry.id}
-              />
+            {activity.map((event, index) => (
+              <TimelineRow continued={index < activity.length - 1} event={event} key={event.id} />
             ))}
           </ol>
         )}
@@ -402,6 +674,7 @@ const withFragment = (href: string, fragment: string): string => {
 }
 
 export const WorkBoard = ({
+  decisions,
   externalLinks = "enabled",
   initialGoalId,
   initialWindow = "now",
@@ -409,6 +682,11 @@ export const WorkBoard = ({
   snapshots
 }: {
   readonly snapshots: WorkSnapshots
+  /**
+   * Lets the reader decide approval requests in place, with their clock. Omit it (the LAN view, a
+   * host that is not the hub) and every request links to the hub instead.
+   */
+  readonly decisions?: WorkRequestDecisions
   readonly externalLinks?: "disabled" | "enabled"
   readonly initialGoalId?: string | null
   readonly initialWindow?: WorkSnapshotWindow
@@ -421,16 +699,16 @@ export const WorkBoard = ({
   const requestedInitialSelectedId = boardNavigation === null ? (initialGoalId ?? null) : boardNavigation.goalId
   const initialStatusFilter = boardNavigation?.statusFilter ?? "all"
   const requestedInitialSelectedGoal = snapshot.goals.find(({ id }) => id === requestedInitialSelectedId)
+  // A link's filter names the state its row showed, so restore it against the same displayed state.
   const initialSelectedGoal =
     requestedInitialSelectedGoal !== undefined &&
-    (initialStatusFilter === "all" || requestedInitialSelectedGoal.state === initialStatusFilter)
+    (initialStatusFilter === "all" || displayStateOf(snapshot, requestedInitialSelectedGoal) === initialStatusFilter)
       ? requestedInitialSelectedGoal
       : undefined
   const initialSelectedId = initialSelectedGoal?.id ?? null
   const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId)
   const [detailsOpen, setDetailsOpen] = useState(
     initialSelectedGoal !== undefined &&
-      (initialStatusFilter === "all" || initialSelectedGoal.state === initialStatusFilter) &&
       (boardNavigation?.detailsOpen ?? (initialGoalId !== undefined && initialGoalId !== null))
   )
   const [statusFilter, setStatusFilter] = useState<"all" | WorkGoal["state"]>(initialStatusFilter)
@@ -439,6 +717,12 @@ export const WorkBoard = ({
   const selectedLinkRowRef = useRef<HTMLAnchorElement | null>(null)
   const selectedRowRef = useRef<HTMLButtonElement | null>(null)
   const triage = workTriage(snapshot)
+  // The overlay by goal, built once per snapshot: rows, captions and filters all read it.
+  const overlay: ReadonlyMap<string, WorkGoalObserved> = new Map(
+    (snapshot.observed ?? []).map((entry) => [entry.goalId, entry])
+  )
+  const observedOf = (goal: WorkGoal): WorkGoalObserved | null => overlay.get(goal.id) ?? null
+  const shownOf = (goal: WorkGoal): WorkDisplayState => observedOf(goal)?.displayState ?? goal.state
   // A historical window is the state as of its time; say so, never in the present tense.
   const tense: WorkTriageTense = window === "now" ? "present" : "past"
   const sentence = workTriageSentence(triage.summary, tense)
@@ -448,7 +732,8 @@ export const WorkBoard = ({
       : `As of ${formatTimestamp(snapshot.asOf)}, ${sentence.charAt(0).toLowerCase()}${sentence.slice(1)}`
   const groupById = new Map(triage.rows.map((row) => [row.goal.id, row.group]))
   const ordered = triage.rows.map((row) => row.goal)
-  const filteredGoals = statusFilter === "all" ? ordered : ordered.filter(({ state }) => state === statusFilter)
+  // Filters match what each row shows: the observed state where there is one.
+  const filteredGoals = statusFilter === "all" ? ordered : ordered.filter((goal) => shownOf(goal) === statusFilter)
   const selectedFilteredGoalIndex = filteredGoals.findIndex(({ id }) => id === selectedId)
   const selected = filteredGoals.find(({ id }) => id === selectedId) ?? null
   const visibleGoalStart =
@@ -479,17 +764,17 @@ export const WorkBoard = ({
   }, [selectedFilteredGoalIndex, selectedId])
 
   const goalRow = (goal: WorkGoal): ReactElement => {
-    const caption = rowCaption(goal)
+    const caption = rowCaption(goal, observedOf(goal), externalLinks === "enabled" ? decisions : undefined)
     const content = (
       <>
         <span className="work-row-title">
           <span className="work-row-meta">
-            {goal.repository.repository}, <code>{goal.repository.branch}</code>
+            {repositoryName(goal.repository.repository)}, <code>{goal.repository.branch}</code>
           </span>
           {goal.title}
         </span>
-        <span className="work-row-state" data-tone={statePresentation[goal.state].tone}>
-          {statePresentation[goal.state].label}
+        <span className="work-row-state" data-tone={displayPresentation[shownOf(goal)].tone}>
+          {displayPresentation[shownOf(goal)].label}
         </span>
         <span className="work-row-caption" data-blocking={caption.blocking}>
           {caption.text}
@@ -550,7 +835,8 @@ export const WorkBoard = ({
                 const selectedAtOption = snapshotFor(snapshots, option).goals.find(({ id }) => id === selectedId)
                 if (
                   selectedAtOption === undefined ||
-                  (statusFilter !== "all" && selectedAtOption.state !== statusFilter)
+                  (statusFilter !== "all" &&
+                    displayStateOf(snapshotFor(snapshots, option), selectedAtOption) !== statusFilter)
                 ) {
                   setDetailsOpen(false)
                 }
@@ -576,7 +862,8 @@ export const WorkBoard = ({
                     detailsOpen:
                       detailsOpen &&
                       selectedAtOption !== undefined &&
-                      (statusFilter === "all" || selectedAtOption.state === statusFilter),
+                      (statusFilter === "all" ||
+                        displayStateOf(snapshotFor(snapshots, option), selectedAtOption) === statusFilter),
                     goalId: selectedId,
                     statusFilter,
                     visibleGoalCount: initialVisibleGoalCount
@@ -642,13 +929,30 @@ export const WorkBoard = ({
         </Text>
         <Text tone="secondary" variant="meta">
           {window === "now" ? "Live" : windowLabel[window]}, as of {formatTimestamp(snapshot.asOf)}
+          {window !== "now"
+            ? null
+            : snapshot.observed === undefined
+              ? ". Live state not available: this hub sends no observed facts (its herdr-work predates the reconciler, or the overlay did not fit the response), so states are as recorded. Update herdr-work on the hub to see them."
+              : snapshot.observedOmitted === undefined
+                ? null
+                : `. Live state shown for the most recently updated goals; ${snapshot.observedOmitted} left out.`}
         </Text>
       </header>
       <Hero caption={summaryCaption(triage.summary, tense)} fact={heroFact} label="Work summary" />
       {timeTravel}
       {snapshot.goals.length === 0 ? (
         <Region title="Goals">
-          <Text tone="secondary">No goals at this checkpoint. A goal appears once an agent's work is admitted.</Text>
+          <Text tone="secondary">
+            {window === "now" ? (
+              <>
+                No goals yet. Delegate work to an agent with{" "}
+                <code>fleetctl submit HOST agent.delegate work REPOSITORY PROMPT</code> (HOST is a name from{" "}
+                <code>fleetctl hosts</code>); its goal appears here once the hub admits it.
+              </>
+            ) : (
+              "No goals at this checkpoint."
+            )}
+          </Text>
         </Region>
       ) : (
         <div className="work-board-layout" data-has-detail={selected !== null && detailsOpen}>
@@ -737,7 +1041,7 @@ export const WorkBoard = ({
               ref={detailsRef}
               title={selected.title}
             >
-              <GoalDetail externalLinks={externalLinks} goal={selected} snapshot={snapshot} />
+              <GoalDetail decisions={decisions} externalLinks={externalLinks} goal={selected} snapshot={snapshot} />
             </Region>
           )}
         </div>

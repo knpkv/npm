@@ -59,7 +59,11 @@ class TrackedVisualViewport extends FakeVisualViewport {
 }
 
 class FakeDocumentStyle implements Pick<CSSStyleDeclaration, "cssText" | "setProperty"> {
-  constructor(public cssText: string) {}
+  cssText: string
+
+  constructor(cssText: string) {
+    this.cssText = cssText
+  }
 
   setProperty(name: string, value: string): void {
     this.cssText = `${this.cssText} ${name}: ${value};`.trim()
@@ -83,13 +87,14 @@ class FakeClassList implements Pick<DOMTokenList, "add" | "contains" | "remove">
 }
 
 class FakeTerminalViewportHost extends EventTarget implements TerminalViewportHost {
-  readonly innerHeight: number | undefined
-  readonly visualViewport: TerminalVisualViewport | null | undefined
+  readonly innerHeight?: number
+  readonly visualViewport?: TerminalVisualViewport | null
 
+  // Omitted arguments stay absent, as on a host without them.
   constructor(visualViewport?: TerminalVisualViewport | null, innerHeight?: number) {
     super()
-    this.innerHeight = innerHeight
-    this.visualViewport = visualViewport
+    if (innerHeight !== undefined) this.innerHeight = innerHeight
+    if (visualViewport !== undefined) this.visualViewport = visualViewport
   }
 }
 

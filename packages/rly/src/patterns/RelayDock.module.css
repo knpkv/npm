@@ -21,7 +21,8 @@
     border-radius: var(--rly-radius-round);
     gap: var(--rly-space-8);
     min-block-size: var(--rly-space-40);
-    padding: var(--rly-space-6) var(--rly-space-16) var(--rly-space-6) var(--rly-space-6);
+    /* The start inset clears the pill's curve for the square tile. */
+    padding: var(--rly-space-6) var(--rly-space-16) var(--rly-space-6) var(--rly-space-8);
   }
 
   .root[data-rly-relay-dock-open="true"] > .trigger {
@@ -36,34 +37,6 @@
   .trigger:active,
   .close:active {
     background: var(--rly-color-surface-3);
-  }
-
-  .mark {
-    align-items: center;
-    align-self: stretch;
-    background: var(--rly-color-agent);
-    border-radius: var(--rly-radius-round);
-    color: var(--rly-color-surface-1);
-    display: inline-flex;
-    inline-size: var(--rly-space-32);
-    justify-content: center;
-    overflow: hidden;
-    position: relative;
-  }
-
-  .markLine {
-    background: currentcolor;
-    block-size: 100%;
-    inline-size: var(--rly-space-2); /* stripe-ok: a stroke inside the 32px Relay mark glyph */
-    inset-inline-start: var(--rly-space-6);
-    opacity: 0.42;
-    position: absolute;
-  }
-
-  .markGlyph {
-    block-size: var(--rly-space-16);
-    inline-size: var(--rly-space-16);
-    position: relative;
   }
 
   .layer {

@@ -27,6 +27,26 @@ const run = (args: ReadonlyArray<string>, config: FakeHeadlessOptions["config"])
   )
 }
 
+// QA-J12: the header named ~/.jcf/config.json when no such file existed, and no value said where it came from.
+describe("jcf config show", () => {
+  it.effect("says when there is no config file and every value is jcf's default", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(["config", "show"], undefined)
+      const printed = world.stdout.join("\n")
+      expect(printed).toContain(`No config file yet (${FAKE_HOME}/.jcf/config.json)`)
+      expect(printed).not.toContain("(default)")
+    }))
+
+  it.effect("marks the values in the file that are still jcf's default", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(["config", "show"], { sessionIdleCapSeconds: 600 })
+      const lines = world.stdout
+      expect(lines[0]).toBe(`Settings in ${FAKE_HOME}/.jcf/config.json. "(default)" marks a value that is jcf's own.`)
+      expect(lines.find((line) => line.includes("Idle cap"))).toBe("  Idle cap (sec):   600")
+      expect(lines.find((line) => line.includes("Refresh"))).toBe("  Refresh (sec):    30  (default)")
+    }))
+})
+
 describe("jcf config reset", () => {
   it.effect("accepts a Windows absolute session root without interpreting it as a relative path", () =>
     Effect.gen(function*() {
@@ -208,7 +228,7 @@ describe("session ignored tickets", () => {
         const config = yield* ConfigService
         expect((yield* config.get).sessionIgnoredTickets).toEqual(["PROJ-42"])
         yield* command(["config"])
-        expect(fake.world.stdout.join("\n")).toContain("Ignored tickets: PROJ-42")
+        expect(fake.world.stdout.join("\n")).toMatch(/Ignored tickets:\s+PROJ-42/)
         yield* command(["config", "unset", "session-ignore", "PROJ-42"])
         expect((yield* config.get).sessionIgnoredTickets).toEqual([])
       }).pipe(Effect.provide(fake.layer))

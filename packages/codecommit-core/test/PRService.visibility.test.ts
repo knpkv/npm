@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Ref, Schema, Stream, SubscriptionRef } from "effect"
+import { Effect, Layer, Option, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
 import type { CacheError } from "../src/CacheService/CacheError.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
@@ -38,6 +38,12 @@ const cachedRow = (profile: string, id: string) =>
     destinationBranch: "main",
     isMergeable: 1,
     isApproved: 0,
+    approvalUnknownReason: null,
+    approvalBaselineKnown: 1,
+    approversUnknown: 0,
+    observationSeq: 0,
+    approvalVersion: "2026-08-02T00:00:00.000Z",
+    approvalObservationSeq: 0,
     commentCount: 0,
     healthScore: null,
     link: `https://example.invalid/pr/${id}`,
@@ -77,9 +83,14 @@ const layerWithConfig = (
       Layer.mergeAll(
         Layer.mock(AwsClient, {}),
         Layer.mock(EventsHub, {}),
-        Layer.mock(CommentRepo, {}),
+        Layer.mock(CommentRepo, {
+          find: () => Effect.succeed(Option.none())
+        }),
         Layer.mock(NotificationRepo, {}),
-        Layer.mock(PullRequestRepo, { findAll }),
+        Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
+          findAll
+        }),
         Layer.mock(SubscriptionRepo, {}),
         Layer.mock(SyncMetadataRepo, {}),
         Layer.mock(ConfigService, { load })
@@ -102,12 +113,13 @@ const syncDependencies = (
           accountId: "123456789012",
           arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
         }),
-      getPullRequests: () => Stream.empty,
-      getPullRequestRefresh: () => Stream.empty
+      getPullRequests: () => Stream.empty
     }),
     Layer.mock(PullRequestRepo, {
+      observe: () => Effect.succeed(1),
       findAll,
       findStaleOpen: () => Effect.succeed([]),
+      findClosedWithUnknownApprovers: () => Effect.succeed([]),
       refreshCommentedBy: () => Effect.void
     }),
     Layer.mock(ConfigService, { load })

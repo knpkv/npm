@@ -11,9 +11,17 @@
  *
  * @category CacheService
  */
-import { Effect, Schema, SchemaGetter } from "effect"
-import { ApprovalRule, PullRequestId, PullRequestStatus, RepositoryName } from "../../../Domain.js"
+import { Effect, Option, Schema, SchemaGetter } from "effect"
+import {
+  ApprovalRule,
+  type ApprovalUnknownReason,
+  ApprovalUnknownTag,
+  PullRequestId,
+  PullRequestStatus,
+  RepositoryName
+} from "../../../Domain.js"
 import { CacheError } from "../../CacheError.js"
+import type { ApprovalGroup, RowGroup, RowVersions } from "./rowWrites.js"
 
 /** DB column `TEXT` (comma-separated) <-> `readonly string[]` */
 export const CommaSeparatedArray = Schema.NullOr(Schema.String).pipe(
@@ -45,6 +53,11 @@ const ApprovalRulesFromJson = Schema.NullOr(Schema.String).pipe(
   })
 )
 
+/**
+ * The `approval_unknown_reason` column: the reason's tag, or NULL when the last evaluation succeeded.
+ */
+export const ApprovalUnknownColumn = Schema.NullOr(ApprovalUnknownTag)
+
 export const CachedPullRequest = Schema.Struct({
   id: PullRequestId,
   awsAccountId: Schema.String,
@@ -57,11 +70,21 @@ export const CachedPullRequest = Schema.Struct({
   repositoryName: RepositoryName,
   creationDate: Schema.DateFromString,
   lastModifiedDate: Schema.DateFromString,
+  /** With `lastModifiedDate`, the row group's version: the observation that last wrote it. */
+  observationSeq: Schema.Number,
+  /** The approval group's version: the provider last activity and observation that last wrote it. */
+  approvalVersion: Schema.DateFromString,
+  approvalObservationSeq: Schema.Number,
   status: PullRequestStatus,
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
   isMergeable: BooleanFromNumber,
   isApproved: BooleanFromNumber,
+  approvalUnknownReason: ApprovalUnknownColumn,
+  /** The `approval_baseline_known` column: whether `isApproved` came from a successful evaluation. */
+  approvalBaselineKnown: BooleanFromNumber,
+  /** Set when the last approver read failed: `approvedBy` is then only the last known list. */
+  approversUnknown: BooleanFromNumber,
   commentCount: Schema.NullOr(Schema.Number),
   healthScore: Schema.NullOr(Schema.Number),
   link: Schema.String,
@@ -102,14 +125,120 @@ export const UpsertInput = Schema.Struct({
   destinationBranch: Schema.String,
   isMergeable: Schema.Number,
   isApproved: Schema.Number,
+  approvalUnknownReason: ApprovalUnknownColumn,
   commentCount: Schema.NullOr(Schema.Number),
   link: Schema.String,
   approvedBy: Schema.Array(Schema.String),
   approvedByArns: Schema.Array(Schema.String),
-  approvalRules: Schema.Array(ApprovalRule).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([])))
+  /** Set when the read couldn't fetch its approvers: `approvedBy` is then a placeholder, not "none". */
+  approversUnknown: Schema.optional(Schema.Boolean),
+  // The rule's plain shape, not the class: callers pass the provider's rules as plain objects, and the
+  // cache stores them as JSON either way.
+  approvalRules: Schema.Array(Schema.Struct(ApprovalRule.fields)).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed([]))
+  )
 })
 
 export type UpsertInput = typeof UpsertInput.Type
+
+/**
+ * A provider read's approval, as `recordApprovalEvaluation` and `approvalColumnsOf` take it: the
+ * evaluated value and its complete rules, or the reason evaluation failed. A `PullRequestDetail` is one.
+ */
+export interface ApprovalRead {
+  readonly isApproved: boolean
+  readonly approvalRules: UpsertInput["approvalRules"]
+  readonly approvalUnknown?: ApprovalUnknownReason | undefined
+  readonly approvedBy: ReadonlyArray<string>
+  readonly approvedByArns: ReadonlyArray<string>
+  readonly approversUnknown?: boolean | undefined
+}
+
+/** A read's approvers: who approved now, or none when the read couldn't fetch them. */
+const approversOf = (read: {
+  readonly approvedBy: ReadonlyArray<string>
+  readonly approvedByArns: ReadonlyArray<string>
+  readonly approversUnknown?: boolean | undefined
+}): ApprovalGroup["approvers"] =>
+  read.approversUnknown === true ? Option.none() : Option.some({ names: read.approvedBy, arns: read.approvedByArns })
+
+/** Both groups' versions as a read of the row saw them: what a recomputed write must still find. */
+export const versionsOf = (row: {
+  readonly lastModifiedDate: Date
+  readonly observationSeq: number
+  readonly approvalVersion: Date
+  readonly approvalObservationSeq: number
+}): RowVersions => ({
+  row: { lastActivity: row.lastModifiedDate, observation: row.observationSeq },
+  approval: { lastActivity: row.approvalVersion, observation: row.approvalObservationSeq }
+})
+
+/**
+ * A listed pull request's row group, complete. The listing reads open pull requests, so no merger and
+ * no closing time are authoritative values, not gaps.
+ */
+export const rowGroupOfListing = (input: UpsertInput): RowGroup => ({
+  title: input.title,
+  description: input.description,
+  author: input.author,
+  status: input.status,
+  creationDate: input.creationDate,
+  sourceBranch: input.sourceBranch,
+  destinationBranch: input.destinationBranch,
+  isMergeable: input.isMergeable === 1,
+  mergedBy: null,
+  closedAt: null
+})
+
+/** A listed pull request's approval group, complete. */
+export const approvalGroupOfListing = (input: UpsertInput): ApprovalGroup => ({
+  isApproved: input.isApproved === 1,
+  approvalRules: input.approvalRules,
+  unknownReason: input.approvalUnknownReason,
+  approvers: approversOf(input)
+})
+
+/** A provider re-read's row group, complete: a closed or merged read also carries when and by whom. */
+export const rowGroupOfRead = (read: {
+  readonly title: string
+  readonly description?: string | undefined
+  readonly author: string
+  readonly status: string
+  readonly creationDate: Date
+  readonly lastActivityDate: Date
+  readonly sourceBranch: string
+  readonly destinationBranch: string
+  readonly isMergeable: boolean
+  readonly mergedBy?: string | undefined
+}): RowGroup => ({
+  title: read.title,
+  description: read.description ?? null,
+  author: read.author,
+  status: read.status,
+  creationDate: read.creationDate.toISOString(),
+  sourceBranch: read.sourceBranch,
+  destinationBranch: read.destinationBranch,
+  isMergeable: read.isMergeable,
+  mergedBy: read.mergedBy ?? null,
+  closedAt: read.status === "OPEN" ? null : read.lastActivityDate.toISOString()
+})
+
+/** A provider read's approval group, complete. */
+export const approvalGroupOfRead = (read: ApprovalRead): ApprovalGroup => ({
+  isApproved: read.isApproved,
+  approvalRules: read.approvalRules,
+  unknownReason: read.approvalUnknown?._tag ?? null,
+  approvers: approversOf(read)
+})
+
+/**
+ * The approval columns an upsert input carries for a provider read. While approval is unknown,
+ * `isApproved` is a placeholder: the write keeps an existing row's last known value.
+ */
+export const approvalColumnsOf = (read: ApprovalRead) => ({
+  isApproved: read.approvalUnknown === undefined && read.isApproved ? 1 : 0,
+  approvalUnknownReason: read.approvalUnknown?._tag ?? null
+})
 
 /** Wrap an Effect with CacheError mapping and a span. */
 export const cacheError = (op: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>

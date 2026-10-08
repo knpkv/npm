@@ -1,5 +1,80 @@
 # @knpkv/herdr-approvals
 
+## 0.11.1
+
+### Patch Changes
+
+- Updated dependencies [[`16244c5`](https://github.com/knpkv/npm/commit/16244c58b41cd8dcee799fd8e8e058598df3fb90), [`0d6cc4d`](https://github.com/knpkv/npm/commit/0d6cc4df23eca64c5d29725bf50899776cc52435), [`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/herdr-connect@0.7.3
+  - @knpkv/herdr-work@0.9.0
+  - @knpkv/rly@0.13.0
+  - @knpkv/herdr-coordinator@0.3.6
+
+## 0.11.0
+
+### Minor Changes
+
+- [#602](https://github.com/knpkv/npm/pull/602) [`58aca11`](https://github.com/knpkv/npm/commit/58aca112c21203ee8955b130d5d891dabe2976a2) Thanks [@konopkov](https://github.com/konopkov)! - The Work tab decides a goal's approval request in place: its bar approves or rejects through the same call as the Approvals tab, shows the decision waiting for the hub, and says how the hub answered (taken, refused, or not yet known). Its clock reads hub time, like the Approvals countdown, and both tabs use the same clock words. An answer belongs to the request it decided, so a new request on the same job starts with a ready bar.
+
+### Patch Changes
+
+- Updated dependencies [[`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26), [`bfba87c`](https://github.com/knpkv/npm/commit/bfba87c566ca21d267c0626da60b431757dc5e32)]:
+  - @knpkv/herdr-fleet@0.7.0
+  - @knpkv/herdr-work@0.8.1
+  - @knpkv/herdr-connect@0.7.2
+  - @knpkv/herdr-coordinator@0.3.5
+
+## 0.10.0
+
+### Minor Changes
+
+- [#512](https://github.com/knpkv/npm/pull/512) [`f3e0012`](https://github.com/knpkv/npm/commit/f3e0012b6106b3d142b8469f327f366b9aa2ba1f) Thanks [@konopkov](https://github.com/konopkov)! - The Approvals tab is a countdown:
+
+  - It leads with the request that expires first ("4m 12s until Apply Nix configuration expires").
+  - Every pending request, from this host and others, is listed soonest first, with its time left.
+  - One decision bar sits on the selected request and names what it decides.
+
+  Decisions show the hub's answer, including a refusal, never an assumed success. A request becomes expired only when the hub says so; at zero its clock reads "expiring". Screen readers hear a request once as it enters its last minute and when it expires, not every tick. Keyboard shortcuts follow the same rules as the buttons, so a request decided on another host, or one already being sent, can't be decided by keyboard either.
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa), [`1ef72d9`](https://github.com/knpkv/npm/commit/1ef72d9317a37e8f28563cae113e9908d8242c3a), [`f8e842e`](https://github.com/knpkv/npm/commit/f8e842e901986b50edf55f98fa3591b742a7904e), [`30849c5`](https://github.com/knpkv/npm/commit/30849c598fdf6776a3a4a2c4061d276e843eaa8e)]:
+  - @knpkv/herdr-connect@0.7.1
+  - @knpkv/rly@0.12.1
+  - @knpkv/herdr-work@0.8.0
+  - @knpkv/herdr-coordinator@0.3.4
+
+## 0.9.0
+
+### Minor Changes
+
+- [#548](https://github.com/knpkv/npm/pull/548) [`0125a64`](https://github.com/knpkv/npm/commit/0125a6414d23989eae1d89ab0523dd09a1a7b5e1) Thanks [@konopkov](https://github.com/konopkov)! - Connect knows where a terminal is really scrolled to. The hub reads herdr's scroll position for the open pane (at most twice a second per session and ten times a second across the host) and sends it to the browser, so a pane someone left scrolled back opens with "Older output, N lines back", and Latest returns in exactly that many lines, one command per frame, until a fresh reading says the pane is at the bottom. Readings are taken only while no scroll is in flight and carry the number of scrolls they cover, so the browser uses only those that already include every scroll it sent. Hosts send it only to clients that ask for it, so hubs and hosts can be upgraded in any order. When the position can't be read it is shown as unknown, never as the bottom, and Connect falls back to its previous behaviour.
+
+### Patch Changes
+
+- [#575](https://github.com/knpkv/npm/pull/575) [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c) Thanks [@konopkov](https://github.com/konopkov)! - Focus rings match rly's: a solid 2px outline in the focus colour, 2px outside the control, from `--rly-focus-ring-width` and `--rly-focus-ring-offset`. Hand-rolled 1px to 3px rings, rings in agent, service or text colours, tinted halos and box-shadow rings are gone. Rings inside clipped containers pull the ring width inside.
+- Updated dependencies [[`0125a64`](https://github.com/knpkv/npm/commit/0125a6414d23989eae1d89ab0523dd09a1a7b5e1), [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c), [`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6)]:
+  - @knpkv/herdr-connect@0.7.0
+  - @knpkv/herdr-work@0.7.2
+  - @knpkv/rly@0.12.0
+
+## 0.8.0
+
+### Minor Changes
+
+- [#572](https://github.com/knpkv/npm/pull/572) [`74429d4`](https://github.com/knpkv/npm/commit/74429d4719b471ab7aaae230ad594f6c5e1755fb) Thanks [@konopkov](https://github.com/konopkov)! - The hostd composer receives `startedWorker(jobId)`, the worker Fleet's job record says that job started, or null when the job is unknown or started none. A background writer that acts on an agent can check its identity against this record instead of pane metadata, which any local agent can write. A job store that can't be read, or a composition without one, fails with `FleetStoreError`, never null.
+
+### Patch Changes
+
+- [#559](https://github.com/knpkv/npm/pull/559) [`8171e47`](https://github.com/knpkv/npm/commit/8171e47d54136a7f1b48572e3fc5c5a184bc7250) Thanks [@konopkov](https://github.com/konopkov)! - `fleetctl submit HOST work.* <json>` says what is wrong with the payload, in one line: each failing field and what it expected, for example `work.abandon payload: goalId: Missing key; reason: Expected string`. The payload's `kind` may be left out; it is the command's own. Before, any problem printed only "work.abandon payload is invalid".
+
+- [#557](https://github.com/knpkv/npm/pull/557) [`d215ab8`](https://github.com/knpkv/npm/commit/d215ab87781bd00f9199f3c04b0c3a901075efbb) Thanks [@konopkov](https://github.com/konopkov)! - The coordinator chat no longer shows a hard-coded host name or a "Persistent" chip; turns read "You asked" or "You asked for work" with their state as a word, and the scrolling history is a named log a keyboard can reach. The notifications panel explains a blocked or unsupported browser instead of offering an Enable button that cannot work, names the cause when checking fails, and keeps its setup help inside the panel.
+- Updated dependencies [[`d215ab8`](https://github.com/knpkv/npm/commit/d215ab87781bd00f9199f3c04b0c3a901075efbb), [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5)]:
+  - @knpkv/herdr-connect@0.6.0
+  - @knpkv/rly@0.11.0
+  - @knpkv/herdr-work@0.7.1
+
 ## 0.7.0
 
 ### Minor Changes

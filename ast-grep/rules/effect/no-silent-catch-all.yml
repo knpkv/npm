@@ -3,24 +3,48 @@
 id: no-silent-catch-all
 language: tsx
 severity: error
-message: "Log before recovering with Effect.catchAll"
+message: "Do not turn every failure into success without looking at it: fail with a typed error, log it, or recover from a named tag"
 
 rule:
-  pattern: Effect.catchAll($FN)
-  has:
-    any:
-      - pattern: Effect.succeed($$$VALUE)
-      - pattern: Effect.void
-    stopBy: end
-  not:
-    has:
-      any:
-        - pattern: Effect.log($$$ARGS)
-        - pattern: Effect.logDebug($$$ARGS)
-        - pattern: Effect.logInfo($$$ARGS)
-        - pattern: Effect.logWarning($$$ARGS)
-        - pattern: Effect.logError($$$ARGS)
-      stopBy: end
+  all:
+    - any:
+        - all:
+            - any:
+                - pattern: Effect.catch(() => $BODY)
+                - pattern: Effect.catch(($IGNORED) => $BODY)
+                - pattern: Effect.catch($EFFECT, () => $BODY)
+                - pattern: Effect.catch($EFFECT, ($IGNORED) => $BODY)
+                - pattern: Effect.catchCause(() => $BODY)
+                - pattern: Effect.catchCause(($IGNORED) => $BODY)
+                - pattern: Effect.catchCause($EFFECT, () => $BODY)
+                - pattern: Effect.catchCause($EFFECT, ($IGNORED) => $BODY)
+                - pattern: Effect.catchIf(() => true, $HANDLER)
+                - pattern: Effect.catchIf($EFFECT, () => true, $HANDLER)
+            - has:
+                any:
+                  - pattern: Effect.succeed($$$VALUE)
+                  - pattern: Effect.succeedNone
+                  - pattern: Effect.succeedSome($$$VALUE)
+                  - pattern: Effect.void
+                stopBy: end
+        # orElseSucceed always succeeds, so a handler that ignores the error is a silent fallback by itself.
+        - pattern: Effect.orElseSucceed(() => $BODY)
+        - pattern: Effect.orElseSucceed(($IGNORED) => $BODY)
+        - pattern: Effect.orElseSucceed($EFFECT, () => $BODY)
+        - pattern: Effect.orElseSucceed($EFFECT, ($IGNORED) => $BODY)
+    - not:
+        has:
+          any:
+            - pattern: Effect.log($$$ARGS)
+            - pattern: Effect.logDebug($$$ARGS)
+            - pattern: Effect.logInfo($$$ARGS)
+            - pattern: Effect.logWarning($$$ARGS)
+            - pattern: Effect.logError($$$ARGS)
+          stopBy: end
+
+constraints:
+  IGNORED:
+    regex: "^_"
 
 files:
   - "packages/**/*.ts"
@@ -35,12 +59,8 @@ ignores:
   - "scratchpad/**"
 
 note: |
-  Silent recovery hides failures from operators and future debugging.
+  A handler that never looks at the failure turns every error, including ones nobody anticipated, into
+  a successful fallback. Recover from the named failure you expect, keep the failure typed, or log it:
 
-  Log the error before returning a fallback:
-
-  Effect.catchAll((cause) =>
-    Effect.logWarning("Falling back after failure", cause).pipe(
-      Effect.as(fallback)
-    )
-  )
+  effect.pipe(Effect.catchTag("NotFound", () => Effect.succeed(Option.none())))
+  effect.pipe(Effect.catch((error) => Effect.logWarning("Using cached list", error).pipe(Effect.as(cached))))

@@ -1,5 +1,69 @@
 # @knpkv/codecommit
 
+## 0.16.2
+
+### Patch Changes
+
+- Updated dependencies [[`4ecc3c2`](https://github.com/knpkv/npm/commit/4ecc3c249223f4999e6c7aa868cfa044267412f7), [`d73f798`](https://github.com/knpkv/npm/commit/d73f7988432fbecedde47885f610908d4c405a35)]:
+  - @knpkv/codecommit-web@0.26.0
+
+## 0.16.1
+
+### Patch Changes
+
+- [#587](https://github.com/knpkv/npm/pull/587) [`d6fb196`](https://github.com/knpkv/npm/commit/d6fb196aaaac44e83450474b345038879f88185a) Thanks [@konopkov](https://github.com/konopkov)! - Installing codecommit no longer downloads the web client's build tooling and browser libraries: the client ships prebuilt, so vite, tailwind, react-dom and the rest are devDependencies of codecommit-web, and codecommit drops an unused tslib.
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`0938903`](https://github.com/knpkv/npm/commit/0938903a17b6d2bdf13b96947471a1d49f10b42f), [`d6fb196`](https://github.com/knpkv/npm/commit/d6fb196aaaac44e83450474b345038879f88185a), [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/codecommit-core@0.22.0
+  - @knpkv/codecommit-web@0.25.0
+  - @knpkv/ai-codex@0.5.2
+
+## 0.16.0
+
+### Minor Changes
+
+- [#569](https://github.com/knpkv/npm/pull/569) [`5509cb8`](https://github.com/knpkv/npm/commit/5509cb87f90641d14211e2d993443e3cfcf40784) Thanks [@konopkov](https://github.com/konopkov)! - Approval and health now read honestly on real queues.
+
+  - `approvalOf` gains `NotRequired`, labelled "No approval required" (`approvalNotRequiredLabel`): CodeCommit evaluates a pull request with no approval rules as approved, though nobody signed off. "Approved" now appears only when rules exist and are satisfied. The CLI flags, TUI badge, web row, detail page and health score all show it. Status filters and counts treat it as neither approved nor pending.
+  - No "Approval granted" or "revoked" notification is sent for a pull request without rules. An identical pull-request notification that is still unread is not added again, so a restart no longer re-announces it.
+  - The cache records whether a pull request's approval baseline is known (migration 0024). A sign-off or withdrawal made while approval evaluation was failing is announced once evaluation recovers. A pull request first seen while evaluation fails holds only a placeholder, so its recovery is not announced.
+  - The health score uses a saturating curve: a base of 8, minus up to 6 for idleness and up to 2 for age, plus up to 1.5 for comments (3 counted), 2 for an approval and 1 for "No approval required". Long-idle pull requests are now ranked instead of all reading 0.0, and fresh ones stay green. A pull request CodeCommit gave no dates for scores Unknown ("Health —") and sorts last; comments that haven't loaded make the score a lower bound.
+
+### Patch Changes
+
+- [#570](https://github.com/knpkv/npm/pull/570) [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9) Thanks [@konopkov](https://github.com/konopkov)! - Executables linked from the repository (`pnpm link --global`, or `node dist/...`) run under plain Node: workspace packages resolve to their build output instead of TypeScript sources. Published `@knpkv/codecommit-core` now serves its `Domain.js`, `CacheService.js` and `SandboxService.js` subpaths; the last two resolved to files that do not exist before.
+- Updated dependencies [[`5509cb8`](https://github.com/knpkv/npm/commit/5509cb87f90641d14211e2d993443e3cfcf40784), [`0a0182c`](https://github.com/knpkv/npm/commit/0a0182c18f237ab420d17d0339f0969d9356c63a), [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c), [`442b11d`](https://github.com/knpkv/npm/commit/442b11db369a5af5e85d4d91d00c334d46f8103d), [`281ce63`](https://github.com/knpkv/npm/commit/281ce63fec174b26c0c306b58ca4c473e83f9cc8), [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9)]:
+  - @knpkv/codecommit-core@0.21.0
+  - @knpkv/codecommit-web@0.24.0
+
+## 0.15.0
+
+### Minor Changes
+
+- [#525](https://github.com/knpkv/npm/pull/525) [`fd9d510`](https://github.com/knpkv/npm/commit/fd9d5103e3558561274b16c258023bee73b4b233) Thanks [@konopkov](https://github.com/konopkov)! - A pull request whose approval rules fail to evaluate is now listed with its approval unknown, instead of being dropped (never cached before) or shown with a stale cached approval.
+
+  - `Domain` adds `ApprovalUnknownReason` (`NotPermitted`, `Throttled`, `ProviderFailed`), `PullRequest.approvalUnknown`, `approvalOf(pr)` (Approved, Pending or Unknown; Unknown wins), and the shared copy `approvalUnknownLabel` and `approvalUnknownReasonText`.
+  - The cache persists the reason and keeps the last known approval and rules until an evaluation succeeds. Health stats no longer count an unknown approval as approved.
+  - `AwsClient.getPullRequestRefresh` and `PullRequestRefreshItem` are removed: `getPullRequests` lists every pull request, with `approvalUnknown` set where evaluation failed. A single-PR refresh now also writes the evaluated approval.
+  - The CLI list, TUI badges and health score show "Approval unknown"; an unknown approval is neither approved nor pending. The TUI status filter gains `unknown`.
+  - codecommit-web's event stream and cached-row API carry the field. The web queue, workbench and detail page show "Approval unknown", and the reason on the detail page; an unknown approval is never shown or counted as approved, pending or ready. The status filter gains `unknown`, and "All open" includes those pull requests.
+  - An expired or rejected session found while evaluating approval rules fails the read instead of reading as an unknown approval, so the refresh marks the account signed out. A `GetPullRequest` answer without a pull request fails as `MissingPullRequestResponse`.
+  - No approval notification is sent when evaluation recovers from unknown: a pull request first seen while evaluation fails has no real last known value.
+  - Every write to a cached pull-request row goes through `PullRequestRepo/rowWrites`, under three rules that keep an older read from overwriting a newer one:
+    1. **Provider reads write whole column groups.** `upsert` (a listing) and the new `writeRead` (a re-read) take a complete `RowGroup` and `ApprovalGroup`, each written unless that group's version is newer. A version is the provider's last activity plus an observation number, which `PullRequestRepo.observe()` takes from the database before each read; compared in that order, it orders two reads of the same revision.
+    2. **Recomputed values never move a version.** The new `writeDerived` (diff stats, comment count, health score, commenters) applies only while the row still holds both versions it was read at. The comment cache and its notifications follow only when it applied.
+    3. **A tombstone keeps the later of both versions.** Only a provider "pull request does not exist" deletes a row, ordered by its observation, and the tombstone (migration 0023) stops a read that began earlier from bringing it back. Other read failures keep the row.
+
+    `upsert` reports which groups it wrote (`GroupsWritten`), and notifications, unknown-approval reporting and auto-subscription follow only those. `recordApprovalEvaluation`, `updateStatusAndClosedAt`, `updateDiffStats`, `updateCommentCount` and `updateHealthScore` are removed. `deleteOne` takes the not-found read's observation. `AwsClient`'s `PullRequestDetail` gains `isMergeable`, so a re-read carries a whole row. The ast-grep rules `no-direct-pull-request-row-write` and `no-pull-request-free-form-row-write` keep other code from writing the table directly or in part.
+
+### Patch Changes
+
+- Updated dependencies [[`fd9d510`](https://github.com/knpkv/npm/commit/fd9d5103e3558561274b16c258023bee73b4b233), [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5), [`3a59848`](https://github.com/knpkv/npm/commit/3a598483979960e71bfc880f182c73d499001091), [`0573403`](https://github.com/knpkv/npm/commit/057340343fcc727fd0c56329d840a668170376ad), [`d76d2d8`](https://github.com/knpkv/npm/commit/d76d2d8af1e266a88414a36e0d41ad27fa143b7d), [`286f23e`](https://github.com/knpkv/npm/commit/286f23ece7fc85b9a7a754b7b5f96b5e65868244), [`8f64bdf`](https://github.com/knpkv/npm/commit/8f64bdfee2ab758c53d0555850be42cfe9f3626e)]:
+  - @knpkv/codecommit-core@0.20.0
+  - @knpkv/codecommit-web@0.23.0
+  - @knpkv/agent-skills@0.3.4
+
 ## 0.14.1
 
 ### Patch Changes

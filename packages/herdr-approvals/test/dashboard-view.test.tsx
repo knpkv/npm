@@ -2,33 +2,34 @@ import { describe, expect, it } from "@effect/vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
 import { approvalShortcutFor, DashboardView } from "../src/dashboard-view.js"
+import { dashboardPage } from "../src/internal/dashboard-page.js"
+
+/** The pending job every snapshot starts from. */
+const pendingRecord: DashboardSnapshot["records"][number] = {
+  actor: "submitter@example.com",
+  approvalExpiresAt: 61_000,
+  approvedAt: null,
+  approvedBy: null,
+  createdAt: 1_000,
+  expiredAt: null,
+  id: "job-1",
+  payload: { kind: "nix.apply", ref: "main" },
+  approvalAvailable: true,
+  rejectedAt: null,
+  rejectedBy: null,
+  status: "pending_approval",
+  updatedAt: 1_000
+}
 
 const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
-  const pending: DashboardSnapshot["records"][number] = {
-    actor: "submitter@example.com",
-    approvalExpiresAt: 61_000,
-    approvalNonce: "nonce-1",
-    approvedAt: null,
-    approvedBy: null,
-    createdAt: 1_000,
-    error: null,
-    expiredAt: null,
-    hash: "hash-1",
-    id: "job-1",
-    payload: { kind: "nix.apply", ref: "main" },
-    approvalAvailable: true,
-    rejectedAt: null,
-    rejectedBy: null,
-    result: null,
-    status: "pending_approval",
-    updatedAt: 1_000
-  }
+  const pending = pendingRecord
   return {
     approvalApp: {
       canonical: false,
       canonicalUrl: "https://ser8.example.test/",
       chatEnabled: false,
-      pushEnabled: false
+      pushEnabled: false,
+      workEnabled: false
     },
     approvalsEnabled,
     chat: null,
@@ -86,13 +87,11 @@ const renderApprovalOnly = (): string =>
 
 const renderApprovedFailure = (): string => {
   const approved: DashboardSnapshot["records"][number] = {
-    ...snapshot(true).records[0],
+    ...pendingRecord,
     approvalExpiresAt: null,
-    approvalNonce: null,
     approvalAvailable: false,
     approvedAt: 2_000,
     approvedBy: "owner@example.com",
-    error: "hostd restarted while this job was running",
     status: "failed",
     updatedAt: 3_000
   }
@@ -158,11 +157,20 @@ const renderMixedAgentStates = (): string => {
   )
 }
 
+describe("dashboard agent states", () => {
+  it("spins only the working agent's state; a done agent keeps a still icon", () => {
+    const markup = renderMixedAgentStates()
+    expect(markup.match(/agent-state-spinning/g)).toHaveLength(1)
+    const done = markup.slice(markup.indexOf("reviewer"))
+    expect(done.slice(0, done.indexOf("</section>"))).not.toContain("agent-state-spinning")
+  })
+})
+
 describe("dashboard approval capability", () => {
   it("shows the existing-owner reconciliation title and summary", () => {
     const base = snapshot(true)
     const pending: DashboardSnapshot["records"][number] = {
-      ...base.records[0],
+      ...pendingRecord,
       payload: {
         kind: "work.reconcile",
         repository: "knpkv/npm",
@@ -202,13 +210,13 @@ describe("dashboard approval capability", () => {
       />
     )
     expect(html).toContain("Reconcile existing Work owner")
-    expect(html).toContain("knpkv/npm#433 · existing owner")
+    expect(html).toContain("knpkv/npm#433: existing owner")
   })
 
   it("shows the goal reassignment title and summary", () => {
     const base = snapshot(true)
     const pending: DashboardSnapshot["records"][number] = {
-      ...base.records[0],
+      ...pendingRecord,
       payload: {
         kind: "work.reassign",
         goalId: "goal-ser8-control-surface",
@@ -248,7 +256,7 @@ describe("dashboard approval capability", () => {
       />
     )
     expect(html).toContain("Reassign Work goal owner")
-    expect(html).toContain("goal-ser8-control-surface · Codex host coordinator → Claude coordinator")
+    expect(html).toContain("goal-ser8-control-surface: Codex host coordinator → Claude coordinator")
   })
 
   it("hides decisions on a non-approval listener", () => {
@@ -263,7 +271,7 @@ describe("dashboard approval capability", () => {
 
   it("hides decisions when a pending record has no approval proof", () => {
     const base = snapshot(true)
-    const pending = { ...base.records[0], approvalAvailable: false, approvalNonce: null }
+    const pending = { ...pendingRecord, approvalAvailable: false }
     const html = renderToStaticMarkup(
       <DashboardView
         busyJobId={null}
@@ -289,7 +297,7 @@ describe("dashboard approval capability", () => {
 
   it("encodes schema-valid job identifiers in approval form actions", () => {
     const base = snapshot(true)
-    const pending = { ...base.records[0], id: "job/with-slash" }
+    const pending = { ...pendingRecord, id: "job/with-slash" }
     const html = renderToStaticMarkup(
       <DashboardView
         busyJobId={null}
@@ -320,9 +328,8 @@ describe("dashboard approval capability", () => {
   it("routes worker Connect links through the canonical hub", () => {
     const base = snapshot(false)
     const active: DashboardSnapshot["records"][number] = {
-      ...base.records[0],
+      ...pendingRecord,
       approvalExpiresAt: null,
-      approvalNonce: null,
       approvalAvailable: false,
       connectTarget: {
         agentId: "agent-worker",
@@ -410,7 +417,7 @@ describe("dashboard approval capability", () => {
 
   it("keeps agent activity and general job history out of the approval-only surface", () => {
     const markup = renderApprovalOnly()
-    expect(markup).toContain("Recent approval history")
+    expect(markup).toContain("Recently decided")
     expect(markup).not.toContain("Agent activity")
     expect(markup).not.toContain("Activity history")
   })
@@ -441,5 +448,15 @@ describe("dashboard approval capability", () => {
     expect(markup).toContain('data-approval-job="job-1"')
     expect(markup).toContain('tabindex="0"')
     expect(markup).toContain('aria-label="Approval keyboard shortcuts"')
+  })
+})
+
+describe("host dashboard page", () => {
+  it("is server-rendered with the text-node separators hydration needs (React #418)", () => {
+    const page = dashboardPage(snapshot(true), "")
+    const root = page.slice(page.indexOf('<div id="fleet-dashboard-root">'), page.indexOf("</div>\n<script"))
+    // renderToString marks where adjacent text nodes meet; static markup merges them and the
+    // hydrating client then finds different text.
+    expect(root).toContain("<!-- -->")
   })
 })

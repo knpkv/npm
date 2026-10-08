@@ -2,8 +2,10 @@
 @layer rly.tokens {
   :root {
     color-scheme: light dark;
-    --rly-font-ui: "Geist Variable", "Geist", system-ui, sans-serif;
-    --rly-font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, monospace;
+    --rly-font-ui: "Geist Variable", "Geist", "Geist Fallback", system-ui, sans-serif;
+    --rly-font-mono: "Geist Mono Variable", "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
+    --rly-focus-ring-width: 2px;
+    --rly-focus-ring-offset: 2px;
     --rly-color-canvas: light-dark(#F6F6F8, #101114);
     --rly-color-surface-1: light-dark(#FFFFFF, #17181C);
     --rly-color-surface-2: light-dark(#F0F1F4, #1E2025);

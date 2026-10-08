@@ -10,9 +10,11 @@ Built with Effect-TS and [@opentui/react](https://github.com/anomalyco/opentui).
 pnpm add @knpkv/jira-clockify
 ```
 
-Or link globally:
+Or link globally from this repository. The linked `jcf` runs the build output, so build it and the
+workspace packages it imports first:
 
 ```bash
+pnpm --filter "@knpkv/jira-clockify..." build
 cd packages/jira-clockify && pnpm link --global
 ```
 
@@ -60,7 +62,7 @@ connects it, and exit non-zero.
 jcf config set project     # Select default Clockify project
 jcf config set billable    # Set default billable flag
 jcf config set jql <jql>   # Set default JQL filter
-jcf config show            # Show current config
+jcf config show            # Show current config; marks values that are jcf's defaults
 jcf config reset           # Reset to defaults
 ```
 
@@ -118,7 +120,12 @@ jcf sync reconcile jira-to-clockify        # Fill Clockify from Jira
 jcf sync reconcile --agent claude             # Propose worklogs from local Claude Code sessions
 jcf sync reconcile --agent claude --calendar  # ...with an hour-by-hour grid of when it happened
 jcf sync reconcile --agent claude --json      # Reporting only: one JSON value, nothing logged
+jcf sync reconcile --agent claude --only clockify  # Read and write Clockify alone (or --only jira)
 ```
+
+An agent run reads both systems before it proposes anything, because a side it cannot read looks the
+same as a side with nothing recorded. If one is not connected the run stops before planning and says
+how to connect it, or to pass `--only` for the other one.
 
 `--agent claude` is for time _neither_ side recorded: it reads Claude Code and Codex transcripts,
 keeps work inside your session roots, and works out which issue each

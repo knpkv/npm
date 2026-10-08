@@ -1,0 +1,50 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-silent-ignore
+language: tsx
+severity: error
+message: "Effect.ignore discards the failure silently: use Effect.ignore({ log: true }), or mark a best-effort step with a // best-effort: <why> comment"
+
+rule:
+  all:
+    - any:
+        - pattern: Effect.ignore
+        - pattern: Effect.ignoreCause
+    - not:
+        inside:
+          any:
+            - pattern: Effect.ignore({ $$$OPTIONS })
+            - pattern: Effect.ignore($EFFECT, { $$$OPTIONS })
+            - pattern: Effect.ignoreCause({ $$$OPTIONS })
+            - pattern: Effect.ignoreCause($EFFECT, { $$$OPTIONS })
+    - not:
+        inside:
+          any:
+            - kind: expression_statement
+            - kind: lexical_declaration
+            - kind: return_statement
+            - kind: variable_declaration
+          follows:
+            kind: comment
+            regex: "^// best-effort: \\S"
+          stopBy: end
+
+files:
+  - "packages/**/*.ts"
+  - "packages/**/*.tsx"
+  - "scripts/**/*.ts"
+
+ignores:
+  - "**/*.test.ts"
+  - "**/*.spec.ts"
+  - "**/generated/**"
+  - "repos/**"
+  - "scratchpad/**"
+
+note: |
+  Effect.ignore drops the failure without a trace. Log what was ignored, or say why ignoring it is safe:
+
+  yield* cleanup.pipe(Effect.ignore({ log: true }))
+
+  // best-effort: the temp directory is removed with the scope anyway
+  yield* fs.remove(tmp).pipe(Effect.ignore)

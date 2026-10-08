@@ -46,7 +46,7 @@ export function SettingsAudit() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">Audit Log</h3>
+        <h1 className="text-lg font-semibold">Audit Log</h1>
         <p className="text-sm text-muted-foreground">Record every AWS API call made by the app</p>
       </div>
 

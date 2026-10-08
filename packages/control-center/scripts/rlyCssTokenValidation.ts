@@ -4,11 +4,32 @@ import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import { inspectRlyCssTokens, type RlyCssTokenViolation } from "./rlyCssTokens.js"
 
-export const RLY_CSS_TOKEN_SOURCE_ROOTS: ReadonlyArray<string> = [
-  "packages/codecommit-web/src",
-  "packages/control-center/src",
-  "packages/rly/src"
-]
+/**
+ * The `src` tree of every package under `packages/` (a directory with a package.json), found on
+ * disk rather than listed: a hand-kept list missed the herdr packages, whose stylesheets referenced
+ * tokens rly never defined. The workspace's root members (scratchpad, scripts) hold no stylesheets.
+ */
+const rlyCssTokenSourceRoots: (
+  fileSystem: FileSystem.FileSystem,
+  path: Path.Path,
+  workspaceRoot: string
+) => Effect.Effect<ReadonlyArray<string>, PlatformError.PlatformError> = Effect.fn("workspace.rlyCssSourceRoots")(
+  function*(fileSystem, path, workspaceRoot) {
+    const packages = path.join(workspaceRoot, "packages")
+    const roots: Array<string> = []
+    for (const entry of [...(yield* fileSystem.readDirectory(packages))].sort()) {
+      // packages/ also holds loose files, such as notes; only a directory is a package.
+      if ((yield* fileSystem.stat(path.join(packages, entry))).type !== "Directory") continue
+      const source = path.join(packages, entry, "src")
+      if (
+        (yield* fileSystem.exists(path.join(packages, entry, "package.json"))) && (yield* fileSystem.exists(source))
+      ) {
+        roots.push(source)
+      }
+    }
+    return roots
+  }
+)
 
 const cssFiles: (
   fileSystem: FileSystem.FileSystem,
@@ -32,6 +53,7 @@ const cssFiles: (
 
 export interface RlyCssTokenWorkspaceInspection {
   readonly filesChecked: number
+  readonly sourceRootsChecked: number
   readonly violations: ReadonlyArray<RlyCssTokenViolation>
 }
 
@@ -48,8 +70,9 @@ export const inspectRlyCssTokenWorkspace = Effect.fn("workspace.inspectRlyCssTok
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const files: Array<string> = []
-    for (const sourceRoot of RLY_CSS_TOKEN_SOURCE_ROOTS) {
-      for (const file of yield* cssFiles(fileSystem, path, path.join(workspaceRoot, sourceRoot))) files.push(file)
+    const sourceRoots = yield* rlyCssTokenSourceRoots(fileSystem, path, workspaceRoot)
+    for (const sourceRoot of sourceRoots) {
+      for (const file of yield* cssFiles(fileSystem, path, sourceRoot)) files.push(file)
     }
 
     const violations: Array<RlyCssTokenViolation> = []
@@ -59,6 +82,6 @@ export const inspectRlyCssTokenWorkspace = Effect.fn("workspace.inspectRlyCssTok
       for (const violation of inspectRlyCssTokens(sourcePath, source, generatedTokens)) violations.push(violation)
     }
 
-    return { filesChecked: files.length, violations }
+    return { filesChecked: files.length, sourceRootsChecked: sourceRoots.length, violations }
   }
 )

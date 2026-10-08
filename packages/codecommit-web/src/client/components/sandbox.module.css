@@ -18,25 +18,9 @@
   gap: var(--rly-space-16);
 }
 
-.eyebrow {
-  display: inline-grid;
-  grid-template-columns: 3px auto;
-  align-items: center;
-  gap: var(--rly-space-12);
-  inline-size: fit-content;
-  color: var(--rly-color-text-2);
-  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
-    var(--rly-type-meta-font);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.eyebrow::before {
-  inline-size: 3px;
-  block-size: var(--rly-space-24);
-  border-radius: var(--rly-radius-round);
-  background: var(--rly-color-service-codecommit);
-  content: "";
+/* How many sandboxes run, as plain words beside the title, not a status pill. */
+.running {
+  white-space: nowrap;
 }
 
 .title,
@@ -52,7 +36,7 @@
 }
 
 .title {
-  max-inline-size: 11ch;
+  max-inline-size: 7.54em;
   text-wrap: balance;
 }
 
@@ -118,8 +102,8 @@
 
 .sandboxOpen:focus-visible {
   border-radius: var(--rly-radius-tag);
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-4);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .sandboxHeading {
@@ -161,11 +145,9 @@
   white-space: nowrap;
 }
 
+/* One sentence, not a dotted list: "Pull request 12, created …, port 8080". */
 .sandboxMeta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--rly-space-8);
+  display: block;
   color: var(--rly-color-text-3);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
@@ -174,11 +156,7 @@
 .statusDetailInline {
   min-inline-size: 0;
   max-inline-size: 100%;
-  overflow-wrap: anywhere;
-}
-
-.metaSeparator {
-  color: var(--rly-color-border-2);
+  overflow-wrap: break-word;
 }
 
 .rowActions,
@@ -196,7 +174,7 @@
 }
 
 .errorMessage {
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   color: var(--rly-color-blocked-ink);
 }
 
@@ -324,8 +302,8 @@
 }
 
 .credentialButton:focus-visible {
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .workspaceContent {
@@ -377,7 +355,7 @@
 
 .logMessage {
   min-inline-size: 0;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
   color: var(--rly-color-text-2);
 }
 

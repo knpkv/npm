@@ -19,6 +19,19 @@ export class FleetStoreError extends Schema.TaggedError<FleetStoreError>()(
   }
 ) {}
 
+/**
+ * A write found the job database locked by another connection (SQLite BUSY/LOCKED) after its busy
+ * timeout. Nothing was written, so the same request may be retried; HTTP surfaces map it to 503.
+ */
+export class FleetStoreBusyError extends Schema.TaggedError<FleetStoreBusyError>()(
+  "FleetStoreBusyError",
+  {
+    operation: Schema.String,
+    detail: Schema.String,
+    cause: Schema.Defect()
+  }
+) {}
+
 export class FleetTransitionConflictError extends Schema.TaggedError<FleetTransitionConflictError>()(
   "FleetTransitionConflictError",
   { jobId: Schema.String }

@@ -1,11 +1,22 @@
 import { Effect, Schema } from "effect"
 import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
-import { FleetJobConflictError, FleetStoreError, FleetTransitionConflictError } from "./errors.js"
+import { FleetJobConflictError, FleetStoreBusyError, FleetStoreError, FleetTransitionConflictError } from "./errors.js"
 import { JobRecord, type PendingApprovalCursor } from "./model.js"
 import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "./sqlite.js"
 
 const storeError = (operation: string) => (cause: unknown) =>
   new FleetStoreError({ operation, detail: String(cause), cause })
+
+// node:sqlite reports SQLITE_BUSY (5) and SQLITE_LOCKED (6) as ERR_SQLITE_ERROR with the primary code in errcode.
+const isSqliteBusy = Schema.is(
+  Schema.Struct({ code: Schema.Literal("ERR_SQLITE_ERROR"), errcode: Schema.Literals([5, 6]) })
+)
+
+// A write either lost the lock to another connection (retryable) or failed for any other reason.
+const writeError = (operation: "put" | "transition") => (cause: unknown) =>
+  isSqliteBusy(cause)
+    ? new FleetStoreBusyError({ operation, detail: String(cause), cause })
+    : new FleetStoreError({ operation, detail: String(cause), cause })
 
 const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
   new FleetStoreError({ operation: error.operation, detail: String(error.cause), cause: error.cause })
@@ -69,7 +80,7 @@ export class JobStore {
         database
           .prepare("INSERT OR IGNORE INTO jobs (id, created_at, record) VALUES (?, ?, ?)")
           .run(record.id, record.createdAt, encodeRecord(record)).changes,
-      catch: storeError("put")
+      catch: writeError("put")
     })
     if (inserted !== 1) {
       return yield* new FleetJobConflictError({ jobId: record.id })
@@ -100,7 +111,7 @@ export class JobStore {
             current.id,
             encodeRecord(current)
           ).changes,
-      catch: storeError("transition")
+      catch: writeError("transition")
     })
     if (changed !== 1) {
       return yield* new FleetTransitionConflictError({ jobId: current.id })

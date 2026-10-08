@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "@effect/vitest"
+import { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import * as Result from "effect/Result"
 
 import {
@@ -12,10 +13,26 @@ import {
   type RelayReviewSessionWrite,
   writeRelayReviewSession
 } from "../src/client/review-session-storage.js"
-import type { PullRequestRelayReviewResponse, RelayReviewConversationTurn } from "../src/server/Api.js"
+import type {
+  PullRequestRelayReviewResponse,
+  RelayReviewConversationTurn,
+  RelayReviewFinding
+} from "../src/server/Api.js"
+
+const finding: RelayReviewFinding = {
+  id: "F1",
+  priority: "P2",
+  title: "Retry amplification",
+  summary: "Retries can duplicate a request.",
+  details: "The retry path lacks an idempotency key.",
+  recommendation: "Require an idempotency key.",
+  verification: "Static review.",
+  publicationTarget: "line-comment",
+  location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
+}
 
 const review: PullRequestRelayReviewResponse = {
-  pullRequestId: "42",
+  pullRequestId: PullRequestId.make("42"),
   revisionId: "revision-1",
   baseCommit: "a".repeat(40),
   headCommit: "b".repeat(40),
@@ -31,17 +48,7 @@ const review: PullRequestRelayReviewResponse = {
   },
   result: {
     verdict: "One finding.",
-    findings: [{
-      id: "F1",
-      priority: "P2",
-      title: "Retry amplification",
-      summary: "Retries can duplicate a request.",
-      details: "The retry path lacks an idempotency key.",
-      recommendation: "Require an idempotency key.",
-      verification: "Static review.",
-      publicationTarget: "line-comment",
-      location: { scope: "line", filePath: "src/retry.ts", line: 1, side: "after" }
-    }]
+    findings: [finding]
   }
 }
 
@@ -461,7 +468,7 @@ describe("Relay review session storage", () => {
 
   it("merges stale tab writes without losing turns or regressing publication state", async () => {
     const key = relayReviewSessionStorageKey(resource)
-    const staleTab = {
+    const staleTab: Parameters<typeof writeSession>[2] = {
       identity: "exact-head-1",
       resource,
       review,
@@ -1013,7 +1020,7 @@ describe("Relay review session storage", () => {
       review: {
         ...review,
         revisionId: "revision-2",
-        result: { ...review.result, findings: [{ ...review.result.findings[0], summary: "Fixed in head." }] }
+        result: { ...review.result, findings: [{ ...finding, summary: "Fixed in head." }] }
       },
       skillIds: [],
       turns: currentTurns,
@@ -1026,7 +1033,7 @@ describe("Relay review session storage", () => {
       review: {
         ...review,
         revisionId: "revision-2",
-        result: { ...review.result, findings: [{ ...review.result.findings[0], summary: "Fixed in head." }] }
+        result: { ...review.result, findings: [{ ...finding, summary: "Fixed in head." }] }
       },
       skillIds: [],
       turns: currentTurns,

@@ -1,0 +1,6 @@
+/*
+ * Cascade order for the two style systems. Loaded before either, so Tailwind's preflight (`base`)
+ * sits under rly's components instead of resetting their type and controls; Tailwind utilities
+ * stay last so app markup can still override rly.
+ */
+@layer theme, base, rly.fonts, rly.tokens, rly.reset, rly.base, rly.components, rly.state, components, utilities;

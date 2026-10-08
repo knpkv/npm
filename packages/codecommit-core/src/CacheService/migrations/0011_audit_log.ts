@@ -19,5 +19,6 @@ export default Effect.flatMap(
       sql`CREATE INDEX IF NOT EXISTS idx_audit_log_operation ON audit_log(operation)`,
       sql`CREATE INDEX IF NOT EXISTS idx_audit_log_permission_state ON audit_log(permission_state)`,
       sql`CREATE INDEX IF NOT EXISTS idx_audit_log_account_profile ON audit_log(account_profile)`
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     ]).pipe(Effect.asVoid, Effect.catchIf(() => true, () => Effect.void))
 )

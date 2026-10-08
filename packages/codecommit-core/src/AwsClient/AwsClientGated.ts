@@ -24,7 +24,7 @@ import { AuditLogRepo, type NewAuditLogEntry } from "../PermissionService/AuditL
 import { PermissionService } from "../PermissionService/index.js"
 import { getOperationMeta } from "../PermissionService/operations.js"
 import { PermissionGate } from "../PermissionService/PermissionGate.js"
-import { AwsClient, type AwsClientError, type PullRequestRefreshItem } from "./index.js"
+import { AwsClient, type AwsClientError } from "./index.js"
 
 // Layer composition: AwsClientLive → InnerAwsClient (rename) → AwsClientGated → AwsClient
 export class InnerAwsClient extends Context.Service<
@@ -96,6 +96,7 @@ export const AwsClientGatedLive: Layer.Layer<
             )
             : Effect.void
         ),
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.void)
       )
 
@@ -104,12 +105,20 @@ export const AwsClientGatedLive: Layer.Layer<
         const meta = getOperationMeta(params.operation)
         const now = yield* Clock.currentTimeMillis
         const nonce = yield* Random.nextIntBetween(0, 999_999_999)
-        const response = yield* gateService.request({
-          id: `gate-${now}-${nonce}`,
-          operation: params.operation,
-          category: meta.category,
-          context: params.context
-        }).pipe(Effect.mapError(() => toDeniedError(params, "timeout")))
+        const response = yield* gateService.request(
+          {
+            id: `gate-${now}-${nonce}`,
+            operation: params.operation,
+            category: meta.category,
+            context: params.context
+          },
+          {
+            // A standing grant or refusal saved after the check above still answers this call.
+            standing: permService.check(params.operation).pipe(
+              Effect.map((state) => state === "always_allow" ? "allow_once" : state === "deny" ? "deny" : undefined)
+            )
+          }
+        ).pipe(Effect.mapError(() => toDeniedError(params, "timeout")))
 
         if (response === "always_allow") {
           yield* permService.set(params.operation, "always_allow")
@@ -200,14 +209,6 @@ export const AwsClientGatedLive: Layer.Layer<
           ({ account }) => `List PRs for ${account.profile}`,
           nested,
           ({ account, options }) => inner.getPullRequests(account, options)
-        )({ account, options }),
-      // The same provider read as getPullRequests, so the same permission and audit operation.
-      getPullRequestRefresh: (account, options) =>
-        gatedStream<GetPullRequestsInput, PullRequestRefreshItem>(
-          "getPullRequests",
-          ({ account }) => `List PRs for ${account.profile}`,
-          nested,
-          ({ account, options }) => inner.getPullRequestRefresh(account, options)
         )({ account, options }),
       getCallerIdentity: gated(
         "getCallerIdentity",

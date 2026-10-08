@@ -89,6 +89,28 @@ describe("WorkbenchRailView", () => {
     ])
   })
 
+  // No rules means nothing to approve: the ready caption must not claim someone approved it.
+  it("says an own ready pull request without rules needs no approval, and keeps approved for a rule-backed one", async () => {
+    const satisfied = [{ poolMembers: ["ana"], requiredApprovals: 1, ruleName: "Approvals", satisfied: true }]
+    const noRules = await render([make("5", { author: "andrey", isApproved: true, approvalRules: [] })], "andrey")
+    expect(noRules.textContent).toContain("no approval required, not merged")
+    expect(noRules.textContent).not.toContain("approved, not merged")
+    await act(async () => root?.unmount())
+    const ruled = await render([make("6", { author: "andrey", isApproved: true, approvalRules: satisfied })], "andrey")
+    expect(ruled.textContent).toContain("approved, not merged")
+  })
+
+  // A last known count could be a since-revoked approval: the caption says unknown, never 1/2.
+  it("says approvers are unknown instead of last known rule progress", async () => {
+    const twoNeeded = [{ poolMembers: ["andrey", "jonas"], requiredApprovals: 2, ruleName: "Two", satisfied: false }]
+    const host = await render(
+      [make("7", { approvalRules: twoNeeded, approvedBy: ["jonas"], approversUnknown: true })],
+      "andrey"
+    )
+    expect(host.textContent).toContain("approvers unknown")
+    expect(host.textContent).not.toContain("1/2")
+  })
+
   it("uses the singular for one waiting pull request", async () => {
     const host = await render([make("1")], "andrey")
     expect(host.textContent).toContain("1 pull request waits on your review.")
@@ -122,6 +144,24 @@ describe("WorkbenchRailView", () => {
       "Nothing waits on you by name. 1 pull request waits on a role pool you may be in."
     )
     expect([...host.querySelectorAll("h3")].map((heading) => heading.textContent)).toEqual(["Open to a role pool 1"])
+  })
+
+  it("says pull requests with approval unknown apart from the review count, with their shared reason", async () => {
+    const unknown = (id: string, tag: "NotPermitted" | "Throttled") =>
+      make(id, { approvalUnknown: { _tag: tag }, isApproved: true })
+    const host = await render([make("1"), unknown("2", "NotPermitted"), unknown("3", "NotPermitted")], "andrey")
+    expect(host.textContent).toContain("1 pull request waits on your review.")
+    expect(host.textContent).toContain(
+      "2 pull requests with approval unknown: Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules)."
+    )
+    const row = rowLinks(host).find((link) => link.textContent?.includes("Change 2"))
+    expect(row?.querySelector("[title]")?.getAttribute("title")).toContain("Not allowed to check approval rules")
+
+    await draw([make("1"), unknown("2", "NotPermitted"), unknown("3", "Throttled")], "andrey")
+    expect(host.textContent).toContain("2 pull requests with approval unknown; open one to see why.")
+
+    await draw([make("1")], "andrey")
+    expect(host.textContent).not.toContain("approval unknown")
   })
 
   it("explains an unknown identity instead of showing an empty queue", async () => {

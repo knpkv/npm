@@ -17,7 +17,6 @@ describe("AwsClientGated", () => {
         calls.push({ account, options })
         return Stream.empty
       },
-      getPullRequestRefresh: () => Stream.die("unexpected getPullRequestRefresh"),
       getCallerIdentity: () => unused("getCallerIdentity"),
       createPullRequest: () => unused("createPullRequest"),
       listBranches: () => unused("listBranches"),
@@ -41,7 +40,8 @@ describe("AwsClientGated", () => {
           resetAll: () => Effect.void,
           isAuditEnabled: () => Effect.succeed(false),
           getAuditRetention: () => Effect.succeed(30),
-          setAudit: () => Effect.void
+          setAudit: () => Effect.void,
+          setCategory: () => Effect.void
         })
       ),
       Layer.succeed(PermissionGate, PermissionGate.of({ request: () => Effect.succeed("allow_once") })),

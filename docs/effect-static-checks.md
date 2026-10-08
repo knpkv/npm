@@ -75,6 +75,16 @@ Use ast-grep for syntactic patterns that are precise without type information:
   scoped binding-aware rule rejects imported `Effect.ignoreCause`; recover
   typed failures with `Effect.catch`, or use an explicit supervisor whose
   non-interrupt policy is covered by a natural lifecycle test.
+- No silent fallbacks. `no-silent-catch-all` rejects `Effect.catch`,
+  `Effect.catchCause` and `Effect.orElseSucceed` handlers that ignore the
+  error (no parameter, or one named `_…`), and `catchIf(() => true, …)`, when
+  they return success without logging. Recovering from a named failure with
+  `catchTag`, or a `catchIf` with a real predicate, stays allowed.
+  `no-silent-ignore` rejects bare `Effect.ignore`/`Effect.ignoreCause`: use
+  `Effect.ignore({ log: true })`, or put a `// best-effort: <why>` comment
+  directly above the statement. Sites that existed when these rules landed carry
+  a reasoned `ast-grep-ignore` line counted by the escape ledger. Fixing a site
+  deletes its line and lowers the package's count.
 - Do not call global `JSON.parse` directly inside CodeCommit `Effect.map`
   callbacks. The binding-aware rule also follows an aliased `JSON.parse`.
   Decode JSON with `Schema.fromJsonString` and an Effect-returning decoder, or

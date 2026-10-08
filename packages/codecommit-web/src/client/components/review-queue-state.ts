@@ -1,4 +1,4 @@
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import * as Predicate from "effect/Predicate"
 import type { FilterEntry, FilterKey } from "../atoms/ui.js"
 import { extractScope } from "../utils/extractScope.js"
@@ -25,7 +25,16 @@ export const resolveQueueMode = (state: QueueModeState, currentUser: string | un
   return "all"
 }
 
-export const openSubStatuses: ReadonlySet<string> = new Set(["approved", "pending", "mergeable", "conflicts"])
+// "unknown" and "not-required" are open approval statuses of their own, so the composite All open
+// group keeps those pull requests.
+export const openSubStatuses: ReadonlySet<string> = new Set([
+  "approved",
+  "pending",
+  "unknown",
+  "not-required",
+  "mergeable",
+  "conflicts"
+])
 const recognizedStatuses: ReadonlySet<string> = new Set(["open", "merged", "closed", ...openSubStatuses])
 
 interface StatusAxisLookup extends Readonly<Record<string, string>> {}
@@ -36,6 +45,8 @@ export const statusAxis: StatusAxisLookup = {
   closed: "lifecycle",
   approved: "approval",
   pending: "approval",
+  unknown: "approval",
+  "not-required": "approval",
   mergeable: "merge",
   conflicts: "merge"
 }
@@ -62,7 +73,7 @@ export const matchesQueueFilter = (pr: Domain.PullRequest, entry: FilterEntry): 
     case "repo":
       return pr.repositoryName === entry.value
     case "approver":
-      return pr.approvedBy.some((name) => name === entry.value)
+      return Domain.currentApprovers(pr).some((name) => name === entry.value)
     case "commenter":
       return pr.commentedBy.some((name) => name === entry.value)
     case "size": {
@@ -83,10 +94,15 @@ export const matchesQueueFilter = (pr: Domain.PullRequest, entry: FilterEntry): 
     }
     case "status":
       switch (entry.value) {
+        // An unknown approval is neither approved nor pending.
         case "approved":
-          return pr.status === "OPEN" && pr.isApproved
+          return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "Approved"
         case "pending":
-          return pr.status === "OPEN" && !pr.isApproved
+          return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "Pending"
+        case "unknown":
+          return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "Unknown"
+        case "not-required":
+          return pr.status === "OPEN" && Domain.approvalOf(pr)._tag === "NotRequired"
         case "mergeable":
           return pr.status === "OPEN" && pr.isMergeable
         case "conflicts":
@@ -135,7 +151,7 @@ export const queueFilterOptions = (
     const scope = extractScope(pr.title)
     if (scope) scopes.add(scope)
     for (const name of pr.commentedBy) if (name) commenters.add(name)
-    for (const name of pr.approvedBy) if (name) approvers.add(name)
+    for (const name of Domain.currentApprovers(pr)) if (name !== "") approvers.add(name)
   }
 
   return {
@@ -145,7 +161,7 @@ export const queueFilterOptions = (
     commenter: [...commenters].sort(),
     scope: [...scopes].sort(),
     repo: [...repositories].sort(),
-    status: ["open", "approved", "pending", "mergeable", "conflicts", "merged", "closed"],
+    status: ["open", "approved", "pending", "unknown", "not-required", "mergeable", "conflicts", "merged", "closed"],
     size: ["small", "medium", "large", "xlarge"]
   }
 }

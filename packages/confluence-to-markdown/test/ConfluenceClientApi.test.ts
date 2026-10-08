@@ -286,7 +286,7 @@ describe("ConfluenceClient API boundary", () => {
       expect(result._tag).toBe("Failure")
       if (result._tag === "Failure") {
         expect(result.failure._tag).toBe("ApiError")
-        expect(result.failure.status).toBe(200)
+        expect(result.failure._tag === "ApiError" ? result.failure.status : undefined).toBe(200)
       }
       expect(requests).toHaveLength(1)
     }).pipe(
@@ -309,7 +309,8 @@ describe("ConfluenceClient API boundary", () => {
       expect(result._tag).toBe("Failure")
       if (result._tag === "Failure") {
         expect(result.failure._tag).toBe("RateLimitError")
-        expect(result.failure.retryAfter).toBeUndefined()
+        expect(result.failure._tag === "RateLimitError" ? result.failure.retryAfter : "not a rate limit")
+          .toBeUndefined()
       }
       expect(requests).toHaveLength(4)
     }).pipe(

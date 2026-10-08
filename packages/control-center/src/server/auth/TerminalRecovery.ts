@@ -126,7 +126,7 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
           yield* Effect.addFinalizer(() =>
             fileSystem.remove(probe, { force: true }).pipe(
               Effect.andThen(directory.sync),
-              Effect.ignore
+              Effect.ignore({ log: "Warn", message: "Could not remove the terminal recovery owner probe" })
             )
           )
           yield* fileSystem.chmod(probe, 0o600).pipe(

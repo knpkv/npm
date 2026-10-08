@@ -18,6 +18,7 @@
  */
 import {
   Account,
+  ApprovalUnknownTag,
   AwsProfileName,
   AwsRegion,
   PRCommentLocationJson,
@@ -84,6 +85,8 @@ export const CachedPullRequestResponse = Schema.Struct({
   destinationBranch: Schema.String,
   isMergeable: Schema.Number,
   isApproved: Schema.Number,
+  /** Set when the last evaluation failed: `isApproved` is then only the last known value. */
+  approvalUnknownReason: Schema.optionalKey(Schema.NullOr(ApprovalUnknownTag)),
   commentCount: Schema.NullOr(Schema.Number),
   link: Schema.String,
   fetchedAt: Schema.String
@@ -610,7 +613,9 @@ const ConfigResponse = Schema.Struct({
 const ConfigPathResponse = Schema.Struct({
   path: Schema.String,
   exists: Schema.Boolean,
-  modifiedAt: Schema.optional(Schema.String)
+  modifiedAt: Schema.optional(Schema.String),
+  /** The files AWS profiles were detected from (AWS_CONFIG_FILE / AWS_SHARED_CREDENTIALS_FILE or ~/.aws). */
+  awsProfileSources: Schema.optional(Schema.Struct({ config: Schema.String, credentials: Schema.String }))
 })
 
 const DatabaseInfoResponse = Schema.Struct({
@@ -922,6 +927,17 @@ export class PermissionsGroup extends HttpApiGroup.make("permissions")
   )
   .add(
     HttpApiEndpoint.post("reset", "/reset", { success: Schema.String })
+  )
+  .add(
+    // One grant for a whole category (first run: every read), so the first account isn't blocked by a modal per call.
+    HttpApiEndpoint.post("updateCategory", "/category", {
+      payload: Schema.Struct({
+        category: Schema.Literals(["read", "write"]),
+        state: PermissionStateSchema
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
     HttpApiEndpoint.get("auditSettings", "/audit", {

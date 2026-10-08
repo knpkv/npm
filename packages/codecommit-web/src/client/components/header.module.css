@@ -103,6 +103,20 @@
   color: var(--rly-color-action-foreground);
 }
 
+/* Forced colours drop the surface fill that marks the current page; system colours mark it instead. */
+@media (forced-colors: active) {
+  .navLink[aria-current="page"] {
+    forced-color-adjust: none;
+    background: Highlight;
+    color: HighlightText;
+  }
+
+  .navLink[aria-current="page"] .navCount {
+    background: HighlightText;
+    color: Highlight;
+  }
+}
+
 .utilities {
   display: flex;
   min-inline-size: 0;
@@ -145,12 +159,21 @@
   background: var(--rly-color-blocked-ink);
 }
 
+/*
+ * The failure's words, inline only where the header has room for them beside the navigation.
+ * Narrower, the label and dot stay, and the full detail stays on the status's title and accessible
+ * name, so it is never cut to an ellipsis or pushed over the navigation.
+ */
 .statusErrorDetail {
-  overflow: hidden;
-  max-inline-size: min(15rem, 20vw);
+  display: none;
   color: var(--rly-color-blocked-ink);
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+@media (min-width: 110rem) {
+  .statusErrorDetail {
+    display: inline;
+    max-inline-size: 22rem;
+  }
 }
 
 .commandButton,
@@ -377,10 +400,6 @@
   .utilities {
     grid-column: 2;
     grid-row: 1;
-  }
-
-  .statusErrorDetail {
-    max-inline-size: min(9rem, 22vw);
   }
 }
 

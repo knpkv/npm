@@ -60,7 +60,11 @@ export const makeBlobPublisher = (
               return openFailure(opened.failure)
             }
 
-            yield* Effect.addFinalizer(() => fs.remove(temporary, { force: true }).pipe(Effect.ignore))
+            yield* Effect.addFinalizer(() =>
+              fs.remove(temporary, { force: true }).pipe(
+                Effect.ignore({ log: "Warn", message: "Could not remove a temporary blob" })
+              )
+            )
             // Every child path is descriptor-relative. Identity checks remain
             // defense in depth around the write and atomic publication.
             yield* directory.assertIdentity

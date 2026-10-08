@@ -10,14 +10,8 @@
   gap: 1.25rem;
 }
 
-.eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
 .title {
-  max-inline-size: 12ch;
+  max-inline-size: 8.22em;
 }
 
 .lede {
@@ -65,8 +59,8 @@
 .facet:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .facetLabel {
@@ -151,8 +145,8 @@
 
 .searchInput:focus {
   border-color: var(--rly-color-focus);
-  outline: 3px solid color-mix(in srgb, var(--rly-color-focus) 22%, transparent);
-  outline-offset: 0;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .searchInput::-webkit-search-cancel-button {
@@ -205,8 +199,9 @@
   cursor: pointer;
 }
 
+/* text-2: text-3 measured 4.31:1 on the chip's surface-2 in light, below AA. */
 .filterChip span:first-child {
-  color: var(--rly-color-text-3);
+  color: var(--rly-color-text-2);
 }
 
 .filterChip:hover {
@@ -378,8 +373,8 @@
 .prRow:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .prMain {
@@ -429,10 +424,6 @@
   gap: 0.45rem;
 }
 
-.metaSeparator {
-  color: var(--rly-color-text-3);
-}
-
 .commentCount {
   display: inline-flex;
   align-items: center;
@@ -462,11 +453,9 @@
 }
 
 .prFact dt {
-  color: var(--rly-color-text-3);
+  color: var(--rly-color-text-2);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .prFact dd {
@@ -649,8 +638,8 @@ a.activityItem:hover {
 a.activityItem:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .activityIcon {

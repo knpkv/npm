@@ -82,6 +82,17 @@ export const cardFacts = (agent: Agent): CardFacts => {
   }
 }
 
+/**
+ * An identifier split where a reader would break it: after `/`, `-`, `_` and `.`, and between a
+ * lower-case letter or digit and the capital that starts the next word. `feat/CheckpointRecovery`
+ * gives `["feat/", "Checkpoint", "Recovery"]`, so a narrow tile breaks it there, never inside a word.
+ */
+export const breakSegments = (value: string): ReadonlyArray<string> =>
+  value.split(/(?<=[/_.-])|(?<=[a-z0-9])(?=[A-Z])/u).filter((segment) => segment !== "")
+
+/** Card facts whose values are identifiers, which wrap at their own separators. */
+export const identifierFacts: ReadonlySet<string> = new Set(["Jira", "Branch", "PR"])
+
 /** The connection line: the state word first, then what it means and when the shown copy is from. */
 export type Connection =
   | { readonly _tag: "Locked" }

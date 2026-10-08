@@ -14,12 +14,16 @@
     overflow-wrap: break-word;
   }
 
-  .default {
+  /* Every tone draws the same header; a tone tints only the body below the rule. */
+  .default,
+  .tray {
     background: var(--rly-color-surface-1);
   }
 
-  .tray {
+  .tray > .body {
     background: var(--rly-color-surface-2);
+    border-end-end-radius: calc(var(--rly-radius-control) - 1px);
+    border-end-start-radius: calc(var(--rly-radius-control) - 1px);
   }
 
   .header {
@@ -47,8 +51,8 @@
 
   .title:focus-visible {
     border-radius: var(--rly-radius-tag);
-    outline: 2px solid var(--rly-color-focus);
-    outline-offset: 2px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .count {

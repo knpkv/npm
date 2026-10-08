@@ -1,11 +1,36 @@
 id: no-silent-catch-all
 valid:
   - |
-    const recovered = effect.pipe(Effect.catchAll((error) => Effect.fail(new Wrapped({ cause: error }))))
+    const found = lookup.pipe(Effect.catchTag("NotFound", () => Effect.succeed(Option.none())))
   - |
-    const logged = effect.pipe(Effect.catchAll((error) => Effect.logWarning(error).pipe(Effect.as(fallback), Effect.andThen(Effect.succeed(fallback)))))
+    const known = lookup.pipe(Effect.catchIf((error) => error.reason._tag === "NotFound", () => Effect.succeed(null)))
+  - |
+    const logged = load.pipe(Effect.catch((error) => Effect.logWarning("Using cached list", error).pipe(Effect.as(cached))))
+  - |
+    const wrapped = load.pipe(Effect.catch((error) => Effect.fail(new LoadFailed({ cause: error }))))
+  - |
+    const decided = load.pipe(Effect.catch((error) => error.retryable ? Effect.succeed(cached) : Effect.fail(error)))
+  - |
+    const fallback = read.pipe(Effect.orElseSucceed((error) => (error.retryable ? cached : defaults)))
 invalid:
   - |
-    const recovered = effect.pipe(Effect.catchAll(() => Effect.succeed(fallback)))
+    const list = load.pipe(Effect.catch(() => Effect.succeed([])))
   - |
-    const ignored = effect.pipe(Effect.catchAll(() => Effect.void))
+    const done = save.pipe(Effect.catch(() => Effect.void))
+  - |
+    const done = save.pipe(Effect.catch((_error) => Effect.void))
+  - |
+    const none = read.pipe(Effect.catchCause(() => Effect.succeedNone))
+  - |
+    const all = read.pipe(Effect.catchIf(() => true, () => Effect.succeed(false)))
+  - |
+    const block = read.pipe(Effect.catch(() => {
+      const fallback = defaults()
+      return Effect.succeed(fallback)
+    }))
+  - |
+    const list = load.pipe(Effect.orElseSucceed(() => []))
+  - |
+    const list = Effect.orElseSucceed(load, (_error) => [])
+  - |
+    const done = Effect.catch(save, () => Effect.void)
