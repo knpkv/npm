@@ -42,6 +42,7 @@ rule:
 
 files:
   - "packages/control-center/src/**/*.css"
+  - "packages/codecommit-web/src/**/*.css"
 
 note: |
   overflow: hidden makes a scroll container, and a scroll container's automatic minimum size as a

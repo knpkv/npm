@@ -63,12 +63,12 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    min-block-size: 100dvh;
+    min-block-size: 100svh;
     margin: 0;
   }
   #root,
   [data-rly-root] {
-    min-block-size: 100dvh;
+    min-block-size: 100svh;
   }
 }
 

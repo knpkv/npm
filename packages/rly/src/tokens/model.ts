@@ -31,6 +31,12 @@ export interface MotionTokenSource {
   readonly reducedDuration: `${number}ms`
 }
 
+/** A named easing curve; components pick one by the kind of movement, not by duration. */
+export interface EasingTokenSource {
+  readonly name: string
+  readonly value: `cubic-bezier(${string})`
+}
+
 /** One contrast invariant checked for both light and dark schemes. */
 export interface ContrastPairSource {
   readonly background: string

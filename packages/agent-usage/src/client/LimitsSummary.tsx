@@ -5,10 +5,10 @@
  * @module
  */
 import { FreshnessStamp } from "@knpkv/rly/patterns"
-import { StateLabel, Surface, Text } from "@knpkv/rly/primitives"
+import { LimitTrack, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import type { BalanceReading, LimitSnapshot } from "../core/Model.js"
 import { describeReason, formatAge, formatBalance, formatInstant, formatPercent } from "./format.js"
-import { agentName, type LimitTone, summarizeLimits, type WindowSummary } from "./limitsModel.js"
+import { agentName, type LimitTone, NEAR_PERCENT, summarizeLimits, type WindowSummary } from "./limitsModel.js"
 
 interface ToneLabel {
   readonly label: string
@@ -40,18 +40,18 @@ const WindowRow = (props: { readonly agent: string; readonly window: WindowSumma
         </Text>
       ) : (
         <div className="usage-window-meter">
-          <div
-            aria-label={`${props.agent} ${window.name} used`}
-            aria-valuemax={100}
-            aria-valuemin={0}
-            aria-valuenow={Math.min(100, Math.round(window.usedPercent))}
-            aria-valuetext={`${formatPercent(window.usedPercent)} used`}
-            className="usage-meter"
-            role="meter"
-          >
-            <span className="usage-meter-fill" style={{ inlineSize: `${Math.min(100, window.usedPercent)}%` }} />
-          </div>
-          <span className="usage-window-value">{formatPercent(window.usedPercent)}</span>
+          {/* Rly's track: the near mark at the same 80% the tone word uses, hatched when the reading is old. */}
+          <LimitTrack
+            className="usage-window-track"
+            decorative={false}
+            label={`${props.agent} ${window.name} used`}
+            near={NEAR_PERCENT}
+            stale={window.freshness === "stale"}
+            value={window.usedPercent}
+            valueText={`${formatPercent(window.usedPercent)} used${window.freshness === "stale" ? ", old reading" : ""}`}
+          />
+          {/* The meter already announces the value; read once, not twice. */}
+          <span aria-hidden="true" className="usage-window-value">{formatPercent(window.usedPercent)}</span>
         </div>
       )}
       <div className="usage-window-meta">
