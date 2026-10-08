@@ -8,6 +8,17 @@
  * @module
  */
 export {
+  Agent,
+  Balance,
+  BalanceReading,
+  failureCovers,
+  LimitReading,
+  LimitSnapshot,
+  UnknownReason
+} from "../core/Model.js"
+export { LimitsNow } from "../shared/contracts.js"
+export { LimitsSummary } from "./LimitsSummary.js"
+export {
   type AgentLimits,
   agentName,
   type LimitTone,
@@ -18,15 +29,4 @@ export {
   summarizeLimits,
   windowName,
   type WindowSummary
-} from "./client/limitsModel.js"
-export { LimitsSummary } from "./client/LimitsSummary.js"
-export {
-  Agent,
-  Balance,
-  BalanceReading,
-  failureCovers,
-  LimitReading,
-  LimitSnapshot,
-  UnknownReason
-} from "./core/Model.js"
-export { LimitsNow } from "./shared/contracts.js"
+} from "./model.js"

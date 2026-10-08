@@ -19,7 +19,7 @@ import {
   visibleSort
 } from "./bookingModel.js"
 import { bookingLabel, OTHER } from "./chartModel.js"
-import { formatTokens, formatUsd } from "./format.js"
+import { formatTokens, formatUsd } from "../limits/format.js"
 import { seriesColor } from "./UsageChart.js"
 
 const LABELS = {

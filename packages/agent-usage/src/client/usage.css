@@ -1,5 +1,5 @@
 @import "@knpkv/rly/styles.css";
-@import "./limits.css";
+@import "../limits/limits.css";
 
 /*
  * Rly owns presentation tokens. Chart series colours are the validated eight-slot categorical

@@ -15,8 +15,8 @@
  */
 import { type Agent, failureCovers, type LimitReading, type LimitSnapshot, type UnknownReason } from "../core/Model.js"
 import type { LimitSeries } from "../shared/contracts.js"
-import { seriesIdentity } from "./chartModel.js"
 import { describeReason } from "./format.js"
+import { seriesIdentity } from "./series.js"
 
 /** A failed reading in words, with what exactly went wrong when that is known. */
 export const describeUnknown = (
