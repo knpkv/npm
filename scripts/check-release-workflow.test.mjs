@@ -48,7 +48,7 @@ test("ready versions publish before pending changesets are versioned", () => {
   // Otherwise the action makes its usual choice; after a release it runs only to version what is pending.
   assert.equal(
     steps[usual].if,
-    "steps.released.outputs.outstanding != 'true' || steps.released.outputs.pending == 'true'"
+    "steps.released.outputs.pending == 'true' || (steps.released.outputs.outstanding != 'true' && steps.released.outputs.propagating != 'true')"
   )
   assert.equal(steps[usual].with["version-script"], "pnpm changeset:version")
   assert.equal(steps[usual].with["publish-script"], "pnpm changeset:publish")
