@@ -46,5 +46,7 @@ describe("approval", () => {
     expect(needsMyReview({ approvalRules: rules, approvedBy: [] }, "alice")).toBe(true)
     expect(needsMyReview({ approvalRules: rules, approvedBy: [], approvalUnknown: { _tag: "NotPermitted" } }, "alice"))
       .toBe(false)
+    // Approvers that couldn't be read may already include the user, so review isn't certain either.
+    expect(needsMyReview({ approvalRules: rules, approvedBy: [], approversUnknown: true }, "alice")).toBe(false)
   })
 })

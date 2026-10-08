@@ -40,6 +40,7 @@ const cachedRow = (profile: string, id: string) =>
     isApproved: 0,
     approvalUnknownReason: null,
     approvalBaselineKnown: 1,
+    approversUnknown: 0,
     observationSeq: 0,
     approvalVersion: "2026-08-02T00:00:00.000Z",
     approvalObservationSeq: 0,
@@ -118,6 +119,7 @@ const syncDependencies = (
       observe: () => Effect.succeed(1),
       findAll,
       findStaleOpen: () => Effect.succeed([]),
+      findClosedWithUnknownApprovers: () => Effect.succeed([]),
       refreshCommentedBy: () => Effect.void
     }),
     Layer.mock(ConfigService, { load })

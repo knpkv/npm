@@ -182,12 +182,11 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## codecommit-core
 
-116 directives (ast-grep 82, effect-diagnostics 34), 17 without a reason.
+115 directives (ast-grep 81, effect-diagnostics 34), 17 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
 | [packages/codecommit-core/src/AwsClient/AwsClientGated.ts](../packages/codecommit-core/src/AwsClient/AwsClientGated.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/codecommit-core/src/AwsClient/getPullRequests.ts](../packages/codecommit-core/src/AwsClient/getPullRequests.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit-core/src/AwsClient/getPullRequests.ts](../packages/codecommit-core/src/AwsClient/getPullRequests.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit-core/src/AwsClient/getPullRequests.ts](../packages/codecommit-core/src/AwsClient/getPullRequests.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit-core/src/CacheService/migrations/0003_add_health_score.ts](../packages/codecommit-core/src/CacheService/migrations/0003_add_health_score.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |

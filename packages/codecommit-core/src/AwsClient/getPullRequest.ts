@@ -26,6 +26,7 @@
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Schema, SchemaGetter } from "effect"
 import {
+  approverFields,
   buildApprovalRules,
   evaluateApproval,
   fetchApprovers,
@@ -135,8 +136,7 @@ const callGetPullRequest = (params: GetPullRequestParams) =>
     const approvalRules = yield* buildApprovalRules(resp.pullRequest?.approvalRules ?? [], evaluation.satisfiedNames)
     return new PullRequestDetail({
       ...detail,
-      approvedBy: approvers.names,
-      approvedByArns: approvers.arns,
+      ...approverFields(approvers),
       approvalRules,
       repoAccountId: repoAccountId || undefined,
       isMergeable,
