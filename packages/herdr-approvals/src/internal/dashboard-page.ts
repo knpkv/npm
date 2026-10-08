@@ -21,9 +21,7 @@ export const dashboardPage = (snapshot: DashboardSnapshot, fontPreload: string):
       { className: "dashboard-gesture" },
       createElement(DashboardView, {
         busyJobId: null,
-        chatBusy: false,
         notificationState: "loading",
-        onChatSubmit: undefined,
         onDecision: () => undefined,
         onDisableNotifications: undefined,
         onEnableNotifications: undefined,

@@ -2,8 +2,7 @@ import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { FreshnessStamp } from "@knpkv/rly/patterns"
 import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 import type { DashboardSnapshot, PendingApproval, PendingApprovalFailure } from "./dashboard-model.js"
-import type { ChatMode } from "@knpkv/herdr-coordinator/model"
-import { CoordinatorChatPanel, NotificationPanel, type NotificationState } from "./approval-app-view.js"
+import { NotificationPanel, type NotificationState } from "./approval-app-view.js"
 import { requiresApproval } from "@knpkv/herdr-fleet/model"
 import { ActivityHistory, jobTitle, statusLabel, statusTone } from "./activity-history.js"
 import { ApprovalRequestDisclosure } from "./approval-request-view.js"
@@ -21,11 +20,9 @@ type DashboardViewProps = {
   readonly decisionStatus?: DecisionStatus | null
   /** The decision waiting for the hub, if any; the countdown's bar shows it as sending. */
   readonly sendingDecision?: ApprovalDecision | null
-  readonly chatBusy: boolean
   readonly notificationState: NotificationState
   readonly historyLoading?: boolean
   readonly pendingLoading?: boolean
-  readonly onChatSubmit: ((mode: ChatMode, message: string) => Promise<boolean>) | undefined
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
   readonly onDisableNotifications: (() => void) | undefined
   readonly onEnableNotifications: (() => void) | undefined
@@ -423,12 +420,10 @@ const AgentStateLabel = ({ status }: { readonly status: string }): ReactElement 
 export const DashboardView = ({
   approvalOnly = false,
   busyJobId,
-  chatBusy,
   decisionStatus = null,
   historyLoading = false,
   notice = null,
   notificationState,
-  onChatSubmit,
   onDecision,
   onDisableNotifications,
   onEnableNotifications,
@@ -554,21 +549,16 @@ export const DashboardView = ({
         ) : (
           <Summary snapshot={snapshot} />
         )}
-        {snapshot.approvalApp.canonical && snapshot.chat !== null ? (
-          <>
-            <NotificationPanel
-              canonicalUrl={snapshot.approvalApp.canonicalUrl}
-              onDisable={onDisableNotifications}
-              onEnable={onEnableNotifications}
-              state={notificationState}
-            />
-            {approvalOnly ? null : (
-              <CoordinatorChatPanel busy={chatBusy} history={snapshot.chat} onSubmit={onChatSubmit} />
-            )}
-          </>
-        ) : snapshot.approvalApp.canonical ? null : (
+        {snapshot.approvalApp.canonical ? (
+          <NotificationPanel
+            canonicalUrl={snapshot.approvalApp.canonicalUrl}
+            onDisable={onDisableNotifications}
+            onEnable={onEnableNotifications}
+            state={notificationState}
+          />
+        ) : (
           <Surface padding="default" tone="secondary" className="hub-link">
-            <Text tone="secondary">Notifications and coordinator chat live on the canonical hub.</Text>
+            <Text tone="secondary">Notifications live on the canonical hub.</Text>
             <a href={snapshot.approvalApp.canonicalUrl}>
               {/* Non-breaking hyphens keep a host like "monster-banana" whole; the href is unchanged. */}
               Open {new URL(snapshot.approvalApp.canonicalUrl).host.replaceAll("-", "\u2011")}

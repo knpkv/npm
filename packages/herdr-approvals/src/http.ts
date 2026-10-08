@@ -21,8 +21,6 @@ import {
   TerminalSelection,
   TerminalServerSignal
 } from "@knpkv/herdr-connect"
-import type { ChatHistoryError } from "@knpkv/herdr-coordinator"
-import { ChatRequest, ChatStore, makeCoordinatorChat } from "@knpkv/herdr-coordinator"
 import type {
   FleetJobConflictError,
   FleetOperationUnavailableError,
@@ -241,7 +239,6 @@ export type UiAssets = {
 
 type ApiError =
   | ApprovalAppStoreError
-  | ChatHistoryError
   | ConnectPeerError
   | DashboardResponseBudgetError
   | FleetApprovalError
@@ -385,7 +382,6 @@ const apiError = (error: ApiError): ApiErrorResponse => {
     case "FleetStoreError":
       return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "ApprovalAppStoreError":
-    case "ChatHistoryError":
     case "WorkProjectionError":
       return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "WorkStoreError":
@@ -1586,8 +1582,6 @@ export const startHttpServer = async (
     )
     finalizers.unshift(() => Promise.resolve().then(() => approvalStore.close()))
     const cryptoService = await httpRuntime.runPromise(Crypto.Crypto)
-    const chatStore = await httpRuntime.runPromise(ChatStore.open(statePath))
-    finalizers.unshift(() => Promise.resolve().then(() => chatStore.close()))
     const activityStore = await httpRuntime.runPromise(
       AgentActivityStore.open(statePath)
     )
@@ -1924,16 +1918,13 @@ export const startHttpServer = async (
       })
     }
     let lanWorkPairing: LanWorkPairing | null = null
-    const chat = await httpRuntime.runPromise(makeCoordinatorChat({
-      config,
-      fleet: service,
-      store: chatStore
-    }))
     const runJob = Effect.fn("HostRunner.runJob")(function*(jobId: string) {
       const record = yield* service.get(jobId)
       return yield* record.payload.kind === "agent.delegate" &&
           record.payload.channel === "coordinator_chat"
-        ? chat.run(jobId)
+        // The hub's chat is gone; a chat job queued before the upgrade still runs as a chat, not as
+        // an ordinary delegation, and its reply stays on its job record.
+        ? service.runCoordinatorChat(jobId)
         : service.run(jobId)
     })
     const runner = await Effect.runPromise(makeRunner(runJob))
@@ -2665,11 +2656,9 @@ export const startHttpServer = async (
                 approvalApp: {
                   canonical: mode === "serve",
                   canonicalUrl: config.approvalHub.url,
-                  chatEnabled: mode === "serve",
                   pushEnabled: mode === "serve",
                   workEnabled: listenerServesWork(mode, config.crossHost)
                 },
-                chat: null,
                 work: null,
                 status: state.status,
                 records: state.history.records,
@@ -2999,32 +2988,6 @@ export const startHttpServer = async (
               return { subscribed: false }
             })
             await respond(response, effect)
-            return
-          }
-
-          if (
-            mode === "serve" &&
-            request.method === "GET" &&
-            url.pathname === "/v1/chat"
-          ) {
-            await respond(response, Effect.andThen(authorized, chat.history()))
-            return
-          }
-
-          if (
-            mode === "serve" &&
-            request.method === "POST" &&
-            url.pathname === "/v1/chat"
-          ) {
-            const effect = Effect.gen(function*() {
-              const who = yield* authorized
-              yield* sameOrigin(request, expectedOrigin())
-              const input = yield* readJson(request, ChatRequest)
-              const submitted = yield* chat.submit(input, who)
-              if (submitted.queued) yield* enqueueJob(submitted.jobId)
-              return submitted.entry
-            })
-            await respond(response, effect, 202)
             return
           }
 
