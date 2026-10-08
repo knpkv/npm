@@ -509,7 +509,7 @@
     gap: var(--rly-space-16);
   }
 
-  .fleet-work-loading {
+  .fleet-work-reserved {
     min-block-size: 100svh;
   }
 

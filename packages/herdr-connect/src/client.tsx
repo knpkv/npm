@@ -962,7 +962,7 @@ export const ConnectSurface = ({
       <section
         aria-label="Herdr agents"
         className="connect-agents"
-        data-loading={current === null && directory._tag !== "Failure" ? "true" : undefined}
+        data-loading={current === null ? "true" : undefined}
         onKeyDown={moveAgentFocus}
       >
         <label className="connect-search">

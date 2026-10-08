@@ -103,7 +103,8 @@
   }
 
   /*
-   * In the hub, while the first directory loads, hold a screen of space: the list that arrives is
+   * In the hub, until the first directory list arrives (failed attempts and their retries included),
+   * hold a screen of space: the list that arrives is
    * usually taller than that, and anything below it (the coordinator chat) stays out of view
    * instead of being pushed down (CLS 0.60 at 768 before).
    */

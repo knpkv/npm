@@ -78,7 +78,7 @@ export const FleetWorkPanel = ({ state }: { readonly state: FleetWorkState }): R
       // Holds a screen of space, like the board that replaces it, so agents and history below
       // stay out of view instead of being pushed down (CLS 0.48 at 1440 before).
       return (
-        <div className="fleet-work-loading">
+        <div className="fleet-work-reserved">
           <StatePanel
             announce="polite"
             description="Loading the latest durable goal projection."
@@ -96,7 +96,14 @@ export const FleetWorkPanel = ({ state }: { readonly state: FleetWorkState }): R
         />
       )
     case "Failure":
-      return (
+      // A failure before any board arrived keeps the loading reservation: the retry that follows
+      // usually lands a full board, and collapsing now would pull the panels below up, then push
+      // them back down. Unavailable and an empty board are settled answers and release it.
+      return state.content === null ? (
+        <div className="fleet-work-reserved">
+          <StatePanel description={state.detail} title="Work unavailable" tone="critical" />
+        </div>
+      ) : (
         <>
           {state.content}
           <StatePanel description={state.detail} title="Work unavailable" tone="critical" />

@@ -4,7 +4,7 @@ import { RegistryProvider } from "@effect/atom-react"
 import { AgentStableId } from "@knpkv/herdr-fleet/model"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { Predicate, Schema } from "effect"
+import { Cause, Predicate, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { ConnectSurface, makeConnectAtoms } from "../src/client.js"
@@ -115,6 +115,24 @@ describe("ConnectSurface directory loading", () => {
       for (let index = 0; index < 12; index += 1) await Promise.resolve()
     })
     expect(loadedHost.querySelector(".connect-agents")?.hasAttribute("data-loading")).toBe(false)
+  })
+
+  it("keeps the directory marked as loading when the first request fails, so its retry does not shift the chat", async () => {
+    window.fetch = () => new Promise<Response>(() => {})
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const atoms = makeConnectAtoms()
+    await act(async () => {
+      root.render(
+        <RegistryProvider initialValues={[[atoms.agents, AsyncResult.failure(Cause.fail("directory unavailable"))]]}>
+          <ConnectSurface atoms={atoms} embedded />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    expect(host.querySelector(".connect-agents")?.getAttribute("data-loading")).toBe("true")
   })
 })
 
