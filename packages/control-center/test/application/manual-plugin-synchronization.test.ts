@@ -6,6 +6,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as TestClock from "effect/testing/TestClock"
 
+import { PluginHealth } from "../../src/domain/freshness.js"
 import { PluginConnectionId, WorkspaceId } from "../../src/domain/identifiers.js"
 import { PluginSyncPageV1 } from "../../src/domain/plugins/events.js"
 import { type ProviderId, VendorImmutableId } from "../../src/domain/sourceRevision.js"
@@ -30,7 +31,7 @@ import {
   ConfluencePageClientFailure
 } from "../../src/server/plugins/confluence/ConfluencePageClient.js"
 import { confluencePagePluginDescriptor } from "../../src/server/plugins/confluence/ConfluencePagePluginDefinition.js"
-import { PluginOutageFailure } from "../../src/server/plugins/failures.js"
+import { PluginOutageFailure, PluginTimeoutFailure } from "../../src/server/plugins/failures.js"
 import {
   jiraReadPluginDescriptor,
   makeJiraReadPluginRuntimeFromProvider
@@ -756,6 +757,60 @@ describe("manual plugin synchronization", () => {
       if (runtime.health._tag === "unavailable") {
         assert.strictEqual(runtime.health.failureClass, "malformed-response")
       }
+    })))
+
+  // The card says why a sync failed: its state carries the failure class and safe message the
+  // failure recorded, and a later successful sync clears it.
+  it.effect("reports why a sync failed, and clears the reason once a sync succeeds", () =>
+    withApplication(Effect.gen(function*() {
+      yield* TestClock.setTime(DateTime.toEpochMillis(SYNCHRONIZED_AT))
+      const fixture = fixtures.find(({ providerId }) => providerId === "codecommit")
+      if (fixture === undefined) return yield* Effect.die("codecommit fixture not found")
+      const { connections, persistence } = yield* setupFixture(fixture)
+      const failing = yield* Ref.make(true)
+      const drivers = makeManualPluginSyncDriverRegistry([{
+        providerId: fixture.providerId,
+        streamKey: fixture.streamKey,
+        sync: () =>
+          Stream.unwrap(
+            Ref.get(failing).pipe(Effect.map((fails) =>
+              fails
+                ? Stream.fail(new PluginTimeoutFailure({ operation: "codecommit-sync" }))
+                : Stream.make(pageFor(fixture))
+            ))
+          )
+      }])
+      const synchronization = yield* makeManualPluginSynchronization(connections, drivers)
+      const input = { workspaceId: WORKSPACE_ID, pluginConnectionId: fixture.pluginConnectionId }
+
+      const failed = yield* synchronization.synchronize(input)
+      assert.strictEqual(failed.result, "source-unavailable")
+      assert.strictEqual(failed.failure?.failureClass, "timeout")
+      assert.isTrue((failed.failure?.safeMessage.length ?? 0) > 0)
+      assert.deepStrictEqual((yield* synchronization.state(input)).failure, failed.failure)
+
+      // A later health write (a connection test after credentials expired) isn't this sync's cause.
+      yield* TestClock.adjust("1 minute")
+      const runtime = yield* persistence.pluginRuntime.getRuntime(WORKSPACE_ID, fixture.pluginConnectionId)
+      yield* persistence.pluginRuntime.recordHealth(
+        WORKSPACE_ID,
+        fixture.pluginConnectionId,
+        runtime.revision,
+        Schema.decodeUnknownSync(Schema.toType(PluginHealth))({
+          _tag: "unavailable",
+          checkedAt: DateTime.makeUnsafe(DateTime.toEpochMillis(SYNCHRONIZED_AT) + 60_000),
+          failureClass: "authentication",
+          retryAt: null,
+          safeMessage: "Credentials were rejected."
+        }),
+        runtime.consecutiveFailures + 1
+      )
+      assert.isNull((yield* synchronization.state(input)).failure)
+
+      yield* Ref.set(failing, false)
+      const recovered = yield* synchronization.synchronize(input)
+      assert.strictEqual(recovered.result, "synchronized")
+      assert.isNull(recovered.failure)
     })))
 
   it.effect("commits a page observed after its health probe at the current clock time", () =>
