@@ -51,7 +51,9 @@ const WindowRow = (props: { readonly agent: string; readonly window: WindowSumma
             valueText={`${formatPercent(window.usedPercent)} used${window.freshness === "stale" ? ", old reading" : ""}`}
           />
           {/* The meter already announces the value; read once, not twice. */}
-          <span aria-hidden="true" className="usage-window-value">{formatPercent(window.usedPercent)}</span>
+          <span aria-hidden="true" className="usage-window-value">
+            {formatPercent(window.usedPercent)}
+          </span>
         </div>
       )}
       <div className="usage-window-meta">
