@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import test, { after } from "node:test"
+import { createServer } from "node:http"
 import { fileURLToPath, URL } from "node:url"
 
 import { NodeServices } from "@effect/platform-node"
@@ -11,7 +12,13 @@ import * as Path from "effect/Path"
 import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
-import { compareVersions, isReleasePullRequest, outstandingReleases, releaseBranch } from "./check-version-bumps.mjs"
+import {
+  changesetPackages,
+  compareVersions,
+  isReleasePullRequest,
+  planRelease,
+  releaseBranch
+} from "./check-version-bumps.mjs"
 
 const manifest = (version, extra = {}) => ({ name: "@knpkv/demo", version, ...extra })
 const at = (file, value) => ({ file, manifest: value })
@@ -55,29 +62,44 @@ test("only this repository's own Version Packages branch is exempt", () => {
   assert.equal(isReleasePullRequest({ headRef: "feat/x", headRepository: repository, repository }), false)
 })
 
-test("a release stays outstanding until npm has it, however many runs were skipped or failed", () => {
-  // Version Packages moved demo to 1.1.0; its own run was cancelled and later pushes changed no version.
-  // Only npm's state decides, so the next run still publishes it.
-  const versions = new Set(["1.0.0"])
-  assert.deepEqual(outstandingReleases([demo(manifest("1.1.0"))], new Map([["@knpkv/demo", versions]])), {
-    firstReleases: [],
-    outstanding: [{ name: "@knpkv/demo", version: "1.1.0" }]
-  })
-  versions.add("1.1.0")
-  assert.deepEqual(outstandingReleases([demo(manifest("1.1.0"))], new Map([["@knpkv/demo", versions]])).outstanding, [])
+const at2 = (name, version, extra = {}) => ({
+  file: `packages/${name}/package.json`,
+  manifest: { name: `@knpkv/${name}`, version, ...extra }
 })
 
-test("a package npm has never seen is a first release, not outstanding, and private packages are skipped", () => {
-  // A feature pull request adds it with its changeset: publishing now would release 0.1.0 before the
-  // changeset versions it.
-  assert.deepEqual(outstandingReleases([demo(manifest("0.1.0"))], new Map([["@knpkv/demo", undefined]])), {
-    firstReleases: [{ name: "@knpkv/demo", version: "0.1.0" }],
-    outstanding: []
-  })
+test("versions npm lacks are ready, except a new package a pending changeset still names", () => {
+  const manifests = [
+    at2("released", "1.1.0"), // Version Packages moved it; its own run was skipped or failed
+    at2("current", "2.0.0"),
+    at2("versioned-new", "0.1.0"), // Version Packages consumed its changeset; npm has never seen it
+    at2("placeholder-new", "0.0.0"), // its changeset is still pending
+    at2("internal", "9.9.9", { private: true })
+  ]
+  const published = new Map([
+    ["@knpkv/released", new Set(["1.0.0"])],
+    ["@knpkv/current", new Set(["2.0.0"])],
+    ["@knpkv/versioned-new", undefined],
+    ["@knpkv/placeholder-new", undefined]
+  ])
+  const plan = planRelease(manifests, published, new Set(["@knpkv/placeholder-new", "@knpkv/current"]))
   assert.deepEqual(
-    outstandingReleases([demo(manifest("2.0.0", { private: true }))], new Map([["@knpkv/demo", new Set(["1.0.0"])]])),
-    { firstReleases: [], outstanding: [] }
+    plan.ready.map(({ name, version }) => `${name}@${version}`),
+    ["@knpkv/released@1.1.0", "@knpkv/versioned-new@0.1.0"]
   )
+  assert.deepEqual(
+    plan.held.map(({ name }) => name),
+    ["@knpkv/placeholder-new"]
+  )
+})
+
+test("a changeset's packages come from its front matter, and a malformed one fails", async () => {
+  const read = (text) => Effect.runPromise(Effect.result(changesetPackages(".changeset/a.md", text)))
+  assert.deepEqual((await read('---\n"@knpkv/a": minor\n"@knpkv/b": patch\n---\n\nWhy.\n')).success, [
+    "@knpkv/a",
+    "@knpkv/b"
+  ])
+  assert.deepEqual((await read("---\n---\n\nEmpty.\n")).success, [])
+  assert.equal((await read("no front matter")).failure?._tag, "VersionBumpError")
 })
 
 const runtime = ManagedRuntime.make(NodeServices.layer)
@@ -156,4 +178,80 @@ test("the script fails a feature branch or a fork that bumps a version, and pass
   assert.match(outcome.feature.output, /@knpkv\/demo \(packages\/demo\/package\.json\): 1\.0\.0 -> 1\.1\.0/u)
   assert.notEqual(outcome.fork.exitCode, ChildProcessSpawner.ExitCode(0), outcome.fork.output)
   assert.equal(outcome.release.exitCode, ChildProcessSpawner.ExitCode(0), outcome.release.output)
+})
+
+// A registry that knows `@knpkv/released` at 1.0.0 and nothing else.
+const fakeRegistry = Effect.acquireRelease(
+  Effect.callback((resume) => {
+    const server = createServer((request, response) => {
+      const known = request.url === "/@knpkv%2Freleased"
+      response.writeHead(known ? 200 : 404, { "content-type": "application/json" })
+      response.end(known ? JSON.stringify({ versions: { "1.0.0": {} } }) : "{}")
+    })
+    server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)))
+  }),
+  (server) => Effect.callback((resume) => server.close(() => resume(Effect.void)))
+)
+
+test("preparing a release sets changesets aside and holds placeholders, only when something is ready", async () => {
+  const outcome = await runtime.runPromise(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const server = yield* fakeRegistry
+      const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "prepare-release-" })
+      const env = {
+        GIT_AUTHOR_NAME: "test",
+        GIT_AUTHOR_EMAIL: "test@example.test",
+        GIT_COMMITTER_NAME: "test",
+        GIT_COMMITTER_EMAIL: "test@example.test",
+        GIT_CONFIG_NOSYSTEM: "1",
+        HOME: directory,
+        NPM_REGISTRY_URL: `http://127.0.0.1:${server.address().port}`,
+        PATH: yield* Config.String("PATH")
+      }
+      const write = (file, text) =>
+        fileSystem
+          .makeDirectory(path.dirname(path.join(directory, file)), { recursive: true })
+          .pipe(Effect.andThen(fileSystem.writeFileString(path.join(directory, file), text)))
+      const manifest = (name, version) => JSON.stringify({ name: `@knpkv/${name}`, version })
+      const prepare = Effect.gen(function* () {
+        const output = path.join(directory, "github-output")
+        yield* fileSystem.writeFileString(output, "")
+        const result = yield* run("node", [script, "--prepare-release"], directory, { ...env, GITHUB_OUTPUT: output })
+        assert.equal(result.exitCode, ChildProcessSpawner.ExitCode(0), result.output)
+        return yield* fileSystem.readFileString(output)
+      })
+      yield* run("git", ["init", "-q", "-b", "main"], directory, env)
+      yield* write("packages/released/package.json", manifest("released", "1.0.0"))
+      yield* write("packages/placeholder/package.json", manifest("placeholder", "0.0.0"))
+      yield* write(".changeset/README.md", "# Changesets\n")
+      yield* write(".changeset/new-package.md", '---\n"@knpkv/placeholder": minor\n---\n\nAdds it.\n')
+      yield* run("git", ["add", "."], directory, env)
+      yield* run("git", ["commit", "-q", "-m", "base"], directory, env)
+      // Nothing ready: npm has released@1.0.0 and the placeholder waits for its changeset.
+      const idle = yield* prepare
+      const idleChangesets = (yield* fileSystem.readDirectory(path.join(directory, ".changeset"))).sort()
+      // Version Packages moves released to 1.1.0 while the placeholder's changeset is still pending.
+      yield* write("packages/released/package.json", manifest("released", "1.1.0"))
+      yield* run("git", ["commit", "-q", "-am", "Version Packages"], directory, env)
+      const ready = yield* prepare
+      return {
+        idle,
+        idleChangesets,
+        ready,
+        readyChangesets: (yield* fileSystem.readDirectory(path.join(directory, ".changeset"))).sort(),
+        placeholder: JSON.parse(
+          yield* fileSystem.readFileString(path.join(directory, "packages/placeholder/package.json"))
+        ),
+        released: JSON.parse(yield* fileSystem.readFileString(path.join(directory, "packages/released/package.json")))
+      }
+    }).pipe(Effect.scoped)
+  )
+  assert.equal(outcome.idle, "outstanding=false\npending=true\n")
+  assert.deepEqual(outcome.idleChangesets, ["README.md", "new-package.md"])
+  assert.equal(outcome.ready, "outstanding=true\npending=true\n")
+  assert.deepEqual(outcome.readyChangesets, ["README.md"])
+  assert.equal(outcome.placeholder.private, true)
+  assert.equal(outcome.released.private, undefined)
 })

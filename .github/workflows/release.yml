@@ -38,30 +38,17 @@ jobs:
           registry-url: https://registry.npmjs.org
       # changesets/action publishes only when no changeset is pending; otherwise it
       # versions. A Version Packages merge that lands after newer changesets reached
-      # main would then publish nothing (#589). So when a package npm already has
-      # carries a version on main that npm does not (only Version Packages makes one:
-      # check-version-bumps guards pull requests), publish first with the pending
-      # changesets set aside, then version them. Asking npm, not this push's diff,
-      # keeps a release outstanding through skipped or failed runs. A package npm has
-      # never seen waits for its own changeset, so it is not published early. A failed
+      # main would then publish nothing (#589). So this step asks npm which versions
+      # on main are ready and not yet published (see check-version-bumps.mjs: a new
+      # package a pending changeset still names is held, its version a placeholder).
+      # When some are ready it sets the pending changesets aside and marks held
+      # packages private in this checkout, so the next step publishes exactly the
+      # ready versions; restore then puts both back from git. Asking npm, not this
+      # push's diff, keeps a release ready through skipped or failed runs. A failed
       # publish fails its step and the job.
-      - name: Find released versions not yet on npm
+      - name: Prepare versions ready to publish
         id: released
-        run: node scripts/check-version-bumps.mjs --outstanding
-      - name: Set pending changesets aside
-        id: pending
-        if: steps.released.outputs.outstanding == 'true'
-        run: |
-          shopt -s nullglob
-          pending=()
-          for file in .changeset/*.md; do
-            [[ "${file}" == .changeset/README.md ]] || pending+=("${file}")
-          done
-          echo "count=${#pending[@]}" >> "${GITHUB_OUTPUT}"
-          if (( ${#pending[@]} > 0 )); then
-            mkdir -p "${RUNNER_TEMP}/pending-changesets"
-            mv -- "${pending[@]}" "${RUNNER_TEMP}/pending-changesets/"
-          fi
+        run: node scripts/check-version-bumps.mjs --prepare-release
       - name: Publish the released versions
         if: steps.released.outputs.outstanding == 'true'
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
@@ -72,13 +59,13 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.TOKEN_NPM }}
           HUSKY: 0
-      - name: Restore pending changesets
-        if: steps.released.outputs.outstanding == 'true' && steps.pending.outputs.count != '0'
-        run: git checkout HEAD -- .changeset
+      - name: Restore pending changesets and held packages
+        if: steps.released.outputs.outstanding == 'true'
+        run: git checkout HEAD -- .changeset packages
       # With nothing outstanding this is the action's usual choice: version pending changesets, or
       # publish when none are pending. After a release it only versions what is pending.
       - name: Create Release Pull Request or Publish
-        if: steps.released.outputs.outstanding != 'true' || steps.pending.outputs.count != '0'
+        if: steps.released.outputs.outstanding != 'true' || steps.released.outputs.pending == 'true'
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           github-token: ${{ secrets.TOKEN_GITHUB }}

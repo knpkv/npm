@@ -13,17 +13,21 @@ import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { parse as parseYaml } from "yaml"
 
 // Release publishes every public package whose version is not on npm yet, so only the Version Packages
 // pull request may move an existing package's version. Two modes:
 // - pull request (GITHUB_EVENT_NAME, GITHUB_BASE_REF, GITHUB_HEAD_REF, GITHUB_REPOSITORY, GITHUB_EVENT_PATH),
 //   on a full-history checkout: fails when a version moved outside the repository's own
 //   changeset-release/main branch;
-// - `--outstanding` (Release workflow): writes `outstanding=true|false` to GITHUB_OUTPUT, saying whether
-//   a package already on npm has a version on main that npm does not. After the pull-request check only a
-//   Version Packages merge makes one, and it stays outstanding until it is published, however many runs
-//   are skipped or fail in between. A package npm has never seen is a first release instead: it waits for
-//   its own changeset, so it is reported and does not count.
+// - `--prepare-release` (Release workflow): asks npm which publishable versions on main it lacks. A version is
+//   ready when npm already has the package (only Version Packages moves a version), or when npm has never
+//   seen the package and no pending changeset names it (Version Packages already consumed its changeset).
+//   A new package a pending changeset still names is held: its version is a placeholder. When something
+//   is ready it sets the pending changesets aside and marks held packages private in this checkout, so the
+//   publish pass releases exactly the ready versions; the workflow restores both from git afterwards.
+//   Writes `outstanding=true|false` and `pending=true|false` to GITHUB_OUTPUT. Asking npm, not a push's
+//   diff, keeps a release ready through skipped or failed runs.
 
 class VersionBumpError extends Data.TaggedError("VersionBumpError") {
   get message() {
@@ -142,21 +146,40 @@ const checkPullRequest = Effect.gen(function* () {
 const Packument = Schema.Struct({ versions: Schema.Record(Schema.String, Schema.Unknown) })
 
 /**
- * Splits publishable packages by what npm has: `outstanding` are versions of packages npm knows that it
- * does not have yet; `firstReleases` are packages npm has never seen. `published` maps a package name to
- * its published versions, or to undefined when npm has no such package.
+ * Splits the publishable versions npm lacks into `ready` and `held`. `published` maps a package name to the
+ * versions npm has, or to undefined when npm has no such package; `pendingNames` are the packages pending
+ * changesets name. Packages whose version npm already has are in neither list.
  */
-export const outstandingReleases = (manifests, published) => {
-  const outstanding = []
-  const firstReleases = []
-  for (const { manifest } of manifests.filter((entry) => publishable(entry.manifest))) {
+export const planRelease = (manifests, published, pendingNames) => {
+  const ready = []
+  const held = []
+  for (const { file, manifest } of manifests) {
+    if (!publishable(manifest) || manifest.version === undefined) continue
     const versions = published.get(manifest.name)
-    if (versions === undefined) firstReleases.push({ name: manifest.name, version: manifest.version })
-    else if (manifest.version !== undefined && !versions.has(manifest.version)) {
-      outstanding.push({ name: manifest.name, version: manifest.version })
-    }
+    const entry = { file, name: manifest.name, version: manifest.version }
+    if (versions === undefined) (pendingNames.has(manifest.name) ? held : ready).push(entry)
+    else if (!versions.has(manifest.version)) ready.push(entry)
   }
-  return { firstReleases, outstanding }
+  return { held, ready }
+}
+
+const ChangesetReleases = Schema.Record(Schema.String, Schema.String)
+const frontmatter = /^---\r?\n((?:[\s\S]*?\r?\n)?)---(?:\r?\n|$)/u
+
+// The package names a pending changeset releases, read from its front matter.
+export const changesetPackages = (file, text) => {
+  const match = frontmatter.exec(text)
+  if (match === null) return Effect.fail(fail(`${file} has no changeset front matter`))
+  return Effect.try({
+    try: () => parseYaml(match[1] ?? ""),
+    catch: (cause) => fail(`${file} front matter is not YAML: ${String(cause)}`)
+  }).pipe(
+    Effect.flatMap((value) => Schema.decodeUnknownEffect(ChangesetReleases)(value ?? {})),
+    Effect.mapError((cause) =>
+      Predicate.isTagged(cause, "VersionBumpError") ? cause : fail(`${file}: ${cause.message}`)
+    ),
+    Effect.map((releases) => Object.keys(releases))
+  )
 }
 
 // The versions npm has for a package, or undefined when npm has no such package. Any other answer fails.
@@ -175,8 +198,17 @@ const publishedVersions = Effect.fn("VersionBumps.publishedVersions")(function* 
   return new Set(Object.keys(packument.versions))
 })
 
-const reportOutstanding = Effect.gen(function* () {
+const prepareRelease = Effect.gen(function* () {
+  const fileSystem = yield* FileSystem.FileSystem
   const registry = yield* Config.String("NPM_REGISTRY_URL").pipe(Config.withDefault("https://registry.npmjs.org"))
+  const pendingFiles = (yield* fileSystem.readDirectory(".changeset"))
+    .filter((name) => name.endsWith(".md") && name !== "README.md")
+    .map((name) => `.changeset/${name}`)
+  const pendingNames = new Set(
+    (yield* Effect.forEach(pendingFiles, (file) =>
+      fileSystem.readFileString(file).pipe(Effect.flatMap((text) => changesetPackages(file, text)))
+    )).flat()
+  )
   const manifests = (yield* manifestsAt("HEAD")).filter((entry) => publishable(entry.manifest))
   const published = new Map(
     yield* Effect.forEach(
@@ -186,20 +218,29 @@ const reportOutstanding = Effect.gen(function* () {
       { concurrency: 4 }
     )
   )
-  const { firstReleases, outstanding } = outstandingReleases(manifests, published)
-  for (const { name, version } of outstanding) yield* Console.log(`Released, not yet on npm: ${name}@${version}`)
-  for (const { name, version } of firstReleases) {
-    yield* Console.log(`First release, waits for its changeset: ${name}@${version ?? "(no version)"}`)
+  const { held, ready } = planRelease(manifests, published, pendingNames)
+  for (const { name, version } of ready) yield* Console.log(`Ready to publish: ${name}@${version}`)
+  for (const { name, version } of held) yield* Console.log(`Held until its changeset is versioned: ${name}@${version}`)
+  if (ready.length > 0) {
+    for (const file of pendingFiles) yield* fileSystem.remove(file)
+    for (const { file } of held) {
+      const text = yield* fileSystem.readFileString(file)
+      const manifest = yield* Schema.decodeUnknownEffect(
+        Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
+      )(text).pipe(Effect.mapError((cause) => fail(`${file} is not a JSON object: ${cause.message}`)))
+      yield* fileSystem.writeFileString(file, `${JSON.stringify({ ...manifest, private: true }, null, 2)}\n`)
+    }
   }
-  const fileSystem = yield* FileSystem.FileSystem
-  yield* fileSystem.writeFileString(yield* Config.String("GITHUB_OUTPUT"), `outstanding=${outstanding.length > 0}\n`, {
-    flag: "a"
-  })
+  yield* fileSystem.writeFileString(
+    yield* Config.String("GITHUB_OUTPUT"),
+    `outstanding=${ready.length > 0}\npending=${pendingFiles.length > 0}\n`,
+    { flag: "a" }
+  )
 }).pipe(Effect.provide(FetchHttpClient.layer))
 
 const program = Effect.gen(function* () {
   const args = yield* (yield* Stdio.Stdio).args
-  if (args.includes("--outstanding")) return yield* reportOutstanding
+  if (args.includes("--prepare-release")) return yield* prepareRelease
   const event = yield* Config.String("GITHUB_EVENT_NAME")
   if (event !== "pull_request") {
     // Pushes to main include Version Packages merges, which are the one place versions move.
