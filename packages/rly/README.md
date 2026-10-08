@@ -31,7 +31,10 @@ Import the global layers once at the application boundary:
 @import "@knpkv/rly/styles.css";
 ```
 
-The stylesheet contains self-hosted Geist and Geist Mono variable fonts,
+The stylesheet contains self-hosted Geist and Geist Mono variable fonts (with
+`font-display: optional`: preload each file in `RLY_FONT_FACES` from your own
+origin with `crossorigin`, and Geist renders from first paint; a late face keeps
+the metric-matched fallback for that page view rather than swapping),
 semantic `light-dark()` color pairs, typography, spacing, shape, motion, a
 scoped reset, and base styles. Set `data-theme="light|dark|system"` on the rly
 root; system is the default. Forced colors and reduced motion are handled

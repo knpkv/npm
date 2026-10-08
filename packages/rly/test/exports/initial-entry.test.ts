@@ -141,6 +141,7 @@ describe("public entries", () => {
       "ToggleGroup",
       "RLY_TRACK_KEY_MARKS",
       "TrackKey",
+      "RLY_FONT_FACES",
       "RLY_COLOR_TOKEN_NAMES",
       "RLY_CONTROL_HEIGHT_TOKEN_NAMES",
       "RLY_MOTION_TOKEN_NAMES",
@@ -154,6 +155,7 @@ describe("public entries", () => {
     const Tokens = await import("../../src/tokens/index.js")
 
     expect(Object.keys(Tokens)).toEqual([
+      "RLY_FONT_FACES",
       "RLY_COLOR_TOKEN_NAMES",
       "RLY_CONTROL_HEIGHT_TOKEN_NAMES",
       "RLY_MOTION_TOKEN_NAMES",

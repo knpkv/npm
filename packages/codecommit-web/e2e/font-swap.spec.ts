@@ -29,9 +29,9 @@ const pullRequests = [
   pullRequest("13", "Queue hides accounts the user switched off")
 ]
 
-// Geist swaps in over its metric-matched fallback without moving the queue (rly font-swap budget).
+// A late Geist stays on its metric-matched fallback without moving the queue (rly font-swap budget).
 for (const viewport of [{ height: 1000, width: 1440 }, { height: 844, width: 390 }]) {
-  test(`Geist swaps in without moving the queue at ${viewport.width}px`, async ({ page }) => {
+  test(`a late Geist never moves the queue at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport)
     await page.route("**/api/session/current", (route) => route.fulfill({ status: 204 }))
     await page.route("**/api/config", (route) =>
