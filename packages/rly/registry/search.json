@@ -1050,6 +1050,40 @@
     {
       "capabilities": [
         "agent",
+        "review"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayFindings",
+      "states": [
+        "accepted",
+        "default",
+        "dismissed",
+        "empty",
+        "failed",
+        "pending",
+        "posted",
+        "posting",
+        "stale"
+      ],
+      "terms": [
+        "accepted",
+        "agent",
+        "dismissed",
+        "empty",
+        "failed",
+        "pattern",
+        "pending",
+        "posted",
+        "posting",
+        "relayfindings",
+        "review",
+        "stale"
+      ]
+    },
+    {
+      "capabilities": [
+        "agent",
         "open"
       ],
       "category": "pattern",

@@ -61,6 +61,7 @@ describe("public entries", () => {
       "useRelayDraft",
       "RelayDecision",
       "RelayDock",
+      "RelayFindings",
       "RelayLauncher",
       "relayShortcut",
       "useRelayShortcut",

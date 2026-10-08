@@ -81,6 +81,11 @@ export const COMPONENT_REGISTRY_METADATA = {
     ["checking", "unverified", "ready", "unavailable"],
     ["agent", "configure"]
   ),
+  RelayFindings: registryMetadata(
+    "Review Relay's findings: grouped by location, severity as icon, word and P-number, accept, dismiss or discuss, post accepted one confirmed call at a time, and say when the head moved",
+    ["pending", "accepted", "dismissed", "posting", "posted", "failed", "stale", "empty"],
+    ["agent", "review"]
+  ),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"
