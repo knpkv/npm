@@ -63,7 +63,7 @@ export const RelayLauncher = ({
     <button
       {...props}
       aria-expanded={expanded}
-      aria-keyshortcuts={shortcut === null ? undefined : shortcut.keys}
+      aria-keyshortcuts={shortcut === null ? undefined : requireText(shortcut.keys, "RelayLauncher shortcut keys")}
       className={classNames(style("root"), className)}
       data-rly-relay-launcher=""
       type="button"

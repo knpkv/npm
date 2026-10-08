@@ -7,11 +7,8 @@ const css = readFileSync(join(import.meta.dirname, "../../src/patterns/RelayLaun
   ""
 )
 
-/** Innermost rules as [selector list, declarations]; at-rule preludes fall outside the match. */
-const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selectors = "", body = ""]) => ({
-  body,
-  selectors: selectors.split(",").map((selector) => selector.trim())
-}))
+/** Innermost rules as raw selector text and declarations; at-rule preludes fall outside the match. */
+const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selectors = "", body = ""]) => ({ body, selectors }))
 
 // In forced colours the open fill sets forced-color-adjust: none, which also lets the author hover tint
 // through; storybook's synthetic hover never matches :hover, so this keeps the selectors honest.
@@ -19,10 +16,13 @@ describe("RelayLauncher forced-colours CSS", () => {
   it("keeps the inverted open fill when the open launcher is hovered", () => {
     const inverted = rules.filter(({ body }) => /background:\s*ButtonText/.test(body))
     expect(inverted).toHaveLength(2)
-    for (const { selectors } of inverted) {
-      const open = selectors.filter((selector) => selector.endsWith(".root[aria-expanded=\"true\"]"))
-      expect(open).toHaveLength(1)
-      expect(selectors).toContain(`${open[0]}:hover`)
-    }
+    // Every author hover rule on the open launcher, repeated verbatim so specificity is equal and the
+    // later forced rule wins.
+    const authorHovers = rules
+      .filter(({ body }) => !/ButtonText/.test(body))
+      .flatMap(({ selectors }) => selectors.split(",").map((selector) => selector.trim()))
+      .filter((selector) => selector.startsWith(".root[aria-expanded=\"true\"]") && selector.includes(":hover"))
+    expect(authorHovers.length).toBeGreaterThan(0)
+    for (const { selectors } of inverted) for (const hover of authorHovers) expect(selectors).toContain(hover)
   })
 })

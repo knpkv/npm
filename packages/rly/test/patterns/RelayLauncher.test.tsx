@@ -52,4 +52,10 @@ describe("RelayLauncher", () => {
       parse(renderToStaticMarkup(<RelayLauncher expanded={false} label="Ask Relay" shortcut={null} />)).textContent
     ).toContain("Ask Relay")
   })
+
+  it("requires the shortcut's ARIA keys, so a blank value cannot silently drop aria-keyshortcuts", () => {
+    expect(() =>
+      renderToStaticMarkup(<RelayLauncher expanded={false} shortcut={{ hint: "Ctrl J", keys: " " }} />)
+    ).toThrow(/shortcut keys/)
+  })
 })

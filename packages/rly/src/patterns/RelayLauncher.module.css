@@ -19,11 +19,16 @@
     padding-inline: var(--rly-space-8) var(--rly-space-12);
     white-space: nowrap;
   }
-  .root:hover {
+  .root:not(:disabled):hover {
     background: var(--rly-color-surface-2);
     border-color: var(--rly-color-text-3);
   }
-  .root:active {
+  /* Matches Button: dimmed and no pointer, so a launcher the host turned off never looks live. */
+  .root:disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
+  }
+  .root:not(:disabled):active {
     background: var(--rly-color-surface-3);
   }
   /*
@@ -35,7 +40,7 @@
     border-color: var(--rly-color-agent);
     box-shadow: inset 0 0 0 1px var(--rly-color-agent);
   }
-  .root[aria-expanded="true"]:hover {
+  .root[aria-expanded="true"]:not(:disabled):hover {
     background: color-mix(in oklab, var(--rly-color-agent) 24%, transparent);
   }
   .root:focus-visible {
@@ -75,10 +80,11 @@
     /*
      * Highlight is the focus ring's colour there, so open is an inverted fill and a heavier border:
      * two cues, neither of them a colour the system might also use for focus. Hover is listed so the
-     * author hover tint never replaces the fill (forced-color-adjust: none lets it through).
+     * author hover tint never replaces the fill (forced-color-adjust: none lets it through). It repeats
+     * the author hover selector exactly, so it has the same specificity and wins by coming later.
      */
     .root[aria-expanded="true"],
-    .root[aria-expanded="true"]:hover {
+    .root[aria-expanded="true"]:not(:disabled):hover {
       background: ButtonText;
       border: 2px solid ButtonText;
       box-shadow: none;
@@ -96,7 +102,8 @@
     color: ButtonText;
   }
   :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"],
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .root[aria-expanded="true"]:hover {
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+    .root[aria-expanded="true"]:not(:disabled):hover {
     background: ButtonText;
     border: 2px solid ButtonText;
     box-shadow: none;
