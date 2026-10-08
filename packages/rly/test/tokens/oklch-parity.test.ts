@@ -4,6 +4,8 @@ import { deltaEOk, hexToOklab, oklchToHex, oklchToOklab } from "../../scripts/to
 import { colorTokenSource } from "../../src/tokens/colors.js"
 
 // The sRGB values rly's palette had before it moved to OKLCH; every token must still display as them.
+// Four values overshoot the sRGB gamut by at most 1.3e-4 after rounding; oklchToHex clamps them, which is
+// what browsers do at that size (gamut mapping gives the same bytes), so the hex comparison holds.
 const previous: ReadonlyArray<readonly [string, `#${string}`, `#${string}`]> = [
   ["canvas", "#F6F6F8", "#101114"],
   ["surface-1", "#FFFFFF", "#17181C"],
