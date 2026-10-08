@@ -19,7 +19,7 @@ import { parse as parseYaml } from "yaml"
 // pull request may move an existing package's version. Two modes:
 // - pull request (GITHUB_EVENT_NAME, GITHUB_BASE_REF, GITHUB_HEAD_REF, GITHUB_REPOSITORY, GITHUB_EVENT_PATH),
 //   on a full-history checkout: fails when a version moved outside the repository's own
-//   changeset-release/main branch, or when a new package's CHANGELOG.md already records its version (that
+//   changeset-release/main branch, or when a CHANGELOG.md gains a heading for its package's current version (that
 //   heading is Release's proof that Version Packages produced a version);
 // - `--prepare-release` (Release workflow): finds the publishable versions on main that npm lacks. One is
 //   ready when its package's CHANGELOG.md has its `## <version>` heading: only `changeset version` writes
@@ -121,11 +121,15 @@ const changelogAt = Effect.fn("VersionBumps.changelogAt")(function* (revision, m
 })
 
 /**
- * New packages whose changelog already records their version. Only `changeset version` may write that
- * heading, since Release treats it as proof that Version Packages produced the version.
+ * Packages whose changelog gains a heading for their current version. Only `changeset version` may write
+ * that heading, since Release treats it as proof that Version Packages produced the version; this catches a
+ * new package with a copied changelog, a heading added later, and a private package going public with one.
  */
-export const preseededReleases = (added, changelogOf) =>
-  added.filter((release) => release.version !== undefined && changelogHasVersion(changelogOf(release), release.version))
+export const introducedHeadings = (entries) =>
+  entries.filter(
+    ({ base, head, version }) =>
+      version !== undefined && changelogHasVersion(head, version) && !changelogHasVersion(base, version)
+  )
 
 const checkPullRequest = Effect.gen(function* () {
   const baseRef = yield* Config.String("GITHUB_BASE_REF")
@@ -140,7 +144,8 @@ const checkPullRequest = Effect.gen(function* () {
   })
   const base = (yield* git(["merge-base", "HEAD", `origin/${baseRef}`])).trim()
   const head = yield* manifestsAt("HEAD")
-  const { added, changes } = compareVersions(yield* manifestsAt(base), head)
+  const baseManifests = yield* manifestsAt(base)
+  const { added, changes } = compareVersions(baseManifests, head)
   for (const { name, version } of added) {
     yield* Console.log(`New publishable package: ${name}@${version ?? "(no version)"}; Release publishes it on merge.`)
   }
@@ -153,15 +158,27 @@ const checkPullRequest = Effect.gen(function* () {
       ].join("\n")
     )
   }
-  const changelogs = new Map(
-    yield* Effect.forEach(added, ({ file }) => changelogAt("HEAD", file).pipe(Effect.map((text) => [file, text])))
+  const baseFiles = new Map(baseManifests.map(({ file, manifest }) => [manifest.name, file]))
+  const headings = yield* Effect.forEach(
+    head.filter(({ manifest }) => publishable(manifest)),
+    ({ file, manifest }) =>
+      Effect.gen(function* () {
+        const baseFile = baseFiles.get(manifest.name)
+        return {
+          base: baseFile === undefined ? "" : yield* changelogAt(base, baseFile),
+          file,
+          head: yield* changelogAt("HEAD", file),
+          name: manifest.name,
+          version: manifest.version
+        }
+      })
   )
-  const preseeded = preseededReleases(added, ({ file }) => changelogs.get(file) ?? "")
-  if (preseeded.length > 0 && !exempt) {
+  const introduced = introducedHeadings(headings)
+  if (introduced.length > 0 && !exempt) {
     return yield* fail(
       [
-        "A new package's CHANGELOG.md may not record its own version; Version Packages writes that heading:",
-        ...preseeded.map(({ file, name, version }) => `- ${name} (${file}): ## ${version}`),
+        "Only Version Packages may add a CHANGELOG.md heading for a package's current version:",
+        ...introduced.map(({ file, name, version }) => `- ${name} (${file}): ## ${version}`),
         "Fix: remove the heading (or the copied changelog) and add a changeset (`pnpm changeset`)."
       ].join("\n")
     )
@@ -213,6 +230,12 @@ const publishedVersions = Effect.fn("VersionBumps.publishedVersions")(function* 
   return new Set(Object.keys(packument.versions))
 })
 
+// The files Changesets reads as changesets, mirroring @changesets/read 1.0.1: top-level `.md` files that
+// are not dotfiles, any-case README.md, AGENTS.md, CLAUDE.md or GEMINI.md.
+const ignoredChangesetFiles = [/^README\.md$/iu, /^AGENTS\.md$/u, /^CLAUDE\.md$/u, /^GEMINI\.md$/u]
+export const isChangesetFile = (name) =>
+  !name.startsWith(".") && name.endsWith(".md") && !ignoredChangesetFiles.some((pattern) => pattern.test(name))
+
 const ChangesetReleases = Schema.Record(Schema.String, Schema.String)
 const frontmatter = /^---\r?\n((?:[\s\S]*?\r?\n)?)---(?:\r?\n|$)/u
 
@@ -237,7 +260,7 @@ const prepareRelease = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem
   const registry = yield* Config.String("NPM_REGISTRY_URL").pipe(Config.withDefault("https://registry.npmjs.org"))
   const pendingFiles = (yield* fileSystem.readDirectory(".changeset"))
-    .filter((name) => name.endsWith(".md") && name !== "README.md")
+    .filter(isChangesetFile)
     .map((name) => `.changeset/${name}`)
   const manifests = (yield* manifestsAt("HEAD")).filter((entry) => publishable(entry.manifest))
   const published = new Map(

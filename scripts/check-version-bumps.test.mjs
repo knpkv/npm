@@ -18,7 +18,8 @@ import {
   compareVersions,
   isReleasePullRequest,
   planRelease,
-  preseededReleases,
+  introducedHeadings,
+  isChangesetFile,
   releaseBranch
 } from "./check-version-bumps.mjs"
 
@@ -103,15 +104,27 @@ test("a changelog records a version only as its own heading", () => {
   assert.equal(changelogHasVersion("", "0.1.0"), false)
 })
 
-test("a new package may not arrive with a changelog that already records its version", () => {
-  const added = [
-    { file: "packages/copied/package.json", name: "@knpkv/copied", version: "0.0.0" },
-    { file: "packages/clean/package.json", name: "@knpkv/clean", version: "0.0.0" }
-  ]
-  const changelogs = new Map([["packages/copied/package.json", "# @knpkv/copied\n\n## 0.0.0\n"]])
+test("a heading for a package's current version may only appear through Version Packages", () => {
+  const entry = (name, version, base, head) => ({ file: `packages/${name}/package.json`, name, version, base, head })
+  const introduced = introducedHeadings([
+    entry("copied-new", "0.0.0", "", "## 0.0.0\n"), // a new package with a copied changelog
+    entry("added-later", "0.0.0", "# x\n", "# x\n\n## 0.0.0\n"), // an existing package gains the heading
+    entry("went-public", "0.0.0", "", "## 0.0.0\n"), // was private (no base entry) and now public
+    entry("history", "1.1.0", "## 1.1.0\n", "## 1.1.0\n"), // already there: unchanged history
+    entry("none", "0.0.0", "", "")
+  ])
   assert.deepEqual(
-    preseededReleases(added, ({ file }) => changelogs.get(file) ?? "").map(({ name }) => name),
-    ["@knpkv/copied"]
+    introduced.map(({ name }) => name),
+    ["copied-new", "added-later", "went-public"]
+  )
+})
+
+test("pending changesets are read like @changesets/read: metadata files and dotfiles are not changesets", () => {
+  assert.deepEqual(
+    ["a.md", "README.md", "readme.md", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".hidden.md", "config.json"].filter(
+      isChangesetFile
+    ),
+    ["a.md"]
   )
 })
 
@@ -190,10 +203,22 @@ test("the script fails a feature branch or a fork that bumps a version, and pass
             GITHUB_REPOSITORY: "knpkv/npm"
           })
         })
+      const feature = yield* check("feat/x", "knpkv/npm")
+      const fork = yield* check(releaseBranch, "fork/npm")
+      const release = yield* check(releaseBranch, "knpkv/npm")
+      // A branch that keeps the version but adds its changelog heading.
+      yield* git("switch", "-q", "-c", "feat/heading", "main")
+      yield* fileSystem.writeFileString(
+        path.join(directory, "packages/demo/CHANGELOG.md"),
+        "# @knpkv/demo\n\n## 1.0.0\n"
+      )
+      yield* git("add", ".")
+      yield* git("commit", "-q", "-m", "heading")
       return {
-        feature: yield* check("feat/x", "knpkv/npm"),
-        fork: yield* check(releaseBranch, "fork/npm"),
-        release: yield* check(releaseBranch, "knpkv/npm")
+        heading: yield* check("feat/heading", "knpkv/npm"),
+        feature,
+        fork,
+        release
       }
     }).pipe(Effect.scoped)
   )
@@ -201,6 +226,8 @@ test("the script fails a feature branch or a fork that bumps a version, and pass
   assert.match(outcome.feature.output, /@knpkv\/demo \(packages\/demo\/package\.json\): 1\.0\.0 -> 1\.1\.0/u)
   assert.notEqual(outcome.fork.exitCode, ChildProcessSpawner.ExitCode(0), outcome.fork.output)
   assert.equal(outcome.release.exitCode, ChildProcessSpawner.ExitCode(0), outcome.release.output)
+  assert.notEqual(outcome.heading.exitCode, ChildProcessSpawner.ExitCode(0), outcome.heading.output)
+  assert.match(outcome.heading.output, /@knpkv\/demo \(packages\/demo\/package\.json\): ## 1\.0\.0/u)
 })
 
 // A registry that knows `@knpkv/released` at 1.0.0 and nothing else.
@@ -257,6 +284,7 @@ test("preparing a release sets changesets aside only when every unpublished vers
       yield* write("packages/released/package.json", manifest("released", "1.0.0"))
       yield* write("packages/released/CHANGELOG.md", "# @knpkv/released\n\n## 1.0.0\n")
       yield* write(".changeset/README.md", "# Changesets\n")
+      yield* write(".changeset/AGENTS.md", "Notes for agents, not a changeset.\n")
       yield* write(".changeset/later.md", '---\n"@knpkv/released": patch\n---\n\nLater fix.\n')
       yield* commit("base")
       const idle = yield* prepare
@@ -282,11 +310,11 @@ test("preparing a release sets changesets aside only when every unpublished vers
     }).pipe(Effect.scoped)
   )
   assert.equal(outcome.idle.written, "outstanding=false\npending=true\n")
-  assert.deepEqual(outcome.idle.changesets, ["README.md", "later.md"])
+  assert.deepEqual(outcome.idle.changesets, ["AGENTS.md", "README.md", "later.md"])
   assert.equal(outcome.ready.written, "outstanding=true\npending=true\n")
-  assert.deepEqual(outcome.ready.changesets, ["README.md"])
+  assert.deepEqual(outcome.ready.changesets, ["AGENTS.md", "README.md"])
   assert.equal(outcome.waiting.written, "outstanding=false\npending=true\n")
-  assert.deepEqual(outcome.waiting.changesets, ["README.md", "fresh.md", "later.md"])
+  assert.deepEqual(outcome.waiting.changesets, ["AGENTS.md", "README.md", "fresh.md", "later.md"])
   assert.match(outcome.waiting.log, /::warning title=Release waits::@knpkv\/released@1\.1\.0 stay unpublished/u)
   assert.notEqual(outcome.orphaned.exitCode, ChildProcessSpawner.ExitCode(0), outcome.orphaned.output)
   assert.match(outcome.orphaned.output, /no pending changeset will version it:\n- @knpkv\/fresh@0\.0\.0/u)
