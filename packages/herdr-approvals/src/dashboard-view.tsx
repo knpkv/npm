@@ -1,6 +1,6 @@
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { FreshnessStamp } from "@knpkv/rly/patterns"
-import type { FormEvent, KeyboardEvent, ReactElement } from "react"
+import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 import type { DashboardSnapshot, PendingApproval, PendingApprovalFailure } from "./dashboard-model.js"
 import type { ChatMode } from "@knpkv/herdr-coordinator/model"
 import { CoordinatorChatPanel, NotificationPanel, type NotificationState } from "./approval-app-view.js"
@@ -39,6 +39,8 @@ type DashboardViewProps = {
   }
   readonly snapshot: DashboardSnapshot
   readonly showHeader?: boolean
+  /** A page-level notice (such as a failed refresh), placed under the header in the page gutter. */
+  readonly notice?: ReactNode
 }
 
 type PendingAgendaItem =
@@ -424,6 +426,7 @@ export const DashboardView = ({
   chatBusy,
   decisionStatus = null,
   historyLoading = false,
+  notice = null,
   notificationState,
   onChatSubmit,
   onDecision,
@@ -535,6 +538,7 @@ export const DashboardView = ({
             </div>
           </header>
         ) : null}
+        {notice}
         {approvalOnly ? (
           <ApprovalsCountdown
             decisionStatus={decisionStatus}
