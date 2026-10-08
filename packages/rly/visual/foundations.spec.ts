@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures.ts"
 
 test("keeps the foundation catalog readable at 320 CSS pixels", async ({ page }) => {
   await page.setViewportSize({ height: 800, width: 320 })

@@ -87,6 +87,16 @@ export { RelayLauncher, relayShortcut, useRelayShortcut, useRelaySummon } from "
 export type { RelayLauncherProps, RlyRelayShortcut, RlyRelaySummon, UseRelaySummonOptions } from "./RelayLauncher.js"
 export { RelayMark, RLY_RELAY_MARK_SIZES, RLY_RELAY_MARK_TILE_SIZES } from "./RelayMark.js"
 export type { RelayMarkProps, RelayMarkTileProps, RlyRelayMarkSize, RlyRelayMarkTileSize } from "./RelayMark.js"
+export { RelayPanel, RLY_RELAY_PANEL_PRESENTATIONS, RLY_RELAY_PANEL_WIDTH, useRelayPresentation } from "./RelayPanel.js"
+export type {
+  RelayPanelProps,
+  RlyRelayPanelPin,
+  RlyRelayPanelPresentation,
+  RlyRelayPanelTab,
+  RlyRelayPresentation,
+  RlyRelayScope,
+  UseRelayPresentationOptions
+} from "./RelayPanel.js"
 export { ReleasePreview } from "./ReleasePreview.js"
 export type { ReleasePreviewProps, RlyReleasePreviewPresentation } from "./ReleasePreview.js"
 export {

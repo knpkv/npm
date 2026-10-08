@@ -63,9 +63,10 @@ jobs:
         if: steps.released.outputs.outstanding == 'true'
         run: git checkout HEAD -- .changeset
       # With nothing outstanding this is the action's usual choice: version pending changesets, or
-      # publish when none are pending. After a release it only versions what is pending.
+      # publish when none are pending. After a release it only versions what is pending, and while npm's
+      # metadata still lags a publish it only versions, so it cannot try to republish.
       - name: Create Release Pull Request or Publish
-        if: steps.released.outputs.outstanding != 'true' || steps.released.outputs.pending == 'true'
+        if: steps.released.outputs.pending == 'true' || (steps.released.outputs.outstanding != 'true' && steps.released.outputs.propagating != 'true')
         uses: changesets/action@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
           github-token: ${{ secrets.TOKEN_GITHUB }}

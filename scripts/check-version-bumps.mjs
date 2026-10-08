@@ -28,9 +28,10 @@ import { parse as parseYaml } from "yaml"
 //   is ready, it sets the pending changesets aside so the publish pass releases them; when any is
 //   unversioned it touches nothing and warns, leaving the release to the action's usual choice, because
 //   `changeset publish` cannot release only part of the workspace safely. An unversioned package no pending
-//   changeset names fails the step, since the usual publish would release it. Writes `outstanding=true|false`
-//   and `pending=true|false` to GITHUB_OUTPUT. Asking npm, not a push's diff, keeps a release ready
-//   through skipped or failed runs.
+//   changeset names fails the step, since the usual publish would release it. A version npm's metadata
+//   lacks but whose tarball npm already serves is still propagating, and the run publishes nothing.
+//   Writes `outstanding`, `pending` and `propagating` (true|false) to GITHUB_OUTPUT. Asking npm, not a
+//   push's diff, keeps a release ready through skipped or failed runs.
 
 class VersionBumpError extends Data.TaggedError("VersionBumpError") {
   get message() {
@@ -233,6 +234,19 @@ const publishedVersions = Effect.fn("VersionBumps.publishedVersions")(function* 
   return new Set(Object.keys(packument.versions))
 })
 
+// Whether npm serves a version's tarball. npm's metadata can lag a publish by many minutes while the
+// tarball is already there, so a version missing from the metadata is checked here before it counts as
+// unpublished: publishing it again would fail with "cannot publish over the previously published version".
+const tarballPublished = Effect.fn("VersionBumps.tarballPublished")(function* (registry, name, version) {
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client.execute(
+    HttpClientRequest.head(`${registry}/${name}/-/${name.split("/").at(-1)}-${version}.tgz`)
+  )
+  if (response.status === 200) return true
+  if (response.status === 404) return false
+  return yield* fail(`npm answered ${response.status} for the ${name}@${version} tarball`)
+})
+
 // The files Changesets reads as changesets, mirroring @changesets/read 1.0.1: top-level `.md` files that
 // are not dotfiles, any-case README.md, AGENTS.md, CLAUDE.md or GEMINI.md.
 const ignoredChangesetFiles = [/^README\.md$/iu, /^AGENTS\.md$/u, /^CLAUDE\.md$/u, /^GEMINI\.md$/u]
@@ -284,9 +298,21 @@ const prepareRelease = Effect.gen(function* () {
       )
     })
   )
-  const { ready, unversioned } = planRelease(manifests, published, ({ file, manifest }) =>
+  const plan = planRelease(manifests, published, ({ file, manifest }) =>
     changelogHasVersion(changelogs.get(file) ?? "", manifest.version)
   )
+  const served = new Set(
+    (yield* Effect.forEach(
+      [...plan.ready, ...plan.unversioned],
+      ({ name, version }) =>
+        tarballPublished(registry, name, version).pipe(Effect.map((exists) => (exists ? `${name}@${version}` : ""))),
+      { concurrency: 4 }
+    )).filter((key) => key !== "")
+  )
+  const unpublished = ({ name, version }) => !served.has(`${name}@${version}`)
+  const ready = plan.ready.filter(unpublished)
+  const unversioned = plan.unversioned.filter(unpublished)
+  for (const key of served) yield* Console.log(`Published, npm metadata still catching up: ${key}`)
   for (const { name, version } of ready) yield* Console.log(`Ready to publish: ${name}@${version}`)
   for (const { name, version } of unversioned) yield* Console.log(`Not versioned yet: ${name}@${version}`)
   // An unversioned version no pending changeset names would be published by the action's usual publish.
@@ -305,8 +331,16 @@ const prepareRelease = Effect.gen(function* () {
       ].join("\n")
     )
   }
-  const outstanding = ready.length > 0 && unversioned.length === 0
-  if (ready.length > 0 && unversioned.length > 0) {
+  // While npm's metadata lags, `changeset publish` would also see those versions as missing and fail on
+  // republishing them, so this run publishes nothing; the next run after the metadata catches up does.
+  const propagating = served.size > 0
+  const outstanding = ready.length > 0 && unversioned.length === 0 && !propagating
+  if (propagating) {
+    yield* Console.log(
+      `::warning title=Release waits::npm's metadata does not list ${[...served].join(", ")} yet; ` +
+        "this run publishes nothing, so the next run does not try to republish them."
+    )
+  } else if (ready.length > 0 && unversioned.length > 0) {
     yield* Console.log(
       `::warning title=Release waits::${ready.map(({ name, version }) => `${name}@${version}`).join(", ")} ` +
         `stay unpublished while ${unversioned.map(({ name }) => name).join(", ")} awaits its changeset; ` +
@@ -316,7 +350,7 @@ const prepareRelease = Effect.gen(function* () {
   if (outstanding) for (const file of pendingFiles) yield* fileSystem.remove(file)
   yield* fileSystem.writeFileString(
     yield* Config.String("GITHUB_OUTPUT"),
-    `outstanding=${outstanding}\npending=${pendingFiles.length > 0}\n`,
+    `outstanding=${outstanding}\npending=${pendingFiles.length > 0}\npropagating=${propagating}\n`,
     { flag: "a" }
   )
 }).pipe(Effect.provide(FetchHttpClient.layer))
