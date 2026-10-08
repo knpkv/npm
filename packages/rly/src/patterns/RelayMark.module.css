@@ -8,7 +8,8 @@
     align-items: center;
     background: var(--rly-color-agent);
     block-size: var(--rly-space-24);
-    border-radius: var(--rly-radius-control);
+    /* Proportional, so every size is the same rounded square (the prototype's 8px on 26). */
+    border-radius: 30%;
     box-sizing: border-box;
     color: var(--rly-color-surface-1);
     display: inline-flex;

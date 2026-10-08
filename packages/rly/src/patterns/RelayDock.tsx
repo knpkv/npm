@@ -979,7 +979,7 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
         ref={triggerRef}
         type="button"
       >
-        <RelayMark.Tile className={style("mark")} size={32} />
+        <RelayMark.Tile size={32} />
         <span>{visibleTriggerLabel}</span>
       </button>
       {!resolvedOpen ? null : (

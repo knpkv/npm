@@ -57,7 +57,8 @@ export const Header: Story = {
     await expect(getComputedStyle(launcher).position).toBe("static")
     const hint = launcher.querySelector("kbd")
     const phone = storyMedia(canvasElement, "(max-width: 40rem)")
-    await expect(hint === null ? "none" : getComputedStyle(hint).display).toBe(phone ? "none" : "inline")
+    // A flex item's display is blockified, so the check is shown versus hidden, not the display value.
+    await expect(hint === null || getComputedStyle(hint).display === "none").toBe(phone)
   },
   render: () => <HostHeader />
 }

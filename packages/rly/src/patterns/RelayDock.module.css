@@ -38,11 +38,6 @@
     background: var(--rly-color-surface-3);
   }
 
-  /* The trigger is a pill, so its mark tile is round to sit inside it. */
-  .mark {
-    border-radius: var(--rly-radius-round);
-  }
-
   .layer {
     inset: var(--rly-space-0);
     pointer-events: none;

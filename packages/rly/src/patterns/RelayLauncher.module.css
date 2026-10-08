@@ -25,9 +25,13 @@
   .root:active {
     background: var(--rly-color-surface-3);
   }
+  /* Open is tinted with the agent colour, the mark's own, so the button reads as Relay's open state. */
   .root[aria-expanded="true"] {
-    background: var(--rly-color-surface-2);
-    border-color: var(--rly-color-text-2);
+    background: color-mix(in oklab, var(--rly-color-agent) 12%, transparent);
+    border-color: var(--rly-color-agent);
+  }
+  .root[aria-expanded="true"]:hover {
+    background: color-mix(in oklab, var(--rly-color-agent) 20%, transparent);
   }
   .root:focus-visible {
     outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
