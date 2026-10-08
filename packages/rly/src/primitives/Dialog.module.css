@@ -16,7 +16,12 @@
     z-index: 0;
   }
 
+  /*
+   * Rows pack at the top: on a phone the dialog fills the screen (block-size: 100dvh below), and a grid's
+   * default stretch would spread title, description and fields over the whole height.
+   */
   .content {
+    align-content: start;
     background: var(--rly-color-surface-1);
     border: 1px solid var(--rly-color-border-1);
     border-radius: var(--rly-radius-overlay);

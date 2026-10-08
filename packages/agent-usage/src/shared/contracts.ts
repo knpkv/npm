@@ -159,6 +159,12 @@ export type LimitsReport = typeof LimitsReport.Type
  * never leave the Machine this way.
  */
 export const LimitsNow = Schema.Struct({
+  /**
+   * The format's version. A reader pinned to another agent-usage checks it first: a newer `v` means
+   * the line is not one it can read, rather than a malformed one. New snapshot sources or reasons
+   * within v1 are additive; readers decode `latest` one snapshot at a time and skip what they don't know.
+   */
+  v: Schema.Literal(1),
   machine: Schema.NonEmptyString,
   observedAt: Schema.Int,
   latest: Schema.Array(LimitSnapshot)

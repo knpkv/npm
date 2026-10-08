@@ -43,6 +43,7 @@ describe("readLimitsNow", () => {
       })
       const limits = yield* readLimitsNow(store, "host-a")
       expect(asked).toEqual([{ from: now - LIMITS_NOW_LOOKBACK_MILLIS, to: now + 1, machine: "host-a" }])
+      expect(limits.v).toBe(1)
       expect(limits.machine).toBe("host-a")
       expect(limits.observedAt).toBe(now)
       expect(limits.latest.map((latest) => [latest.label, latest.reading])).toEqual([

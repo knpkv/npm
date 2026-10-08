@@ -76,6 +76,21 @@
     outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
     outline-offset: var(--rly-focus-ring-offset);
   }
+
+  /*
+   * A control that must stay visually small (a 40px close, a 24px chip) gets a 44px hit area from an
+   * invisible ::after that grows past whichever edge is short; a side already 44px or more stays put.
+   * Mark the element with data-rly-hit-area. Controls sized by the control-height tokens don't need it:
+   * those already reach 44px on coarse pointers.
+   */
+  :where([data-rly-root], [data-rly-catalog]) :where([data-rly-hit-area]) {
+    position: relative;
+  }
+  :where([data-rly-root], [data-rly-catalog]) :where([data-rly-hit-area])::after {
+    content: "";
+    inset: min(0px, calc((100% - 44px) / 2));
+    position: absolute;
+  }
 }
 
 /* After rly.components, so a component's own display cannot defeat the native hidden
