@@ -39,8 +39,11 @@ const githubWorkflowStep = (workflow: string, name: string): string | undefined 
   const start = lines.findIndex((line) => line.trim() === `- name: ${name}`)
   if (start < 0) return undefined
   const indentation = lines[start]?.search(/\S/u) ?? 0
-  const siblingPrefix = `${" ".repeat(indentation)}- `
-  const relativeEnd = lines.slice(start + 1).findIndex((line) => line.startsWith(siblingPrefix))
+  // The step ends at its next sibling or at anything less indented, such as the next job.
+  const relativeEnd = lines.slice(start + 1).findIndex((line) => {
+    const lineIndentation = line.search(/\S/u)
+    return lineIndentation >= 0 && lineIndentation <= indentation
+  })
   const end = relativeEnd < 0 ? lines.length : start + relativeEnd + 1
   return lines.slice(start, end).join("\n")
 }
@@ -310,7 +313,7 @@ describe("control center runtime benchmark report", () => {
       expect(validationCommand).toContain("scripts/validateRuntimeBenchmarkReport.ts")
       const uploadStep = githubWorkflowStep(packageJson.workflow, "Upload Control Center runtime benchmark evidence")
       expect(uploadStep).toBeDefined()
-      expect(uploadStep).toContain("if: ${{ always() }}")
+      expect(uploadStep).toContain("if: ${{ always() && matrix.package == 'control-center' }}")
       expect(uploadStep).toContain(
         "uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7"
       )
@@ -338,6 +341,12 @@ describe("control center runtime benchmark report", () => {
           if-no-files-found: error
       - name: Later step
         run: pnpm test`
+    const lastStepOfJob = `
+      - name: Upload Control Center runtime benchmark evidence
+        uses: actions/upload-artifact@v7
+
+  browser:
+    if: \${{ always() }}`
 
     expect(githubWorkflowStep(splitFields, "Upload Control Center runtime benchmark evidence")).not.toContain(
       "actions/upload-artifact"
@@ -347,6 +356,9 @@ describe("control center runtime benchmark report", () => {
     )
     expect(githubWorkflowStep(completeStep, "Upload Control Center runtime benchmark evidence")).toContain(
       "if-no-files-found: error"
+    )
+    expect(githubWorkflowStep(lastStepOfJob, "Upload Control Center runtime benchmark evidence")).not.toContain(
+      "always()"
     )
   })
 

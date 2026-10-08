@@ -86,14 +86,20 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 
 #### Browser
 
-- Installs the Playwright-managed Chromium runtime and its system dependencies
-- Runs every package browser suite, including the `rly` catalog and Control Center production routes
-- Serializes browser work to one worker through the package configuration
+- One matrix leg per package that declares a `test:browser` script (`Browser (<package>)`),
+  each with a 15-minute timeout and `fail-fast: false`, so a slow suite cannot cancel the rest
+- Each leg installs the Playwright-managed Chromium runtime and its system dependencies,
+  builds the package's workspace dependencies, then runs that package's browser suite
+- The required `Browser` check is an aggregate job: it waits for every leg and passes only
+  when the whole matrix succeeded (no skipped or cancelled leg counts as success).
+  `scripts/check-browser-partition.test.mjs` keeps the matrix equal to the set of packages
+  with a `test:browser` script, so a new suite cannot be left out
+- Serializes browser work to one worker through each package's configuration
 - Audits Control Center routes for keyboard focus, serious/critical WCAG violations,
   320-pixel reflow, forced colors, and reduced motion
 - Exercises second-machine pairing through the trusted HTTPS proxy fixture
-- Runs the deterministic large-fixture contract benchmark and validates the
-  browser-runtime cardinality, cleanup, and machine-qualified timing report
+- The control-center leg also runs the deterministic large-fixture contract benchmark and
+  validates the browser-runtime cardinality, cleanup, and machine-qualified timing report
 - Treats the GitHub-hosted runner's `local-ssd` declaration as a trusted CI
   configuration input rather than hardware attestation. The validator fails
   when that declaration is missing or renamed, so timing cannot silently become
@@ -103,11 +109,12 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
   Node, CPU, memory, platform, architecture, and storage class. A second timing
   failure on the eligible class is a release-gate failure; other failures are
   never retried as noise.
-- **Commands**:
-  - `pnpm test:browser`
-  - `pnpm --filter @knpkv/control-center benchmark:contracts`
-  - `pnpm --filter @knpkv/control-center benchmark:validate-runtime`
-- **Timeout**: 15 minutes
+- **Commands** (per leg):
+  - `pnpm --filter "@knpkv/<package>^..." --sort --if-present run build`
+  - `pnpm --filter "@knpkv/<package>" run test:browser`
+  - control-center leg: `pnpm --filter @knpkv/control-center benchmark:contracts` and `benchmark:validate-runtime`
+- Locally, `pnpm test:browser` still runs every suite one after another
+- **Timeout**: 15 minutes per leg (the aggregate check: 2 minutes)
 - **Node Version**: 26.7.0
 
 ---

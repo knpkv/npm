@@ -564,13 +564,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## herdr-approvals
 
-17 directives (ast-grep 4, effect-diagnostics 13), 3 without a reason.
+14 directives (ast-grep 1, effect-diagnostics 13), 3 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/herdr-approvals/src/http.ts](../packages/herdr-approvals/src/http.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/herdr-approvals/src/push-worker.ts](../packages/herdr-approvals/src/push-worker.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/herdr-approvals/src/push-worker.ts](../packages/herdr-approvals/src/push-worker.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/herdr-approvals/test/http.test.ts](../packages/herdr-approvals/test/http.test.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- one test must probe a port before hostd binds it (see its use).` | yes |
 | [packages/herdr-approvals/scripts/test-packed-packages.ts](../packages/herdr-approvals/scripts/test-packed-packages.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-approvals/src/bin.ts](../packages/herdr-approvals/src/bin.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
