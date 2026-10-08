@@ -466,10 +466,26 @@ the platform) only when the host binds that key and prevents the browser's own C
 or `null` where it binds none, such as a live terminal that keeps its chords.
 The hint hides at 40rem and below, and the button is 32px tall, 44px for a coarse pointer.
 
-```tsx
-import { RelayLauncher, useRelayShortcut } from "@knpkv/rly/patterns"
+`useRelaySummon` binds that shortcut. From the page it opens Relay and focuses the composer (or, if
+Relay is already open, moves focus to the composer); from inside Relay it takes focus back to where it
+came from, and Relay stays open. Full screen, it closes Relay. Escape closes Relay when focus is inside
+it or Relay is full screen, and returns focus. Only the exact chord is handled and prevented, so Ctrl+K,
+`?`, g-sequences and Alt keys reach the host. On a non-Latin layout the physical J key works; a Latin
+layout uses the J the user sees. Escape is left to an IME composition and to a dialog, listbox or menu
+open inside or opened from Relay, including inside shadow roots. When the element Relay came from is
+gone, focus returns to the `launcher`; after a close, focus returns once Relay has actually closed.
+Attach the returned `regionRef` to Relay's region and `composerRef` to the composer, which is focused
+as soon as it mounts. The hook follows Relay into another document (an iframe portal). Pass the same
+`shortcut` the launcher advertises, or `null` while the host's own surface owns the key; Escape inside
+Relay works either way.
 
-;<RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} shortcut={useRelayShortcut()} />
+```tsx
+import { RelayLauncher, useRelayShortcut, useRelaySummon } from "@knpkv/rly/patterns"
+
+;const shortcut = useRelayShortcut()
+const { composerRef, regionRef } = useRelaySummon({ fullscreen: false, launcher, onOpenChange: setOpen, open, shortcut })
+
+<RelayLauncher expanded={open} onClick={() => setOpen((value) => !value)} ref={launcher} shortcut={shortcut} />
 ```
 
 `RelayDock` is the shared product frame for one adapter-owned Relay thread. It

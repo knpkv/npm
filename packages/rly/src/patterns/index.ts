@@ -83,8 +83,8 @@ export type {
   RlyRelayDockSelectionControl,
   RlyRelayDockState
 } from "./RelayDock.js"
-export { RelayLauncher, relayShortcut, useRelayShortcut } from "./RelayLauncher.js"
-export type { RelayLauncherProps, RlyRelayShortcut } from "./RelayLauncher.js"
+export { RelayLauncher, relayShortcut, useRelayShortcut, useRelaySummon } from "./RelayLauncher.js"
+export type { RelayLauncherProps, RlyRelayShortcut, RlyRelaySummon, UseRelaySummonOptions } from "./RelayLauncher.js"
 export { RelayMark, RLY_RELAY_MARK_SIZES, RLY_RELAY_MARK_TILE_SIZES } from "./RelayMark.js"
 export type { RelayMarkProps, RelayMarkTileProps, RlyRelayMarkSize, RlyRelayMarkTileSize } from "./RelayMark.js"
 export { ReleasePreview } from "./ReleasePreview.js"
