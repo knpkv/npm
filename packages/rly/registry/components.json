@@ -3708,15 +3708,14 @@
           "src/patterns/RelayLauncher.module.css"
         ],
         "tests": [
+          "test/patterns/RelayLauncher.css.test.ts",
           "test/patterns/RelayLauncher.test.tsx"
         ]
       },
       "importPath": "@knpkv/rly/patterns",
       "name": "RelayLauncher",
       "props": {
-        "defaults": {
-          "expanded": "false"
-        },
+        "defaults": {},
         "types": [
           "RelayLauncherProps"
         ]
@@ -3726,28 +3725,10 @@
       "states": [
         "closed",
         "default",
-        "false",
-        "open",
-        "true"
+        "open"
       ],
       "status": "experimental",
-      "variants": [
-        {
-          "defaultValue": "false",
-          "description": "Controls the expanded presentation axis of RelayLauncher.",
-          "name": "expanded",
-          "values": [
-            {
-              "description": "Use false for the expanded presentation.",
-              "name": "false"
-            },
-            {
-              "description": "Use true for the expanded presentation.",
-              "name": "true"
-            }
-          ]
-        }
-      ]
+      "variants": []
     },
     {
       "accessibility": {

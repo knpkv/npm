@@ -720,6 +720,7 @@
           "packages/rly/src/patterns/RelayLauncher.module.css"
         ],
         "tests": [
+          "packages/rly/test/patterns/RelayLauncher.css.test.ts",
           "packages/rly/test/patterns/RelayLauncher.test.tsx"
         ]
       },

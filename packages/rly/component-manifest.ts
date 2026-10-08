@@ -285,11 +285,13 @@ export const componentManifest = {
       source: "src/patterns/RelayLauncher.tsx",
       status: "experimental",
       styles: ["src/patterns/RelayLauncher.module.css"],
-      variants: [{ defaultValue: "false", name: "expanded", values: ["false", "true"] }],
+      // expanded is required, so it has no default to record; the closed and open states live in the
+      // registry metadata.
+      variants: [],
       visual: {
         story: "stories/patterns/RelayLauncher.stories.tsx",
         storyId: "patterns-relaylauncher--header",
-        tests: ["test/patterns/RelayLauncher.test.tsx"]
+        tests: ["test/patterns/RelayLauncher.test.tsx", "test/patterns/RelayLauncher.css.test.ts"]
       }
     },
     // scaffold:components:insert
