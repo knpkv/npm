@@ -266,7 +266,7 @@
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
     gap: var(--rly-space-12);
-    grid-template-columns: 4.25rem minmax(0, 1fr) auto;
+    grid-template-columns: var(--connect-state-track) minmax(0, 1fr) var(--connect-time-track);
     padding: 0 var(--rly-space-12) var(--rly-space-6);
   }
 
@@ -284,6 +284,12 @@
     position: relative;
   }
 
+  /* Fixed tracks: the longest state word with its icon, and an hh:mm time. */
+  .connect-agent-tree {
+    --connect-state-track: 7rem;
+    --connect-time-track: 3.25rem;
+  }
+
   .connect-agent {
     align-items: center;
     background: transparent;
@@ -294,7 +300,7 @@
     cursor: pointer;
     display: grid;
     font: inherit;
-    grid-template-columns: 4.25rem minmax(0, 1fr) auto;
+    grid-template-columns: var(--connect-state-track) minmax(0, 1fr) var(--connect-time-track);
     gap: var(--rly-space-12);
     min-inline-size: 0;
     padding: var(--rly-space-12);
@@ -325,6 +331,7 @@
 
   .connect-agent time {
     color: var(--rly-color-text-3);
+    text-align: end;
     font-family: "Geist Mono", ui-monospace, monospace;
     font-size: var(--rly-type-meta-size);
     font-variant-numeric: tabular-nums;
@@ -350,8 +357,44 @@
   }
 
   /* The state as its icon and word (agent-state.tsx); the label carries its own tone. */
+  /* An unknown state's own word may be long; it wraps inside the track rather than widening it. */
   .connect-agent-state {
     display: inline-flex;
+    min-inline-size: 0;
+    overflow-wrap: break-word;
+  }
+
+  .connect-filter-count {
+    color: var(--rly-color-text-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .connect-group-filter button[aria-pressed="true"] .connect-filter-count,
+  .connect-status-filter button[aria-pressed="true"] .connect-filter-count {
+    color: inherit;
+  }
+
+  /* A host that didn't answer: named in the Host filter, but not an option. */
+  .connect-host-silent {
+    align-items: baseline;
+    color: var(--rly-color-text-3);
+    display: inline-flex;
+    gap: var(--rly-space-4);
+    padding: var(--rly-space-6) var(--rly-space-8);
+  }
+
+  /* The directory's read time changes only per poll; tabular digits keep its width still. */
+  .connect-updated {
+    color: var(--rly-color-text-3);
+    display: block;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    font-variant-numeric: tabular-nums;
+    margin-block-end: var(--rly-space-8);
+  }
+
+  .connect-updated[data-stale="true"] {
+    color: var(--rly-color-held-ink);
   }
 
   /* Only an agent at work moves; settled states keep a still, distinct icon. */
@@ -367,13 +410,12 @@
     }
   }
 
+  /* Hosts that didn't answer, named above the list so the gap in it is explained where it shows. */
   .connect-failures {
-    border-block-start: 1px solid var(--rly-color-border-1);
-    color: var(--rly-color-text-3);
-    display: grid;
-    gap: var(--rly-space-4);
-    margin-block-start: var(--rly-space-20);
-    padding: var(--rly-space-12) var(--rly-space-8);
+    color: var(--rly-color-held-ink);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    margin: 0 0 var(--rly-space-12);
   }
 
   .connect-preference-error {
@@ -781,19 +823,21 @@
       white-space: nowrap;
     }
 
+    .connect-agent-tree {
+      --connect-state-track: 6.25rem;
+      --connect-time-track: 2.75rem;
+    }
+
     .connect-agent {
       gap: var(--rly-space-8);
-      grid-template-columns: 3.5rem minmax(0, 1fr) auto;
       padding: var(--rly-space-8);
     }
 
     .connect-list-head {
       gap: var(--rly-space-8);
-      grid-template-columns: 3.5rem minmax(0, 1fr) auto;
       padding-inline: var(--rly-space-8);
     }
 
-    .connect-failures,
     .connect-preference-error {
       display: none;
     }
@@ -867,6 +911,23 @@
     .connect-group-filter button,
     .connect-status-filter button {
       padding-inline: var(--rly-space-4);
+    }
+  }
+
+  /* At 24rem and below the state sits over the name, with the time beside it; the column heads go. */
+  @media (max-width: 24rem) {
+    .connect-agent {
+      grid-template-columns: minmax(0, 1fr) auto;
+      row-gap: var(--rly-space-4);
+    }
+
+    .connect-agent-copy {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+
+    .connect-list-head {
+      display: none;
     }
   }
 

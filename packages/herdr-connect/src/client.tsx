@@ -37,6 +37,7 @@ import {
   AgentDirectory,
   connectAgentKey,
   ConnectSummary,
+  silentHostsSentence,
   ConnectWorkspace,
   TerminalKeyRail,
   type AgentActivityFilter
@@ -859,6 +860,9 @@ export const ConnectSurface = ({
       ? directory.previousSuccess.value.timestamp
       : null
   const offlineHosts = (current?.failures ?? []).map((failure) => failure.host)
+  const silentHosts = silentHostsSentence(current?.failures ?? [])
+  // The directory's own read time: it changes only when a poll lands, so nothing ticks between reads.
+  const updatedAt = AsyncResult.isSuccess(directory) ? directory.timestamp : staleSince
   const selected =
     agents.find((agent) => connectAgentKey(agent) === selectedKey) ??
     (connectionRequest !== null && connectAgentKey(connectionRequest.agent) === selectedKey
@@ -1049,14 +1053,29 @@ export const ConnectSurface = ({
             value={query}
           />
         </label>
+        {updatedAt === null ? null : (
+          <small className="connect-updated" data-stale={staleSince === null ? undefined : "true"}>
+            {staleSince === null ? "Updated " : "Stale, last updated "}
+            <time dateTime={new Date(updatedAt).toISOString()}>
+              {new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            </time>
+          </small>
+        )}
+        {silentHosts === null ? null : (
+          <p className="connect-failures" role="status">
+            {silentHosts}
+          </p>
+        )}
         {current === null ? (
           <Text tone="secondary">
             {directory._tag === "Failure"
-              ? `Couldn't load the fleet directory: ${causeSummary(directory.cause)}. Retrying every 5 seconds.`
+              ? `The fleet directory didn't answer: ${causeSummary(directory.cause)}. Retrying every 5 seconds.`
               : "Loading fleet agents…"}
           </Text>
         ) : agents.length === 0 ? (
-          <Text tone="secondary">No live agents.</Text>
+          silentHosts === null ? (
+            <Text tone="secondary">No agents running on any host.</Text>
+          ) : null
         ) : (
           <AgentDirectory
             activityFilter={activityFilter}
@@ -1067,6 +1086,7 @@ export const ConnectSurface = ({
             onSelect={selectAgent}
             query={query}
             selectedKey={selectedKey}
+            silentHosts={offlineHosts}
           />
         )}
         {connection._tag === "connecting" ? (
@@ -1092,19 +1112,10 @@ export const ConnectSurface = ({
         )}
         {staleSince === null || directory._tag !== "Failure" ? null : (
           <small className="connect-status-message" data-tone="caution">
-            Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
+            The list is stale. Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
             {new Date(staleSince).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; retrying every 5
             seconds.
           </small>
-        )}
-        {(current?.failures.length ?? 0) === 0 ? null : (
-          <div className="connect-failures">
-            {current?.failures.map((failure) => (
-              <small key={failure.host}>
-                {failure.host}: {failure.reason.replaceAll("_", " ")}
-              </small>
-            ))}
-          </div>
         )}
       </section>
     </>
