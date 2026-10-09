@@ -24,3 +24,7 @@ note: |
   its initial JavaScript closure. A value import from effect pulls the Effect runtime into that closure
   (once: 366 kB budget, 632 kB built). Keep Effect calls in the lazy panel or dock modules, for example
   src/answering.ts.
+
+  This rule sees direct imports only: a value import that reaches effect through another local module
+  (./model.js, ./conversation.js) passes it. Control Center's closure budget (its build's dist
+  validation) is the transitive guard.

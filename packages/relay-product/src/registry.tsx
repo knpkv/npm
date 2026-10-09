@@ -129,7 +129,13 @@ interface RelayPullRequestDockRegistry {
   readonly draftAbout: RefObject<Map<string, string | null>>
   /** How many panels have claimed Relay's Ctrl/⌘+J under this provider; more than one is a bug. */
   readonly summonClaims: RefObject<number>
-  /** How many continuations sent from Relay are still waiting on their answer. */
+}
+
+/**
+ * How many continuations sent from Relay still wait on their answer. Its own context, so a send
+ * re-renders only the marks that read it, not every registry consumer.
+ */
+interface RelayAnswering {
   readonly answering: number
   readonly setAnswering: (update: (current: number) => number) => void
 }
@@ -143,6 +149,7 @@ export class RelayProductDockProviderMissing extends Error {
 }
 
 const RelayPullRequestDockContext = createContext<RelayPullRequestDockRegistry | undefined>(undefined)
+const RelayAnsweringContext = createContext<RelayAnswering | undefined>(undefined)
 
 /** Provide one route-lifetime registration slot without loading the dock chrome. */
 export const RelayProductDockProvider = ({ children }: { readonly children: ReactNode }): ReactElement => {
@@ -166,7 +173,6 @@ export const RelayProductDockProvider = ({ children }: { readonly children: Reac
   }, [])
   const registry = useMemo<RelayPullRequestDockRegistry>(
     () => ({
-      answering,
       draftAbout,
       launcher,
       open,
@@ -175,14 +181,18 @@ export const RelayProductDockProvider = ({ children }: { readonly children: Reac
       register,
       registration,
       returnTo,
-      setAnswering,
       setOpen,
       setPinned,
       summonClaims
     }),
-    [answering, open, pinned, register, registration]
+    [open, pinned, register, registration]
   )
-  return <RelayPullRequestDockContext value={registry}>{children}</RelayPullRequestDockContext>
+  const answeringValue = useMemo<RelayAnswering>(() => ({ answering, setAnswering }), [answering])
+  return (
+    <RelayPullRequestDockContext value={registry}>
+      <RelayAnsweringContext value={answeringValue}>{children}</RelayAnsweringContext>
+    </RelayPullRequestDockContext>
+  )
 }
 
 /** Attach one exact PR controller to the application-level Relay dock for this route lifetime. */
@@ -254,8 +264,9 @@ export const useSummonClaim = (): void => {
  */
 export const useRelayProductActivity = (): RlyRelayMarkActivity => {
   const registry = useContext(RelayPullRequestDockContext)
-  if (registry === undefined) throw new RelayProductDockProviderMissing()
-  return registry.answering > 0 || registry.registration?.working === true ? "working" : "idle"
+  const answering = useContext(RelayAnsweringContext)
+  if (registry === undefined || answering === undefined) throw new RelayProductDockProviderMissing()
+  return answering.answering > 0 || registry.registration?.working === true ? "working" : "idle"
 }
 
 /**
@@ -264,9 +275,9 @@ export const useRelayProductActivity = (): RlyRelayMarkActivity => {
  * their continuation with `answeringWhile` instead.
  */
 export const useRelayProductAnswering = (): (() => () => void) => {
-  const registry = useContext(RelayPullRequestDockContext)
-  if (registry === undefined) throw new RelayProductDockProviderMissing()
-  const { setAnswering } = registry
+  const answering = useContext(RelayAnsweringContext)
+  if (answering === undefined) throw new RelayProductDockProviderMissing()
+  const { setAnswering } = answering
   return useCallback(() => {
     setAnswering((current) => current + 1)
     let ended = false

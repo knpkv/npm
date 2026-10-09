@@ -18,7 +18,7 @@ const motionSpec = `
 | Activity | What moves | Timing |
 | --- | --- | --- |
 | \`idle\` (default) | nothing | — |
-| \`working\` | the baton slides along its diagonal, hook to hook and back; opacity .55 → 1 → .55; hooks hold still | 1.2s each way (4 × \`--rly-motion-slow-duration\`), \`--rly-easing-in-out\`, loops while working |
+| \`working\` | from rest, the baton slides along its diagonal to one hook, back through rest to the other, and home; opacity 1 at rest, .55 at either end; hooks hold still | 2.4s a cycle, 1.2s each way (8 × \`--rly-motion-slow-duration\`), sine-sampled keyframes run linear, loops while working |
 | \`attention\` | the hooks close on the baton by one grid unit, twice, then rest | 900ms once (3 × slow), \`--rly-easing-in-out\`; replays only when attention is set again |
 | \`entrance\` | each stroke fades and scales in from .85 about its own centre; the tile and svg hold still | 300ms once (slow), \`--rly-easing-out\`; \`RelayPanel\` plays it each time its header opens. A mark that opens already working or waiting starts its loop or nudge as the entrance ends |
 
