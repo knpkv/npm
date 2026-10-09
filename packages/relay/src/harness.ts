@@ -149,8 +149,15 @@ export interface RelayHarnessService {
   ) => Effect.Effect<void, RelayStoreFailed | RelayBackendNotConfigured>
   /** The session's events: a `Snapshot` first, then every change. Ends when the scope closes. */
   readonly events: (ref: ObjectRef) => Stream.Stream<RelayEvent, RelayStoreFailed>
-  /** Answer a pending confirmation. Outcomes are remembered for the harness's lifetime, not across restarts. */
-  readonly decide: (callId: string, allow: boolean) => Effect.Effect<void, RelayDecisionNotPending>
+  /**
+   * Answer a confirmation pending in `ref`'s session. A call raised in another session is `Unknown` here and
+   * stays pending. Outcomes are remembered for the harness's lifetime, not across restarts.
+   */
+  readonly decide: (
+    ref: ObjectRef,
+    callId: string,
+    allow: boolean
+  ) => Effect.Effect<void, RelayDecisionNotPending | RelayStoreFailed>
   /**
    * Stop the run answering `runId`. A message still queued is withdrawn alone; a run in flight stops whole,
    * with every message it took. Nothing already committed is undone.
@@ -393,6 +400,13 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
       return created
     }))
 
+  // The session an object already has, without creating one: deciding never opens a session.
+  const existingSession = (ref: ObjectRef): Effect.Effect<ConversationId | undefined, RelayStoreFailed> =>
+    promise("find the session", async () => {
+      const index = await harness.snapshot(SessionIndex, root.id, BACKGROUND_CONTEXT)
+      return index?.sessions[objectRefKey(ref)]
+    })
+
   const byName = new Map(options.capabilities.map((capability) => [capability.name, capability]))
   const display: Display = (capability) => byName.get(capability)
   const tools = options.capabilities.map((capability): SessionTool => ({
@@ -437,11 +451,13 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
         Effect.map(conversationFor(ref), (conversation) =>
           sessionEvents(harness, conversation, confirmations, pendingFor, display))
       ),
-    decide: (callId, allow) =>
+    decide: (ref, callId, allow) =>
       Effect.gen(function*() {
+        const session = yield* existingSession(ref)
         const waiting = pending.get(callId)
-        if (waiting === undefined) {
-          return yield* new RelayDecisionNotPending({ callId, state: outcomes.get(callId) ?? { _tag: "Unknown" } })
+        if (waiting === undefined || session === undefined || waiting.event.session !== String(session)) {
+          const outcome = waiting === undefined ? outcomes.get(callId) : undefined
+          return yield* new RelayDecisionNotPending({ callId, state: outcome ?? { _tag: "Unknown" } })
         }
         outcomes.set(callId, { _tag: "Decided", allow })
         pending.delete(callId)

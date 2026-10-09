@@ -66,7 +66,9 @@ unauthenticated routes. Profiles, credentials and provider ARNs never cross into
 
 - `GET /events?product&kind&id`: server-sent events, a `Snapshot` first, then `RelayEvent` frames.
   Every 15 seconds `: hb` re-checks the owner session. Once the session no longer holds, the stream
-  sends `data: {"_tag":"Unauthorized"}` and ends.
+  sends `data: {"_tag":"Unauthorized"}` and ends. If Relay can't read the session's events, the stream
+  sends `data: {"_tag":"StreamFailed"}` and ends, so the dock can tell Relay failing from a dropped
+  connection. The cause stays in the server log.
 - `POST /messages {ref, text, requestId, backend?, context?}`: 202 `{runId}`, the `requestId` that the
   run's events list in `runIds`. An unknown `backend` is 400. `context` holds at most one
   `ReviewFindings { reviewedHead, findings }`: the findings the person is looking at. Findings live in

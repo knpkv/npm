@@ -5,7 +5,8 @@ import {
   RelayDecisionNotPending,
   type RelayEvent,
   type RelayHarnessService,
-  RelayRunNotActive
+  RelayRunNotActive,
+  RelayStoreFailed
 } from "@knpkv/relay"
 import { Effect, Fiber, FileSystem, Layer, Path, Ref, Stream } from "effect"
 import { Etag, HttpPlatform } from "effect/http"
@@ -38,11 +39,15 @@ const fakeHarness = (sent: Ref.Ref<ReadonlyArray<string>>): RelayHarnessService 
         ...(options?.context ?? []).map((context) => `${context.label}\n${context.body}`)
       ]),
   events: () => Stream.concat(Stream.make(snapshot), Stream.never),
-  decide: (callId) =>
+  decide: (decided, callId) =>
     Effect.fail(
       new RelayDecisionNotPending({
         callId,
-        state: callId === "answered" ? { _tag: "Decided", allow: false } : { _tag: "Expired" }
+        state: decided.id !== ref.id
+          ? { _tag: "Unknown" }
+          : callId === "answered"
+          ? { _tag: "Decided", allow: false }
+          : { _tag: "Expired" }
       })
     ),
   cancel: (_ref, runId) => runId === "req-live" ? Effect.void : Effect.fail(new RelayRunNotActive({ runId })),
@@ -143,6 +148,11 @@ describe("/api/relay", () => {
           Effect.flip
         )
         expect(expired).toMatchObject({ state: { _tag: "Expired" } })
+        // A decision names its session: the same call id under another pull request finds nothing.
+        const elsewhere = yield* client.relay.decisions({
+          payload: { ref: { ...ref, id: "123456789012/us-east-1/payments/43" }, callId: "answered", allow: true }
+        }).pipe(Effect.flip)
+        expect(elsewhere).toMatchObject({ _tag: "RelayConflictError", state: { _tag: "Unknown" } })
       }))
 
     it.effect("reports the session's backend and every backend's status", () =>
@@ -170,6 +180,25 @@ describe("/api/relay", () => {
         const text = (yield* Fiber.join(frames)).join("")
         expect(text).toContain(`"_tag":"Snapshot"`)
         expect(text.trim().endsWith(`data: {"_tag":"Unauthorized"}`)).toBe(true)
+      }))
+  })
+
+  it.layer(relayLayer(Effect.succeed({
+    ...fakeHarness(Ref.makeUnsafe<ReadonlyArray<string>>([])),
+    events: () =>
+      Stream.concat(
+        Stream.make(snapshot),
+        Stream.fail(new RelayStoreFailed({ operation: "read the session", message: "disk I/O error at /home/me" }))
+      )
+  })))("when the session's events fail", (it) => {
+    it.effect("ends with StreamFailed, so the dock can tell a broken Relay from a dropped connection", () =>
+      Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(CodeCommitApi, ["relay"])
+        const response = yield* client.relay.events({ query: ref, responseMode: "response-only" })
+        const text = (yield* response.stream.pipe(Stream.decodeText(), Stream.runCollect)).join("")
+        expect(text).toContain(`"_tag":"Snapshot"`)
+        expect(text.trim().endsWith(`data: {"_tag":"StreamFailed"}`)).toBe(true)
+        expect(text).not.toContain("/home/me")
       }))
   })
 

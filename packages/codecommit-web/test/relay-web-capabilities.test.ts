@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, layer } from "@effect/vitest"
 import { describeCall, invoke } from "@knpkv/capability"
-import { CacheService, Domain, PRService, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
+import { CacheService, Domain, Errors, PRService, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { Effect, Exit, Layer, Option, Schema, Stream } from "effect"
 import { postLineComment, webCapabilities } from "../src/server/relay/RelayWebCapabilities.js"
 import { RelayFindingPublisher } from "../src/server/review/RelayFindingPublisher.js"
@@ -88,7 +88,10 @@ const readClient = (current: ReadClient.CodeCommitPullRequestRevision): ReadClie
 
 const posted: Array<Extract<ReviewClient.CodeCommitReviewAction, { readonly _tag: "comment" }>> = []
 
-const services = (current: ReadClient.CodeCommitPullRequestRevision) =>
+const services = (
+  current: ReadClient.CodeCommitPullRequestRevision,
+  post?: RelayFindingPublisher["Service"]["post"]
+) =>
   Layer.mergeAll(
     Layer.mock(CacheService.PullRequestRepo, {
       findByCoordinates: () =>
@@ -96,11 +99,11 @@ const services = (current: ReadClient.CodeCommitPullRequestRevision) =>
     }),
     Layer.succeed(ReadClient.CodeCommitReadClient, readClient(current)),
     Layer.succeed(RelayFindingPublisher, {
-      post: (action) =>
+      post: post ?? ((action) =>
         Effect.sync(() => {
           posted.push(action)
           return new ReviewClient.CodeCommitReviewReceipt({ operationId: "comment:9", summary: "Comment posted" })
-        })
+        }))
     }),
     NodeServices.layer
   )
@@ -174,3 +177,32 @@ layer(services(new ReadClient.CodeCommitPullRequestRevision({ ...revision, revis
       }))
   }
 )
+
+const refusedBy = (reason: "denied" | "timeout") => () =>
+  Effect.fail(
+    new Errors.AwsApiError({
+      operation: "postPullRequestComment",
+      profile: Domain.AwsProfileName.make("production"),
+      region: Domain.AwsRegion.make("eu-west-1"),
+      cause: new Errors.PermissionDeniedError({ operation: "postPullRequestComment", reason })
+    })
+  )
+
+layer(services(revision, refusedBy("denied")))("when the person's permission settings refuse the comment", (it) => {
+  it.effect("reports it as not permitted, never as something to try again", () =>
+    Effect.gen(function*() {
+      const exit = yield* Effect.exit(invoke(webCapabilities.postLineComment, lineComment(1)))
+      expect(exit).toMatchObject(Exit.fail({ _tag: "CapabilityFailed", tag: "CommentNotPermitted" }))
+      expect(JSON.stringify(exit)).toContain("Do not retry")
+      expect(JSON.stringify(exit)).not.toContain("Try again")
+    }))
+})
+
+layer(services(revision, refusedBy("timeout")))("when nobody answers the permission prompt", (it) => {
+  it.effect("says the prompt went unanswered, still not as something to try again", () =>
+    Effect.gen(function*() {
+      const exit = yield* Effect.exit(invoke(webCapabilities.postLineComment, lineComment(1)))
+      expect(exit).toMatchObject(Exit.fail({ _tag: "CapabilityFailed", tag: "CommentNotPermitted" }))
+      expect(JSON.stringify(exit)).toContain("Nobody answered the permission prompt")
+    }))
+})

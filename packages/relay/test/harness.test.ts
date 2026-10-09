@@ -200,7 +200,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
           relay.events(pr),
           relay.send(pr, "Comment LGTM", "req-2"),
           (event) =>
-            event._tag === "ConfirmationRequired" ? relay.decide(event.call, false).pipe(Effect.orDie) : Effect.void
+            event._tag === "ConfirmationRequired" ? relay.decide(pr, event.call, false).pipe(Effect.orDie) : Effect.void
         )
         const confirmation = events.find((event) => event._tag === "ConfirmationRequired")
         expect(confirmation).toMatchObject({
@@ -224,7 +224,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
             ? Effect.sync(() =>
               atCard.push([...commentCalls])
             ).pipe(
-              Effect.andThen(relay.decide(event.call, true).pipe(Effect.orDie))
+              Effect.andThen(relay.decide(pr, event.call, true).pipe(Effect.orDie))
             )
             : Effect.void)
         expect(atCard).toEqual([[]])
@@ -239,7 +239,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         const model = toolThenAnswer("run_shell", { cmd: "rm -rf /" }, prompts)
         const relay = yield* relayIn(harnessLayer(model.layer, store))
         const events = yield* sendAndCollect(relay.events(pr), relay.send(pr, "Clean up", "req-host"), (event) =>
-          event._tag === "ConfirmationRequired" ? relay.decide(event.call, true).pipe(Effect.orDie) : Effect.void)
+          event._tag === "ConfirmationRequired" ? relay.decide(pr, event.call, true).pipe(Effect.orDie) : Effect.void)
         expect(events.map((event) =>
           event._tag
         )).not.toContain("ConfirmationRequired")
@@ -263,7 +263,9 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
             relay.events(pr),
             relay.send(pr, "Comment nothing", "req-invalid"),
             (event) =>
-              event._tag === "ConfirmationRequired" ? relay.decide(event.call, true).pipe(Effect.orDie) : Effect.void
+              event._tag === "ConfirmationRequired"
+                ? relay.decide(pr, event.call, true).pipe(Effect.orDie)
+                : Effect.void
           )
           expect(events.map((event) => event._tag)).not.toContain("ConfirmationRequired")
           expect(prompts.at(-1)).toContain("post_non_empty got invalid arguments, so nobody was asked")
@@ -288,7 +290,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         // Second dock: its Snapshot is followed by the same confirmation; answering it finishes the run.
         const second = yield* relay.events(pr).pipe(
           Stream.tap((event) =>
-            event._tag === "ConfirmationRequired" ? relay.decide(event.call, true).pipe(Effect.orDie) : Effect.void
+            event._tag === "ConfirmationRequired" ? relay.decide(pr, event.call, true).pipe(Effect.orDie) : Effect.void
           ),
           Stream.takeUntil((event) => event._tag === "RunFinished"),
           Stream.runCollect
@@ -433,8 +435,10 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         expect(commentCalls).toEqual([])
         // The card went away with its run: a late answer learns it expired, and a finished run can't be cancelled.
         const card = events.find((event) => event._tag === "ConfirmationRequired")
-        const late = yield* relay.decide(card?._tag === "ConfirmationRequired" ? card.call : "", true).pipe(Effect.flip)
-        expect(late.state).toEqual({ _tag: "Expired" })
+        const late = yield* relay.decide(pr, card?._tag === "ConfirmationRequired" ? card.call : "", true).pipe(
+          Effect.flip
+        )
+        expect(late).toMatchObject({ _tag: "RelayDecisionNotPending", state: { _tag: "Expired" } })
         const again = yield* relay.cancel(pr, "req-cancel").pipe(Effect.flip)
         expect(again).toMatchObject({ _tag: "RelayRunNotActive", runId: "req-cancel" })
         const reconnect = yield* relay.events(pr).pipe(Stream.take(1), Stream.runCollect)
@@ -508,7 +512,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
           relay.events(pr),
           relay.send(pr, "Comment Ship it", "req-receipt"),
           (event) =>
-            event._tag === "ConfirmationRequired" ? relay.decide(event.call, true).pipe(Effect.orDie) : Effect.void
+            event._tag === "ConfirmationRequired" ? relay.decide(pr, event.call, true).pipe(Effect.orDie) : Effect.void
         )
         expect(events.find((event) => event._tag === "RunStarted")).toMatchObject({ runIds: ["req-receipt"] })
         expect(events.find((event) => event._tag === "ConfirmationResolved")).toMatchObject({ decision: "confirmed" })
@@ -562,15 +566,40 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
           (event) =>
             event._tag === "ConfirmationRequired"
               ? Effect.sync(() => answered.push(event.call)).pipe(
-                Effect.andThen(relay.decide(event.call, false)),
+                Effect.andThen(relay.decide(pr, event.call, false)),
                 Effect.orDie
               )
               : Effect.void
         )
-        const repeated = yield* relay.decide(answered[0] ?? "", true).pipe(Effect.flip)
-        expect(repeated.state).toEqual({ _tag: "Decided", allow: false })
-        const unknown = yield* relay.decide("never-asked", true).pipe(Effect.flip)
-        expect(unknown.state).toEqual({ _tag: "Unknown" })
+        const repeated = yield* relay.decide(pr, answered[0] ?? "", true).pipe(Effect.flip)
+        expect(repeated).toMatchObject({ _tag: "RelayDecisionNotPending", state: { _tag: "Decided", allow: false } })
+        const unknown = yield* relay.decide(pr, "never-asked", true).pipe(Effect.flip)
+        expect(unknown).toMatchObject({ _tag: "RelayDecisionNotPending", state: { _tag: "Unknown" } })
+        expect(commentCalls).toEqual([])
+      }).pipe(Effect.scoped))
+
+    it.effect("answers a confirmation only from the session that raised it", () =>
+      Effect.gen(function*() {
+        commentCalls.length = 0
+        const store = yield* tempStore
+        const model = toolThenAnswer("post_comment", { pr: "42", body: "LGTM" })
+        const relay = yield* relayIn(harnessLayer(model.layer, store))
+        const otherPr = ObjectRef.make({ product: "codecommit", kind: "pull-request", id: "acct/repo/43" })
+        const fromOther: Array<unknown> = []
+        yield* sendAndCollect(
+          relay.events(pr),
+          relay.send(pr, "Comment LGTM", "req-scoped"),
+          (event) =>
+            event._tag === "ConfirmationRequired"
+              ? relay.decide(otherPr, event.call, true).pipe(
+                Effect.flip,
+                Effect.tap((refused) => Effect.sync(() => fromOther.push(refused))),
+                Effect.andThen(relay.decide(pr, event.call, false)),
+                Effect.orDie
+              )
+              : Effect.void
+        )
+        expect(fromOther).toMatchObject([{ _tag: "RelayDecisionNotPending", state: { _tag: "Unknown" } }])
         expect(commentCalls).toEqual([])
       }).pipe(Effect.scoped))
   })

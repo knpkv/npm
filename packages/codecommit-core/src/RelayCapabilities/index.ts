@@ -31,6 +31,7 @@ import {
   ApprovalUnknownTag,
   PullRequestStatus
 } from "../Domain.js"
+import { PermissionDeniedError } from "../Errors.js"
 import { CachedPRToPullRequest } from "../PRService/internal.js"
 import { enabledProfiles } from "../PRService/visibility.js"
 import { CodeCommitReadAccount, CodeCommitReadClient } from "../ReadClient/index.js"
@@ -82,6 +83,31 @@ export class CodeCommitUnavailable extends Schema.TaggedError<CodeCommitUnavaila
   message: Schema.String,
   fix: Schema.String
 }) {}
+
+/**
+ * The person's own permission settings refused the comment: a rule set to deny, a declined prompt, or a prompt
+ * nobody answered. The model must not retry it unasked, since every retry asks the person again.
+ */
+export class CommentNotPermitted extends Schema.TaggedError<CommentNotPermitted>()("CommentNotPermitted", {
+  message: Schema.String,
+  fix: Schema.String
+}) {}
+
+const isPermissionDenied = Schema.is(PermissionDeniedError)
+
+/**
+ * A post the permission gate refused, or `undefined` for any other failure. Gated posters report a refusal as
+ * `AwsApiError` caused by `PermissionDeniedError`.
+ */
+export const commentNotPermitted = (error: CodeCommitReviewError): CommentNotPermitted | undefined => {
+  if (error._tag !== "AwsApiError" || !isPermissionDenied(error.cause)) return undefined
+  return new CommentNotPermitted({
+    message: error.cause.reason === "timeout"
+      ? "Nobody answered the permission prompt for this comment, so it was not posted."
+      : "The person's permission settings declined this comment, so it was not posted.",
+    fix: "Do not retry unless the person asks."
+  })
+}
 
 const refreshFix = "Refresh the pull-request queue, or check the account is enabled in Settings."
 
@@ -255,7 +281,7 @@ export const postComment = defineContract({
     content: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(10_000))
   }),
   output: Schema.Struct({ pullRequest: PullRequestCoordinates, operationId: Schema.String, summary: Schema.String }),
-  failure: Schema.Union([PullRequestNotCached, CodeCommitUnavailable]),
+  failure: Schema.Union([PullRequestNotCached, CodeCommitUnavailable, CommentNotPermitted]),
   cites: (output) => [pullRequestRef(output.pullRequest)]
 })
 
@@ -332,7 +358,9 @@ export const capabilities = {
         },
         content: input.content,
         clientRequestToken: yield* commentToken(revision.revisionId, input.content)
-      }).pipe(Effect.mapError(providerUnavailable("posting the comment")))
+      }).pipe(
+        Effect.mapError((error) => commentNotPermitted(error) ?? providerUnavailable("posting the comment")(error))
+      )
       return { pullRequest: input.pullRequest, operationId: receipt.operationId, summary: receipt.summary }
     }))
 }

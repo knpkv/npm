@@ -6,7 +6,8 @@
  * - **The stream is the dock's only source of truth.** `events` sends a Snapshot first, then each change,
  *   as `data: <RelayEvent JSON>` frames. Every 15 seconds a `: hb` comment re-checks the owner session; once
  *   it no longer holds, the stream sends `data: {"_tag":"Unauthorized"}` and ends, so the dock re-pairs
- *   instead of waiting on a dead stream.
+ *   instead of waiting on a dead stream. If the session's events fail, it sends `data: {"_tag":"StreamFailed"}`
+ *   and ends; the cause is logged here, never sent.
  * - **Writes answer with what happened, not just OK.** `messages` is 202 with the `runId` the run's events
  *   carry; `cancel` and `decisions` are 204, or 409 with the state they found (`NotRunning`, `Decided`,
  *   `Expired`, `Unknown`).
@@ -27,6 +28,7 @@ const encoder = new TextEncoder()
 const encodeEvent = Schema.encodeEffect(Schema.fromJsonString(RelayEvent))
 const heartbeat = encoder.encode(": hb\n\n")
 const unauthorized = encoder.encode(`data: ${JSON.stringify({ _tag: "Unauthorized" })}\n\n`)
+const streamFailed = encoder.encode(`data: ${JSON.stringify({ _tag: "StreamFailed" })}\n\n`)
 
 /**
  * A findings set as the model reads it: which head it was reviewed at, then each finding as JSON. The
@@ -52,12 +54,12 @@ export const RelayLive = HttpApiBuilder.group(CodeCommitApi, "relay", (handlers)
       .handleRaw("events", ({ query, request }) =>
         Effect.gen(function*() {
           const relay = yield* mount.harness
-          const credential = request.cookies["cc_owner"] ?? ""
+          const credential = request.cookies[session.cookieName] ?? ""
           const events = relay.events(query).pipe(
             Stream.mapEffect((event) => Effect.orDie(encodeEvent(event))),
             Stream.map((json) => encoder.encode(`data: ${json}\n\n`)),
             Stream.catch((failure) =>
-              Stream.fromEffect(Effect.logWarning("Relay event stream failed", failure)).pipe(Stream.drain)
+              Stream.fromEffect(Effect.logWarning("Relay event stream failed", failure).pipe(Effect.as(streamFailed)))
             )
           )
           // The session is re-checked on the heartbeat; the stream ends after telling the dock it expired.
@@ -111,8 +113,11 @@ export const RelayLive = HttpApiBuilder.group(CodeCommitApi, "relay", (handlers)
       .handle("decisions", ({ payload }) =>
         Effect.gen(function*() {
           const relay = yield* mount.harness
-          yield* relay.decide(payload.callId, payload.allow).pipe(
-            Effect.catchTag("RelayDecisionNotPending", ({ state }) => Effect.fail(new RelayConflictError({ state })))
+          yield* relay.decide(payload.ref, payload.callId, payload.allow).pipe(
+            Effect.catchTags({
+              RelayDecisionNotPending: ({ state }) => Effect.fail(new RelayConflictError({ state })),
+              RelayStoreFailed: (failure) => Effect.fail(storeFailed(failure))
+            })
           )
         }))
       .handle("session", ({ query }) =>

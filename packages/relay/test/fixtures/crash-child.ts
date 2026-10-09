@@ -63,7 +63,7 @@ const program = (phase: "run" | "resume") =>
     const events = relay.events(pr).pipe(
       Stream.tap((
         event
-      ) => (event._tag === "ConfirmationRequired" ? Effect.orDie(relay.decide(event.call, true)) : Effect.void)),
+      ) => (event._tag === "ConfirmationRequired" ? Effect.orDie(relay.decide(pr, event.call, true)) : Effect.void)),
       Stream.tap((event) => Console.log(JSON.stringify(event)))
     )
     if (phase === "run") {

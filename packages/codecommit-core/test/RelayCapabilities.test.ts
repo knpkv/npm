@@ -6,7 +6,7 @@ import { CachedPullRequest, PullRequestRepo } from "../src/CacheService/repos/Pu
 import { ConfigService } from "../src/ConfigService/index.js"
 import { TuiConfig } from "../src/ConfigService/internal.js"
 import { AwsProfileName, AwsRegion } from "../src/Domain.js"
-import { AwsCredentialError } from "../src/Errors.js"
+import { AwsApiError, AwsCredentialError, AwsThrottleError, PermissionDeniedError } from "../src/Errors.js"
 import { CodeCommitPullRequestRevision, CodeCommitReadClient } from "../src/ReadClient/index.js"
 import {
   capabilities,
@@ -100,6 +100,7 @@ const posted: Array<PullRequestCommentAction> = []
 const services = (options: {
   readonly load?: ConfigService["Service"]["load"]
   readonly getPullRequest?: CodeCommitReadClient["Service"]["getPullRequest"]
+  readonly post?: PullRequestCommentPoster["Service"]["post"]
 } = {}) =>
   Layer.mergeAll(
     Layer.mock(PullRequestRepo, {
@@ -116,11 +117,11 @@ const services = (options: {
         Effect.succeed(revision))
     }),
     Layer.mock(PullRequestCommentPoster, {
-      post: (action) =>
+      post: options.post ?? ((action) =>
         Effect.sync(() => {
           posted.push(action)
           return new CodeCommitReviewReceipt({ operationId: "comment:c-1", summary: "Pull request comment posted" })
-        })
+        }))
     }),
     NodeServices.layer
   )
@@ -231,6 +232,43 @@ describe("when CodeCommit or the config can't answer", () => {
         const exit = yield* Effect.exit(invoke(postCommentCapability, { pullRequest: pr42, content: "Hi" }))
         expect(JSON.stringify(exit)).toContain("aws sso login --profile work")
         expect(posted).toEqual([])
+      }))
+  })
+
+  const work = { profile: AwsProfileName.make("work"), region: AwsRegion.make("us-east-1") }
+
+  layer(services({
+    post: () =>
+      Effect.fail(
+        new AwsApiError({
+          operation: "postPullRequestComment",
+          ...work,
+          cause: new PermissionDeniedError({ operation: "postPullRequestComment", reason: "denied" })
+        })
+      )
+  }))((it) => {
+    it.effect("reports a comment the person's permission settings refused as not permitted, never as retryable", () =>
+      Effect.gen(function*() {
+        const exit = yield* Effect.exit(invoke(postCommentCapability, { pullRequest: pr42, content: "Hi" }))
+        expect(exit).toMatchObject(Exit.fail({ _tag: "CapabilityFailed", tag: "CommentNotPermitted" }))
+        expect(JSON.stringify(exit)).toContain("Do not retry")
+        expect(JSON.stringify(exit)).not.toContain("Try again")
+      }))
+  })
+
+  layer(
+    services({
+      post: () =>
+        Effect.fail(
+          new AwsThrottleError({ operation: "postPullRequestComment", retryCount: 3, cause: "rate exceeded" })
+        )
+    })
+  )((it) => {
+    it.effect("still reports a throttled post as CodeCommit being unavailable", () =>
+      Effect.gen(function*() {
+        const exit = yield* Effect.exit(invoke(postCommentCapability, { pullRequest: pr42, content: "Hi" }))
+        expect(exit).toMatchObject(Exit.fail({ _tag: "CapabilityFailed", tag: "CodeCommitUnavailable" }))
+        expect(JSON.stringify(exit)).toContain("throttled")
       }))
   })
 })

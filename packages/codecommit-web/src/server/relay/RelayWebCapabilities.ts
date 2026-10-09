@@ -16,13 +16,20 @@
  * @module
  */
 import { defineContract, implement } from "@knpkv/capability"
-import { CacheService, PRService, ReadClient, RelayCapabilities } from "@knpkv/codecommit-core"
+import { CacheService, Errors, PRService, ReadClient, RelayCapabilities } from "@knpkv/codecommit-core"
 import { Effect, Option, Schema } from "effect"
 import { loadPullRequestDiff, postPullRequestLineComment } from "../review/PullRequestReview.js"
 import type { PullRequestReviewError } from "../review/PullRequestReview.js"
 import { RelayFindingPublisher } from "../review/RelayFindingPublisher.js"
 
-const { CodeCommitUnavailable, PullRequestCoordinates, PullRequestNotCached, pullRequestRef } = RelayCapabilities
+const {
+  CodeCommitUnavailable,
+  CommentNotPermitted,
+  PullRequestCoordinates,
+  PullRequestNotCached,
+  commentNotPermitted,
+  pullRequestRef
+} = RelayCapabilities
 
 /** The pull request moved to a newer head since the comment was written against it. */
 export class ReviewHeadMoved extends Schema.TaggedError<ReviewHeadMoved>()("ReviewHeadMoved", {
@@ -98,9 +105,17 @@ export const postLineComment = defineContract({
     content: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(10_000))
   }),
   output: Schema.Struct({ pullRequest: PullRequestCoordinates, operationId: Schema.String, summary: Schema.String }),
-  failure: Schema.Union([PullRequestNotCached, ReviewHeadMoved, CommentLineOutsidePatch, CodeCommitUnavailable]),
+  failure: Schema.Union([
+    PullRequestNotCached,
+    ReviewHeadMoved,
+    CommentLineOutsidePatch,
+    CommentNotPermitted,
+    CodeCommitUnavailable
+  ]),
   cites: (output) => [pullRequestRef(output.pullRequest)]
 })
+
+const isAwsApiError = Schema.is(Errors.AwsApiError)
 
 const decodePullRequest = Schema.decodeEffect(PRService.CachedPRToPullRequest)
 
@@ -136,7 +151,10 @@ const unavailable = (error: PullRequestReviewError) =>
     fix: "Try again; if it repeats, open the pull request in the AWS console."
   })
 
-/** A review-machinery failure as the model reads it: the two it can act on are typed, the rest unavailable. */
+/**
+ * A review-machinery failure as the model reads it: a moved head, an anchor outside the patch and a refused
+ * post are typed, the rest unavailable.
+ */
 const reviewFailure = (error: PullRequestReviewError) => {
   switch (error.operation) {
     case "revision-changed":
@@ -149,6 +167,9 @@ const reviewFailure = (error: PullRequestReviewError) => {
         message: error.message,
         fix: "Pick a line inside the changes, or post a top-level comment instead."
       })
+    case "line-comment":
+      // The publisher's failure rides as the cause; only its permission refusal is typed for the model.
+      return (isAwsApiError(error.cause) ? commentNotPermitted(error.cause) : undefined) ?? unavailable(error)
     default:
       return unavailable(error)
   }
