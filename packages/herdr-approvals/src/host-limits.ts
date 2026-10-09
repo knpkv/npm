@@ -10,13 +10,11 @@ import { collectBoundedText } from "@knpkv/bounded-io"
 import { decodeLimitsTolerantly, type HostLimits, limitsUnavailable, RawLimits, readingOf } from "@knpkv/herdr-connect"
 import { Clock, Duration, Effect, Ref, Result, Schema, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import { CommandFailed, reportFailure } from "./agent-usage-failure.js"
 
 /** agent-usage's answer is a few KiB; anything near this is not it. */
 export const hostLimitsOutputMaxBytes = 256 * 1024
 export const hostLimitsTimeout = "10 seconds"
-
-/** agent-usage exited nonzero, or printed more than the reader allows; `detail` is its stderr or why. */
-export class CommandFailed extends Schema.TaggedError<CommandFailed>()("CommandFailed", { detail: Schema.String }) {}
 
 const decodeRawLimits = Schema.decodeUnknownResult(Schema.fromJsonString(RawLimits))
 
@@ -36,6 +34,7 @@ export const runCommand = Effect.fn("HostLimits.run")(function*(
       }, { concurrency: "unbounded" })
       if (Number(exitCode) !== 0) {
         return yield* new CommandFailed({
+          kind: "exit",
           detail: stderr.trim() === "" ? `exited with code ${String(exitCode)}` : stderr
         })
       }
@@ -43,9 +42,12 @@ export const runCommand = Effect.fn("HostLimits.run")(function*(
     })
   ).pipe(
     Effect.catchTags({
-      ByteLimitExceeded: () => Effect.fail(new CommandFailed({ detail: "output over the size limit" }))
+      ByteLimitExceeded: () =>
+        Effect.fail(new CommandFailed({ kind: "too_large", detail: "output over the size limit" }))
     }),
-    Effect.mapError((error) => error._tag === "CommandFailed" ? error : new CommandFailed({ detail: String(error) }))
+    Effect.mapError((error) =>
+      error._tag === "CommandFailed" ? error : new CommandFailed({ kind: "spawn", detail: String(error) })
+    )
   )
 })
 
@@ -69,8 +71,12 @@ const readReading = (command: ReadonlyArray<string> | undefined): Effect.Effect<
       // A newer agent-usage may add sources or reasons: what this hostd can't read is skipped and counted.
       return readingOf(decodeLimitsTolerantly(json.success))
     }),
-    // agent-usage explains its own failures in one sentence on stderr ("is not running", "older version").
-    Effect.catchTag("CommandFailed", ({ detail }) => Effect.succeed(limitsUnavailable("failed", detail)))
+    // agent-usage's own sentence can name host paths: it is logged here, and a fixed sentence leaves.
+    Effect.catchTag(
+      "CommandFailed",
+      (failure) =>
+        Effect.map(reportFailure("Connect limits", failure), (sentence) => limitsUnavailable("failed", sentence))
+    )
   )
 }
 

@@ -140,6 +140,7 @@ export const readingOf = (read: TolerantLimits, alreadySkipped = 0): HostLimits[
     case "UnsupportedVersion":
       return limitsUnavailable("unsupported_version", `limits format v${read.version}; this reader knows v1`)
     case "Invalid":
-      return limitsUnavailable("invalid_output", read.detail)
+      // The decode error quotes what was printed, which may name host paths: it never leaves as is.
+      return limitsUnavailable("invalid_output", "agent-usage printed limits this version could not read.")
   }
 }

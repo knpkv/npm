@@ -134,6 +134,7 @@ export const usageReadingOf = (read: TolerantUsage, alreadySkipped = 0): HostUsa
     case "UnsupportedVersion":
       return usageUnavailable("unsupported_version", `usage format v${read.version}; this reader knows v1`)
     case "Invalid":
-      return usageUnavailable("invalid_output", read.detail)
+      // The decode error quotes what was printed, which may name host paths: it never leaves as is.
+      return usageUnavailable("invalid_output", "agent-usage printed usage this version could not read.")
   }
 }

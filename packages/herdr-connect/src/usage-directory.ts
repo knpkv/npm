@@ -36,8 +36,11 @@ export interface PeerUsageTarget {
 /** A month of daily token cells and bounded limit series is well under this; anything larger is not agent-usage. */
 export const usageResponseMaxBytes = 2 * 1024 * 1024
 
-// Longer than limits' 1.5 s: a 30-day read scans a month of the peer's store.
-const peerUsageTimeoutMs = 5_000
+/**
+ * How long the hub waits for a peer: longer than the peer's own 20-second cold read (a 30-day scan
+ * of its store), so the first ask for a range and zone gets the read rather than a timeout.
+ */
+export const peerUsageTimeoutMs = 25_000
 
 /** The `/local` URL for one query. */
 export const peerUsageUrl = (base: string, query: UsageQuery): string => {

@@ -20,8 +20,9 @@ import {
   usageResponseMaxBytes,
   usageUnavailable
 } from "@knpkv/herdr-connect"
-import { Clock, Duration, Effect, Result, Schema, Scope } from "effect"
+import { Clock, Duration, Effect, Result, Schema, Scope, Semaphore, SynchronizedRef } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
+import { reportFailure } from "./agent-usage-failure.js"
 import { runCommand, type StaleWhileRevalidate, staleWhileRevalidate } from "./host-limits.js"
 
 // A 30-day read scans a month of the store; give it longer than limits' 10 seconds.
@@ -70,8 +71,11 @@ const readReading = (
       }
       return usageReadingOf(decodeUsageTolerantly(json.success))
     }),
-    // agent-usage explains its own failures in one sentence on stderr ("older version without usage").
-    Effect.catchTag("CommandFailed", ({ detail }) => Effect.succeed(usageUnavailable("failed", detail)))
+    // agent-usage's own sentence can name host paths: it is logged here, and a fixed sentence leaves.
+    Effect.catchTag(
+      "CommandFailed",
+      (failure) => Effect.map(reportFailure("Usage tab", failure), (sentence) => usageUnavailable("failed", sentence))
+    )
   )
 }
 
@@ -89,9 +93,15 @@ export const readHostUsage = Effect.fn("HostUsage.read")(function*(
   return { host, readAt: yield* Clock.currentTimeMillis, reading } satisfies HostUsage
 })
 
+/** At most this many agent-usage reads run at once across every range and zone. */
+export const hostUsageConcurrentReads = 2
+
 /**
  * One {@link staleWhileRevalidate} per range and zone, at most {@link hostUsageCacheEntries} of
- * them: a new pair beyond that drops the least recently asked one. Refreshes live in `scope`.
+ * them: a new pair beyond that drops the least recently asked one. Finding or creating a pair's
+ * entry is atomic, so concurrent first asks share one read; and at most
+ * {@link hostUsageConcurrentReads} reads run at once, so a burst of new pairs queues rather than
+ * starting a command each. Refreshes live in `scope`.
  */
 export const usageCache = Effect.fn("HostUsage.cache")(function*(
   read: (query: UsageQuery) => Effect.Effect<HostUsage>,
@@ -99,23 +109,30 @@ export const usageCache = Effect.fn("HostUsage.cache")(function*(
   entries: number = hostUsageCacheEntries
 ) {
   const scope: Scope.Scope = yield* Effect.scope
-  const caches = new Map<string, StaleWhileRevalidate<HostUsage>>()
-  return (query: UsageQuery): Effect.Effect<HostUsage> =>
-    Effect.gen(function*() {
-      const key = `${query.range} ${query.timeZone}`
-      const known = caches.get(key)
-      // Re-inserted on every ask, so the Map's order is least recently asked first.
-      caches.delete(key)
-      const cache = known ?? (yield* staleWhileRevalidate(read(query), ttl).pipe(Effect.provideService(
-        Scope.Scope,
-        scope
-      )))
-      caches.set(key, cache)
-      while (caches.size > entries) {
-        const oldest = caches.keys().next().value
-        if (oldest === undefined) break
-        caches.delete(oldest)
-      }
-      return yield* cache.read
-    })
+  const reads = yield* Semaphore.make(hostUsageConcurrentReads)
+  const caches = yield* SynchronizedRef.make(new Map<string, StaleWhileRevalidate<HostUsage>>())
+  const entryFor = (query: UsageQuery) =>
+    SynchronizedRef.modifyEffect(caches, (current) =>
+      Effect.gen(function*() {
+        const key = `${query.range} ${query.timeZone}`
+        const next = new Map(current)
+        const known = next.get(key)
+        // Re-inserted on every ask, so the Map's order is least recently asked first.
+        next.delete(key)
+        const cache = known ?? (yield* staleWhileRevalidate(reads.withPermits(1)(read(query)), ttl).pipe(
+          Effect.provideService(Scope.Scope, scope)
+        ))
+        next.set(key, cache)
+        while (next.size > entries) {
+          const oldest = next.keys().next().value
+          if (oldest === undefined) break
+          next.delete(oldest)
+        }
+        const updated: readonly [StaleWhileRevalidate<HostUsage>, Map<string, StaleWhileRevalidate<HostUsage>>] = [
+          cache,
+          next
+        ]
+        return updated
+      }))
+  return (query: UsageQuery): Effect.Effect<HostUsage> => Effect.flatMap(entryFor(query), (cache) => cache.read)
 })
