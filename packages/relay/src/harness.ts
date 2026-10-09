@@ -70,6 +70,15 @@ export class RelayStoreLocked extends Schema.TaggedError<RelayStoreLocked>()("Re
   message: Schema.String
 }) {}
 
+/**
+ * The store directory or database is a symbolic link. Relay refuses it rather than re-permission and
+ * write conversation content wherever the link points.
+ */
+export class RelayStoreLinked extends Schema.TaggedError<RelayStoreLinked>()("RelayStoreLinked", {
+  path: Schema.String,
+  message: Schema.String
+}) {}
+
 /** The Relay store could not be opened or read. `message` names the operation and the fix. */
 export class RelayStoreFailed extends Schema.TaggedError<RelayStoreFailed>()("RelayStoreFailed", {
   operation: Schema.String,
@@ -189,6 +198,12 @@ const promise = <A>(operation: string, run: () => Promise<A>) =>
     catch: (cause) => new RelayStoreFailed({ operation, message: `${operation} failed: ${String(cause)}` })
   })
 
+/** `readLink` fails with NotFound for a missing path and EINVAL for a path that exists but is not a link. */
+const notALink = (error: PlatformError): boolean =>
+  error.reason._tag === "NotFound" ||
+  (error.reason._tag !== "BadArgument" && Predicate.hasProperty(error.reason.cause, "code") &&
+    error.reason.cause.code === "EINVAL")
+
 const openStore = (path: string) =>
   Effect.acquireRelease(
     Effect.gen(function*() {
@@ -199,10 +214,40 @@ const openStore = (path: string) =>
         Effect.mapError((cause: PlatformError) =>
           new RelayStoreFailed({ operation, message: `${operation} failed: ${cause.message}` })
         )
-      yield* fs.makeDirectory(paths.dirname(path), { recursive: true, mode: 0o700 }).pipe(
+      const directory = paths.dirname(path)
+      // chmod and SQLite follow links, so neither the directory, the database nor SQLite's sidecar files may
+      // be one: a link would have Relay re-permission and write conversation content wherever it points.
+      // Parent components may be links (a linked home directory is common); only the store's own names are
+      // checked, the directory before it is created so a dangling link is reported as a link.
+      const refuseLink = (target: string, what: string) =>
+        fs.readLink(target).pipe(
+          Effect.matchEffect({
+            onFailure: (error) =>
+              notALink(error)
+                ? Effect.void
+                : Effect.fail(
+                  new RelayStoreFailed({
+                    operation: "check the Relay store",
+                    message: `check the Relay store failed: ${error.message}`
+                  })
+                ),
+            onSuccess: (destination) =>
+              Effect.fail(
+                new RelayStoreLinked({
+                  path: target,
+                  message: `The Relay ${what} ${target} is a link to ${destination}. Replace it with a real ${what}.`
+                })
+              )
+          })
+        )
+      yield* refuseLink(directory, "store directory")
+      yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
         ownerOnly("create the Relay store directory")
       )
-      yield* fs.chmod(paths.dirname(path), 0o700).pipe(ownerOnly("restrict the Relay store directory"))
+      yield* Effect.forEach([path, `${path}-wal`, `${path}-shm`], (file) => refuseLink(file, "store"), {
+        discard: true
+      })
+      yield* fs.chmod(directory, 0o700).pipe(ownerOnly("restrict the Relay store directory"))
       const client = createClient({ url: `file:${path}` })
       const database = libsqlDatabase(client)
       yield* promise("open the Relay store", async () => {

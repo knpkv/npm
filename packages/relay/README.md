@@ -70,6 +70,8 @@ const RelayLive = Layer.unwrap(
 ## Security boundaries
 
 - The session store holds conversation content. Its directory is created `0700` and the database `0600`;
+  a store directory, database or SQLite sidecar (`-wal`, `-shm`) that is a symbolic link, even a dangling one, fails with `RelayStoreLinked` before anything is
+  re-permissioned or written;
   it is never logged, never sent to telemetry, and never served on unauthenticated routes.
 - One process owns a store: the connection runs in SQLite's exclusive locking mode, so a second owner fails
   with `RelayStoreLocked`, and the lock is released by the OS if the owner dies.
