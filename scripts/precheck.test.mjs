@@ -15,7 +15,7 @@ const eslintPartitions = ["lint:eslint:control-center", "lint:eslint:workspace"]
 
 const plan = (overrides) =>
   planPrecheck({
-    base: undefined,
+    base: { commit: "fork123", kind: "fork" },
     eslintPartitions,
     files: [],
     matchesGlob,
@@ -101,17 +101,27 @@ test("each touched package runs its own check, a deleted file included", () => {
 
 test("repository checks always close the run, with their bases pinned only when precheck pinned one", () => {
   const tail = ["debt ledger", "changed Effect diagnostics", "changeset coverage", "rly stripes"]
-  const unpinned = plan({ files: ["README.md"] })
-  assert.deepEqual(labels(unpinned).slice(-4), tail)
-  assert.deepEqual(unpinned.find((step) => step.label === "changeset coverage").env, {})
+  const env = (steps, label) => steps.find((step) => step.label === label).env
 
-  const pinned = plan({ files: ["README.md"], base: "abc123" })
+  const fork = plan({ files: ["README.md"] })
+  assert.deepEqual(labels(fork).slice(-4), tail)
+  assert.deepEqual(env(fork, "changeset coverage"), {})
+  assert.deepEqual(env(fork, "changed Effect diagnostics"), {})
+
+  const explicit = plan({ files: ["README.md"], base: { commit: "abc123", kind: "explicit" } })
   for (const label of ["changed Effect diagnostics", "changeset coverage"]) {
-    assert.deepEqual(pinned.find((step) => step.label === label).env, {
-      CHANGESET_COVERAGE_BASE: "abc123",
-      EFFECT_DIAGNOSTICS_BASE: "abc123"
-    })
+    assert.deepEqual(env(explicit, label), { CHANGESET_COVERAGE_BASE: "abc123", EFFECT_DIAGNOSTICS_BASE: "abc123" })
   }
+})
+
+// A pinned EFFECT_DIAGNOSTICS_BASE mid-merge became merge-base(HEAD, MERGE_HEAD), the old fork point: #608's merge
+// checked ~380 files of main's delta and failed on main's own diagnostics. The script reads MERGE_HEAD itself.
+test("during a merge only changeset coverage is pinned to the merge head", () => {
+  const merge = plan({ files: ["README.md"], base: { commit: "merge123", kind: "merge" } })
+  const env = (label) => merge.find((step) => step.label === label).env
+  assert.deepEqual(env("changeset coverage"), { CHANGESET_COVERAGE_BASE: "merge123" })
+  assert.deepEqual(env("changed Effect diagnostics"), { CHANGESET_COVERAGE_BASE: "merge123" })
+  assert.equal("EFFECT_DIAGNOSTICS_BASE" in env("changed Effect diagnostics"), false)
 })
 
 test("rule and script changes run their own tests", () => {

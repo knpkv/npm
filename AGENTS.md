@@ -300,8 +300,10 @@ Update a pushed branch by merging main in. Never rebase or force-push.
 4. Run `pnpm install`, then build the touched packages' workspace dependencies before typechecking
    (`pnpm --filter "<package>^..." build`). Never symlink another checkout's `dist`.
 5. Run `pnpm check:changed`.
-   - During a merge it compares against `MERGE_HEAD` and pins `CHANGESET_COVERAGE_BASE` and
-     `EFFECT_DIAGNOSTICS_BASE` to it.
+   - During a merge it compares against `MERGE_HEAD` and pins `CHANGESET_COVERAGE_BASE` to it.
+   - Leave `EFFECT_DIAGNOSTICS_BASE` unset during a merge: that script reads `MERGE_HEAD` itself. A pinned base
+     makes it diff from `merge-base(HEAD, base)`, the old fork point, so it checks every file main changed since
+     then.
    - A commit made by hand needs `CHANGESET_COVERAGE_BASE=$(cat "$(git rev-parse --git-dir)/MERGE_HEAD")`.
    - Rules main added since the branch forked run against the branch's own files here, not first in CI.
 6. Make the merge commit through the hook, push, and wait for CI. CI is green when the `Check` workflow run for the

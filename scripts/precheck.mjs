@@ -109,10 +109,24 @@ const scriptTestFor = (file, scriptTests) => {
 /**
  * The ordered steps for a change. Pure: `files` exist in the worktree, `touched` also holds deletions (they still
  * make a package's check run), `packages` maps a `packages/<dir>` prefix to its manifest name and whether it has a
- * `check` script, and `base` is set only when the comparison base must be pinned for the CI checks.
+ * `check` script, and `base` is the comparison base with how it was chosen (see `checkBases`).
  */
+/**
+ * The base environment for the two CI checks that diff against a base.
+ * - An explicit `--base` pins both.
+ * - During a merge only changeset coverage is pinned, to the merge head. Changed Effect diagnostics reads MERGE_HEAD
+ *   itself, and a pinned base would make it diff from merge-base(HEAD, MERGE_HEAD): the old fork point, so every file
+ *   main changed since then.
+ * - Against the fork point neither is pinned; both resolve it themselves.
+ */
+export const checkBases = (base) => {
+  if (base.kind === "explicit") return { CHANGESET_COVERAGE_BASE: base.commit, EFFECT_DIAGNOSTICS_BASE: base.commit }
+  if (base.kind === "merge") return { CHANGESET_COVERAGE_BASE: base.commit }
+  return {}
+}
+
 export const planPrecheck = ({ base, eslintPartitions, files, matchesGlob, packages, scriptTests, touched }) => {
-  const pinned = base === undefined ? {} : { CHANGESET_COVERAGE_BASE: base, EFFECT_DIAGNOSTICS_BASE: base }
+  const pinned = checkBases(base)
   const lintable = eslintPartitions
     .map((partition) => ({
       name: partition.name,
@@ -220,11 +234,11 @@ export const untrackedNotice = (untracked) =>
 /**
  * The comparison base: an explicit `--base`, else the pending merge head, else the fork point with origin/main.
  * Against the merge head the diff is the whole branch against the new main, so rules main added run on every file
- * the branch changed. Only the first two pin the CI checks' bases, which otherwise resolve the fork point themselves.
+ * the branch changed. `kind` says which, for `checkBases`.
  */
 const resolveBase = Effect.fn("Precheck.resolveBase")(function* (git, fs, explicit) {
   if (explicit !== undefined) {
-    return { commit: (yield* git(["rev-parse", "--verify", `${explicit}^{commit}`])).trim(), pinned: true }
+    return { commit: (yield* git(["rev-parse", "--verify", `${explicit}^{commit}`])).trim(), kind: "explicit" }
   }
   const mergeHeadPath = (yield* git(["rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD"])).trim()
   if (yield* fs.exists(mergeHeadPath)) {
@@ -232,9 +246,9 @@ const resolveBase = Effect.fn("Precheck.resolveBase")(function* (git, fs, explic
     if (heads.length !== 1) {
       return yield* new PrecheckUsageError({ reason: `precheck needs one pending merge head, found ${heads.length}` })
     }
-    return { commit: heads[0].trim(), pinned: true }
+    return { commit: heads[0].trim(), kind: "merge" }
   }
-  return { commit: (yield* git(["merge-base", "HEAD", "origin/main"])).trim(), pinned: false }
+  return { commit: (yield* git(["merge-base", "HEAD", "origin/main"])).trim(), kind: "fork" }
 })
 
 const readPackages = Effect.fn("Precheck.readPackages")(function* (fs, path, root, prefixes) {
@@ -307,7 +321,7 @@ const program = Effect.gen(function* () {
       .map((name) => `scripts/${name}`)
   )
   const steps = planPrecheck({
-    base: base.pinned ? base.commit : undefined,
+    base,
     eslintPartitions,
     files,
     matchesGlob,
