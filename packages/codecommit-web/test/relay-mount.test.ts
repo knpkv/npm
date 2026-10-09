@@ -85,4 +85,21 @@ layer(NodeServices.layer, { excludeTestServices: true })("Relay mount", (it) => 
       expect((yield* fs.stat(elsewhere)).mode & 0o777).toBe(0o755)
       expect(yield* fs.exists(path.join(elsewhere, "sessions.sqlite"))).toBe(false)
     }).pipe(Effect.scoped))
+
+  it.effect("calls a dangling ~/.codecommit/relay link a link, and creates nothing where it points", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fs.makeTempDirectoryScoped()
+      const missing = path.join(home, "gone")
+      yield* fs.makeDirectory(path.join(home, ".codecommit"))
+      yield* fs.symlink(missing, path.join(home, ".codecommit", "relay"))
+      const refused = yield* Effect.flatMap(mounted(home), (mount) => mount.harness).pipe(Effect.flip)
+      expect(refused).toMatchObject({
+        _tag: "RelayUnavailableError",
+        message: "~/.codecommit/relay is a link.",
+        fix: "Replace ~/.codecommit/relay with a directory you own, then restart."
+      })
+      expect(yield* fs.exists(missing)).toBe(false)
+    }).pipe(Effect.scoped))
 })

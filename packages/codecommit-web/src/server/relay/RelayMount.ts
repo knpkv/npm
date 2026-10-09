@@ -15,7 +15,7 @@
  */
 import type { CacheService, ConfigService, ReadClient } from "@knpkv/codecommit-core"
 import { Domain, RelayCapabilities } from "@knpkv/codecommit-core"
-import { claudeCodeBackend, codexCliBackend, make, register } from "@knpkv/relay"
+import { claudeCodeBackend, codexCliBackend, make, register, RelayStoreLinked } from "@knpkv/relay"
 import type { RegisteredCapability, RelayBackend, RelayHarnessService, WriteReceipt } from "@knpkv/relay"
 import { Config, Context, type Crypto, Effect, FileSystem, Layer, Path } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
@@ -100,7 +100,23 @@ export const relayMountLayerWith = <R>(backends: RelayBackends<R>) =>
       const path = yield* Path.Path
       const home = yield* Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE")))
       const directory = path.join(home, ".codecommit", "relay")
-      yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 })
+      // The CLIs start here before the store opens. A dangling link makes mkdir fail, so say it is a link; a link
+      // to a real directory passes here and the store refuses it.
+      yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
+        Effect.catchTag("PlatformError", (failure) =>
+          fs.readLink(directory).pipe(
+            Effect.matchEffect({
+              onFailure: () => Effect.fail(failure),
+              onSuccess: (destination) =>
+                Effect.fail(
+                  new RelayStoreLinked({
+                    path: directory,
+                    message: `The Relay store directory ${directory} is a link to ${destination}.`
+                  })
+                )
+            })
+          ))
+      )
       const available = yield* backends(directory)
       const capabilities = RelayCapabilities.capabilities
       const registered: ReadonlyArray<RegisteredCapability<CapabilityServices>> = [
