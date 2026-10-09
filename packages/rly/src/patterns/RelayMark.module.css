@@ -40,14 +40,9 @@
    * motion token, which the in-app reduced-motion setting sets to 0ms.
    */
   @media (prefers-reduced-motion: no-preference) {
-    /* One entrance as the header opens: the glyph settles in, 300ms. */
-    [data-rly-relay-entrance] {
-      animation: rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards;
-    }
-    /* Working: the baton travels hook to hook and back, 1.2s each way. Hooks hold still. */
+    /* Working: the baton travels hook to hook and back from rest, 2.4s a cycle (1.2s each way). Hooks hold still. */
     [data-rly-relay-activity="working"] > .baton {
-      animation: rly-relay-mark-pass calc(var(--rly-motion-slow-duration) * 4) var(--rly-easing-in-out) infinite
-        alternate;
+      animation: rly-relay-mark-pass calc(var(--rly-motion-slow-duration) * 8) linear infinite;
     }
     /* Attention: the hooks close on the baton twice, then rest; it replays only when attention is set again. */
     [data-rly-relay-activity="attention"] > .hookStart {
@@ -56,6 +51,30 @@
     [data-rly-relay-activity="attention"] > .hookEnd {
       animation: rly-relay-mark-nudge-end calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out);
     }
+    /*
+     * One entrance as the header opens: each stroke settles in, 300ms. A mark that opens already working or
+     * waiting starts its loop or nudge once the entrance ends; these selectors outrank the ones above.
+     */
+    [data-rly-relay-entrance] > path {
+      animation: rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards;
+    }
+    [data-rly-relay-entrance][data-rly-relay-activity="working"] > .baton {
+      animation:
+        rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards,
+        rly-relay-mark-pass calc(var(--rly-motion-slow-duration) * 8) linear var(--rly-motion-slow-duration) infinite;
+    }
+    [data-rly-relay-entrance][data-rly-relay-activity="attention"] > .hookStart {
+      animation:
+        rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards,
+        rly-relay-mark-nudge-start calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out)
+          var(--rly-motion-slow-duration);
+    }
+    [data-rly-relay-entrance][data-rly-relay-activity="attention"] > .hookEnd {
+      animation:
+        rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards,
+        rly-relay-mark-nudge-end calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out)
+          var(--rly-motion-slow-duration);
+    }
   }
   @keyframes rly-relay-mark-enter {
     from {
@@ -63,18 +82,46 @@
       transform: scale(0.85);
     }
   }
-  /* Along the baton's own diagonal, never past the hooks' ends. */
+  /*
+   * Along the baton's own diagonal, never past the hooks' ends: one full cycle out and back from rest, sampled
+   * on a sine so it starts and ends at rest (no jump when it starts) and runs linear between samples.
+   */
   @keyframes rly-relay-mark-pass {
     from {
+      opacity: 1;
+      transform: translate(0, 0);
+    }
+    12.5% {
+      opacity: 0.68;
+      transform: translate(1.06px, -1.06px);
+    }
+    25% {
       opacity: 0.55;
-      transform: translate(-1.5px, 1.5px);
+      transform: translate(1.5px, -1.5px);
+    }
+    37.5% {
+      opacity: 0.68;
+      transform: translate(1.06px, -1.06px);
     }
     50% {
       opacity: 1;
+      transform: translate(0, 0);
+    }
+    62.5% {
+      opacity: 0.68;
+      transform: translate(-1.06px, 1.06px);
+    }
+    75% {
+      opacity: 0.55;
+      transform: translate(-1.5px, 1.5px);
+    }
+    87.5% {
+      opacity: 0.68;
+      transform: translate(-1.06px, 1.06px);
     }
     to {
-      opacity: 0.55;
-      transform: translate(1.5px, -1.5px);
+      opacity: 1;
+      transform: translate(-0px, 0px);
     }
   }
   @keyframes rly-relay-mark-nudge-start {

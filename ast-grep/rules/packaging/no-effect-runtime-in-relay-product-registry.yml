@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-effect-runtime-in-relay-product-registry
+language: tsx
+severity: error
+message: "@knpkv/relay-product/registry is loaded in hosts' first paint: import Effect types only"
+
+rule:
+  all:
+    - any:
+        - kind: import_statement
+        - kind: export_statement
+    - has:
+        field: source
+        regex: '^["'']effect(/[^"'']*)?["'']$'
+    - not:
+        regex: '^(import|export)\s+type\b'
+
+files:
+  - "packages/relay-product/src/registry.tsx"
+
+note: |
+  Control Center and CodeCommit load the registry entry eagerly, and Control Center's build budgets
+  its initial JavaScript closure. A value import from effect pulls the Effect runtime into that closure
+  (once: 366 kB budget, 632 kB built). Keep Effect calls in the lazy panel or dock modules, for example
+  src/answering.ts.
+
+  This rule sees direct imports only: a value import that reaches effect through another local module
+  (./model.js, ./conversation.js) passes it. Control Center's closure budget (its build's dist
+  validation) is the transitive guard.

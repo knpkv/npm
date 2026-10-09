@@ -19,6 +19,7 @@ import {
 import {
   codeCommitRelayAbout,
   codeCommitRelayAccountKind,
+  type CodeCommitRelayContinuationOutcome,
   codeCommitRelayExecutionProfile,
   codeCommitRepositoryAccountIdentity,
   codeCommitRouteAccountIdentity,
@@ -89,6 +90,25 @@ const requireReadyRegistration = (
   registration.status === "ready" ? Effect.succeed(registration) : Effect.die("Expected a ready Relay registration")
 
 describe("CodeCommit Relay dock adapter", () => {
+  // The mark shows a running review as Relay working, including the first run, before any thread exists.
+  it("reports a running review as working, ready or not", () => {
+    const input = {
+      available: true,
+      context: [],
+      continueReview: (): Promise<CodeCommitRelayContinuationOutcome> => Promise.resolve({ _tag: "completed" }),
+      conversation,
+      review: explainReview,
+      selectedFindingId: null,
+      selection: makeCodeCommitRelaySelection(undefined),
+      turns: []
+    }
+    expect(makeCodeCommitRelayThreadRegistration({ ...input, isReviewing: true }).working).toBe(true)
+    expect(makeCodeCommitRelayThreadRegistration({ ...input, isReviewing: false }).working).toBe(false)
+    const firstRun = makeCodeCommitRelayThreadRegistration({ ...input, isReviewing: true, review: null })
+    expect(firstRun.status).toBe("unavailable")
+    expect(firstRun.working).toBe(true)
+  })
+
   it("keeps the continuation bound to the registered profile and model", () => {
     const registration = makeCodeCommitRelayThreadRegistration({
       available: true,

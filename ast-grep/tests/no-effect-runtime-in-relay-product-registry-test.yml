@@ -1,0 +1,15 @@
+id: no-effect-runtime-in-relay-product-registry
+valid:
+  - |
+    import type * as Effect from "effect/Effect"
+  - |
+    import type { RlyRelayMarkActivity } from "@knpkv/rly/patterns"
+  - |
+    export type { Effect } from "effect/Effect"
+invalid:
+  - |
+    import * as Effect from "effect/Effect"
+  - |
+    import { Effect } from "effect"
+  - |
+    export { Effect } from "effect/Effect"

@@ -1,3 +1,4 @@
+import type { RlyRelayMarkActivity } from "@knpkv/rly/patterns"
 import type * as Effect from "effect/Effect"
 import {
   createContext,
@@ -69,6 +70,12 @@ interface RelayPullRequestDockRegistrationBase {
   readonly context: ReadonlyArray<{ readonly id: string; readonly label: string; readonly value: string }>
   readonly conversation: PullRequestConversation
   readonly selection: RelaySelectorState
+  /**
+   * Whether the product's own Relay run for this pull request (a review, say) is in progress; Relay's
+   * mark shows it, and the product still says it in words. A continuation sent from the panel counts on
+   * its own, so leave this out unless the product runs Relay elsewhere.
+   */
+  readonly working?: boolean | undefined
 }
 
 /** One thing inside a pull request the next message is about. */
@@ -124,6 +131,15 @@ interface RelayPullRequestDockRegistry {
   readonly summonClaims: RefObject<number>
 }
 
+/**
+ * How many continuations sent from Relay still wait on their answer. Its own context, so a send
+ * re-renders only the marks that read it, not every registry consumer.
+ */
+interface RelayAnswering {
+  readonly answering: number
+  readonly setAnswering: (update: (current: number) => number) => void
+}
+
 export class RelayProductDockProviderMissing extends Error {
   readonly _tag = "RelayProductDockProviderMissing"
 
@@ -133,12 +149,14 @@ export class RelayProductDockProviderMissing extends Error {
 }
 
 const RelayPullRequestDockContext = createContext<RelayPullRequestDockRegistry | undefined>(undefined)
+const RelayAnsweringContext = createContext<RelayAnswering | undefined>(undefined)
 
 /** Provide one route-lifetime registration slot without loading the dock chrome. */
 export const RelayProductDockProvider = ({ children }: { readonly children: ReactNode }): ReactElement => {
   const [registration, setRegistration] = useState<RelayPullRequestDockRegistration | null>(null)
   const [open, setOpen] = useState(false)
   const [pinned, setPinned] = useState(false)
+  const [answering, setAnswering] = useState(0)
   const launcher = useRef<HTMLButtonElement | null>(null)
   const summonClaims = useRef(0)
   const returnTo = useRef<HTMLElement | null>(null)
@@ -169,7 +187,12 @@ export const RelayProductDockProvider = ({ children }: { readonly children: Reac
     }),
     [open, pinned, register, registration]
   )
-  return <RelayPullRequestDockContext value={registry}>{children}</RelayPullRequestDockContext>
+  const answeringValue = useMemo<RelayAnswering>(() => ({ answering, setAnswering }), [answering])
+  return (
+    <RelayPullRequestDockContext value={registry}>
+      <RelayAnsweringContext value={answeringValue}>{children}</RelayAnsweringContext>
+    </RelayPullRequestDockContext>
+  )
 }
 
 /** Attach one exact PR controller to the application-level Relay dock for this route lifetime. */
@@ -232,4 +255,36 @@ export const useSummonClaim = (): void => {
       claims.current -= 1
     }
   }, [claims])
+}
+
+/**
+ * What Relay is doing, for its mark: `working` while the registered product runs Relay or a continuation
+ * sent from Relay waits on its answer, else `idle`. Products have no decision state yet, so never
+ * `attention`. The launcher, panel and dock read it; a host need not.
+ */
+export const useRelayProductActivity = (): RlyRelayMarkActivity => {
+  const registry = useContext(RelayPullRequestDockContext)
+  const answering = useContext(RelayAnsweringContext)
+  if (registry === undefined || answering === undefined) throw new RelayProductDockProviderMissing()
+  return answering.answering > 0 || registry.registration?.working === true ? "working" : "idle"
+}
+
+/**
+ * Starts counting Relay as answering; call the returned function once the answer arrives or fails.
+ * The registry stays free of the Effect runtime (hosts load it eagerly), so the lazy panel and dock wrap
+ * their continuation with `answeringWhile` instead.
+ */
+export const useRelayProductAnswering = (): (() => () => void) => {
+  const answering = useContext(RelayAnsweringContext)
+  if (answering === undefined) throw new RelayProductDockProviderMissing()
+  const { setAnswering } = answering
+  return useCallback(() => {
+    setAnswering((current) => current + 1)
+    let ended = false
+    return () => {
+      if (ended) return
+      ended = true
+      setAnswering((current) => current - 1)
+    }
+  }, [setAnswering])
 }
