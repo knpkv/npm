@@ -20,7 +20,7 @@ const motionSpec = `
 | \`idle\` (default) | nothing | — |
 | \`working\` | the baton slides along its diagonal, hook to hook and back; opacity .55 → 1 → .55; hooks hold still | 1.2s each way (4 × \`--rly-motion-slow-duration\`), \`--rly-easing-in-out\`, loops while working |
 | \`attention\` | the hooks close on the baton by one grid unit, twice, then rest | 900ms once (3 × slow), \`--rly-easing-in-out\`; replays only when attention is set again |
-| \`entrance\` | the glyph fades and scales in from .85 | 300ms once (slow), \`--rly-easing-out\`; \`RelayPanel\` plays it each time its header opens |
+| \`entrance\` | each stroke fades and scales in from .85 about its own centre; the tile and svg hold still | 300ms once (slow), \`--rly-easing-out\`; \`RelayPanel\` plays it each time its header opens. A mark that opens already working or waiting starts its loop or nudge as the entrance ends |
 
 **Gate.** Every animation sits inside \`@media (prefers-reduced-motion: no-preference)\` and is timed by a
 \`--rly-motion-*\` token, so the system preference and the in-app \`data-rly-reduced-motion="reduce"\` setting
@@ -112,6 +112,10 @@ const ActivityCatalog = (): ReactElement => (
       <div data-row="entrance" style={rowStyle}>
         <RelayMark.Tile entrance size={32} />
         <Text variant="body">entrance</Text>
+      </div>
+      <div data-row="entrance-working" style={rowStyle}>
+        <RelayMark.Tile activity="working" entrance size={32} />
+        <Text variant="body">entrance, then working</Text>
       </div>
       <div style={rowStyle}>
         <RelayLauncher activity="working" expanded={false} shortcut={relayShortcut(false)} />

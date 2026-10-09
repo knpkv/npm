@@ -63,4 +63,39 @@ test.describe("RelayMark motion", () => {
     expect(minimum).not.toBeNull()
     expect(minimum).toBeGreaterThanOrEqual(0.5)
   })
+
+  test("enters stroke by stroke, holding the tile and svg still, then starts the loop", async ({ page }) => {
+    await open(page, "no-preference", "no-preference")
+    const tile = page.locator("[data-row='entrance-working'] [data-size]")
+    const boxes = await tile.evaluate((element) => {
+      const svg = element.querySelector("svg")
+      const baton = svg?.querySelector("path:last-child")
+      if (svg === null || svg === undefined || baton === null || baton === undefined) return null
+      const all = svg.getAnimations({ subtree: true })
+      for (const animation of all) animation.pause()
+      const box = (): string => JSON.stringify([element.getBoundingClientRect(), svg.getBoundingClientRect()])
+      for (const animation of all) animation.currentTime = 0
+      const start = box()
+      for (const animation of all) animation.currentTime = 299
+      return {
+        baton: baton
+          .getAnimations()
+          .map((animation) => ("animationName" in animation ? String(animation.animationName) : "?")),
+        end: box(),
+        own: svg.getAnimations().length,
+        start,
+        strokes: all.length
+      }
+    })
+    expect(boxes).not.toBeNull()
+    // All three strokes enter; the svg itself never animates, so neither it nor the tile moves.
+    expect(boxes?.own).toBe(0)
+    expect(boxes?.strokes).toBe(4)
+    expect(boxes?.end).toBe(boxes?.start)
+    // The baton enters, then passes.
+    expect(boxes?.baton.map((name) => name.replace(/^.*__/, ""))).toEqual([
+      "rly-relay-mark-enter",
+      "rly-relay-mark-pass"
+    ])
+  })
 })

@@ -40,10 +40,6 @@
    * motion token, which the in-app reduced-motion setting sets to 0ms.
    */
   @media (prefers-reduced-motion: no-preference) {
-    /* One entrance as the header opens: the glyph settles in, 300ms. */
-    [data-rly-relay-entrance] {
-      animation: rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards;
-    }
     /* Working: the baton travels hook to hook and back, 1.2s each way. Hooks hold still. */
     [data-rly-relay-activity="working"] > .baton {
       animation: rly-relay-mark-pass calc(var(--rly-motion-slow-duration) * 4) var(--rly-easing-in-out) infinite
@@ -55,6 +51,31 @@
     }
     [data-rly-relay-activity="attention"] > .hookEnd {
       animation: rly-relay-mark-nudge-end calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out);
+    }
+    /*
+     * One entrance as the header opens: each stroke settles in, 300ms. A mark that opens already working or
+     * waiting starts its loop or nudge once the entrance ends; these selectors outrank the ones above.
+     */
+    [data-rly-relay-entrance] > path {
+      animation: rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards;
+    }
+    [data-rly-relay-entrance][data-rly-relay-activity="working"] > .baton {
+      animation:
+        rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards,
+        rly-relay-mark-pass calc(var(--rly-motion-slow-duration) * 4) var(--rly-easing-in-out)
+          var(--rly-motion-slow-duration) infinite alternate;
+    }
+    [data-rly-relay-entrance][data-rly-relay-activity="attention"] > .hookStart {
+      animation:
+        rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards,
+        rly-relay-mark-nudge-start calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out)
+          var(--rly-motion-slow-duration);
+    }
+    [data-rly-relay-entrance][data-rly-relay-activity="attention"] > .hookEnd {
+      animation:
+        rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards,
+        rly-relay-mark-nudge-end calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out)
+          var(--rly-motion-slow-duration);
     }
   }
   @keyframes rly-relay-mark-enter {

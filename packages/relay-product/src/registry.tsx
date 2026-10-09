@@ -1,3 +1,4 @@
+import type { RlyRelayMarkActivity } from "@knpkv/rly/patterns"
 import type * as Effect from "effect/Effect"
 import {
   createContext,
@@ -69,6 +70,12 @@ interface RelayPullRequestDockRegistrationBase {
   readonly context: ReadonlyArray<{ readonly id: string; readonly label: string; readonly value: string }>
   readonly conversation: PullRequestConversation
   readonly selection: RelaySelectorState
+  /**
+   * Whether the product's own Relay run for this pull request (a review, say) is in progress; Relay's
+   * mark shows it, and the product still says it in words. A continuation sent from the panel counts on
+   * its own, so leave this out unless the product runs Relay elsewhere.
+   */
+  readonly working?: boolean | undefined
 }
 
 /** One thing inside a pull request the next message is about. */
@@ -122,6 +129,9 @@ interface RelayPullRequestDockRegistry {
   readonly draftAbout: RefObject<Map<string, string | null>>
   /** How many panels have claimed Relay's Ctrl/⌘+J under this provider; more than one is a bug. */
   readonly summonClaims: RefObject<number>
+  /** How many continuations sent from Relay are still waiting on their answer. */
+  readonly answering: number
+  readonly setAnswering: (update: (current: number) => number) => void
 }
 
 export class RelayProductDockProviderMissing extends Error {
@@ -139,6 +149,7 @@ export const RelayProductDockProvider = ({ children }: { readonly children: Reac
   const [registration, setRegistration] = useState<RelayPullRequestDockRegistration | null>(null)
   const [open, setOpen] = useState(false)
   const [pinned, setPinned] = useState(false)
+  const [answering, setAnswering] = useState(0)
   const launcher = useRef<HTMLButtonElement | null>(null)
   const summonClaims = useRef(0)
   const returnTo = useRef<HTMLElement | null>(null)
@@ -155,6 +166,7 @@ export const RelayProductDockProvider = ({ children }: { readonly children: Reac
   }, [])
   const registry = useMemo<RelayPullRequestDockRegistry>(
     () => ({
+      answering,
       draftAbout,
       launcher,
       open,
@@ -163,11 +175,12 @@ export const RelayProductDockProvider = ({ children }: { readonly children: Reac
       register,
       registration,
       returnTo,
+      setAnswering,
       setOpen,
       setPinned,
       summonClaims
     }),
-    [open, pinned, register, registration]
+    [answering, open, pinned, register, registration]
   )
   return <RelayPullRequestDockContext value={registry}>{children}</RelayPullRequestDockContext>
 }
@@ -232,4 +245,35 @@ export const useSummonClaim = (): void => {
       claims.current -= 1
     }
   }, [claims])
+}
+
+/**
+ * What Relay is doing, for its mark: `working` while the registered product runs Relay or a continuation
+ * sent from Relay waits on its answer, else `idle`. Products have no decision state yet, so never
+ * `attention`. The launcher, panel and dock read it; a host need not.
+ */
+export const useRelayProductActivity = (): RlyRelayMarkActivity => {
+  const registry = useContext(RelayPullRequestDockContext)
+  if (registry === undefined) throw new RelayProductDockProviderMissing()
+  return registry.answering > 0 || registry.registration?.working === true ? "working" : "idle"
+}
+
+/**
+ * Starts counting Relay as answering; call the returned function once the answer arrives or fails.
+ * The registry stays free of the Effect runtime (hosts load it eagerly), so the lazy panel and dock wrap
+ * their continuation with `answeringWhile` instead.
+ */
+export const useRelayProductAnswering = (): (() => () => void) => {
+  const registry = useContext(RelayPullRequestDockContext)
+  if (registry === undefined) throw new RelayProductDockProviderMissing()
+  const { setAnswering } = registry
+  return useCallback(() => {
+    setAnswering((current) => current + 1)
+    let ended = false
+    return () => {
+      if (ended) return
+      ended = true
+      setAnswering((current) => current - 1)
+    }
+  }, [setAnswering])
 }
