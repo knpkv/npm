@@ -11,10 +11,16 @@ import * as Stream from "effect/Stream"
 // Release's publish step: runs `changeset publish`, passing its output through unchanged (changesets/action
 // reads its `New tag:` lines). npm can accept a publish into staging and keep the version out of its
 // metadata for an hour (npm/cli#9889). The next Release run then finds that version missing, publishes it
-// again, and npm answers E409 "Cannot publish over previously staged version". When every failure is that
-// conflict for the exact package and version being released, and every planned release either published or
-// was staged, the release is complete: this logs each as staged, not yet visible, and exits 0. Any other
-// failure, or a planned release that was never attempted (changesets stops after a failing batch), fails.
+// again, and npm answers E409 "Cannot publish over previously staged version". That run is only a retry of
+// a release that already happened, so it exits 0 and logs each version as staged, not yet visible, when all
+// of these hold:
+// - every failure is that conflict for the exact package and version being released;
+// - changesets listed what it planned, and every planned release either published or was staged (it stops
+//   after a failing batch, so a later batch may never have been attempted);
+// - nothing follows the failure block but tag results and changesets' exit line, so a failed tag step fails;
+// - each staged version's git tag is on origin. The run that staged it reported success and tagged it; when
+//   that tag is missing, this fails and names the tag and GitHub release to create by hand.
+// Anything else keeps the failure.
 
 class PublishFailed extends Data.TaggedError("PublishFailed") {
   get message() {
@@ -39,20 +45,38 @@ const releasesAfter = (lines, heading) => {
   return releases
 }
 
-/** Each failed release in the "Some packages failed to publish" block, with npm's code and message when given. */
+/**
+ * The "Some packages failed to publish" block: each failed release with npm's code and message when given,
+ * and the lines that follow the block.
+ */
 const failuresIn = (lines) => {
   const start = lines.findIndex((line) => line.includes("Some packages failed to publish:"))
-  if (start < 0) return []
+  if (start < 0) return { failures: [], after: [] }
   const failures = []
-  for (const line of lines.slice(start + 1)) {
-    const release = releaseLine.exec(line)
-    const error = errorLine.exec(line)
+  let end = start + 1
+  for (; end < lines.length; end += 1) {
+    const release = releaseLine.exec(lines[end])
+    const error = errorLine.exec(lines[end])
     if (release !== null) failures.push({ name: release[1], version: release[2], code: null, message: null })
     else if (error !== null && failures.length > 0) {
       failures[failures.length - 1] = { ...failures[failures.length - 1], code: error[1], message: error[2] }
     } else break
   }
-  return failures
+  return { failures, after: lines.slice(end) }
+}
+
+// After the failure block changesets prints only its tag results (successes are tagged) and then exits through
+// ExitError. A tag step that throws prints its stack there instead, before the same exit line.
+const tagResultLine =
+  /^(?:[◒◐◓◑◇]\s*)?(?:Creating git tags\.\.\.|Created git tags[.:]|Skipped tags \(already exist\):|- \S+@\S+)$/
+const exitLine = /^🦋 Exited with code \d+$/
+const endsCleanly = (after) => {
+  const remaining = after.filter((line) => line.length > 0)
+  return (
+    remaining.length > 0 &&
+    exitLine.test(remaining[remaining.length - 1]) &&
+    remaining.slice(0, -1).every((line) => tagResultLine.test(line))
+  )
 }
 
 /** npm's answer to publishing a version it already holds in staging, for exactly this package and version. */
@@ -64,7 +88,7 @@ export const isStagedConflict = ({ code, message, name, version }) =>
 
 /**
  * Reads `changeset publish` output. `staged` lists the releases npm holds in staging; it is null when the run
- * failed for any other reason: another error, or a planned release that neither published nor was staged.
+ * failed for any other reason (see the conditions above), or when the output is not the shape this expects.
  */
 export const readPublishOutput = (output) => {
   const lines = output
@@ -73,15 +97,32 @@ export const readPublishOutput = (output) => {
     .map((line) => line.trim())
   const planned = releasesAfter(lines, "These packages will be published")
   const published = releasesAfter(lines, "Successfully published:")
-  const failures = failuresIn(lines)
+  const { after, failures } = failuresIn(lines)
   const key = ({ name, version }) => `${name}@${version}`
+  const plannedKeys = new Set(planned.map(key))
   const settled = new Set([...published, ...failures.filter(isStagedConflict)].map(key))
-  return failures.length > 0 &&
-    failures.every(isStagedConflict) &&
-    planned.every((release) => settled.has(key(release)))
+  return planned.length > 0 &&
+    failures.length > 0 &&
+    failures.every((failure) => isStagedConflict(failure) && plannedKeys.has(key(failure))) &&
+    planned.every((release) => settled.has(key(release))) &&
+    endsCleanly(after)
     ? { staged: failures.map(({ name, version }) => ({ name, version })) }
     : { staged: null }
 }
+
+/** Whether origin has the release tag `name@version`: `git ls-remote --exit-code` exits 2 when it does not. */
+const tagOnOrigin = Effect.fn("tagOnOrigin")(function* (tag) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const exitCode = yield* spawner.exitCode(
+    ChildProcess.make("git", ["ls-remote", "--exit-code", "--tags", "origin", `refs/tags/${tag}`], {
+      extendEnv: true,
+      stdout: "ignore"
+    })
+  )
+  if (exitCode === ChildProcessSpawner.ExitCode(0)) return true
+  if (exitCode === ChildProcessSpawner.ExitCode(2)) return false
+  return yield* new PublishFailed({ reason: `git ls-remote could not check ${tag} (exit code ${exitCode})` })
+})
 
 const main = Effect.gen(function* () {
   const stdout = (yield* Stdio.Stdio).stdout({ endOnDone: false })
@@ -103,10 +144,20 @@ const main = Effect.gen(function* () {
   if (exitCode === ChildProcessSpawner.ExitCode(0)) return
   const { staged } = readPublishOutput(output)
   if (staged === null) return yield* new PublishFailed({ reason: `changeset publish exited with code ${exitCode}` })
+  const untagged = []
+  for (const release of staged) {
+    if (!(yield* tagOnOrigin(`${release.name}@${release.version}`))) untagged.push(release)
+  }
+  if (untagged.length > 0) {
+    const tags = untagged.map(({ name, version }) => `${name}@${version}`).join(", ")
+    return yield* new PublishFailed({
+      reason: `${tags} staged on npm but never tagged: create each git tag and its GitHub release by hand`
+    })
+  }
   for (const { name, version } of staged) {
     yield* Console.log(
       `::notice title=Staged, not yet visible::${name}@${version} staged, not yet visible: ` +
-        "npm already accepted this version and has not listed it yet."
+        "npm already accepted this version and it is tagged; npm has not listed it yet."
     )
   }
 }).pipe(
