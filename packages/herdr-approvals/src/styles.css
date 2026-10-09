@@ -28,16 +28,15 @@
     max-inline-size: 100rem;
     padding: var(--rly-space-16) var(--rly-space-32);
   }
-  /* One line: mark, name, then what it is, on a shared baseline. */
+  /* One line: the mark, then the name, centred on the tile. */
   .fleet-shell-brand {
-    align-items: baseline;
+    align-items: center;
     display: flex;
-    gap: var(--rly-space-8);
+    gap: var(--rly-space-12);
     min-inline-size: var(--rly-space-0);
   }
   .fleet-shell-brand > .fleet-shell-mark {
-    align-self: center;
-    margin-inline-end: var(--rly-space-4);
+    flex: none;
   }
   .fleet-shell-meta {
     align-items: center;
@@ -78,17 +77,6 @@
   }
   .fleet-shortcuts dd {
     margin: var(--rly-space-0);
-  }
-  .fleet-shell-mark {
-    align-items: center;
-    background: var(--rly-color-action-background);
-    block-size: var(--rly-space-40);
-    border-radius: var(--rly-radius-field);
-    color: var(--rly-color-action-foreground);
-    display: inline-flex;
-    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size)/1 var(--rly-font-ui);
-    inline-size: var(--rly-space-40);
-    justify-content: center;
   }
   /* A force-mounted tab (Approvals) stays mounted but is hidden while another tab shows. */
   .fleet-shell-main [role="tabpanel"][data-state="inactive"] {
@@ -205,31 +193,7 @@
   }
 
   .fleet-mark {
-    align-items: center;
-    background: var(--rly-color-surface-2);
-    border: 1px solid var(--rly-color-border-2);
-    border-radius: var(--rly-radius-control);
-    block-size: var(--rly-space-48);
-    display: flex;
-    flex: 0 0 auto;
-    gap: var(--rly-space-4);
-    inline-size: var(--rly-space-48);
-    justify-content: center;
-  }
-
-  .fleet-mark i {
-    background: var(--rly-color-agent);
-    block-size: var(--rly-space-6);
-    border-radius: var(--rly-radius-round);
-    inline-size: var(--rly-space-6);
-  }
-
-  .fleet-mark i:first-child {
-    background: var(--rly-color-deploying-ink);
-  }
-
-  .fleet-mark i:last-child {
-    background: var(--rly-color-success-ink);
+    flex: none;
   }
 
   .app-title {

@@ -1,0 +1,27 @@
+{
+  "relay-apple-touch-180.png": {
+    "pngSha256": "94adf37b55e6dea0700543144c684c11df22e0e2e52b0673112b14c239620f8e",
+    "size": 180,
+    "sourceSha256": "122c2366ce7fc3e20c940355497dd5b8c51e5c5968c128d91e41b979351fb420"
+  },
+  "relay-192.png": {
+    "pngSha256": "63cb2461f7bc4a83d27358971eeabf872ed84a06051b8cc8659a86efddf22d40",
+    "size": 192,
+    "sourceSha256": "3b92c9ec3e7a7060b2c112db4d2484370d099064430680a59371c94aafe15a4a"
+  },
+  "relay-512.png": {
+    "pngSha256": "264c7b48a96c1c9c2546647d5c20c8e83a6134ce0392402e735913cb5673bb89",
+    "size": 512,
+    "sourceSha256": "9e0bda68548c078213f0f76f4a7db397daddf1dc1e8e2a21a070e8f2bee52415"
+  },
+  "relay-maskable-512.png": {
+    "pngSha256": "691a09fcc80318d0ea5303a3bfdc1341da6d76281f2bdf29b21c1fcff07c3911",
+    "size": 512,
+    "sourceSha256": "50487d77c3f0a088c280cde2846c6ce2e4b1b9677054397b3b4ff7714584eaeb"
+  },
+  "relay-badge-96.png": {
+    "pngSha256": "251376d99ee4507a99b3f3e9c47775d899e85aabd8b4c5e27f3ac6c24aafa17b",
+    "size": 96,
+    "sourceSha256": "79f677c062ec69debed58becf8ac18799e7b83a760a6306fd94ec9234d8a5e5f"
+  }
+}

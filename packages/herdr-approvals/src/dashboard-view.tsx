@@ -1,5 +1,5 @@
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
-import { FreshnessStamp } from "@knpkv/rly/patterns"
+import { FreshnessStamp, RelayMark } from "@knpkv/rly/patterns"
 import type { FormEvent, KeyboardEvent, ReactElement, ReactNode } from "react"
 import type { DashboardSnapshot, PendingApproval, PendingApprovalFailure } from "./dashboard-model.js"
 import { connectWorkerHref, NotificationPanel, type NotificationState } from "./approval-app-view.js"
@@ -502,11 +502,7 @@ export const DashboardView = ({
       <AppColumn className="app">
         {showHeader ? (
           <header className="app-header">
-            <div className="fleet-mark" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </div>
+            <RelayMark.Tile className="fleet-mark" size={32} />
             <div className="app-title">
               <Text variant="meta" tone="secondary">
                 Host activity
@@ -517,7 +513,7 @@ export const DashboardView = ({
             </div>
             <div className="header-actions">
               {snapshot.approvalApp.canonical ? (
-                <nav className="fleet-app-nav" aria-label="Fleet applications">
+                <nav className="fleet-app-nav" aria-label="Relay applications">
                   <a href="/" aria-current="page">
                     Approvals
                   </a>

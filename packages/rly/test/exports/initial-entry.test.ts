@@ -68,6 +68,7 @@ describe("public entries", () => {
       "useRelaySummon",
       "RelayMark",
       "RLY_RELAY_MARK_ACTIVITIES",
+      "RLY_RELAY_MARK_GLYPH",
       "RLY_RELAY_MARK_SIZES",
       "RLY_RELAY_MARK_TILE_SIZES",
       "RelayPanel",
