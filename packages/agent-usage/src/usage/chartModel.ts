@@ -45,28 +45,38 @@ export interface StackedUsage {
 const measureOf = (measure: Measure, cell: { readonly costUsd: number; readonly tokens: number }): number =>
   measure === "cost" ? cell.costUsd : cell.tokens
 
+/** One series' value in one period: the input {@link stackSeries} stacks. */
+export interface SeriesCell {
+  readonly period: number
+  readonly id: string
+  readonly value: number
+}
+
 /**
- * Stacks each period's usage by Booking. With a Booking selected only it is drawn; otherwise the
- * eight largest by the measure over the range are named and the rest fold into Other.
+ * Stacks each period's cells by series. With a series selected only it is drawn; otherwise the eight
+ * largest over the range are named and the rest fold into Other. `periods` is how many columns
+ * there are, oldest first.
  */
-export const stackUsage = (report: UsageReport, measure: Measure, selected: string | null): StackedUsage => {
+export const stackSeries = (
+  periods: number,
+  cells: ReadonlyArray<SeriesCell>,
+  selected: string | null
+): StackedUsage => {
   const totals = new Map<string, number>()
-  for (const cell of report.cells) {
-    totals.set(cell.booking, (totals.get(cell.booking) ?? 0) + measureOf(measure, cell))
-  }
+  for (const cell of cells) totals.set(cell.id, (totals.get(cell.id) ?? 0) + cell.value)
   const ranked = [...totals].filter(([, total]) => total > 0).sort((left, right) => right[1] - left[1])
   const named = selected === null ? ranked.slice(0, NAMED_SERIES).map(([id]) => id) : [selected]
   const namedSet = new Set(named)
   const folds = selected === null && ranked.length > NAMED_SERIES
   const order = folds ? [...named, OTHER] : named
 
-  const columns = report.periods.map((_, period): Column => {
+  const columns = Array.from({ length: periods }, (_, period): Column => {
     const values = new Map<string, number>()
-    for (const cell of report.cells) {
+    for (const cell of cells) {
       if (cell.period !== period) continue
-      const id = namedSet.has(cell.booking) ? cell.booking : folds ? OTHER : null
+      const id = namedSet.has(cell.id) ? cell.id : folds ? OTHER : null
       if (id === null) continue
-      values.set(id, (values.get(id) ?? 0) + measureOf(measure, cell))
+      values.set(id, (values.get(id) ?? 0) + cell.value)
     }
     let from = 0
     const segments: Array<Segment> = []
@@ -85,6 +95,14 @@ export const stackUsage = (report: UsageReport, measure: Measure, selected: stri
     max: columns.reduce((max, column) => Math.max(max, column.total), 0)
   }
 }
+
+/** Stacks each period's usage by Booking, in the measure: {@link stackSeries} over the report's cells. */
+export const stackUsage = (report: UsageReport, measure: Measure, selected: string | null): StackedUsage =>
+  stackSeries(
+    report.periods.length,
+    report.cells.map((cell) => ({ period: cell.period, id: cell.booking, value: measureOf(measure, cell) })),
+    selected
+  )
 
 /**
  * Colour slots for the Bookings now on screen. A Booking that already had a slot keeps it; a new

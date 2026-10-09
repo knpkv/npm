@@ -21,16 +21,16 @@ import {
   usageAtom
 } from "./atoms.js"
 import { BookingTable } from "./BookingTable.js"
-import { assignSlots, bookingLabel, type Measure, OTHER, rangeTotal, stackUsage } from "./chartModel.js"
+import { assignSlots, bookingLabel, type Measure, OTHER, rangeTotal, stackUsage } from "../usage/chartModel.js"
 import { formatTokens } from "../limits/format.js"
-import { LimitChart } from "./LimitChart.js"
+import { LimitChart } from "../usage/LimitChart.js"
 import { LimitsSummary } from "../limits/LimitsSummary.js"
 import { LiveIndicator } from "./LiveIndicator.js"
-import { PRESETS } from "./range.js"
+import { PRESETS } from "../usage/range.js"
 import { outcomeOf, shown } from "./result.js"
 import { StatusStrip } from "./StatusStrip.js"
 import { useLiveUpdates } from "./useLiveUpdates.js"
-import { formatMeasure, UsageChart } from "./UsageChart.js"
+import { formatMeasure, UsageChart } from "../usage/UsageChart.js"
 import type { AgentFilter } from "../shared/contracts.js"
 
 const AGENTS: ReadonlyArray<{ readonly value: AgentFilter; readonly label: string }> = [
@@ -202,7 +202,7 @@ const Dashboard = () => {
                 labelOf={labels}
                 measure={measure}
                 range={usage.value.range}
-                report={usage.value.report}
+                periods={usage.value.report.periods}
                 slots={slots}
                 stacked={stacked}
               />

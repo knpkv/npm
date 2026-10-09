@@ -92,6 +92,15 @@ stderr and exit nonzero, with nothing on stdout:
 | `older version without limits` | The server predates the `limits` request; restart it on the installed version |
 | `could not read its store`     | The server knows the request but its store failed; the server's log says why  |
 
+### Charts for another page
+
+`@knpkv/agent-usage/usage` exports the page's two charts for another browser surface, with
+`@knpkv/agent-usage/usage.css` and Rly's stylesheet: `UsageChart` (columns per period, stacked by
+whatever series the caller names, built with `stackSeries`) and `LimitChart` (one row per limit
+window). `UsageChart` takes the periods and the stacked cells, not a usage report, so a caller can
+draw tokens without any cost. Like `@knpkv/agent-usage/limits`, the entry bundles for a browser
+without the server, the store or Node modules.
+
 ### Running as a service
 
 `serve` needs no terminal: it reads nothing from stdin and prints the startup link to stdout once.

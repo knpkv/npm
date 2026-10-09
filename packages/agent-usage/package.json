@@ -25,6 +25,11 @@
       "default": "./dist/limits/index.js"
     },
     "./limits.css": "./src/limits/limits.css",
+    "./usage": {
+      "types": "./src/usage/index.ts",
+      "default": "./dist/usage/index.js"
+    },
+    "./usage.css": "./src/usage/charts.css",
     "./*.js": {
       "types": "./src/*.ts",
       "default": "./dist/*.js"
@@ -44,6 +49,11 @@
         "default": "./dist/limits/index.js"
       },
       "./limits.css": "./src/limits/limits.css",
+      "./usage": {
+        "types": "./dist/usage/index.d.ts",
+        "default": "./dist/usage/index.js"
+      },
+      "./usage.css": "./src/usage/charts.css",
       "./*.js": {
         "types": "./dist/*.d.ts",
         "default": "./dist/*.js"
@@ -52,7 +62,8 @@
   },
   "files": [
     "dist",
-    "src/limits/limits.css"
+    "src/limits/limits.css",
+    "src/usage/charts.css"
   ],
   "engines": {
     "node": ">=26"

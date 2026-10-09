@@ -2,13 +2,22 @@ import { describe, expect, it } from "@effect/vitest"
 import { build } from "esbuild"
 import packageJson from "../package.json" with { type: "json" }
 
-// Connect bundles `@knpkv/agent-usage/limits` for the browser: the entry must not reach the server,
-// the store or the filesystem the way the package root does.
-describe("limits entry", () => {
+// Connect bundles `@knpkv/agent-usage/limits` and the herdr hub `@knpkv/agent-usage/usage` for the
+// browser: neither entry may reach the server, the store or the filesystem the way the package root does.
+const entries: ReadonlyArray<{
+  readonly name: "./limits" | "./usage"
+  readonly source: string
+  readonly published: string
+}> = [
+  { name: "./limits", source: "../src/limits/index.ts", published: "./dist/limits/index.js" },
+  { name: "./usage", source: "../src/usage/index.ts", published: "./dist/usage/index.js" }
+]
+
+describe.each(entries)("$name entry", ({ name, published, source }) => {
   it("bundles for a browser without Node modules", async () => {
     const result = await build({
       bundle: true,
-      entryPoints: [new URL("../src/limits/index.ts", import.meta.url).pathname],
+      entryPoints: [new URL(source, import.meta.url).pathname],
       format: "esm",
       jsx: "automatic",
       metafile: true,
@@ -26,8 +35,9 @@ describe("limits entry", () => {
   })
 
   it("publishes the entry outside the directory the page build empties", () => {
-    const entry = packageJson.exports["./limits"].default
-    expect(entry).toBe("./dist/limits/index.js")
+    const entry = packageJson.exports[name].default
+    expect(entry).toBe(published)
     expect(entry.startsWith("./dist/client/")).toBe(false)
+    expect(packageJson.publishConfig.exports[name].default).toBe(published)
   })
 })

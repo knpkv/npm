@@ -3,11 +3,11 @@ import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { ReactNode } from "react"
 import { expect, waitFor } from "storybook/test"
 import { BookingTable } from "../src/client/BookingTable.js"
-import { assignSlots, bookingLabel, OTHER, stackUsage } from "../src/client/chartModel.js"
-import { LimitChart } from "../src/client/LimitChart.js"
+import { assignSlots, bookingLabel, OTHER, stackUsage } from "../src/usage/chartModel.js"
+import { LimitChart } from "../src/usage/LimitChart.js"
 import { LimitsSummary } from "../src/limits/LimitsSummary.js"
 import { StatusStrip } from "../src/client/StatusStrip.js"
-import { UsageChart } from "../src/client/UsageChart.js"
+import { UsageChart } from "../src/usage/UsageChart.js"
 import type { ServerStatus } from "../src/shared/contracts.js"
 import { buildWeek, type Scenario, TIME_ZONE } from "./fixtures/week.js"
 
@@ -92,7 +92,7 @@ export const UsageByBooking: Story = {
           labelOf={view.labelOf}
           measure="cost"
           range={view.range}
-          report={view.week.usage}
+          periods={view.week.usage.periods}
           slots={view.slots}
           stacked={view.stacked}
         />

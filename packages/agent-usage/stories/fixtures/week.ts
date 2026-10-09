@@ -9,7 +9,7 @@
  * @example
  * const week = buildWeek("binding") // Claude 5-hour at 86%, resets in 1h 12m
  */
-import { rangeOf, type ViewRange } from "../../src/client/range.js"
+import { rangeOf, type ViewRange } from "../../src/usage/range.js"
 import { attribute, bookingId } from "../../src/core/Attribution.js"
 import type { BalanceReading, LimitSnapshot, TicketTitleValue, Tokens } from "../../src/core/Model.js"
 import { buildLimitsReport, buildUsageReport, periodsOf } from "../../src/core/Report.js"

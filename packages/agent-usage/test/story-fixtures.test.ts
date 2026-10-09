@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
-import { rangeOf } from "../src/client/range.js"
 import { formatPeriod } from "../src/limits/format.js"
 import { summarizeLimits } from "../src/limits/model.js"
+import { rangeOf } from "../src/usage/range.js"
 import { buildWeek, NOW, TIME_ZONE } from "../stories/fixtures/week.js"
 
 describe("current-screen fixtures", () => {

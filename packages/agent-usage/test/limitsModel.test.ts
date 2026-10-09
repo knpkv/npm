@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
 import { limitTrackTone, type RlyLimitTrackTone } from "@knpkv/rly/primitives"
-import { PLOT, timeTicks } from "../src/client/axis.js"
 import type { LimitSnapshot } from "../src/core/Model.js"
 import {
   limitRows,
@@ -12,6 +11,7 @@ import {
   summarizeLimits,
   windowName
 } from "../src/limits/model.js"
+import { PLOT, timeTicks } from "../src/usage/axis.js"
 
 const HOUR = 3_600_000
 const now = Date.parse("2026-10-04T12:00:00Z")

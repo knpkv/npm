@@ -7,7 +7,7 @@
 import { Predicate } from "effect"
 import { totalTokens } from "../core/Model.js"
 import type { BookingSummary } from "../shared/contracts.js"
-import { bookingLabel } from "./chartModel.js"
+import { bookingLabel } from "../usage/chartModel.js"
 
 export type BookingColumn =
   | "booking"

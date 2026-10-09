@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import { rangeOf } from "../src/client/range.js"
 import { periodsOf } from "../src/core/Report.js"
+import { rangeOf } from "../src/usage/range.js"
 
 describe("rangeOf", () => {
   const now = Date.parse("2026-10-03T15:20:00+02:00")

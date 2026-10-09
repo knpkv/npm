@@ -18,9 +18,9 @@ import {
   sortBookings,
   visibleSort
 } from "./bookingModel.js"
-import { bookingLabel, OTHER } from "./chartModel.js"
+import { bookingLabel, OTHER } from "../usage/chartModel.js"
 import { formatTokens, formatUsd } from "../limits/format.js"
-import { seriesColor } from "./UsageChart.js"
+import { seriesColor } from "../usage/UsageChart.js"
 
 const LABELS = {
   booking: "Booking",
