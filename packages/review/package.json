@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/review",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "description": "Provider-neutral review contracts, runtime state, and controls",
   "license": "MIT",
   "author": "knpkv",

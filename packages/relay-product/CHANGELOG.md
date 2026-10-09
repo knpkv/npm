@@ -1,5 +1,16 @@
 # @knpkv/relay-product
 
+## 0.4.0
+
+### Minor Changes
+
+- [#715](https://github.com/knpkv/npm/pull/715) [`7267362`](https://github.com/knpkv/npm/commit/72673622a770d5b40c695fe13b36a82f80e78cf4) Thanks [@konopkov](https://github.com/konopkov)! - Relay's mark shows when Relay is working in the products. relay-product marks the launcher, panel and dock as working while a continuation sent from Relay waits on its answer, or while the product reports its own run through the registration's new `working` field; codecommit-web reports a running PR review. RelayMark's entrance now moves each stroke instead of the whole svg, and a mark that opens already working starts its loop as the entrance ends.
+
+### Patch Changes
+
+- Updated dependencies [[`7267362`](https://github.com/knpkv/npm/commit/72673622a770d5b40c695fe13b36a82f80e78cf4), [`8af4c75`](https://github.com/knpkv/npm/commit/8af4c7569dc195201e29dbf902b6bb221ec78f84), [`eb2ddfd`](https://github.com/knpkv/npm/commit/eb2ddfd124b3e8805d886fa26c178aa59231f1b4)]:
+  - @knpkv/rly@0.18.0
+
 ## 0.3.1
 
 ### Patch Changes
