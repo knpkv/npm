@@ -367,6 +367,40 @@ describe("Relay conversations", () => {
     await runtime.dispose()
   })
 
+  it("reads the backend after a send only while someone holds the conversation open", async () => {
+    const answers: Array<ReturnType<typeof gate<Response>>> = []
+    const server = fakeServer({
+      events: () => new Response(openBody().body),
+      messages: () => {
+        const answer = gate<Response>()
+        answers.push(answer)
+        return answer.promise
+      },
+      session: () => json(session("codex-cli")),
+      backends: () => json(backends)
+    })
+    const runtime = runtimeFor(server)
+    const conversations = makeRelayConversations(relay, runtime)
+    // Held open: the accepted send reads the backend.
+    const held = conversations.subscribe(ref, () => undefined)
+    const kept = conversations.send(ref, { text: "One", requestId: "r1" })
+    await tick()
+    answers[0]?.open(json({ runId: "r1" }, 202))
+    expect(await kept).toEqual(Exit.void)
+    await tick()
+    expect(server.hits("session")).toBe(1)
+    // Closed while the send waits: its answer still resolves the send, and nothing reads.
+    const late = conversations.send(ref, { text: "Two", requestId: "r2" })
+    await tick()
+    held()
+    answers[1]?.open(json({ runId: "r2" }, 202))
+    expect(await late).toEqual(Exit.void)
+    await tick()
+    expect(server.hits("session")).toBe(1)
+    conversations.dispose()
+    await runtime.dispose()
+  })
+
   it("retries a send with its own request id after the answer was lost", async () => {
     const sent: Array<unknown> = []
     let attempts = 0

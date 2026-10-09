@@ -119,8 +119,12 @@ export const makeRelayConversations = (client: RelayClient, runtime: RelayRuntim
     if (readsBackend(event)) refreshBackend(entry)
   }
 
-  /** Reads the session's backend in the background; only the newest read may land. */
+  /**
+   * Reads the session's backend in the background; only the newest read may land. Nothing reads for a
+   * conversation nobody holds open, such as a send answered after its panel closed.
+   */
   const refreshBackend = (entry: Entry): void => {
+    if (entry.listeners.size === 0 || entries.get(objectRefKey(entry.ref)) !== entry) return
     interrupt(entry.backendRead)
     entry.backendReads += 1
     const read = entry.backendReads
