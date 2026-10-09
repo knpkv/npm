@@ -14,6 +14,7 @@
  */
 import { LimitSnapshot, LimitsNow } from "@knpkv/agent-usage/limits"
 import { Option, Result, Schema } from "effect"
+import { reasonSentences } from "./unavailable-detail.js"
 
 export { LimitsNow }
 
@@ -138,9 +139,9 @@ export const readingOf = (read: TolerantLimits, alreadySkipped = 0): HostLimits[
     case "Read":
       return { _tag: "Read", limits: read.limits, skipped: alreadySkipped + read.skipped }
     case "UnsupportedVersion":
-      return limitsUnavailable("unsupported_version", `limits format v${read.version}; this reader knows v1`)
+      return limitsUnavailable("unsupported_version", reasonSentences.unsupported_version)
     case "Invalid":
       // The decode error quotes what was printed, which may name host paths: it never leaves as is.
-      return limitsUnavailable("invalid_output", "agent-usage printed limits this version could not read.")
+      return limitsUnavailable("invalid_output", reasonSentences.invalid_output)
   }
 }

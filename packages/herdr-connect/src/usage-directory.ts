@@ -11,13 +11,15 @@ import { Effect, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import { collectFleet, collectHub } from "./internal/fleet-reads.js"
 import { PeerLimitsFailureReason } from "./limits.js"
+import { peerUnavailableDetail } from "./unavailable-detail.js"
 import {
   decodeUsageTolerantly,
   type FleetUsage,
   type HostUsage,
   LooseHostUsage,
   type UsageQuery,
-  usageReadingOf
+  usageReadingOf,
+  usageResponseMaxBytes
 } from "./usage.js"
 
 export class PeerUsageError extends Schema.TaggedError<PeerUsageError>()("PeerUsageError", {
@@ -32,9 +34,6 @@ export interface PeerUsageTarget {
   readonly online: boolean
   readonly usageUrl: string | null
 }
-
-/** A month of daily token cells and bounded limit series is well under this; anything larger is not agent-usage. */
-export const usageResponseMaxBytes = 2 * 1024 * 1024
 
 /**
  * How long the hub waits for a peer: longer than the peer's own 20-second cold read (a 30-day scan
@@ -71,8 +70,9 @@ export const fetchPeerUsage = (query: UsageQuery) =>
       if (loose.host.toLowerCase() !== peer.host.toLowerCase()) {
         return yield* new PeerUsageError({ cause: loose.host, host: peer.host, reason: "invalid_response" })
       }
+      // A peer on an older hostd may send agent-usage's raw stderr: only a known sentence passes on.
       const reading: HostUsage["reading"] = loose.reading._tag === "Unavailable"
-        ? loose.reading
+        ? { ...loose.reading, detail: peerUnavailableDetail(loose.reading.reason, loose.reading.detail) }
         : usageReadingOf(decodeUsageTolerantly(loose.reading.usage), loose.reading.skipped)
       return { host: loose.host, readAt: loose.readAt, reading } satisfies HostUsage
     },

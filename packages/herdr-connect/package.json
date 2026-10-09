@@ -30,6 +30,10 @@
       "types": "./dist/client.d.ts",
       "import": "./dist/client.js"
     },
+    "./usage": {
+      "types": "./dist/usage-entry.d.ts",
+      "import": "./dist/usage-entry.js"
+    },
     "./model": {
       "types": "./dist/model.d.ts",
       "import": "./dist/model.js"

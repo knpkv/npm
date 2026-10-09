@@ -80,6 +80,7 @@ describe("dashboard Work polling ownership", () => {
         <RegistryProvider>
           <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
           <FleetShell
+            usage={null}
             approvals={<div data-testid="approvals" />}
             connect={<ConnectSurface atoms={atoms} embedded />}
             hostCount={1}

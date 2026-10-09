@@ -5,7 +5,8 @@ import {
   FleetShell,
   FleetWorkPanel,
   type FleetWorkState,
-  fleetShortcutFor
+  fleetShortcutFor,
+  shellTabLinkTarget
 } from "../src/shell-view.js"
 
 const press = (
@@ -28,12 +29,13 @@ const press = (
   })
 
 describe("shared fleet shell", () => {
-  it("keeps Approvals, Connect, and Work in distinct tab panels under one masthead", () => {
+  it("keeps Approvals, Connect, Work and Usage in distinct tab panels under one masthead", () => {
     const markup = renderToStaticMarkup(
       <FleetShell
         approvals={<section>APPROVALS_ONLY</section>}
         connect={<section>CONNECT_TERMINAL_CHAT_TREE</section>}
         hostCount={3}
+        usage={<section>USAGE_HISTORY</section>}
         work={<section>WORK_DEPARTURE_BOARD</section>}
       />
     )
@@ -41,10 +43,11 @@ describe("shared fleet shell", () => {
     // What the shell knows: configured hosts, not how many answer.
     expect(markup).toContain(">3 hosts<")
     expect(markup).not.toContain("configured")
-    expect(markup.match(/role="tab"/g)).toHaveLength(3)
+    expect(markup.match(/role="tab"/g)).toHaveLength(4)
     expect(markup).toContain(">Approvals</button>")
     expect(markup).toContain(">Connect</button>")
     expect(markup).toContain(">Work</button>")
+    expect(markup).toContain(">Usage</button>")
     expect(markup).toContain("Keyboard shortcuts")
     // No key rail inside the panels any more.
     expect(markup).not.toContain("<kbd>")
@@ -59,6 +62,7 @@ describe("shared fleet shell", () => {
         connect={<section>CONNECT</section>}
         hostCount={1}
         notice={<p>REFRESH_FAILED</p>}
+        usage={<section>USAGE_HISTORY</section>}
         work={<section>WORK</section>}
       />
     )
@@ -69,7 +73,9 @@ describe("shared fleet shell", () => {
   })
 
   it("brands the masthead Relay, with its mark beside the name and the tabs named after it", () => {
-    const markup = renderToStaticMarkup(<FleetShell approvals={null} connect={null} hostCount={1} work={null} />)
+    const markup = renderToStaticMarkup(
+      <FleetShell approvals={null} connect={null} hostCount={1} usage={null} work={null} />
+    )
     const masthead = markup.slice(markup.indexOf("fleet-shell-masthead"), markup.indexOf("</header>"))
     expect(masthead).toMatch(/<strong[^>]*>Relay<\/strong>/)
     // The name is in words, so the mark is decorative.
@@ -79,7 +85,8 @@ describe("shared fleet shell", () => {
   })
 
   it("acts on no single bare key: 1, 2, 3 and / do nothing", () => {
-    for (const key of ["1", "2", "3", "/", "a", "c", "w"]) expect(press(key)).toEqual({ prefix: null, shortcut: null })
+    for (const key of ["1", "2", "3", "/", "a", "c", "w", "u"])
+      expect(press(key)).toEqual({ prefix: null, shortcut: null })
   })
 
   it("selects a tab with g then a, c or w, within the sequence window", () => {
@@ -123,5 +130,21 @@ describe("shared fleet shell", () => {
     for (const state of states) {
       expect(renderToStaticMarkup(<FleetWorkPanel state={state} />)).toMatch(/<h1[^>]*>Work<\/h1>/)
     }
+  })
+
+  it("opens Usage with g then u", () => {
+    const g = press("g", { now: 1_000 })
+    expect(press("u", { now: 1_200, prefix: g.prefix }).shortcut).toEqual({ _tag: "select_tab", tab: "usage" })
+  })
+
+  // Connect's limits line links to /?tab=usage: inside the shell that switches tabs, not pages.
+  it("reads a same-page ?tab= link as a tab switch, and nothing else", () => {
+    const here = { origin: "http://127.0.0.1:8787", pathname: "/" }
+    expect(shellTabLinkTarget("/?tab=usage", here)).toBe("usage")
+    expect(shellTabLinkTarget("?tab=connect", here)).toBe("connect")
+    expect(shellTabLinkTarget("/?tab=settings", here)).toBeNull()
+    expect(shellTabLinkTarget("/connect/?tab=usage", here)).toBeNull()
+    expect(shellTabLinkTarget("https://example.com/?tab=usage", here)).toBeNull()
+    expect(shellTabLinkTarget("/", here)).toBeNull()
   })
 })

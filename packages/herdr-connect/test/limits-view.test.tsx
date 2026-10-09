@@ -40,23 +40,20 @@ const view: ConnectLimitsView = {
 }
 
 describe("ConnectLimits", () => {
-  it("shows one line of state labels and keeps the cards closed", async () => {
+  it("shows one line of state labels and links to the Usage tab for each host's cards", async () => {
     const host = await render(<ConnectLimits problem={null} view={view} />)
     expect([...host.querySelectorAll(".connect-limits-line li")].map((item) => item.textContent)).toEqual([
       "Claude 86% 5-hour",
       "Codex unknown"
     ])
-    const details = host.querySelector("details")
-    expect(details?.open).toBe(false)
-    expect(details?.querySelector("summary")?.textContent).toBe("Limits on each host")
-  })
-
-  it("gives each host's cards their own heading", async () => {
-    const host = await render(<ConnectLimits problem={null} view={view} />)
-    const headings = [...host.querySelectorAll("h2")]
-    expect(headings.map((heading) => heading.textContent)).toEqual(["Limits on SER8", "Limits on PI"])
-    expect(new Set(headings.map((heading) => heading.id)).size).toBe(2)
-    expect(host.textContent).toContain("No reading from MBP (offline)")
+    const link = host.querySelector("a")
+    expect(link?.getAttribute("href")).toBe("/?tab=usage")
+    expect(link?.textContent).toBe("Limits and usage on each host")
+    // The cards and notes moved to the Usage tab: Connect keeps only its line.
+    expect(host.querySelector("details")).toBeNull()
+    expect(host.querySelectorAll("h2")).toHaveLength(0)
+    const single = await render(<ConnectLimits problem={null} view={{ ...view, hosts: [view.hosts[0]!] }} />)
+    expect(single.querySelector("a")?.textContent).toBe("Limits and usage")
   })
 
   it("shows nothing while limits are off, and says why when the first load failed", async () => {

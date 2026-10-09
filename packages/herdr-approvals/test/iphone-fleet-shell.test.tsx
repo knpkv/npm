@@ -34,6 +34,7 @@ const render = async (element: React.ReactNode): Promise<void> => {
 describe("iPhone fleet shell regressions", () => {
   const shell = (
     <FleetShell
+      usage={null}
       approvals={<section>Approvals</section>}
       connect={<section>Terminal</section>}
       hostCount={1}
@@ -79,6 +80,7 @@ describe("iPhone fleet shell regressions", () => {
     }
     await render(
       <FleetShell
+        usage={null}
         approvals={<section>Approvals</section>}
         connect={<LateSearch />}
         hostCount={1}
@@ -98,6 +100,7 @@ describe("iPhone fleet shell regressions", () => {
     window.history.replaceState(null, "", "/?tab=connect")
     await render(
       <FleetShell
+        usage={null}
         approvals={<button type="button">Approve request</button>}
         connect={<button type="button">Focused terminal control</button>}
         hostCount={1}
@@ -128,6 +131,7 @@ describe("iPhone fleet shell regressions", () => {
   it("still selects a panel when its destination tab is missing", async () => {
     await render(
       <FleetShell
+        usage={null}
         approvals={<button type="button">Focused approval control</button>}
         connect={<section>Terminal</section>}
         hostCount={1}
@@ -164,6 +168,7 @@ describe("iPhone fleet shell regressions", () => {
 
     await render(
       <FleetShell
+        usage={null}
         approvals={<section>Approvals</section>}
         connect={<section>Connect</section>}
         hostCount={1}

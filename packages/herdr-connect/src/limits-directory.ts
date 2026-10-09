@@ -17,6 +17,7 @@ import {
   PeerLimitsFailureReason,
   readingOf
 } from "./limits.js"
+import { peerUnavailableDetail } from "./unavailable-detail.js"
 
 export class PeerLimitsError extends Schema.TaggedError<PeerLimitsError>()("PeerLimitsError", {
   cause: Schema.Defect(),
@@ -55,8 +56,9 @@ export const fetchPeerLimits = Effect.fn("ConnectLimits.fetchPeer")(
     if (loose.host.toLowerCase() !== peer.host.toLowerCase()) {
       return yield* new PeerLimitsError({ cause: loose.host, host: peer.host, reason: "invalid_response" })
     }
+    // A peer on an older hostd may send agent-usage's raw stderr: only a known sentence passes on.
     const reading: HostLimits["reading"] = loose.reading._tag === "Unavailable"
-      ? loose.reading
+      ? { ...loose.reading, detail: peerUnavailableDetail(loose.reading.reason, loose.reading.detail) }
       : readingOf(decodeLimitsTolerantly(loose.reading.limits), loose.reading.skipped)
     return { host: loose.host, readAt: loose.readAt, reading } satisfies HostLimits
   },

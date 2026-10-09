@@ -5,7 +5,7 @@ import { Cause, Option, Predicate } from "effect"
 import type * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react"
 
-export type FleetShellTab = "approvals" | "connect" | "work"
+export type FleetShellTab = "approvals" | "connect" | "work" | "usage"
 
 export type FleetShortcut =
   | { readonly _tag: "focus_agent_search" }
@@ -145,12 +145,13 @@ export const FleetWorkPanel = ({ state }: { readonly state: FleetWorkState }): R
 const sequenceTabs: ReadonlyMap<string, FleetShellTab> = new Map([
   ["a", "approvals"],
   ["c", "connect"],
-  ["w", "work"]
+  ["w", "work"],
+  ["u", "usage"]
 ])
 
 /**
  * The shortcut for one key press, and the `g` prefix it leaves. No single bare key acts on its own:
- * Andrey's window manager owns Alt, so tabs are `g` then `a` / `c` / `w` within
+ * Andrey's window manager owns Alt, so tabs are `g` then `a` / `c` / `w` / `u` within
  * {@link FLEET_SEQUENCE_MS}, agent search is Ctrl+K (Cmd+K), and `?` lists the shortcuts. Only
  * Ctrl+K works inside a field; nothing else takes a key while one has focus.
  */
@@ -186,6 +187,7 @@ const shortcutList: ReadonlyArray<{ readonly keys: ReadonlyArray<string>; readon
   { action: "Go to Approvals", keys: ["g", "a"] },
   { action: "Go to Connect", keys: ["g", "c"] },
   { action: "Go to Work", keys: ["g", "w"] },
+  { action: "Go to Usage", keys: ["g", "u"] },
   { action: "Search agents", keys: ["Ctrl", "K"] },
   { action: "Show these shortcuts", keys: ["?"] }
 ]
@@ -252,14 +254,33 @@ const isEditableTarget = (target: EventTarget | null): boolean => {
   return Predicate.hasProperty(target, "role") && target.role === "textbox"
 }
 
+const isAnchor = (node: EventTarget): node is HTMLAnchorElement =>
+  Predicate.hasProperty(node, "tagName") && node.tagName === "A"
+
 const isShellTab = (value: string): value is FleetShellTab =>
-  value === "approvals" || value === "connect" || value === "work"
+  value === "approvals" || value === "connect" || value === "work" || value === "usage"
+
+/**
+ * The tab a same-page `?tab=` link opens, or null for any other link. Connect's limits line links to
+ * `/?tab=usage`; inside the shell that switches tabs rather than reloading the page.
+ */
+export const shellTabLinkTarget = (
+  href: string,
+  current: { readonly origin: string; readonly pathname: string }
+): FleetShellTab | null => {
+  if (!URL.canParse(href, current.origin)) return null
+  const url = new URL(href, current.origin)
+  if (url.origin !== current.origin || url.pathname !== current.pathname) return null
+  const tab = url.searchParams.get("tab")
+  return tab !== null && isShellTab(tab) ? tab : null
+}
 
 export const FleetShell = ({
   approvals,
   connect,
   hostCount,
   notice = null,
+  usage,
   work
 }: {
   readonly approvals: ReactNode
@@ -267,6 +288,8 @@ export const FleetShell = ({
   readonly hostCount: number
   /** A page-level notice (such as a failed refresh): under the masthead, in the gutter, above the tabs. */
   readonly notice?: ReactNode
+  /** The Usage tab's content; mounted only while it shows, so its polls stop when it doesn't. */
+  readonly usage: ReactNode
   readonly work: ReactNode
 }): ReactElement => {
   const [tab, setTab] = useState<FleetShellTab>("approvals")
@@ -315,6 +338,17 @@ export const FleetShell = ({
       window.visualViewport?.removeEventListener("scroll", scheduleTerminalInsetUpdate)
     }
   }, [tab])
+  // On a phone the tabs scroll as one row; the selected one is always brought into it, so a page
+  // opened on `?tab=usage` (the fourth tab) shows which tab it is on.
+  useLayoutEffect(() => {
+    const tabList = tabsRef.current?.querySelector<HTMLElement>(':scope > [role="tablist"]')
+    const selected = tabList?.querySelector<HTMLElement>(`:scope > [role="tab"][data-tab-value="${tab}"]`)
+    if (tabList === null || tabList === undefined || selected === null || selected === undefined) return
+    const list = tabList.getBoundingClientRect()
+    const trigger = selected.getBoundingClientRect()
+    if (trigger.left < list.left) tabList.scrollLeft += trigger.left - list.left
+    else if (trigger.right > list.right) tabList.scrollLeft += trigger.right - list.right
+  }, [tab])
   const focusTab = (nextTab: FleetShellTab): void => {
     const tabList = tabsRef.current?.querySelector<HTMLElement>(':scope > [role="tablist"]')
     const tabs = tabList?.querySelectorAll<HTMLButtonElement>(':scope > [role="tab"]') ?? []
@@ -361,6 +395,41 @@ export const FleetShell = ({
     window.addEventListener("keydown", handleShortcut)
     return () => window.removeEventListener("keydown", handleShortcut)
   })
+  // A plain click on a same-page `?tab=` link switches tabs in place; a modified click (new tab,
+  // new window) keeps the browser's own behaviour.
+  useEffect(() => {
+    const handleClick = (event: MouseEvent): void => {
+      if (
+        event.defaultPrevented ||
+        event.button !== 0 ||
+        event.metaKey ||
+        event.ctrlKey ||
+        event.shiftKey ||
+        event.altKey
+      )
+        return
+      // The link itself, or the link around what was clicked: the first anchor on the event's path.
+      const anchor = event.composedPath().find(isAnchor)
+      const href = anchor?.getAttribute("href")
+      // A link to another window or a download keeps the browser's own behaviour.
+      if (
+        anchor === undefined ||
+        href === null ||
+        href === undefined ||
+        anchor.getAttribute("target") !== null ||
+        anchor.hasAttribute("download")
+      )
+        return
+      const target = shellTabLinkTarget(href, window.location)
+      if (target === null) return
+      event.preventDefault()
+      selectTab(target)
+      window.scrollTo({ top: 0 })
+    }
+    document.addEventListener("click", handleClick)
+    return () => document.removeEventListener("click", handleClick)
+    // Registered once: selectTab only reads refs and the state setter, both stable across renders.
+  }, [])
   const items: ReadonlyArray<RlyTabItem> = [
     {
       content: approvals,
@@ -379,6 +448,11 @@ export const FleetShell = ({
       content: work,
       label: "Work",
       value: "work"
+    },
+    {
+      content: usage,
+      label: "Usage",
+      value: "usage"
     }
   ]
   return (
