@@ -16,7 +16,7 @@
  * @module
  */
 import { agentName } from "@knpkv/agent-usage/limits"
-import type { SeriesCell, ViewRange } from "@knpkv/agent-usage/usage"
+import type { SeriesCell, UsagePreset, ViewRange } from "@knpkv/agent-usage/usage"
 import type { FleetUsage, UsageNow } from "./usage.js"
 
 type LimitSeries = UsageNow["limits"][number]
@@ -34,6 +34,8 @@ export interface UsageTabView {
   /** The chart's columns: every host's periods, merged by key, oldest first. */
   readonly periods: ReadonlyArray<{ readonly key: string; readonly start: number }>
   readonly range: ViewRange | null
+  /** The range the shown reads answer for, or null when no host answered: what the totals are labelled with. */
+  readonly preset: UsagePreset | null
   readonly cells: ReadonlyArray<SeriesCell>
   readonly labels: ReadonlyMap<string, string>
   readonly totalTokens: number
@@ -44,21 +46,13 @@ export interface UsageTabView {
 
 const seriesId = (agent: string, model: string): string => `${agent}:${model}`
 
-/** agent-usage's stderr sentence, without its own "agent-usage:" prefix or Markdown backticks. */
-const plainDetail = (detail: string): string => detail.replace(/^(?:agent-usage:\s*)+/u, "").replaceAll("`", "")
-
-const unavailableNote = (host: string, reason: string, detail: string): string => {
-  switch (reason) {
-    case "not_configured":
-      return `${host}: usage is not set up on this host.`
-    case "unsupported_version":
-      return `${host}: its agent-usage is newer than this hub reads (${plainDetail(detail)}).`
-    case "timeout":
-      return `${host}: agent-usage did not answer in time.`
-    default:
-      return `${host}: ${plainDetail(detail)}`
-  }
-}
+/**
+ * A host with no read, in words. hostd only ever sends one of its fixed sentences as the detail
+ * (and the hub keeps only those from a peer), so the detail is shown as it is; only "not set up" is
+ * worded for this tab.
+ */
+const unavailableNote = (host: string, reason: string, detail: string): string =>
+  reason === "not_configured" ? `${host}: usage is not set up on this host.` : `${host}: ${detail}`
 
 const failureNote = (host: string, reason: string): string =>
   reason === "offline"
@@ -117,6 +111,7 @@ export const usageTabView = (fleet: FleetUsage, sinceReceived: number): UsageTab
   return {
     periods,
     range,
+    preset: first?.range.preset ?? null,
     cells,
     labels,
     totalTokens,

@@ -43,6 +43,7 @@ const view: UsageTabView = {
     { key: "2026-10-09", start: day }
   ],
   range: { from: 0, to: 2 * day, bucket: "day" },
+  preset: "7d",
   cells: [{ period: 1, id: "claude:claude-opus-5", value: 1_200 }],
   labels: new Map([["claude:claude-opus-5", "Claude claude-opus-5"]]),
   totalTokens: 1_200,
@@ -61,6 +62,29 @@ describe("UsageTab", () => {
     ])
     expect(host.textContent).toContain("1.2K tokens in the last 7 days")
     expect(host.textContent).toContain("PI is offline.")
+  })
+
+  // A switch keeps the old range's reads on screen until the new ones land: they keep their own label.
+  it("labels the totals with the range the shown reads answer for, and says when a switch is loading", async () => {
+    const switching = await render({ range: "30d", usage: { loading: true, problem: null, view } })
+    expect(switching.textContent).toContain("Updating to the last 30 days… showing the last 7 days")
+    expect(switching.textContent).not.toContain("in the last 30 days")
+    expect(switching.querySelector("[aria-busy='true']")).not.toBeNull()
+    const settled = await render({ range: "30d", usage: { loading: false, problem: null, view } })
+    expect(settled.textContent).toContain("1.2K tokens in the last 7 days")
+  })
+
+  it("says no host has usage when the fleet answered without any, rather than loading forever", async () => {
+    const none = await render({
+      usage: {
+        loading: false,
+        problem: null,
+        view: { ...view, range: null, preset: null, cells: [], totalTokens: 0, hosts: [] }
+      }
+    })
+    expect(none.textContent).toContain("No host has usage to show.")
+    expect(none.querySelector("[aria-label='Loading usage']")).toBeNull()
+    expect([...none.querySelectorAll("h2")].map((heading) => heading.textContent)).toEqual(["Tokens"])
   })
 
   it("offers 24h, 7d and 30d on every size, and reports the chosen one", async () => {

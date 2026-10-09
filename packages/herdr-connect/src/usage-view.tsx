@@ -126,14 +126,17 @@ export const UsageTab = ({ limits, onHubMachine, onRangeChange, range, usage }: 
         )}
       </section>
 
-      <section aria-labelledby={tokensId} className="usage-tab-panel">
+      <section aria-busy={usage.loading} aria-labelledby={tokensId} className="usage-tab-panel">
         <div className="usage-tab-panel-head">
           <Text as="h2" id={tokensId} variant="card-title">
             Tokens
           </Text>
-          {view === null ? null : (
+          {/* Labelled with the range the shown reads answer for: after a switch they stay until the new range lands. */}
+          {view === null || view.preset === null ? null : (
             <Text tone="secondary" variant="meta">
-              {compact.format(view.totalTokens)} tokens in the last {rangeLabel[range]}
+              {usage.loading && view.preset !== range
+                ? `Updating to the last ${rangeLabel[range]}… showing the last ${rangeLabel[view.preset]}`
+                : `${compact.format(view.totalTokens)} tokens in the last ${rangeLabel[view.preset]}`}
             </Text>
           )}
         </div>
@@ -142,7 +145,10 @@ export const UsageTab = ({ limits, onHubMachine, onRangeChange, range, usage }: 
             {usage.problem}
           </Text>
         )}
-        {view === null || stacked === null || view.range === null ? (
+        {view !== null && view.range === null ? (
+          // The fleet answered, but no host had usage to give: its notes above say why.
+          <p className="usage-empty">No host has usage to show.</p>
+        ) : view === null || stacked === null || view.range === null ? (
           usage.problem === null ? (
             <Skeleton decorative={false} height="16rem" label="Loading usage" variant="block" />
           ) : null
@@ -175,7 +181,7 @@ export const UsageTab = ({ limits, onHubMachine, onRangeChange, range, usage }: 
       </section>
 
       {/* Each host's history needs a read; until one arrives the token panel says why there is none. */}
-      {view === null ? null : (
+      {view === null || view.hosts.length === 0 ? null : (
         <section aria-labelledby={historyId} className="usage-tab-panel">
           <Text as="h2" id={historyId} variant="card-title">
             Limits over time

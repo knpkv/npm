@@ -411,7 +411,15 @@ export const FleetShell = ({
       // The link itself, or the link around what was clicked: the first anchor on the event's path.
       const anchor = event.composedPath().find(isAnchor)
       const href = anchor?.getAttribute("href")
-      if (anchor === undefined || href === null || href === undefined || anchor.getAttribute("target") !== null) return
+      // A link to another window or a download keeps the browser's own behaviour.
+      if (
+        anchor === undefined ||
+        href === null ||
+        href === undefined ||
+        anchor.getAttribute("target") !== null ||
+        anchor.hasAttribute("download")
+      )
+        return
       const target = shellTabLinkTarget(href, window.location)
       if (target === null) return
       event.preventDefault()
@@ -420,7 +428,8 @@ export const FleetShell = ({
     }
     document.addEventListener("click", handleClick)
     return () => document.removeEventListener("click", handleClick)
-  })
+    // Registered once: selectTab only reads refs and the state setter, both stable across renders.
+  }, [])
   const items: ReadonlyArray<RlyTabItem> = [
     {
       content: approvals,

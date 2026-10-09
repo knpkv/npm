@@ -44,6 +44,7 @@ describe("usageTabView", () => {
     ])
     expect(view.labels.get("codex:gpt-6")).toBe("Codex gpt-6")
     expect(view.totalTokens).toBe(450)
+    expect(view.preset).toBe("7d")
     // Each host's limits keep its own clock: its observedAt plus the time since the page got it.
     expect(view.hosts.map((host) => [host.host, host.now])).toEqual([["SER8", 7_000], ["PI", 6_000]])
   })
@@ -56,7 +57,11 @@ describe("usageTabView", () => {
         {
           host: "NUC",
           readAt: 0,
-          reading: { _tag: "Unavailable", reason: "failed", detail: "agent-usage: `agent-usage serve` is not running" }
+          reading: {
+            _tag: "Unavailable",
+            reason: "failed",
+            detail: "agent-usage is not running on this host. Start it (or its service)."
+          }
         }
       ],
       failures: [{ host: "PI", reason: "offline" }],
@@ -64,7 +69,7 @@ describe("usageTabView", () => {
     }
     expect(usageTabView(fleet, 0).notes).toEqual([
       "MBP: usage is not set up on this host.",
-      "NUC: agent-usage serve is not running",
+      "NUC: agent-usage is not running on this host. Start it (or its service).",
       "SER8: 2 entries from a newer agent-usage are not shown.",
       "PI is offline.",
       "The other machines could not be listed, so only this host is shown."
@@ -74,6 +79,7 @@ describe("usageTabView", () => {
   it("has no chart range until a host answers", () => {
     const view = usageTabView({ hosts: [], failures: [], peersListed: true }, 0)
     expect(view.range).toBeNull()
+    expect(view.preset).toBeNull()
     expect(view.cells).toEqual([])
   })
 })
