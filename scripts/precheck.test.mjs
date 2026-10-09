@@ -6,7 +6,7 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 
 import rootManifest from "../package.json" with { type: "json" }
-import { eslintPartition, hooksProblem, parseArguments, planPrecheck } from "./precheck.mjs"
+import { eslintPartition, hooksProblem, parseArguments, planPrecheck, untrackedNotice } from "./precheck.mjs"
 
 const rootScripts = rootManifest.scripts
 const eslintPartitions = ["lint:eslint:control-center", "lint:eslint:workspace"].map((name) =>
@@ -134,4 +134,12 @@ test("a checkout without husky's hooks is refused, since its commits would skip 
     "git core.hooksPath is .git/hooks, not .husky/_"
   )
   assert.equal(hooksProblem({ hooksPath: ".husky/_", preCommitExists: false }), ".husky/_/pre-commit is missing")
+})
+
+test("untracked files are named, never formatted or skipped silently", () => {
+  assert.equal(untrackedNotice([]), undefined)
+  assert.equal(
+    untrackedNotice(["diff:", "scratch/a.ts"]),
+    "[precheck] skipping 2 untracked files (git add -N <file> to check one): diff:, scratch/a.ts"
+  )
 })
