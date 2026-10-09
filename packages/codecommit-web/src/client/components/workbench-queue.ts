@@ -8,7 +8,7 @@
  * to the client yet), *quiet* runs from the last modification. An unknown caller identity is
  * reported as `Unknown`, never as an empty queue.
  */
-import { approvalOf, identityMatches } from "@knpkv/codecommit-core/Domain.js"
+import { approvalOf, currentApproverArns, currentApprovers, identityMatches } from "@knpkv/codecommit-core/Domain.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { Data } from "effect"
 
@@ -102,9 +102,33 @@ const viewerOf = (caller: Caller, pullRequest: Domain.PullRequest): Viewer | und
     : { arn: undefined, name: caller.username }
 }
 
+/**
+ * Open pull requests whose approval is unknown. They are never counted as waiting on the user, so the
+ * hero says them separately; `reason` is set when they all fail the same way, so the fix can be named.
+ */
+export interface ApprovalUnknownSummary {
+  readonly count: number
+  readonly reason: Domain.ApprovalUnknownReason | undefined
+}
+
 export interface WorkbenchQueue {
   readonly summary: WorkbenchSummary
   readonly rows: ReadonlyArray<WorkbenchRow>
+  readonly approvalUnknown: ApprovalUnknownSummary
+}
+
+/** {@link ApprovalUnknownSummary} over the open pull requests in `pullRequests`. */
+export const approvalUnknownSummary = (
+  pullRequests: ReadonlyArray<Domain.PullRequest>
+): ApprovalUnknownSummary => {
+  const reasons = pullRequests
+    .filter((pullRequest) => pullRequest.status === "OPEN")
+    .flatMap((pullRequest) => {
+      const approval = approvalOf(pullRequest)
+      return approval._tag === "Unknown" ? [approval.reason] : []
+    })
+  const shared = new Set(reasons.map((reason) => reason._tag)).size === 1 ? reasons[0] : undefined
+  return { count: reasons.length, reason: shared }
 }
 
 /**
@@ -188,16 +212,16 @@ const poolEntries = (rule: Domain.ApprovalRule): ReadonlyArray<string> =>
  */
 const approvalsOn = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule): number => {
   if (rule.satisfied) return rule.requiredApprovals
-  if (rule.poolMembers.length === 0 && rule.poolMemberArns.length === 0) return pullRequest.approvedBy.length
-  if (rule.poolMemberArns.length > 0 && pullRequest.approvedByArns.length > 0) {
-    return pullRequest.approvedByArns.filter((arn) => rule.poolMemberArns.some((entry) => poolEntryMatches(entry, arn)))
-      .length
+  const names = currentApprovers(pullRequest)
+  const arns = currentApproverArns(pullRequest)
+  if (rule.poolMembers.length === 0 && rule.poolMemberArns.length === 0) return names.length
+  if (rule.poolMemberArns.length > 0 && arns.length > 0) {
+    return arns.filter((arn) => rule.poolMemberArns.some((entry) => poolEntryMatches(entry, arn))).length
   }
   // Name fallback: wildcard entries never count by name. Raw entries carry the wildcards that
   // normalization strips (`Review*/alice` becomes `alice`), so they decide when present.
   const exactMembers = poolEntries(rule).filter((entry) => !entry.includes("*"))
-  return pullRequest.approvedBy.filter((approver) => exactMembers.some((member) => identityMatches(approver, member)))
-    .length
+  return names.filter((approver) => exactMembers.some((member) => identityMatches(approver, member))).length
 }
 
 /**
@@ -261,15 +285,16 @@ const stuckReason = (pullRequest: Domain.PullRequest, quietMs: number): StuckRea
  * only the caller's own ARN counts, so another session of the same role is not "you". With
  * approver ARNs only, a same-name approval that the rule's pool counts does, so `Operations/alice`
  * approving leaves a `Reviewers/*` rule open for alice; without ARNs, any same-name approval does.
+ * While approvers are unknown nothing counts: a last known approval may have been revoked.
  */
 const approvedToward = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRule, viewer: Viewer): boolean => {
-  if (viewer.arn !== undefined && pullRequest.approvedByArns.length > 0) {
-    return pullRequest.approvedByArns.includes(viewer.arn)
+  const names = currentApprovers(pullRequest)
+  const arns = currentApproverArns(pullRequest)
+  if (viewer.arn !== undefined && arns.length > 0) return arns.includes(viewer.arn)
+  if (arns.length === 0 || rule.poolMemberArns.length === 0) {
+    return names.some((approver) => identityMatches(viewer.name, approver))
   }
-  if (pullRequest.approvedByArns.length === 0 || rule.poolMemberArns.length === 0) {
-    return pullRequest.approvedBy.some((approver) => identityMatches(viewer.name, approver))
-  }
-  return pullRequest.approvedByArns.some(
+  return arns.some(
     (arn) => identityMatches(viewer.name, arn) && rule.poolMemberArns.some((entry) => poolEntryMatches(entry, arn))
   )
 }
@@ -277,14 +302,17 @@ const approvedToward = (pullRequest: Domain.PullRequest, rule: Domain.ApprovalRu
 /**
  * Yours first; then, for the unsatisfied rules the caller hasn't approved toward, `review` when one
  * certainly counts their approval (named member, or no pool at all) and `pool` when one only might.
- * While approval is unknown, which rules are satisfied is only last known: any rule the caller could
- * count toward makes it `pool`, never the certain `review`.
+ * While approval is unknown, which rules are satisfied is only last known; while approvers are
+ * unknown, whether the caller already approved is. Either way any rule the caller could count toward
+ * makes it `pool`, never the certain `review`, and a last known approval never takes them out.
  */
 const groupOf = (pullRequest: Domain.PullRequest, viewer: Viewer): WorkbenchGroup | undefined => {
   if (identityMatches(viewer.name, pullRequest.author)) return "yours"
-  if (approvalOf(pullRequest)._tag === "Unknown") {
+  const approvalUnknown = approvalOf(pullRequest)._tag === "Unknown"
+  const approversUnknown = pullRequest.approversUnknown === true
+  if (approvalUnknown || approversUnknown) {
     const couldCount = pullRequest.approvalRules
-      .filter((rule) => !approvedToward(pullRequest, rule, viewer))
+      .filter((rule) => (approvalUnknown || !rule.satisfied) && !approvedToward(pullRequest, rule, viewer))
       .some((rule) => poolStanding(rule, viewer) !== "out")
     if (couldCount) return "pool"
   }
@@ -345,8 +373,10 @@ export const workbenchQueue = (
           openMs: Math.max(0, now.getTime() - pullRequest.creationDate.getTime()),
           pullRequest,
           quietMs,
-          // While approval is unknown, rule progress is only last known, so the row says unknown instead.
-          rule: approvalOf(pullRequest)._tag === "Unknown" ? undefined : ruleProgress(pullRequest),
+          // While approval or approvers are unknown, rule progress is only last known, so the row says unknown instead.
+          rule: approvalOf(pullRequest)._tag === "Unknown" || pullRequest.approversUnknown === true
+            ? undefined
+            : ruleProgress(pullRequest),
           stuck: group === "yours"
             ? stuckReason(pullRequest, quietMs)
             : approvalOf(pullRequest)._tag === "Unknown"
@@ -356,10 +386,12 @@ export const workbenchQueue = (
       ]
     })
     .sort((a, b) => groupOrder[a.group] - groupOrder[b.group] || b.openMs - a.openMs)
-  if (!known) return { rows, summary: WorkbenchSummary.Unknown() }
+  const approvalUnknown = approvalUnknownSummary(pullRequests)
+  if (!known) return { approvalUnknown, rows, summary: WorkbenchSummary.Unknown() }
   const waiting = rows.filter((row) => row.group === "review")
   const oldest = waiting[0]
   return {
+    approvalUnknown,
     rows,
     summary: oldest === undefined
       ? WorkbenchSummary.Clear({

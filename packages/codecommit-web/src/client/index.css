@@ -63,12 +63,12 @@
   }
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    min-block-size: 100dvh;
+    min-block-size: 100svh;
     margin: 0;
   }
   #root,
   [data-rly-root] {
-    min-block-size: 100dvh;
+    min-block-size: 100svh;
   }
 }
 
@@ -94,14 +94,9 @@
   }
 }
 
-.rolling-line {
-  animation: rolling-slide-in 350ms cubic-bezier(0.16, 1, 0.3, 1) both;
-  transition: opacity 400ms ease;
-}
-
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .rolling-line {
-    animation: none;
-    transition: none;
+    animation: rolling-slide-in var(--rly-motion-deliberate-duration) var(--rly-motion-deliberate-easing) both;
+    transition: opacity var(--rly-motion-deliberate-duration) var(--rly-motion-deliberate-easing);
   }
 }

@@ -1,0 +1,16 @@
+id: no-type-assertion
+snapshots:
+  ? |
+    const modes = ["read", "write"] as const
+  : labels:
+      - source: '["read", "write"] as const'
+        style: primary
+        start: 14
+        end: 40
+  ? |
+    const user = input as User
+  : labels:
+      - source: input as User
+        style: primary
+        start: 13
+        end: 26

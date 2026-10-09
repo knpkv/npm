@@ -27,6 +27,19 @@ export const defaultCalendarLayers: CalendarLayers = {
   overlapping: false
 }
 
+/**
+ * The layers as drawn: a system that is not connected shows nothing, even from a week read before it
+ * was disconnected, so its entries can neither be seen nor hide or overlap anything.
+ */
+export const connectedLayers = (
+  layers: CalendarLayers,
+  connected: { readonly jira: boolean; readonly clockify: boolean }
+): CalendarLayers => ({
+  ...layers,
+  jira: layers.jira && connected.jira,
+  clockify: layers.clockify && connected.clockify
+})
+
 const remainingSuggestionSeconds = (
   row: WeekRowResponse,
   scope: WeekPlanResponse["scope"],

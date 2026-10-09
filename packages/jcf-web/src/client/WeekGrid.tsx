@@ -26,6 +26,7 @@ import {
   type GridBlock,
   minimumBlockPixels,
   minutePixels,
+  connectedLayers,
   projectCalendar,
   type ProposableBlock
 } from "./calendarProjection.js"
@@ -82,6 +83,8 @@ const Block = (props: {
   readonly onOpenSaved: (entry: SavedEntry) => void
 }) => {
   const { block, column, columns, endMinutes, startMinutes } = props.placed
+  // A packed stretch clips its rows to its time; touch has no hover, so the head toggles it open.
+  const [expanded, setExpanded] = useState(false)
   const height = Math.max((endMinutes - startMinutes) * MINUTE_PX, MIN_BLOCK_PX)
   const density = height < 38 ? "short" : height < 56 ? "medium" : "full"
   const style = {
@@ -95,7 +98,7 @@ const Block = (props: {
   if (block.kind === "stretch") {
     const selected = (member: ProposableBlock) =>
       props.selectedRowId === member.rowId && props.selectedBlockIndex === member.blockIndex
-    // The height is a floor, not a cap: hovering or focusing a stretch lets its rows show in full.
+    // The height is a floor, not a cap: opening, hovering or focusing a stretch shows its rows in full.
     const stretchStyle: CSSProperties & Record<"--jcf-stretch-height", string> = {
       left: style.left,
       top: style.top,
@@ -105,13 +108,22 @@ const Block = (props: {
     return (
       <div
         className="jcf-stretch"
+        data-expanded={expanded}
         style={stretchStyle}
         role="group"
         aria-label={`${clock}, ${String(block.members.length)} tickets packed in this stretch`}
       >
-        <span className="jcf-stretch-head">
+        <button
+          type="button"
+          className="jcf-stretch-head"
+          aria-expanded={expanded}
+          onClick={(event) => {
+            event.stopPropagation()
+            setExpanded((open) => !open)
+          }}
+        >
           {clock}, {block.members.length} tickets
-        </span>
+        </button>
         <ul>
           {block.members.map((member) => (
             <li key={member.id} className="jcf-stretch-row">
@@ -214,6 +226,8 @@ const Block = (props: {
 }
 
 export const WeekGrid = (props: {
+  /** A system that is not connected has no saved layer to show; its chip is left out. */
+  readonly connected: { readonly jira: boolean; readonly clockify: boolean }
   readonly layers: CalendarLayers
   readonly onToggleLayer: (layer: keyof CalendarLayers | "all") => void
   readonly writing: boolean
@@ -230,7 +244,7 @@ export const WeekGrid = (props: {
   readonly onOpenRow: (rowId: string, blockIndex: number) => void
   readonly onOpenSlot: (day: string, clock: string) => void
 }) => {
-  const { layers } = props
+  const layers = useMemo(() => connectedLayers(props.layers, props.connected), [props.layers, props.connected])
   const [view, setView] = useState<"auto" | "calendar" | "agenda">("auto")
   const [narrow, setNarrow] = useState(() => window.matchMedia("(max-width: 900px)").matches)
   useEffect(() => {
@@ -303,7 +317,8 @@ export const WeekGrid = (props: {
                 {group.choices
                   .filter(
                     ({ key }) =>
-                      (key !== "jira" && key !== "clockify") || props.plan.scope === "both" || props.plan.scope === key
+                      (key !== "jira" && key !== "clockify") ||
+                      (props.connected[key] && (props.plan.scope === "both" || props.plan.scope === key))
                   )
                   .map(({ detail, key, label }) => {
                     const selected =

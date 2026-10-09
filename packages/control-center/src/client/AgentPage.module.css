@@ -16,7 +16,9 @@
   gap: clamp(4rem, 9vw, 8rem);
 }
 
+/* A text-sized link; its ::after extends the target to 44px without moving the text. */
 .back {
+  position: relative;
   inline-size: fit-content;
   color: var(--rly-color-text-2);
   font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
@@ -24,11 +26,18 @@
   text-decoration: none;
 }
 
-.back:hover,
 .back:focus-visible {
   color: var(--rly-color-text-1);
   text-decoration: underline;
   text-underline-offset: var(--rly-space-4);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .back:hover {
+    color: var(--rly-color-text-1);
+    text-decoration: underline;
+    text-underline-offset: var(--rly-space-4);
+  }
 }
 
 .hero,
@@ -47,7 +56,7 @@
 
 .heroCopy h1,
 .legacyHeader h1 {
-  max-inline-size: 11ch;
+  max-inline-size: 7.54em;
   letter-spacing: -0.065em;
   text-wrap: balance;
 }
@@ -116,10 +125,6 @@
   font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
     var(--rly-type-card-title-font);
   text-align: start;
-  transition:
-    border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
-    background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
-    box-shadow var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
 }
 
 .preset {
@@ -146,10 +151,12 @@
   box-shadow: inset 0 0 0 1px var(--rly-color-agent);
 }
 
-.preset:hover,
-.suggestion:hover {
-  border-color: var(--rly-color-agent);
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .preset:hover,
+  .suggestion:hover {
+    border-color: var(--rly-color-agent);
+    background: var(--rly-color-surface-2);
+  }
 }
 
 .preset:focus-visible,
@@ -234,9 +241,18 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .preset,
   .suggestion {
-    transition: none;
+    transition:
+      border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      box-shadow var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
+}
+
+.back::after {
+  position: absolute;
+  inset: min(0px, (100% - 2.75rem) / 2);
+  content: "";
 }

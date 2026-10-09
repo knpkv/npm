@@ -6,7 +6,7 @@
     display: block;
     inline-size: 100%;
     min-inline-size: var(--rly-space-48);
-    overflow: hidden;
+    overflow: clip;
     position: relative;
   }
   .defaultSize {

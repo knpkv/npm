@@ -840,8 +840,12 @@ const make = (
               (candidate.filename === decodedAttachment.filename && candidate.fileId !== undefined)
             ) ?? decodedAttachment
           ),
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-          Effect.catch(() => Effect.succeed(decodedAttachment))
+          // The upload response already describes the attachment; the listing only adds its file id.
+          Effect.catch((error) =>
+            Effect.logDebug("Attachment listing failed; using the upload response", error).pipe(
+              Effect.as(decodedAttachment)
+            )
+          )
         )
       })
 

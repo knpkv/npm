@@ -1,5 +1,69 @@
 # @knpkv/herdr-work
 
+## 0.9.4
+
+### Patch Changes
+
+- Updated dependencies [[`586f75d`](https://github.com/knpkv/npm/commit/586f75d4b65e6d3c3b3f41f35d1b1a34facdb133), [`8f49d5b`](https://github.com/knpkv/npm/commit/8f49d5bafad19c7e3163538f7acb2f0f7de4d2d1), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1cecd7c`](https://github.com/knpkv/npm/commit/1cecd7c454fdbdf042f7a3fd25a200805500881f), [`48830f8`](https://github.com/knpkv/npm/commit/48830f89057919d23ca408192cb68ac1893c8e96), [`799414f`](https://github.com/knpkv/npm/commit/799414f37422e7aeaf0a36bb80d8d878d75f5a10), [`2540508`](https://github.com/knpkv/npm/commit/2540508d00dc60c3842817df8ca37ce6c6a6179b), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1902d84`](https://github.com/knpkv/npm/commit/1902d84417dc050cd7fe7a2472071275424f1e4f), [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44)]:
+  - @knpkv/herdr-fleet@0.9.0
+  - @knpkv/rly@0.17.0
+
+## 0.9.3
+
+### Patch Changes
+
+- Updated dependencies [[`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6), [`67f7ea1`](https://github.com/knpkv/npm/commit/67f7ea1a5e3c0281da1d627fce940975e2db0cf4), [`f5f5fd9`](https://github.com/knpkv/npm/commit/f5f5fd98dcea7b7df1b226043e89ffb6decaffad), [`ce3234a`](https://github.com/knpkv/npm/commit/ce3234a201e3336b17f22219c8215d11eecc3408), [`4a41bf8`](https://github.com/knpkv/npm/commit/4a41bf82e327ec66a5df1202920f08e8e51554a4), [`e584518`](https://github.com/knpkv/npm/commit/e584518c9c98186e331a9962c4c6347c470cb3c5), [`d476bb0`](https://github.com/knpkv/npm/commit/d476bb0b2e2399c72eb2cd7b8c6005d833464598), [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327), [`765e850`](https://github.com/knpkv/npm/commit/765e850895d4edc16a75b3af072f71d527ad0b8c)]:
+  - @knpkv/rly@0.16.0
+
+## 0.9.2
+
+### Patch Changes
+
+- Updated dependencies [[`dfa2d94`](https://github.com/knpkv/npm/commit/dfa2d94ea207baeb281ef222c7d28cf98e4962bb), [`5d21796`](https://github.com/knpkv/npm/commit/5d21796fb856fba44a32395e316a6bd95ecdbdd6), [`aa41111`](https://github.com/knpkv/npm/commit/aa411113b76d81637f7af356bf04054246aa30ab), [`3ddf05b`](https://github.com/knpkv/npm/commit/3ddf05baa285beebba1ebe99bd2458434a613015)]:
+  - @knpkv/rly@0.15.0
+
+## 0.9.1
+
+### Patch Changes
+
+- Updated dependencies [[`da04e85`](https://github.com/knpkv/npm/commit/da04e85df105627acbfcc017ee0f15e6f4d6f20d), [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597), [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae), [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db)]:
+  - @knpkv/herdr-fleet@0.8.0
+  - @knpkv/rly@0.14.0
+
+## 0.9.0
+
+### Minor Changes
+
+- [#591](https://github.com/knpkv/npm/pull/591) [`0d6cc4d`](https://github.com/knpkv/npm/commit/0d6cc4df23eca64c5d29725bf50899776cc52435) Thanks [@konopkov](https://github.com/konopkov)! - `WorkService.planReconcile({ confirmed })` answers what `reconcile` would do now, writing nothing. It shares `reconcile`'s planning: capacity, confirmation, failure and already-stamped checks, and each checkpoint's validation, each check in its own transaction rolled back at once, with later steps checked against the checkpoints earlier ones planned. A plan is advisory; `reconcile` decides again from the store as it then is. Steps are `would_apply` (with the fact behind it and the goal's latest event id and `updatedAt` it was planned from), `recorded` or `conflict`. A shadow run in observe mode measures the real decisions this way.
+
+### Patch Changes
+
+- Updated dependencies [[`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/rly@0.13.0
+
+## 0.8.1
+
+### Patch Changes
+
+- [#590](https://github.com/knpkv/npm/pull/590) [`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26) Thanks [@konopkov](https://github.com/konopkov)! - Work activity for an approved reassignment or abandonment reads as a sentence: "Reassigned from host-coordinator to claude-coordinator: <reason>" and "Abandoned: <reason>". Owner ids and the approval's job id and hash no longer appear in the text; they stay structured on the reassignment and abandonment records. `workReassignActivitySummary` and `workAbandonActivitySummary` now take only the payload. Events already recorded keep their earlier text.
+
+- [#600](https://github.com/knpkv/npm/pull/600) [`bfba87c`](https://github.com/knpkv/npm/commit/bfba87c566ca21d267c0626da60b431757dc5e32) Thanks [@konopkov](https://github.com/konopkov)! - A decided request drops its Approve/Reject bar once the snapshot proves the outcome: it reads as its title and state word, a refusal keeps its explanation, and the outcome is announced. While a bar is shown, the request is named once, by the bar.
+- Updated dependencies [[`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26)]:
+  - @knpkv/herdr-fleet@0.7.0
+
+## 0.8.0
+
+### Minor Changes
+
+- [#527](https://github.com/knpkv/npm/pull/527) [`f8e842e`](https://github.com/knpkv/npm/commit/f8e842e901986b50edf55f98fa3591b742a7904e) Thanks [@konopkov](https://github.com/konopkov)! - `WorkBoard` takes an optional `decisions` prop so a host that can decide approvals lets the reader approve or reject a goal's request in place, with its clock ("4m 12s left") on the request and its row. Requests the host cannot decide keep their link to the hub, the bar stays mounted after a decision so the hub's answer is announced, and the read-only view never offers a decision.
+
+- [#528](https://github.com/knpkv/npm/pull/528) [`30849c5`](https://github.com/knpkv/npm/commit/30849c598fdf6776a3a4a2c4061d276e843eaa8e) Thanks [@konopkov](https://github.com/konopkov)! - The Work tab shows what the reconciler observed. Goals group, filter and show their state by the observed overlay where there is one (a merged pull request is done, a closed one abandoned), and the detail names the recorded state when they differ. The open goal lists its observed pull request, flags an owner whose agent has been gone for a day, and says when a source could not be read and how old its facts are; observed events join the activity timeline with their provenance, an unreadable source drawn hatched. The header says when live state is unavailable or trimmed. Planned goals get their own "Not started" group instead of counting as moving, rows name the repository instead of its full path, facts stack on narrow screens, and the empty board says how to delegate the first goal.
+
+### Patch Changes
+
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/rly@0.12.1
+
 ## 0.7.2
 
 ### Patch Changes

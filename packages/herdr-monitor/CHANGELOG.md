@@ -1,5 +1,29 @@
 # @knpkv/herdr-monitor
 
+## 0.3.4
+
+### Patch Changes
+
+- [#687](https://github.com/knpkv/npm/pull/687) [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44) Thanks [@konopkov](https://github.com/konopkov)! - Browser builds now target Chrome 123, Edge 123, Firefox 120 and Safari 17.6, the floor the CSS already relies on for `light-dark()` and `safe` alignment. Before, they targeted Vite's default (Chrome 111, Safari 16.4), so Lightning CSS rewrote `light-dark()` into its custom-property polyfill. Built CSS now keeps `light-dark()` native. For `@knpkv/rly` consumers, the published stylesheet assumes those browsers.
+
+## 0.3.3
+
+### Patch Changes
+
+- [#665](https://github.com/knpkv/npm/pull/665) [`28b9dbd`](https://github.com/knpkv/npm/commit/28b9dbdd6bf0a10e247ecbe36653b0f4273235ee) Thanks [@konopkov](https://github.com/konopkov)! - The board's stylesheet uses logical properties, so it follows the writing direction; no visual change.
+
+## 0.3.2
+
+### Patch Changes
+
+- [#599](https://github.com/knpkv/npm/pull/599) [`ed263a1`](https://github.com/knpkv/npm/commit/ed263a1b0d20dd47341dc9ed19175a889b94e44a) Thanks [@konopkov](https://github.com/konopkov)! - Failures that were silently swallowed now say so. agent-usage's page reports a successful reply it cannot read instead of treating it as empty, and logs a failed control-socket exchange. herdr-monitor answers a publish that stalls past its deadline with 408 rather than 400, and logs every failed publish request.
+
+## 0.3.1
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+
 ## 0.3.0
 
 ### Minor Changes

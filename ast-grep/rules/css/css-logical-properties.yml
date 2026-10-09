@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: css-logical-properties
+language: css
+severity: error
+message: "Use logical properties (inline/block, start/end); physical sides and width/height do not follow writing direction"
+
+rule:
+  any:
+    - kind: property_name
+      regex: "(?i)^((margin|padding|border|scroll-margin|scroll-padding)-(top|right|bottom|left)(-(width|style|color))?|border-(top|bottom)-(left|right)-radius|top|right|bottom|left|(min-|max-)?(width|height))$"
+    - all:
+        - kind: declaration
+        - has:
+            kind: property_name
+            regex: "(?i)^(text-align|float|clear)$"
+        - has:
+            kind: plain_value
+            regex: "(?i)^(left|right)$"
+
+files:
+  - "packages/herdr-monitor/src/**/*.css"
+  - "packages/review/src/**/*.css"
+  - "packages/agent-usage/src/**/*.css"
+  - "packages/codecommit-web/src/**/*.css"
+  - "packages/herdr-approvals/src/**/*.css"
+  - "packages/control-center/src/**/*.css"
+  - "packages/jcf-web/src/**/*.css"
+
+note: |
+  good-css: margin-block-start, padding-inline, inset-inline-end, inline-size, max-block-size,
+  text-align: start. Three- and four-value margin/padding shorthands are physical too but are not
+  matched (values may contain spaces); write margin-block / margin-inline instead. Media and
+  container queries (max-width: 30rem) are features, not properties, and stay allowed.
+  A shape drawn with borders that must not mirror (a tick glyph) sets `direction: ltr` on itself and
+  keeps logical properties: they resolve against the element's own direction, so no escape is
+  needed (escapes count against the package ledger in `pnpm debt:check`). Packages opt in by adding
+  their stylesheets to files once they comply.

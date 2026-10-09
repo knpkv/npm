@@ -6,8 +6,15 @@
  *
  * @module
  */
-import { ConfigService, FetchTicket, IssueFacts, ReconcileService } from "@knpkv/jira-clockify"
-import { Effect, Semaphore } from "effect"
+import {
+  ClockifyAuth,
+  ConfigService,
+  FetchTicket,
+  IssueFacts,
+  JiraAccess,
+  ReconcileService
+} from "@knpkv/jira-clockify"
+import { Effect, Option, Semaphore } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import type { ConfirmBatchItemResponse, ReadProgress, WeekScopeName } from "../shared/contracts.js"
 import { ApiError, JcfWebApi, PlanExpiredError, ProposalRejectedError } from "./Api.js"
@@ -184,13 +191,28 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
     const config = yield* ConfigService.ConfigService
     const plans = yield* WeekPlans
     const configWrites = yield* Semaphore.make(1)
+    const jiraAccess = yield* JiraAccess.JiraAccess
+    const clockifyAuth = yield* ClockifyAuth.ClockifyAuth
 
     return handlers
+      .handle("sources", () =>
+        Effect.gen(function*() {
+          // Re-read on every request: a system connected in a terminal shows up without a restart.
+          const jira = yield* jiraAccess.connection.pipe(Effect.mapError((error) => failed(error.message)))
+          const clockify = yield* clockifyAuth.isConfigured
+          return {
+            jira: { connected: Option.isSome(jira), connect: JiraAccess.connectJiraCommand },
+            clockify: { connected: clockify, connect: "jcf auth clockify setup" }
+          }
+        }))
       .handle("agent", () => config.get.pipe(Effect.map((settings) => settings.sessionAgent)))
       .handle("saveAgent", ({ payload }) =>
         configWrites.withPermits(1)(Effect.gen(function*() {
           yield* plans.invalidateDescriptions
-          yield* config.set({ sessionAgent: payload }).pipe(Effect.ensuring(plans.invalidateDescriptions))
+          yield* config.set({ sessionAgent: payload }).pipe(
+            Effect.mapError((error) => failed(error.message)),
+            Effect.ensuring(plans.invalidateDescriptions)
+          )
           const stored = (yield* config.get).sessionAgent
           if (
             stored.provider !== payload.provider || stored.model !== payload.model || stored.effort !== payload.effort
@@ -203,8 +225,8 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
         configWrites.withPermits(1)(Effect.gen(function*() {
           const current = yield* config.get
           const next = { ...current.sessionTicketMap, [payload.cwd]: payload.ticketKey }
-          yield* config.set({ sessionTicketMap: next })
-          // Read back rather than echo: the config service swallows a failed write, so echoing the map
+          yield* config.set({ sessionTicketMap: next }).pipe(Effect.mapError((error) => failed(error.message)))
+          // Read back rather than echo: a write can land and still not stick (a concurrent edit), so echoing the map
           // we meant to store would report a save that never happened.
           const stored = (yield* config.get).sessionTicketMap
           if (stored[payload.cwd] !== payload.ticketKey) {
@@ -218,8 +240,8 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
           const next = current.sessionOwnershipOverrides.includes(payload.ticketKey)
             ? current.sessionOwnershipOverrides
             : [...current.sessionOwnershipOverrides, payload.ticketKey].sort()
-          yield* config.set({ sessionOwnershipOverrides: next })
-          // Read back rather than echo: the config service swallows a failed write, so echoing the
+          yield* config.set({ sessionOwnershipOverrides: next }).pipe(Effect.mapError((error) => failed(error.message)))
+          // Read back rather than echo: a write can land and still not stick (a concurrent edit), so echoing the
           // list we meant to store would report a decision that did not stick.
           const stored = (yield* config.get).sessionOwnershipOverrides
           if (!stored.includes(payload.ticketKey)) {
@@ -232,7 +254,7 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
           const current = yield* config.get
           const others = current.sessionIgnoredTickets.filter((key) => key !== payload.ticketKey)
           const next = payload.ignored ? [...others, payload.ticketKey].sort() : others
-          yield* config.set({ sessionIgnoredTickets: next })
+          yield* config.set({ sessionIgnoredTickets: next }).pipe(Effect.mapError((error) => failed(error.message)))
           // Read back rather than echo, for the same reason as the ownership list above.
           const stored = (yield* config.get).sessionIgnoredTickets
           if (stored.includes(payload.ticketKey) !== payload.ignored) {

@@ -26,6 +26,15 @@ describe("pull request row presentation", () => {
     })
   })
 
+  it("says approvers are unknown instead of counting a last known list", () => {
+    expect(pullRequestRowDecision({ approvedBy: ["alice"], approversUnknown: true, isMergeable: true, status: "OPEN" }))
+      .toEqual({ actionLabel: "Open review", summary: "Approvers unknown" })
+    expect(pullRequestRowDecision({ approvedBy: ["alice"], isMergeable: true, status: "OPEN" })).toEqual({
+      actionLabel: "Open review",
+      summary: "1 approval"
+    })
+  })
+
   it("matches the machine timestamp to the visible event", () => {
     const creationDate = new Date("2026-08-01T09:00:00.000Z")
     const lastModifiedDate = new Date("2026-08-11T17:30:00.000Z")
@@ -52,7 +61,11 @@ describe("pull request row presentation", () => {
       }]
     } satisfies Partial<Parameters<typeof pullRequestRowStatus>[0]>
     expect(pullRequestRowStatus({ ...open, isApproved: true, approvalUnknown: { _tag: "NotPermitted" } }))
-      .toEqual({ label: "Approval unknown", tone: "neutral" })
+      .toEqual({
+        label: "Approval unknown",
+        reason: "Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules).",
+        tone: "neutral"
+      })
     expect(pullRequestRowStatus({ ...open, isApproved: true })).toEqual({ label: "Approved", tone: "positive" })
     expect(pullRequestRowStatus({ ...open, isApproved: false })).toEqual({ label: "Pending", tone: "caution" })
     expect(pullRequestRowStatus({ ...open, isApproved: true, approvalRules: [] }))

@@ -194,8 +194,15 @@ const root = Command.make("clockify-api-regenerate", { check, local }).pipe(
       const current = yield* fs.readFileString(scriptPaths.specFile).pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(JsonString)),
         Effect.flatMap(canonicalJson),
-        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        Effect.orElseSucceed(() => "")
+        // An unreadable committed spec counts as changed, so --check fails and a write replaces it.
+        Effect.catch((error) =>
+          Effect.logWarning(
+            `The committed spec at ${scriptPaths.specFile} could not be read; treating it as changed`,
+            error
+          ).pipe(
+            Effect.as("")
+          )
+        )
       )
 
       if (check) {

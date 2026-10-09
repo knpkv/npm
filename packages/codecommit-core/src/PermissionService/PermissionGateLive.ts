@@ -23,17 +23,47 @@
 import { Context, Deferred, Effect, Layer, Ref } from "effect"
 import { EventsHub, RepoChange } from "../CacheService/EventsHub.js"
 import { PermissionDeniedError } from "../Errors.js"
-import { PermissionGate, type PermissionPrompt, type PermissionResponse } from "./PermissionGate.js"
+import {
+  PermissionGate,
+  type PermissionPrompt,
+  type PermissionRequestOptions,
+  type PermissionResponse
+} from "./PermissionGate.js"
 
 interface PendingEntry {
   readonly deferred: Deferred.Deferred<PermissionResponse>
   readonly prompt: PermissionPrompt
 }
 
+/** A category's waiting prompts: their count and the first few contexts. */
+export interface PendingPrompts {
+  readonly count: number
+  readonly contexts: ReadonlyArray<string>
+}
+
 export interface PermissionGateLive {
-  readonly request: (prompt: PermissionPrompt) => Effect.Effect<PermissionResponse, PermissionDeniedError>
+  readonly request: (
+    prompt: PermissionPrompt,
+    options?: PermissionRequestOptions
+  ) => Effect.Effect<PermissionResponse, PermissionDeniedError>
   readonly resolve: (promptId: string, response: PermissionResponse) => Effect.Effect<void>
+  /**
+   * Answers every pending prompt of one category, after a standing grant for it was saved: calls that
+   * were already waiting when the grant landed go ahead too instead of each asking again.
+   */
+  readonly resolveCategory: (
+    category: PermissionPrompt["category"],
+    response: PermissionResponse
+  ) => Effect.Effect<void>
   readonly getFirstPending: () => Effect.Effect<PermissionPrompt | undefined>
+  /**
+   * The prompts of one category waiting in this process right now: how many, and the first `limit`
+   * contexts in arrival order. Only what is actually queued here, so the count never guesses.
+   */
+  readonly pendingOf: (
+    category: PermissionPrompt["category"],
+    limit: number
+  ) => Effect.Effect<PendingPrompts>
 }
 
 const makePermissionGateLive = Effect.gen(function*() {
@@ -50,20 +80,30 @@ const makePermissionGateLive = Effect.gen(function*() {
       return next
     }).pipe(Effect.andThen(hub.publish(RepoChange.PermissionResolved())))
 
-  const request = (prompt: PermissionPrompt): Effect.Effect<PermissionResponse, PermissionDeniedError> =>
+  const request = (
+    prompt: PermissionPrompt,
+    options?: PermissionRequestOptions
+  ): Effect.Effect<PermissionResponse, PermissionDeniedError> =>
     Effect.gen(function*() {
       const deferred = yield* Deferred.make<PermissionResponse>()
       const response = yield* Effect.acquireUseRelease(
         Ref.update(pending, (m) => new Map(m).set(prompt.id, { deferred, prompt })),
         () =>
-          hub.publish(RepoChange.PermissionRequired()).pipe(
-            Effect.andThen(Deferred.await(deferred)),
-            Effect.timeout("30 seconds"),
-            Effect.catchTag(
-              "TimeoutError",
-              () => Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "timeout" }))
-            )
-          ),
+          // Registered first, then re-read: a grant saved in between either released this prompt
+          // (resolveCategory saw it) or is visible here.
+          (options?.standing === undefined
+            ? Effect.void
+            : options.standing.pipe(
+              Effect.flatMap((standing) => standing === undefined ? Effect.void : Deferred.succeed(deferred, standing))
+            )).pipe(
+              Effect.andThen(hub.publish(RepoChange.PermissionRequired())),
+              Effect.andThen(Deferred.await(deferred)),
+              Effect.timeout("30 seconds"),
+              Effect.catchTag(
+                "TimeoutError",
+                () => Effect.fail(new PermissionDeniedError({ operation: prompt.operation, reason: "timeout" }))
+              )
+            ),
         () => removePending(prompt.id)
       )
 
@@ -84,6 +124,20 @@ const makePermissionGateLive = Effect.gen(function*() {
       })
     )
 
+  const resolveCategory = (
+    category: PermissionPrompt["category"],
+    response: PermissionResponse
+  ): Effect.Effect<void> =>
+    Ref.get(pending).pipe(
+      Effect.flatMap((m) =>
+        Effect.forEach(
+          [...m.values()].filter((entry) => entry.prompt.category === category),
+          (entry) => Deferred.succeed(entry.deferred, response),
+          { discard: true }
+        )
+      )
+    )
+
   // For SSE payload builder — shows one prompt at a time (FIFO).
   // Remaining prompts queue behind; they'll surface as each resolves.
   const getFirstPending = (): Effect.Effect<PermissionPrompt | undefined> =>
@@ -94,7 +148,15 @@ const makePermissionGateLive = Effect.gen(function*() {
       })
     )
 
-  return { request, resolve, getFirstPending } satisfies PermissionGateLive
+  const pendingOf = (category: PermissionPrompt["category"], limit: number): Effect.Effect<PendingPrompts> =>
+    Ref.get(pending).pipe(
+      Effect.map((m) => {
+        const prompts = [...m.values()].filter((entry) => entry.prompt.category === category)
+        return { contexts: prompts.slice(0, limit).map((entry) => entry.prompt.context), count: prompts.length }
+      })
+    )
+
+  return { request, resolve, resolveCategory, getFirstPending, pendingOf } satisfies PermissionGateLive
 })
 
 export class PermissionGateLiveTag extends Context.Service<

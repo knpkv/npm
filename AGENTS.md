@@ -39,6 +39,26 @@ Install all dependencies using `pnpm`:
 pnpm install
 ```
 
+#### New worktree
+
+Every new checkout or worktree needs its hooks before its first commit. `pnpm install --ignore-scripts`
+skips the `prepare` script, which leaves git running no pre-commit hook at all. Commits then look gated
+but are not. Run the `prepare` steps explicitly, then fail closed if the hooks are still missing:
+
+```bash
+pnpm install
+pnpm exec effect-tsgo patch --typescript && pnpm exec husky
+test -x .husky/_/pre-commit && test "$(git config core.hooksPath)" = .husky/_ || { echo "hooks not installed" >&2; exit 1; }
+```
+
+A package's `check` typechecks against its workspace dependencies' built `dist`. Before checking a package in a
+fresh worktree, build those dependencies with `pnpm --filter "<package>^..." build`.
+
+`pnpm check:changed` makes the same check and refuses to run without the hooks. A commit has
+passed the gate only if its output shows `[pre-commit]` lines. Write the commit output to a log rather
+than passing `-q`, and quote those lines when you report a pass. A commit made with `--no-verify` is
+reported as such, never as gated.
+
 ### Core Commands
 
 - **Build all packages**:
@@ -67,9 +87,47 @@ pnpm install
   ```
 
 - **Format all packages**:
+
   ```bash
   pnpm format
   ```
+
+- **Check only what this branch changed** (run it before committing):
+  ```bash
+  pnpm check:changed            # against the fork point with origin/main, or the pending merge head
+  pnpm check:changed --dry-run  # print the plan
+  ```
+
+### Before Committing
+
+`pnpm check:changed` (`scripts/precheck.mjs`) is the focused gate. It runs these steps one at a time and stops at the
+first failure:
+
+1. On the explicit list of changed files: `eslint --fix` → `prettier --write` → `eslint` → `oxlint` → `ast-grep scan`.
+   ESLint gets only the files the root `lint:eslint:*` scripts lint.
+2. `ast-grep test` when `ast-grep/` changed, and `node --test scripts/<name>.test.mjs` when `scripts/<name>.mjs`
+   changed.
+3. Each touched package's own `check`, which includes its test tsconfig.
+4. The debt ledger, changed Effect diagnostics, changeset coverage and `lint:stripes`.
+
+Untracked files are left out and named in the output, so a stray scratch file is never reformatted. To check a new
+file, run `git add -N <file>` first.
+
+`check:changed` is a heavy job, not a quick lint:
+
+- Changeset coverage always runs, with a 1.5 GB heap.
+- Every touched package runs its full `check`, and Control Center's is the heaviest.
+
+On a shared machine, run it wherever heavy jobs are queued. Use `--dry-run` to see the steps first.
+
+It is not named `precheck` because pnpm runs a `precheck` script before every `pnpm check`. When you run checks
+by hand instead:
+
+- Run `set -o pipefail` first.
+- Never pipe a checker into `tail` or `head` before `&&`.
+- Chain check → commit → push with `&&` only, never `;`.
+- Pass file lists as arrays (zsh: `F=(${(f)"$(git diff --name-only …)"})`) and echo their count before acting.
+- If prettier rewrites lines outside your hunks, revert that file and format only your hunks.
 
 ## Development Conventions
 
@@ -221,6 +279,52 @@ types against the base. Removing a public generated model or changing
 with unchanged contracts may. The changeset checker's generated-source exclusion
 does not prove compatibility. Review release classification explicitly and use
 major for incompatible changes to stable packages.
+
+### Merging Main Into a PR
+
+Update a pushed branch by merging main in. Never rebase or force-push.
+
+1. Confirm that `gh pr view <n> --json state` is `OPEN` and that the local branch is at its `headRefOid`.
+2. Run `git fetch origin && git merge --no-commit --no-ff origin/main`. A plain `git merge` commits a clean merge
+   without running the pre-commit hook.
+3. Resolve conflicts, and only conflicts.
+   - Take main's `docs/debt.baseline.json` and `docs/debt.md` (`git checkout --theirs -- <file>`), then run
+     `pnpm debt:update`.
+   - Run `git diff origin/main -- docs/debt.baseline.json | grep '^+ '` and read every line it prints. Never `tail`
+     that output.
+     - A new entry means the branch adds debt, so fix the code.
+     - A changed `file` or `text` on an existing entry is a moved escape. It is fine only when that package's count
+       is unchanged, which `pnpm debt:check` confirms.
+   - Stage only the conflicted paths. A fix the merge needs, such as a lint rule main added or an API change, goes
+     in its own commit after the merge commit.
+4. Run `pnpm install`, then build the touched packages' workspace dependencies before typechecking
+   (`pnpm --filter "<package>^..." build`). Never symlink another checkout's `dist`.
+5. Run `pnpm check:changed`.
+   - During a merge it compares against `MERGE_HEAD` and pins `CHANGESET_COVERAGE_BASE` and
+     `EFFECT_DIAGNOSTICS_BASE` to it.
+   - A commit made by hand needs `CHANGESET_COVERAGE_BASE=$(cat "$(git rev-parse --git-dir)/MERGE_HEAD")`.
+   - Rules main added since the branch forked run against the branch's own files here, not first in CI.
+6. Make the merge commit through the hook, push, and wait for CI. CI is green when the `Check` workflow run for the
+   exact head SHA (`gh run list --commit <sha> --workflow Check`) has completed with success. Never decide from a
+   check list read before the matrix jobs exist.
+
+Stacked PRs get no CI until their base is main.
+
+- Fix problems in the lowest PR, then merge each parent into its child, bottom up.
+- When a parent merges, retarget the child with `gh pr edit <child> --base main`, then merge main into it.
+- Report a stacked PR as "stacked, no CI", never as merge-ready.
+
+If the parent was squash-merged, branch fresh from `origin/main` and apply only the child's own diff:
+`git diff <parent-head> <child-head> | git apply -3`.
+
+### Package Exports
+
+A new `exports` entry is proven only from a real build.
+
+1. Delete the package's `dist` and run its own `build` script.
+2. From a consumer, import or bundle the entry by package name, not by path.
+3. Never place an exported module under a directory that a bundler empties on build. For example, Vite's
+   `emptyOutDir` clears its `outDir` and drops a module that `tsc` emitted there.
 
 ### Agent Management
 

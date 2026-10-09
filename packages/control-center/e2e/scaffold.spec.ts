@@ -782,14 +782,18 @@ test("renders the private browser application boundary", async ({ page }) => {
   await expect(page.getByText("Release facts stay private")).toBeVisible()
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { exact: true, name: "Control Center" })).toBeFocused()
-  for (const name of ["Overview", "Releases", "Services", "Ask Relay"]) {
+  for (const name of ["Overview", "Releases", "Services"]) {
     await page.keyboard.press("Tab")
     await expect(page.getByRole("link", { name })).toBeFocused()
   }
+  await page.keyboard.press("Tab")
+  await expect(page.getByRole("banner").getByRole("button", { name: /^Relay/u })).toBeFocused()
   await page.getByRole("link", { name: "Releases" }).click()
   await expect(page.getByRole("heading", { level: 1, name: "Every release. One view." })).toBeVisible()
   await expect(page.getByText("Release facts stay private")).toBeVisible()
-  await page.getByRole("link", { name: "Ask Relay" }).click()
+  // Relay opens from the header; its full page keeps its own route.
+  await page.getByRole("banner").getByRole("button", { name: /^Relay/u }).click()
+  await page.getByRole("button", { name: "Open Relay's full page" }).click()
   await expect(page.getByRole("heading", { level: 2, name: "Release context stays private" })).toBeVisible()
   await expect(page.getByText("Pair this browser before Relay reads a workspace release.")).toBeVisible()
 })
@@ -800,7 +804,7 @@ test("keeps mobile navigation clear of application identity and content", async 
 
   const navigationBox = await page.getByRole("navigation", { name: "Primary" }).boundingBox()
   const brandBox = await page.getByRole("link", { exact: true, name: "Control Center" }).boundingBox()
-  const agentBox = await page.getByRole("link", { name: "Ask Relay" }).boundingBox()
+  const agentBox = await page.getByRole("banner").getByRole("button", { name: /^Relay/u }).boundingBox()
   if (navigationBox === null || brandBox === null || agentBox === null) {
     throw new Error("mobile application chrome must remain measurable")
   }
@@ -811,9 +815,34 @@ test("keeps mobile navigation clear of application identity and content", async 
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { exact: true, name: "Control Center" })).toBeFocused()
   await page.keyboard.press("Tab")
-  await expect(page.getByRole("link", { name: "Ask Relay" })).toBeFocused()
+  await expect(page.getByRole("banner").getByRole("button", { name: /^Relay/u })).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(page.getByRole("link", { name: "Overview" })).toBeFocused()
+})
+
+test("fits Relay's header launcher at every width, in both themes and forced colours", async ({ page }, testInfo) => {
+  for (const width of [320, 390, 1280]) {
+    await page.setViewportSize({ height: 844, width })
+    await page.goto("/")
+    const launcher = page.getByRole("banner").getByRole("button", { name: /^Relay/u })
+    // The real launcher, once its chunk has replaced the same-size stand-in.
+    await expect(page.locator("header [data-rly-relay-launcher]")).toBeVisible()
+    const box = await launcher.boundingBox()
+    expect((box?.x ?? 0) + (box?.width ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(width)
+    expect(await page.evaluate<number>("document.documentElement.scrollWidth")).toBeLessThanOrEqual(width)
+    const looks: ReadonlyArray<
+      readonly [string, { readonly colorScheme: "dark" | "light"; readonly forcedColors: "active" | "none" }]
+    > = [
+      ["light", { colorScheme: "light", forcedColors: "none" }],
+      ["dark", { colorScheme: "dark", forcedColors: "none" }],
+      ["forced", { colorScheme: "light", forcedColors: "active" }]
+    ]
+    for (const [name, media] of looks) {
+      await page.emulateMedia(media)
+      await page.screenshot({ path: testInfo.outputPath(`header-${String(width)}-${name}.png`) })
+    }
+    await page.emulateMedia({ colorScheme: "light", forcedColors: "none" })
+  }
 })
 
 test("explains credential rejection separately from server availability", async ({ page }) => {

@@ -1,14 +1,10 @@
 @import "@knpkv/rly/styles.css";
 
-/* Set by the export's head script until the inlined fonts are ready (at most a second). */
-html[data-review-fonts="loading"] body {
-  visibility: hidden;
-}
 .review-guide {
   --review-reading-ink: color-mix(in srgb, var(--rly-color-text-1) 60%, var(--rly-color-text-2));
   background: var(--rly-color-surface-2);
   color: var(--review-reading-ink);
-  min-height: 100vh;
+  min-block-size: 100svh;
   display: grid;
   grid-template-columns: 16rem minmax(0, 1fr);
 }
@@ -22,14 +18,14 @@ html[data-review-fonts="loading"] body {
   grid-column: 1;
   grid-row: 1;
   position: sticky;
-  top: 0;
-  height: 100vh;
+  inset-block-start: 0;
+  block-size: 100svh;
   overflow-y: auto;
-  min-width: 0;
+  min-inline-size: 0;
   padding: var(--rly-space-32) var(--rly-space-24);
 }
 .review-nav {
-  min-width: 0;
+  min-inline-size: 0;
 }
 .review-nav-title {
   color: var(--rly-color-text-1);
@@ -46,15 +42,23 @@ html[data-review-fonts="loading"] body {
 .review-nav li a {
   /* Block, not flex: a flex item keeps its text at min-content and an identifier could not wrap. */
   display: block;
-  min-height: var(--rly-space-32);
+  min-block-size: var(--rly-space-32);
   overflow-wrap: break-word;
   padding-block: var(--rly-space-4);
   box-sizing: border-box;
   text-decoration: none;
   line-height: var(--rly-type-body-line-height);
 }
-.review-nav li a:hover {
-  text-decoration: underline;
+/* Stacked links sit too close for an invisible ::after hit area, so on touch each row grows to 44px. */
+@media (pointer: coarse) {
+  .review-nav li a {
+    min-block-size: 44px;
+  }
+}
+@media (hover: hover) and (pointer: fine) {
+  .review-nav li a:hover {
+    text-decoration: underline;
+  }
 }
 .review-nav li a:focus-visible {
   border-radius: var(--rly-radius-tag);
@@ -73,16 +77,23 @@ html[data-review-fonts="loading"] body {
   display: flex;
   align-items: center;
   gap: var(--rly-space-8);
-  min-height: var(--rly-space-40);
-  width: fit-content;
+  min-block-size: var(--rly-space-40);
+  inline-size: fit-content;
   cursor: pointer;
+  position: relative;
+}
+/* The label is 40px tall; an invisible layer takes the target to 44px without moving anything. */
+.review-checkbox::after {
+  content: "";
+  position: absolute;
+  inset: min(0px, (100% - 44px) / 2);
 }
 .review-checkbox input {
   appearance: none;
   display: grid;
   place-content: center;
-  width: 18px;
-  height: 18px;
+  inline-size: 18px;
+  block-size: 18px;
   flex: 0 0 18px;
   margin: 0;
   border: 1px solid var(--rly-color-text-2);
@@ -96,14 +107,18 @@ html[data-review-fonts="loading"] body {
 }
 .review-checkbox input:checked::before {
   content: "";
-  width: 8px;
-  height: 4px;
-  border-left: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
+  inline-size: 8px;
+  block-size: 4px;
+  /* A tick glyph must not mirror in right-to-left text, so its strokes resolve left-to-right. */
+  direction: ltr;
+  border-inline-start: 2px solid currentColor;
+  border-block-end: 2px solid currentColor;
   transform: translateY(-1px) rotate(-45deg);
 }
-.review-checkbox:hover input {
-  border-color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .review-checkbox:hover input {
+    border-color: var(--rly-color-text-1);
+  }
 }
 .review-checkbox input:focus-visible {
   outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
@@ -121,15 +136,15 @@ html[data-review-fonts="loading"] body {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--rly-space-4);
-  width: 100%;
-  max-width: 16rem;
+  inline-size: 100%;
+  max-inline-size: 16rem;
   background: var(--rly-color-surface-2);
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-field);
   padding: var(--rly-space-4);
 }
 .review-theme button {
-  min-width: 0;
+  min-inline-size: 0;
   padding-inline: var(--rly-space-4);
   border-radius: var(--rly-radius-tag);
   color: var(--rly-color-text-2);
@@ -145,9 +160,9 @@ html[data-review-fonts="loading"] body {
   grid-column: 2;
   grid-row: 1;
   border-inline-start: 1px solid var(--rly-color-border-1);
-  min-width: 0;
+  min-inline-size: 0;
   padding: var(--rly-space-48) clamp(1rem, 4vw, 4rem);
-  max-width: 108rem;
+  max-inline-size: 108rem;
   /* Paths and identifiers in prose are single long words; inherited, so every paragraph wraps them. */
   overflow-wrap: break-word;
 }
@@ -157,7 +172,7 @@ html[data-review-fonts="loading"] body {
 /* A document's title, not a poster's: page-title type, capped so a long title stays a few lines. */
 .review-header h1 {
   margin-block: var(--rly-space-24);
-  max-width: 28ch;
+  max-inline-size: 19.18em;
   font-size: min(var(--rly-type-page-title-size), 2.75rem);
 }
 .review-explanation {
@@ -172,7 +187,7 @@ html[data-review-fonts="loading"] body {
   font-weight: 500;
 }
 .review-guide .review-reading {
-  scroll-margin-top: var(--rly-space-24);
+  scroll-margin-block-start: var(--rly-space-24);
 }
 .review-inline {
   display: flex;
@@ -182,7 +197,7 @@ html[data-review-fonts="loading"] body {
   font-size: var(--rly-type-label-size);
 }
 .review-prose {
-  max-width: 68ch;
+  max-inline-size: 45.3em;
   font-size: var(--rly-type-body-size);
   line-height: 1.75;
   color: var(--review-reading-ink);
@@ -238,8 +253,9 @@ html[data-review-fonts="loading"] body {
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-control);
-  margin: var(--rly-space-24) 0;
-  overflow: hidden;
+  margin-block: var(--rly-space-24);
+  margin-inline: 0;
+  overflow: clip;
 }
 .review-diagram figcaption {
   background: var(--rly-color-surface-2);
@@ -266,8 +282,8 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   color: transparent;
 }
 .review-prose svg {
-  max-width: 100%;
-  height: auto;
+  max-inline-size: 100%;
+  block-size: auto;
 }
 /* Edge labels sit on the panel's own surface in text ink, in both themes. */
 .review-diagram .edgeLabel,
@@ -295,9 +311,9 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   color: var(--rly-color-text-1);
 }
 .review-chapter {
-  border-top: 1px solid var(--rly-color-border-1);
+  border-block-start: 1px solid var(--rly-color-border-1);
   padding-block: var(--rly-space-40);
-  scroll-margin-top: var(--rly-space-24);
+  scroll-margin-block-start: var(--rly-space-24);
 }
 .review-chapter h2 {
   margin: 0;
@@ -306,8 +322,8 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
 .review-file {
   container-type: inline-size;
   margin-block-start: var(--rly-space-32);
-  min-width: 0;
-  scroll-margin-top: var(--rly-space-24);
+  min-inline-size: 0;
+  scroll-margin-block-start: var(--rly-space-24);
 }
 .review-file-header {
   display: flex;
@@ -319,7 +335,7 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
 }
 /* A path is one unbreakable token: as a flex item it would keep its full width, so let it shrink and wrap. */
 .review-file-header code {
-  min-width: 0;
+  min-inline-size: 0;
   overflow-wrap: break-word;
 }
 .review-file [data-rly-patch-diff] table {
@@ -330,18 +346,18 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
 .review-file [data-rly-patch-diff] th {
   padding: var(--rly-space-8);
   font-size: var(--rly-type-meta-size);
-  text-align: left;
+  text-align: start;
   color: var(--rly-color-text-2);
 }
 .review-finding {
-  max-width: 80ch;
+  max-inline-size: 53.3em;
   margin-block: var(--rly-space-8);
-  scroll-margin-top: var(--rly-space-24);
+  scroll-margin-block-start: var(--rly-space-24);
   font-family: var(--rly-font-ui);
 }
 /* A long fenced example must scroll inside its card, not widen the diff table. */
 .review-file .review-finding {
-  max-width: min(80ch, calc(100cqi - var(--rly-space-24)));
+  max-inline-size: min(53.3em, calc(100cqi - var(--rly-space-24)));
 }
 .review-finding .review-inline a {
   margin-inline-start: auto;
@@ -363,14 +379,14 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
 }
 .review-verdict {
   margin-block-end: var(--rly-space-32);
-  scroll-margin-top: var(--rly-space-24);
+  scroll-margin-block-start: var(--rly-space-24);
 }
 .review-checklist > div {
   display: grid;
   grid-template-columns: minmax(10rem, 1fr) 2fr;
   gap: var(--rly-space-16);
   padding-block: var(--rly-space-12);
-  border-bottom: 1px solid var(--rly-color-border-1);
+  border-block-end: 1px solid var(--rly-color-border-1);
 }
 .review-checklist dd {
   margin: 0;
@@ -392,7 +408,7 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
 }
 /* Flex items keep their longest word as a minimum width; let them shrink so long paths and names wrap. */
 .review-issues li > * {
-  min-width: 0;
+  min-inline-size: 0;
 }
 .review-issues .review-issue-location {
   font-size: var(--rly-type-meta-size);
@@ -402,7 +418,7 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
 /* An inline-block keeps the link's underline off the code pills inside a summary. */
 .review-issues a code {
   display: inline-block;
-  max-width: 100%;
+  max-inline-size: 100%;
   overflow-wrap: break-word;
 }
 .review-usage {
@@ -418,8 +434,15 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   display: flex;
   gap: var(--rly-space-8);
   list-style: none;
-  min-height: var(--rly-space-40);
-  width: fit-content;
+  min-block-size: var(--rly-space-40);
+  inline-size: fit-content;
+  position: relative;
+}
+/* 40px tall; an invisible layer takes the target to 44px without moving anything. */
+.review-usage summary::before {
+  content: "";
+  position: absolute;
+  inset: min(0px, (100% - 44px) / 2);
 }
 .review-usage summary::-webkit-details-marker {
   display: none;
@@ -453,23 +476,24 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
   color: var(--rly-color-text-2);
 }
 .review-metrics dd {
-  margin: var(--rly-space-8) 0 0;
+  margin-block: var(--rly-space-8) 0;
+  margin-inline: 0;
   font-family: var(--rly-font-mono);
 }
 .review-skip {
   position: fixed;
-  top: -5rem;
-  left: 1rem;
+  inset-block-start: -5rem;
+  inset-inline-start: 1rem;
   z-index: 1;
   background: var(--rly-color-surface-1);
   padding: var(--rly-space-12);
 }
 .review-skip:focus {
-  top: 1rem;
+  inset-block-start: 1rem;
 }
 /* Phone: one column in DOM order — the guide, its title and summary on the first screen, then the
    chapter list, then the reading controls — so what is read and what is tabbed through agree. */
-@media (max-width: 800px) {
+@media (width <= 50rem) {
   .review-guide {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -482,7 +506,7 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
     align-items: center;
     gap: var(--rly-space-8) var(--rly-space-16);
     padding: var(--rly-space-12) var(--rly-space-16);
-    border-top: 1px solid var(--rly-color-border-1);
+    border-block-start: 1px solid var(--rly-color-border-1);
   }
   .review-content {
     border-inline-start: 0;
@@ -490,7 +514,7 @@ html[data-review-ready="true"] .review-diagram .mermaid:not([data-processed="tru
     grid-row: auto;
   }
   .review-nav {
-    border-top: 1px solid var(--rly-color-border-1);
+    border-block-start: 1px solid var(--rly-color-border-1);
     padding: var(--rly-space-24) var(--rly-space-16);
   }
   .review-header h1 {

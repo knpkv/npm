@@ -1,5 +1,23 @@
 # @knpkv/herdr-fleet
 
+## 0.9.0
+
+### Minor Changes
+
+- [#698](https://github.com/knpkv/npm/pull/698) [`586f75d`](https://github.com/knpkv/npm/commit/586f75d4b65e6d3c3b3f41f35d1b1a34facdb133) Thanks [@konopkov](https://github.com/konopkov)! - hostd serves Claude and Codex limits for Connect. Set the optional `agentUsageLimitsCommand` in the fleet configuration to `agent-usage limits`. `GET /v1/connect/limits` then returns this host's read, and on the hub every peer's read too. herdr-connect exports the wire schemas (`HostLimits`, `FleetLimits`) and the fleet collection. A host that can't read its limits says why instead of reporting zero.
+
+## 0.8.0
+
+### Minor Changes
+
+- [#626](https://github.com/knpkv/npm/pull/626) [`da04e85`](https://github.com/knpkv/npm/commit/da04e85df105627acbfcc017ee0f15e6f4d6f20d) Thanks [@konopkov](https://github.com/konopkov)! - Job-store writes (`put`, `transition`) that lose the SQLite write lock to another connection now fail with the new `FleetStoreBusyError` instead of `FleetStoreError`. Nothing was written, so the same request can be retried. Every `FleetService` method that writes a job (approve, reject, run and the rest) can now fail with it.
+
+## 0.7.0
+
+### Minor Changes
+
+- [#590](https://github.com/knpkv/npm/pull/590) [`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26) Thanks [@konopkov](https://github.com/konopkov)! - Work activity for an approved reassignment or abandonment reads as a sentence: "Reassigned from host-coordinator to claude-coordinator: <reason>" and "Abandoned: <reason>". Owner ids and the approval's job id and hash no longer appear in the text; they stay structured on the reassignment and abandonment records. `workReassignActivitySummary` and `workAbandonActivitySummary` now take only the payload. Events already recorded keep their earlier text.
+
 ## 0.6.1
 
 ### Patch Changes

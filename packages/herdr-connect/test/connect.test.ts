@@ -730,7 +730,7 @@ describe("Connect public seams", () => {
       .toEqual(["done"])
     const attention = calendarConnectAgents(
       agents,
-      { activity: "attention", host: null, query: "" },
+      { activity: "needs-you", host: null, query: "" },
       { now: 2_000, timeZone: "UTC" }
     )
     expect(attention.flatMap(({ agents }) => agents.map(({ state }) => state)))

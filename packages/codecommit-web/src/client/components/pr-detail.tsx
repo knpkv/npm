@@ -31,7 +31,9 @@ import {
   approvalOf,
   approvalUnknownLabel,
   approvalUnknownReasonText,
+  approversUnknownLabel,
   AwsRegion,
+  currentApprovers,
   identityMatches,
   PullRequestId
 } from "@knpkv/codecommit-core/Domain.js"
@@ -56,6 +58,7 @@ import {
   type RlyStateTone
 } from "@knpkv/rly/primitives"
 import { Exit, Option } from "effect"
+import * as Cause from "effect/Cause"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { ArrowRightIcon, CheckIcon, ChevronDownIcon, CodeIcon, LoaderIcon, PlusIcon, TrashIcon } from "lucide-react"
@@ -68,6 +71,7 @@ import { toast } from "sonner"
 import {
   appStateAtom,
   createApprovalRuleAtom,
+  deleteApprovalRuleAtom,
   createSandboxAtom,
   openPrAtom,
   refreshSinglePrAtom,
@@ -205,6 +209,18 @@ export const refreshFailureDescription = (cause: unknown): string => {
   return message.length > 0 ? message : "Try the refresh again."
 }
 
+/** Why the first read of a pull request that is not cached failed, and whether Settings → Accounts fixes it. */
+export interface PullRequestLoadFailure {
+  readonly message: string
+  readonly fixInSettings: boolean
+}
+
+export const pullRequestLoadFailure = (cause: unknown): PullRequestLoadFailure => ({
+  message: refreshFailureDescription(cause),
+  fixInSettings:
+    Predicate.isTagged(cause, "AccountSwitchedOffApiError") || Predicate.isTagged(cause, "AccountUnknownApiError")
+})
+
 const isTextInputTarget = (target: EventTarget | null): boolean => {
   const tagName = Predicate.hasProperty(target, "tagName") ? target.tagName : undefined
   return tagName === "INPUT" || tagName === "TEXTAREA"
@@ -217,10 +233,10 @@ const focusedElement = (target: EventTarget | null): Pick<Element, "tagName"> | 
 /**
  * Whether someone other than the author signed off, as review evidence for time to first review. Any
  * sign-off counts: one of two required, or a voluntary one where no rules apply. An unknown approval
- * holds only a last known one, so it doesn't.
+ * holds only a last known one, so it doesn't; nor do approvers that couldn't be read.
  */
 export const signedOffByOthers = (pr: Domain.PullRequest): boolean =>
-  approvalOf(pr)._tag !== "Unknown" && pr.approvedBy.some((approver) => !identityMatches(approver, pr.author))
+  approvalOf(pr)._tag !== "Unknown" && currentApprovers(pr).some((approver) => !identityMatches(approver, pr.author))
 
 /**
  * True when Enter on the focused element already does something (follow a link, press a button),
@@ -470,15 +486,7 @@ function CommentsSection({
         tone="progress"
       />
     ))
-    .onError(() => (
-      <StatePanel
-        announce="polite"
-        description="Refresh the pull request to try reading the conversation again."
-        title="Comments unavailable"
-        tone="critical"
-      />
-    ))
-    .onDefect(() => (
+    .onFailure(() => (
       <StatePanel
         announce="polite"
         description="Refresh the pull request to try reading the conversation again."
@@ -528,7 +536,7 @@ function CommentsSection({
         </div>
       )
     })
-    .render()
+    .exhaustive()
 }
 
 function LifecycleInfo({ pr }: { readonly pr: Domain.PullRequest }) {
@@ -656,24 +664,40 @@ interface ApproversCardProps {
     readonly satisfied: boolean
     readonly fromTemplate?: string | undefined
   }>
+  /** Who approved as far as is known now ({@link currentApprovers}): marked with a check. */
   readonly approvedBy: ReadonlyArray<string>
+  /** The last approver read failed, so nobody is marked approved and the card says so. */
+  readonly approversUnknown: boolean
   /** The last evaluation failed, so each rule's `satisfied` is only its last known value. */
   readonly approvalUnknown: boolean
   readonly knownUserArns: ReadonlyMap<string, string>
   readonly currentUser: string | undefined
   readonly repoAccountId: string
   readonly onSetApprovers: (arns: ReadonlyArray<string>) => void
-  readonly onRefresh: () => void
+  /**
+   * Deletes this card's own rule (never a template rule), then refreshes the pull request. Says which
+   * step failed: a failed refresh is retried with `onRefresh`, never by deleting again.
+   */
+  readonly onRemoveRule: () => Promise<RuleRemoval>
+  readonly onRefresh: () => Promise<boolean>
   readonly permissionPrompt: boolean
 }
+
+/** How removing a rule ended. */
+type RuleRemoval =
+  | { readonly _tag: "Removed" }
+  | { readonly _tag: "DeleteFailed"; readonly reason: string }
+  | { readonly _tag: "RefreshFailed" }
 
 function ApproversCard({
   approvalRules,
   approvalUnknown,
   approvedBy,
+  approversUnknown,
   currentUser,
   knownUserArns,
   onRefresh,
+  onRemoveRule,
   onSetApprovers,
   permissionPrompt,
   repoAccountId,
@@ -691,6 +715,11 @@ function ApproversCard({
     onRefresh
   })
   const { pendingAdd, pendingRemove } = optimistic
+  // Removing stays on until the refreshed rules drop the rule (the button goes with it), so it can't be
+  // clicked again against a rule that is already gone.
+  const [removal, setRemoval] = useState<{ readonly _tag: "Idle" } | { readonly _tag: "Removing" } | RuleRemoval>({
+    _tag: "Idle"
+  })
 
   // Pool members for THIS card: template rules + this card's managed rule (not other managed rules)
   const allPoolMembers = useMemo(() => {
@@ -707,6 +736,18 @@ function ApproversCard({
   const managedRule = approvalRules.find((r) => r.ruleName === ruleName && r.fromTemplate === undefined)
   const managedArns = managedRule?.poolMemberArns ?? []
   const managedMembers = managedRule?.poolMembers ?? []
+  const hasManagedRule = managedRule !== undefined
+  useEffect(() => {
+    if (!hasManagedRule) setRemoval({ _tag: "Idle" })
+  }, [hasManagedRule])
+  const removeRule = () => {
+    setRemoval({ _tag: "Removing" })
+    void onRemoveRule().then(setRemoval)
+  }
+  const refreshAfterRemoval = () => {
+    setRemoval({ _tag: "Removing" })
+    void onRefresh().then((refreshed) => setRemoval(refreshed ? { _tag: "Removed" } : { _tag: "RefreshFailed" }))
+  }
 
   // Users available to add (have known ARN + not already in pool)
   const addable = useMemo(
@@ -751,6 +792,7 @@ function ApproversCard({
             ) : (
               <StateLabel label="Pending" size="compact" tone="caution" />
             ))}
+          {approversUnknown && <StateLabel label={approversUnknownLabel} size="compact" tone="neutral" />}
         </div>
         <Button
           aria-expanded={showPicker}
@@ -762,7 +804,32 @@ function ApproversCard({
         >
           <PlusIcon className="size-4" />
         </Button>
+        {managedRule === undefined ? null : (
+          // Only the rule this page created can be removed; template rules belong to the repository.
+          <RlyButton
+            // Removed and waiting for the refreshed rules to drop it: no second delete.
+            disabled={removal._tag === "Removed" || removal._tag === "RefreshFailed"}
+            loading={removal._tag === "Removing"}
+            onClick={removeRule}
+            size="compact"
+            variant="quiet"
+          >
+            Remove rule
+          </RlyButton>
+        )}
       </header>
+      {removal._tag === "DeleteFailed" ? (
+        <p className={styles.removeFailure} role="alert">
+          Couldn't remove the rule: {removal.reason}
+        </p>
+      ) : removal._tag === "RefreshFailed" ? (
+        <p className={styles.removeFailure} role="alert">
+          Removed the rule, but this page couldn't refresh to show it.{" "}
+          <RlyButton onClick={refreshAfterRemoval} size="compact" variant="quiet">
+            Refresh
+          </RlyButton>
+        </p>
+      ) : null}
       <div className={styles.approverBody}>
         {showPicker && (
           <div className={styles.approverPicker}>
@@ -961,7 +1028,9 @@ export function PRDetail() {
   const shareRefresh = useMemo(() => makeInFlight<Awaited<ReturnType<typeof refreshSingleWithResult>>>(), [refreshKey])
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
+  const deleteRule = useAtomSet(deleteApprovalRuleAtom, { mode: "promiseExit" })
   const fetchedRef = useRef<string | null>(null)
+  const [loadFailure, setLoadFailure] = useState<PullRequestLoadFailure | null>(null)
   const routeSelection = useMemo(() => {
     const route = pullRequestRouteCoordinates(accountId, prId, searchParams)
     return route === undefined
@@ -1006,7 +1075,7 @@ export function PRDetail() {
     }
     for (const p of state.pullRequests) {
       addUser(p.author)
-      for (const name of p.approvedBy) addUser(name)
+      for (const name of currentApprovers(p)) addUser(name)
       for (const name of p.commentedBy) addUser(name)
       for (const rule of p.approvalRules) {
         for (const name of rule.poolMembers) addUser(name)
@@ -1029,8 +1098,24 @@ export function PRDetail() {
     const key = `${refreshAccountId}:${prId}:${refreshRepositoryName ?? ""}:${refreshRegion ?? ""}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    void requestRefresh(refreshAccountId, prId).catch(() => {})
+    setLoadFailure(null)
+    // A failed first read replaces the loading panel with its reason; it must never spin on.
+    void requestRefresh(refreshAccountId, prId).then(
+      () => setLoadFailure(null),
+      (cause: unknown) => setLoadFailure(pullRequestLoadFailure(cause))
+    )
   }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, requestRefresh, routeAmbiguous])
+
+  const retryLoad = useCallback(() => {
+    if (refreshAccountId === undefined || refreshAccountId.length === 0 || prId === undefined || prId.length === 0) {
+      return
+    }
+    setLoadFailure(null)
+    void requestRefresh(refreshAccountId, prId, "fresh").then(
+      () => setLoadFailure(null),
+      (cause: unknown) => setLoadFailure(pullRequestLoadFailure(cause))
+    )
+  }, [prId, refreshAccountId, requestRefresh])
 
   const score: HealthScore | undefined = useMemo(
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
@@ -1194,13 +1279,17 @@ export function PRDetail() {
     },
     [commentNavigationIdentity, pr?.commentCount]
   )
-  const refreshAfterApprovalMutation = useCallback(() => {
+  /** Re-reads this pull request after an approval change; resolves with whether the refresh succeeded. */
+  const refreshAfterApprovalMutation = useCallback((): Promise<boolean> => {
     if (refreshAccountId === undefined || refreshAccountId.length === 0 || prId === undefined || prId.length === 0)
-      return
+      return Promise.resolve(false)
     // A refresh already in flight may have read the rules before this change, so read again after it.
-    void requestRefresh(refreshAccountId, prId, "fresh").then(
-      (refreshed) => invalidateReview(refreshed, false),
-      () => {}
+    return requestRefresh(refreshAccountId, prId, "fresh").then(
+      (refreshed) => {
+        invalidateReview(refreshed, false)
+        return true
+      },
+      () => false
     )
   }, [invalidateReview, prId, refreshAccountId, requestRefresh])
   const handleRefresh = useCallback(() => {
@@ -1367,6 +1456,31 @@ export function PRDetail() {
           announce="assertive"
           description="Choose both repository and region to identify this pull request."
           title="Pull request coordinates are ambiguous"
+          tone="critical"
+        />
+      </section>
+    )
+  }
+
+  if (pr === null && loadFailure !== null) {
+    return (
+      <section className={styles.loadingState}>
+        <StatePanel
+          action={
+            <>
+              {loadFailure.fixInSettings ? (
+                <RlyButton onClick={() => navigate("/settings/accounts")} size="compact" variant="primary">
+                  Open Settings → Accounts
+                </RlyButton>
+              ) : null}
+              <RlyButton onClick={retryLoad} size="compact">
+                Try again
+              </RlyButton>
+            </>
+          }
+          announce="assertive"
+          description={loadFailure.message}
+          title="Can't read this pull request"
           tone="critical"
         />
       </section>
@@ -1667,7 +1781,8 @@ export function PRDetail() {
               <ApproversCard
                 approvalRules={pr.approvalRules}
                 approvalUnknown={approvalOf(pr)._tag === "Unknown"}
-                approvedBy={pr.approvedBy}
+                approvedBy={currentApprovers(pr)}
+                approversUnknown={pr.approversUnknown === true}
                 currentUser={state.currentUser}
                 key={card.ruleName}
                 knownUserArns={knownUserArns}
@@ -1698,6 +1813,22 @@ export function PRDetail() {
                     })
                   }
                 }}
+                onRemoveRule={() =>
+                  deleteRule({
+                    payload: { account: pr.account, approvalRuleName: card.ruleName, pullRequestId: pr.id }
+                  }).then((exit): Promise<RuleRemoval> | RuleRemoval => {
+                    if (Exit.isSuccess(exit)) {
+                      return refreshAfterApprovalMutation().then((refreshed) =>
+                        refreshed ? { _tag: "Removed" } : { _tag: "RefreshFailed" }
+                      )
+                    }
+                    const error = Cause.squash(exit.cause)
+                    return {
+                      _tag: "DeleteFailed",
+                      reason: Predicate.isError(error) ? error.message : "the server didn't answer."
+                    }
+                  })
+                }
                 permissionPrompt={state.permissionPrompt !== undefined}
                 repoAccountId={currentAcct}
                 required={card.required}

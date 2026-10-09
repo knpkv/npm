@@ -103,7 +103,7 @@ export function SettingsNotifications() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Notifications</h2>
+        <h1 className="text-lg font-semibold">Notifications</h1>
         <p className="text-sm text-muted-foreground">Desktop notifications and review reminders</p>
       </div>
       <Separator />

@@ -141,6 +141,26 @@ test("validates, persists, and reflows workspace settings in a real browser", as
   await page.getByLabel("Theme").selectOption("dark")
   await expect.poll(() => page.evaluate(() => localStorage.getItem("cc_theme"))).toBe("dark")
 
+  // At 320px the stacked gutters once left the Browsers card no room: its Retry button poked past the
+  // card edge, and with rly's shrinkable reset the heading split mid-word ("Brows/ers").
+  await page.setViewportSize({ width: 320, height: 900 })
+  const browsersHeading = page.getByRole("heading", { name: "Browsers" })
+  const browsersCard = browsersHeading.locator("xpath=ancestor::section[1]")
+  const escaping = await browsersCard.evaluate((card) => {
+    const edge = card.getBoundingClientRect().right
+    return [...card.querySelectorAll("*")].filter((element) => element.getBoundingClientRect().right > edge + 0.5)
+      .map((element) => element.tagName.toLowerCase())
+  })
+  expect(escaping).toEqual([])
+  const headingLines = await browsersHeading.evaluate((heading) => {
+    const lineHeight = heading.ownerDocument.defaultView?.getComputedStyle(heading).lineHeight
+    return lineHeight === undefined
+      ? Number.NaN
+      : Math.round(heading.getBoundingClientRect().height / Number.parseFloat(lineHeight))
+  })
+  expect(headingLines).toBe(1)
+  await page.setViewportSize({ width: 1280, height: 900 })
+
   const presentationAudit = productionRouteAuditCase(
     "workspace-settings",
     "settings",
@@ -193,4 +213,35 @@ test("does not load or mutate settings for a route outside the browser session w
   await page.goto(`/w/${otherWorkspaceId}/settings`)
   await expect(page.getByText("Workspace not found", { exact: true })).toBeVisible()
   await expect.poll(() => settingsRequests).toBe(0)
+})
+
+test.describe("on a touch phone", () => {
+  test.use({ hasTouch: true, isMobile: true, viewport: { height: 844, width: 390 } })
+
+  // iOS zooms the page into a field whose text is under 16px; the permission select is label-sized otherwise.
+  test("the browser permission select reads at 16px", async ({ context, page }) => {
+    await context.addCookies([{ name: "cc_session", value: "ab".repeat(32), url: "http://127.0.0.1:4173" }])
+    await page.addInitScript((token) => sessionStorage.setItem("cc_csrf", token), csrfToken)
+    await context.route(
+      "**/api/v1/session/current",
+      (route) =>
+        route.fulfill({ body: JSON.stringify({ csrfToken, session }), contentType: "application/json", status: 200 })
+    )
+    await context.route(
+      "**/api/v1/settings",
+      (route) =>
+        route.fulfill({
+          body: JSON.stringify({ ...readModel, settings }),
+          contentType: "application/json",
+          status: 200
+        })
+    )
+    await page.goto(`/w/${workspaceId}/settings`)
+    expect(await page.evaluate<boolean>("matchMedia('(pointer: coarse)').matches")).toBe(true)
+    const select = page.getByLabel("New browser access")
+    await expect(select).toBeVisible()
+    expect(await select.evaluate((field) => field.ownerDocument.defaultView?.getComputedStyle(field).fontSize)).toBe(
+      "16px"
+    )
+  })
 })

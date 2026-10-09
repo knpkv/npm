@@ -6,6 +6,49 @@
     box-sizing: border-box;
   }
 
+  /*
+   * Block containers (headings, lists, quotes and figures included) may shrink below their content as flex
+   * and grid items, so a long child can't push a layout wider; their long words then wrap (overflow-wrap).
+   * Inline content (svg, img, span, button, input) keeps its automatic minimum, so marks, icons and labels
+   * never collapse; a component that needs it to shrink says so.
+   */
+  :where([data-rly-root], [data-rly-catalog])
+    :where(
+      div,
+      section,
+      article,
+      main,
+      aside,
+      header,
+      footer,
+      nav,
+      ul,
+      ol,
+      li,
+      dl,
+      dt,
+      dd,
+      figure,
+      blockquote,
+      form,
+      fieldset,
+      p,
+      h1,
+      h2,
+      h3,
+      h4,
+      h5,
+      h6
+    ) {
+    min-inline-size: 0;
+  }
+
+  /* Long words and URLs wrap instead of overflowing; paragraphs avoid a lone last word. */
+  :where([data-rly-root], [data-rly-catalog]) {
+    overflow-wrap: break-word;
+    text-wrap: pretty;
+  }
+
   :where([data-rly-root], [data-rly-catalog]) :where(button, input, select, textarea) {
     color: inherit;
     font: inherit;
@@ -32,6 +75,21 @@
   :where([data-rly-root], [data-rly-catalog]) :focus-visible {
     outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
     outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  /*
+   * A control that must stay visually small (a 40px close, a 24px chip) gets a 44px hit area from an
+   * invisible ::after that grows past whichever edge is short; a side already 44px or more stays put.
+   * Mark the element with data-rly-hit-area. Controls sized by the control-height tokens don't need it:
+   * those already reach 44px on coarse pointers.
+   */
+  :where([data-rly-root], [data-rly-catalog]) :where([data-rly-hit-area]) {
+    position: relative;
+  }
+  :where([data-rly-root], [data-rly-catalog]) :where([data-rly-hit-area])::after {
+    content: "";
+    inset: min(0px, calc((100% - 44px) / 2));
+    position: absolute;
   }
 }
 

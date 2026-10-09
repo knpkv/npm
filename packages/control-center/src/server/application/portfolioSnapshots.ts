@@ -190,10 +190,9 @@ export const loadReleasePageAwareness = Effect.fn(
           (awareness) => [release.id, awareness] satisfies readonly [ReleaseId, PortfolioReleasePageAwareness]
         )).pipe(Effect.map((entries) => new Map(entries)))
     }),
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    Effect.catch(() =>
-      Effect.succeed(
-        new Map(releases.map((release) => [release.id, unknownPageAwareness()]))
+    Effect.catch((error) =>
+      Effect.logWarning("Could not read release page awareness; showing it as unknown", error).pipe(
+        Effect.as(new Map(releases.map((release) => [release.id, unknownPageAwareness()])))
       )
     )
   )

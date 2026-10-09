@@ -2,7 +2,7 @@
   display: grid;
   gap: var(--rly-space-6);
   margin: 0 auto;
-  max-width: 44rem;
+  max-inline-size: 44rem;
   padding: var(--rly-space-8) var(--rly-space-4);
 }
 

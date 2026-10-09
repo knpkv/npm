@@ -5,7 +5,6 @@ import {
   answerSettles,
   answerText,
   clockText,
-  countdownText,
   crossedIntoLastMinute,
   DecisionAnswer,
   factsOf,
@@ -22,27 +21,27 @@ const record = (id: string, overrides: Partial<JobRecord> = {}): JobRecord => ({
   actor: "submitter@example.com",
   approvalAvailable: true,
   approvalExpiresAt: 600_000,
-  approvalNonce: "nonce",
   approvedAt: null,
   approvedBy: null,
   createdAt: 1_000,
-  error: null,
   expiredAt: null,
-  hash: "hash",
   id,
   payload: { kind: "nix.apply", ref: "main" },
   rejectedAt: null,
   rejectedBy: null,
-  result: null,
   status: "pending_approval",
   updatedAt: 1_000,
   ...overrides
 })
 
 const snapshot = (pending: DashboardSnapshot["pendingApprovals"]): DashboardSnapshot => ({
-  approvalApp: { canonical: true, canonicalUrl: "https://hub.example.test/", chatEnabled: false, pushEnabled: false },
+  approvalApp: {
+    canonical: true,
+    canonicalUrl: "https://hub.example.test/",
+    pushEnabled: false,
+    workEnabled: false
+  },
   approvalsEnabled: true,
-  chat: null,
   directory: null,
   historyNextCursor: null,
   host: "ALPHA",
@@ -62,11 +61,12 @@ const snapshot = (pending: DashboardSnapshot["pendingApprovals"]): DashboardSnap
 })
 
 describe("countdown model", () => {
-  it("reads seconds only under five minutes and never goes negative", () => {
-    expect(countdownText(52_000)).toBe("52s")
-    expect(countdownText(4 * 60_000 + 12_000)).toBe("4m 12s")
-    expect(countdownText(11 * 60_000 + 40_000)).toBe("11m")
-    expect(countdownText(-5_000)).toBe("0s")
+  it("reads seconds only under five minutes, never negative, in the Work board's words", () => {
+    expect(clockText(52_000, 0)).toBe("52s")
+    expect(clockText(4 * 60_000 + 12_000, 0)).toBe("4m 12s")
+    expect(clockText(11 * 60_000 + 40_000, 0)).toBe("11m")
+    expect(clockText(0, 5_000)).toBe("expiring")
+    expect(clockText(null, 0)).toBeNull()
   })
 
   it("says how long ago in minutes, hours, then whole days", () => {
@@ -98,7 +98,7 @@ describe("countdown model", () => {
               approvalExpiresAt: 120_000,
               createdAt: 1_000,
               id: "soon",
-              payload: { kind: "nix.check", ref: "main" },
+              payload: { kind: "nix.check" },
               status: "pending_approval"
             },
             approvalUrl: "https://beta.example.test/approve/soon",
@@ -153,9 +153,11 @@ describe("countdown model", () => {
     expect(answerSettles(answerForStatus(409))).toBe(true)
     expect(answerText(DecisionAnswer.Unreadable())).toContain("couldn't be read")
     expect(answerSettles(DecisionAnswer.Unreadable())).toBe(false)
-    expect(answerText(DecisionAnswer.Accepted({ decision: "approve", record: record("x", { status: "queued" }) })))
-      .toBe("The hub recorded your approval; the job is queued.")
-    expect(answerText(DecisionAnswer.Accepted({ decision: "reject", record: record("x", { status: "rejected" }) })))
-      .toContain("Nothing will run")
+    expect(
+      answerText(DecisionAnswer.Accepted({ decision: "approve", record: record("x", { status: "queued" }) }))
+    ).toBe("The hub recorded your approval; the job is queued.")
+    expect(
+      answerText(DecisionAnswer.Accepted({ decision: "reject", record: record("x", { status: "rejected" }) }))
+    ).toContain("Nothing will run")
   })
 })

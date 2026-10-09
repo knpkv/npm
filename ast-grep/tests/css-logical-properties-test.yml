@@ -1,0 +1,21 @@
+id: css-logical-properties
+valid:
+  - |
+    .x { margin-block-start: 1rem; padding-inline: 2rem; inset-inline-end: 0; inline-size: 100%; max-block-size: 2lh; text-align: start; }
+  - |
+    @media (max-width: 30rem) { .x { border-block-end: 1px solid; } }
+  - |
+    .x { border-start-start-radius: 2px; float: inline-start; }
+invalid:
+  - |
+    .x { margin-top: 1rem; }
+  - |
+    .x { border-bottom: 1px solid; }
+  - |
+    .x { max-width: 28rem; }
+  - |
+    .x { top: 0; }
+  - |
+    .x { text-align: left; }
+  - |
+    .x { border-top-left-radius: 2px; }

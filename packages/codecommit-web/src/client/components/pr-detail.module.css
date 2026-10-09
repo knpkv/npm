@@ -67,7 +67,7 @@
 }
 
 .title {
-  max-inline-size: 40ch;
+  max-inline-size: 27.4em;
   overflow-wrap: break-word;
   text-wrap: balance;
 }
@@ -79,17 +79,23 @@
   gap: var(--rly-space-8);
 }
 
+/* The underline, not the colour, sets a link apart from the sentence around it. Stated in full here
+   because Tailwind's preflight resets `a` to `text-decoration: inherit`. */
 .textLink,
 .codeLink {
   color: var(--rly-color-text-1);
-  text-decoration-color: color-mix(in srgb, currentColor 35%, transparent);
+  text-decoration-line: underline;
+  /* 60% keeps the line at 3:1 or more against the canvas in both themes (35% was 2.19:1 in light). */
+  text-decoration-color: color-mix(in srgb, currentColor 60%, transparent);
   text-decoration-thickness: 1px;
   text-underline-offset: var(--rly-space-4);
 }
 
-.textLink:hover,
-.codeLink:hover {
-  text-decoration-color: currentColor;
+@media (hover: hover) and (pointer: fine) {
+  .textLink:hover,
+  .codeLink:hover {
+    text-decoration-color: currentColor;
+  }
 }
 
 .textLink:focus-visible,
@@ -203,7 +209,8 @@
 }
 
 .branchPair code {
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -286,7 +293,7 @@
 .description,
 .markdown {
   color: var(--rly-color-text-1);
-  max-inline-size: 68ch;
+  max-inline-size: 45.3em;
   overflow-wrap: break-word;
 }
 
@@ -320,7 +327,7 @@
   border-color: var(--rly-color-border-1);
   box-shadow: none;
   min-inline-size: var(--rly-space-0);
-  overflow: hidden;
+  overflow: clip;
 }
 
 .disclosureTrigger {
@@ -339,8 +346,10 @@
   text-align: start;
 }
 
-.disclosureTrigger:hover {
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .disclosureTrigger:hover {
+    background: var(--rly-color-surface-2);
+  }
 }
 
 .disclosureTrigger small {
@@ -453,10 +462,12 @@
     color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
 }
 
-.suggestedApprover:hover {
-  background: var(--rly-color-surface-2);
-  border-color: var(--rly-color-action-background);
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .suggestedApprover:hover {
+    background: var(--rly-color-surface-2);
+    border-color: var(--rly-color-action-background);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .suggestedApprover svg {
@@ -475,8 +486,10 @@
   padding: var(--rly-space-2);
 }
 
-.removeApprover:hover {
-  background: color-mix(in srgb, currentColor 12%, transparent);
+@media (hover: hover) and (pointer: fine) {
+  .removeApprover:hover {
+    background: color-mix(in srgb, currentColor 12%, transparent);
+  }
 }
 
 .scoreBreakdown {
@@ -516,7 +529,8 @@
   border-radius: var(--rly-radius-round);
   flex: 1 1 8rem;
   min-block-size: var(--rly-space-6);
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
 }
 
 .scoreFill {
@@ -746,5 +760,48 @@
 
   .page :global(.animate-spin) {
     animation: none;
+  }
+}
+
+.removeFailure {
+  color: var(--rly-color-blocked-ink);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  margin: 0;
+}
+
+/* Drawn under 44px; the pseudo-element grows the touch target without changing the look. */
+.suggestedApprover,
+.removeApprover {
+  position: relative;
+}
+
+.suggestedApprover::after,
+.removeApprover::after {
+  position: absolute;
+  inset: min(0px, (100% - 2.75rem) / 2);
+  content: "";
+}
+
+/* Press feedback; the scale eases only when motion is allowed. */
+.suggestedApprover:active,
+.removeApprover:active {
+  scale: 0.97;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .removeApprover {
+    transition-property: scale;
+    transition-duration: var(--rly-motion-fast-duration);
+    transition-timing-function: var(--rly-motion-fast-easing);
+  }
+
+  /* Keeps its colour transitions alongside the press. */
+  .suggestedApprover {
+    transition:
+      background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      scale var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 }

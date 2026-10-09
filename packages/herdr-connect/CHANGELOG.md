@@ -1,5 +1,93 @@
 # @knpkv/herdr-connect
 
+## 0.10.0
+
+### Minor Changes
+
+- [#704](https://github.com/knpkv/npm/pull/704) [`fea24ef`](https://github.com/knpkv/npm/commit/fea24ef8e52da5918feb8a45ae314a6b670c0c6b) Thanks [@konopkov](https://github.com/konopkov)! - Connect shows Claude and Codex limits. A line under the summary names each agent's window closest to its limit ("Claude 86% 5-hour", "Codex unknown"), and a disclosure holds each host's "Limits now" cards from agent-usage. agent-usage's `LimitsSummary` takes an optional `title`, and gives each instance its own heading id.
+
+- [#698](https://github.com/knpkv/npm/pull/698) [`586f75d`](https://github.com/knpkv/npm/commit/586f75d4b65e6d3c3b3f41f35d1b1a34facdb133) Thanks [@konopkov](https://github.com/konopkov)! - hostd serves Claude and Codex limits for Connect. Set the optional `agentUsageLimitsCommand` in the fleet configuration to `agent-usage limits`. `GET /v1/connect/limits` then returns this host's read, and on the hub every peer's read too. herdr-connect exports the wire schemas (`HostLimits`, `FleetLimits`) and the fleet collection. A host that can't read its limits says why instead of reporting zero.
+
+### Patch Changes
+
+- [#690](https://github.com/knpkv/npm/pull/690) [`7e38bea`](https://github.com/knpkv/npm/commit/7e38beabe14c07ec27adc9391f2a25d502e87491) Thanks [@konopkov](https://github.com/konopkov)! - Fleet connect no longer locks zoom on phones: pinch zoom works again, and the search field and the terminal's text input stay at 16px so focusing them doesn't zoom the page on iOS.
+
+- [#691](https://github.com/knpkv/npm/pull/691) [`eee2128`](https://github.com/knpkv/npm/commit/eee21285ba0a8364cb47cc90ec5b1dd9bf2c8aab) Thanks [@konopkov](https://github.com/konopkov)! - On touch screens a tapped terminal key, agent row or link no longer keeps its hover look; a tapped key could look like a latched modifier.
+- Updated dependencies [[`1f6cc4a`](https://github.com/knpkv/npm/commit/1f6cc4ae3e3302681ad52fd667515f13cbfbeb40), [`fea24ef`](https://github.com/knpkv/npm/commit/fea24ef8e52da5918feb8a45ae314a6b670c0c6b), [`d19931f`](https://github.com/knpkv/npm/commit/d19931f8abbdf82ca154f0be10d74c58b8d09f64), [`fea24ef`](https://github.com/knpkv/npm/commit/fea24ef8e52da5918feb8a45ae314a6b670c0c6b), [`586f75d`](https://github.com/knpkv/npm/commit/586f75d4b65e6d3c3b3f41f35d1b1a34facdb133), [`8f49d5b`](https://github.com/knpkv/npm/commit/8f49d5bafad19c7e3163538f7acb2f0f7de4d2d1), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1cecd7c`](https://github.com/knpkv/npm/commit/1cecd7c454fdbdf042f7a3fd25a200805500881f), [`48830f8`](https://github.com/knpkv/npm/commit/48830f89057919d23ca408192cb68ac1893c8e96), [`799414f`](https://github.com/knpkv/npm/commit/799414f37422e7aeaf0a36bb80d8d878d75f5a10), [`2540508`](https://github.com/knpkv/npm/commit/2540508d00dc60c3842817df8ca37ce6c6a6179b), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1902d84`](https://github.com/knpkv/npm/commit/1902d84417dc050cd7fe7a2472071275424f1e4f), [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44)]:
+  - @knpkv/agent-usage@0.6.0
+  - @knpkv/herdr-fleet@0.9.0
+  - @knpkv/rly@0.17.0
+  - @knpkv/herdr-work@0.9.4
+
+## 0.9.0
+
+### Minor Changes
+
+- [#652](https://github.com/knpkv/npm/pull/652) [`2b79b24`](https://github.com/knpkv/npm/commit/2b79b241a95d5e6d54c1055e0b245bd24a490276) Thanks [@konopkov](https://github.com/konopkov)! - Connect's agents now speak the hub's state language. Each directory row shows the agent's state as an icon and word in its tone, the same label the hub's Agent activity uses, instead of a plain capitalised word. Only working agents spin, and only with motion allowed. `waiting` now counts under the Status filter's "Needs you" (renamed from "Attention") rather than "Ready", because it waits on a person. The work line no longer repeats the state ("Root agent, npm", not "Root agent, Working in npm"), since the label beside it says it. Unknown states keep their own word with a caution alert icon, so they never look idle. `@knpkv/herdr-connect/surface` exports `agentStatePresentation`, `AgentStateLabel`, `agentBuckets` and `agentBucketLabel`. herdr-approvals' Agent activity reads the same mapping, so its state words are now capitalised and blocked and errored agents show in critical tone.
+
+- [#658](https://github.com/knpkv/npm/pull/658) [`504148b`](https://github.com/knpkv/npm/commit/504148b49fef69471bd3772c60d1629758ccf930) Thanks [@konopkov](https://github.com/konopkov)! - Connect is now the hub's one agent list, and the Work tab no longer repeats agents under Agent activity. Each Connect row leads with the agent's state (icon and word) in a fixed column, then its name and work, then when it was last active. Lineage indents the name, not the state. At 24rem and below the state sits above the name. A row's accessible name is its own content plus "open terminal". Status filter options show their counts within the current Host filter, ignoring the search. A host that didn't answer is named in the Host filter (not offered as an option) and, once, in a line above the list with its cause; the summary only counts agents: "GAMMA (timed out) didn't answer; its agents aren't listed." That line now shows on phones too. The directory shows when it was last read ("Updated 09:41:05"), changing only when a poll lands, and says "Stale" when a refresh failed. Empty and failure states read "No agents running on any host." and "The fleet directory didn't answer: …". `AgentDirectory` takes an optional `silentHosts`.
+
+- [#664](https://github.com/knpkv/npm/pull/664) [`5199a49`](https://github.com/knpkv/npm/commit/5199a4959d643d029a9b7701bce94d904250abfd) Thanks [@konopkov](https://github.com/konopkov)! - Connect's key rail has a Keyboard button: press it to bring up the on-screen keyboard (it focuses the terminal's input inside the tap, so iOS opens it), press again to put it away. It stays pressed while the keyboard is up, including after a tap on the terminal. On a phone the "N lines back" status is now a badge over the terminal's top corner rather than a rail cell, so it never resizes the terminal and taps go through it. `TerminalKeyRail` takes optional `keyboardOpen` and `onKeyboardToggle`.
+
+- [#670](https://github.com/knpkv/npm/pull/670) [`8acdf0d`](https://github.com/knpkv/npm/commit/8acdf0dbd0800c27d5dd4d0130e035558f575975) Thanks [@konopkov](https://github.com/konopkov)! - Connect's key rail has a Paste button. It reads the clipboard inside the tap (iOS asks to confirm) and sends the text to the terminal as one paste, bracketed when the program asked for it; a latched Ctrl or Alt is released first. An empty clipboard, a refused read or a browser without clipboard access says so in the rail. On phones the pinned actions sit five to a row. `TerminalKeyRail` takes an optional `onPaste`.
+
+### Patch Changes
+
+- Updated dependencies [[`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6), [`67f7ea1`](https://github.com/knpkv/npm/commit/67f7ea1a5e3c0281da1d627fce940975e2db0cf4), [`f5f5fd9`](https://github.com/knpkv/npm/commit/f5f5fd98dcea7b7df1b226043e89ffb6decaffad), [`ce3234a`](https://github.com/knpkv/npm/commit/ce3234a201e3336b17f22219c8215d11eecc3408), [`4a41bf8`](https://github.com/knpkv/npm/commit/4a41bf82e327ec66a5df1202920f08e8e51554a4), [`e584518`](https://github.com/knpkv/npm/commit/e584518c9c98186e331a9962c4c6347c470cb3c5), [`d476bb0`](https://github.com/knpkv/npm/commit/d476bb0b2e2399c72eb2cd7b8c6005d833464598), [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327), [`765e850`](https://github.com/knpkv/npm/commit/765e850895d4edc16a75b3af072f71d527ad0b8c)]:
+  - @knpkv/rly@0.16.0
+  - @knpkv/herdr-work@0.9.3
+
+## 0.8.0
+
+### Minor Changes
+
+- [#649](https://github.com/knpkv/npm/pull/649) [`132d46b`](https://github.com/knpkv/npm/commit/132d46bc0ed8a881737a0ead6db9b32cbbac4889) Thanks [@konopkov](https://github.com/konopkov)! - In Connect on iPhone, a tap on the terminal now brings up the keyboard: it focuses the terminal's text input inside the tap, where Ghostty's own focus went to a container iOS won't type into. The key rail gets a Keys toggle that hides the Ctrl/Alt modifiers and the terminal keys (Select and Latest stay), remembered on this device. `TerminalKeyRail` takes optional `keysHidden` and `onKeysHiddenChange`.
+
+### Patch Changes
+
+- [#653](https://github.com/knpkv/npm/pull/653) [`5594373`](https://github.com/knpkv/npm/commit/5594373fe3479fa7cbae68608f8b7b84606407e6) Thanks [@konopkov](https://github.com/konopkov)! - On a phone the terminal key rail no longer grows a row when "N lines back" appears, so the terminal keeps its size while you scroll and page-sized scrolls match the screen. With the new Keys button the status pushed Select onto a fourth row; it now takes one column beside Keys, Latest and Select.
+- Updated dependencies [[`dfa2d94`](https://github.com/knpkv/npm/commit/dfa2d94ea207baeb281ef222c7d28cf98e4962bb), [`5d21796`](https://github.com/knpkv/npm/commit/5d21796fb856fba44a32395e316a6bd95ecdbdd6), [`aa41111`](https://github.com/knpkv/npm/commit/aa411113b76d81637f7af356bf04054246aa30ab), [`3ddf05b`](https://github.com/knpkv/npm/commit/3ddf05baa285beebba1ebe99bd2458434a613015)]:
+  - @knpkv/rly@0.15.0
+  - @knpkv/herdr-work@0.9.2
+
+## 0.7.4
+
+### Patch Changes
+
+- [#623](https://github.com/knpkv/npm/pull/623) [`c47e854`](https://github.com/knpkv/npm/commit/c47e8544c762aeb58a28811106e3acf768af12b1) Thanks [@konopkov](https://github.com/konopkov)! - The hub no longer jumps while its first content loads. Connect's agent directory and the Work board each hold a screen of space until their first content arrives, through a failed first request and its retry, so the coordinator chat (Connect) and the agents and history panels (Work) stay out of view instead of being pushed down when the list or board arrives. CLS on a cold load was 0.60 (Connect, 768) and 0.48 (Work, 1440).
+- Updated dependencies [[`da04e85`](https://github.com/knpkv/npm/commit/da04e85df105627acbfcc017ee0f15e6f4d6f20d), [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597), [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae), [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db)]:
+  - @knpkv/herdr-fleet@0.8.0
+  - @knpkv/rly@0.14.0
+  - @knpkv/herdr-work@0.9.1
+
+## 0.7.3
+
+### Patch Changes
+
+- [#594](https://github.com/knpkv/npm/pull/594) [`16244c5`](https://github.com/knpkv/npm/commit/16244c58b41cd8dcee799fd8e8e058598df3fb90) Thanks [@konopkov](https://github.com/konopkov)! - When a terminal session ends and herdr does not take the release command, does not exit, or cannot be killed afterwards, Connect now logs a warning for each instead of dropping the failure silently. Cleanup still never fails the session.
+- Updated dependencies [[`0d6cc4d`](https://github.com/knpkv/npm/commit/0d6cc4df23eca64c5d29725bf50899776cc52435), [`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/herdr-work@0.9.0
+  - @knpkv/rly@0.13.0
+
+## 0.7.2
+
+### Patch Changes
+
+- Updated dependencies [[`69eb086`](https://github.com/knpkv/npm/commit/69eb08644a3b9e39ba97fd0205a985e5e7208a26), [`bfba87c`](https://github.com/knpkv/npm/commit/bfba87c566ca21d267c0626da60b431757dc5e32)]:
+  - @knpkv/herdr-fleet@0.7.0
+  - @knpkv/herdr-work@0.8.1
+
+## 0.7.1
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+
+- [#586](https://github.com/knpkv/npm/pull/586) [`1ef72d9`](https://github.com/knpkv/npm/commit/1ef72d9317a37e8f28563cae113e9908d8242c3a) Thanks [@konopkov](https://github.com/konopkov)! - The herdr-connect test suite, browser fixtures included, is now typechecked as part of `check`, and the package leaves the test-typecheck allowlist.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa), [`f8e842e`](https://github.com/knpkv/npm/commit/f8e842e901986b50edf55f98fa3591b742a7904e), [`30849c5`](https://github.com/knpkv/npm/commit/30849c598fdf6776a3a4a2c4061d276e843eaa8e)]:
+  - @knpkv/rly@0.12.1
+  - @knpkv/herdr-work@0.8.0
+
 ## 0.7.0
 
 ### Minor Changes

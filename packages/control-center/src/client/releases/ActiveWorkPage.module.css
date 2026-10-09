@@ -1,7 +1,6 @@
 .page,
 .hero,
 .selectedRelease,
-.identity,
 .contextSection {
   display: grid;
 }
@@ -20,7 +19,7 @@
 }
 
 .hero h1 {
-  max-inline-size: 10ch;
+  max-inline-size: 6.85em;
   letter-spacing: -0.07em;
   text-wrap: balance;
 }
@@ -32,7 +31,8 @@
 .releaseSelector {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-group);
 }
@@ -69,10 +69,19 @@
   gap: var(--rly-space-32);
 }
 
+/*
+ * The relay mark and the service title share a row while both fit; on a phone the title wraps below
+ * the mark instead of being crushed to nothing beside it.
+ */
 .identity {
-  grid-template-columns: auto 1fr;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--rly-space-20);
+}
+
+.identityTitle {
+  flex: 1 1 min(100%, 12rem);
 }
 
 .identity h2 {

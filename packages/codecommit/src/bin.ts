@@ -17,7 +17,7 @@ import {
   withCodeCommitMock
 } from "@knpkv/codecommit-core/MockTransport.js"
 import { requireLoopbackHostname, serveCodeCommit } from "@knpkv/codecommit-web"
-import { Console, Data, Effect, Layer } from "effect"
+import { Config, Console, Data, Effect, Layer, Option } from "effect"
 import { Command, Flag as Options } from "effect/cli"
 import * as HttpClient from "effect/http/HttpClient"
 import * as ChildProcess from "effect/process/ChildProcess"
@@ -26,6 +26,7 @@ import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
 import { fileURLToPath } from "node:url"
 import pkg from "../package.json" with { type: "json" }
+import { browserLaunch, skippedLine } from "./BrowserLaunch.js"
 import { reportFailure } from "./CliFailure.js"
 import { prCreateCommand } from "./PrCreate.js"
 import { prExportCommand } from "./PrExport.js"
@@ -89,15 +90,29 @@ const web = Command.make("web", {
   hostname: Options.String("hostname").pipe(
     Options.withDescription("Loopback address to listen on, such as 127.0.0.1 or ::1"),
     Options.withDefault("127.0.0.1")
+  ),
+  noOpen: Options.Boolean("no-open").pipe(
+    Options.withDescription(
+      "Print the sign-in link without opening a browser (also when BROWSER=none, CI is set, or stdout is not a terminal)"
+    )
   )
-}, ({ hostname, port }) =>
+}, ({ hostname, noOpen, port }) =>
   Effect.gen(function*() {
     yield* requireLoopbackHostname(hostname)
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const launch = browserLaunch({
+      noOpen,
+      browser: Option.getOrUndefined(yield* Config.option(Config.String("BROWSER"))),
+      ci: Option.getOrUndefined(yield* Config.option(Config.String("CI"))),
+      interactive: process.stdout.isTTY === true
+    })
     // The same start as the web package's own entry; this command adds opening the browser.
     return yield* serveCodeCommit({
       hostname,
-      onReady: (url) => openBrowser(url).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
+      onReady: (url) =>
+        launch._tag === "Skip"
+          ? Console.log(skippedLine(launch.reason))
+          : openBrowser(url).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
       port
     })
   })).pipe(Command.withDescription("Serve the browser UI on this machine and open it"))
@@ -112,8 +127,7 @@ const openBrowser = (url: string) => {
       () => true,
       () => exitCode(ChildProcess.make("rundll32.exe", ["url.dll,FileProtocolHandler", url]))
     ),
-    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    Effect.ignore
+    Effect.ignore({ log: true, message: "No browser could be opened; open the link above" })
   )
 }
 

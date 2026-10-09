@@ -1,6 +1,6 @@
 import { colorTokenSource, contrastPairSource } from "../../src/tokens/colors.js"
 import { controlHeightTokenSource } from "../../src/tokens/control.js"
-import { motionTokenSource } from "../../src/tokens/motion.js"
+import { easingTokenSource, motionTokenSource } from "../../src/tokens/motion.js"
 import { radiusTokenSource } from "../../src/tokens/shape.js"
 import { spaceTokenSource } from "../../src/tokens/space.js"
 import { typeTokenSource } from "../../src/tokens/typography.js"
@@ -29,6 +29,7 @@ export const validateTokenSource = (): void => {
   uniqueNames(radiusTokenSource, "radius")
   uniqueNames(typeTokenSource, "type")
   uniqueNames(motionTokenSource, "motion")
+  uniqueNames(easingTokenSource, "easing")
   uniqueNames(controlHeightTokenSource, "control height")
   for (const result of measureContrastPairs(colorTokenSource, contrastPairSource)) {
     if (result.ratio < result.minimum) {
@@ -61,12 +62,19 @@ const renderSchemeColors = (): string =>
     .map((token) => declaration(`color-${token.name}`, `light-dark(${token.light}, ${token.dark})`))
     .join("\n")
 
-/** Render the complete central token/theme layer. */
+/**
+ * Render the complete central token/theme layer. Colours are declared once, on :root, as light-dark(): an
+ * unregistered custom property resolves light-dark() where it is used, so a [data-theme] subtree only
+ * sets color-scheme and its descendants pick the matching value without the tokens being re-declared.
+ */
 export const renderTokenCss = (): string => {
   validateTokenSource()
   const root = [
-    declaration("font-ui", "\"Geist Variable\", \"Geist\", system-ui, sans-serif"),
-    declaration("font-mono", "\"Geist Mono Variable\", \"Geist Mono\", ui-monospace, monospace"),
+    declaration("font-ui", "\"Geist Variable\", \"Geist\", \"Geist Fallback\", system-ui, sans-serif"),
+    declaration(
+      "font-mono",
+      "\"Geist Mono Variable\", \"Geist Mono\", \"Geist Mono Fallback\", ui-monospace, monospace"
+    ),
     // One solid, high-contrast focus ring: 2px, drawn 2px outside the control (inset rings negate the width).
     declaration("focus-ring-width", "2px"),
     declaration("focus-ring-offset", "2px"),
@@ -84,7 +92,8 @@ export const renderTokenCss = (): string => {
     ...motionTokenSource.flatMap((token) => [
       declaration(`motion-${token.name}-duration`, token.duration),
       declaration(`motion-${token.name}-easing`, token.easing)
-    ])
+    ]),
+    ...easingTokenSource.map((token) => declaration(`easing-${token.name}`, token.value))
   ].join("\n")
 
   return `${CSS_HEADER}
@@ -101,26 +110,8 @@ ${root}
   :root:is([data-theme="system"], [data-rly-theme="system"]),
   :where([data-theme="system"], [data-rly-theme="system"]) { color-scheme: light dark; }
 
-  :root:is(
-    [data-theme="light"], [data-rly-theme="light"],
-    [data-theme="dark"], [data-rly-theme="dark"],
-    [data-theme="system"], [data-rly-theme="system"]
-  ),
-  :where(
-    [data-theme="light"], [data-rly-theme="light"],
-    [data-theme="dark"], [data-rly-theme="dark"],
-    [data-theme="system"], [data-rly-theme="system"]
-  ) {
-${renderSchemeColors()}
-  }
-
   @media (forced-colors: active) {
-    :root,
-    :where(
-      [data-theme="light"], [data-rly-theme="light"],
-      [data-theme="dark"], [data-rly-theme="dark"],
-      [data-theme="system"], [data-rly-theme="system"]
-    ) {
+    :root {
 ${renderForcedColors()}
     }
   }
@@ -166,6 +157,7 @@ ${renderNames("RLY_SPACE_TOKEN_NAMES", "RlySpaceToken", spaceTokenSource.map(({ 
 ${renderNames("RLY_RADIUS_TOKEN_NAMES", "RlyRadiusToken", radiusTokenSource.map(({ name }) => name))}
 ${renderNames("RLY_TYPE_TOKEN_NAMES", "RlyTypeToken", typeTokenSource.map(({ name }) => name))}
 ${renderNames("RLY_MOTION_TOKEN_NAMES", "RlyMotionToken", motionTokenSource.map(({ name }) => name))}
+${renderNames("RLY_EASING_TOKEN_NAMES", "RlyEasingToken", easingTokenSource.map(({ name }) => name))}
 ${
     renderNames(
       "RLY_CONTROL_HEIGHT_TOKEN_NAMES",
@@ -188,6 +180,7 @@ export const renderTokenRegistry = (): string => {
           ...result,
           ratio: Number(result.ratio.toFixed(2))
         })),
+        easing: easingTokenSource,
         motion: motionTokenSource,
         radius: radiusTokenSource,
         space: spaceTokenSource,

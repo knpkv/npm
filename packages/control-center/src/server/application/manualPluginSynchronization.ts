@@ -192,11 +192,36 @@ const failureHealth = Effect.fn("ManualPluginSynchronization.failureHealth")(fun
   })
 })
 
+/**
+ * Why a failed attempt failed: the failure on the connection's health, but only when that health was
+ * recorded during the attempt (`persistHealth` writes it before the attempt completes). A health
+ * written after the attempt, by a connection test or another sync, says nothing about it, so the
+ * reason is unknown (null) rather than borrowed. The join is by time: a different failure written
+ * inside the attempt's own window (a concurrent connection test) would still be attributed to it;
+ * an exact join needs the attempt to record its failure class, which waits for a stable schema.
+ */
+const failureOfAttempt = (
+  attempt: PluginSyncAttemptRecord,
+  health: PluginHealthType | null
+): PluginSynchronizationState["failure"] => {
+  if (attempt.outcome !== SOURCE_UNAVAILABLE_OUTCOME || attempt.completedAt === null || health === null) return null
+  if (health._tag !== "unavailable" && health._tag !== "degraded") return null
+  const checkedAt = DateTime.toEpochMillis(health.checkedAt)
+  const recordedDuringAttempt = checkedAt >= DateTime.toEpochMillis(attempt.startedAt) &&
+    checkedAt <= DateTime.toEpochMillis(attempt.completedAt)
+  return recordedDuringAttempt ? { failureClass: health.failureClass, safeMessage: health.safeMessage } : null
+}
+
+/**
+ * The state of a stream's syncs. A failed last sync says why from the failure it recorded on the
+ * connection's health (see `failureOfAttempt`).
+ */
 const stateFromAttemptState = (
   pluginConnectionId: PluginConnectionId,
   providerId: ProviderId,
   streamKey: string,
-  attemptState: PluginSyncAttemptState
+  attemptState: PluginSyncAttemptState,
+  health: PluginHealthType | null
 ): PluginSynchronizationState => {
   const lastAttempt: PluginSyncAttemptRecord | undefined = attemptState.latestAttempt ?? undefined
   const lastSuccess: PluginSyncAttemptRecord | undefined = attemptState.latestSynchronized ?? undefined
@@ -211,7 +236,8 @@ const stateFromAttemptState = (
       : lastAttempt.outcome === null
       ? "running"
       : lastAttempt.outcome,
-    pagesCommitted: lastAttempt?.pagesCommitted ?? 0
+    pagesCommitted: lastAttempt?.pagesCommitted ?? 0,
+    failure: lastAttempt === undefined ? null : failureOfAttempt(lastAttempt, health)
   }
 }
 
@@ -333,11 +359,15 @@ export const makeManualPluginSynchronization = Effect.fn(
       bound.pluginConnectionId,
       bound.streamKey
     ).pipe(Effect.mapError(() => unavailable()))
+    const runtime = yield* persistence.pluginRuntime.getRuntime(bound.workspaceId, bound.pluginConnectionId).pipe(
+      Effect.mapError(() => unavailable())
+    )
     return stateFromAttemptState(
       bound.pluginConnectionId,
       bound.providerId,
       bound.streamKey,
-      attemptState
+      attemptState,
+      runtime.health
     )
   })
 

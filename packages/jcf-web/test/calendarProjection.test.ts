@@ -1,5 +1,10 @@
 import { expect, it } from "@effect/vitest"
-import { defaultCalendarLayers, projectCalendar, weekTotals } from "../src/client/calendarProjection.js"
+import {
+  connectedLayers,
+  defaultCalendarLayers,
+  projectCalendar,
+  weekTotals
+} from "../src/client/calendarProjection.js"
 import { previewWrite } from "../src/client/weekAtoms.js"
 import type { SavedEntry } from "../src/shared/contracts.js"
 import { fixtureWeek } from "./fixture.js"
@@ -359,4 +364,38 @@ it("retains sixteen-second provider records when all remaining suggestions are t
   expect(projection.counts).toEqual({ jira: 1, clockify: 2, available: 0, overlapping: 0 })
   expect(projection.placements.get(plan.monday)).toHaveLength(3)
   expect(weekTotals(plan)).toEqual({ jira: 16, clockify: 32, jiraSuggested: 0, clockifySuggested: 0 })
+})
+
+// Review finding: a disconnected system lost its layer chip but kept drawing a week read earlier.
+it("draws nothing from a system that is not connected, and keeps the connected one", () => {
+  const base = fixtureWeek()
+  const saved = (source: "jira" | "clockify", hour: number): SavedEntry => ({
+    id: `${source}-${hour}`,
+    revision: "r",
+    source,
+    ticketKey: "PROJ-123",
+    startMs: new Date(`${base.monday}T${hour}:00:00`).getTime(),
+    endMs: new Date(`${base.monday}T${hour + 1}:00:00`).getTime(),
+    description: null
+  })
+  const plan = {
+    ...base,
+    rows: [{
+      ...base.rows[0]!,
+      intervals: [saved("jira", 13), saved("clockify", 15)].map((entry) => ({
+        ...entry,
+        entry
+      })) satisfies typeof base.rows[number]["intervals"]
+    }]
+  }
+  const sources = (layers: ReturnType<typeof connectedLayers>) =>
+    new Set(
+      [...projectCalendar(plan, [], layers).placements.values()].flat().flatMap(({ block }) =>
+        block.kind === "logged" ? [block.source] : []
+      )
+    )
+  expect(sources(defaultCalendarLayers).has("jira")).toBe(true)
+  const jiraOff = sources(connectedLayers(defaultCalendarLayers, { jira: false, clockify: true }))
+  expect(jiraOff.has("jira")).toBe(false)
+  expect(jiraOff.has("clockify")).toBe(true)
 })

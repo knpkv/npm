@@ -53,3 +53,11 @@ export {
   useRelayProductDockRegistration,
   useRelayPullRequestDock
 } from "./dock.js"
+
+export { RelayProductLauncher, RelayProductPanel, type RelayProductPanelProps, type RelayProductPin } from "./panel.js"
+export {
+  type RelayProductDockAbout,
+  type RelayProductDockAlternate,
+  RelayProductSummonClaimed,
+  useRelayProductOpen
+} from "./registry.js"

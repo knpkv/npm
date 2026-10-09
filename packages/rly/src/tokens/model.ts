@@ -1,8 +1,8 @@
 /** A semantic color pair selected by the inherited CSS color scheme. */
 export interface ColorTokenSource {
-  readonly dark: `#${string}`
+  readonly dark: `oklch(${string})`
   readonly forced: string
-  readonly light: `#${string}`
+  readonly light: `oklch(${string})`
   readonly name: string
   readonly purpose: "content" | "state" | "provenance" | "series"
 }
@@ -29,6 +29,12 @@ export interface MotionTokenSource {
   readonly easing: string
   readonly name: string
   readonly reducedDuration: `${number}ms`
+}
+
+/** A named easing curve; components pick one by the kind of movement, not by duration. */
+export interface EasingTokenSource {
+  readonly name: string
+  readonly value: `cubic-bezier(${string})`
 }
 
 /** One contrast invariant checked for both light and dark schemes. */

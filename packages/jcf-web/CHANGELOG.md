@@ -1,5 +1,74 @@
 # @knpkv/jcf-web
 
+## 0.8.0
+
+### Minor Changes
+
+- [#545](https://github.com/knpkv/npm/pull/545) [`391e9e3`](https://github.com/knpkv/npm/commit/391e9e3e5a66ebc770264222e51e10e1983bf2eb) Thanks [@konopkov](https://github.com/konopkov)! - The agent conversation no longer moves while the agent works. Below 1100px the sheet has a fixed height, and new output scrolls inside it. A read's progress sits below the conversation, so the conversation stays put when the progress goes. On a short window, such as a laptop at 200% zoom, the sheet uses the full height. The masthead status keeps room for its longest wording, so the page no longer re-wraps as the status changes. The editor picks layers with the same buttons as the calendar, instead of browser checkboxes, and its note grows with what you type, with no resize grip. A failed read is stated once, in the alert; the totals line just says how old the totals are. After a failed or cancelled read, the agent conversation stops saying it is waiting.
+
+- [#542](https://github.com/knpkv/npm/pull/542) [`fc2ccc3`](https://github.com/knpkv/npm/commit/fc2ccc38179d3a0a0c89c55b7adf0d6ba6638ecc) Thanks [@konopkov](https://github.com/konopkov)! - The week view says what is missing instead of showing zeros, and a signed-out tab can get back in:
+
+  - A tab without a valid session shows one screen naming `jcf web login`, instead of the whole app with zeros, enabled controls and three red panels. A link pasted into that tab signs it in. An expired link in the address bar no longer signs out a tab whose session is still valid.
+  - `jcf web login` (or `jcf-web login`) asks the running jcf-web for a fresh one-time link, so a second browser or an expired tab no longer needs a restart. jcf-web leaves its address and a control token in `~/.jcf/web.json` (owner-only) while it runs, and removes it on exit.
+  - A system that is not connected reads "— Not connected. Run jcf auth jira token" (or the Clockify command) in the week totals, never "nothing saved". Its saved layer is hidden, and it is never a write target. With nothing connected, the page shows one panel naming both commands.
+  - With no session folder chosen, the empty state says so and names the setting, instead of offering a Scan sessions that cannot find anything. The empty-state copy names only the connected systems.
+  - `pnpm --filter @knpkv/jcf-web start` works in the workspace (it runs the server with `tsx`), and `test:pack` checks it.
+
+### Patch Changes
+
+- [#699](https://github.com/knpkv/npm/pull/699) [`192e70e`](https://github.com/knpkv/npm/commit/192e70e46108974287865d3ec0c379aa4c418055) Thanks [@konopkov](https://github.com/konopkov)! - Ticket keys that are wider than their calendar block end in "…" again instead of being cut off mid-character, and a packed stretch's heading is a full-width target at least 24px tall.
+
+- [#687](https://github.com/knpkv/npm/pull/687) [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44) Thanks [@konopkov](https://github.com/konopkov)! - Browser builds now target Chrome 123, Edge 123, Firefox 120 and Safari 17.6, the floor the CSS already relies on for `light-dark()` and `safe` alignment. Before, they targeted Vite's default (Chrome 111, Safari 16.4), so Lightning CSS rewrote `light-dark()` into its custom-property polyfill. Built CSS now keeps `light-dark()` native. For `@knpkv/rly` consumers, the published stylesheet assumes those browsers.
+- Updated dependencies [[`fc2ccc3`](https://github.com/knpkv/npm/commit/fc2ccc38179d3a0a0c89c55b7adf0d6ba6638ecc), [`8f49d5b`](https://github.com/knpkv/npm/commit/8f49d5bafad19c7e3163538f7acb2f0f7de4d2d1), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1cecd7c`](https://github.com/knpkv/npm/commit/1cecd7c454fdbdf042f7a3fd25a200805500881f), [`48830f8`](https://github.com/knpkv/npm/commit/48830f89057919d23ca408192cb68ac1893c8e96), [`799414f`](https://github.com/knpkv/npm/commit/799414f37422e7aeaf0a36bb80d8d878d75f5a10), [`2540508`](https://github.com/knpkv/npm/commit/2540508d00dc60c3842817df8ca37ce6c6a6179b), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1902d84`](https://github.com/knpkv/npm/commit/1902d84417dc050cd7fe7a2472071275424f1e4f), [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44)]:
+  - @knpkv/jira-clockify@1.8.0
+  - @knpkv/rly@0.17.0
+
+## 0.7.0
+
+### Minor Changes
+
+- [#598](https://github.com/knpkv/npm/pull/598) [`0360454`](https://github.com/knpkv/npm/commit/0360454dd4c280b982615173923bb42e93aa2569) Thanks [@konopkov](https://github.com/konopkov)! - jcf no longer reports success for writes that failed, and no longer falls back silently. `ConfigService.set` fails with `ConfigUnreadable` when `~/.jcf/config.json` cannot be read (instead of overwriting it with defaults) and with `ConfigNotSaved` when it cannot be written. `ClockifyAuth.save` fails with `ClockifyKeyNotSaved` when the key cannot be written or made owner-only. A Clockify project or tag that cannot be looked up while starting a timer, an unreadable state, cache or config file, and a Jira identity or search failure keep their fallback but log a warning naming what was dropped and why. Saving defaults during `timer start` or `timer stop` reports a failure without stopping the timer. In jcf-web, a settings save that fails now answers with the reason instead of a generic error.
+
+### Patch Changes
+
+- [#673](https://github.com/knpkv/npm/pull/673) [`a1085a1`](https://github.com/knpkv/npm/commit/a1085a1c000e326e1bb718179df4d590952360b0) Thanks [@konopkov](https://github.com/konopkov)! - The week view uses logical properties and rem sizes, so it mirrors under right-to-left text and follows the browser's font size; hover styles apply only to a fine pointer, a packed stretch opens from its head on touch, and keyboard focus on the entry editor shows the focus ring.
+- Updated dependencies [[`0360454`](https://github.com/knpkv/npm/commit/0360454dd4c280b982615173923bb42e93aa2569), [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6), [`67f7ea1`](https://github.com/knpkv/npm/commit/67f7ea1a5e3c0281da1d627fce940975e2db0cf4), [`f5f5fd9`](https://github.com/knpkv/npm/commit/f5f5fd98dcea7b7df1b226043e89ffb6decaffad), [`ce3234a`](https://github.com/knpkv/npm/commit/ce3234a201e3336b17f22219c8215d11eecc3408), [`4a41bf8`](https://github.com/knpkv/npm/commit/4a41bf82e327ec66a5df1202920f08e8e51554a4), [`e584518`](https://github.com/knpkv/npm/commit/e584518c9c98186e331a9962c4c6347c470cb3c5), [`d476bb0`](https://github.com/knpkv/npm/commit/d476bb0b2e2399c72eb2cd7b8c6005d833464598), [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327), [`765e850`](https://github.com/knpkv/npm/commit/765e850895d4edc16a75b3af072f71d527ad0b8c)]:
+  - @knpkv/jira-clockify@1.7.0
+  - @knpkv/rly@0.16.0
+
+## 0.6.6
+
+### Patch Changes
+
+- Updated dependencies [[`dfa2d94`](https://github.com/knpkv/npm/commit/dfa2d94ea207baeb281ef222c7d28cf98e4962bb), [`5d21796`](https://github.com/knpkv/npm/commit/5d21796fb856fba44a32395e316a6bd95ecdbdd6), [`aa41111`](https://github.com/knpkv/npm/commit/aa411113b76d81637f7af356bf04054246aa30ab), [`3ddf05b`](https://github.com/knpkv/npm/commit/3ddf05baa285beebba1ebe99bd2458434a613015)]:
+  - @knpkv/rly@0.15.0
+
+## 0.6.5
+
+### Patch Changes
+
+- [#593](https://github.com/knpkv/npm/pull/593) [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597) Thanks [@konopkov](https://github.com/konopkov)! - Text no longer jumps when Geist loads. rly's font stacks fall back to metric-matched Arial, Liberation Sans or Arimo faces (and Courier New, Liberation Mono or Cousine for mono), sized per weight, so lines break and rows stand the same height before and after the swap wherever glyphs are placed at subpixels (desktop Chrome on Linux as measured, and the usual macOS and Windows defaults); a Linux desktop set to full hinting can still move text slightly. Reading measures and title widths are set in `em` (at the weight each is drawn in) rather than `ch`, whose size follows the font's "0" and changed by 16% on the swap. Product shells preload the Geist file their stylesheet loads, and review's offline guide no longer hides the page until its fonts are ready.
+
+- [#639](https://github.com/knpkv/npm/pull/639) [`c33ead7`](https://github.com/knpkv/npm/commit/c33ead79cfcbcdb16bbb468229e5a35454e05998) Thanks [@konopkov](https://github.com/konopkov)! - The web app preloads Geist Mono as well as Geist, so ids and code text paint in the right face sooner and don't re-wrap a line when the font arrives.
+- Updated dependencies [[`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597), [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae), [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db)]:
+  - @knpkv/rly@0.14.0
+
+## 0.6.4
+
+### Patch Changes
+
+- Updated dependencies [[`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/rly@0.13.0
+
+## 0.6.3
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/jira-clockify@1.6.2
+  - @knpkv/rly@0.12.1
+
 ## 0.6.2
 
 ### Patch Changes

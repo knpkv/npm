@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test"
+import { expect, test } from "./fixtures.ts"
 
 test("renders the bounded catalog environment and captures one local frame", async ({ page }, testInfo) => {
   await page.emulateMedia({ colorScheme: "dark", forcedColors: "active", reducedMotion: "reduce" })

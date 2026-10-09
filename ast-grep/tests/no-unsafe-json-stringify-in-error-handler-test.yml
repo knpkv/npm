@@ -1,0 +1,7 @@
+id: no-unsafe-json-stringify-in-error-handler
+valid:
+  - |
+    const rendered = yield* Schema.encodeEffect(Schema.fromJsonString(ErrorReport))(report)
+invalid:
+  - |
+    const rendered = JSON.stringify(Object.keys(props).length > 0 ? props : error)

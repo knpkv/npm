@@ -40,10 +40,14 @@ export const States: Story = {
     >
       <Region count={rows.length} title="Queue" tone="default">
         <ul style={{ display: "grid", gap: 0, listStyle: "none", margin: 0, padding: 0 }}>
-          {rows.map((row) => (
+          {rows.map((row, index) => (
             <li
               key={row}
-              style={{ borderBlockEnd: "1px solid var(--rly-color-border-1)", padding: "var(--rly-space-12) 0" }}
+              style={{
+                // Rules sit between rows only; the region's own edge closes the list.
+                borderBlockEnd: index < rows.length - 1 ? "1px solid var(--rly-color-border-1)" : "none",
+                padding: "var(--rly-space-12) 0"
+              }}
             >
               {row}
             </li>

@@ -70,12 +70,19 @@ const asset = (suffix: string): string => {
 }
 const script = asset("connect.js")
 const styles = asset("connect.css")
+// The fonts connect.css references, served as hostd serves them, so the page loads Geist for real.
+const fonts = new Map(
+  bundle.outputFiles.filter((output) => output.path.endsWith(".woff2")).map((output) => [
+    `/assets/${output.path.split("/").at(-1)}`,
+    output.contents
+  ])
+)
 
 const page = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <title>Fleet connect fixture</title>
 <link rel="stylesheet" href="/assets/connect.css">
@@ -289,6 +296,9 @@ const handle = (agentsBody: string) => (request: IncomingMessage, response: Serv
   } else if (url.pathname === "/assets/connect.css") {
     response.writeHead(200, { "content-type": "text/css" })
     response.end(styles)
+  } else if (fonts.has(url.pathname)) {
+    response.writeHead(200, { "content-type": "font/woff2" })
+    response.end(fonts.get(url.pathname))
   } else if (url.pathname === "/v1/connect/agents") {
     json(response, agentsBody)
   } else if (url.pathname === "/__test/screen") {

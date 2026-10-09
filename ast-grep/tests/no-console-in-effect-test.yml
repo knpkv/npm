@@ -1,0 +1,13 @@
+id: no-console-in-effect
+valid:
+  - |
+    const program = Effect.gen(function* () {
+      yield* Effect.log("started")
+    })
+  - |
+    console.log("outside Effect")
+invalid:
+  - |
+    const program = Effect.gen(function* () {
+      console.log("started")
+    })

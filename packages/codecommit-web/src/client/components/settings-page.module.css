@@ -40,21 +40,30 @@
     var(--rly-type-label-font);
   text-align: start;
   text-decoration: none;
-  transition:
-    background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
-    color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   white-space: nowrap;
 }
 
-.tab:hover {
-  background: var(--rly-color-surface-2);
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .tab:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .tab[data-active="true"] {
   border-color: var(--rly-color-border-1);
   background: var(--rly-color-surface-1);
   color: var(--rly-color-text-1);
+}
+
+/* Forced colours drop the surface fill that marks the current tab; system colours mark it instead. */
+@media (forced-colors: active) {
+  .tab[data-active="true"] {
+    forced-color-adjust: none;
+    border-color: Highlight;
+    background: Highlight;
+    color: HighlightText;
+  }
 }
 
 .tab:focus-visible {
@@ -82,26 +91,20 @@
     position: static;
   }
 
+  /*
+   * Columns by width, not by label width: the web font arrives wider than its fallback, and a
+   * wrapping flex row then re-breaks after first paint and pushes the page down (CLS 0.14 at 200%).
+   */
   .tabList {
-    display: flex;
-    flex-wrap: wrap;
-    overflow-x: auto;
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
     padding-block-end: var(--rly-space-4);
-    overscroll-behavior-inline: contain;
-    scrollbar-width: none;
-  }
-
-  .tabList::-webkit-scrollbar {
-    display: none;
-  }
-
-  .tab {
-    flex: 1 1 auto;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .tab {
-    transition: none;
+    transition:
+      background-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 }

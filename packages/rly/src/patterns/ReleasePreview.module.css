@@ -22,7 +22,8 @@
   .dialogSurface {
     block-size: min(48rem, calc(100dvh - var(--rly-space-32)));
     grid-template-rows: auto minmax(var(--rly-space-0), 1fr);
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
   }
 
   .dialogSurface > :last-child,
@@ -155,7 +156,8 @@
     }
 
     .dialogSurface > header > :first-child {
-      overflow: hidden;
+      min-inline-size: 0;
+      overflow: clip;
       text-overflow: ellipsis;
       text-wrap: nowrap;
     }

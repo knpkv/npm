@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/rly",
-  "version": "0.12.0",
+  "version": "0.17.0",
   "description": "Release-oriented design system for human and agent collaboration",
   "license": "MIT",
   "author": "knpkv",
@@ -53,6 +53,7 @@
     "./registry/schema.json": "./registry/schema.json",
     "./registry/search.json": "./registry/search.json",
     "./registry/USAGE.md": "./registry/USAGE.md",
+    "./relay-mark.svg": "./dist/assets/relay-mark.svg",
     "./styles.css": "./dist/styles.css"
   },
   "publishConfig": {

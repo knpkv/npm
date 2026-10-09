@@ -67,6 +67,11 @@
     min-inline-size: var(--rly-space-0);
     padding-block: var(--rly-space-8);
   }
+  @supports (justify-content: safe center) {
+    .content {
+      justify-content: safe center;
+    }
+  }
 
   .label {
     min-inline-size: var(--rly-space-0);
@@ -82,7 +87,7 @@
     position: absolute;
   }
 
-  @media (hover: hover) {
+  @media (hover: hover) and (pointer: fine) {
     .root:not(:disabled):hover {
       border-color: var(--rly-color-text-2);
     }

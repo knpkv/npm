@@ -64,9 +64,9 @@ const agentRows = Array.from({ length: 18 }, (_, index) => {
   const agent = String(index + 1).padStart(2, "0")
   return `
     <button class="connect-agent" type="button">
-      <time>12:${agent}</time>
-      <span class="connect-agent-copy"><strong>agent-${agent}</strong><small>SER8, Root agent, Working in npm</small></span>
       <span class="connect-agent-state" data-activity="working">Working</span>
+      <span class="connect-agent-copy"><strong>agent-${agent}</strong><small>SER8, Root agent, npm</small></span>
+      <time>12:${agent}</time>
     </button>`
 }).join("")
 
@@ -241,6 +241,15 @@ test("390x844 keeps directory chrome dense and the full list reachable without a
 
   await rows.last().scrollIntoViewIfNeeded()
   await expect(rows.last()).toBeInViewport()
+})
+
+// iOS zooms into a field under 16px when it takes focus; the page no longer locks zoom to hide it.
+test("390x844 search field is at least 16px, so focusing it does not zoom the page", async ({ page }) => {
+  await setEmbeddedDirectory(page)
+  const fontSize = await page
+    .locator(".connect-search input")
+    .evaluate((input) => Number.parseFloat(getComputedStyle(input).fontSize))
+  expect(fontSize).toBeGreaterThanOrEqual(16)
 })
 
 test("mobile standalone keeps the directory as its bounded scroll owner", async ({ page }) => {

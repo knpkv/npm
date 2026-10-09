@@ -361,12 +361,13 @@ const make = Effect.gen(function*() {
         userCache.set(accountId, person)
         return person
       }),
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.catch(() => {
-        // User may be deleted / inaccessible — fall back to bare account id.
+      // A deleted or hidden user is shown by account id. The fallback is cached, so this warns once per user.
+      Effect.catch((error) => {
         const fallback: Person = { accountId, displayName: accountId, emailAddress: null }
         userCache.set(accountId, fallback)
-        return Effect.succeed(fallback)
+        return Effect.logWarning(`Jira user ${accountId} could not be read; showing the account id`, error).pipe(
+          Effect.as(fallback)
+        )
       }),
       // Drop the in-flight memo once resolved so a later miss can refetch.
       Effect.ensuring(Effect.sync(() => userInFlight.delete(accountId)))

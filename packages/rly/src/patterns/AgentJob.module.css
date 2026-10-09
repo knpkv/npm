@@ -6,7 +6,7 @@
     container-type: inline-size;
     display: grid;
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   .header {
@@ -28,6 +28,11 @@
     justify-content: center;
     min-block-size: var(--rly-space-32);
     min-inline-size: var(--rly-space-32);
+  }
+  @supports (justify-content: safe center) {
+    .agentGlyph {
+      justify-content: safe center;
+    }
   }
 
   .titleBlock {

@@ -30,7 +30,8 @@
   border: 1px solid color-mix(in srgb, var(--rly-color-service-clockify) 46%, var(--rly-color-border-1));
   border-radius: var(--rly-radius-control);
   grid-template-columns: minmax(13rem, 0.42fr) minmax(var(--rly-space-0), 1fr);
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
 }
 
 .total {
@@ -77,7 +78,7 @@
   font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
     var(--rly-type-body-large-font);
   margin: var(--rly-space-0);
-  max-inline-size: 46ch;
+  max-inline-size: 30.6em;
 }
 
 .primaryFacts {
@@ -171,9 +172,14 @@
   text-decoration: none;
 }
 
-.attribution a:hover strong,
 .attribution a:focus-visible strong {
   color: var(--rly-color-service-jira);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .attribution a:hover strong {
+    color: var(--rly-color-service-jira);
+  }
 }
 
 .attribution a:focus-visible {

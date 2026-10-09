@@ -39,6 +39,17 @@ export type {
 } from "./Sheet.js"
 export { RLY_SKELETON_DEFAULT_VARIANTS, RLY_SKELETON_VARIANTS, Skeleton } from "./Skeleton.js"
 export type { RlySkeletonVariant, SkeletonProps } from "./Skeleton.js"
+export { StackedBars } from "./StackedBars.js"
+export type {
+  RlyBandMark,
+  RlyChartBin,
+  RlyChartColumn,
+  RlyChartSegment,
+  RlyChartSelection,
+  RlyChartWindow,
+  RlyStepBand,
+  StackedBarsProps
+} from "./StackedBars.js"
 export { RLY_STATE_LABEL_DEFAULT_VARIANTS, RLY_STATE_LABEL_VARIANTS, StateLabel } from "./StateLabel.js"
 export type { RlyStateLabelSize, RlyStateTone, StateLabelProps } from "./StateLabel.js"
 export { RLY_STATE_PANEL_DEFAULT_VARIANTS, RLY_STATE_PANEL_VARIANTS, StatePanel } from "./StatePanel.js"

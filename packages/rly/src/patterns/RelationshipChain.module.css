@@ -70,8 +70,10 @@
     text-underline-offset: var(--rly-space-2);
   }
 
-  .endpointLink:hover {
-    text-decoration-color: currentcolor;
+  @media (hover: hover) and (pointer: fine) {
+    .endpointLink:hover {
+      text-decoration-color: currentcolor;
+    }
   }
 
   .endpointLink:focus-visible {
@@ -127,6 +129,11 @@
     flex-wrap: wrap;
     gap: var(--rly-space-4);
     justify-content: center;
+  }
+  @supports (justify-content: safe center) {
+    .direction {
+      justify-content: safe center;
+    }
   }
 
   .arrow {

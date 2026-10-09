@@ -2,7 +2,7 @@
 
 Fleet agent directory and authenticated Herdr terminal control.
 
-The directory combines the local inventory with peer `/v1/connect/agents/local` responses. Peer requests time out after 1.5 seconds and run with bounded concurrency. An offline, unavailable, timed-out, or malformed peer becomes a typed partial failure; healthy agents remain usable.
+The directory combines the local inventory with peer `/v1/connect/agents/local` responses. Peer requests time out after 1.5 seconds and run with bounded concurrency. An offline, unavailable, timed-out, or malformed peer becomes a typed partial failure; healthy agents remain usable. The directory names each host that didn't answer, with its cause, above the list and in the Host filter, so missing agents are explained rather than silently absent.
 
 The terminal connector resolves an opaque agent ID against the current local inventory, starts `herdr terminal session control`, streams Schema-decoded frames, and writes bounded input, resize, scroll, and release commands. Its session is scoped, so interruption releases or kills the child instead of leaving an attach process behind.
 

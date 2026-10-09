@@ -70,13 +70,14 @@ describe("bootstrapSession", () => {
     expect(window.replaceState).toHaveBeenCalledWith(null, "", "/")
   })
 
-  it("clears a token rejected by the server and ignores loads without one", async () => {
+  // A spent or expired link leaves the tab on its cookie; the next request says whether that still works.
+  it("clears a token rejected by the server, keeps the cookie session, and ignores loads without one", async () => {
     const request = vi.spyOn(Transport, "request").mockImplementation(async (_path, _options, consume) =>
       consume(new Response("invalid", { status: 401 }))
     )
     const rejected = stubWindow(`#bootstrap_token=${bootstrapToken}`)
     const { bootstrapSession } = await import("../src/client/api.js")
-    await expect(bootstrapSession()).rejects.toMatchObject({ status: 401 })
+    await expect(bootstrapSession()).resolves.toBeUndefined()
     expect(rejected.replaceState).toHaveBeenCalledWith(null, "", "/")
 
     vi.unstubAllGlobals()

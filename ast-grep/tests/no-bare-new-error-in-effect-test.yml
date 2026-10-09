@@ -1,0 +1,18 @@
+id: no-bare-new-error-in-effect
+valid:
+  - |
+    const program = Effect.gen(function* () {
+      return yield* new ParseFailure({ input })
+    })
+  - |
+    const invalid = new Error("outside Effect")
+invalid:
+  - |
+    const program = Effect.gen(function* () {
+      return yield* Effect.fail(new Error("boom"))
+    })
+  - |
+    const program = Effect.gen(function* () {
+      const failure = new TypeError("bad input")
+      return failure
+    })

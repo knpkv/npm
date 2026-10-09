@@ -67,7 +67,7 @@
     min-inline-size: var(--rly-control-height-default);
   }
 
-  @media (hover: hover) {
+  @media (hover: hover) and (pointer: fine) {
     .item:not([data-state="checked"]):hover {
       background: var(--rly-color-surface-2);
       color: var(--rly-color-text-1);

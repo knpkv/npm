@@ -53,8 +53,10 @@
   padding: var(--rly-space-4) var(--rly-space-12);
 }
 
-.close:hover {
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .close:hover {
+    background: var(--rly-color-surface-2);
+  }
 }
 
 .close:focus-visible {
@@ -66,7 +68,8 @@
   display: flex;
   flex-direction: column;
   min-block-size: 0;
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
 }
 
 /* The pane fills the drawer instead of taking its stacked-below height. */
@@ -89,5 +92,29 @@
     block-size: auto;
     flex: none;
     overflow: visible;
+  }
+}
+
+/* Drawn under 44px; the pseudo-element grows the touch target without changing the look. */
+.close {
+  position: relative;
+}
+
+.close::after {
+  position: absolute;
+  inset: min(0px, (100% - 2.75rem) / 2);
+  content: "";
+}
+
+/* Press feedback; the scale eases only when motion is allowed. */
+.close:active {
+  scale: 0.97;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .close {
+    transition-property: scale;
+    transition-duration: var(--rly-motion-fast-duration);
+    transition-timing-function: var(--rly-motion-fast-easing);
   }
 }

@@ -359,7 +359,10 @@ export const serveCodeCommit = Effect.fn("CodeCommitServer.serve")(function*(opt
           Effect.gen(function*() {
             yield* Ref.set(listening, true)
             yield* Effect.logInfo(`Authenticated server ready at ${directOrigin}`)
-            yield* Stream.make(`Authenticated bootstrap URL: ${url}\n`).pipe(Stream.run(stdio.stdout()))
+            // The one line a new user needs, set apart from the logs above it.
+            yield* Stream.make(
+              `\nCodeCommit is ready. Open this sign-in link (it works once, within 60 seconds):\n\n  ${url}\n\n`
+            ).pipe(Stream.run(stdio.stdout()))
             if (options.onReady !== undefined) yield* options.onReady(url)
           })
       )
