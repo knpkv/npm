@@ -14,6 +14,10 @@
  *   the owner dies, even on `kill -9`.
  * - **A run is named by the `requestId`s it answers.** `send` takes the dock's `requestId`; events that
  *   end a run, and the Snapshot of a run in flight, list them, and `cancel` stops a run only by one of them.
+ * - **A person's message is the stream's, not the sender's.** A Snapshot lists the messages still queued;
+ *   after it, `MessageQueued`, `MessagePlaced` and `MessageWithdrawn` follow each one, in the same order as
+ *   the transcript. A message committed before a Snapshot is in it, one committed after arrives as an event,
+ *   so a dock never guesses from its own send.
  * - **Backend status is observed, not assumed.** A backend starts `Unverified` when its CLI answers
  *   `--version`, turns `Ready` when a turn answers, and `Unavailable` with `SignedOut` when the CLI refuses
  *   the login. Nothing about it is persisted.
@@ -21,7 +25,6 @@
  * @module
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
-import type { Message } from "@earendil-works/pi-ai"
 import { createRegistry, defineDoc, Harness, watchEvents } from "@earendil-works/pi-durable"
 import type {
   AgentEvent,
@@ -55,6 +58,8 @@ import { AiError } from "effect/ai"
 import type { LanguageModel } from "effect/ai"
 import type { PlatformError } from "effect/PlatformError"
 import { libsqlDatabase } from "./libsqlDatabase.js"
+import { entryText, makeMessageTracker } from "./messages.js"
+import type { MessageEvent } from "./messages.js"
 import { BackendUnavailableCause, DecisionState, objectRefKey, RelayBackendId, WriteReceipt } from "./model.js"
 import type { BackendStatus, ObjectRef, RelayEvent, SessionInfo, SessionTool } from "./model.js"
 import { relayModels, relayProvider } from "./piProvider.js"
@@ -543,18 +548,6 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
 export const layer = <Requirements>(options: RelayHarnessOptions<Requirements>) =>
   Layer.effect(RelayHarness, make(options))
 
-/** The visible text of a stored user or assistant entry. */
-const entryText = (messages: ReadonlyArray<Message> | undefined): string =>
-  (messages ?? [])
-    .flatMap((message) =>
-      message.role === "user" || message.role === "assistant"
-        ? Predicate.isString(message.content)
-          ? [message.content]
-          : message.content.flatMap((block) => (block.type === "text" ? [block.text] : []))
-        : []
-    )
-    .join("\n")
-
 /** The citations a capability call records in its Pi tool details. */
 /** What a capability call records in its Pi tool details: citations, and a write's receipt. */
 const decodeDetails = Schema.decodeUnknownOption(
@@ -631,7 +624,14 @@ const sessionEvents = (
     )
     return [...partial, ...running]
   }
-  const toRelay = (event: AgentEvent, runIds: ReadonlyArray<string>): ReadonlyArray<Unsequenced> => {
+  const messages = makeMessageTracker()
+  const fromMessages = (events: ReadonlyArray<MessageEvent>): ReadonlyArray<Unsequenced> =>
+    events.map((event) => ({ ...event, session }))
+  const toRelay = (
+    event: AgentEvent,
+    runIds: ReadonlyArray<string>,
+    queued: ReadonlyArray<string> = []
+  ): ReadonlyArray<Unsequenced> => {
     switch (event.type) {
       case "snapshot":
         return [
@@ -639,6 +639,7 @@ const sessionEvents = (
             _tag: "Snapshot",
             session,
             runIds,
+            queued,
             messages: event.entries.flatMap((
               entry
             ): ReadonlyArray<{ readonly id: string; readonly role: "user" | "relay"; readonly text: string }> =>
@@ -658,6 +659,11 @@ const sessionEvents = (
         return event.message.role === "assistant"
           ? event.message.content.flatMap((block, index) => (block.type === "text" ? textFrom(index, block.text) : []))
           : []
+      case "message_end":
+      case "entry_appended":
+        return fromMessages(messages.entry(event.entry))
+      case "submission":
+        return fromMessages(messages.record(event.record))
       case "message_update":
         return event.changes.flatMap((change): ReadonlyArray<Unsequenced> => {
           // Pi coalesces commits, so text arrives as deltas, as a whole block, or as the whole message.
@@ -736,6 +742,15 @@ const sessionEvents = (
       : promise("read the run in flight", async () => runIdsOf(inputs, await records(inputs)))).pipe(
         Effect.tap((runIds) => Effect.sync(() => (active = runIds)))
       )
+  // The messages waiting for the run in flight, as their requestIds.
+  const queuedOf = (
+    inbox: ReadonlyArray<{ readonly id: SubmissionId }>
+  ): Effect.Effect<ReadonlyArray<string>, RelayStoreFailed> => {
+    const inputs = inbox.map(({ id }) => id)
+    return inputs.length === 0
+      ? Effect.succeed([])
+      : promise("read the queued messages", async () => runIdsOf(inputs, await records(inputs)))
+  }
   // A run's end says only which inputs it ran; each input's submission record says how it ended.
   const runEnded = (inputs: ReadonlyArray<SubmissionId>): Effect.Effect<Unsequenced, RelayStoreFailed> =>
     promise("read how the run ended", async () => {
@@ -772,8 +787,8 @@ const sessionEvents = (
           Stream.map((runIds): Unsequenced => ({ _tag: "RunStarted", session, runIds }))
         )
         : event.type === "snapshot"
-        ? Stream.fromEffect(track(event.run?.inputs ?? [])).pipe(
-          Stream.flatMap((runIds) => Stream.fromIterable(toRelay(event, runIds)))
+        ? Stream.fromEffect(Effect.all([track(event.run?.inputs ?? []), queuedOf(event.inbox)])).pipe(
+          Stream.flatMap(([runIds, queued]) => Stream.fromIterable(toRelay(event, runIds, queued)))
         )
         : Stream.fromIterable(toRelay(event, active))
   )

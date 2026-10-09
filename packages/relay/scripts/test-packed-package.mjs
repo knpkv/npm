@@ -6,14 +6,27 @@
  * - every static import in `dist/index.js` is a declared dependency (or a subpath of one) or a Node built-in,
  *   so no Pi package, provider SDK or esbuild is imported;
  * - every dynamic import can only reach a Node built-in;
- * - no declaration names a Pi package.
+ * - no declaration names a Pi package;
+ * - `dist/wire.js` (`@knpkv/relay/wire`) imports only `effect` and `@knpkv/capability`, and a browser consumer
+ *   that imports `@knpkv/relay/wire` by package name bundles for the browser.
  */
+import { build } from "esbuild"
 import { execFileSync } from "node:child_process"
 import console from "node:console"
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs"
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import process from "node:process"
+import { BROWSER_TARGET } from "../../../browser-target.ts"
 
 const forbidden = [
   /^@earendil-works\//u,
@@ -36,11 +49,18 @@ try {
   const manifest = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))
   const declared = [...Object.keys(manifest.dependencies ?? {}), ...Object.keys(manifest.peerDependencies ?? {})]
 
-  for (const file of ["dist/index.js", "dist/index.d.ts", "README.md", "LICENSE-THIRD-PARTY.md"]) {
+  for (const file of [
+    "dist/index.js",
+    "dist/index.d.ts",
+    "dist/wire.js",
+    "dist/wire.d.ts",
+    "README.md",
+    "LICENSE-THIRD-PARTY.md"
+  ]) {
     if (!existsSync(join(root, file))) fail(`missing ${file}`)
   }
   const dist = readdirSync(join(root, "dist"))
-  const strayJs = dist.filter((file) => file.endsWith(".js") && file !== "index.js")
+  const strayJs = dist.filter((file) => file.endsWith(".js") && file !== "index.js" && file !== "wire.js")
   if (strayJs.length > 0) fail(`JavaScript outside the bundle: ${strayJs.join(", ")}`)
 
   const bundle = readFileSync(join(root, "dist", "index.js"), "utf8")
@@ -64,6 +84,47 @@ try {
     if (argument !== "specifier" && !/^"node:[a-z_/]+"$/u.test(argument)) {
       fail(`importNodeModule can reach a package: importNodeModule(${argument})`)
     }
+  }
+
+  const wire = readFileSync(join(root, "dist", "wire.js"), "utf8")
+  const wireSpecifiers = [
+    ...wire.matchAll(/^\s*(?:import|export)\b[^;]*?\bfrom\s*"([^"]+)"|^\s*import\s*"([^"]+)"|\bimport\(([^)]*)\)/gmu)
+  ].map((match) => match[1] ?? match[2] ?? match[3])
+  for (const specifier of new Set(wireSpecifiers)) {
+    if (!/^(effect|@knpkv\/capability)(\/|$)/u.test(specifier)) fail(`wire.js imports ${specifier}, not browser-safe`)
+  }
+  if (wireSpecifiers.length === 0) fail("wire.js imports nothing: the import scan matched no specifier")
+
+  // A page imports the entry by package name, through the tarball's `exports`, and bundles it for the browser.
+  // Its dependencies resolve from this package's install; the bundle must take in nothing of the harness.
+  const consumer = join(temporary, "consumer")
+  mkdirSync(join(consumer, "node_modules", "@knpkv"), { recursive: true })
+  symlinkSync(root, join(consumer, "node_modules", "@knpkv", "relay"))
+  writeFileSync(
+    join(consumer, "entry.js"),
+    `import { RelayStreamFrame } from "@knpkv/relay/wire"\nexport const frame = RelayStreamFrame\n`
+  )
+  const harnessInputs = /@libsql|@earendil-works|ai-claude|ai-codex|ai-runtime|typebox|\/package\/dist\/index\.js$/u
+  try {
+    const bundled = await build({
+      entryPoints: [join(consumer, "entry.js")],
+      bundle: true,
+      format: "esm",
+      logLevel: "silent",
+      metafile: true,
+      nodePaths: [join(process.cwd(), "node_modules")],
+      platform: "browser",
+      target: BROWSER_TARGET,
+      write: false
+    })
+    const pulled = Object.keys(bundled.metafile.inputs).filter((input) => harnessInputs.test(input))
+    if (pulled.length > 0)
+      fail(`a browser bundle of @knpkv/relay/wire takes in the harness: ${pulled.slice(0, 3).join(", ")}`)
+    if (!Object.keys(bundled.metafile.inputs).some((input) => input.endsWith("dist/wire.js"))) {
+      fail("a browser bundle of @knpkv/relay/wire doesn't contain dist/wire.js")
+    }
+  } catch (error) {
+    fail(`a browser page can't bundle @knpkv/relay/wire: ${error instanceof Error ? error.message : String(error)}`)
   }
 
   for (const file of dist.filter((name) => name.endsWith(".d.ts"))) {

@@ -122,8 +122,19 @@ export const RelayEvent = Schema.TaggedUnion({
       Schema.Struct({ id: Name, role: Schema.Literals(["user", "relay"]), text: Schema.String })
     ),
     /** The run in flight, empty when idle. */
-    runIds: RunIds
+    runIds: RunIds,
+    /** Messages accepted but not yet in the transcript, oldest first: they wait for the run in flight. */
+    queued: RunIds
   },
+  /**
+   * A message the server accepted that waits for the run in flight. It joins the transcript with its own
+   * `MessagePlaced`, or leaves with `MessageWithdrawn`.
+   */
+  MessageQueued: { ...eventFields, requestId: Name },
+  /** A message the server placed in the transcript; `id` is its transcript id, as a later Snapshot names it. */
+  MessagePlaced: { ...eventFields, id: Name, requestId: Name, text: Schema.String },
+  /** A queued message the person withdrew before any run took it. */
+  MessageWithdrawn: { ...eventFields, requestId: Name },
   RunStarted: { ...eventFields, runIds: RunIds },
   TextDelta: { ...eventFields, text: Schema.String },
   /** `summary` is a server-built, display-safe line; `input` is the call's typed arguments. */
