@@ -1,0 +1,29 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: no-duplicate-agent-state-mapping
+language: tsx
+severity: error
+message: "Map agent states only in herdr-connect's agent-state.tsx; read agentStatePresentation instead"
+
+rule:
+  kind: switch_case
+  has:
+    field: value
+    kind: string
+    regex: '^"(working|idle)"$'
+
+files:
+  - "packages/herdr-connect/src/**/*.tsx"
+  - "packages/herdr-connect/src/**/*.ts"
+  - "packages/herdr-approvals/src/**/*.tsx"
+  - "packages/herdr-approvals/src/**/*.ts"
+
+ignores:
+  - "packages/herdr-connect/src/agent-state.tsx"
+  - "packages/herdr-approvals/src/**/work-*"
+
+note: |
+  One state language for agents (workers/ui2.agents-merge.plan.md, D2): the word, icon, tone,
+  motion and Status filter bucket come from agentStatePresentation. A second switch on herdr's
+  agent states lets a row look idle while its filter says it needs you. Work's goal states
+  (work-*) are a different vocabulary and are excluded.

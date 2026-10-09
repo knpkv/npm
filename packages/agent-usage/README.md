@@ -18,7 +18,7 @@ every model request in a private SQLite store, polls Claude's limits, and serves
 ## Running it
 
 Installed from npm, the binary is `agent-usage` (`agent-usage serve`, `agent-usage login`,
-`agent-usage ingest`). From this repository:
+`agent-usage ingest`, `agent-usage limits`). From this repository:
 
 ```bash
 pnpm build                                       # builds the workspace, this package included
@@ -72,6 +72,25 @@ time, but logs that `login` is unavailable, and `login` says to choose a shorter
 | `did not answer with a link`                 | Something answered on the socket with a reply that is not a sign-in link                                                 |
 
 Every failure exits nonzero and prints nothing on stdout, so `agent-usage login | xargs …` is safe.
+
+### Limits for another program
+
+`agent-usage limits` asks the running server for this Machine's latest limits over the same
+owner-only control socket and prints them as one JSON line: `{ v: 1, machine, observedAt, latest }`. A reader pinned to another agent-usage checks `v` first and decodes `latest` one snapshot at a time, so a newer source or reason skips that snapshot rather than the whole line.
+`latest` holds the newest snapshot of every limit window seen in the last eight days, the same tiles as
+the page's "Limits now". A window not seen for eight days is left out: it has reset since. A window
+that could not be read stays an `Unknown` snapshot with its reason; it is never reported as 0%.
+`observedAt` is the server's clock when it answered, and every time in the reply is on that clock.
+
+Limits only: balances and spend stay on the authenticated page. No session cookie and no provider
+credential is involved, so hostd can call it to show limits in Connect. Failures print one sentence on
+stderr and exit nonzero, with nothing on stdout:
+
+| Message                        | Meaning                                                                       |
+| ------------------------------ | ----------------------------------------------------------------------------- |
+| `is not running on this store` | No server listens on the store's control socket                               |
+| `older version without limits` | The server predates the `limits` request; restart it on the installed version |
+| `could not read its store`     | The server knows the request but its store failed; the server's log says why  |
 
 ### Running as a service
 

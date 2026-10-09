@@ -1,0 +1,38 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: css-motion-opt-in
+language: css
+severity: error
+message: "Motion is opt-in: put transition/animation inside @media (prefers-reduced-motion: no-preference)"
+
+rule:
+  kind: declaration
+  has:
+    kind: property_name
+    regex: "^(transition|animation)(-(property|duration|name))?$"
+  not:
+    any:
+      - has:
+          kind: plain_value
+          regex: "^none$"
+      # Match the query, not the whole @media text: a nested guard inside the block must not excuse
+      # the outer rules.
+      - inside:
+          kind: media_statement
+          stopBy: end
+          has:
+            not:
+              kind: block
+            regex: "(?i)prefers-reduced-motion\\s*:\\s*no-preference"
+
+files:
+  - "packages/control-center/src/**/*.css"
+  - "packages/jcf-web/src/**/*.css"
+  - "packages/rly/src/**/*.css"
+  - "packages/herdr-approvals/src/**/*.css"
+
+note: |
+  good-css: motion only when the reader has not asked to reduce it. An opt-out `reduce`
+  block misses any rule added later; the opt-in query cannot. Setting `none` stays allowed
+  anywhere. rly zeroes its own motion-token durations under `reduce`, which is a second
+  guard, not a substitute: raw durations and view transitions ignore it.

@@ -241,8 +241,10 @@
   white-space: nowrap;
 }
 
-.editorToolbar button:hover {
-  background: var(--rly-color-surface-1);
+@media (hover: hover) and (pointer: fine) {
+  .editorToolbar button:hover {
+    background: var(--rly-color-surface-1);
+  }
 }
 
 .editorToolbar button:focus-visible {
@@ -256,7 +258,6 @@
   border-radius: var(--rly-radius-field);
   min-block-size: 24rem;
   max-inline-size: none;
-  outline: none;
   padding: clamp(var(--rly-space-24), 5vw, var(--rly-space-48));
 }
 
@@ -332,5 +333,11 @@
 @media (prefers-reduced-motion: reduce) {
   .document * {
     scroll-behavior: auto;
+  }
+}
+
+@media (pointer: coarse) {
+  .editorToolbar button {
+    min-block-size: 2.75rem;
   }
 }

@@ -1,0 +1,13 @@
+id: no-direct-timer-api-js
+valid:
+  - |
+    const now = yield* Clock.currentTimeMillis
+  - |
+    const date = new Date(timestamp)
+invalid:
+  - |
+    const now = Date.now()
+  - |
+    const today = new Date()
+  - |
+    setInterval(poll, 1000)

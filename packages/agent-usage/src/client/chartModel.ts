@@ -14,6 +14,7 @@
  * @module
  */
 import type { Agent, LimitReading } from "../core/Model.js"
+import { seriesIdentity } from "../limits/series.js"
 import type { UsageReport } from "../shared/contracts.js"
 
 export type Measure = "cost" | "tokens"
@@ -163,19 +164,6 @@ export const readingAt = (
   return found
 }
 
-/**
- * A limit series' identity on the page, matching the report's: Codex windows by length (a plan
- * change moves a window between slots), Claude windows by name.
- */
-export const seriesIdentity = (series: {
-  readonly agent: Agent
-  readonly label: string
-  readonly windowMinutes: number | null
-}): string =>
-  series.agent === "codex" && series.windowMinutes !== null
-    ? `codex:${series.windowMinutes}m`
-    : `${series.agent}:${series.label}`
-
 /** The range's usage by the measure, restricted to the selected Booking when one is picked. */
 export const rangeTotal = (report: UsageReport, measure: Measure, selected: string | null = null): number =>
   report.cells
@@ -196,3 +184,5 @@ export const formatAxis = (measure: Measure, value: number, step = 1): string =>
   const decimals = step > 0 && step < 0.01 ? Math.min(20, Math.ceil(-Math.log10(step))) : 2
   return `$${value.toFixed(decimals)}`
 }
+
+export { seriesIdentity }

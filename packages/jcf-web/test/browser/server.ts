@@ -3,7 +3,7 @@ import { NodeFileSystem, NodeHttpServer, NodePath, NodeRuntime, NodeServices } f
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { ReconcileService } from "@knpkv/jira-clockify"
 import { FAKE_HOME, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
-import { Effect, Layer, Queue, Ref, Schema } from "effect"
+import { Config, Effect, Layer, Queue, Ref, Schema } from "effect"
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createServer } from "node:http"
 import { apiApplication, StaticRouter } from "../../src/server/HttpApplication.js"
@@ -11,7 +11,8 @@ import { makeOwnerSession } from "../../src/server/OwnerSession.js"
 
 // This executable composes isolated engine services and a real loopback HTTP listener.
 // @effect-diagnostics strictEffectProvide:off
-const origin = "http://127.0.0.1:4179"
+/** The port Playwright picked for this run; the fixture binds it and every URL it prints uses it. */
+const BrowserPort = Config.Int("JCF_WEB_BROWSER_PORT")
 const mondays = ["2026-09-07", "2026-09-14"]
 type Hold = "hold" | "hold-start" | null
 type Command = "activity" | "finish"
@@ -47,14 +48,17 @@ const transcriptsFor = (hours: ReadonlyArray<number>, firstBlockSeconds = 3600) 
 
 /** Every reset owns fresh providers, retained plans and one-time credentials. */
 const makeFixture = Effect.fn("BrowserFixture.make")(function*(
+  origin: string,
   seed: boolean = true,
   savedEditing: boolean = false,
-  scenario: Scenario = null
+  scenario: Scenario = null,
+  jiraConnected: boolean = true
 ) {
   const next = yield* Ref.make<Hold>(null)
   const pending = yield* Ref.make<Queue.Queue<Command> | null>(null)
   const security = yield* makeOwnerSession(origin)
   const fake = makeFakeHeadless({
+    jiraLoggedIn: jiraConnected,
     config: { sessionRoots: [`${FAKE_HOME}/dev/work`], sessionOwnership: "any" },
     describer: () => "Improved weekly time review and tested approval behavior",
     transcripts: transcriptsFor(
@@ -181,7 +185,8 @@ const makeFixture = Effect.fn("BrowserFixture.make")(function*(
   yield* Effect.forEach(
     seed ? mondays : [],
     (monday) =>
-      Effect.forEach(["both", "jira", "clockify"], (scope) =>
+      // Without Jira there is no Jira-only week to seed.
+      Effect.forEach(jiraConnected ? ["both", "jira", "clockify"] : ["both", "clockify"], (scope) =>
         Effect.promise(async () => {
           const response = await web.handler(
             new Request(`${origin}/api/week/?monday=${monday}&only=${scope}`, {
@@ -189,9 +194,13 @@ const makeFixture = Effect.fn("BrowserFixture.make")(function*(
             })
           )
           const body = await response.text()
-          if (response.status !== 200) return { status: response.status, body }
+          if (response.status !== 200) {
+            return { status: response.status, body }
+          }
           return null
-        }).pipe(Effect.flatMap((failure) => failure === null ? Effect.void : Effect.die(failure))))
+        }).pipe(Effect.flatMap((failure) =>
+          failure === null ? Effect.void : Effect.die(failure)
+        )))
   ).pipe(Effect.onError(() => Effect.promise(() => web.dispose())))
   const code = yield* security.mintBootstrapCode
   return {
@@ -218,7 +227,9 @@ const makeFixture = Effect.fn("BrowserFixture.make")(function*(
 })
 
 const run = Effect.gen(function*() {
-  let fixture = yield* makeFixture()
+  const port = yield* BrowserPort
+  const origin = `http://127.0.0.1:${port}`
+  let fixture = yield* makeFixture(origin)
   yield* Effect.addFinalizer(() => Effect.promise(() => fixture.web.dispose()))
   const routes = HttpRouter.use((router) =>
     Effect.gen(function*() {
@@ -238,7 +249,13 @@ const run = Effect.gen(function*() {
           yield* Effect.promise(() => fixture.web.dispose())
           const parameters = new URL(request.url, origin).searchParams
           const scenario = Schema.decodeUnknownSync(Scenario)(parameters.get("scenario"))
-          fixture = yield* makeFixture(seed, parameters.get("savedEditing") === "true", scenario)
+          fixture = yield* makeFixture(
+            origin,
+            seed,
+            parameters.get("savedEditing") === "true",
+            scenario,
+            parameters.get("jira") !== "off"
+          )
           return yield* HttpServerResponse.json({ url: fixture.url })
         })
       )
@@ -279,7 +296,7 @@ const run = Effect.gen(function*() {
   )
   return yield* Layer.launch(
     HttpRouter.serve(routes).pipe(
-      Layer.provide(NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port: 4179 })),
+      Layer.provide(NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port })),
       Layer.provide(Etag.layer),
       Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))),
       Layer.provide(NodeServices.layer)

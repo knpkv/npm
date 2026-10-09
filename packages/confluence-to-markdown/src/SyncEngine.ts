@@ -8,6 +8,7 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
 import * as Predicate from "effect/Predicate"
@@ -775,8 +776,14 @@ export const layer: Layer.Layer<
             yield* git.checkout(originalBranch)
             yield* git.merge("origin/confluence", {
               message: `Merge remote changes from Confluence`
-              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-            }).pipe(Effect.catchIf(() => true, () => Effect.void)) // May fail if no changes
+            }).pipe(
+              Effect.catch((error) =>
+                Effect.logWarning(
+                  `Could not merge the Confluence changes into ${originalBranch}; run git merge origin/confluence to finish`,
+                  error
+                )
+              )
+            )
           }
 
           return {
@@ -833,11 +840,7 @@ export const layer: Layer.Layer<
         const remoteAdf = params.remoteAdf
         if (remoteAdf === undefined) return
 
-        const remoteDoc = yield* Effect.try({
-          try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(remoteAdf),
-          catch: () => null
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        }).pipe(Effect.orElseSucceed(() => null))
+        const remoteDoc = Option.getOrNull(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))(remoteAdf))
         if (remoteDoc === null) return
 
         const unsafe = roundTripUnsafeNodeTypes(remoteDoc)
@@ -847,11 +850,9 @@ export const layer: Layer.Layer<
           )
         }
 
-        const outgoingDoc = yield* Effect.try({
-          try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(params.outgoingAdf),
-          catch: () => null
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        }).pipe(Effect.orElseSucceed(() => null))
+        const outgoingDoc = Option.getOrNull(
+          Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))(params.outgoingAdf)
+        )
         if (outgoingDoc === null) return
 
         const drift = structuralCensusDelta(remoteDoc, outgoingDoc)
@@ -913,13 +914,13 @@ export const layer: Layer.Layer<
         let created = 0
         for (const filePath of files) {
           const result = yield* previewFile(filePath, force).pipe(
-            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-            Effect.catchIf(() => true, (error) =>
+            Effect.catch((error) =>
               Effect.succeed({
                 pushed: false,
                 created: false,
                 error: `Would fail to push ${filePath}: ${syncErrorMessage(error)}`
-              }))
+              })
+            )
           )
           if ("error" in result && result.error !== undefined) errors.push(result.error)
           if (result.pushed) pushed++
@@ -980,7 +981,7 @@ export const layer: Layer.Layer<
           // Set editor version to v2 (new editor)
           const createdPageId = PageId(createdPage.id)
           yield* client.setEditorVersion(createdPageId, "v2").pipe(
-            Effect.catchIf(() => true, (error) => {
+            Effect.catch((error) => {
               // Log warning but don't fail the push
               return Effect.logWarning(`Failed to set editor v2 for page ${createdPage.id}: ${error.message}`)
             })
@@ -1145,8 +1146,11 @@ export const layer: Layer.Layer<
 
         return yield* collect.pipe(
           Effect.ensuring(
-            // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-            originalBranch ? git.checkout(originalBranch).pipe(Effect.ignore) : Effect.void
+            originalBranch !== ""
+              ? git.checkout(originalBranch).pipe(
+                Effect.ignore({ log: "Warn", message: `Could not switch back to ${originalBranch}` })
+              )
+              : Effect.void
           )
         )
       })
@@ -1177,8 +1181,12 @@ export const layer: Layer.Layer<
               const match = content.match(/pageId:\s*['"]?(\d+)['"]?/)
               return match ? match[1] : null
             }),
-            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-            Effect.catchIf(() => true, () => Effect.succeed(null))
+            Effect.catch((error) =>
+              Effect.logWarning(`Could not read the deleted ${deletedPath}; its Confluence page is not deleted`, error)
+                .pipe(
+                  Effect.as(null)
+                )
+            )
           )
           if (pageId) pending.push({ path: deletedPath, pageId })
         }
@@ -1233,13 +1241,13 @@ export const layer: Layer.Layer<
               pageIdMap,
               options.force ?? false
             ).pipe(
-              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-              Effect.catchIf(() => true, (error) =>
+              Effect.catch((error) =>
                 Effect.succeed({
                   pushed: false,
                   created: false,
                   error: `Failed: ${syncErrorMessage(error)}`
-                }))
+                })
+              )
             )
             if (result.error) errors.push(result.error)
             if (result.pushed) pushed++
@@ -1303,8 +1311,7 @@ export const layer: Layer.Layer<
                 Effect.logWarning(
                   `Page ${pending.pageId} (${pending.path}) was already gone; treating the deletion as applied.`
                 )),
-              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-              Effect.catchIf(() => true, (error) => {
+              Effect.catch((error) => {
                 errors.push(`Failed to delete page ${pending.pageId}: ${error.message}`)
                 return Effect.void
               })
@@ -1314,13 +1321,13 @@ export const layer: Layer.Layer<
 
         for (const filePath of sortedFiles) {
           const result = yield* pushFile(filePath, revisionMessage, spaceId, pageIdMap, options.force ?? false).pipe(
-            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-            Effect.catchIf(() => true, (error) =>
+            Effect.catch((error) =>
               Effect.succeed({
                 pushed: false,
                 created: false,
                 error: `Failed to push ${filePath}: ${syncErrorMessage(error)}`
-              }))
+              })
+            )
           )
           if (result.error) errors.push(result.error)
           if (result.pushed) pushed++
@@ -1330,8 +1337,9 @@ export const layer: Layer.Layer<
         // Amend the last commit with canonical content
         yield* git.addAll()
         yield* git.amend({ noEdit: true }).pipe(
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-          Effect.catchIf(() => true, () => Effect.void)
+          Effect.catch((error) =>
+            Effect.logWarning("Could not fold the canonical content into the last commit; it is left staged", error)
+          )
         )
 
         // Two-branch model: update origin/confluence to match HEAD.

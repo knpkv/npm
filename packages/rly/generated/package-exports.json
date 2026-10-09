@@ -39,5 +39,6 @@
   "./registry/schema.json": "./registry/schema.json",
   "./registry/search.json": "./registry/search.json",
   "./registry/USAGE.md": "./registry/USAGE.md",
+  "./relay-mark.svg": "./dist/assets/relay-mark.svg",
   "./styles.css": "./dist/styles.css"
 }

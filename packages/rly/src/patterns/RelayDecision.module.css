@@ -1,0 +1,91 @@
+@layer rly.components {
+  .root {
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-field);
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: 0;
+    padding: var(--rly-space-12);
+  }
+  .ask {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    margin: 0;
+  }
+  .meta,
+  .outcome {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    margin: 0;
+  }
+  .target {
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    display: grid;
+    gap: var(--rly-space-2) var(--rly-space-12);
+    grid-template-columns: max-content minmax(0, 1fr);
+    margin: 0;
+  }
+  .row {
+    display: contents;
+  }
+  .row dt {
+    color: var(--rly-color-text-2);
+  }
+  .row dd {
+    margin: 0;
+    overflow-wrap: break-word;
+  }
+  /* The exact text, capped with its own scroll so the buttons stay in reach. */
+  .body {
+    background: var(--rly-color-surface-2);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-tag);
+    margin: 0;
+    max-block-size: calc(16 * var(--rly-type-body-line-height));
+    overflow: auto;
+    overflow-wrap: break-word;
+    padding: var(--rly-space-8) var(--rly-space-12);
+    white-space: pre-wrap;
+  }
+  .quote {
+    margin: 0;
+  }
+  .body:focus-visible,
+  .outcome:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+  }
+  /* A destructive write keeps its own colour, so it never reads like posting a comment. */
+  .actions .danger {
+    background: var(--rly-color-blocked-ink);
+    border-color: var(--rly-color-blocked-ink);
+    color: var(--rly-color-surface-1);
+  }
+  .outcome {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-4);
+  }
+  .root[data-state="Failed"] .outcome {
+    color: var(--rly-color-blocked-ink);
+  }
+  .announcer {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    margin: -1px;
+    min-inline-size: 0;
+    overflow: clip;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+  }
+}

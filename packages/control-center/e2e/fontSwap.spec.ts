@@ -3,10 +3,10 @@ import { FONT_SWAP_LAUNCH_OPTIONS, measureFontSwapShift } from "../../../playwri
 
 test.use({ launchOptions: FONT_SWAP_LAUNCH_OPTIONS })
 
-// Geist swaps in over its metric-matched fallback without moving the first screen a new browser
+// A late Geist stays on its metric-matched fallback without moving the first screen a new browser
 // sees, the private application boundary (rly font-swap budget).
 for (const viewport of [{ height: 900, width: 1440 }, { height: 844, width: 390 }]) {
-  test(`Geist swaps in without moving the private boundary at ${viewport.width}px`, async ({ page }) => {
+  test(`a late Geist never moves the private boundary at ${viewport.width}px`, async ({ page }) => {
     await page.setViewportSize(viewport)
     await page.route("**/api/v1/session/current", (route) =>
       route.fulfill({

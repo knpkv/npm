@@ -32,6 +32,7 @@ import {
   ProposalRejectedError,
   RetargetPartialError,
   SavedWeek,
+  Sources,
   StandingPayload,
   StandingResult,
   UnauthorizedApiError,
@@ -121,6 +122,7 @@ export class RowsGroup extends HttpApiGroup.make("rows")
 {}
 
 export class ConfigGroup extends HttpApiGroup.make("config")
+  .add(HttpApiEndpoint.get("sources", "/sources", { success: Sources, error: ApiError }))
   .add(HttpApiEndpoint.get("agent", "/agent", { success: SessionAgentSettings }))
   .add(HttpApiEndpoint.post("saveAgent", "/agent", {
     payload: SessionAgentSettings,

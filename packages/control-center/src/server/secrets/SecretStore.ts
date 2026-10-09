@@ -282,8 +282,7 @@ export const makeSecretStore: (
             yield* Effect.addFinalizer(() =>
               fs.remove(probe, { force: true }).pipe(
                 Effect.andThen(root.sync),
-                // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-                Effect.ignore
+                Effect.ignore({ log: "Warn", message: "Could not remove the secret store owner probe" })
               )
             )
             yield* fs.chmod(probe, SECRET_FILE_MODE).pipe(
@@ -405,8 +404,11 @@ export const makeSecretStore: (
     const rootAfter = yield* root.assertIdentity.pipe(Effect.result)
     if (Result.isFailure(rootAfter)) return
     const removed = yield* fs.remove(expected).pipe(Effect.result)
-    // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    if (Result.isSuccess(removed)) yield* root.sync.pipe(Effect.ignore)
+    if (Result.isSuccess(removed)) {
+      yield* root.sync.pipe(
+        Effect.ignore({ log: "Warn", message: "Could not sync the secret store after removing a secret" })
+      )
+    }
   })
 
   const openExisting = Effect.fn("SecretStore.openExisting")(function*(

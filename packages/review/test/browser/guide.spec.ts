@@ -241,6 +241,27 @@ for (const width of [390, 1280]) {
 }
 
 // ui-b: at phone widths the view controls came before the guide's title.
+// QA-161: rly's default phone layout stacked "Change guide" and "Review (2)" as two full-width rows,
+// marked only by a faint fill, so the tab bar read as two lines of text.
+for (const width of [320, 390]) {
+  test(`on a phone the reading tabs share one row and the selected one is underlined at ${width}px`, async ({
+    page
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 800 })
+    await load(page, await guideHtml(), testInfo)
+    const tabs = page.getByRole("tablist", { name: "Read the change" }).getByRole("tab")
+    const [guide, review] = await Promise.all([tabs.nth(0).boundingBox(), tabs.nth(1).boundingBox()])
+    expect(guide !== null && review !== null && guide.y === review.y && guide.x + guide.width <= review.x).toBe(true)
+    const underline = (index: number) => tabs.nth(index).evaluate((tab) => getComputedStyle(tab, "::after").opacity)
+    expect(await underline(0)).toBe("1")
+    expect(await underline(1)).toBe("0")
+    const fits = await page.getByRole("tablist", { name: "Read the change" }).evaluate((list) =>
+      list.scrollWidth <= list.clientWidth
+    )
+    expect(fits).toBe(true)
+  })
+}
+
 test("on a phone the title comes before the view controls", async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 800 })
   await load(page, await guideHtml(), testInfo)

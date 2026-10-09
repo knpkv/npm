@@ -73,8 +73,7 @@ export const loadToken = (
     const tokenPath = yield* getAuthPath(toolName)
 
     const exists = yield* fs.exists(tokenPath).pipe(
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.catch(() => Effect.succeed(false))
+      Effect.mapError((cause) => new FileSystemError({ operation: "check", path: tokenPath, cause }))
     )
     if (!exists) {
       return null
@@ -139,9 +138,10 @@ export const deleteToken = (
     const fs = yield* FileSystem.FileSystem
     const tokenPath = yield* getAuthPath(toolName)
 
+    // Already gone is the outcome we want; any other failure leaves the token on disk, so it is reported.
     yield* fs.remove(tokenPath).pipe(
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.catch(() => Effect.void)
+      Effect.catchIf((error) => error.reason._tag === "NotFound", () => Effect.void),
+      Effect.mapError((cause) => new FileSystemError({ operation: "delete", path: tokenPath, cause }))
     )
   })
 
@@ -165,8 +165,7 @@ export const loadOAuthConfig = (
     const configPath = yield* getOAuthConfigPath(toolName)
 
     const exists = yield* fs.exists(configPath).pipe(
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.catch(() => Effect.succeed(false))
+      Effect.mapError((cause) => new FileSystemError({ operation: "check", path: configPath, cause }))
     )
     if (!exists) {
       return null

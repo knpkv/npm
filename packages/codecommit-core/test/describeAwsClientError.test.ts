@@ -1,7 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { AwsProfileName, AwsRegion } from "../src/Domain.js"
-import { AwsApiError, AwsCredentialError, AwsThrottleError, describeAwsClientError } from "../src/Errors.js"
+import {
+  AwsApiError,
+  AwsCredentialError,
+  AwsThrottleError,
+  describeAwsClientError,
+  PermissionDeniedError
+} from "../src/Errors.js"
 
 const at = { profile: Schema.decodeSync(AwsProfileName)("dev"), region: Schema.decodeSync(AwsRegion)("eu-central-1") }
 
@@ -38,5 +44,28 @@ describe("describeAwsClientError", () => {
     expect(describeAwsClientError(new AwsApiError({ ...at, cause: "", operation: "getPullRequests" }))).toBe(
       "no detail from the provider"
     )
+  })
+
+  // QA-169: the permission gate's refusal read "PermissionDeniedError:" — a tag and an empty message.
+  it("says a held or denied permission in words", () => {
+    const gated = (reason: "denied" | "timeout") =>
+      new AwsApiError({
+        ...at,
+        cause: new PermissionDeniedError({ operation: "getPullRequests", reason }),
+        operation: "getPullRequests"
+      })
+    expect(describeAwsClientError(gated("denied"))).toBe("Not allowed: the getPullRequests permission is denied")
+    expect(describeAwsClientError(gated("timeout"))).toBe(
+      "Not allowed yet: the getPullRequests permission prompt has no answer"
+    )
+  })
+
+  it("names a provider error with no message without a dangling colon", () => {
+    const error = new AwsApiError({
+      ...at,
+      cause: providerError("ServiceUnavailable", ""),
+      operation: "getPullRequests"
+    })
+    expect(describeAwsClientError(error)).toBe("ServiceUnavailable")
   })
 })

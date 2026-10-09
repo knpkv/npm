@@ -34,8 +34,7 @@ test("says this browser isn't signed in when the session is refused, with no zer
   await expect(page.getByText("This browser isn't signed in", { exact: true })).toBeVisible()
   await expect(
     page.getByRole("main").getByText("Run codecommit web again and open the link it prints", { exact: false })
-  )
-    .toBeVisible()
+  ).toBeVisible()
   await expect(page.getByRole("status").filter({ hasText: "Not signed in" })).toBeVisible()
   const facets = page.getByRole("group", { name: "Pull request facets" })
   await expect(facets.getByLabel("unknown")).toHaveCount(4)
@@ -55,8 +54,9 @@ test("names an unreachable server and retries on request", async ({ page }) => {
   await page.goto("/")
   await expect(page.getByText("Can't reach the CodeCommit server", { exact: true })).toBeVisible()
   // The queue's panel names the cause; the header keeps it on its status (inline only on wide screens).
-  await expect(page.getByRole("main").getByText("The CodeCommit server answered 503.", { exact: false }).first())
-    .toBeVisible()
+  await expect(
+    page.getByRole("main").getByText("The CodeCommit server answered 503.", { exact: false }).first()
+  ).toBeVisible()
   const before = streamCalls
   await page.getByRole("button", { name: "Retry now" }).click()
   await expect.poll(() => streamCalls).toBeGreaterThan(before)
@@ -223,7 +223,10 @@ test("finishes a switched-on account's save after leaving Settings", async ({ pa
   })
   await page.route("**/api/config/save", async (route) => {
     await held.promise
-    await route.fulfill({ json: "saved" }).then(() => saved.push(route.request().postData() ?? ""), () => {})
+    await route.fulfill({ json: "saved" }).then(
+      () => saved.push(route.request().postData() ?? ""),
+      () => {}
+    )
   })
 
   await page.goto("/settings/accounts")
@@ -243,6 +246,108 @@ const withPrompt = (category: "read" | "write", operation: string, context: stri
   accounts: [{ enabled: true, profile: "dev", region: "eu-central-1" }],
   enabledProfiles: ["dev"],
   permissionPrompt: { category, context, id: "prompt-1", operation }
+})
+
+test("names every read waiting behind the shown one, so one grant clearly answers them all", async ({ page }) => {
+  await routeCommon(page)
+  await page.route("**/api/events/", (route) =>
+    route.fulfill({
+      body: `data: ${
+        JSON.stringify({
+          ...withPrompt("read", "getCallerIdentity", "Get identity for dev"),
+          pendingReads: { contexts: ["Get identity for dev", "List PRs for dev"], count: 2 }
+        })
+      }\n\n`,
+      contentType: "text/event-stream"
+    }))
+  await page.route("**/api/config", (route) => route.fulfill({ json: config }))
+
+  await page.goto("/")
+  await expect(
+    page.getByText("2 reads are waiting: Get identity for dev and List PRs for dev.", { exact: false })
+  ).toBeVisible()
+})
+
+test("tells a signed-out browser in Settings how to sign in, not to check the config file", async ({ page }) => {
+  await routeCommon(page)
+  await page.route("**/api/events/", (route) => route.fulfill({ status: 401 }))
+  await page.route("**/api/config", (route) => route.fulfill({ status: 401 }))
+  await page.route("**/api/config/path", (route) => route.fulfill({ status: 401 }))
+
+  await page.goto("/settings/accounts")
+  await expect(page.getByText("This browser isn't signed in", { exact: true }).first()).toBeVisible()
+  await expect(page.getByText("config.json", { exact: false })).toHaveCount(0)
+})
+
+test("says it is checking sign-in until an account's identity read answers", async ({ page }) => {
+  await routeCommon(page)
+  await page.route("**/api/events/", (route) =>
+    route.fulfill({
+      body: `data: ${JSON.stringify({ ...emptySnapshot, enabledProfiles: ["dev"] })}\n\n`,
+      contentType: "text/event-stream"
+    }))
+  await page.route(
+    "**/api/config",
+    (route) =>
+      route.fulfill({ json: { ...config, accounts: [{ enabled: true, profile: "dev", regions: ["eu-central-1"] }] } })
+  )
+
+  await page.goto("/settings/accounts")
+  await expect(page.getByText("Checking sign-in…", { exact: true })).toBeVisible()
+  await expect(page.getByText("Not logged in", { exact: true })).toHaveCount(0)
+})
+
+// A read prompt arrives after the page has painted: docked to the bottom edge, it never moves the page.
+test("docks the read prompt so a late one doesn't push the page down", async ({ page }) => {
+  await routeCommon(page)
+  let prompt = false
+  await page.route("**/api/events/", (route) =>
+    route.fulfill({
+      body: `data: ${
+        JSON.stringify(
+          prompt ? withPrompt("read", "getCallerIdentity", "Get identity for dev") : emptySnapshot
+        )
+      }\n\n`,
+      contentType: "text/event-stream"
+    }))
+  await page.route(
+    "**/api/config",
+    (route) =>
+      route.fulfill({ json: { ...config, accounts: [{ enabled: true, profile: "dev", regions: ["eu-central-1"] }] } })
+  )
+  await page.setViewportSize({ height: 800, width: 390 })
+
+  await page.goto("/settings/accounts")
+  const heading = page.getByRole("heading", { level: 1 })
+  const before = (await heading.boundingBox())?.y
+  prompt = true
+  await page.reload()
+  const bar = page.locator("[data-needs-answer]")
+  await expect(bar).toBeVisible()
+  expect((await heading.boundingBox())?.y).toBe(before)
+  expect(await bar.evaluate((element) => getComputedStyle(element).position)).toBe("fixed")
+  // The page keeps the bar's height free at its end, so its last row isn't hidden under it.
+  const room = await page.locator("main").evaluate((main) => Number.parseFloat(getComputedStyle(main).paddingBottom))
+  expect(room).toBeGreaterThanOrEqual((await bar.boundingBox())?.height ?? Number.POSITIVE_INFINITY)
+  await expect(page.getByText("Waiting for read permission", { exact: true })).toBeVisible()
+  // On a desktop width Relay's overlay ends above the bar, never on its answers. (At phone width Relay is a
+  // full-screen dialog instead, and the bar waits behind it until Relay closes.)
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await page
+    .getByRole("banner")
+    .getByRole("button", { name: /^Relay/ })
+    .click()
+  const panel = page.getByRole("complementary", { exact: true, name: "Relay" })
+  await expect(panel).toBeVisible()
+  // Measured once its entrance animation has settled.
+  await panel.evaluate(async (element) => {
+    await Promise.all(element.getAnimations().map((animation) => animation.finished))
+  })
+  const panelBox = await panel.boundingBox()
+  const barBox = await bar.boundingBox()
+  // The bar's box includes its 8px clear band, so a panel ending at its top keeps that gap from the notice.
+  expect((panelBox?.y ?? Number.POSITIVE_INFINITY) + (panelBox?.height ?? 0)).toBeLessThanOrEqual(barBox?.y ?? 0)
+  await expect(page.getByRole("button", { name: "Deny" })).toBeVisible()
 })
 
 test("asks for a read inline, so the first account isn't blocked by a modal", async ({ page }) => {
@@ -266,8 +371,9 @@ test("asks for a read inline, so the first account isn't blocked by a modal", as
   await page.goto("/")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(page.getByText("Waiting for your permission", { exact: true })).toBeVisible()
-  await expect(page.getByText("CodeCommit asks before reading from AWS: Get identity for dev.", { exact: false }))
-    .toBeVisible()
+  await expect(
+    page.getByText("Allow CodeCommit to read from AWS: Get identity for dev?", { exact: false })
+  ).toBeVisible()
   await page.getByRole("button", { name: "Allow every read" }).click()
   await expect.poll(() => calls.length).toBe(1)
   expect(calls[0]).toContain("\"category\":\"read\"")
@@ -306,6 +412,7 @@ test("lists each profile as a switch named by its row, big enough to hit", async
   await expect(toggle).not.toBeChecked()
   const row = await toggle.evaluate((element) => element.closest("label")?.getBoundingClientRect().height ?? 0)
   expect(row).toBeGreaterThanOrEqual(32)
-  await expect(page.getByRole("checkbox", { name: "Add new profiles from your AWS configuration automatically" }))
-    .toBeChecked()
+  await expect(
+    page.getByRole("checkbox", { name: "Add new profiles from your AWS configuration automatically" })
+  ).toBeChecked()
 })

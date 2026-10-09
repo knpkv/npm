@@ -1,4 +1,5 @@
 @import "@knpkv/rly/styles.css";
+@import "../limits/limits.css";
 
 /*
  * Rly owns presentation tokens. Chart series colours are the validated eight-slot categorical
@@ -15,7 +16,7 @@
   --usage-series-7: light-dark(#4a3aa7, #9085e9);
   --usage-series-8: light-dark(#e34948, #e66767);
   --usage-series-other: light-dark(#9b9a96, #6e6d69);
-  min-height: 100dvh;
+  min-block-size: 100svh;
   padding: var(--rly-space-24);
 }
 
@@ -23,8 +24,8 @@
   display: flex;
   flex-direction: column;
   gap: var(--rly-space-16);
-  margin: 0 auto;
-  max-width: 1440px;
+  margin-inline: auto;
+  max-inline-size: 1440px;
 }
 
 .usage-heading-meta {
@@ -63,118 +64,24 @@
   padding-block: var(--rly-space-12);
 }
 
-.usage-limits-now {
-  display: flex;
-  flex-direction: column;
-  gap: var(--rly-space-12);
-}
-
-.usage-limits-now h2 {
-  margin: 0;
-}
-
-.usage-agent-groups {
-  align-items: start;
-  display: grid;
-  gap: var(--rly-space-12);
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
-}
-
-.usage-agent-groups h3 {
-  margin: 0 0 var(--rly-space-8);
-}
-
-.usage-windows {
-  display: flex;
-  flex-direction: column;
-  gap: var(--rly-space-12);
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.usage-window {
-  display: flex;
-  flex-direction: column;
-  gap: var(--rly-space-4);
-}
-
-.usage-window-head,
-.usage-window-meta {
-  align-items: center;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--rly-space-8);
-  justify-content: space-between;
-}
-
-.usage-window-meter {
-  align-items: center;
-  display: flex;
-  gap: var(--rly-space-8);
-}
-
-.usage-meter {
-  background: var(--rly-color-surface-3);
-  block-size: 0.5rem;
-  border-radius: var(--rly-radius-round);
-  flex: 1;
-  overflow: hidden;
-}
-
-.usage-meter-fill {
-  background: var(--rly-color-text-2);
-  block-size: 100%;
-  border-radius: inherit;
-  display: block;
-}
-
-.usage-window[data-tone="near"] .usage-meter-fill {
-  background: var(--rly-color-held-ink);
-}
-
-.usage-window[data-tone="at-limit"] .usage-meter-fill {
-  background: var(--rly-color-blocked-ink);
-}
-
-.usage-window-value {
-  color: var(--rly-color-text-1);
-  font-family: var(--rly-type-card-title-font);
-  font-size: var(--rly-type-card-title-size);
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--rly-type-card-title-weight);
-  min-inline-size: 2.4em;
-  text-align: end;
-}
-
-.usage-unnamed {
-  margin-top: var(--rly-space-12);
-}
-
-.usage-unnamed summary,
-.usage-explain summary {
+.usage-explain summary,
+.usage-readings summary {
   color: var(--rly-color-text-2);
   cursor: pointer;
+  position: relative;
 }
 
-.usage-balances {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--rly-space-24);
-  margin: 0;
-}
-
-.usage-balances div {
-  display: flex;
-  flex-direction: column;
-}
-
-.usage-balances dd {
-  margin: 0;
+/* A one-line disclosure is shorter than 44px; an invisible layer takes the target there. */
+.usage-explain summary::after,
+.usage-readings summary::after {
+  content: "";
+  inset: min(0px, (100% - 44px) / 2);
+  position: absolute;
 }
 
 .usage-headline {
-  margin: var(--rly-space-4) 0 0;
+  margin-block: var(--rly-space-4) 0;
+  margin-inline: 0;
 }
 
 .usage-headline-value {
@@ -187,7 +94,8 @@
 }
 
 .usage-explain p {
-  margin: var(--rly-space-4) 0 0;
+  margin-block: var(--rly-space-4) 0;
+  margin-inline: 0;
 }
 
 .usage-panel {
@@ -216,16 +124,16 @@
  * a tall tooltip must be free to extend below the plot.
  */
 .usage-chart {
-  min-width: 0;
+  inline-size: 100%;
+  min-inline-size: 0;
   overflow: clip visible;
   position: relative;
-  width: 100%;
 }
 
 /* The first render uses a fallback width until the container is measured; never let it push the page. */
 .usage-chart svg {
   display: block;
-  max-width: 100%;
+  max-inline-size: 100%;
 }
 
 .usage-grid {
@@ -247,13 +155,9 @@
 .usage-column-target {
   cursor: crosshair;
   fill: transparent;
-  outline: none;
 }
 
-.usage-column-target:focus-visible {
-  stroke: var(--rly-color-focus);
-  stroke-width: var(--rly-focus-ring-width);
-}
+/* Focus draws rly's ring around the column (base :focus-visible), which forced colours keep. */
 
 g[data-active="true"] .usage-segment {
   stroke: var(--rly-color-text-1);
@@ -320,17 +224,17 @@ g[data-active="true"] .usage-segment {
 
 .usage-key {
   display: inline-block;
+  block-size: 0;
   flex: none;
-  height: 0;
-  width: 1rem;
+  inline-size: 1rem;
 }
 
 .usage-key-level {
-  border-top: 2px solid var(--rly-color-text-1);
+  border-block-start: 2px solid var(--rly-color-text-1);
 }
 
 .usage-key-near {
-  border-top: 1px dashed var(--rly-color-border-2);
+  border-block-start: 1px dashed var(--rly-color-border-2);
 }
 
 .usage-now {
@@ -345,12 +249,12 @@ g[data-active="true"] .usage-segment {
 }
 
 .usage-key-reset {
-  border-top: 2px dotted var(--rly-color-text-3);
+  border-block-start: 2px dotted var(--rly-color-text-3);
 }
 
 .usage-key-unknown {
   background: repeating-linear-gradient(45deg, var(--rly-color-text-3) 0 1.5px, transparent 1.5px 5px);
-  height: 0.75rem;
+  block-size: 0.75rem;
 }
 
 .usage-crosshair {
@@ -380,7 +284,7 @@ g[data-active="true"] .usage-segment {
 
 .usage-tooltip-title {
   font-weight: 600;
-  margin-bottom: var(--rly-space-4);
+  margin-block-end: var(--rly-space-4);
 }
 
 .usage-tooltip-muted {
@@ -406,9 +310,9 @@ g[data-active="true"] .usage-segment {
 .usage-swatch {
   border-radius: 2px;
   display: inline-block;
+  block-size: 0.75rem;
   flex: none;
-  height: 0.75rem;
-  width: 0.75rem;
+  inline-size: 0.75rem;
 }
 
 .usage-note {
@@ -438,20 +342,20 @@ g[data-active="true"] .usage-segment {
 .usage-table {
   border-collapse: collapse;
   font-variant-numeric: tabular-nums;
-  width: 100%;
+  inline-size: 100%;
 }
 
 .usage-table caption {
   color: var(--rly-color-text-2);
-  padding-bottom: var(--rly-space-8);
-  text-align: left;
+  padding-block-end: var(--rly-space-8);
+  text-align: start;
 }
 
 .usage-table th,
 .usage-table td {
-  border-bottom: 1px solid var(--rly-color-border-1);
+  border-block-end: 1px solid var(--rly-color-border-1);
   padding: var(--rly-space-6) var(--rly-space-8);
-  text-align: left;
+  text-align: start;
 }
 
 .usage-table thead th {
@@ -476,7 +380,7 @@ g[data-active="true"] .usage-segment {
   overflow-x: auto;
 }
 
-@container (min-width: 40.0625rem) {
+@container (inline-size >= 40.0625rem) {
   .usage-bookings[data-breakdown="true"] table {
     min-inline-size: 60rem;
   }
@@ -489,7 +393,7 @@ g[data-active="true"] .usage-segment {
 }
 
 /* EntityTable's root is the size container; numbers align right only while it is a table. */
-@container (min-width: 40.0625rem) {
+@container (inline-size >= 40.0625rem) {
   .usage-bookings[data-numeric-from="3"] :is(th, td):nth-child(n + 3),
   .usage-bookings[data-numeric-from="4"] :is(th, td):nth-child(n + 4) {
     text-align: end;
@@ -509,7 +413,7 @@ g[data-active="true"] .usage-segment {
   display: block;
   max-inline-size: 100%;
   min-inline-size: 0;
-  overflow: hidden;
+  overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -525,6 +429,15 @@ g[data-active="true"] .usage-segment {
   font-weight: 600;
   gap: var(--rly-space-6);
   padding: 0;
+  /* A wrapped long booking name reads from the start, not centred under its swatch. */
+  text-align: start;
+}
+
+/* Rows sit too close for an invisible hit layer, so on touch each booking button grows to 44px. */
+@media (pointer: coarse) {
+  .usage-row-button {
+    min-block-size: 44px;
+  }
 }
 
 .usage-row-button:focus-visible {
@@ -533,15 +446,16 @@ g[data-active="true"] .usage-segment {
 }
 
 .usage-status {
-  border-top: 1px solid var(--rly-color-border-1);
-  margin: var(--rly-space-16) auto 0;
-  max-width: 1440px;
+  border-block-start: 1px solid var(--rly-color-border-1);
+  margin-block: var(--rly-space-16) 0;
+  margin-inline: auto;
+  max-inline-size: 1440px;
   color: var(--rly-color-text-3);
   display: flex;
   flex-wrap: wrap;
   font-size: 0.85em;
   gap: var(--rly-space-16);
-  padding-top: var(--rly-space-12);
+  padding-block-start: var(--rly-space-12);
 }
 
 .usage-status [data-tone="failure"] {
@@ -552,7 +466,7 @@ g[data-active="true"] .usage-segment {
   color: var(--rly-color-held-ink);
 }
 
-@media (max-width: 720px) {
+@media (width <= 45rem) {
   .usage-shell {
     padding: var(--rly-space-16);
   }
@@ -563,11 +477,6 @@ g[data-active="true"] .usage-segment {
   }
 }
 
-.usage-readings summary {
-  color: var(--rly-color-text-2);
-  cursor: pointer;
-}
-
 .usage-readings table {
-  margin-top: var(--rly-space-8);
+  margin-block-start: var(--rly-space-8);
 }

@@ -118,7 +118,7 @@ const actionFailureDescription = (
   }
 }
 
-const failureFromCause = <Failure extends RelayProductDockContinuationFailure | RelayProductDockLocateFailure>(
+export const failureFromCause = <Failure extends RelayProductDockContinuationFailure | RelayProductDockLocateFailure>(
   cause: Cause.Cause<Failure>
 ): string => {
   const failure = cause.reasons.find(Cause.isFailReason)
@@ -167,7 +167,8 @@ const useRelayDockAction = (): readonly [
   return [state, run]
 }
 
-const HostConversationLocator = ({ host }: { readonly host: RelayProductDockHost }): ReactElement => {
+/** The locator form's state and submit: region, repository, PR number and optional account, decoded before lookup. */
+export const useHostConversationLocator = (host: RelayProductDockHost) => {
   const [accountId, setAccountId] = useState("")
   const [pullRequestId, setPullRequestId] = useState("")
   const [region, setRegion] = useState("")
@@ -201,6 +202,36 @@ const HostConversationLocator = ({ host }: { readonly host: RelayProductDockHost
     setValidation(null)
     runAction(host.locatePullRequestConversation(decoded.success))
   }
+
+  return {
+    accountId,
+    action,
+    pullRequestId,
+    region,
+    repositoryName,
+    setAccountId,
+    setPullRequestId,
+    setRegion,
+    setRepositoryName,
+    submit,
+    validation
+  }
+}
+
+export const HostConversationLocator = ({ host }: { readonly host: RelayProductDockHost }): ReactElement => {
+  const {
+    accountId,
+    action,
+    pullRequestId,
+    region,
+    repositoryName,
+    setAccountId,
+    setPullRequestId,
+    setRegion,
+    setRepositoryName,
+    submit,
+    validation
+  } = useHostConversationLocator(host)
 
   return (
     <form aria-label="Find a pull request conversation" onSubmit={submit}>
@@ -400,7 +431,10 @@ export const RelayProductDockChrome = ({ host }: { readonly host: RelayProductDo
     <div
       data-relay-product-dock-chrome=""
       style={{
-        insetBlockEnd: "max(var(--rly-space-16), env(safe-area-inset-bottom, 0px))",
+        // A host app with its own bottom-docked bar publishes its height as --app-bottom-inset, so the
+        // chip sits above it rather than on top of its actions.
+        insetBlockEnd:
+          "calc(max(var(--rly-space-16), env(safe-area-inset-bottom, 0px)) + var(--app-bottom-inset, 0px))",
         insetInlineEnd: "max(var(--rly-space-16), env(safe-area-inset-right, 0px))",
         position: "fixed",
         zIndex: 80

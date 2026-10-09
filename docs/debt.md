@@ -16,22 +16,20 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## ai-claude
 
-4 directives (ast-grep 1, effect-diagnostics 3), 2 without a reason.
+3 directives (effect-diagnostics 3), 2 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/ai-claude/src/protocol.ts](../packages/ai-claude/src/protocol.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/ai-claude/test/model.test.ts](../packages/ai-claude/test/model.test.ts) | effect-diagnostics | `@effect-diagnostics multipleEffectProvide:off` | **missing** |
 | [packages/ai-claude/test/model.test.ts](../packages/ai-claude/test/model.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/ai-claude/test/relay-boundary.test.ts](../packages/ai-claude/test/relay-boundary.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 
 ## ai-codex
 
-9 directives (ast-grep 1, effect-diagnostics 7, typescript 1), 1 without a reason.
+8 directives (effect-diagnostics 7, typescript 1), 1 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/ai-codex/src/internal/outputSchema.ts](../packages/ai-codex/src/internal/outputSchema.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/ai-codex/test/events.test.ts](../packages/ai-codex/test/events.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/ai-codex/test/events.test.ts](../packages/ai-codex/test/events.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/ai-codex/test/events.test.ts](../packages/ai-codex/test/events.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
@@ -57,21 +55,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## atlassian-common
 
-18 directives (ast-grep 11, effect-diagnostics 7), 7 without a reason.
+7 directives (effect-diagnostics 7), 7 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/atlassian-common/src/auth/OAuthOperations.ts](../packages/atlassian-common/src/auth/OAuthOperations.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/cli/index.ts](../packages/atlassian-common/src/cli/index.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/cli/index.ts](../packages/atlassian-common/src/cli/index.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/AuthProfiles.ts](../packages/atlassian-common/src/config/AuthProfiles.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/ProfileManager.ts](../packages/atlassian-common/src/config/ProfileManager.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/ProfileManager.ts](../packages/atlassian-common/src/config/ProfileManager.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/ProfileManager.ts](../packages/atlassian-common/src/config/ProfileManager.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/ProfileManager.ts](../packages/atlassian-common/src/config/ProfileManager.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/TokenStorage.ts](../packages/atlassian-common/src/config/TokenStorage.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/TokenStorage.ts](../packages/atlassian-common/src/config/TokenStorage.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/atlassian-common/src/config/TokenStorage.ts](../packages/atlassian-common/src/config/TokenStorage.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/atlassian-common/test/cli.errorHandling.test.ts](../packages/atlassian-common/test/cli.errorHandling.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 | [packages/atlassian-common/test/cliAuth.authCommand.test.ts](../packages/atlassian-common/test/cliAuth.authCommand.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 | [packages/atlassian-common/test/cliAuth.guardrails.test.ts](../packages/atlassian-common/test/cliAuth.guardrails.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
@@ -121,21 +108,12 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/capability/test/types.test.ts](../packages/capability/test/types.test.ts) | typescript | `@ts-expect-error -- describeCall accepts gated (write or host) contracts only` | yes |
 | [packages/capability/test/types.test.ts](../packages/capability/test/types.test.ts) | typescript | `@ts-expect-error -- the contract declares only Declared, so Undeclared must not typecheck` | yes |
 
-## clockify-api-client
-
-1 directives (ast-grep 1), 0 without a reason.
-
-| File | Kind | Directive | Reason |
-| --- | --- | --- | --- |
-| [packages/clockify-api-client/scripts/regenerate.ts](../packages/clockify-api-client/scripts/regenerate.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-
 ## codecommit
 
-44 directives (ast-grep 14, effect-diagnostics 30), 24 without a reason.
+43 directives (ast-grep 13, effect-diagnostics 30), 24 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/codecommit/src/bin.ts](../packages/codecommit/src/bin.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit/src/FilterService.ts](../packages/codecommit/src/FilterService.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit/src/main.tsx](../packages/codecommit/src/main.tsx) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit/src/PrList.ts](../packages/codecommit/src/PrList.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
@@ -182,12 +160,11 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## codecommit-core
 
-116 directives (ast-grep 82, effect-diagnostics 34), 17 without a reason.
+115 directives (ast-grep 81, effect-diagnostics 34), 17 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
 | [packages/codecommit-core/src/AwsClient/AwsClientGated.ts](../packages/codecommit-core/src/AwsClient/AwsClientGated.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/codecommit-core/src/AwsClient/getPullRequests.ts](../packages/codecommit-core/src/AwsClient/getPullRequests.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit-core/src/AwsClient/getPullRequests.ts](../packages/codecommit-core/src/AwsClient/getPullRequests.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit-core/src/AwsClient/getPullRequests.ts](../packages/codecommit-core/src/AwsClient/getPullRequests.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/codecommit-core/src/CacheService/migrations/0003_add_health_score.ts](../packages/codecommit-core/src/CacheService/migrations/0003_add_health_score.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
@@ -375,77 +352,23 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/codecommit-web/test/review-skill-catalog.test.ts](../packages/codecommit-web/test/review-skill-catalog.test.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/codecommit-web/src/client/hooks/useSSE.ts](../packages/codecommit-web/src/client/hooks/useSSE.ts) | eslint | `eslint-disable-next-line no-console` | **missing** |
 
-## confluence-api-client
-
-1 directives (ast-grep 1), 0 without a reason.
-
-| File | Kind | Directive | Reason |
-| --- | --- | --- | --- |
-| [packages/confluence-api-client/scripts/regenerate.ts](../packages/confluence-api-client/scripts/regenerate.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-
 ## confluence-to-markdown
 
-22 directives (ast-grep 20, effect-diagnostics 2), 2 without a reason.
+2 directives (effect-diagnostics 2), 2 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/confluence-to-markdown/src/commands/pageInput.ts](../packages/confluence-to-markdown/src/commands/pageInput.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/commands/pageInput.ts](../packages/confluence-to-markdown/src/commands/pageInput.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/commands/pageInput.ts](../packages/confluence-to-markdown/src/commands/pageInput.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/commands/pageInput.ts](../packages/confluence-to-markdown/src/commands/pageInput.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/commands/sync.ts](../packages/confluence-to-markdown/src/commands/sync.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/ConfluenceAuth.ts](../packages/confluence-to-markdown/src/ConfluenceAuth.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/ConfluenceAuth.ts](../packages/confluence-to-markdown/src/ConfluenceAuth.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/ConfluenceClient.ts](../packages/confluence-to-markdown/src/ConfluenceClient.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/ConfluenceConfig.ts](../packages/confluence-to-markdown/src/ConfluenceConfig.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/ConfluenceConfig.ts](../packages/confluence-to-markdown/src/ConfluenceConfig.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/confluence-to-markdown/src/SyncEngine.ts](../packages/confluence-to-markdown/src/SyncEngine.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/confluence-to-markdown/test/authCommand.test.ts](../packages/confluence-to-markdown/test/authCommand.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 | [packages/confluence-to-markdown/test/ConfluenceAuth.test.ts](../packages/confluence-to-markdown/test/ConfluenceAuth.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 
 ## control-center
 
-134 directives (ast-grep 31, effect-diagnostics 91, eslint 9, typescript 3), 44 without a reason.
+108 directives (ast-grep 5, effect-diagnostics 91, eslint 9, typescript 3), 44 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
 | [packages/control-center/e2e/realRuntimeFixture.ts](../packages/control-center/e2e/realRuntimeFixture.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- the spawned runtime takes its port as an argument; follow-up: let it bind 0 and report its port.` | yes |
-| [packages/control-center/src/server/agent/AgentJobWorker.ts](../packages/control-center/src/server/agent/AgentJobWorker.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts](../packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/agent/internal/PrReviewSourceWorkspace.ts](../packages/control-center/src/server/agent/internal/PrReviewSourceWorkspace.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/application/completeDiffReads.ts](../packages/control-center/src/server/application/completeDiffReads.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/application/pluginAdministration.ts](../packages/control-center/src/server/application/pluginAdministration.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/application/pluginAdministration.ts](../packages/control-center/src/server/application/pluginAdministration.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/application/portfolioSnapshots.ts](../packages/control-center/src/server/application/portfolioSnapshots.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/application/pullRequestReviews.ts](../packages/control-center/src/server/application/pullRequestReviews.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/auth/TerminalRecovery.ts](../packages/control-center/src/server/auth/TerminalRecovery.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/cliConfiguration.ts](../packages/control-center/src/server/cliConfiguration.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/DataRootProtocol.ts](../packages/control-center/src/server/DataRootProtocol.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/persistence/backup/BackupArchiveCore.ts](../packages/control-center/src/server/persistence/backup/BackupArchiveCore.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/persistence/backup/BackupArchiveCore.ts](../packages/control-center/src/server/persistence/backup/BackupArchiveCore.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/persistence/backup/BackupArchiveCore.ts](../packages/control-center/src/server/persistence/backup/BackupArchiveCore.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/persistence/backup/BackupArchiveCore.ts](../packages/control-center/src/server/persistence/backup/BackupArchiveCore.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/persistence/backup/BackupArchiveCore.ts](../packages/control-center/src/server/persistence/backup/BackupArchiveCore.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/persistence/object-store/BlobPublisher.ts](../packages/control-center/src/server/persistence/object-store/BlobPublisher.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/persistence/repositories/pluginRuntimeRepository.ts](../packages/control-center/src/server/persistence/repositories/pluginRuntimeRepository.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/plugins/atlassian/AtlassianOAuthGrants.ts](../packages/control-center/src/server/plugins/atlassian/AtlassianOAuthGrants.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/plugins/atlassian/AtlassianOAuthGrants.ts](../packages/control-center/src/server/plugins/atlassian/AtlassianOAuthGrants.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/plugins/atlassian/AtlassianOAuthGrants.ts](../packages/control-center/src/server/plugins/atlassian/AtlassianOAuthGrants.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/runtime/internal/superviseAgentJobWorker.ts](../packages/control-center/src/server/runtime/internal/superviseAgentJobWorker.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/runtime/RetentionStartup.ts](../packages/control-center/src/server/runtime/RetentionStartup.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/runtime/RetentionStartup.ts](../packages/control-center/src/server/runtime/RetentionStartup.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/control-center/src/server/runtime/ServerLifecycle.ts](../packages/control-center/src/server/runtime/ServerLifecycle.ts) | ast-grep | `ast-grep-ignore: no-unowned-detached-fiber` | yes |
-| [packages/control-center/src/server/secrets/SecretStore.ts](../packages/control-center/src/server/secrets/SecretStore.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/control-center/src/server/secrets/SecretStore.ts](../packages/control-center/src/server/secrets/SecretStore.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/control-center/test/integration/liveServerPort.ts](../packages/control-center/test/integration/liveServerPort.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- the live server takes its port as an argument; follow-up: let it bind 0 and report its port.` | yes |
 | [packages/control-center/test/runtime/offline-backup.test.ts](../packages/control-center/test/runtime/offline-backup.test.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- the built CLI takes its port as an argument; follow-up: let it bind 0 and report its port.` | yes |
 | [packages/control-center/test/runtime/server-smoke.test.ts](../packages/control-center/test/runtime/server-smoke.test.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- the built CLI takes its port as an argument; follow-up: let it bind 0 and report its port.` | yes |
@@ -564,13 +487,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## herdr-approvals
 
-17 directives (ast-grep 4, effect-diagnostics 13), 3 without a reason.
+14 directives (ast-grep 1, effect-diagnostics 13), 3 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/herdr-approvals/src/http.ts](../packages/herdr-approvals/src/http.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/herdr-approvals/src/push-worker.ts](../packages/herdr-approvals/src/push-worker.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/herdr-approvals/src/push-worker.ts](../packages/herdr-approvals/src/push-worker.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/herdr-approvals/test/http.test.ts](../packages/herdr-approvals/test/http.test.ts) | ast-grep | `ast-grep-ignore: no-released-ephemeral-test-port -- one test must probe a port before hostd binds it (see its use).` | yes |
 | [packages/herdr-approvals/scripts/test-packed-packages.ts](../packages/herdr-approvals/scripts/test-packed-packages.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/herdr-approvals/src/bin.ts](../packages/herdr-approvals/src/bin.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
@@ -664,13 +584,11 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## jcf-web
 
-10 directives (ast-grep 1, effect-diagnostics 9), 0 without a reason.
+9 directives (effect-diagnostics 9), 0 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/jcf-web/scripts/test-packed-package.ts](../packages/jcf-web/scripts/test-packed-package.ts) | ast-grep | `ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/jcf-web/src/client/transport.ts](../packages/jcf-web/src/client/transport.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
-| [packages/jcf-web/src/main.ts](../packages/jcf-web/src/main.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/browser/server.ts](../packages/jcf-web/test/browser/server.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/confirm.test.ts](../packages/jcf-web/test/confirm.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/confirmDst.test.ts](../packages/jcf-web/test/confirmDst.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
@@ -678,22 +596,14 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/jcf-web/test/readRoute.test.ts](../packages/jcf-web/test/readRoute.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/recordedWeek.test.ts](../packages/jcf-web/test/recordedWeek.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jcf-web/test/savedEntryRoutes.test.ts](../packages/jcf-web/test/savedEntryRoutes.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
-
-## jira-api-client
-
-1 directives (ast-grep 1), 0 without a reason.
-
-| File | Kind | Directive | Reason |
-| --- | --- | --- | --- |
-| [packages/jira-api-client/scripts/regenerate.ts](../packages/jira-api-client/scripts/regenerate.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
+| [packages/jcf-web/test/signInAndSources.test.ts](../packages/jcf-web/test/signInAndSources.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 
 ## jira-cli
 
-4 directives (ast-grep 1, effect-diagnostics 3), 2 without a reason.
+3 directives (effect-diagnostics 3), 2 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/jira-cli/src/VersionService.ts](../packages/jira-cli/src/VersionService.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/jira-cli/src/bin.ts](../packages/jira-cli/src/bin.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/jira-cli/test/authCommand.test.ts](../packages/jira-cli/test/authCommand.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |
 | [packages/jira-cli/test/JiraAuth.test.ts](../packages/jira-cli/test/JiraAuth.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:skip-file` | **missing** |

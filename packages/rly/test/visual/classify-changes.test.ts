@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
   type ChangedFile,
@@ -267,5 +269,24 @@ describe("visual changed-file classifier", () => {
         currentCatalog: catalog([{ ...button, storyIds }])
       })).toEqual({ reasons: ["invalid-visual-catalog"], scope: "full" })
     }
+  })
+
+  // A path shared by two components invalidates the whole catalog and silently disables scoped
+  // captures. The diff family's data-only components already share DiffCodeView's story and test (a
+  // known gap in the classifier, tracked separately); no other component may add a shared path.
+  it("adds no shared catalog paths beyond the diff family's known ones", () => {
+    const generated: VisualCatalog = JSON.parse(
+      readFileSync(join(import.meta.dirname, "../../generated/visual-catalog.json"), "utf8")
+    )
+    const counts = new Map<string, number>()
+    for (const { paths } of generated.components) {
+      for (const path of [paths.source, paths.story, ...paths.styles, ...paths.tests]) {
+        counts.set(path, (counts.get(path) ?? 0) + 1)
+      }
+    }
+    expect([...counts].filter(([, count]) => count > 1).map(([path]) => path).sort()).toEqual([
+      "packages/rly/stories/diff/DiffCodeView.stories.tsx",
+      "packages/rly/test/diff/DiffCodeView.test.tsx"
+    ])
   })
 })

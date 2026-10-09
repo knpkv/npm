@@ -1,0 +1,17 @@
+id: no-direct-json
+valid:
+  - |
+    const program = Effect.gen(function* () {
+      return yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Manifest))(text)
+    })
+  - |
+    const parsed = JSON.parse(text)
+invalid:
+  - |
+    const program = Effect.gen(function* () {
+      return JSON.parse(text)
+    })
+  - |
+    const program = Effect.gen(function* () {
+      yield* fs.writeFileString(path, JSON.stringify(manifest))
+    })

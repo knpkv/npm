@@ -6,7 +6,7 @@
     container-type: inline-size;
     display: grid;
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   /* Thesis and progress side by side; a container query below stacks them. A container cannot
@@ -110,10 +110,12 @@
     box-shadow: inset 0 -2px var(--rly-color-text-1);
   }
 
-  .group button:hover,
-  .standalone:hover {
-    background: var(--rly-color-surface-2);
-    color: var(--rly-color-text-1);
+  @media (hover: hover) and (pointer: fine) {
+    .group button:hover,
+    .standalone:hover {
+      background: var(--rly-color-surface-2);
+      color: var(--rly-color-text-1);
+    }
   }
 
   .group button:focus-visible,

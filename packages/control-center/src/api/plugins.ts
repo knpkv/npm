@@ -583,6 +583,15 @@ export const PluginSynchronizationResult = Schema.Literals([
 /** Decoded synchronization result presented without provider diagnostics. */
 export type PluginSynchronizationResult = typeof PluginSynchronizationResult.Type
 
+/** A failed sync's stable class and provider-safe sentence, never the raw cause. */
+export const PluginSynchronizationFailure = Schema.Struct({
+  failureClass: PluginFailureClass,
+  safeMessage: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(500))
+}).annotate({ identifier: "PluginSynchronizationFailure" })
+
+/** Decoded sync failure. */
+export type PluginSynchronizationFailure = typeof PluginSynchronizationFailure.Type
+
 /** Secret-free durable synchronization state for one negotiated connection stream. */
 export const PluginSynchronizationState = Schema.Struct({
   pluginConnectionId: PluginConnectionId,
@@ -591,7 +600,17 @@ export const PluginSynchronizationState = Schema.Struct({
   lastAttemptAt: Schema.NullOr(UtcTimestamp),
   lastSuccessAt: Schema.NullOr(UtcTimestamp),
   result: PluginSynchronizationResult,
-  pagesCommitted: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
+  pagesCommitted: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /**
+   * Why the last sync failed, from the failure it recorded on the connection's health; null unless
+   * the last result is `source-unavailable` with a recorded failure. An absent field decodes as null.
+   */
+  failure: Schema.optional(Schema.NullOr(PluginSynchronizationFailure)).pipe(
+    Schema.decodeTo(Schema.NullOr(PluginSynchronizationFailure), {
+      decode: SchemaGetter.withDefault(Effect.succeed<typeof PluginSynchronizationFailure.Type | null>(null)),
+      encode: SchemaGetter.required()
+    })
+  )
 }).annotate({ identifier: "PluginSynchronizationState" })
 
 /** Decoded manual synchronization state. */

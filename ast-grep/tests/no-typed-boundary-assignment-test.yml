@@ -1,0 +1,13 @@
+id: no-typed-boundary-assignment
+valid:
+  - |
+    const raw: unknown = JSON.parse(text)
+  - |
+    const user = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(User))(text)
+invalid:
+  - |
+    const user: User = JSON.parse(text)
+  - |
+    const payload: Payload = await response.json()
+  - |
+    const body: Body = request.body

@@ -1,14 +1,17 @@
 import { describe, expect, it } from "@effect/vitest"
+import { limitTrackTone, type RlyLimitTrackTone } from "@knpkv/rly/primitives"
 import { PLOT, timeTicks } from "../src/client/axis.js"
+import type { LimitSnapshot } from "../src/core/Model.js"
 import {
   limitRows,
   limitSegments,
+  type LimitTone,
   limitTone,
+  NEAR_PERCENT,
   relativeReset,
   summarizeLimits,
   windowName
-} from "../src/client/limitsModel.js"
-import type { LimitSnapshot } from "../src/core/Model.js"
+} from "../src/limits/model.js"
 
 const HOUR = 3_600_000
 const now = Date.parse("2026-10-04T12:00:00Z")
@@ -30,6 +33,19 @@ describe("limitTone", () => {
     expect(limitTone({ _tag: "Known", usedPercent: 80, resetsAt: null })).toBe("near")
     expect(limitTone({ _tag: "Known", usedPercent: 100, resetsAt: null })).toBe("at-limit")
     expect(limitTone({ _tag: "Unknown", reason: "Fetch" })).toBe("unknown")
+  })
+
+  it("agrees with the tone Rly's LimitTrack draws at the same near mark", () => {
+    const track = { ok: "ok", near: "near", "at-limit": "full", unknown: "unknown" } satisfies Record<
+      LimitTone,
+      RlyLimitTrackTone
+    >
+    for (const usedPercent of [0, 79.9, 80, 99.9, 100, 140]) {
+      expect(track[limitTone({ _tag: "Known", usedPercent, resetsAt: null })]).toBe(
+        limitTrackTone(usedPercent, NEAR_PERCENT)
+      )
+    }
+    expect(track[limitTone({ _tag: "Unknown", reason: "Fetch" })]).toBe(limitTrackTone(null, NEAR_PERCENT))
   })
 })
 

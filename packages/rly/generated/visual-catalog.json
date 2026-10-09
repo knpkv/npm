@@ -426,6 +426,21 @@
       ]
     },
     {
+      "name": "FontFaces",
+      "paths": {
+        "source": "packages/rly/src/tokens/fonts.ts",
+        "story": "packages/rly/stories/foundations/FontFaces.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/tokens/font-faces.test.ts"
+        ]
+      },
+      "storyId": "foundations-fontfaces--specimen",
+      "storyIds": [
+        "foundations-fontfaces--specimen"
+      ]
+    },
+    {
       "name": "FreshnessStamp",
       "paths": {
         "source": "packages/rly/src/patterns/FreshnessStamp.tsx",
@@ -689,6 +704,40 @@
       ]
     },
     {
+      "name": "RelayComposer",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayComposer.tsx",
+        "story": "packages/rly/stories/patterns/RelayComposer.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayComposer.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayComposer.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaycomposer--draft",
+      "storyIds": [
+        "patterns-relaycomposer--draft"
+      ]
+    },
+    {
+      "name": "RelayDecision",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayDecision.tsx",
+        "story": "packages/rly/stories/patterns/RelayDecision.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayDecision.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayDecision.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaydecision--lifecycle",
+      "storyIds": [
+        "patterns-relaydecision--lifecycle"
+      ]
+    },
+    {
       "name": "RelayDock",
       "paths": {
         "source": "packages/rly/src/patterns/RelayDock.tsx",
@@ -709,6 +758,116 @@
         "patterns-relaydock--loading",
         "patterns-relaydock--mobile-sheet",
         "patterns-relaydock--unavailable"
+      ]
+    },
+    {
+      "name": "RelayFindings",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayFindings.tsx",
+        "story": "packages/rly/stories/patterns/RelayFindings.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayFindings.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayFindings.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relayfindings--review-findings",
+      "storyIds": [
+        "patterns-relayfindings--review-findings",
+        "patterns-relayfindings--stale",
+        "patterns-relayfindings--empty"
+      ]
+    },
+    {
+      "name": "RelayLauncher",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayLauncher.tsx",
+        "story": "packages/rly/stories/patterns/RelayLauncher.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayLauncher.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayLauncher.css.test.ts",
+          "packages/rly/test/patterns/RelayLauncher.summon.test.tsx",
+          "packages/rly/test/patterns/RelayLauncher.test.tsx",
+          "packages/rly/test/patterns/relaySummon.test.ts"
+        ]
+      },
+      "storyId": "patterns-relaylauncher--header",
+      "storyIds": [
+        "patterns-relaylauncher--header"
+      ]
+    },
+    {
+      "name": "RelayMark",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayMark.tsx",
+        "story": "packages/rly/stories/patterns/RelayMark.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayMark.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayMark.favicon.test.ts",
+          "packages/rly/test/patterns/RelayMark.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaymark--sizes",
+      "storyIds": [
+        "patterns-relaymark--sizes"
+      ]
+    },
+    {
+      "name": "RelayPanel",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayPanel.tsx",
+        "story": "packages/rly/stories/patterns/RelayPanel.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayPanel.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayPanel.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaypanel--overlay",
+      "storyIds": [
+        "patterns-relaypanel--overlay"
+      ]
+    },
+    {
+      "name": "RelaySetup",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelaySetup.tsx",
+        "story": "packages/rly/stories/patterns/RelaySetup.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelaySetup.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelaySetup.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaysetup--first-run-setup",
+      "storyIds": [
+        "patterns-relaysetup--first-run-setup"
+      ]
+    },
+    {
+      "name": "RelayTranscript",
+      "paths": {
+        "source": "packages/rly/src/patterns/RelayTranscript.tsx",
+        "story": "packages/rly/stories/patterns/RelayTranscript.stories.tsx",
+        "styles": [
+          "packages/rly/src/patterns/RelayTranscript.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/patterns/RelayTranscript.test.tsx"
+        ]
+      },
+      "storyId": "patterns-relaytranscript--conversation",
+      "storyIds": [
+        "patterns-relaytranscript--conversation",
+        "patterns-relaytranscript--streaming",
+        "patterns-relaytranscript--failed"
       ]
     },
     {

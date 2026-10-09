@@ -1,5 +1,74 @@
 # @knpkv/codecommit-web
 
+## 0.28.0
+
+### Minor Changes
+
+- [#613](https://github.com/knpkv/npm/pull/613) [`faddacc`](https://github.com/knpkv/npm/commit/faddacc829272ec3b580af00ee6e581294be76e7) Thanks [@konopkov](https://github.com/konopkov)! - A pull request URL for a switched-off account no longer spins on "Loading pull request" while every refresh returns 500. `refreshSinglePR` fails with `AccountSwitchedOff` (naming the profile) when a disabled profile owns the account, or with `AccountUnknown` when no profile is known to; the web API answers those with 409 and 404. The page says why it can't read the pull request, links to Settings → Accounts when that fixes it, and offers Try again for any other failure.
+
+### Patch Changes
+
+- [#682](https://github.com/knpkv/npm/pull/682) [`e2f406b`](https://github.com/knpkv/npm/commit/e2f406bc0e3941cc4d349aba844ec04822e82585) Thanks [@konopkov](https://github.com/konopkov)! - Settings → Audit: at narrow widths the action buttons wrap instead of the View Audit Log label spilling past its button.
+
+- [#669](https://github.com/knpkv/npm/pull/669) [`fcbd310`](https://github.com/knpkv/npm/commit/fcbd310bc0de959847246d1d7b3b93fa944c6cd3) Thanks [@konopkov](https://github.com/konopkov)! - Nav labels no longer spill out of their pills at 320px; the row scrolls instead. Hover highlights apply only on devices that hover, so a tap no longer leaves a row or button highlighted.
+
+- [#671](https://github.com/knpkv/npm/pull/671) [`28e5c8c`](https://github.com/knpkv/npm/commit/28e5c8ca02373f7b6cdcc9af4a25380e97ddb8fe) Thanks [@konopkov](https://github.com/konopkov)! - Small controls (filter chips, approver add/remove, the findings drawer's close, nav pills) get a 44px touch target without changing how they look, and buttons give press feedback.
+
+- [#674](https://github.com/knpkv/npm/pull/674) [`3be1bf6`](https://github.com/knpkv/npm/commit/3be1bf63e9b6e933ba38063ebd23e6e84e0c4d22) Thanks [@konopkov](https://github.com/konopkov)! - Pages and the review workbench size to the phone's small viewport (`svh`), so they no longer run under the browser's toolbar; clipped boxes use `overflow: clip`.
+
+- [#675](https://github.com/knpkv/npm/pull/675) [`6016906`](https://github.com/knpkv/npm/commit/60169060a04688084c7e47ebec4b28d538be9811) Thanks [@konopkov](https://github.com/konopkov)! - Motion in the review workbench, settings and the rolling status line is opt-in (only with no reduced-motion preference) and uses Relay's motion tokens, so the status line eases in 240ms instead of 350–400ms.
+
+- [#687](https://github.com/knpkv/npm/pull/687) [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44) Thanks [@konopkov](https://github.com/konopkov)! - Browser builds now target Chrome 123, Edge 123, Firefox 120 and Safari 17.6, the floor the CSS already relies on for `light-dark()` and `safe` alignment. Before, they targeted Vite's default (Chrome 111, Safari 16.4), so Lightning CSS rewrote `light-dark()` into its custom-property polyfill. Built CSS now keeps `light-dark()` native. For `@knpkv/rly` consumers, the published stylesheet assumes those browsers.
+- Updated dependencies [[`faddacc`](https://github.com/knpkv/npm/commit/faddacc829272ec3b580af00ee6e581294be76e7)]:
+  - @knpkv/codecommit-core@0.24.0
+
+## 0.27.0
+
+### Minor Changes
+
+- [#661](https://github.com/knpkv/npm/pull/661) [`26d9de9`](https://github.com/knpkv/npm/commit/26d9de9c64b78da62ab462856cbd09e9137eb40f) Thanks [@konopkov](https://github.com/konopkov)! - Relay opens from the app header (button or Ctrl/⌘+J) into one panel, replacing the fixed chip. A finding's "Discuss in Relay" opens the panel with that finding attached to the composer; the separate in-page discussion is gone, and earlier per-finding discussions stay readable in the PR thread, each named for what it was about. Run, profile and focus controls, progress and the findings deck stay in the page. No new AWS operations or permissions.
+
+### Patch Changes
+
+- [#612](https://github.com/knpkv/npm/pull/612) [`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26) Thanks [@konopkov](https://github.com/konopkov)! - A refresh held back by the permission gate no longer reads "PermissionDeniedError:." It now says what is missing and where to fix it: "Couldn't list pull requests in dev (eu-central-1): Not allowed yet: the getPullRequests permission prompt has no answer. Allow it in Settings → Permissions." A provider error with no message is named without a dangling colon.
+- Updated dependencies [[`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26)]:
+  - @knpkv/codecommit-core@0.23.1
+
+## 0.26.2
+
+### Patch Changes
+
+- [#585](https://github.com/knpkv/npm/pull/585) [`2bc7cfa`](https://github.com/knpkv/npm/commit/2bc7cfa8678e43920eda987d2049d97f7a4ba58f) Thanks [@konopkov](https://github.com/konopkov)! - An approval revoked down to no approvers is now cleared. Approvers are who approved the pull request now, from the same read as the approval: a read with none clears them, and only a read that couldn't fetch them keeps the last known list. Before, a failed approver read and a real "no approvers" were the same empty list, and the cache kept the old approvers in both cases, so a revoked approval never cleared.
+
+  - `fetchApprovers` returns `Option`: none when the read fails (logged as a warning), never an empty list standing in for a failure.
+  - `PullRequest` and `PullRequestDetail` gain `approversUnknown` (set when the approver read failed; `approvedBy` is then only the last known list), and `UpsertInput` carries it.
+  - Approvers now move with the approval group's version, so a read whose approval is older than the cached one doesn't overwrite them.
+  - The cache keeps the marker (`approvers_unknown`, migration 0025; every row cached before it starts unknown, since its list may hold a revoked approval, until it is re-read), so a published pull request still says its approvers are only last known; the browser's wire schema decodes it.
+  - A bulk refresh, listed or stale re-read, with a pull request whose approvers couldn't be read counts that account as partial, not clean.
+  - `needsMyReview` and the workbench don't claim a definite review while approvers are unknown (the user may already have approved): the workbench lists such a pull request under the pool, and a last known approval never takes the user out of it.
+  - `Domain` adds `approversUnknownLabel` and `currentApprovers` (none while approvers are unknown). The browser shows "Approvers unknown" instead of an approval count, rule progress or approver check marks, and approver filters offer and match only approvers known now.
+  - Reviewer stats don't count approvers that couldn't be read, in top approvers or time to first review.
+  - The approver read logs its failure where it recovers, so its silent-fallback baseline line is gone.
+  - A merged or closed pull request is never listed again, so each refresh re-reads up to 25 of those with unknown approvers, oldest-updated first, until none is left. A failed re-read stays unknown and is logged, and never holds the refresh back. `PullRequestRepo` adds `findClosedWithUnknownApprovers`.
+  - A credential failure on the approver read is no longer unknown approvers: it fails the read, so the account shows signed out.
+  - `Domain` adds `currentApproverArns`. The `no-raw-pull-request-approvers-read` guard also covers `approvedByArns`, optional-chained and indexed reads.
+
+- [#631](https://github.com/knpkv/npm/pull/631) [`2f2925b`](https://github.com/knpkv/npm/commit/2f2925b42d04686ca9da52c056f6d9a177548e05) Thanks [@konopkov](https://github.com/konopkov)! - First-run follow-ups. When more than one read waits for permission, the read bar names them ("2 reads are waiting: Get identity for dev and List PRs for dev"; three at most, then "and N more"), so "Allow every read" is plainly the one answer. `@knpkv/codecommit-core`: `PermissionGateLive.pendingOf(category, limit)` reports the prompts actually waiting in this process. Settings → Accounts says "Checking sign-in…" until an account's identity read answers, instead of "Not logged in" next to a live SSO profile, and a browser without a session gets the sign-in-link guidance in Settings instead of a pointer to the config file.
+
+- [#628](https://github.com/knpkv/npm/pull/628) [`87c1f1b`](https://github.com/knpkv/npm/commit/87c1f1baae40c0e4351de976a6446c8c194e72df) Thanks [@konopkov](https://github.com/konopkov)! - Stats fits a 320px screen: its tiles and charts flow into as many columns as fit instead of three fixed ones. A notification's title wraps onto a second line instead of being cut off on a phone. Settings' tabs on a narrow or zoomed screen are laid out in columns by width, so the row no longer re-wraps and shifts the page when the web font arrives.
+
+- [#635](https://github.com/knpkv/npm/pull/635) [`4ff1f03`](https://github.com/knpkv/npm/commit/4ff1f0386648e41cfee2d0198c7c30c312c60539) Thanks [@konopkov](https://github.com/konopkov)! - The read permission bar docks to the bottom edge instead of entering the page above it, so a prompt that arrives after the page has painted no longer pushes everything down (the Settings layout shift on a first run). The page keeps the bar's height free at its end. While the identity read waits for that permission, Settings → Accounts says "Waiting for read permission" instead of a sign-in state.
+
+  The Relay chip sits above the docked bar instead of covering its answers: `@knpkv/relay-product`'s dock adds the host's `--app-bottom-inset` to its bottom offset. The bar's sentence is shorter, and Accounts says "Waiting for read permission" whenever any read waits.
+
+- [#605](https://github.com/knpkv/npm/pull/605) [`0f93f9a`](https://github.com/knpkv/npm/commit/0f93f9a6310af21bade9563dcf45f8961436f0c0) Thanks [@konopkov](https://github.com/konopkov)! - The pull request page's review header is a flat panel instead of a provider-tinted one, and Relay's profile choice uses the design system's select (named, keyboard-navigable, styled in every theme) instead of the browser's default control. Inside the findings drawer its options open within the drawer, so they can be chosen.
+
+- [#593](https://github.com/knpkv/npm/pull/593) [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597) Thanks [@konopkov](https://github.com/konopkov)! - Text no longer jumps when Geist loads. rly's font stacks fall back to metric-matched Arial, Liberation Sans or Arimo faces (and Courier New, Liberation Mono or Cousine for mono), sized per weight, so lines break and rows stand the same height before and after the swap wherever glyphs are placed at subpixels (desktop Chrome on Linux as measured, and the usual macOS and Windows defaults); a Linux desktop set to full hinting can still move text slightly. Reading measures and title widths are set in `em` (at the weight each is drawn in) rather than `ch`, whose size follows the font's "0" and changed by 16% on the swap. Product shells preload the Geist file their stylesheet loads, and review's offline guide no longer hides the page until its fonts are ready.
+
+- [#639](https://github.com/knpkv/npm/pull/639) [`c33ead7`](https://github.com/knpkv/npm/commit/c33ead79cfcbcdb16bbb468229e5a35454e05998) Thanks [@konopkov](https://github.com/konopkov)! - The web app preloads Geist Mono as well as Geist, so ids and code text paint in the right face sooner and don't re-wrap a line when the font arrives.
+- Updated dependencies [[`2bc7cfa`](https://github.com/knpkv/npm/commit/2bc7cfa8678e43920eda987d2049d97f7a4ba58f), [`2f2925b`](https://github.com/knpkv/npm/commit/2f2925b42d04686ca9da52c056f6d9a177548e05)]:
+  - @knpkv/codecommit-core@0.23.0
+
 ## 0.26.1
 
 ### Patch Changes

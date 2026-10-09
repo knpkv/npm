@@ -1,11 +1,21 @@
-import { expect, type Page, test } from "@playwright/test"
+import type { Page } from "@playwright/test"
+import { expect, test } from "./fixtures.ts"
 
 const storyUrl = (globals: string): string =>
   `/iframe.html?id=foundations-tokens--overview&viewMode=story&globals=${globals}`
 
+// The sample's background as the sRGB it paints (read back from a 1×1 canvas), whatever colour space
+// the token is written in.
 const canvasColor = (page: Page): Promise<string> =>
   page.locator("[data-token=\"canvas\"] .tokenStory__sample")
-    .evaluate((element) => getComputedStyle(element).backgroundColor)
+    .evaluate((element) => {
+      const context = document.createElement("canvas").getContext("2d")
+      if (context === null) return ""
+      context.fillStyle = getComputedStyle(element).backgroundColor
+      context.fillRect(0, 0, 1, 1)
+      const [r = 0, g = 0, b = 0] = context.getImageData(0, 0, 1, 1).data
+      return `rgb(${String(r)}, ${String(g)}, ${String(b)})`
+    })
 
 test("resolves explicit and system light-dark themes", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light", forcedColors: "none", reducedMotion: "no-preference" })

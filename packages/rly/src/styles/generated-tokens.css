@@ -6,41 +6,41 @@
     --rly-font-mono: "Geist Mono Variable", "Geist Mono", "Geist Mono Fallback", ui-monospace, monospace;
     --rly-focus-ring-width: 2px;
     --rly-focus-ring-offset: 2px;
-    --rly-color-canvas: light-dark(#F6F6F8, #101114);
-    --rly-color-surface-1: light-dark(#FFFFFF, #17181C);
-    --rly-color-surface-2: light-dark(#F0F1F4, #1E2025);
-    --rly-color-surface-3: light-dark(#E8E9ED, #282A31);
-    --rly-color-text-1: light-dark(#17181B, #F4F4F6);
-    --rly-color-text-2: light-dark(#5E6068, #B7B9C1);
-    --rly-color-text-3: light-dark(#6E717A, #9396A0);
-    --rly-color-border-1: light-dark(#DADCE2, #30323A);
-    --rly-color-border-2: light-dark(#B9BCC5, #4C4F5A);
-    --rly-color-action-background: light-dark(#17181B, #F4F4F6);
-    --rly-color-action-foreground: light-dark(#FFFFFF, #17181B);
-    --rly-color-focus: light-dark(#006DFF, #89B7FF);
-    --rly-color-agent: light-dark(#6741A5, #BD9CF0);
-    --rly-color-success-ink: light-dark(#16753A, #66D38B);
-    --rly-color-success-tint: light-dark(#EAF6ED, #153222);
-    --rly-color-blocked-ink: light-dark(#B42318, #FF8B82);
-    --rly-color-blocked-tint: light-dark(#FDECEA, #3A1918);
-    --rly-color-held-ink: light-dark(#7A5100, #F0C66A);
-    --rly-color-held-tint: light-dark(#FFF5DC, #33270F);
-    --rly-color-deploying-ink: light-dark(#075EBC, #75AEFF);
-    --rly-color-deploying-tint: light-dark(#EAF3FF, #112B49);
-    --rly-color-service-codecommit: light-dark(#C45500, #FF9B55);
-    --rly-color-service-codepipeline: light-dark(#8A42C2, #D69CFF);
-    --rly-color-service-jira: light-dark(#0C66E4, #75AEFF);
-    --rly-color-service-confluence: light-dark(#4758D6, #9EA9FF);
-    --rly-color-service-clockify: light-dark(#0087C7, #64CCF2);
-    --rly-color-series-1: light-dark(#2A78D6, #3987E5);
-    --rly-color-series-2: light-dark(#008300, #2E9E2E);
-    --rly-color-series-3: light-dark(#C24F7C, #D55181);
-    --rly-color-series-4: light-dark(#9C6A00, #C98500);
-    --rly-color-series-5: light-dark(#118259, #199E70);
-    --rly-color-series-6: light-dark(#C4501E, #D95926);
-    --rly-color-series-7: light-dark(#4A3AA7, #9085E9);
-    --rly-color-series-8: light-dark(#D23D3C, #E66767);
-    --rly-color-series-other: light-dark(#777672, #7E7D79);
+    --rly-color-canvas: light-dark(oklch(97.37% 0.0026 286.35), oklch(17.79% 0.0064 271.04));
+    --rly-color-surface-1: light-dark(oklch(100% 0 none), oklch(20.97% 0.008 274.53));
+    --rly-color-surface-2: light-dark(oklch(95.82% 0.0041 271.37), oklch(24.36% 0.01 268.27));
+    --rly-color-surface-3: light-dark(oklch(93.44% 0.0055 274.96), oklch(28.59% 0.0131 272.91));
+    --rly-color-text-1: light-dark(oklch(20.92% 0.0061 271.12), oklch(96.77% 0.0027 286.35));
+    --rly-color-text-2: light-dark(oklch(49.01% 0.013 274.7), oklch(78.66% 0.0115 274.85));
+    --rly-color-text-3: light-dark(oklch(54.91% 0.0144 271.15), oklch(67.38% 0.0151 272.6));
+    --rly-color-border-1: light-dark(oklch(89.47% 0.0085 271.32), oklch(31.84% 0.0145 274.43));
+    --rly-color-border-2: light-dark(oklch(79.56% 0.0131 271.25), oklch(42.9% 0.0186 273.49));
+    --rly-color-action-background: light-dark(oklch(20.92% 0.0061 271.12), oklch(96.77% 0.0027 286.35));
+    --rly-color-action-foreground: light-dark(oklch(100% 0 none), oklch(20.92% 0.0061 271.12));
+    --rly-color-focus: light-dark(oklch(57.68% 0.2328 259.8), oklch(77.5% 0.1149 259.12));
+    --rly-color-agent: light-dark(oklch(47.08% 0.1548 297.66), oklch(75.36% 0.1225 301.6));
+    --rly-color-success-ink: light-dark(oklch(49.55% 0.1249 150.69), oklch(78.4% 0.1445 152.74));
+    --rly-color-success-tint: light-dark(oklch(96.17% 0.0174 153.57), oklch(28.91% 0.0461 157.59));
+    --rly-color-blocked-ink: light-dark(oklch(50.03% 0.1821 29.51), oklch(76.13% 0.142 25.57));
+    --rly-color-blocked-tint: light-dark(oklch(95.6% 0.0187 25.6), oklch(26.13% 0.0525 23.12));
+    --rly-color-held-ink: light-dark(oklch(46.86% 0.0987 75.3), oklch(84.49% 0.1205 85.16));
+    --rly-color-held-tint: light-dark(oklch(97.14% 0.0344 88.77), oklch(28.06% 0.0417 82.9));
+    --rly-color-deploying-ink: light-dark(oklch(49.3% 0.1652 256.17), oklch(74.53% 0.1323 257.25));
+    --rly-color-deploying-tint: light-dark(oklch(96.09% 0.0188 255.53), oklch(28.58% 0.0639 253.7));
+    --rly-color-service-codecommit: light-dark(oklch(58.25% 0.1609 47.1), oklch(78.01% 0.1467 53.69));
+    --rly-color-service-codepipeline: light-dark(oklch(53.23% 0.1942 306.77), oklch(78.38% 0.1486 310.24));
+    --rly-color-service-jira: light-dark(oklch(54.19% 0.2065 259.4), oklch(74.53% 0.1323 257.25));
+    --rly-color-service-confluence: light-dark(oklch(52.21% 0.1926 272.06), oklch(76.01% 0.1239 277.45));
+    --rly-color-service-clockify: light-dark(oklch(59.46% 0.1365 240.15), oklch(79.78% 0.11 224.74));
+    --rly-color-series-1: light-dark(oklch(57.53% 0.1626 255.53), oklch(62.21% 0.1612 255.05));
+    --rly-color-series-2: light-dark(oklch(52.85% 0.1798 142.5), oklch(61.45% 0.1797 143));
+    --rly-color-series-3: light-dark(oklch(59% 0.1537 358.49), oklch(62.24% 0.1712 0.84));
+    --rly-color-series-4: light-dark(oklch(56.27% 0.118 76.33), oklch(66.99% 0.1425 73.23));
+    --rly-color-series-5: light-dark(oklch(53.81% 0.1139 161.78), oklch(62.12% 0.1283 163.11));
+    --rly-color-series-6: light-dark(oklch(57.67% 0.1603 40.99), oklch(62.21% 0.1726 40.11));
+    --rly-color-series-7: light-dark(oklch(43.31% 0.1671 283.62), oklch(66.96% 0.1452 286.83));
+    --rly-color-series-8: light-dark(oklch(58.03% 0.1863 25.45), oklch(66.93% 0.1586 22.31));
+    --rly-color-series-other: light-dark(oklch(56.55% 0.0062 95.16), oklch(58.93% 0.0061 95.15));
     --rly-space-0: 0;
     --rly-space-2: 2px;
     --rly-space-4: 4px;
@@ -117,8 +117,10 @@
     --rly-motion-standard-easing: cubic-bezier(.2, .8, .2, 1);
     --rly-motion-deliberate-duration: 240ms;
     --rly-motion-deliberate-easing: cubic-bezier(.2, .8, .2, 1);
-    --rly-motion-slow-duration: 360ms;
+    --rly-motion-slow-duration: 300ms;
     --rly-motion-slow-easing: cubic-bezier(.2, .8, .2, 1);
+    --rly-easing-out: cubic-bezier(.2, .8, .2, 1);
+    --rly-easing-in-out: cubic-bezier(.65, 0, .35, 1);
   }
 
   :root:is([data-theme="light"], [data-rly-theme="light"]),
@@ -128,60 +130,8 @@
   :root:is([data-theme="system"], [data-rly-theme="system"]),
   :where([data-theme="system"], [data-rly-theme="system"]) { color-scheme: light dark; }
 
-  :root:is(
-    [data-theme="light"], [data-rly-theme="light"],
-    [data-theme="dark"], [data-rly-theme="dark"],
-    [data-theme="system"], [data-rly-theme="system"]
-  ),
-  :where(
-    [data-theme="light"], [data-rly-theme="light"],
-    [data-theme="dark"], [data-rly-theme="dark"],
-    [data-theme="system"], [data-rly-theme="system"]
-  ) {
-    --rly-color-canvas: light-dark(#F6F6F8, #101114);
-    --rly-color-surface-1: light-dark(#FFFFFF, #17181C);
-    --rly-color-surface-2: light-dark(#F0F1F4, #1E2025);
-    --rly-color-surface-3: light-dark(#E8E9ED, #282A31);
-    --rly-color-text-1: light-dark(#17181B, #F4F4F6);
-    --rly-color-text-2: light-dark(#5E6068, #B7B9C1);
-    --rly-color-text-3: light-dark(#6E717A, #9396A0);
-    --rly-color-border-1: light-dark(#DADCE2, #30323A);
-    --rly-color-border-2: light-dark(#B9BCC5, #4C4F5A);
-    --rly-color-action-background: light-dark(#17181B, #F4F4F6);
-    --rly-color-action-foreground: light-dark(#FFFFFF, #17181B);
-    --rly-color-focus: light-dark(#006DFF, #89B7FF);
-    --rly-color-agent: light-dark(#6741A5, #BD9CF0);
-    --rly-color-success-ink: light-dark(#16753A, #66D38B);
-    --rly-color-success-tint: light-dark(#EAF6ED, #153222);
-    --rly-color-blocked-ink: light-dark(#B42318, #FF8B82);
-    --rly-color-blocked-tint: light-dark(#FDECEA, #3A1918);
-    --rly-color-held-ink: light-dark(#7A5100, #F0C66A);
-    --rly-color-held-tint: light-dark(#FFF5DC, #33270F);
-    --rly-color-deploying-ink: light-dark(#075EBC, #75AEFF);
-    --rly-color-deploying-tint: light-dark(#EAF3FF, #112B49);
-    --rly-color-service-codecommit: light-dark(#C45500, #FF9B55);
-    --rly-color-service-codepipeline: light-dark(#8A42C2, #D69CFF);
-    --rly-color-service-jira: light-dark(#0C66E4, #75AEFF);
-    --rly-color-service-confluence: light-dark(#4758D6, #9EA9FF);
-    --rly-color-service-clockify: light-dark(#0087C7, #64CCF2);
-    --rly-color-series-1: light-dark(#2A78D6, #3987E5);
-    --rly-color-series-2: light-dark(#008300, #2E9E2E);
-    --rly-color-series-3: light-dark(#C24F7C, #D55181);
-    --rly-color-series-4: light-dark(#9C6A00, #C98500);
-    --rly-color-series-5: light-dark(#118259, #199E70);
-    --rly-color-series-6: light-dark(#C4501E, #D95926);
-    --rly-color-series-7: light-dark(#4A3AA7, #9085E9);
-    --rly-color-series-8: light-dark(#D23D3C, #E66767);
-    --rly-color-series-other: light-dark(#777672, #7E7D79);
-  }
-
   @media (forced-colors: active) {
-    :root,
-    :where(
-      [data-theme="light"], [data-rly-theme="light"],
-      [data-theme="dark"], [data-rly-theme="dark"],
-      [data-theme="system"], [data-rly-theme="system"]
-    ) {
+    :root {
     --rly-color-canvas: Canvas;
     --rly-color-surface-1: Canvas;
     --rly-color-surface-2: Canvas;

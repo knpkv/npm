@@ -26,4 +26,15 @@ describe("failed operation copy", () => {
   it("still reads as a sentence for older rows without a cause or profile", () => {
     expect(failedOperationText({ operation: "listBranches" })).toBe("listBranches failed.")
   })
+
+  it("points a held or denied permission at Settings → Permissions", () => {
+    expect(failedOperationText({
+      operation: "getPullRequests",
+      profile: "dev-administratoraccess",
+      region: "eu-central-1",
+      cause: "Not allowed yet: the getPullRequests permission prompt has no answer"
+    })).toBe(
+      "Couldn't list pull requests in dev-administratoraccess (eu-central-1): Not allowed yet: the getPullRequests permission prompt has no answer. Allow it in Settings → Permissions."
+    )
+  })
 })

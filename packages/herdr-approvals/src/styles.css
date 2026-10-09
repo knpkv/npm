@@ -3,7 +3,7 @@
   body,
   #fleet-dashboard-root {
     margin: 0;
-    min-height: 100%;
+    min-block-size: 100%;
   }
 
   body[data-rly-root] {
@@ -17,7 +17,7 @@
   }
 
   .fleet-shell {
-    min-block-size: 100vh;
+    min-block-size: 100svh;
   }
   .fleet-shell-masthead {
     align-items: center;
@@ -110,7 +110,7 @@
   .keyboard-hints kbd {
     background: var(--rly-color-surface-2);
     border: 1px solid var(--rly-color-border-2);
-    border-block-end-color: var(--rly-color-border-3);
+    border-block-end-color: currentcolor;
     border-radius: var(--rly-radius-field);
     color: var(--rly-color-text-2);
     font: inherit;
@@ -156,7 +156,7 @@
   }
 
   .dashboard-root {
-    min-height: 100vh;
+    min-block-size: 100svh;
   }
 
   .pull-refresh {
@@ -173,7 +173,6 @@
     pointer-events: none;
     position: fixed;
     transform: translateY(calc(-32px + var(--pull-distance, 0px)));
-    transition: opacity var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 
   .dashboard-root[data-pulling="true"] .pull-refresh {
@@ -183,7 +182,6 @@
   .pull-refresh span {
     color: var(--rly-color-agent);
     font-size: 1.2rem;
-    transition: transform var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 
   .dashboard-root[data-pull-ready="true"] .pull-refresh span {
@@ -197,12 +195,6 @@
     margin-inline: auto;
     padding-block: var(--rly-space-20) var(--rly-space-64);
     transform: translateY(var(--pull-distance, 0px));
-    transition: transform var(--rly-motion-standard-duration) var(--rly-motion-standard-easing);
-  }
-
-  .dashboard-root[data-pulling="true"] .app,
-  .dashboard-root[data-pulling="true"] .pull-refresh {
-    transition: none;
   }
 
   .app-header {
@@ -225,8 +217,7 @@
     justify-content: center;
   }
 
-  .fleet-mark i,
-  .agent-presence {
+  .fleet-mark i {
     background: var(--rly-color-agent);
     block-size: var(--rly-space-6);
     border-radius: var(--rly-radius-round);
@@ -237,8 +228,7 @@
     background: var(--rly-color-deploying-ink);
   }
 
-  .fleet-mark i:last-child,
-  .agent-presence {
+  .fleet-mark i:last-child {
     background: var(--rly-color-success-ink);
   }
 
@@ -247,7 +237,8 @@
   }
 
   .app-title h1 {
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
     text-overflow: ellipsis;
   }
 
@@ -274,10 +265,10 @@
     font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
       var(--rly-type-label-font);
     padding: var(--rly-space-6) var(--rly-space-2);
+    position: relative;
     text-decoration: none;
   }
 
-  .fleet-app-nav a:hover,
   .fleet-app-nav a[aria-current="page"] {
     border-block-end-color: var(--rly-color-agent);
     color: var(--rly-color-text-1);
@@ -303,7 +294,8 @@
   .summary-grid .summary-branch {
     font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
       var(--rly-type-card-title-font);
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
     text-overflow: ellipsis;
   }
 
@@ -312,15 +304,16 @@
   }
 
   .section-heading,
-  .agenda-heading,
-  .agent-line {
+  .agenda-heading {
     align-items: flex-start;
     display: flex;
     gap: var(--rly-space-16);
     justify-content: space-between;
   }
 
+  /* A count that doesn't fit beside the heading drops under it instead of squeezing into a column. */
   .section-heading {
+    flex-wrap: wrap;
     margin-block-end: var(--rly-space-20);
   }
 
@@ -329,30 +322,70 @@
   .decision-history-panel,
   .history-panel,
   .machine-panel {
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
   }
 
-  .agent-grid {
+  /* This host's agents, in Connect's row shape: a fixed state track, then the name, then the link. */
+  .host-agent-list {
     display: grid;
-    gap: var(--rly-space-8);
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    list-style: none;
+    margin: 0;
+    padding: 0;
   }
 
-  .agent-line {
+  .host-agent {
     align-items: center;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: grid;
+    gap: var(--rly-space-12);
+    grid-template-columns: 7rem minmax(0, 1fr) auto;
+    padding-block: var(--rly-space-12);
   }
 
-  .agent-line > div {
+  .host-agent:last-child {
+    border-block-end: 0;
+  }
+
+  .host-agent-state {
+    display: inline-flex;
+    min-inline-size: 0;
+    overflow-wrap: break-word;
+  }
+
+  .host-agent-copy {
     display: grid;
-    flex: 1;
     min-inline-size: 0;
   }
 
-  .agent-line small,
-  .agent-line strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .host-agent-copy small,
+  .host-agent-copy strong {
+    overflow-wrap: break-word;
+  }
+
+  .host-agent-link {
+    color: var(--rly-color-agent);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
     white-space: nowrap;
+  }
+
+  .host-agent-link:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  /* At 24rem and below the state sits over the name, with the link beside it. */
+  @media (max-width: 24rem) {
+    .host-agent {
+      grid-template-columns: minmax(0, 1fr) auto;
+      row-gap: var(--rly-space-4);
+    }
+
+    .host-agent-copy {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
   }
 
   .agenda-list {
@@ -377,7 +410,8 @@
 
   .agenda-heading p {
     display: -webkit-box;
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
     overflow-wrap: break-word;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
@@ -498,10 +532,6 @@
     text-decoration: none;
   }
 
-  .remote-approval-link:hover {
-    border-color: var(--rly-color-text-2);
-  }
-
   .remote-approval-link:focus-visible {
     outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
     outline-offset: var(--rly-focus-ring-offset);
@@ -540,6 +570,15 @@
     gap: var(--rly-space-16);
   }
 
+  /* A failed refresh's notice sits in the page gutter above the content it is about. */
+  .dashboard-refresh-failed {
+    margin-block-end: var(--rly-space-12);
+  }
+
+  .fleet-work-reserved {
+    min-block-size: 100svh;
+  }
+
   .activity-toolbar {
     align-items: end;
     background: color-mix(in srgb, var(--rly-color-surface-1) 94%, transparent);
@@ -570,7 +609,10 @@
     border-radius: var(--rly-radius-control);
     color: var(--rly-color-text-1);
     font: inherit;
+    font-size: max(16px, 1rem);
     min-block-size: 2.5rem;
+    /* An input's intrinsic width would hold the toolbar column open past the card at 320. */
+    min-inline-size: 0;
     padding-inline: var(--rly-space-12);
   }
 
@@ -598,7 +640,8 @@
     font: inherit;
     font-size: var(--rly-type-meta-size);
     min-block-size: 2rem;
-    padding-inline: var(--rly-space-10);
+    padding-inline: var(--rly-space-12);
+    position: relative;
   }
 
   .activity-filters button[aria-pressed="true"] {
@@ -612,7 +655,8 @@
     border-radius: var(--rly-radius-control);
     list-style: none;
     margin: var(--rly-space-12) 0 0;
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
     padding: 0;
   }
 
@@ -634,7 +678,6 @@
     text-align: start;
   }
 
-  .activity-row:hover,
   .activity-row[aria-expanded="true"] {
     background: var(--rly-color-surface-2);
   }
@@ -652,14 +695,14 @@
     min-inline-size: 0;
   }
 
+  /* Titles and descriptions wrap: at phone width an ellipsis left a third of the sentence. */
   .activity-row-copy > * {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
   }
 
   .activity-actor {
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
     text-align: end;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -762,13 +805,9 @@
     text-decoration: none;
   }
 
-  a.machine:hover {
-    background: var(--rly-color-surface-3);
-    border-color: var(--rly-color-border-2);
-  }
-
+  /* No dimming: the "Offline" label says it, and opacity pulled its ink below 4.5:1 (axe, QA-167). */
   .machine-offline {
-    opacity: 0.65;
+    color: var(--rly-color-text-2);
   }
 
   .hub-link {
@@ -783,11 +822,6 @@
     color: var(--rly-color-agent);
     font-weight: 650;
     overflow-wrap: break-word;
-  }
-
-  .chat-panel {
-    display: grid;
-    gap: var(--rly-space-16);
   }
 
   .notification-status {
@@ -846,71 +880,10 @@
     padding-inline-start: var(--rly-space-24);
   }
 
-  .notification-actions,
-  .chat-actions {
+  .notification-actions {
     display: flex;
     gap: var(--rly-space-8);
     justify-content: flex-end;
-  }
-
-  .chat-history {
-    display: grid;
-    gap: var(--rly-space-12);
-    max-block-size: 32rem;
-    overflow-y: auto;
-  }
-
-  /* Turns are rows in the log, separated by a rule, not cards inside the panel's card. */
-  .chat-turn {
-    border-block-end: 1px solid var(--rly-color-border-1);
-    display: grid;
-    gap: var(--rly-space-8);
-    padding-block: var(--rly-space-12);
-  }
-
-  .chat-turn:last-child {
-    border-block-end: 0;
-  }
-
-  .chat-turn p {
-    margin: 0;
-    overflow-wrap: break-word;
-    white-space: pre-wrap;
-  }
-
-  /* A turn's state as a word; only a failure takes ink. */
-  .chat-turn-state {
-    color: var(--rly-color-text-2);
-    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
-      var(--rly-type-label-font);
-  }
-
-  .chat-turn-state[data-state="failed"] {
-    color: var(--rly-color-blocked-ink);
-  }
-
-  .chat-history:focus-visible {
-    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-    outline-offset: var(--rly-focus-ring-offset);
-  }
-
-  .chat-turn-heading {
-    align-items: center;
-    display: flex;
-    gap: var(--rly-space-8);
-    justify-content: space-between;
-  }
-
-  /* The coordinator's answer under the question it answers; its "Coordinator" label marks it, no side bar. */
-  .coordinator-reply {
-    display: grid;
-    gap: var(--rly-space-6);
-    padding-block-start: var(--rly-space-4);
-  }
-
-  .chat-compose {
-    display: grid;
-    gap: var(--rly-space-8);
   }
 
   .keyboard-hints {
@@ -921,39 +894,6 @@
       var(--rly-type-meta-font);
     gap: var(--rly-space-12);
     justify-content: flex-end;
-  }
-
-  .chat-compose label {
-    color: var(--rly-color-text-2);
-    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
-      var(--rly-type-meta-font);
-  }
-
-  .chat-compose textarea {
-    background: var(--rly-color-surface-2);
-    border: 1px solid var(--rly-color-border-2);
-    border-radius: var(--rly-radius-control);
-    color: var(--rly-color-text-1);
-    font: inherit;
-    padding: var(--rly-space-12);
-    resize: vertical;
-  }
-
-  /* Forced colours would paint the placeholder in a link-like system colour; it is hint text. */
-  @media (forced-colors: active) {
-    .chat-compose textarea::placeholder {
-      color: GrayText;
-    }
-  }
-
-  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .chat-compose textarea::placeholder {
-    color: GrayText;
-  }
-
-  .chat-compose textarea:focus-visible {
-    border-color: var(--rly-color-agent);
-    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
-    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .notice {
@@ -987,7 +927,7 @@
     clip-path: inset(50%);
     inline-size: 1px;
     margin: 0;
-    overflow: hidden;
+    overflow: clip;
     position: absolute;
     white-space: nowrap;
   }
@@ -1050,10 +990,6 @@
     inline-size: 100%;
     padding: var(--rly-space-12) var(--rly-space-16);
     text-align: start;
-  }
-
-  .countdown-row:hover {
-    background: var(--rly-color-surface-2);
   }
 
   /* Selection is the row's background and aria-current, never an edge stripe. */
@@ -1204,10 +1140,6 @@
     text-decoration: none;
   }
 
-  .countdown-review-link:hover {
-    background: var(--rly-color-surface-2);
-  }
-
   .countdown-review-link:focus-visible {
     outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
     outline-offset: var(--rly-focus-ring-offset);
@@ -1262,16 +1194,6 @@
     }
   }
 
-  .app-error {
-    color: var(--rly-color-text-1);
-  }
-
-  .app-error pre {
-    color: var(--rly-color-blocked-ink);
-    overflow-wrap: break-word;
-    white-space: pre-wrap;
-  }
-
   @media (max-width: 46rem) {
     .app {
       inline-size: min(calc(100% - var(--rly-space-16)), 68rem);
@@ -1282,7 +1204,6 @@
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .agent-grid,
     .machine-grid {
       grid-template-columns: 1fr;
     }
@@ -1305,7 +1226,7 @@
     }
 
     .activity-toolbar {
-      grid-template-columns: 1fr;
+      grid-template-columns: minmax(0, 1fr);
       position: static;
     }
 
@@ -1351,6 +1272,34 @@
     }
   }
 
+  /* Below 24rem a time column left the title about 80px, and words broke mid-word: the time
+     moves onto its own line above the title, and the copy takes the row's full width. */
+  @media (max-width: 24rem) {
+    .activity-row {
+      grid-template-columns: minmax(0, 1fr) 1rem;
+    }
+
+    .activity-row > time {
+      grid-column: 1;
+      grid-row: 1;
+    }
+
+    .activity-row-copy {
+      grid-column: 1;
+      grid-row: 2;
+    }
+
+    .activity-status {
+      grid-column: 1;
+      grid-row: 3;
+    }
+
+    .activity-disclosure {
+      grid-column: 2;
+      grid-row: 1 / span 3;
+    }
+  }
+
   @media (max-width: 21rem) {
     .summary-grid,
     .approval-actions {
@@ -1369,11 +1318,65 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .app,
-    .pull-refresh,
+  /* Controls drawn under 44px keep their look; the pseudo-element grows the touch target. */
+  .fleet-app-nav a::after,
+  .activity-filters button::after {
+    content: "";
+    inset: min(0px, (100% - 2.75rem) / 2);
+    position: absolute;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .fleet-app-nav a:hover {
+      border-block-end-color: var(--rly-color-agent);
+      color: var(--rly-color-text-1);
+    }
+
+    .remote-approval-link:hover {
+      border-color: var(--rly-color-text-2);
+    }
+
+    .activity-row:hover,
+    .countdown-row:not([aria-current="true"]):hover,
+    .countdown-review-link:hover {
+      background: var(--rly-color-surface-2);
+    }
+
+    a.machine:hover {
+      background: var(--rly-color-surface-3);
+      border-color: var(--rly-color-border-2);
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .pull-refresh {
+      transition: opacity var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+    }
+
     .pull-refresh span {
+      transition: transform var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+    }
+
+    .app {
+      transition: transform var(--rly-motion-standard-duration) var(--rly-motion-standard-easing);
+    }
+
+    /* While the finger is down the content follows it, no easing. */
+    .dashboard-root[data-pulling="true"] .app,
+    .dashboard-root[data-pulling="true"] .pull-refresh {
       transition: none;
     }
+
+    .activity-filters button,
+    .remote-approval-link,
+    .countdown-review-link {
+      transition: scale var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+    }
+  }
+
+  .activity-filters button:active,
+  .remote-approval-link:active,
+  .countdown-review-link:active {
+    scale: 0.97;
   }
 }

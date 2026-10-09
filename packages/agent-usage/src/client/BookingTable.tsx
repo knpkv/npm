@@ -19,7 +19,7 @@ import {
   visibleSort
 } from "./bookingModel.js"
 import { bookingLabel, OTHER } from "./chartModel.js"
-import { formatTokens, formatUsd } from "./format.js"
+import { formatTokens, formatUsd } from "../limits/format.js"
 import { seriesColor } from "./UsageChart.js"
 
 const LABELS = {
@@ -97,7 +97,12 @@ export const BookingTable = (props: {
           </button>
         )
       case "title":
-        return <span className="usage-title">{titleOf(summary)}</span>
+        // The cell ellipsizes a long summary; the title keeps the whole text reachable.
+        return (
+          <span className="usage-title" title={titleOf(summary)}>
+            {titleOf(summary)}
+          </span>
+        )
       case "agents":
         return summary.agents.join(", ")
       case "requests":

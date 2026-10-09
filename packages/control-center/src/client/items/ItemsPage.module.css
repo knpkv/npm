@@ -167,7 +167,8 @@
 }
 
 .itemLink strong {
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -289,5 +290,13 @@
   .shareForm > div,
   .shareResult > div {
     grid-column: auto;
+  }
+}
+
+/* Touch keyboards zoom the page into a field whose text is under 16px. */
+@media (pointer: coarse) {
+  .filters input,
+  .filters select {
+    font-size: max(16px, 1rem);
   }
 }

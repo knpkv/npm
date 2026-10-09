@@ -41,7 +41,8 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 0;
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-group);
 }
@@ -137,5 +138,13 @@
   }
   .filters {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Touch keyboards zoom the page into a field whose text is under 16px. */
+@media (pointer: coarse) {
+  .filters select,
+  .filters input {
+    font-size: max(16px, 1rem);
   }
 }

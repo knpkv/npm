@@ -640,8 +640,11 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
                   ? Effect.succeed(name)
                   : Effect.fail(sessionError("sandbox-unavailable"))
               ),
-              // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-              Effect.tapError(() => forceRemoveSandbox(name).pipe(Effect.ignore))
+              Effect.tapError(() =>
+                forceRemoveSandbox(name).pipe(
+                  Effect.ignore({ log: "Warn", message: "Could not remove a sandbox that failed to start" })
+                )
+              )
             ),
           () =>
             Effect.gen(function*() {

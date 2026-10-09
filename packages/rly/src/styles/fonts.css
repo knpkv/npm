@@ -1,5 +1,10 @@
+/*
+ * optional: a preloaded face (served from the shell's origin) is ready within the short block period and
+ * renders from first paint; a face that is late stays on the metric-matched fallback for this page
+ * view, so text never swaps and never shifts. Shells preload every face in RLY_FONT_FACES.
+ */
 @font-face {
-  font-display: swap;
+  font-display: optional;
   font-family: "Geist Variable";
   font-style: normal;
   font-weight: 100 900;
@@ -7,7 +12,7 @@
 }
 
 @font-face {
-  font-display: swap;
+  font-display: optional;
   font-family: "Geist Mono Variable";
   font-style: normal;
   font-weight: 100 900;

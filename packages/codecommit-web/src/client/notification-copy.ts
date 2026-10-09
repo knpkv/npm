@@ -23,9 +23,11 @@ const operationWords = new Map([
 const signInAgain = /expired|ExpiredToken|UnrecognizedClient|InvalidClientTokenId|Credentials unavailable|SSO|token/i
 const throttled = /^Throttled:|Rate exceeded|Throttl/i
 const denied = /AccessDenied|not authorized|UnauthorizedOperation/i
+const notAllowed = /^Not allowed( yet)?:/
 
 /** The one action that fixes a cause, or `null` when the cause names nothing actionable. */
 export const fixFor = (cause: string): string | null => {
+  if (notAllowed.test(cause)) return "Allow it in Settings → Permissions."
   if (throttled.test(cause)) return "It's retried on the next refresh."
   if (denied.test(cause)) return "Check that this profile's role can read CodeCommit."
   if (signInAgain.test(cause)) return "Sign in again in Settings → Accounts."

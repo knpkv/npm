@@ -174,6 +174,35 @@ export class PermissionDeniedError extends Schema.TaggedError<PermissionDeniedEr
 ) {}
 
 /**
+ * A pull request route names an account whose configured profile is switched off, so nothing may read
+ * it until the user switches it back on. Pull request URLs stay addressable for hidden accounts, so this
+ * is what such a route reports instead of a generic refresh failure.
+ *
+ * @category Errors
+ */
+export class AccountSwitchedOff extends Schema.TaggedError<AccountSwitchedOff>()("AccountSwitchedOff", {
+  awsAccountId: Schema.String,
+  profile: Schema.String
+}) {
+  override get message() {
+    return `${this.profile} is switched off, so this pull request can't be read. Switch it on in Settings → Accounts.`
+  }
+}
+
+/**
+ * A pull request route names an account that no configured profile is known to own.
+ *
+ * @category Errors
+ */
+export class AccountUnknown extends Schema.TaggedError<AccountUnknown>()("AccountUnknown", {
+  awsAccountId: Schema.String
+}) {
+  override get message() {
+    return `None of your accounts is known to read ${this.awsAccountId}. Switch on the account that owns it in Settings → Accounts, or check the link.`
+  }
+}
+
+/**
  * Union of errors from AwsClient methods.
  *
  * @category Errors
@@ -187,8 +216,14 @@ export type AwsClientError = AwsCredentialError | AwsThrottleError | AwsApiError
  */
 export const describeAwsClientError = (error: AwsClientError): string => {
   const inner = error.cause
+  // The permission gate's refusal is ours, not the provider's: say what is missing in words.
+  if (Schema.is(PermissionDeniedError)(inner)) {
+    return inner.reason === "denied"
+      ? `Not allowed: the ${inner.operation} permission is denied`
+      : `Not allowed yet: the ${inner.operation} permission prompt has no answer`
+  }
   const provider = Predicate.isError(inner)
-    ? `${inner.name !== "Error" ? `${inner.name}: ` : ""}${inner.message}`
+    ? [inner.name === "Error" ? "" : inner.name, inner.message.trim()].filter((part) => part !== "").join(": ")
     : String(inner)
   const detail = provider.trim().length > 0 ? provider.trim() : "no detail from the provider"
   switch (error._tag) {

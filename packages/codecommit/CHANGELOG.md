@@ -1,5 +1,33 @@
 # @knpkv/codecommit
 
+## 0.17.1
+
+### Patch Changes
+
+- Updated dependencies [[`faddacc`](https://github.com/knpkv/npm/commit/faddacc829272ec3b580af00ee6e581294be76e7), [`e2f406b`](https://github.com/knpkv/npm/commit/e2f406bc0e3941cc4d349aba844ec04822e82585), [`fcbd310`](https://github.com/knpkv/npm/commit/fcbd310bc0de959847246d1d7b3b93fa944c6cd3), [`28e5c8c`](https://github.com/knpkv/npm/commit/28e5c8ca02373f7b6cdcc9af4a25380e97ddb8fe), [`3be1bf6`](https://github.com/knpkv/npm/commit/3be1bf63e9b6e933ba38063ebd23e6e84e0c4d22), [`6016906`](https://github.com/knpkv/npm/commit/60169060a04688084c7e47ebec4b28d538be9811), [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44)]:
+  - @knpkv/codecommit-core@0.24.0
+  - @knpkv/codecommit-web@0.28.0
+
+## 0.17.0
+
+### Minor Changes
+
+- [#610](https://github.com/knpkv/npm/pull/610) [`bbdbb13`](https://github.com/knpkv/npm/commit/bbdbb130868ddd3593e7bc5d547b470baa21ae3c) Thanks [@konopkov](https://github.com/konopkov)! - `codecommit web --no-open` prints the sign-in link without opening a browser. It also skips the browser when `BROWSER=none`, when `CI` is set, or when stdout is not a terminal, and says why. Test harnesses and scripts no longer open tabs in the user's browser.
+
+### Patch Changes
+
+- Updated dependencies [[`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26), [`26d9de9`](https://github.com/knpkv/npm/commit/26d9de9c64b78da62ab462856cbd09e9137eb40f)]:
+  - @knpkv/codecommit-core@0.23.1
+  - @knpkv/codecommit-web@0.27.0
+
+## 0.16.3
+
+### Patch Changes
+
+- Updated dependencies [[`2bc7cfa`](https://github.com/knpkv/npm/commit/2bc7cfa8678e43920eda987d2049d97f7a4ba58f), [`2f2925b`](https://github.com/knpkv/npm/commit/2f2925b42d04686ca9da52c056f6d9a177548e05), [`87c1f1b`](https://github.com/knpkv/npm/commit/87c1f1baae40c0e4351de976a6446c8c194e72df), [`4ff1f03`](https://github.com/knpkv/npm/commit/4ff1f0386648e41cfee2d0198c7c30c312c60539), [`0f93f9a`](https://github.com/knpkv/npm/commit/0f93f9a6310af21bade9563dcf45f8961436f0c0), [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597), [`c33ead7`](https://github.com/knpkv/npm/commit/c33ead79cfcbcdb16bbb468229e5a35454e05998)]:
+  - @knpkv/codecommit-core@0.23.0
+  - @knpkv/codecommit-web@0.26.2
+
 ## 0.16.2
 
 ### Patch Changes

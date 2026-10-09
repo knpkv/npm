@@ -2,6 +2,7 @@
 import * as Cause from "effect/Cause"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as Predicate from "effect/Predicate"
 
 import type { WorkspaceId } from "../../../domain/identifiers.js"
 import type { AgentJobWorkerService } from "../../agent/AgentJobWorker.js"
@@ -45,8 +46,12 @@ export const superviseAgentJobWorker = Effect.fn("AgentJobWorker.supervise")(fun
       if (drainStarted) return
     }
   }).pipe(
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    Effect.catch(() => Effect.void)
+    // A draining server refusing the next cycle is the normal stop; anything else is logged, never dropped.
+    Effect.catch((error) =>
+      Predicate.isTagged(error, "ServerDraining")
+        ? Effect.void
+        : Effect.logError(`${options.logLabel} supervisor stopped`, error)
+    )
   )
   yield* Effect.forkScoped(supervise)
 })

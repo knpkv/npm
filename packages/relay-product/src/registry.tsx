@@ -3,10 +3,12 @@ import {
   createContext,
   type ReactElement,
   type ReactNode,
+  type RefObject,
   useCallback,
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState
 } from "react"
 
@@ -31,6 +33,18 @@ export interface RelayProductDockHost {
   ) => Effect.Effect<void, RelayProductDockLocateFailure>
   readonly product: AgenticProduct
   readonly selection: RelaySelectorState
+  /**
+   * Another Relay conversation this host offers (Control Center's release conversation, say): before the
+   * pull-request locator where no pull request is registered, after it while finding another one.
+   */
+  readonly alternate?: RelayProductDockAlternate | undefined
+}
+
+/** A host's other Relay conversation, opened by the host (navigating to its own page). */
+export interface RelayProductDockAlternate {
+  /** The action, naming the conversation: "Open the Release 2.18 conversation". */
+  readonly label: string
+  readonly onOpen: () => void
 }
 
 export interface RelayProductDockMessage {
@@ -57,6 +71,13 @@ interface RelayPullRequestDockRegistrationBase {
   readonly selection: RelaySelectorState
 }
 
+/** One thing inside a pull request the next message is about. */
+export interface RelayProductDockAbout {
+  readonly id: string
+  readonly label: string
+  readonly onClear: () => void
+}
+
 export type RelayPullRequestDockRegistration = RelayPullRequestDockRegistrationBase &
   (
     | {
@@ -67,6 +88,13 @@ export type RelayPullRequestDockRegistration = RelayPullRequestDockRegistrationB
           request: typeof ContinuePullRequestConversationRequest.Type
         ) => Effect.Effect<void, RelayProductDockContinuationFailure>
         readonly messages: ReadonlyArray<RelayProductDockMessage>
+        /**
+         * What the next message is about inside this PR (a finding, say), shown as a removable
+         * reference on the composer; clearing it sends to the whole pull request.
+         */
+        readonly about?: RelayProductDockAbout | undefined
+        /** One line the panel shows above its composer (another composer on this page, say). */
+        readonly notice?: string | undefined
         readonly status: "ready"
       }
     | {
@@ -78,6 +106,22 @@ export type RelayPullRequestDockRegistration = RelayPullRequestDockRegistrationB
 interface RelayPullRequestDockRegistry {
   readonly register: (registration: RelayPullRequestDockRegistration) => () => void
   readonly registration: RelayPullRequestDockRegistration | null
+  /** Whether the Relay panel is open; shared by the header launcher and the panel. */
+  readonly open: boolean
+  readonly setOpen: (open: boolean | ((current: boolean) => boolean)) => void
+  /** Whether the user pinned Relay beside the page; the host lays out its column from this and `open`. */
+  readonly pinned: boolean
+  readonly setPinned: (pinned: boolean) => void
+  /** The header launcher, where the panel returns focus unless something else opened it. */
+  readonly launcher: RefObject<HTMLButtonElement | null>
+  /** Where closing returns focus: the launcher, or the control that last opened Relay (openFrom). */
+  readonly returnTo: RefObject<HTMLElement | null>
+  /** Open Relay from a page control (Discuss, say); closing returns focus to that control. */
+  readonly openFrom: (control: HTMLElement) => void
+  /** Per thread, what its kept draft was written about, so a change survives closing Relay. */
+  readonly draftAbout: RefObject<Map<string, string | null>>
+  /** How many panels have claimed Relay's Ctrl/⌘+J under this provider; more than one is a bug. */
+  readonly summonClaims: RefObject<number>
 }
 
 export class RelayProductDockProviderMissing extends Error {
@@ -93,13 +137,38 @@ const RelayPullRequestDockContext = createContext<RelayPullRequestDockRegistry |
 /** Provide one route-lifetime registration slot without loading the dock chrome. */
 export const RelayProductDockProvider = ({ children }: { readonly children: ReactNode }): ReactElement => {
   const [registration, setRegistration] = useState<RelayPullRequestDockRegistration | null>(null)
+  const [open, setOpen] = useState(false)
+  const [pinned, setPinned] = useState(false)
+  const launcher = useRef<HTMLButtonElement | null>(null)
+  const summonClaims = useRef(0)
+  const returnTo = useRef<HTMLElement | null>(null)
+  const draftAbout = useRef(new Map<string, string | null>())
+  const openFrom = useCallback((control: HTMLElement) => {
+    returnTo.current = control
+    setOpen(true)
+  }, [])
   const register = useCallback((next: RelayPullRequestDockRegistration) => {
     setRegistration(next)
     return () => {
       setRegistration((current) => (current === next ? null : current))
     }
   }, [])
-  const registry = useMemo<RelayPullRequestDockRegistry>(() => ({ register, registration }), [register, registration])
+  const registry = useMemo<RelayPullRequestDockRegistry>(
+    () => ({
+      draftAbout,
+      launcher,
+      open,
+      openFrom,
+      pinned,
+      register,
+      registration,
+      returnTo,
+      setOpen,
+      setPinned,
+      summonClaims
+    }),
+    [open, pinned, register, registration]
+  )
   return <RelayPullRequestDockContext value={registry}>{children}</RelayPullRequestDockContext>
 }
 
@@ -115,4 +184,52 @@ export const useRelayProductDockRegistration = (): RelayPullRequestDockRegistrat
   const registry = useContext(RelayPullRequestDockContext)
   if (registry === undefined) throw new RelayProductDockProviderMissing()
   return registry.registration
+}
+
+/**
+ * The Relay panel's open and pinned state and the header launcher, shared through the provider. A host
+ * renders RelayProductPanel in its own column when `open && pinned` and the viewport allows pinning.
+ */
+export const useRelayProductOpen = (): Pick<
+  RelayPullRequestDockRegistry,
+  "draftAbout" | "launcher" | "open" | "openFrom" | "pinned" | "returnTo" | "setOpen" | "setPinned"
+> => {
+  const registry = useContext(RelayPullRequestDockContext)
+  if (registry === undefined) throw new RelayProductDockProviderMissing()
+  return {
+    draftAbout: registry.draftAbout,
+    launcher: registry.launcher,
+    open: registry.open,
+    openFrom: registry.openFrom,
+    pinned: registry.pinned,
+    returnTo: registry.returnTo,
+    setOpen: registry.setOpen,
+    setPinned: registry.setPinned
+  }
+}
+
+/** Two panels under one provider would both bind Ctrl/⌘+J, so a second one fails loudly. */
+export class RelayProductSummonClaimed extends Error {
+  readonly _tag = "RelayProductSummonClaimed"
+
+  constructor() {
+    super("Only one RelayProductPanel may be mounted per RelayProductDockProvider")
+  }
+}
+
+/** Claim Relay's keyboard summon for this provider; a second claim throws RelayProductSummonClaimed. */
+export const useSummonClaim = (): void => {
+  const registry = useContext(RelayPullRequestDockContext)
+  if (registry === undefined) throw new RelayProductDockProviderMissing()
+  const claims = registry.summonClaims
+  useEffect(() => {
+    claims.current += 1
+    if (claims.current > 1) {
+      claims.current -= 1
+      throw new RelayProductSummonClaimed()
+    }
+    return () => {
+      claims.current -= 1
+    }
+  }, [claims])
 }

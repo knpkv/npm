@@ -56,6 +56,7 @@ const cachedPullRequest = Schema.decodeSync(CachedPullRequest)({
   isApproved: 0,
   approvalUnknownReason: null,
   approvalBaselineKnown: 1,
+  approversUnknown: 0,
   observationSeq: 0,
   approvalVersion: "2026-08-02T00:00:00.000Z",
   approvalObservationSeq: 0,
@@ -777,7 +778,9 @@ describe("PRService.refreshSinglePR coordinates", () => {
         )
       )
 
-      expect(failure._tag).toBe("RefreshError")
+      // No cached row's durable account is the token's, so the account is unknown; what matters is that
+      // the profile alias that collides with it is never used to call the provider.
+      expect(failure._tag).toBe("AccountUnknown")
       expect(yield* Ref.get(providerCalls)).toBe(0)
     }))
 
@@ -956,4 +959,55 @@ describe("PRService.refreshSinglePR coordinates", () => {
       )
       expect(yield* Ref.get(upserted)).toBe("111122223333")
     }))
+
+  // QA-168: a PR URL for a switched-off account must say so, not fail as a generic refresh error.
+  describe("when no enabled account can read the route's account", () => {
+    const unread = (cached: ReadonlyArray<CachedPullRequest>) =>
+      Effect.gen(function*() {
+        const state = yield* SubscriptionRef.make<Domain.AppState>({ pullRequests: [], accounts: [], status: "idle" })
+        return yield* runWithLayer(
+          makeRefreshSinglePR(state)("111122223333", pullRequest.id, {
+            region: Domain.AwsRegion.make("eu-west-1"),
+            repositoryName: Domain.RepositoryName.make("payments")
+          }),
+          Layer.mergeAll(
+            Layer.mock(AwsClient, {}),
+            Layer.mock(PullRequestRepo, {
+              findByCoordinates: () => Effect.succeed(Option.none()),
+              findAll: () => Effect.succeed([...cached])
+            }),
+            Layer.mock(CommentRepo, {}),
+            Layer.mock(NotificationRepo, {}),
+            Layer.mock(SubscriptionRepo, {}),
+            Layer.mock(ConfigService, {
+              load: Effect.succeed({
+                ...config,
+                accounts: [{
+                  profile: Domain.AwsProfileName.make("production"),
+                  regions: [Domain.AwsRegion.make("eu-west-1")],
+                  enabled: false
+                }]
+              })
+            }),
+            Layer.mock(EventsHub, {})
+          )
+        ).pipe(Effect.flip)
+      })
+
+    it.effect("names the switched-off profile that owns it", () =>
+      Effect.gen(function*() {
+        // Another pull request of the same account is cached, which ties the account id to its profile.
+        const error = yield* unread([{ ...cachedPullRequest, id: Domain.PullRequestId.make("7") }])
+        expect(error._tag).toBe("AccountSwitchedOff")
+        expect(error.message).toBe(
+          "production is switched off, so this pull request can't be read. Switch it on in Settings → Accounts."
+        )
+      }))
+
+    it.effect("says the account is unknown when no profile is known to own it", () =>
+      Effect.gen(function*() {
+        const error = yield* unread([])
+        expect(error._tag).toBe("AccountUnknown")
+      }))
+  })
 })

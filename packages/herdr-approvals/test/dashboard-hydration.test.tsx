@@ -15,13 +15,11 @@ describe("host dashboard polls", () => {
   })
 
   it("polls nothing a host dashboard does not serve, and everything on the hub", () => {
-    expect(dashboardPolls({ chatEnabled: false, pushEnabled: false, workEnabled: false })).toEqual({
-      chat: false,
+    expect(dashboardPolls({ pushEnabled: false, workEnabled: false })).toEqual({
       push: false,
       work: false
     })
-    expect(dashboardPolls({ chatEnabled: true, pushEnabled: true, workEnabled: true })).toEqual({
-      chat: true,
+    expect(dashboardPolls({ pushEnabled: true, workEnabled: true })).toEqual({
       push: true,
       work: true
     })

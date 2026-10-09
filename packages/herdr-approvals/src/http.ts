@@ -12,6 +12,8 @@ import {
   AgentRelationshipStore,
   ConnectAgentCursor,
   fleetConnectAgents,
+  fleetLimits,
+  hubLimits,
   localConnectAgents,
   makeHerdrTerminalConnector,
   pageFleetConnectAgents,
@@ -21,12 +23,11 @@ import {
   TerminalSelection,
   TerminalServerSignal
 } from "@knpkv/herdr-connect"
-import type { ChatHistoryError } from "@knpkv/herdr-coordinator"
-import { ChatRequest, ChatStore, makeCoordinatorChat } from "@knpkv/herdr-coordinator"
 import type {
   FleetJobConflictError,
   FleetOperationUnavailableError,
   FleetService,
+  FleetStoreBusyError,
   FleetStoreError,
   FleetTransitionConflictError,
   HostConfiguration,
@@ -75,6 +76,7 @@ import {
   Cause,
   Clock,
   Crypto,
+  Duration,
   Effect,
   Equal,
   Exit,
@@ -91,6 +93,7 @@ import {
 } from "effect"
 import type { Redacted } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
+import { ChildProcessSpawner } from "effect/process"
 import type * as SemaphoreModule from "effect/Semaphore"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { createServer as createSecureServer } from "node:https"
@@ -115,6 +118,7 @@ import {
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { fontPreloadLink } from "./font-preload.js"
+import { readHostLimits, staleWhileRevalidate } from "./host-limits.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
@@ -240,7 +244,6 @@ export type UiAssets = {
 
 type ApiError =
   | ApprovalAppStoreError
-  | ChatHistoryError
   | ConnectPeerError
   | DashboardResponseBudgetError
   | FleetApprovalError
@@ -249,6 +252,7 @@ type ApiError =
   | FleetJobNotFoundError
   | FleetOperationError
   | FleetOperationUnavailableError
+  | FleetStoreBusyError
   | FleetStoreError
   | FleetTransitionConflictError
   | FleetValidationError
@@ -306,6 +310,7 @@ type PeerTarget = {
   readonly approvalUrl: string | null
   readonly pendingUrl: string | null
   readonly connectAgentsUrl: string | null
+  readonly limitsUrl: string | null
   readonly terminalUrl: string | null
 }
 
@@ -373,6 +378,7 @@ const apiError = (error: ApiError): ApiErrorResponse => {
         body: { error: error._tag, host: error.host, reason: error.reason }
       }
     case "FleetOperationError":
+    case "FleetStoreBusyError":
     case "TerminalTransportError":
       return { status: 503, body: { error: error._tag, detail: error.detail } }
     case "LanWorkCryptoError":
@@ -382,7 +388,6 @@ const apiError = (error: ApiError): ApiErrorResponse => {
     case "FleetStoreError":
       return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "ApprovalAppStoreError":
-    case "ChatHistoryError":
     case "WorkProjectionError":
       return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "WorkStoreError":
@@ -671,6 +676,9 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
       connectAgentsUrl: address === undefined
         ? null
         : `http://${address}:${config.port}/v1/connect/agents/local`,
+      limitsUrl: address === undefined
+        ? null
+        : `http://${address}:${config.port}/v1/connect/limits/local`,
       terminalUrl: address === undefined
         ? null
         : `ws://${address}:${config.port}/v1/connect/terminal`
@@ -1180,7 +1188,7 @@ const connectPage = (fontPreload: string): string =>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0b0d10">
 <title>Fleet connect</title>
@@ -1418,13 +1426,11 @@ export const makeRunner = Effect.fn("HostRunner.make")(function*(
     if (!accepting) return Promise.resolve(false)
     const run = serial.withPermits(1)(
       runJob(jobId).pipe(
-        Effect.tapError((error) =>
+        Effect.catch((error) =>
           Effect.logError("HostRunner.job_failed", error).pipe(
             Effect.annotateLogs({ jobId })
           )
-        ),
-        // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        Effect.ignore
+        )
       )
     )
     return runPromise(Effect.forkIn(run, scope)).then(() => true)
@@ -1496,6 +1502,20 @@ export const startHttpServer = async (
       () => activeRequestControllers.delete(controller)
     )
   }
+  // A read older than 30 seconds is refreshed in the background, so a peer answers the hub's
+  // 1.5-second fetch from its last read even while agent-usage is slow.
+  const spawner = await httpRuntime.runPromise(Effect.service(ChildProcessSpawner.ChildProcessSpawner))
+  // Background refreshes live in this scope; closing the server closes it before the runtime.
+  const limitsScope = await httpRuntime.runPromise(Scope.make())
+  finalizers.unshift(() => httpRuntime.runPromise(Scope.close(limitsScope, Exit.void)))
+  const { read: localLimits } = await httpRuntime.runPromise(
+    staleWhileRevalidate(
+      readHostLimits(config.host, config.agentUsageLimitsCommand).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+      ),
+      Duration.seconds(30)
+    ).pipe(Effect.provideService(Scope.Scope, limitsScope))
+  )
   const shutdown = async (): Promise<void> => {
     if (closed) return
     closed = true
@@ -1585,8 +1605,6 @@ export const startHttpServer = async (
     )
     finalizers.unshift(() => Promise.resolve().then(() => approvalStore.close()))
     const cryptoService = await httpRuntime.runPromise(Crypto.Crypto)
-    const chatStore = await httpRuntime.runPromise(ChatStore.open(statePath))
-    finalizers.unshift(() => Promise.resolve().then(() => chatStore.close()))
     const activityStore = await httpRuntime.runPromise(
       AgentActivityStore.open(statePath)
     )
@@ -1923,16 +1941,13 @@ export const startHttpServer = async (
       })
     }
     let lanWorkPairing: LanWorkPairing | null = null
-    const chat = await httpRuntime.runPromise(makeCoordinatorChat({
-      config,
-      fleet: service,
-      store: chatStore
-    }))
     const runJob = Effect.fn("HostRunner.runJob")(function*(jobId: string) {
       const record = yield* service.get(jobId)
       return yield* record.payload.kind === "agent.delegate" &&
           record.payload.channel === "coordinator_chat"
-        ? chat.run(jobId)
+        // The hub's chat is gone; a chat job queued before the upgrade still runs as a chat, not as
+        // an ordinary delegation, and its reply stays on its job record.
+        ? service.runCoordinatorChat(jobId)
         : service.run(jobId)
     })
     const runner = await Effect.runPromise(makeRunner(runJob))
@@ -2664,11 +2679,9 @@ export const startHttpServer = async (
                 approvalApp: {
                   canonical: mode === "serve",
                   canonicalUrl: config.approvalHub.url,
-                  chatEnabled: mode === "serve",
                   pushEnabled: mode === "serve",
                   workEnabled: listenerServesWork(mode, config.crossHost)
                 },
-                chat: null,
                 work: null,
                 status: state.status,
                 records: state.history.records,
@@ -3002,32 +3015,6 @@ export const startHttpServer = async (
           }
 
           if (
-            mode === "serve" &&
-            request.method === "GET" &&
-            url.pathname === "/v1/chat"
-          ) {
-            await respond(response, Effect.andThen(authorized, chat.history()))
-            return
-          }
-
-          if (
-            mode === "serve" &&
-            request.method === "POST" &&
-            url.pathname === "/v1/chat"
-          ) {
-            const effect = Effect.gen(function*() {
-              const who = yield* authorized
-              yield* sameOrigin(request, expectedOrigin())
-              const input = yield* readJson(request, ChatRequest)
-              const submitted = yield* chat.submit(input, who)
-              if (submitted.queued) yield* enqueueJob(submitted.jobId)
-              return submitted.entry
-            })
-            await respond(response, effect, 202)
-            return
-          }
-
-          if (
             approvalSurface &&
             request.method === "GET" &&
             url.pathname === "/v1/dashboard-pending"
@@ -3094,6 +3081,32 @@ export const startHttpServer = async (
                 ).pipe(
                   Effect.provideService(Crypto.Crypto, cryptoService)
                 )
+              )
+            )
+            return
+          }
+
+          // The hub's own question to a peer: only the approval hub's node may ask.
+          if (
+            mode === "tailnet" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/connect/limits/local"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(tailnetActor(request, config, [config.approvalHub.nodeId]), localLimits)
+            )
+            return
+          }
+
+          // Every listener that serves a dashboard serves its limits: on the hub every peer's read,
+          // anywhere else just this host's.
+          if (request.method === "GET" && url.pathname === "/v1/connect/limits") {
+            await respond(
+              response,
+              Effect.andThen(
+                authorized,
+                mode === "serve" ? hubLimits(localLimits, fleetPeers(config)) : fleetLimits(localLimits, [])
               )
             )
             return

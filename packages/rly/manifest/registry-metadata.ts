@@ -36,6 +36,56 @@ export const COMPONENT_REGISTRY_METADATA = {
     ],
     ["decide", "present"]
   ),
+  RelayMark: {
+    accessibility: [
+      "Decorative unless given a label; a labelled mark is an image with that name",
+      "Drawn in currentColor, so it follows its host's text in every theme and in forced colours"
+    ],
+    capabilities: ["present", "brand"],
+    purpose:
+      "Show Relay's mark, the baton, bare in the current colour (16, 20 default, 24 or 32px) or on an agent-coloured tile (20, 24 default or 32px)",
+    states: ["bare", "tile"]
+  },
+  RelayLauncher: {
+    accessibility: [
+      "A native button whose aria-expanded follows Relay being open",
+      "aria-keyshortcuts names the shortcut; the visible hint is hidden from assistive technology so it is heard once",
+      "32px tall, 44px for a coarse pointer, with the shared focus ring"
+    ],
+    capabilities: ["open", "agent"],
+    purpose: "Open and close Relay from the host's header, with its mark, a label and the Ctrl/⌘+J hint",
+    states: ["closed", "open"]
+  },
+  RelayPanel: registryMetadata(
+    "Frame Relay as a non-modal overlay, a pinned column or a full-screen dialog, with its header, tabs, freshness line, body and footer",
+    ["overlay", "pinned", "fullscreen"],
+    ["agent", "overlay"]
+  ),
+  RelayTranscript: registryMetadata(
+    "Show a Relay conversation: your turns, Relay's prose, tool activity with citations, run outcomes, and a polite announcer",
+    ["conversation", "streaming", "failed"],
+    ["agent", "present"]
+  ),
+  RelayComposer: registryMetadata(
+    "Write to Relay: an auto-growing message box with context refs, a run preset, send and stop, and drafts kept per object",
+    ["draft", "busy"],
+    ["agent", "write"]
+  ),
+  RelayDecision: registryMetadata(
+    "Ask before one Relay write: the action, its exact target and body, confirm or decline, and its outcome with a receipt",
+    ["pending", "confirmed", "done", "failed", "declined", "expired"],
+    ["agent", "decide"]
+  ),
+  RelaySetup: registryMetadata(
+    "Set up Relay in the panel: pick a ready agent from real backend status with one repair action each, pick a focus, then start",
+    ["checking", "unverified", "ready", "unavailable"],
+    ["agent", "configure"]
+  ),
+  RelayFindings: registryMetadata(
+    "Review Relay's findings: grouped by location, severity as icon, word and P-number, accept, dismiss or discuss, post accepted one confirmed call at a time, and say when the head moved",
+    ["pending", "accepted", "dismissed", "posting", "posted", "failed", "stale", "empty"],
+    ["agent", "review"]
+  ),
   // scaffold:registry-metadata:insert
   AgentContextButton: registryMetadata("Open an agent in the exact current entity or release context", [
     "complete"

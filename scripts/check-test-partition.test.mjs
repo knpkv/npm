@@ -22,7 +22,8 @@ const [packageText, workflowText] = await runtime.runPromise(
   })
 )
 const scripts = JSON.parse(packageText).scripts
-const jobs = parseDocument(workflowText).toJS().jobs
+const workflow = parseDocument(workflowText).toJS()
+const jobs = workflow.jobs
 
 test("local pnpm test still runs both partitions", () => {
   assert.equal(scripts.test, "pnpm test:unit && pnpm test:pack")
@@ -88,4 +89,9 @@ test("the Test check passes only when both partitions succeed", async () => {
   ]) {
     assert.notEqual(await aggregateExit(unit, pack), ChildProcessSpawner.ExitCode(0), `unit=${unit} pack=${pack}`)
   }
+})
+
+test("pull request runs supersede each other, but a push to main is never cancelled", () => {
+  assert.equal(workflow.concurrency.group, "${{ github.workflow }}-${{ github.ref }}")
+  assert.equal(workflow.concurrency["cancel-in-progress"], "${{ github.event_name == 'pull_request' }}")
 })

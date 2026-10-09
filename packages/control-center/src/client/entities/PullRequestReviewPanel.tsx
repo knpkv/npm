@@ -34,6 +34,7 @@ import type {
   ReviewSuggestionTarget
 } from "./usePullRequestReview.js"
 import styles from "./WorkspacePullRequestDetails.module.css"
+import { reviewCountsLabel } from "./reviewCounts.js"
 
 const unavailableMessage = (
   reason: Extract<PullRequestReviewControllerState, { readonly _tag: "ready" }>["review"] extends infer Review
@@ -392,7 +393,7 @@ const threadEventSummary = (event: PullRequestReviewThreadEvent): string | null 
     case "progress":
       return event.text
     case "review-report":
-      return `${String(event.report.suggestions.length)} suggestions · ${String(event.report.notes.length)} notes`
+      return reviewCountsLabel(event.report.suggestions.length, event.report.notes.length)
     case "suggestion-revised":
       return event.suggestionState === "dismissed"
         ? `Suggestion revision ${String(event.sequence)} · dismissed by operator`
@@ -889,7 +890,9 @@ export const PullRequestReviewPanel = ({
             <Button onClick={onCancelReview}>Cancel review</Button>
           </div>
         ) : null}
-        <code className={styles.reviewHead}>{review.subject.headRevision}</code>
+        <code className={styles.reviewHead} title={review.subject.headRevision}>
+          {review.subject.headRevision}
+        </code>
         <span aria-hidden="true" className={styles.reviewRunway} />
       </div>
     )

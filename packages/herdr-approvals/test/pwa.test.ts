@@ -44,12 +44,10 @@ describe("approval PWA", () => {
       approvalApp: {
         canonical: true,
         canonicalUrl: "https://ser8.example.test:4779/",
-        chatEnabled: false,
         pushEnabled: true,
         workEnabled: false
       },
       approvalsEnabled: true,
-      chat: null,
       directory: null,
       historyNextCursor: null,
       host: "SER8",

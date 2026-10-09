@@ -3,19 +3,20 @@ import { describe, expect, it, vi } from "@effect/vitest"
 import {
   connectAgentPageMaxRecords,
   FleetConnectAgentPage,
+  FleetLimits,
   terminalCommandMaxPayloadBytes,
   type TerminalConnector,
   terminalFrameMaxEncodedBytes,
   TerminalSelection,
   type TerminalSession
 } from "@knpkv/herdr-connect"
-import { ChatHistory, chatHistoryMaxEntries, ChatStore, type StoredChatTurn } from "@knpkv/herdr-coordinator"
+import { chatHistoryMaxEntries, ChatStore, type StoredChatTurn } from "@knpkv/herdr-coordinator"
 import {
   FleetAuthorizationError,
   FleetOperationError,
   fleetResponseBodyMaxBytes,
   type FleetService,
-  FleetStoreError,
+  FleetStoreBusyError,
   FleetValidationError,
   type HostConfiguration,
   type HostOperations,
@@ -499,12 +500,12 @@ esac
             approve: (jobId, approval, actor) => {
               if (failApproval) {
                 failApproval = false
-                // A store write that fails once: the approval proof must survive it so a retry succeeds.
+                // The job store is locked once: a retryable 503, and the approval proof must survive it so a retry succeeds.
                 return Effect.fail(
-                  new FleetStoreError({
+                  new FleetStoreBusyError({
                     cause: "transient test failure",
-                    detail: "approval store temporarily unavailable",
-                    operation: "test.approve"
+                    detail: "database is locked",
+                    operation: "transition"
                   })
                 )
               }
@@ -594,8 +595,11 @@ esac
               method: "POST"
             })
           )
-          expect(transientFailure.status).toBe(500)
-          yield* Effect.promise(() => transientFailure.text())
+          expect(transientFailure.status).toBe(503)
+          // Decoding fails the test unless the 503 names the retryable busy store.
+          yield* Schema.decodeUnknownEffect(
+            Schema.fromJsonString(Schema.Struct({ error: Schema.Literal("FleetStoreBusyError") }))
+          )(yield* Effect.promise(() => transientFailure.text()))
 
           const decided = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
@@ -1737,6 +1741,59 @@ esac
             error: "FleetOperationError",
             detail: "backend unavailable"
           })
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("serves this host's limits on its own listener and keeps the peer route off it", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-limits-"))
+    const report = {
+      v: 1,
+      machine: "ALPHA",
+      observedAt: 1_000,
+      latest: [{
+        agent: "claude",
+        machine: "ALPHA",
+        source: "claude-oauth-usage",
+        label: "*",
+        windowMinutes: null,
+        observedAt: 900,
+        reading: { _tag: "Unknown", reason: "Fetch" }
+      }]
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(
+                {
+                  ...config(root),
+                  agentUsageLimitsCommand: ["sh", "-c", "printf '%s' \"$1\"", "agent-usage", JSON.stringify(report)]
+                },
+                fleet,
+                assets,
+                { terminalConnector: unusedTerminal }
+              )
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits`))
+          expect(response.status).toBe(200)
+          const body = Schema.decodeUnknownSync(FleetLimits)(yield* Effect.promise(() => response.json()))
+          expect(body.failures).toEqual([])
+          expect(body.hosts.map(({ host, reading }) => [host, reading])).toEqual([
+            ["ALPHA", { _tag: "Read", limits: report, skipped: 0 }]
+          ])
+          // Only a peer's tailnet listener answers the hub's per-host question.
+          expect((yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits/local`))).status).toBe(404)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {
@@ -3434,13 +3491,8 @@ esac
           const chatResponse = yield* Effect.promise(() =>
             secureRequestBody(`${server.serveUrl}/v1/chat`, requestHeaders)
           )
-          expect(chatResponse.status).toBe(200)
-          expect(Buffer.byteLength(chatResponse.body)).toBeLessThanOrEqual(
-            fleetResponseBodyMaxBytes
-          )
-          expect(
-            Schema.decodeUnknownSync(ChatHistory)(JSON.parse(chatResponse.body)).entries
-          ).toHaveLength(chatHistoryMaxEntries)
+          // The coordinator chat is gone from the hub: its route no longer exists.
+          expect(chatResponse.status).toBe(404)
           const agentIds: Array<string> = []
           let agentCursor: (typeof FleetConnectAgentPage.Type)["nextCursor"] = null
           do {

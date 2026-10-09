@@ -1,0 +1,18 @@
+id: no-throw-in-effect-generator
+snapshots:
+  ? |
+    const program = Effect.gen(function* () {
+      throw new ParseFailure({ input })
+    })
+  : labels:
+      - source: throw new ParseFailure({ input })
+        style: primary
+        start: 44
+        end: 77
+      - source: |-
+          Effect.gen(function* () {
+            throw new ParseFailure({ input })
+          })
+        style: secondary
+        start: 16
+        end: 80

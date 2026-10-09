@@ -31,6 +31,7 @@ import type {
   OwnershipResult,
   PromoteWithheldRequest,
   ReadProgress,
+  Sources,
   StandingPayload,
   StandingResult,
   UpdateSavedEntryRequest,
@@ -100,6 +101,9 @@ export const bootstrapSession = async (): Promise<void> => {
     headers: { authorization: `Bearer ${token}` },
     method: "POST"
   }, async (response) => {
+    // A spent or expired link is not a sign-out: the cookie from an earlier link may still be valid,
+    // and the next request says so either way.
+    if (response.status === 401) return
     if (!response.ok) throw await failureFrom(response)
     const { decodeBootstrap } = await import("./decoding.js")
     const body = await decodeBootstrap(await response.json())
@@ -240,6 +244,15 @@ export const readWeekStream = async (
     await reader.cancel()
     reader.releaseLock()
   }
+}
+
+/** Which systems are connected, and the command for each that is not. Fails with 401 when signed out. */
+export const readSources = async (signal: AbortSignal): Promise<Sources> => {
+  const { request } = await import("./transport.js")
+  return request("/api/config/sources", { method: "GET", signal }, async (response) => {
+    if (!response.ok) throw await failureFrom(response)
+    return (await import("./decoding.js")).decodeSources(await response.json())
+  })
 }
 
 /** Read only the cached view; absent evidence is explicit and never launches an agent. */

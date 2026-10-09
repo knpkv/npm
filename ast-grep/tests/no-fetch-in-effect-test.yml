@@ -1,0 +1,19 @@
+id: no-fetch-in-effect
+valid:
+  - |
+    const load = HttpClient.get(url)
+  - |
+    const read = Effect.tryPromise(() => file.text())
+invalid:
+  - |
+    const load = Effect.tryPromise(() => fetch(url))
+  - |
+    const load = Effect.tryPromise({ try: () => fetch(url), catch: (cause) => new LoadError({ cause }) })
+  - |
+    const load = Effect.tryPromise({
+      try: async () => {
+        const response = await fetch(url)
+        return response.json()
+      },
+      catch: (cause) => new LoadError({ cause })
+    })

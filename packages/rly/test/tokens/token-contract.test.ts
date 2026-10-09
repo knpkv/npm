@@ -3,10 +3,11 @@ import { contrastRatio, measureContrastPairs } from "../../scripts/tokens/contra
 import { renderTokenContract, renderTokenCss } from "../../scripts/tokens/token-contract.js"
 import { colorTokenSource, contrastPairSource } from "../../src/tokens/colors.js"
 import { controlHeightTokenSource } from "../../src/tokens/control.js"
-import { motionTokenSource } from "../../src/tokens/motion.js"
+import { easingTokenSource, motionTokenSource } from "../../src/tokens/motion.js"
 import {
   RLY_COLOR_TOKEN_NAMES,
   RLY_CONTROL_HEIGHT_TOKEN_NAMES,
+  RLY_EASING_TOKEN_NAMES,
   RLY_MOTION_TOKEN_NAMES,
   RLY_RADIUS_TOKEN_NAMES,
   RLY_SPACE_TOKEN_NAMES,
@@ -27,6 +28,7 @@ describe("semantic token contract", () => {
     expect(RLY_RADIUS_TOKEN_NAMES).toEqual(radiusTokenSource.map(({ name }) => name))
     expect(RLY_TYPE_TOKEN_NAMES).toEqual(typeTokenSource.map(({ name }) => name))
     expect(RLY_MOTION_TOKEN_NAMES).toEqual(motionTokenSource.map(({ name }) => name))
+    expect(RLY_EASING_TOKEN_NAMES).toEqual(easingTokenSource.map(({ name }) => name))
     expect(RLY_CONTROL_HEIGHT_TOKEN_NAMES).toEqual(controlHeightTokenSource.map(({ name }) => name))
   })
 
@@ -82,18 +84,26 @@ describe("semantic token contract", () => {
     ).toBe(true)
   })
 
-  it("keeps the approved motion rhythm and easing curve exact", () => {
+  it("keeps the approved motion rhythm, capped at 300ms, and its two easing curves exact", () => {
     expect(motionTokenSource.map(({ duration, easing, name }) => ({ duration, easing, name }))).toEqual([
       { duration: "90ms", easing: "cubic-bezier(.2, .8, .2, 1)", name: "fast" },
       { duration: "160ms", easing: "cubic-bezier(.2, .8, .2, 1)", name: "standard" },
       { duration: "240ms", easing: "cubic-bezier(.2, .8, .2, 1)", name: "deliberate" },
-      { duration: "360ms", easing: "cubic-bezier(.2, .8, .2, 1)", name: "slow" }
+      { duration: "300ms", easing: "cubic-bezier(.2, .8, .2, 1)", name: "slow" }
     ])
+    expect(easingTokenSource).toEqual([
+      { name: "out", value: "cubic-bezier(.2, .8, .2, 1)" },
+      { name: "in-out", value: "cubic-bezier(.65, 0, .35, 1)" }
+    ])
+    const css = renderTokenCss()
+    expect(css).toContain("--rly-easing-out: cubic-bezier(.2, .8, .2, 1);")
+    expect(css).toContain("--rly-easing-in-out: cubic-bezier(.65, 0, .35, 1);")
   })
 
   it("emits one central light-dark, forced-color, and reduced-motion layer", () => {
     const css = renderTokenCss()
-    expect(css.match(/light-dark\(/g)).toHaveLength(colorTokenSource.length * 2)
+    // Declared once on :root; a themed subtree only switches color-scheme.
+    expect(css.match(/light-dark\(/g)).toHaveLength(colorTokenSource.length)
     expect(css).toContain("[data-theme=\"light\"]")
     expect(css).toContain("@media (forced-colors: active)")
     expect(css).toContain("[data-forced-colors=\"active\"]")

@@ -467,8 +467,7 @@ const verifyProcessOwnership = Effect.fn("ControlCenterCli.verifyProcessOwnershi
         yield* Effect.addFinalizer(() =>
           fileSystem.remove(probePath, { force: true }).pipe(
             Effect.andThen(directory.sync),
-            // ast-grep-ignore: no-silent-ignore -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-            Effect.ignore
+            Effect.ignore({ log: "Warn", message: "Could not remove the data-root owner probe" })
           )
         )
         yield* mapConfigurationError(fileSystem.chmod(probePath, DATA_ROOT_MARKER_MODE))

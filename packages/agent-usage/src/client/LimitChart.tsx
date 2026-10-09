@@ -11,7 +11,7 @@ import type { LimitReading, UnknownReason } from "../core/Model.js"
 import type { LimitSeries } from "../shared/contracts.js"
 import { PLOT, timeAxis, timeTicks } from "./axis.js"
 import { readingAt } from "./chartModel.js"
-import { describeReason, formatInstant, formatPercent, formatShortInstant } from "./format.js"
+import { describeReason, formatInstant, formatPercent, formatShortInstant } from "../limits/format.js"
 import {
   describeUnknown,
   fullWindowName,
@@ -20,7 +20,7 @@ import {
   type LimitSegment,
   limitSegments,
   NEAR_PERCENT
-} from "./limitsModel.js"
+} from "../limits/model.js"
 import type { ViewRange } from "./range.js"
 import { useDismissOnEscape, useTooltipPlacement } from "./useTooltipPlacement.js"
 import { useWidth } from "./useWidth.js"
