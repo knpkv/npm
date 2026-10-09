@@ -3306,6 +3306,13 @@
       "reasoned": false
     },
     {
+      "package": "relay",
+      "kind": "ast-grep",
+      "file": "packages/relay/src/libsqlDatabase.ts",
+      "text": "ast-grep-ignore: no-type-assertion",
+      "reasoned": true
+    },
+    {
       "package": "review",
       "kind": "typescript",
       "file": "packages/review/test/export-guide.test.ts",

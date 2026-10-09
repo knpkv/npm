@@ -8,8 +8,10 @@ catalog:
 
 allowBuilds:
   "@ast-grep/cli": true
+  "@google/genai": false
   esbuild: false
   msgpackr-extract: false
+  protobufjs: false
   unrs-resolver: false
 
 overrides:

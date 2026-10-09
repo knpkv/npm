@@ -650,6 +650,14 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 | [packages/jira-clockify/test/TimerService.test.ts](../packages/jira-clockify/test/TimerService.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | yes |
 | [packages/jira-clockify/test/writerGuard.test.ts](../packages/jira-clockify/test/writerGuard.test.ts) | effect-diagnostics | `@effect-diagnostics strictEffectProvide:off` | **missing** |
 
+## relay
+
+1 directives (ast-grep 1), 0 without a reason.
+
+| File | Kind | Directive | Reason |
+| --- | --- | --- | --- |
+| [packages/relay/src/libsqlDatabase.ts](../packages/relay/src/libsqlDatabase.ts) | ast-grep | `ast-grep-ignore: no-type-assertion` | yes |
+
 ## review
 
 3 directives (typescript 3), 0 without a reason.
