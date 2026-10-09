@@ -148,9 +148,13 @@ export const acquire = (options: { readonly intervalSeconds: number }) =>
     // no interruptible work before returning the lease to the caller that installs its finalizer.
     const previous = yield* fs.readFileString(cursorFile).pipe(
       Effect.map(decodeLease),
-      // No cursor yet is the first run; any other read failure starts from now, which is logged.
+      // No cursor yet is the first run. Any other read failure loses the resume point, so it warns and starts from now.
       Effect.catch((error) =>
-        Effect.logDebug(`No readable watch cursor at ${cursorFile}`, error).pipe(Effect.as(Option.none<Lease>()))
+        (error.reason._tag === "NotFound"
+          ? Effect.logDebug(`No watch cursor at ${cursorFile} yet`)
+          : Effect.logWarning(`Could not read the watch cursor at ${cursorFile}; resuming from now`, error)).pipe(
+            Effect.as(Option.none<Lease>())
+          )
       )
     )
     const resumeFromMs = Option.match(previous, {
@@ -184,9 +188,14 @@ export const acquire = (options: { readonly intervalSeconds: number }) =>
 
     const existing = yield* fs.readFileString(file).pipe(
       Effect.map(decodeLease),
-      // Unreadable or malformed is not evidence that anybody holds it.
+      // Unreadable or malformed is not evidence that anybody holds it. Gone since the create is a race with its
+      // removal; any other read failure is unexpected and warns.
       Effect.catch((error) =>
-        Effect.logDebug(`No readable watch lease at ${file}`, error).pipe(Effect.as(Option.none<Lease>()))
+        (error.reason._tag === "NotFound"
+          ? Effect.logDebug(`The watch lease at ${file} was removed while reading it`)
+          : Effect.logWarning(`Could not read the watch lease at ${file}`, error)).pipe(
+            Effect.as(Option.none<Lease>())
+          )
       )
     )
     const held = Option.getOrUndefined(existing)

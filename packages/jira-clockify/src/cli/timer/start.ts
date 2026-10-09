@@ -4,7 +4,7 @@
  * @module
  */
 import { ClockifyApiClient, type Project } from "@knpkv/clockify-api-client"
-import { Clock, Console, Effect, Option, SubscriptionRef } from "effect"
+import { Cause, Clock, Console, Effect, Option, SubscriptionRef } from "effect"
 import { Argument as Args, Command, Flag as Options, Prompt } from "effect/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
@@ -131,13 +131,17 @@ export const start = Command.make(
             value: t.key
           }))
         }).pipe(
-          Effect.catch((error) =>
-            Effect.logDebug("Ticket selection ended without a choice", error).pipe(Effect.as(noSelectedKey()))
-          )
+          // Input ending (Ctrl+C, end of input) is the user cancelling; a terminal error still fails the command.
+          Effect.catchIf(Cause.isDone, () =>
+            Effect.logDebug("Ticket selection ended without a choice").pipe(Effect.as(noSelectedKey())))
         )
 
-        if (!selectedKey) return
-        const found = allTickets.find((t) => t.key === selectedKey)
+        if (selectedKey === null) {
+          return
+        }
+        const found = allTickets.find((t) =>
+          t.key === selectedKey
+        )
         if (!found) return
         ticket = found
       } else {

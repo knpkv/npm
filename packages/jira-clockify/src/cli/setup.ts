@@ -124,7 +124,7 @@ export const launchTui = (args: ReadonlyArray<string>) =>
       const thisDir = yield* path.fromFileUrl(new URL(".", import.meta.url))
       const scriptPath = path.join(thisDir, "../bin.js")
       const cliArgs = args.slice(2)
-      yield* exitCode(ChildProcess.make("bun", [scriptPath, ...cliArgs], {
+      const code = yield* exitCode(ChildProcess.make("bun", [scriptPath, ...cliArgs], {
         stdin: "inherit",
         stdout: "inherit",
         stderr: "inherit"
@@ -133,6 +133,10 @@ export const launchTui = (args: ReadonlyArray<string>) =>
           new CommandFailed({ message: `Could not start the terminal UI with bun. Run it directly: bun ${scriptPath}` })
         )
       )
+      // The terminal UI prints its own error; jcf passes its failure on instead of exiting 0.
+      if (code !== 0) {
+        return yield* new CommandFailed({ message: `The terminal UI exited with code ${code}.` })
+      }
     }
   })
 
