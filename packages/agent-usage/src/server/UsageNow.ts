@@ -10,6 +10,8 @@
  *   with the same zone answer with the same period keys.
  * - **Bounded.** A month of five-minute limit polls is thousands of points per series; each series
  *   keeps at most {@link MAX_LIMIT_POINTS}, the highest reading per slice, so a peak is never lost.
+ *   The price: an Unknown run shorter than a slice that shares it with a Known reading disappears
+ *   (about 90 minutes at 30 days, 3 at 24 hours), so a brief failed poll may not show as a gap.
  *
  * @module
  */

@@ -53,9 +53,20 @@ export const describeUsageFailure = (failure: UsageFailure): string => {
     case "UsageNotSupported":
       return "the running agent-usage is an older version without usage. Restart it (or its service) on the installed version."
     case "UsageRequestRefused":
-      return `the running agent-usage does not know the time zone ${
-        JSON.stringify(failure.timeZone)
-      }. Pass an IANA zone such as Europe/Amsterdam.`
+      switch (failure.refused) {
+        case "time zone":
+          return `the running agent-usage does not know the time zone ${
+            JSON.stringify(failure.timeZone)
+          }. Pass an IANA zone such as Europe/Amsterdam.`
+        case "range":
+          return `the running agent-usage does not offer the range ${
+            JSON.stringify(failure.preset)
+          }. Restart it (or its service) on the installed version.`
+        case "malformed":
+          return `the usage request was malformed (time zone ${
+            JSON.stringify(failure.timeZone)
+          }). Pass one IANA zone, such as Europe/Amsterdam.`
+      }
     case "UsageUnavailable":
       return "the running agent-usage could not read its store; its log says why."
     case "UsageReplyInvalid":

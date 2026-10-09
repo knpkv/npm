@@ -4,7 +4,7 @@ import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Ref, Scope } fr
 import * as Reactivity from "effect/reactivity/Reactivity"
 import { TestClock } from "effect/testing"
 import { spawn } from "node:child_process"
-import { createServer, type Server } from "node:net"
+import { createConnection, createServer, type Server } from "node:net"
 import { UnknownTimeZone } from "../src/core/Report.js"
 import {
   type ControlReaders,
@@ -63,6 +63,19 @@ const fakeServer = (socketPath: string, reply: string | undefined, accepted?: De
       })
     ),
     (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
+  )
+
+/** Sends one raw line to the socket at `socketPath` and answers the reply line, trimmed. */
+const rawExchange = (socketPath: string, line: string) =>
+  Effect.promise(() =>
+    new Promise<string>((resolve) => {
+      let reply = ""
+      const connection = createConnection(socketPath, () => connection.write(`${line}\n`))
+      connection.on("data", (chunk) => {
+        reply += chunk.toString()
+      })
+      connection.on("close", () => resolve(reply.trim()))
+    })
   )
 
 const codeOf = (url: string): string => decodeURIComponent(url.split("#bootstrap_token=")[1] ?? "")
@@ -147,6 +160,31 @@ describe("control socket", () => {
           usage: () => Effect.fail("store unreadable")
         })
         expect(yield* Effect.flip(requestUsage(failing, self, "7d", "UTC"))).toBeInstanceOf(UsageUnavailable)
+      }))
+
+    // A malformed `usage` line is the asker's mistake, not an old server: it must never read "older version".
+    it.effect("refuses a malformed usage line by what is wrong with it, never as an unknown request", () =>
+      Effect.gen(function*() {
+        const path = yield* Path.Path
+        const directory = yield* store
+        const secrets = yield* makeOwnerSession(origin)
+        yield* controlSocket(directory, secrets, Effect.void, {
+          ...unasked,
+          usage: (_, timeZone) => Effect.fail(new UnknownTimeZone({ zone: timeZone }))
+        })
+        const socketPath = path.join(directory, "serve.sock")
+        expect(yield* rawExchange(socketPath, "usage 7d")).toBe("{\"error\":\"bad request\"}")
+        expect(yield* rawExchange(socketPath, "usage 7d UTC extra")).toBe("{\"error\":\"bad request\"}")
+        expect(yield* rawExchange(socketPath, "usage 1y UTC")).toBe("{\"error\":\"unknown range\"}")
+        expect(yield* rawExchange(socketPath, "usage 7d Mars/Olympus")).toBe("{\"error\":\"unknown time zone\"}")
+        // The client never sends an empty or spaced zone, and says which part it refused.
+        const empty = yield* Effect.flip(requestUsage(directory, self, "7d", ""))
+        expect(empty).toBeInstanceOf(UsageRequestRefused)
+        expect(empty).toMatchObject({ refused: "malformed" })
+        expect(yield* Effect.flip(requestUsage(directory, self, "7d", "Mars/Olympus"))).toMatchObject({
+          _tag: "UsageRequestRefused",
+          refused: "time zone"
+        })
       }))
 
     it.effect("tells a server too old for usage from one answering nonsense", () =>
