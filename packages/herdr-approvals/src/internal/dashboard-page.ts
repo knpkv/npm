@@ -40,10 +40,11 @@ export const dashboardPage = (snapshot: DashboardSnapshot, fontPreload: string):
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#111418">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Approvals">
-<title>${dashboardDocumentTitle(snapshot.host)}</title>
+<meta name="apple-mobile-web-app-title" content="Relay">
+<title>${dashboardDocumentTitle(snapshot)}</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/assets/approval-icon.svg" type="image/svg+xml">
+<link rel="icon" href="/assets/relay-icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/relay-apple-touch-180.png">
 ${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark">

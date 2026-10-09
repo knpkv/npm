@@ -144,9 +144,12 @@ const pendingRecord = (host: string, index: number): JobRecord => ({
   updatedAt: index + 1
 })
 
+const relayPng = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+
 const assets = {
   connectScript: "",
   fonts: new Map<string, Uint8Array>(),
+  icons: new Map([["relay-192.png", relayPng]]),
   script: "",
   stylesheet: "",
   worker: ""
@@ -1506,12 +1509,17 @@ esac
 
   it("escapes configured hosts in the dashboard document title", () => {
     const host = "SER8</title><script data-xss=\"true\">alert(1)</script>"
-    const title = dashboardDocumentTitle(host)
+    const title = dashboardDocumentTitle({ approvalApp: { canonical: false }, host })
     expect(title).not.toContain("<script")
     expect(title).not.toContain(host)
     expect(title).toBe(
-      "Host activity on SER8&lt;/title&gt;&lt;script data-xss=&quot;true&quot;&gt;alert(1)&lt;/script&gt;"
+      "SER8&lt;/title&gt;&lt;script data-xss=&quot;true&quot;&gt;alert(1)&lt;/script&gt; on Relay"
     )
+  })
+
+  it("titles the hub Relay and a host's own page after the host", () => {
+    expect(dashboardDocumentTitle({ approvalApp: { canonical: true }, host: "ser8" })).toBe("Relay")
+    expect(dashboardDocumentTitle({ approvalApp: { canonical: false }, host: "ser8" })).toBe("ser8 on Relay")
   })
 
   it.effect("refuses an oversized dashboard when no history remains to page", () =>
@@ -1741,6 +1749,46 @@ esac
             error: "FleetOperationError",
             detail: "backend unavailable"
           })
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("serves the Relay manifest and icons, and the old icon path for earlier installs", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-relay-icons-"))
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() => startHttpServer(config(root), fleet, assets, { terminalConnector: unusedTerminal })),
+            (running) => Effect.promise(running.close)
+          )
+          const get = (path: string) => Effect.promise(() => fetch(`${server.url}${path}`))
+          const manifest = yield* get("/manifest.webmanifest")
+          expect(manifest.headers.get("content-type")).toBe("application/manifest+json; charset=utf-8")
+          expect(yield* Effect.promise(() => manifest.json())).toMatchObject({
+            id: "/",
+            name: "Relay",
+            scope: "/",
+            short_name: "Relay",
+            start_url: "/"
+          })
+          const png = yield* get("/assets/relay-192.png")
+          expect(png.headers.get("content-type")).toBe("image/png")
+          expect(new Uint8Array(yield* Effect.promise(() => png.arrayBuffer()))).toEqual(relayPng)
+          const text = (path: string) =>
+            get(path).pipe(Effect.flatMap((response) => Effect.promise(() => response.text())))
+          const svg = yield* text("/assets/relay-icon.svg")
+          const legacy = yield* text("/assets/approval-icon.svg")
+          expect(svg).toContain("<title>Relay</title>")
+          expect(legacy).toBe(svg)
+          expect((yield* get("/assets/relay-unknown.png")).status).toBe(404)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {

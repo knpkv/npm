@@ -1,4 +1,5 @@
 import { build } from "esbuild"
+import { copyFile, readdir } from "node:fs/promises"
 import { BROWSER_TARGET } from "../../../browser-target.ts"
 
 const common = {
@@ -40,3 +41,8 @@ await Promise.all([
     outdir: "dist"
   })
 ])
+
+// The PNG icons are committed (CI has no rasteriser; see scripts/render-icons.ts) and served from dist.
+for (const name of await readdir("icons")) {
+  if (name.endsWith(".png")) await copyFile(`icons/${name}`, `dist/${name}`)
+}

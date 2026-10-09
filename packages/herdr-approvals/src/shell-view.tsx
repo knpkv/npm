@@ -1,4 +1,5 @@
 import { PortalProvider } from "@knpkv/rly/foundations"
+import { RelayMark } from "@knpkv/rly/patterns"
 import { Button, Dialog, StatePanel, Tabs, Text, type RlyTabItem } from "@knpkv/rly/primitives"
 import { Cause, Option, Predicate } from "effect"
 import type * as AsyncResult from "effect/reactivity/AsyncResult"
@@ -386,15 +387,9 @@ export const FleetShell = ({
       <div className="fleet-shell" ref={shellRef}>
         <header className="fleet-shell-masthead">
           <div className="fleet-shell-brand">
-            <span aria-hidden="true" className="fleet-shell-mark">
-              H
-            </span>
-            {/* One line: the name, then what it is. */}
+            <RelayMark.Tile className="fleet-shell-mark" size={32} />
             <Text as="strong" variant="label">
-              Herdr
-            </Text>
-            <Text tone="secondary" variant="meta">
-              Fleet control
+              Relay
             </Text>
           </div>
           <div className="fleet-shell-meta">
@@ -416,7 +411,7 @@ export const FleetShell = ({
         <main className="fleet-shell-main">
           {notice}
           <Tabs
-            aria-label="Fleet applications"
+            aria-label="Relay applications"
             data-mobile-layout="single-row"
             items={items}
             onValueChange={selectTab}

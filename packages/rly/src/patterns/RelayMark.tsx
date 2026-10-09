@@ -23,6 +23,32 @@ export const RLY_RELAY_MARK_ACTIVITIES: readonly ["idle", "working", "attention"
 /** One activity the mark can show. */
 export type RlyRelayMarkActivity = (typeof RLY_RELAY_MARK_ACTIVITIES)[number]
 
+/** The mark's geometry, as {@link RLY_RELAY_MARK_GLYPH} gives it. */
+export interface RlyRelayMarkGlyph {
+  readonly viewBox: "0 0 24 24"
+  readonly strokeWidth: 2.75
+  readonly paths: {
+    readonly hookStart: "M4 20V9.5A5.5 5.5 0 0 1 9.5 4H13"
+    readonly hookEnd: "M20 4v10.5a5.5 5.5 0 0 1-5.5 5.5H11"
+    readonly baton: "M10 14 14 10"
+  }
+}
+
+/**
+ * The mark's geometry: two open hooks and the baton between them, stroked round on a 24 grid. A host
+ * that draws Relay outside React (an app icon, a notification badge) builds it from this, so it can't
+ * drift from the component.
+ */
+export const RLY_RELAY_MARK_GLYPH: RlyRelayMarkGlyph = {
+  viewBox: "0 0 24 24",
+  strokeWidth: 2.75,
+  paths: {
+    hookStart: "M4 20V9.5A5.5 5.5 0 0 1 9.5 4H13",
+    hookEnd: "M20 4v10.5a5.5 5.5 0 0 1-5.5 5.5H11",
+    baton: "M10 14 14 10"
+  }
+}
+
 type MarkBaseProps = Omit<ComponentPropsWithRef<"svg">, "children" | "height" | "viewBox" | "width">
 
 /** Motion shared by the bare mark and the tile; every movement waits for the reader's motion preference. */
@@ -98,13 +124,13 @@ const Glyph = ({
     stroke="currentColor"
     strokeLinecap="round"
     strokeLinejoin="round"
-    strokeWidth={2.75}
-    viewBox="0 0 24 24"
+    strokeWidth={RLY_RELAY_MARK_GLYPH.strokeWidth}
+    viewBox={RLY_RELAY_MARK_GLYPH.viewBox}
     width={size}
   >
-    <path className={style("hookStart")} d="M4 20V9.5A5.5 5.5 0 0 1 9.5 4H13" />
-    <path className={style("hookEnd")} d="M20 4v10.5a5.5 5.5 0 0 1-5.5 5.5H11" />
-    <path className={style("baton")} d="M10 14 14 10" />
+    <path className={style("hookStart")} d={RLY_RELAY_MARK_GLYPH.paths.hookStart} />
+    <path className={style("hookEnd")} d={RLY_RELAY_MARK_GLYPH.paths.hookEnd} />
+    <path className={style("baton")} d={RLY_RELAY_MARK_GLYPH.paths.baton} />
   </svg>
 )
 

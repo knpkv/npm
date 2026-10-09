@@ -68,6 +68,16 @@ describe("shared fleet shell", () => {
     expect(notice).toBeLessThan(markup.indexOf('role="tablist"'))
   })
 
+  it("brands the masthead Relay, with its mark beside the name and the tabs named after it", () => {
+    const markup = renderToStaticMarkup(<FleetShell approvals={null} connect={null} hostCount={1} work={null} />)
+    const masthead = markup.slice(markup.indexOf("fleet-shell-masthead"), markup.indexOf("</header>"))
+    expect(masthead).toMatch(/<strong[^>]*>Relay<\/strong>/)
+    // The name is in words, so the mark is decorative.
+    expect(masthead).toMatch(/<span[^>]*aria-hidden="true"[^>]*fleet-shell-mark/)
+    expect(masthead).not.toContain("Herdr")
+    expect(markup).toContain('aria-label="Relay applications"')
+  })
+
   it("acts on no single bare key: 1, 2, 3 and / do nothing", () => {
     for (const key of ["1", "2", "3", "/", "a", "c", "w"]) expect(press(key)).toEqual({ prefix: null, shortcut: null })
   })

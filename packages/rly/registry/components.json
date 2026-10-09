@@ -4070,6 +4070,10 @@
         },
         {
           "kind": "value",
+          "name": "RLY_RELAY_MARK_GLYPH"
+        },
+        {
+          "kind": "value",
           "name": "RLY_RELAY_MARK_SIZES"
         },
         {
@@ -4079,6 +4083,10 @@
         {
           "kind": "type",
           "name": "RlyRelayMarkActivity"
+        },
+        {
+          "kind": "type",
+          "name": "RlyRelayMarkGlyph"
         },
         {
           "kind": "type",

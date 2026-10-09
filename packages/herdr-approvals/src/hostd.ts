@@ -7,6 +7,7 @@ import { fleetConfigPath } from "./internal/config-path.js"
 import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-job.js"
 import { noStartedWorkerStore, startedWorker } from "./internal/started-worker.js"
 import { makeHostOperations } from "./operations.js"
+import { relayIconAssets } from "./relay-icon.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
 export { runWorkAbandon } from "./work-abandon.js"
@@ -58,9 +59,17 @@ const loadUiAssets = Effect.fn("Hostd.loadUiAssets")(function*(directory: string
         Effect.map((contents): readonly [string, Uint8Array] => [name, contents])
       )
   )
+  const icons = yield* Effect.forEach(
+    relayIconAssets,
+    ({ file }) =>
+      fileSystem.readFile(paths.join(directory, file)).pipe(
+        Effect.map((contents): readonly [string, Uint8Array] => [file, contents])
+      )
+  )
   return {
     connectScript: yield* fileSystem.readFileString(paths.join(directory, "connect.js")),
     fonts: new Map(fonts),
+    icons: new Map(icons),
     script: yield* fileSystem.readFileString(paths.join(directory, "approval.js")),
     stylesheet,
     worker: yield* fileSystem.readFileString(paths.join(directory, "approval-sw.js"))
