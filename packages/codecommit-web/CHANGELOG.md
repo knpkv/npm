@@ -1,5 +1,27 @@
 # @knpkv/codecommit-web
 
+## 0.28.0
+
+### Minor Changes
+
+- [#613](https://github.com/knpkv/npm/pull/613) [`faddacc`](https://github.com/knpkv/npm/commit/faddacc829272ec3b580af00ee6e581294be76e7) Thanks [@konopkov](https://github.com/konopkov)! - A pull request URL for a switched-off account no longer spins on "Loading pull request" while every refresh returns 500. `refreshSinglePR` fails with `AccountSwitchedOff` (naming the profile) when a disabled profile owns the account, or with `AccountUnknown` when no profile is known to; the web API answers those with 409 and 404. The page says why it can't read the pull request, links to Settings → Accounts when that fixes it, and offers Try again for any other failure.
+
+### Patch Changes
+
+- [#682](https://github.com/knpkv/npm/pull/682) [`e2f406b`](https://github.com/knpkv/npm/commit/e2f406bc0e3941cc4d349aba844ec04822e82585) Thanks [@konopkov](https://github.com/konopkov)! - Settings → Audit: at narrow widths the action buttons wrap instead of the View Audit Log label spilling past its button.
+
+- [#669](https://github.com/knpkv/npm/pull/669) [`fcbd310`](https://github.com/knpkv/npm/commit/fcbd310bc0de959847246d1d7b3b93fa944c6cd3) Thanks [@konopkov](https://github.com/konopkov)! - Nav labels no longer spill out of their pills at 320px; the row scrolls instead. Hover highlights apply only on devices that hover, so a tap no longer leaves a row or button highlighted.
+
+- [#671](https://github.com/knpkv/npm/pull/671) [`28e5c8c`](https://github.com/knpkv/npm/commit/28e5c8ca02373f7b6cdcc9af4a25380e97ddb8fe) Thanks [@konopkov](https://github.com/konopkov)! - Small controls (filter chips, approver add/remove, the findings drawer's close, nav pills) get a 44px touch target without changing how they look, and buttons give press feedback.
+
+- [#674](https://github.com/knpkv/npm/pull/674) [`3be1bf6`](https://github.com/knpkv/npm/commit/3be1bf63e9b6e933ba38063ebd23e6e84e0c4d22) Thanks [@konopkov](https://github.com/konopkov)! - Pages and the review workbench size to the phone's small viewport (`svh`), so they no longer run under the browser's toolbar; clipped boxes use `overflow: clip`.
+
+- [#675](https://github.com/knpkv/npm/pull/675) [`6016906`](https://github.com/knpkv/npm/commit/60169060a04688084c7e47ebec4b28d538be9811) Thanks [@konopkov](https://github.com/konopkov)! - Motion in the review workbench, settings and the rolling status line is opt-in (only with no reduced-motion preference) and uses Relay's motion tokens, so the status line eases in 240ms instead of 350–400ms.
+
+- [#687](https://github.com/knpkv/npm/pull/687) [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44) Thanks [@konopkov](https://github.com/konopkov)! - Browser builds now target Chrome 123, Edge 123, Firefox 120 and Safari 17.6, the floor the CSS already relies on for `light-dark()` and `safe` alignment. Before, they targeted Vite's default (Chrome 111, Safari 16.4), so Lightning CSS rewrote `light-dark()` into its custom-property polyfill. Built CSS now keeps `light-dark()` native. For `@knpkv/rly` consumers, the published stylesheet assumes those browsers.
+- Updated dependencies [[`faddacc`](https://github.com/knpkv/npm/commit/faddacc829272ec3b580af00ee6e581294be76e7)]:
+  - @knpkv/codecommit-core@0.24.0
+
 ## 0.27.0
 
 ### Minor Changes

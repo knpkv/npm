@@ -1,5 +1,29 @@
 # @knpkv/rly
 
+## 0.17.0
+
+### Minor Changes
+
+- [#679](https://github.com/knpkv/npm/pull/679) [`8f49d5b`](https://github.com/knpkv/npm/commit/8f49d5bafad19c7e3163538f7acb2f0f7de4d2d1) Thanks [@konopkov](https://github.com/konopkov)! - rly's reset lets block containers shrink below their content as flex and grid items (`min-inline-size: 0`; inline content such as icons and labels keeps its automatic minimum), wraps long words and URLs (`overflow-wrap: break-word`), and avoids lone last words (`text-wrap: pretty`) inside rly roots. A component that must not shrink states its own minimum.
+
+- [#696](https://github.com/knpkv/npm/pull/696) [`799414f`](https://github.com/knpkv/npm/commit/799414f37422e7aeaf0a36bb80d8d878d75f5a10) Thanks [@konopkov](https://github.com/konopkov)! - Motion is opt-in: every rly transition and animation now runs only under `prefers-reduced-motion: no-preference`, so a reader who asks for less motion gets none, not just zero-length motion. Adds two easing tokens, `--rly-easing-out` (entering, leaving, answering a press) and `--rly-easing-in-out` (something on screen turning or moving), exported as `RLY_EASING_TOKEN_NAMES`. The `slow` duration drops from 360ms to 300ms. The per-duration `--rly-motion-*-easing` variables stay, as ease-out.
+
+- [#684](https://github.com/knpkv/npm/pull/684) [`2540508`](https://github.com/knpkv/npm/commit/2540508d00dc60c3842817df8ca37ce6c6a6179b) Thanks [@konopkov](https://github.com/konopkov)! - rly's colour tokens are written in OKLCH (neutrals use hue `none`), and the generated custom properties are `light-dark(oklch(…), oklch(…))`. Every token displays as exactly the sRGB colour it replaced, in both themes.
+
+- [#687](https://github.com/knpkv/npm/pull/687) [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44) Thanks [@konopkov](https://github.com/konopkov)! - Browser builds now target Chrome 123, Edge 123, Firefox 120 and Safari 17.6, the floor the CSS already relies on for `light-dark()` and `safe` alignment. Before, they targeted Vite's default (Chrome 111, Safari 16.4), so Lightning CSS rewrote `light-dark()` into its custom-property polyfill. Built CSS now keeps `light-dark()` native. For `@knpkv/rly` consumers, the published stylesheet assumes those browsers.
+
+### Patch Changes
+
+- [#701](https://github.com/knpkv/npm/pull/701) [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32) Thanks [@konopkov](https://github.com/konopkov)! - On a phone, where `Dialog` fills the screen, its title, description and fields now pack at the top one gap apart instead of spreading over the whole height.
+
+- [#694](https://github.com/knpkv/npm/pull/694) [`1cecd7c`](https://github.com/knpkv/npm/commit/1cecd7c454fdbdf042f7a3fd25a200805500881f) Thanks [@konopkov](https://github.com/konopkov)! - `Text`'s verdict and page-title variants extend their box over Geist's accented capitals and descenders (and give the space back with negative margins), so a focus ring on a display heading no longer cuts through its glyphs and nothing around it moves.
+
+- [#697](https://github.com/knpkv/npm/pull/697) [`48830f8`](https://github.com/knpkv/npm/commit/48830f89057919d23ca408192cb68ac1893c8e96) Thanks [@konopkov](https://github.com/konopkov)! - Controls that stay visually small (the Relay dock and sheet close buttons, the findings "Open" chip and evidence disclosure, the transcript's jump button, table sort headers, and the diff workbench's "Show all files") now take taps across a 44px area through an invisible `::after`, without changing their look.
+
+- [#701](https://github.com/knpkv/npm/pull/701) [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32) Thanks [@konopkov](https://github.com/konopkov)! - Single-row `Tabs` (`data-mobile-layout="single-row"`) no longer overflow by 1px vertically and show a scrollbar: the hairline is drawn inside the scroller, and the selected underline still covers it.
+
+- [#686](https://github.com/knpkv/npm/pull/686) [`1902d84`](https://github.com/knpkv/npm/commit/1902d84417dc050cd7fe7a2472071275424f1e4f) Thanks [@konopkov](https://github.com/konopkov)! - rly's colour tokens are declared once on `:root` as `light-dark()`; a `[data-theme]` subtree only switches `color-scheme`, and its descendants resolve the matching value. Themed subtrees no longer re-declare every colour, so a themed subtree inside `[data-forced-colors="active"]` keeps the forced system colours.
+
 ## 0.16.0
 
 ### Minor Changes

@@ -1,5 +1,25 @@
 # @knpkv/herdr-approvals
 
+## 0.15.0
+
+### Minor Changes
+
+- [#698](https://github.com/knpkv/npm/pull/698) [`586f75d`](https://github.com/knpkv/npm/commit/586f75d4b65e6d3c3b3f41f35d1b1a34facdb133) Thanks [@konopkov](https://github.com/konopkov)! - hostd serves Claude and Codex limits for Connect. Set the optional `agentUsageLimitsCommand` in the fleet configuration to `agent-usage limits`. `GET /v1/connect/limits` then returns this host's read, and on the hub every peer's read too. herdr-connect exports the wire schemas (`HostLimits`, `FleetLimits`) and the fleet collection. A host that can't read its limits says why instead of reporting zero.
+
+### Patch Changes
+
+- [#690](https://github.com/knpkv/npm/pull/690) [`7e38bea`](https://github.com/knpkv/npm/commit/7e38beabe14c07ec27adc9391f2a25d502e87491) Thanks [@konopkov](https://github.com/konopkov)! - Fleet connect no longer locks zoom on phones: pinch zoom works again, and the search field and the terminal's text input stay at 16px so focusing them doesn't zoom the page on iOS.
+
+- [#666](https://github.com/knpkv/npm/pull/666) [`5b79b06`](https://github.com/knpkv/npm/commit/5b79b06f381232b284f77b3c533c334ede7782b3) Thanks [@konopkov](https://github.com/konopkov)! - Hub CSS follows good-css: hover highlights only on devices that hover, 44px touch targets for the nav and activity filters, a 16px activity search so iOS doesn't zoom, small-viewport heights, `overflow: clip`, and opt-in motion. The activity toolbar now sticks while the history scrolls.
+
+- [#687](https://github.com/knpkv/npm/pull/687) [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44) Thanks [@konopkov](https://github.com/konopkov)! - Browser builds now target Chrome 123, Edge 123, Firefox 120 and Safari 17.6, the floor the CSS already relies on for `light-dark()` and `safe` alignment. Before, they targeted Vite's default (Chrome 111, Safari 16.4), so Lightning CSS rewrote `light-dark()` into its custom-property polyfill. Built CSS now keeps `light-dark()` native. For `@knpkv/rly` consumers, the published stylesheet assumes those browsers.
+- Updated dependencies [[`7e38bea`](https://github.com/knpkv/npm/commit/7e38beabe14c07ec27adc9391f2a25d502e87491), [`fea24ef`](https://github.com/knpkv/npm/commit/fea24ef8e52da5918feb8a45ae314a6b670c0c6b), [`eee2128`](https://github.com/knpkv/npm/commit/eee21285ba0a8364cb47cc90ec5b1dd9bf2c8aab), [`586f75d`](https://github.com/knpkv/npm/commit/586f75d4b65e6d3c3b3f41f35d1b1a34facdb133), [`8f49d5b`](https://github.com/knpkv/npm/commit/8f49d5bafad19c7e3163538f7acb2f0f7de4d2d1), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1cecd7c`](https://github.com/knpkv/npm/commit/1cecd7c454fdbdf042f7a3fd25a200805500881f), [`48830f8`](https://github.com/knpkv/npm/commit/48830f89057919d23ca408192cb68ac1893c8e96), [`799414f`](https://github.com/knpkv/npm/commit/799414f37422e7aeaf0a36bb80d8d878d75f5a10), [`2540508`](https://github.com/knpkv/npm/commit/2540508d00dc60c3842817df8ca37ce6c6a6179b), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1902d84`](https://github.com/knpkv/npm/commit/1902d84417dc050cd7fe7a2472071275424f1e4f), [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44)]:
+  - @knpkv/herdr-connect@0.10.0
+  - @knpkv/herdr-fleet@0.9.0
+  - @knpkv/rly@0.17.0
+  - @knpkv/herdr-coordinator@0.3.8
+  - @knpkv/herdr-work@0.9.4
+
 ## 0.14.0
 
 ### Minor Changes
