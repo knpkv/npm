@@ -17,8 +17,13 @@ layer(NodeServices.layer, { excludeTestServices: true })("Relay in CodeCommit we
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
         const running = yield* spawner.spawn(ChildProcess.make(tsx, [child, "run", home, marker]))
-        yield* fs.exists(marker).pipe(
-          Effect.repeat({ until: (exists) => exists, schedule: Schedule.spaced("50 millis") }),
+        // Kill only once the post is on disk: the append creates the file before it writes, so a busy
+        // machine can see it exist while still empty, and a kill there lands before the provider accepted.
+        const posted = fs.exists(marker).pipe(
+          Effect.flatMap((exists) => exists ? fs.readFileString(marker) : Effect.succeed(""))
+        )
+        yield* posted.pipe(
+          Effect.repeat({ until: (text) => text === "posted LGTM\n", schedule: Schedule.spaced("50 millis") }),
           Effect.timeout("30 seconds")
         )
         yield* running.kill({ killSignal: "SIGKILL" })
