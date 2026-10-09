@@ -54,12 +54,13 @@ test.describe("RelayMark motion", () => {
     await expect(baton).toBeVisible()
     const minimum = await baton.evaluate((element) => {
       const animation = element.getAnimations()[0]
-      if (animation === undefined) return Number(getComputedStyle(element).opacity)
+      if (animation === undefined) return null
       animation.pause()
       animation.currentTime = 0
       return Number(getComputedStyle(element).opacity)
     })
-    // The faintest point of the pass still draws the baton.
+    // The faintest point of the pass still draws the baton; no animation at all would prove nothing.
+    expect(minimum).not.toBeNull()
     expect(minimum).toBeGreaterThanOrEqual(0.5)
   })
 })

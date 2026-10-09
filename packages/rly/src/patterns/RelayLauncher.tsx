@@ -197,7 +197,7 @@ const focusOutside = (region: HTMLElement | null, owner: Document): HTMLElement 
 /** Inputs for the launcher. */
 export type RelayLauncherProps = Omit<ComponentPropsWithRef<"button">, "children" | "type"> & {
   /** What Relay is doing, shown on the mark; `idle` (still) unless given. Say it in words too. */
-  readonly activity?: RlyRelayMarkActivity
+  readonly activity?: RlyRelayMarkActivity | undefined
   /** Whether Relay is open; announced as the button's expanded state. */
   readonly expanded: boolean
   /** The visible name, "Relay" unless the host names its Relay more specifically. */

@@ -453,7 +453,7 @@ export type RlyRelayDockDesktopPresentation = "overlay" | "rail"
 
 interface RelayDockBaseProps extends Omit<ComponentPropsWithRef<"div">, "children" | "title"> {
   /** What Relay is doing, shown on the trigger's mark; `idle` (still) unless given. Say it in words too. */
-  readonly activity?: RlyRelayMarkActivity
+  readonly activity?: RlyRelayMarkActivity | undefined
   readonly context: ReadonlyArray<RlyRelayDockContextChip>
   readonly description?: string
   readonly desktopPresentation?: RlyRelayDockDesktopPresentation

@@ -53,7 +53,7 @@ export interface RlyRelayPanelPin {
 
 interface RelayPanelBaseProps {
   /** What Relay is doing, shown on the header mark; `idle` (still) unless given. Say it in words too. */
-  readonly activity?: RlyRelayMarkActivity
+  readonly activity?: RlyRelayMarkActivity | undefined
   /** Status line under the header (freshness of what Relay read); not a live region. */
   readonly freshness?: ReactNode
   /** Kept on screen under the body: the composer. */

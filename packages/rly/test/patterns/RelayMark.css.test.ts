@@ -7,9 +7,10 @@ const css = readFileSync(join(import.meta.dirname, "../../src/patterns/RelayMark
   ""
 )
 
-/** Every `animation` declaration with the text before it, so its enclosing at-rules can be read back. */
-const animations = [...css.matchAll(/(?<![-\w])animation\s*:\s*([^;]+);/g)].map((match) => ({
+/** Every `animation` or longhand declaration with the text before it, so its enclosing at-rules can be read back. */
+const animations = [...css.matchAll(/(?<![-\w])animation(?:-[a-z-]+)?\s*:\s*([^;]+);/g)].map((match) => ({
   before: css.slice(0, match.index),
+  declaration: match[0].slice(0, match[0].indexOf(":")).trim(),
   value: match[1] ?? ""
 }))
 
@@ -34,7 +35,7 @@ describe("RelayMark motion CSS", () => {
   })
 
   it("times every movement by a motion token, so the in-app reduced-motion setting stops it", () => {
-    for (const { value } of animations) {
+    for (const { value } of animations.filter(({ declaration }) => /^animation(-duration)?$/.test(declaration))) {
       expect(value).toMatch(/var\(--rly-motion-[a-z]+-duration\)/)
       expect(value).not.toMatch(/\d(ms|s)\b/)
     }
