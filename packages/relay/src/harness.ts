@@ -55,6 +55,15 @@ export class RelayStoreLocked extends Schema.TaggedError<RelayStoreLocked>()("Re
   message: Schema.String
 }) {}
 
+/**
+ * The store directory or database is a symbolic link. Relay refuses it rather than re-permission and
+ * write conversation content wherever the link points.
+ */
+export class RelayStoreLinked extends Schema.TaggedError<RelayStoreLinked>()("RelayStoreLinked", {
+  path: Schema.String,
+  message: Schema.String
+}) {}
+
 /** The Relay store could not be opened or read. `message` names the operation and the fix. */
 export class RelayStoreFailed extends Schema.TaggedError<RelayStoreFailed>()("RelayStoreFailed", {
   operation: Schema.String,
@@ -129,10 +138,31 @@ const openStore = (path: string) =>
         Effect.mapError((cause: PlatformError) =>
           new RelayStoreFailed({ operation, message: `${operation} failed: ${cause.message}` })
         )
-      yield* fs.makeDirectory(paths.dirname(path), { recursive: true, mode: 0o700 }).pipe(
+      const directory = paths.dirname(path)
+      yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
         ownerOnly("create the Relay store directory")
       )
-      yield* fs.chmod(paths.dirname(path), 0o700).pipe(ownerOnly("restrict the Relay store directory"))
+      // chmod and SQLite follow links, so neither the directory nor the database may be one: a link would
+      // have Relay re-permission and write conversation content wherever it points. Parent components may
+      // be links (a linked home directory is common); only the store's own names are checked.
+      const refuseLink = (target: string, what: string) =>
+        fs.readLink(target).pipe(
+          // readLink fails on anything that is not a link, including a missing database; that is the
+          // case to continue. A real I/O problem resurfaces when SQLite opens the file.
+          Effect.matchEffect({
+            onFailure: () => Effect.void,
+            onSuccess: (destination) =>
+              Effect.fail(
+                new RelayStoreLinked({
+                  path: target,
+                  message: `The Relay ${what} ${target} is a link to ${destination}. Replace it with a real ${what}.`
+                })
+              )
+          })
+        )
+      yield* refuseLink(directory, "store directory")
+      yield* refuseLink(path, "store")
+      yield* fs.chmod(directory, 0o700).pipe(ownerOnly("restrict the Relay store directory"))
       const client = createClient({ url: `file:${path}` })
       const database = libsqlDatabase(client)
       yield* promise("open the Relay store", async () => {

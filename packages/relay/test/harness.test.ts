@@ -280,6 +280,39 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
       }).pipe(Effect.scoped))
   })
 
+  describe("store links", () => {
+    it.effect("refuses a store directory that is a link, and leaves the link's target untouched", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fs.makeTempDirectoryScoped()
+        const elsewhere = path.join(root, "elsewhere")
+        yield* fs.makeDirectory(elsewhere, { mode: 0o755 })
+        const linked = path.join(root, "relay")
+        yield* fs.symlink(elsewhere, linked)
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        const failure = yield* relayIn(harnessLayer(model.layer, path.join(linked, "relay.sqlite"))).pipe(Effect.flip)
+        expect(failure).toMatchObject({ _tag: "RelayStoreLinked", path: linked })
+        expect((yield* fs.stat(elsewhere)).mode & 0o777).toBe(0o755)
+        expect(yield* fs.readDirectory(elsewhere)).toEqual([])
+      }).pipe(Effect.scoped))
+
+    it.effect("refuses a database that is a link, even one pointing at nothing yet", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fs.makeTempDirectoryScoped()
+        const store = path.join(root, "relay", "relay.sqlite")
+        const target = path.join(root, "target.sqlite")
+        yield* fs.makeDirectory(path.dirname(store), { mode: 0o700 })
+        yield* fs.symlink(target, store)
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        const failure = yield* relayIn(harnessLayer(model.layer, store)).pipe(Effect.flip)
+        expect(failure).toMatchObject({ _tag: "RelayStoreLinked", path: store })
+        expect(yield* fs.exists(target)).toBe(false)
+      }).pipe(Effect.scoped))
+  })
+
   describe("relayModels", () => {
     it("registers only Relay's own providers, never pi-ai's catalog or its OAuth providers", () => {
       const run = () => Promise.reject(new Error("not called"))
