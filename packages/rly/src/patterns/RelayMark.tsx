@@ -16,10 +16,17 @@ export type RlyRelayMarkTileSize = (typeof RLY_RELAY_MARK_TILE_SIZES)[number]
 
 /**
  * What Relay is doing, as the mark shows it. `idle` holds still; `working` passes the baton between the
- * hooks while Relay reads or answers; `attention` nudges the hooks together twice, then rests, when Relay
- * waits on the reader. Motion only: the host still says in words what Relay is doing.
+ * hooks while Relay reads or answers; `attention` nudges the hooks together twice every few seconds while
+ * Relay waits on the reader's decision; `unread` holds the hooks a little closed on the baton when a
+ * reply finished while Relay was closed (a pose, so it shows under reduced motion too). The host still
+ * says in words what Relay is doing.
  */
-export const RLY_RELAY_MARK_ACTIVITIES: readonly ["idle", "working", "attention"] = ["idle", "working", "attention"]
+export const RLY_RELAY_MARK_ACTIVITIES: readonly ["idle", "working", "attention", "unread"] = [
+  "idle",
+  "working",
+  "attention",
+  "unread"
+]
 /** One activity the mark can show. */
 export type RlyRelayMarkActivity = (typeof RLY_RELAY_MARK_ACTIVITIES)[number]
 

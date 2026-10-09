@@ -44,12 +44,19 @@
     [data-rly-relay-activity="working"] > .baton {
       animation: rly-relay-mark-pass calc(var(--rly-motion-slow-duration) * 8) linear infinite;
     }
-    /* Attention: the hooks close on the baton twice, then rest; it replays only when attention is set again. */
+    /* Attention: the hooks close on the baton twice, then rest; again every 3.6s while Relay waits on the reader. */
     [data-rly-relay-activity="attention"] > .hookStart {
-      animation: rly-relay-mark-nudge-start calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out);
+      animation: rly-relay-mark-nudge-start calc(var(--rly-motion-slow-duration) * 12) var(--rly-easing-in-out) infinite;
     }
     [data-rly-relay-activity="attention"] > .hookEnd {
-      animation: rly-relay-mark-nudge-end calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out);
+      animation: rly-relay-mark-nudge-end calc(var(--rly-motion-slow-duration) * 12) var(--rly-easing-in-out) infinite;
+    }
+    /* Unread: the hooks settle onto their held pose once, 300ms. */
+    [data-rly-relay-activity="unread"] > .hookStart {
+      animation: rly-relay-mark-hold-start var(--rly-motion-slow-duration) var(--rly-easing-out) backwards;
+    }
+    [data-rly-relay-activity="unread"] > .hookEnd {
+      animation: rly-relay-mark-hold-end var(--rly-motion-slow-duration) var(--rly-easing-out) backwards;
     }
     /*
      * One entrance as the header opens: each stroke settles in, 300ms. A mark that opens already working or
@@ -66,14 +73,18 @@
     [data-rly-relay-entrance][data-rly-relay-activity="attention"] > .hookStart {
       animation:
         rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards,
-        rly-relay-mark-nudge-start calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out)
-          var(--rly-motion-slow-duration);
+        rly-relay-mark-nudge-start calc(var(--rly-motion-slow-duration) * 12) var(--rly-easing-in-out)
+          var(--rly-motion-slow-duration) infinite;
     }
     [data-rly-relay-entrance][data-rly-relay-activity="attention"] > .hookEnd {
       animation:
         rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards,
-        rly-relay-mark-nudge-end calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out)
-          var(--rly-motion-slow-duration);
+        rly-relay-mark-nudge-end calc(var(--rly-motion-slow-duration) * 12) var(--rly-easing-in-out)
+          var(--rly-motion-slow-duration) infinite;
+    }
+    /* An unread mark that opens with its header just enters; the entrance lands on the held pose. */
+    [data-rly-relay-entrance][data-rly-relay-activity="unread"] > path {
+      animation: rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards;
     }
   }
   @keyframes rly-relay-mark-enter {
@@ -124,17 +135,48 @@
       transform: translate(-0px, 0px);
     }
   }
+  /* Two beats in the first quarter of the cycle, then rest: a call, not a pulse. */
   @keyframes rly-relay-mark-nudge-start {
-    25%,
-    75% {
+    6.25%,
+    18.75% {
       transform: translate(1px, 1px);
+    }
+    12.5%,
+    25%,
+    to {
+      transform: none;
     }
   }
   @keyframes rly-relay-mark-nudge-end {
-    25%,
-    75% {
+    6.25%,
+    18.75% {
       transform: translate(-1px, -1px);
     }
+    12.5%,
+    25%,
+    to {
+      transform: none;
+    }
+  }
+  @keyframes rly-relay-mark-hold-start {
+    from {
+      transform: none;
+    }
+  }
+  @keyframes rly-relay-mark-hold-end {
+    from {
+      transform: none;
+    }
+  }
+  /*
+   * Unread holds the hooks a little closed on the baton: a pose, not motion, so it shows with reduced motion
+   * too. The host still says "Relay replied".
+   */
+  [data-rly-relay-activity="unread"] > .hookStart {
+    transform: translate(0.75px, 0.75px);
+  }
+  [data-rly-relay-activity="unread"] > .hookEnd {
+    transform: translate(-0.75px, -0.75px);
   }
   /*
    * The agent fill is dropped by the system; an outline keeps the tile's shape. It takes its context's
