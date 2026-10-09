@@ -12,24 +12,47 @@ html {
 * {
   box-sizing: border-box;
 }
+/* Content stops at 90rem, like the other hub pages, so a wall display does not spread facts far
+   from their labels. */
 body {
-  margin: 0;
+  margin: 0 auto;
+  max-inline-size: 90rem;
   padding: var(--rly-space-24);
 }
-/* Product name left, connection state and Lock right, a rule below. */
+/* Product name and Lock on the first row, the connection line on its own row below, a rule under
+   both. The rows keep their size whatever they hold: the title row is always as tall as the Lock
+   button, shown or not, and the connection line keeps room for two lines below 60rem, where the
+   longest one ("Offline: showing the snapshot from …; retrying …") wraps. So locking, opening and
+   going offline never move the board. */
 .masthead {
   align-items: center;
-  border-bottom: 1px solid var(--rly-color-border-1);
-  display: flex;
-  flex-wrap: wrap;
+  border-block-end: 1px solid var(--rly-color-border-1);
+  display: grid;
   gap: var(--rly-space-8) var(--rly-space-16);
-  padding-bottom: var(--rly-space-16);
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding-block-end: var(--rly-space-16);
 }
 h1 {
+  align-items: center;
+  display: flex;
   font-size: var(--rly-type-section-title-size);
   font-weight: 600;
   letter-spacing: -0.02em;
-  margin: 0 auto 0 0;
+  margin: 0;
+  min-block-size: var(--rly-space-48);
+}
+#lock {
+  grid-column: 2;
+  grid-row: 1;
+}
+#connection {
+  grid-column: 1 / -1;
+  min-block-size: 2lh;
+}
+@media (width >= 60rem) {
+  #connection {
+    min-block-size: 1lh;
+  }
 }
 h2 {
   font-size: var(--rly-type-card-title-size);
@@ -38,7 +61,8 @@ h2 {
 }
 h3 {
   font-size: var(--rly-type-card-title-size);
-  margin: 0 0 var(--rly-space-4);
+  margin-block: 0 var(--rly-space-4);
+  margin-inline: 0;
 }
 p {
   line-height: 1.5;
@@ -65,25 +89,25 @@ form {
   display: grid;
   gap: var(--rly-space-8);
   margin: var(--rly-space-48) auto;
-  max-width: 28rem;
+  max-inline-size: 28rem;
 }
 form h2 {
-  margin-bottom: var(--rly-space-8);
+  margin-block-end: var(--rly-space-8);
 }
 label {
   font-weight: 600;
-  margin-top: var(--rly-space-12);
+  margin-block-start: var(--rly-space-12);
 }
 input,
 button {
   font: inherit;
-  min-height: var(--rly-space-48);
+  min-block-size: var(--rly-space-48);
   border: 1px solid var(--rly-color-border-2);
   border-radius: var(--rly-radius-control);
   padding: var(--rly-space-12) var(--rly-space-16);
 }
 input {
-  width: 100%;
+  inline-size: 100%;
   color: var(--rly-color-text-1);
   background: var(--rly-color-surface-1);
 }
@@ -106,8 +130,8 @@ button {
   color: var(--rly-color-text-1);
 }
 :focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 /* Forced colours: system button colours keep every label visible. */
 @media (forced-colors: active) {
@@ -123,16 +147,17 @@ button {
   font-size: var(--rly-type-section-title-size);
   font-weight: 600;
   line-height: 1.2;
-  margin: var(--rly-space-32) 0 var(--rly-space-24);
+  margin-block: var(--rly-space-32) var(--rly-space-24);
+  margin-inline: 0;
   overflow-wrap: break-word;
 }
 /* The board is a header and its tiles; the tiles are the only surfaces, so no frame around them. */
 .region {
-  margin-top: var(--rly-space-16);
+  margin-block-start: var(--rly-space-16);
 }
 .region-header {
   align-items: baseline;
-  border-bottom: 1px solid var(--rly-color-border-1);
+  border-block-end: 1px solid var(--rly-color-border-1);
   display: flex;
   flex-wrap: wrap;
   gap: var(--rly-space-4) var(--rly-space-12);
@@ -142,15 +167,17 @@ button {
   color: var(--rly-color-text-2);
   font-variant-numeric: tabular-nums;
 }
-/* Tiles share the full width, and a row is one band: equal heights, whatever each one lists. */
+/* Tiles share the full width; each is as tall as what it lists, so a short card leaves no blank
+   band under its facts. */
 #agents {
-  align-items: stretch;
+  align-items: start;
   display: grid;
   gap: var(--rly-space-16);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   list-style: none;
   margin: 0;
-  padding: var(--rly-space-16) 0 0;
+  padding-block: var(--rly-space-16) 0;
+  padding-inline: 0;
 }
 /* Each agent is a flat card with an even border; its state leads as a word. */
 .agent {
@@ -166,7 +193,7 @@ button {
 /* Grid items keep their longest word as a minimum width; let them shrink so a long task or branch
    name wraps inside its tile. */
 .agent > * {
-  min-width: 0;
+  min-inline-size: 0;
 }
 .state {
   font-weight: 600;
@@ -179,30 +206,48 @@ button {
   font-weight: 600;
 }
 dl {
-  border-top: 1px solid var(--rly-color-border-1);
+  border-block-start: 1px solid var(--rly-color-border-1);
   display: grid;
   font-size: var(--rly-type-body-size);
   gap: var(--rly-space-8) var(--rly-space-12);
-  grid-template-columns: max-content minmax(0, 1fr);
-  margin: var(--rly-space-12) 0 0;
-  padding-top: var(--rly-space-12);
+  /* One key width for every tile, so values line up across a row; it fits "Clockify recorded". */
+  grid-template-columns: 9.5em minmax(0, 1fr);
+  margin-block: var(--rly-space-12) 0;
+  margin-inline: 0;
+  padding-block-start: var(--rly-space-12);
 }
 dd {
   font-variant-numeric: tabular-nums;
   margin: 0;
 }
+/* Identifiers break at their own separators (see breakSegments); break-word is the last resort for
+   one segment wider than the tile. */
+dd.identifier {
+  overflow-wrap: break-word;
+  word-break: normal;
+}
 .unpublished {
-  margin-top: var(--rly-space-8);
+  margin-block-start: var(--rly-space-8);
 }
 footer {
   font-size: var(--rly-type-label-size);
-  margin-top: var(--rly-space-48);
+  margin-block-start: var(--rly-space-48);
 }
 [hidden] {
   display: none !important;
 }
-@media (max-width: 30rem) {
+@media (width <= 30rem) {
   body {
     padding: var(--rly-space-16);
+  }
+  /* Tiles stack one per row here, so there is no row to line up with; values get the room. */
+  dl {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+}
+/* At 320px the section title wrapped to two lines beside Lock board. */
+@media (width <= 22.5rem) {
+  h1 {
+    font-size: var(--rly-type-card-title-size);
   }
 }

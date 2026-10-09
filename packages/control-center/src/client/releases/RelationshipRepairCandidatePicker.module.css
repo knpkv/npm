@@ -30,11 +30,21 @@
   text-align: start;
 }
 
-.candidate:hover,
 .candidate:focus-visible {
   background: var(--rly-color-surface-2);
   border-color: var(--rly-color-border-2);
-  outline: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .candidate:hover {
+    background: var(--rly-color-surface-2);
+    border-color: var(--rly-color-border-2);
+  }
+}
+
+.candidate:focus-visible {
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .candidate > span:first-child {
@@ -70,7 +80,7 @@
 
 @media (prefers-reduced-motion: no-preference) {
   .draft {
-    animation: reveal-draft 160ms ease-out both;
+    animation: reveal-draft var(--rly-motion-standard-duration) var(--rly-motion-standard-easing) both;
   }
 }
 

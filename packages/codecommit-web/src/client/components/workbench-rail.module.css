@@ -42,12 +42,16 @@
   align-content: start;
   display: grid;
   gap: var(--rly-space-16);
+  /* One track as wide as the rail: an auto track grows to the longest unbreakable token and clips. */
+  grid-template-columns: minmax(var(--rly-space-0), 1fr);
   overflow-y: auto;
   padding: var(--rly-space-16) var(--rly-space-8);
 }
 
 .summary {
   margin: 0;
+  /* An IAM action ("codecommit:EvaluatePullRequestApprovalRules") is one token; let it wrap. */
+  overflow-wrap: break-word;
   padding-inline: var(--rly-space-8);
 }
 
@@ -94,8 +98,10 @@
   text-decoration: none;
 }
 
-.row:hover {
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .row:hover {
+    background: var(--rly-color-surface-2);
+  }
 }
 
 .row[aria-current="page"] {
@@ -105,8 +111,8 @@
 }
 
 .row:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: -2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .repo {
@@ -123,7 +129,7 @@
 .rowTitle {
   font-weight: 500;
   grid-area: title;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
 }
 
 .caption {

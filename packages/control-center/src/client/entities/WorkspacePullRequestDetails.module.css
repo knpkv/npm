@@ -58,7 +58,8 @@
   border: 1px solid color-mix(in srgb, var(--rly-color-service-codecommit) 42%, var(--rly-color-border-1));
   border-radius: var(--rly-radius-control);
   gap: var(--rly-space-24);
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
   padding: var(--rly-space-32);
 }
 
@@ -107,7 +108,8 @@
   border-radius: var(--rly-radius-field);
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
   padding: var(--rly-space-12);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -151,7 +153,7 @@
 .description {
   font: var(--rly-type-body-large-weight) var(--rly-type-body-large-size) / var(--rly-type-body-large-line-height)
     var(--rly-type-body-large-font);
-  max-inline-size: 58ch;
+  max-inline-size: 38.6em;
   min-inline-size: 0;
   overflow-wrap: break-word;
 }
@@ -219,17 +221,18 @@
   inline-size: 100%;
   margin-block-start: var(--rly-space-4);
   min-block-size: var(--rly-space-4);
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
   position: relative;
 }
 
+/* Static full bar unless motion is welcome; then a 38% runner loops across it. */
 .reviewRunway::after {
-  animation: review-runway 1.6s ease-in-out infinite;
   background: var(--rly-color-service-codecommit);
   border-radius: inherit;
   content: "";
   inset-block: var(--rly-space-0);
-  inline-size: 38%;
+  inline-size: 100%;
   position: absolute;
 }
 
@@ -282,8 +285,8 @@
 }
 
 .reviewPresetList input:focus-visible + span {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .reviewPresetList small {
@@ -341,7 +344,8 @@
   color: var(--rly-color-text-2);
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
   text-overflow: ellipsis;
 }
 
@@ -467,8 +471,8 @@
 .revisionEditor select:focus-visible,
 .revisionEditor textarea:focus-visible {
   border-color: var(--rly-color-focus);
-  outline: 2px solid color-mix(in srgb, var(--rly-color-focus) 24%, transparent);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .revisionEditor textarea {
@@ -717,8 +721,8 @@
 
 .publicationEditor textarea:focus-visible {
   border-color: var(--rly-color-focus);
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .publicationFooter {
@@ -784,7 +788,7 @@
 .reviewThreadTranscript {
   display: grid;
   gap: var(--rly-space-12);
-  max-block-size: min(28rem, 55vh);
+  max-block-size: min(28rem, 55svh);
   min-block-size: 8rem;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -797,8 +801,8 @@
 
 .reviewThreadTranscript:focus-visible {
   border-color: var(--rly-color-focus);
-  outline: 2px solid color-mix(in srgb, var(--rly-color-focus) 24%, transparent);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .reviewThreadTranscript > button {
@@ -930,8 +934,8 @@
 
 .reviewThreadComposer textarea:focus-visible {
   border-color: var(--rly-color-focus);
-  outline: 2px solid color-mix(in srgb, var(--rly-color-focus) 24%, transparent);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .reviewThreadComposerFooter {
@@ -988,8 +992,8 @@
 }
 
 .filesLink:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-4);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 @media (max-width: 52rem) {
@@ -1023,9 +1027,19 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .reviewRunway::after {
-    animation: none;
-    inline-size: 100%;
+    animation: review-runway 1.6s ease-in-out infinite;
+    inline-size: 38%;
+  }
+}
+
+/* Touch keyboards zoom the page into a field whose text is under 16px. */
+@media (pointer: coarse) {
+  .revisionAdvanced textarea,
+  .publicationEditor textarea,
+  .revisionEditor textarea,
+  .reviewThreadComposer textarea {
+    font-size: max(16px, 1rem);
   }
 }

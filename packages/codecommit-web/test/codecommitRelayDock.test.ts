@@ -17,15 +17,17 @@ import {
   matchesCodeCommitPullRequestRoute
 } from "../src/client/codecommit-route.js"
 import {
+  codeCommitRelayAbout,
   codeCommitRelayAccountKind,
   codeCommitRelayExecutionProfile,
   codeCommitRepositoryAccountIdentity,
   codeCommitRouteAccountIdentity,
   makeCodeCommitRelayConversation,
   makeCodeCommitRelaySelection,
-  makeCodeCommitRelayThreadRegistration
+  makeCodeCommitRelayThreadRegistration,
+  relayModelLabel
 } from "../src/client/codecommitRelayDock.js"
-import type { PullRequestRelayReviewResponse } from "../src/server/Api.js"
+import { type PullRequestRelayReviewResponse, RelayReviewFinding } from "../src/server/Api.js"
 
 const selection = Schema.decodeUnknownSync(RelaySelectorState)({
   modelId: "configured-default",
@@ -47,7 +49,7 @@ const conversation = Schema.decodeUnknownSync(PullRequestConversation)({
 })
 
 const explainReview: PullRequestRelayReviewResponse = {
-  pullRequestId: "42",
+  pullRequestId: Domain.PullRequestId.make("42"),
   revisionId: "revision-1",
   baseCommit: "a".repeat(40),
   headCommit: "b".repeat(40),
@@ -63,6 +65,18 @@ const explainReview: PullRequestRelayReviewResponse = {
   },
   result: { explanation: "The change keeps provider access on the host.", findings: [], verdict: "Explained." }
 }
+
+const retryFinding = Schema.decodeUnknownSync(RelayReviewFinding)({
+  details: "Each retry re-enqueues the job.",
+  id: "F1",
+  location: { scope: "general" },
+  priority: "P2",
+  publicationTarget: "pr-comment",
+  recommendation: "Bound the retries.",
+  summary: "Retries multiply under load.",
+  title: "Retry amplification",
+  verification: "Load test the queue."
+})
 
 const continuationRequest = (message: string) =>
   Schema.decodeUnknownSync(ContinuePullRequestConversationRequest)({ conversation, message, selection })
@@ -117,8 +131,8 @@ describe("CodeCommit Relay dock adapter", () => {
   it("uses repository account identity without changing the credential route alias", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
-      profile: "dev-administratoraccess",
-      region: "eu-central-1",
+      profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+      region: Domain.AwsRegion.make("eu-central-1"),
       repoAccountId: "repository-account"
     })
 
@@ -130,8 +144,8 @@ describe("CodeCommit Relay dock adapter", () => {
   it("uses the credential account when repository identity is empty", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
-      profile: "dev-administratoraccess",
-      region: "eu-central-1",
+      profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+      region: Domain.AwsRegion.make("eu-central-1"),
       repoAccountId: ""
     })
 
@@ -146,14 +160,14 @@ describe("CodeCommit Relay dock adapter", () => {
           repositoryName: Domain.RepositoryName.make("payments")
         },
         selection
-      ).thread.accountId
-    ).toBe("credential-account")
+      ).thread
+    ).toMatchObject({ accountId: "credential-account" })
     expect(
       codeCommitRouteAccountIdentity(
         new Domain.Account({
           awsAccountId: "",
-          profile: "dev-administratoraccess",
-          region: "eu-central-1",
+          profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+          region: Domain.AwsRegion.make("eu-central-1"),
           repoAccountId: ""
         })
       )
@@ -163,8 +177,8 @@ describe("CodeCommit Relay dock adapter", () => {
   it("keeps the located repository and region in the redirect route", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
-      profile: "dev-administratoraccess",
-      region: "eu-central-1",
+      profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+      region: Domain.AwsRegion.make("eu-central-1"),
       repoAccountId: "repository-account"
     })
     const candidate = {
@@ -221,8 +235,8 @@ describe("CodeCommit Relay dock adapter", () => {
   it("recomputes the canonical thread identity when only the region changes", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
-      profile: "dev-administratoraccess",
-      region: "us-east-1",
+      profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+      region: Domain.AwsRegion.make("us-east-1"),
       repoAccountId: "repository-account"
     })
     const pullRequest = {
@@ -237,8 +251,8 @@ describe("CodeCommit Relay dock adapter", () => {
         ...pullRequest,
         account: new Domain.Account({
           awsAccountId: "credential-account",
-          profile: "dev-administratoraccess",
-          region: "us-west-2",
+          profile: Domain.AwsProfileName.make("dev-administratoraccess"),
+          region: Domain.AwsRegion.make("us-west-2"),
           repoAccountId: "repository-account"
         })
       },
@@ -315,5 +329,79 @@ describe("CodeCommit Relay dock adapter", () => {
     if (registration.status === "unavailable") {
       expect(registration.description).toContain("current exact revision")
     }
+  })
+
+  it.effect("names what each run of turns is about, so per-finding discussions stay readable in one thread", () =>
+    Effect.gen(function*() {
+      const onClear = (): void => undefined
+      const registration = yield* requireReadyRegistration(
+        makeCodeCommitRelayThreadRegistration({
+          about: { id: "F1", label: "Finding: Retry amplification", onClear },
+          available: true,
+          context: [],
+          continueReview: () => Promise.resolve({ _tag: "completed" }),
+          conversation,
+          isReviewing: false,
+          review: {
+            ...explainReview,
+            result: {
+              ...explainReview.result,
+              findings: [retryFinding]
+            }
+          },
+          selectedFindingId: "F1",
+          selection,
+          turns: [
+            { id: "t1", findingId: "F1", role: "user", message: "Is it bounded?" },
+            { id: "t2", findingId: "F1", role: "assistant", message: "Yes, three attempts." },
+            { id: "t3", findingId: "F9", role: "user", message: "And the old one?" },
+            { id: "t4", findingId: "PR", role: "user", message: "Anything else?" }
+          ]
+        })
+      )
+      expect(registration.about?.label).toBe("Finding: Retry amplification")
+      expect(registration.messages.filter(({ role }) => role === "system").map(({ text }) => text)).toEqual([
+        "About Retry amplification",
+        "About F9, no longer in the current deck",
+        "About the whole pull request"
+      ])
+      // Verdict and explanation, then each run of turns after the note naming it.
+      expect(registration.messages.map(({ role }) => role)).toEqual([
+        "relay",
+        "relay",
+        "system",
+        "operator",
+        "relay",
+        "system",
+        "operator",
+        "system",
+        "operator"
+      ])
+    }))
+
+  it("names the discussed finding by its whole snapshot, so a changed finding under a reused id is a new context", () => {
+    const onClear = (): void => undefined
+    const review = { ...explainReview, result: { ...explainReview.result, findings: [retryFinding] } }
+    const changed = {
+      ...review,
+      result: { ...review.result, findings: [{ ...retryFinding, summary: "Retries now back off." }] }
+    }
+    const before = codeCommitRelayAbout("F1", review, onClear)
+    const after = codeCommitRelayAbout("F1", changed, onClear)
+    expect(before?.label).toBe("Finding: Retry amplification")
+    expect(after?.label).toBe("Finding: Retry amplification")
+    expect(after?.id).not.toBe(before?.id)
+    expect(codeCommitRelayAbout("F1", null, onClear)).toMatchObject({ id: "F1", label: "Finding: F1" })
+    expect(codeCommitRelayAbout(null, review, onClear)).toBeUndefined()
+  })
+
+  it("names the provider's default model in words, never by its raw id", () => {
+    expect(relayModelLabel("configured-default")).toBe("Default model")
+    expect(relayModelLabel("default")).toBe("Default model")
+    expect(relayModelLabel(undefined)).toBe("Default model")
+    expect(relayModelLabel("gpt-5.6-luna")).toBe("gpt-5.6-luna")
+    expect(
+      makeCodeCommitRelaySelection({ id: "thorough", model: "configured-default", name: "Thorough review" }).models
+    ).toEqual([{ id: "configured-default", label: "Default model" }])
   })
 })

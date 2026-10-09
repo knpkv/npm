@@ -1,5 +1,17 @@
 # @knpkv/ai-codex
 
+## 0.5.3
+
+### Patch Changes
+
+- [#597](https://github.com/knpkv/npm/pull/597) [`1118080`](https://github.com/knpkv/npm/commit/1118080aad8616fa9f19c15cbcf5b3f4df0160a1) Thanks [@konopkov](https://github.com/konopkov)! - Claude's output decoding falls back to line-delimited events only when the whole output isn't one result document, never on other failures. Codex logs a warning when it can't remove its temporary output-schema directory, instead of ignoring that silently.
+
+## 0.5.2
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+
 ## 0.5.1
 
 ### Patch Changes

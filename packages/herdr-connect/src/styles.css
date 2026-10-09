@@ -1,4 +1,6 @@
 @import "@knpkv/rly/styles.css";
+/* agent-usage's "Limits now" cards, shown in Connect's limits disclosure. */
+@import "@knpkv/agent-usage/limits.css";
 
 @layer connect {
   html.connect-terminal-document-lock,
@@ -67,20 +69,102 @@
     padding: var(--rly-space-12) var(--rly-space-20);
   }
 
+  /* The page title, then the one-sentence summary, on the directory's own column edge. The summary's
+     heading type scales with the column, so a long host name never reaches the edge at 320. */
   .connect-embedded-intro {
-    align-items: end;
-    border-block-end: 1px solid var(--rly-color-border-1);
-    display: flex;
-    gap: var(--rly-space-24);
-    justify-content: space-between;
-    margin-inline: auto;
-    max-inline-size: 76rem;
-    padding: var(--rly-space-24) var(--rly-space-20) var(--rly-space-20);
+    --rly-type-section-title-size: clamp(1.25rem, 6.5cqi, 2rem);
+    --rly-type-section-title-line-height: calc(var(--rly-type-section-title-size) * 1.15);
+    container-type: inline-size;
+    display: grid;
+    gap: var(--rly-space-16);
+    inline-size: min(100%, 76rem);
+    justify-self: center;
+    padding: var(--rly-space-20) var(--rly-space-20) var(--rly-space-8);
   }
 
-  .connect-embedded-intro > div {
+  .connect-embedded-intro h1 {
+    margin: var(--rly-space-0);
+  }
+
+  /* Limits: one line of state labels under the summary, the cards behind a disclosure. */
+  .connect-limits {
     display: grid;
     gap: var(--rly-space-8);
+    margin-block-start: var(--rly-space-8);
+  }
+
+  /* Standalone, the limits take their own line under the header, on the header's edges. */
+  .connect-header + .connect-limits {
+    margin-block-start: var(--rly-space-0);
+    padding: var(--rly-space-12) var(--rly-space-20);
+  }
+
+  .connect-limits-line,
+  .connect-limits-notes {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .connect-limits-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-4) var(--rly-space-16);
+  }
+
+  .connect-limits-details > summary {
+    color: var(--rly-color-text-2);
+    cursor: pointer;
+    font-size: var(--rly-type-meta-size);
+    inline-size: fit-content;
+    position: relative;
+  }
+
+  /* A one-line disclosure is shorter than 44px; an invisible layer takes the target there. */
+  .connect-limits-details > summary::after {
+    content: "";
+    inset: min(0px, (100% - 2.75rem) / 2);
+    position: absolute;
+  }
+
+  /* Each host's cards are their own region: a clear step between them. */
+  .connect-limits-hosts {
+    display: grid;
+    gap: var(--rly-space-24);
+    padding-block-start: var(--rly-space-12);
+  }
+
+  .connect-limits-notes {
+    display: grid;
+    gap: var(--rly-space-4);
+  }
+
+  .connect-intro-caption {
+    color: var(--rly-color-text-2);
+    margin: var(--rly-space-0);
+  }
+
+  /* On a narrow screen the summary takes up to three lines once the fleet loads; reserve them so the list does not jump. */
+  @media (max-width: 700px) {
+    .connect-embedded-intro [data-rly-hero] {
+      /* Three lines of the Hero's heading-size sentence (its section-title type), measured from the token. */
+      min-block-size: calc(3 * var(--rly-type-section-title-line-height));
+    }
+
+    /* Phones keep the sentence and drop its caption, as the directory needs the room. */
+    .connect-intro-caption {
+      display: none;
+    }
+  }
+
+  /*
+   * In the hub, until the first directory list arrives (failed attempts and their retries included),
+   * hold a screen of space: the list that arrives is
+   * usually taller than that, and anything below it (the coordinator chat) stays out of view
+   * instead of being pushed down (CLS 0.60 at 768 before).
+   */
+  .connect-shell-embedded .connect-agents[data-loading="true"] {
+    min-block-size: 100svh;
   }
 
   .connect-agents {
@@ -118,10 +202,28 @@
     padding: var(--rly-space-8) var(--rly-space-12);
   }
 
+  /* iOS zooms the page into any field under 16px when it takes focus, and the page leaves pinch zoom
+     on, so the search field and Ghostty's hidden input (UA default ~13px) both stay at 16px or more. */
+  .connect-search input,
+  #connect-terminal-input {
+    font-size: max(16px, 1rem);
+  }
+
+  /* Forced colours would paint the placeholder in a link-like system colour; it is hint text. */
+  @media (forced-colors: active) {
+    .connect-search input::placeholder {
+      color: GrayText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-search input::placeholder {
+    color: GrayText;
+  }
+
   .connect-search input:focus-visible {
     border-color: var(--rly-color-agent);
-    outline: 2px solid color-mix(in srgb, var(--rly-color-agent) 35%, transparent);
-    outline-offset: 1px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .connect-filter-row {
@@ -138,52 +240,51 @@
   }
 
   .connect-filter-label {
-    color: var(--rly-color-text-3);
-    font-size: var(--rly-type-meta-size);
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
     padding-inline: var(--rly-space-4);
   }
 
+  /* Filters are words; the chosen one is underlined, every option a full-height target. */
   .connect-group-filter,
   .connect-status-filter {
-    background: var(--rly-color-surface-2);
-    border: 1px solid var(--rly-color-border-1);
-    border-radius: var(--rly-radius-control);
     display: flex;
     flex-wrap: wrap;
-    gap: 2px;
+    gap: var(--rly-space-4);
     max-inline-size: 100%;
     min-inline-size: 0;
-    padding: 2px;
   }
 
   .connect-group-filter button,
   .connect-status-filter button {
-    background: transparent;
+    background: none;
     border: 0;
-    border-radius: calc(var(--rly-radius-control) - 2px);
-    color: var(--rly-color-text-3);
+    border-radius: var(--rly-radius-field);
+    color: var(--rly-color-text-2);
     cursor: pointer;
-    font: inherit;
-    font-size: var(--rly-type-meta-size);
     flex: 0 0 auto;
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
     max-inline-size: 100%;
+    min-block-size: calc(var(--rly-space-32) + var(--rly-space-8));
     min-inline-size: 0;
-    overflow-wrap: anywhere;
-    padding: var(--rly-space-6) var(--rly-space-8);
-    white-space: normal;
+    overflow-wrap: break-word;
+    padding-inline: var(--rly-space-12);
   }
 
   .connect-group-filter button[aria-pressed="true"],
   .connect-status-filter button[aria-pressed="true"] {
-    background: var(--rly-color-surface-3);
-    box-shadow: 0 0 0 1px var(--rly-color-border-2);
     color: var(--rly-color-text-1);
+    text-decoration: underline;
+    text-decoration-thickness: var(--rly-space-2);
+    text-underline-offset: var(--rly-space-6);
   }
 
   .connect-group-filter button:focus-visible,
   .connect-status-filter button:focus-visible {
-    outline: 2px solid var(--rly-color-focus);
-    outline-offset: 1px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .connect-agent-tree {
@@ -220,19 +321,35 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* Column names over the rows, on the rows' own tracks. */
+  .connect-list-head {
+    color: var(--rly-color-text-2);
+    display: grid;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-12);
+    grid-template-columns: var(--connect-state-track) minmax(0, 1fr) var(--connect-time-track);
+    padding: 0 var(--rly-space-12) var(--rly-space-6);
+  }
+
+  .connect-visually-hidden {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    overflow: hidden;
+    position: absolute;
+    white-space: nowrap;
+  }
+
   .connect-agent-list {
     display: grid;
     position: relative;
   }
 
-  .connect-agent-list::before {
-    background: var(--rly-color-border-1);
-    content: "";
-    inset-block: var(--rly-space-12);
-    inset-inline-start: calc(var(--rly-space-12) + 4.25rem + var(--rly-space-12) + 0.25rem);
-    inline-size: 1px;
-    pointer-events: none;
-    position: absolute;
+  /* Fixed tracks: the longest state word with its icon, and an hh:mm time. */
+  .connect-agent-tree {
+    --connect-state-track: 7rem;
+    --connect-time-track: 3.25rem;
   }
 
   .connect-agent {
@@ -245,7 +362,7 @@
     cursor: pointer;
     display: grid;
     font: inherit;
-    grid-template-columns: 4.25rem 0.5rem minmax(0, 1fr) auto;
+    grid-template-columns: var(--connect-state-track) minmax(0, 1fr) var(--connect-time-track);
     gap: var(--rly-space-12);
     min-inline-size: 0;
     padding: var(--rly-space-12);
@@ -256,39 +373,36 @@
       border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 
-  .connect-agent:hover,
   .connect-agent:focus-visible,
   .connect-agent[data-selected="true"] {
     background: var(--rly-color-surface-2);
   }
 
-  .connect-agent:focus-visible {
-    outline: 1px solid var(--rly-color-agent);
-    outline-offset: -1px;
+  /* Hover only where a pointer can hover: on touch, :hover sticks to the last tapped element. */
+  @media (hover: hover) and (pointer: fine) {
+    .connect-agent:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
+  .connect-agent:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
+  }
+
+  /* Selected: a filled row with a full outline, never a one-sided bar. */
   .connect-agent[data-selected="true"] {
     background: color-mix(in srgb, var(--rly-color-agent) 12%, var(--rly-color-surface-2));
-    box-shadow: inset 3px 0 0 var(--rly-color-agent);
+    outline: 1px solid var(--rly-color-border-2);
+    outline-offset: -1px;
   }
 
   .connect-agent time {
     color: var(--rly-color-text-3);
+    text-align: end;
     font-family: "Geist Mono", ui-monospace, monospace;
     font-size: var(--rly-type-meta-size);
     font-variant-numeric: tabular-nums;
-  }
-
-  .connect-agent .agent-presence {
-    box-shadow: 0 0 0 4px var(--rly-color-surface-1);
-    position: relative;
-    z-index: 1;
-  }
-
-  .connect-agent:hover .agent-presence,
-  .connect-agent:focus-visible .agent-presence,
-  .connect-agent[data-selected="true"] .agent-presence {
-    box-shadow: 0 0 0 4px var(--rly-color-surface-2);
   }
 
   .connect-agent-copy {
@@ -297,28 +411,79 @@
     min-inline-size: 0;
   }
 
+  /* Names and their host, relationship and work read in full; long ones wrap. */
   .connect-agent-copy small,
   .connect-agent-copy strong {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    overflow-wrap: break-word;
   }
 
-  .connect-agent .agent-presence[data-activity="working"] {
-    background: var(--rly-color-agent);
+  /* An identifier (host, work) moves to the next line whole; it breaks only if it is longer than the line. */
+  .connect-token {
+    display: inline-block;
+    max-inline-size: 100%;
+    overflow-wrap: break-word;
   }
 
-  .connect-agent .agent-presence[data-activity="finished"] {
-    background: var(--rly-color-text-3);
+  /* The state as its icon and word (agent-state.tsx); the label carries its own tone. */
+  /* An unknown state's own word may be long; it wraps inside the track rather than widening it. */
+  .connect-agent-state {
+    display: inline-flex;
+    min-inline-size: 0;
+    overflow-wrap: break-word;
   }
 
-  .connect-failures {
-    border-block-start: 1px solid var(--rly-color-border-1);
+  .connect-filter-count {
     color: var(--rly-color-text-3);
-    display: grid;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .connect-group-filter button[aria-pressed="true"] .connect-filter-count,
+  .connect-status-filter button[aria-pressed="true"] .connect-filter-count {
+    color: inherit;
+  }
+
+  /* A host that didn't answer: named in the Host filter, but not an option. */
+  .connect-host-silent {
+    align-items: baseline;
+    color: var(--rly-color-text-3);
+    display: inline-flex;
     gap: var(--rly-space-4);
-    margin-block-start: var(--rly-space-20);
-    padding: var(--rly-space-12) var(--rly-space-8);
+    padding: var(--rly-space-6) var(--rly-space-8);
+  }
+
+  /* The directory's read time changes only per poll; tabular digits keep its width still. */
+  .connect-updated {
+    color: var(--rly-color-text-3);
+    display: block;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    font-variant-numeric: tabular-nums;
+    margin-block-end: var(--rly-space-8);
+  }
+
+  .connect-updated[data-stale="true"] {
+    color: var(--rly-color-held-ink);
+  }
+
+  /* Only an agent at work moves; settled states keep a still, distinct icon. */
+  @media (prefers-reduced-motion: no-preference) {
+    .agent-state-spinning svg {
+      animation: agent-state-spin 1.6s linear infinite;
+    }
+  }
+
+  @keyframes agent-state-spin {
+    to {
+      transform: rotate(1turn);
+    }
+  }
+
+  /* Hosts that didn't answer, named above the list so the gap in it is explained where it shows. */
+  .connect-failures {
+    color: var(--rly-color-held-ink);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    margin: 0 0 var(--rly-space-12);
   }
 
   .connect-preference-error {
@@ -377,12 +542,20 @@
     text-decoration: none;
   }
 
-  .connect-agent-work-link:hover,
   .connect-agent-work-link:focus-visible {
     color: var(--rly-color-agent);
     text-decoration: underline;
     text-decoration-thickness: 0.12em;
     text-underline-offset: 0.16em;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .connect-agent-work-link:hover {
+      color: var(--rly-color-agent);
+      text-decoration: underline;
+      text-decoration-thickness: 0.12em;
+      text-underline-offset: 0.16em;
+    }
   }
 
   .connect-agent-identity[data-work-goal-state="missing"] small,
@@ -416,6 +589,11 @@
     display: flex;
     flex: 0 0 auto;
     gap: var(--rly-space-4);
+  }
+
+  /* The Keys toggle hides the modifier and key groups; `display: flex` above would override [hidden]. */
+  .terminal-key-group[hidden] {
+    display: none;
   }
 
   /* View actions stay in reach at the end of the rail while the keys scroll under them. */
@@ -461,16 +639,23 @@
     white-space: nowrap;
   }
 
-  .terminal-key:hover,
   .terminal-key[aria-pressed="true"] {
     background: var(--rly-color-surface-3);
     border-color: var(--rly-color-agent);
   }
 
+  /* On touch a tapped key would keep this paint and look like a latched modifier. */
+  @media (hover: hover) and (pointer: fine) {
+    .terminal-key:hover {
+      background: var(--rly-color-surface-3);
+      border-color: var(--rly-color-agent);
+    }
+  }
+
   .terminal-key:focus-visible {
     border-color: var(--rly-color-focus);
-    outline: 2px solid var(--rly-color-focus);
-    outline-offset: 2px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .terminal-key:disabled {
@@ -506,10 +691,19 @@
     padding-inline: var(--rly-space-12);
   }
 
-  .terminal-back:hover,
   .terminal-back:focus-visible {
     border-color: var(--rly-color-agent);
-    outline: none;
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .terminal-back:hover {
+      border-color: var(--rly-color-agent);
+    }
+  }
+
+  .terminal-back:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .terminal-viewport-stage {
@@ -619,8 +813,8 @@
       display: none;
     }
 
-    .connect-header h1,
-    .connect-embedded-intro h1 {
+    /* The standalone page keeps a one-row header on phones; the embedded tab's title is already card-sized. */
+    .connect-header h1 {
       font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
         var(--rly-type-card-title-font);
       letter-spacing: var(--rly-type-card-title-tracking);
@@ -636,19 +830,8 @@
     }
 
     .connect-embedded-intro {
-      align-items: center;
-      gap: var(--rly-space-8);
-      padding: var(--rly-space-8);
-    }
-
-    .connect-embedded-intro > div {
-      display: block;
-      min-inline-size: 0;
-    }
-
-    .connect-embedded-intro > div > :first-child,
-    .connect-embedded-intro > div > :last-child {
-      display: none;
+      gap: var(--rly-space-12);
+      padding: var(--rly-space-12) var(--rly-space-8) var(--rly-space-4);
     }
 
     .connect-agents {
@@ -678,6 +861,18 @@
       margin-block-end: var(--rly-space-8);
     }
 
+    /* Each filter's name sits beside its options, so 40px targets still fit a phone's first screen. */
+    .connect-filter-set {
+      align-items: start;
+      gap: var(--rly-space-8);
+      grid-template-columns: 3.25rem minmax(0, 1fr);
+    }
+
+    .connect-filter-label {
+      align-self: center;
+      padding-inline: var(--rly-space-0);
+    }
+
     .connect-group-filter,
     .connect-status-filter {
       inline-size: 100%;
@@ -687,6 +882,7 @@
     .connect-status-filter button {
       line-height: var(--rly-type-meta-line-height);
       padding-block: var(--rly-space-4);
+      padding-inline: var(--rly-space-8);
     }
 
     .connect-agent-tree {
@@ -715,17 +911,21 @@
       white-space: nowrap;
     }
 
-    .connect-agent-list::before {
-      inset-inline-start: calc(var(--rly-space-8) + 3.5rem + var(--rly-space-8) + 0.25rem);
+    .connect-agent-tree {
+      --connect-state-track: 6.25rem;
+      --connect-time-track: 2.75rem;
     }
 
     .connect-agent {
       gap: var(--rly-space-8);
-      grid-template-columns: 3.5rem 0.5rem minmax(0, 1fr) auto;
       padding: var(--rly-space-8);
     }
 
-    .connect-failures,
+    .connect-list-head {
+      gap: var(--rly-space-8);
+      padding-inline: var(--rly-space-8);
+    }
+
     .connect-preference-error {
       display: none;
     }
@@ -750,11 +950,13 @@
     }
   }
 
-  /* Phones get every key whole: four 44px columns instead of a row that scrolls sideways. */
+  /* Phones get every key whole instead of a row that scrolls sideways: keys four to a row, and the
+     pinned actions (Keyboard, Keys, Paste, Latest, Select) five to their own row. Twenty columns
+     hold both: a key spans five, an action four. */
   @media (max-width: 640px) {
     .terminal-key-scroll {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(20, minmax(0, 1fr));
       overflow: visible;
     }
 
@@ -768,19 +970,94 @@
     }
 
     .terminal-key-scroll .terminal-key {
+      grid-column: span 5;
       min-block-size: 44px;
       min-inline-size: 0;
     }
 
+    /* Five to a row leaves about 55px a button at 320, so the actions use the meta size to keep
+       "Keyboard" inside its button. */
+    .terminal-key-group-pinned .terminal-key {
+      font-size: var(--rly-type-meta-size);
+      grid-column: span 4;
+      padding-inline: var(--rly-space-4);
+    }
+
+    /* A row of its own: start at the first column (grid-column-start alone would drop the span). */
+    .terminal-key-group-pinned .terminal-key:first-of-type {
+      grid-column: 1 / span 4;
+    }
+
+    /* The anchor for the lines-back badge below. */
+    .terminal-key-rail {
+      position: relative;
+    }
+
+    /* Out of the grid, so the last row is Keyboard, Keys, Latest and Select and the status can never
+       add a rail row or resize the terminal: a solid badge over the terminal's top corner, inside the
+       safe area, that lets every tap through to the terminal. */
     .terminal-older-output {
-      grid-column: span 2;
-      justify-self: end;
+      background: var(--rly-color-surface-2);
+      border: 1px solid var(--rly-color-border-2);
+      border-radius: var(--rly-radius-control);
+      inset-block-start: calc(100% + var(--rly-space-8));
+      inset-inline-end: max(var(--rly-space-8), env(safe-area-inset-right));
+      padding: var(--rly-space-2) var(--rly-space-8);
+      pointer-events: none;
+      position: absolute;
+      z-index: 2;
     }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .connect-agent {
       transition: none;
+    }
+  }
+
+  /* Phones: tighter option padding keeps the five status words on one row, with room for wider font metrics. */
+  @media (max-width: 420px) {
+    .connect-group-filter,
+    .connect-status-filter {
+      gap: var(--rly-space-0);
+    }
+
+    .connect-group-filter button,
+    .connect-status-filter button {
+      padding-inline: var(--rly-space-4);
+    }
+  }
+
+  /* At 24rem and below the state sits over the name, with the time beside it; the column heads go. */
+  @media (max-width: 24rem) {
+    .connect-agent {
+      grid-template-columns: minmax(0, 1fr) auto;
+      row-gap: var(--rly-space-4);
+    }
+
+    .connect-agent-copy {
+      grid-column: 1 / -1;
+      grid-row: 2;
+    }
+
+    .connect-list-head {
+      display: none;
+    }
+  }
+
+  /* The narrowest phones give the options the whole row; the groups keep their names through aria-labelledby. */
+  @media (max-width: 360px) {
+    .connect-filter-set {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .connect-filter-label {
+      block-size: 1px;
+      clip-path: inset(50%);
+      inline-size: 1px;
+      overflow: hidden;
+      position: absolute;
+      white-space: nowrap;
     }
   }
 }

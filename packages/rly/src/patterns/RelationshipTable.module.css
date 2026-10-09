@@ -79,17 +79,19 @@
     color: inherit;
     display: grid;
     min-inline-size: var(--rly-space-0);
-    outline-offset: var(--rly-space-2);
+    outline-offset: var(--rly-focus-ring-offset);
     text-decoration-color: var(--rly-color-border-2);
     text-underline-offset: var(--rly-space-2);
   }
 
-  .endpointLink:hover {
-    text-decoration-color: currentcolor;
+  @media (hover: hover) and (pointer: fine) {
+    .endpointLink:hover {
+      text-decoration-color: currentcolor;
+    }
   }
 
   .endpointLink:focus-visible {
-    outline: 2px solid var(--rly-color-focus);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   }
 
   .title,
@@ -146,7 +148,8 @@
       clip: rect(0 0 0 0);
       clip-path: inset(50%);
       inline-size: 1px;
-      overflow: hidden;
+      min-inline-size: 0;
+      overflow: clip;
       position: absolute;
       white-space: nowrap;
     }
@@ -162,7 +165,7 @@
       border-radius: var(--rly-radius-control);
       display: grid;
       min-inline-size: var(--rly-space-0);
-      overflow: hidden;
+      overflow: clip;
     }
 
     .cell {

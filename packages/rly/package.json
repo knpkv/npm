@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/rly",
-  "version": "0.10.0",
+  "version": "0.17.0",
   "description": "Release-oriented design system for human and agent collaboration",
   "license": "MIT",
   "author": "knpkv",
@@ -53,6 +53,7 @@
     "./registry/schema.json": "./registry/schema.json",
     "./registry/search.json": "./registry/search.json",
     "./registry/USAGE.md": "./registry/USAGE.md",
+    "./relay-mark.svg": "./dist/assets/relay-mark.svg",
     "./styles.css": "./dist/styles.css"
   },
   "publishConfig": {
@@ -75,6 +76,7 @@
     "codegen:check": "tsx scripts/generate-contract.ts check",
     "lint": "eslint \"{src,test,scripts,generated,manifest,stories,visual,.storybook}/**/*.{ts,tsx}\" component-manifest.ts vite.config.ts vite.bounded.config.ts vitest.config.ts vitest.storybook.config.ts playwright.config.ts && pnpm lint:colors && pnpm lint:stripes",
     "lint:colors": "tsx scripts/tokens/lint-colors.ts",
+    "lint:focus-rings": "tsx scripts/tokens/lint-focus-rings.ts",
     "lint:stripes": "tsx scripts/tokens/lint-stripes.ts",
     "prepack": "pnpm build",
     "scaffold": "tsx scripts/scaffold-component.ts",
@@ -84,7 +86,7 @@
     "test": "vitest run",
     "test:browser": "pnpm test:storybook && pnpm test:visual",
     "test:pack": "tsx scripts/test-packed-package.ts",
-    "test:storybook": "vitest run --config vitest.storybook.config.ts --project storybook && vitest run --config vitest.storybook.config.ts --project storybook-phone",
+    "test:storybook": "vitest run --config vitest.storybook.config.ts --project storybook && vitest run --config vitest.storybook.config.ts --project storybook-phone && vitest run --config vitest.storybook.config.ts --project storybook-touch",
     "test:visual": "pnpm storybook:build && playwright test --config playwright.config.ts",
     "validate:dist": "tsx scripts/validate-dist.ts",
     "validate:registry": "tsx scripts/validate-registry.ts",

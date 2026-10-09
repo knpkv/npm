@@ -85,7 +85,6 @@ describe("Herdr terminal stderr budget", () => {
             isRunning: Effect.succeed(true),
             kill: () => Effect.void,
             pid: ChildProcessSpawner.ProcessId(42),
-            reref: Effect.void,
             stderr: Stream.make(half, half),
             stdin: Sink.drain,
             stdout: Stream.never,

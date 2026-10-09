@@ -600,6 +600,36 @@ describe("ServicesPage connection tests", () => {
     expect(currentLocation).toBe("/services")
   })
 
+  it("prints the provider name on a connection card only when the card's title doesn't already say it", async () => {
+    const namedLikeProvider = Schema.decodeSync(PluginConnectionSummary)({
+      ...Schema.encodeSync(PluginConnectionSummary)(confluenceConnection),
+      displayName: "confluence"
+    })
+    const twoConnections = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      ...Schema.encodeSync(PluginOverviewResponse)(overview),
+      connections: [
+        Schema.encodeSync(PluginConnectionSummary)(connection),
+        Schema.encodeSync(PluginConnectionSummary)(namedLikeProvider)
+      ]
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connection.pluginConnectionId),
+      overview: () => Promise.resolve(twoConnections),
+      setEnabled: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    const markIn = (title: string) =>
+      [...host.querySelectorAll<HTMLElement>("article")]
+        .find((card) => card.querySelector("h2")?.textContent === title)
+        ?.querySelector<HTMLElement>("[data-rly-service]")
+    // A renamed connection keeps its provider visible; one titled with the provider's name doesn't repeat it.
+    expect(markIn("Payments Jira")?.textContent).toBe("Jira")
+    expect(markIn("confluence")?.textContent).toBe("")
+    expect(markIn("confluence")?.getAttribute("aria-label")).toBe("Confluence")
+  })
+
   it("keeps provider-account renames independent across account cards", async () => {
     const firstAccountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000201")
     const secondAccountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000202")
@@ -2991,7 +3021,7 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport)
     await act(async () => undefined)
-    expect(host.textContent).toContain("Never synchronized")
+    expect(host.textContent).toContain("Not synced yet")
     const syncNow = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Sync now")
     )
@@ -3000,11 +3030,11 @@ describe("ServicesPage connection tests", () => {
     expect(syncNow?.disabled).toBe(true)
     // While the attempt is in flight the panel surfaces the in-progress state
     // rather than the stale prior result.
-    expect(host.textContent).toContain("Synchronizing…")
+    expect(host.textContent).toContain("Syncing…")
     await act(async () => completeSynchronization?.())
-    expect(host.textContent).toContain("Synchronized")
-    expect(host.textContent).toContain("3 pages")
-    expect(host.textContent).toContain("2026-07-19T10:00:01.000Z")
+    // Relative and clock time, never an ISO timestamp.
+    expect(host.textContent).toMatch(/Synced [^,]+, \d\d:\d\d/)
+    expect(host.textContent).not.toContain("2026-07-19T10:00:01.000Z")
   })
 
   it("shows synchronization only for Confluence connections with negotiated sync", async () => {
@@ -3084,7 +3114,7 @@ describe("ServicesPage connection tests", () => {
 
     const host = await renderServices(transport)
     await act(async () => undefined)
-    expect(host.textContent).toContain("Never synchronized")
+    expect(host.textContent).toContain("Not synced yet")
     expect(host.textContent).toContain("Sync now")
 
     const disable = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
@@ -3130,8 +3160,7 @@ describe("ServicesPage connection tests", () => {
     const host = await renderServices(transport)
     await act(async () => undefined)
 
-    expect(host.textContent).toContain("Synchronized")
-    expect(host.textContent).toContain("3 pages")
+    expect(host.textContent).toMatch(/Synced [^,]+, \d\d:\d\d/)
     const syncNow = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Sync now")
     )
@@ -3175,15 +3204,15 @@ describe("ServicesPage connection tests", () => {
     }
     const host = await renderServices(transport)
     await act(async () => undefined)
-    expect(host.textContent).toContain("Loading synchronization state")
+    expect(host.textContent).toContain("Loading sync state")
     await act(async () => failInitialLoad?.())
-    expect(host.textContent).toContain("Synchronization state is unavailable")
+    expect(host.textContent).toContain("Sync state is unavailable")
     const refresh = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
       textContent?.includes("Refresh state")
     )
     await act(async () => refresh?.click())
     expect(synchronization).toHaveBeenCalledTimes(2)
-    expect(host.textContent).toContain("Never synchronized")
+    expect(host.textContent).toContain("Not synced yet")
   })
 
   it("retries only AWS drafts that did not create successfully", async () => {
@@ -3777,5 +3806,453 @@ describe("ServicesPage connection tests", () => {
       ({ textContent }) => textContent?.includes("Test connection")
     )
     expect(recoveredTest?.disabled).toBe(false)
+  })
+})
+
+describe("ServicesPage first sync", () => {
+  const syncState = (
+    pluginConnectionId: PluginConnectionId,
+    result: PluginSynchronizationState["result"],
+    extra: Partial<typeof PluginSynchronizationState.Encoded> = {}
+  ) =>
+    Schema.decodeUnknownSync(PluginSynchronizationState)({
+      pluginConnectionId,
+      providerId: "codecommit",
+      streamKey: "pull-requests",
+      lastAttemptAt: null,
+      lastSuccessAt: null,
+      result,
+      pagesCommitted: 0,
+      ...extra
+    })
+
+  const awsField = (key: string, defaultValue: string | null = null) => ({
+    key,
+    label: key,
+    description: `Configure ${key}.`,
+    kind: "text",
+    scope: "adapter",
+    required: true,
+    defaultValue,
+    isReadOnly: false,
+    minimum: null,
+    maximum: null
+  })
+  const awsOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+    catalog: [
+      {
+        ...catalogEntry("codecommit"),
+        configurationFields: [awsField("profile", "default"), awsField("region"), awsField("repositoryName")]
+      },
+      {
+        ...catalogEntry("codepipeline"),
+        configurationFields: [awsField("profile", "default"), awsField("region"), awsField("pipelineName")]
+      },
+      catalogEntry("jira"),
+      catalogEntry("confluence"),
+      catalogEntry("clockify")
+    ],
+    connections: []
+  })
+
+  /** A created connection that negotiates sync; `healthy` decides its connection test. */
+  const created = (request: Parameters<ConnectionTestTransport["create"]>[0], healthy: boolean) =>
+    Schema.decodeUnknownSync(CreatePluginConnectionResponse)({
+      connection: {
+        pluginConnectionId: request.pluginConnectionId,
+        providerId: request.providerId,
+        displayName: request.displayName,
+        isEnabled: true,
+        supportsSynchronization: true,
+        health: null,
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      },
+      configuration: {
+        pluginConnectionId: request.pluginConnectionId,
+        revision: 1,
+        values: request.values,
+        updatedAt: "2026-07-14T10:03:00.000Z"
+      },
+      test: healthy
+        ? {
+            _tag: "healthy",
+            pluginConnectionId: request.pluginConnectionId,
+            providerId: request.providerId,
+            checkedAt: "2026-07-14T10:03:00.000Z",
+            latencyMilliseconds: 20,
+            identity: {
+              kind: "account",
+              label: "AWS account",
+              displayName: "Production account",
+              providerImmutableId: "123456789012"
+            }
+          }
+        : {
+            _tag: "failed",
+            pluginConnectionId: request.pluginConnectionId,
+            providerId: request.providerId,
+            checkedAt: "2026-07-14T10:03:00.000Z",
+            latencyMilliseconds: 20,
+            failureClass: "authorization",
+            retryAt: null,
+            safeMessage: "Access denied."
+          }
+    })
+
+  // A connected resource holds no data until it syncs: connecting starts that first sync, once,
+  // for each resource whose connection test passed.
+  it("starts one sync for each newly connected healthy resource, none for a failed one", async () => {
+    const ids = [
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000161"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000162")
+    ]
+    const createBatch = vi.fn<NonNullable<ConnectionTestTransport["createBatch"]>>(async (request) =>
+      Schema.decodeUnknownSync(CreatePluginConnectionsResponse)({
+        results: request.connections.map((connectionRequest, index) => ({
+          _tag: "succeeded",
+          response: Schema.encodeSync(CreatePluginConnectionResponse)(created(connectionRequest, index === 0))
+        }))
+      })
+    )
+    // The first sync stays in flight while the page refreshes around it; it must not be aborted.
+    let finishSync: (() => void) | undefined
+    const synchronize = vi.fn<NonNullable<ConnectionTestTransport["synchronize"]>>(
+      (pluginConnectionId) =>
+        new Promise((resolve) => {
+          finishSync = () => resolve(syncState(pluginConnectionId, "synchronized", { pagesCommitted: 1 }))
+        })
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      createBatch,
+      discoverAwsProfiles: () => Promise.resolve([{ profile: "production", region: "eu-west-1" }]),
+      discoverAwsResources: () =>
+        Promise.resolve({
+          accountId: "123456789012",
+          codeCommit: { _tag: "available", names: [], truncated: false },
+          codePipeline: { _tag: "available", names: [], truncated: false }
+        }),
+      overview: () => Promise.resolve(awsOverview),
+      makeConnectionId: vi.fn().mockResolvedValueOnce(ids[0]).mockResolvedValueOnce(ids[1]),
+      setEnabled: vi.fn(),
+      synchronization: (pluginConnectionId) => Promise.resolve(syncState(pluginConnectionId, "never")),
+      synchronize,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const inputs = host.querySelectorAll<HTMLInputElement>("input")
+    if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
+    if (inputs[1] !== undefined) await setControlValue(inputs[1], "production")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+    const textareas = host.querySelectorAll<HTMLTextAreaElement>("textarea")
+    if (textareas[0] !== undefined) await setControlValue(textareas[0], "payments-api\nrisk-engine")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => submit?.click())
+    await act(async () => undefined)
+
+    expect(createBatch).toHaveBeenCalledTimes(1)
+    expect(synchronize.mock.calls.map(([pluginConnectionId]) => pluginConnectionId)).toEqual([ids[0]])
+    expect(synchronize.mock.calls[0]?.[1].aborted).toBe(false)
+    expect(host.textContent).toContain("Syncing…")
+    await act(async () => finishSync?.())
+    expect(host.textContent).not.toContain("Syncing…")
+  })
+
+  // Inside an account, a resource that hasn't synced shows Sync now without opening Controls, and a
+  // credential failure is the account's problem: said once on the account, not on each resource row.
+  it("opens an unsynced resource with Sync now, and states a credential failure once on the account", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000181")
+    const repositoryId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000182")
+    const pipelineId = Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000183")
+    const repositoryConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000184")
+    const pipelineConnectionId = Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000185")
+    const resourceConnection = (
+      pluginConnectionId: PluginConnectionId,
+      followedResourceId: FollowedResourceId,
+      providerId: "codecommit" | "codepipeline",
+      displayName: string
+    ) => ({
+      pluginConnectionId,
+      providerAccountId: accountId,
+      followedResourceId,
+      providerId,
+      displayName,
+      isEnabled: true,
+      supportsSynchronization: true,
+      health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+      updatedAt: "2026-07-14T10:00:00.000Z"
+    })
+    const accountOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        catalogEntry("codecommit"),
+        catalogEntry("codepipeline"),
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: [
+        resourceConnection(repositoryConnectionId, repositoryId, "codecommit", "Payments repository"),
+        resourceConnection(pipelineConnectionId, pipelineId, "codepipeline", "Payments pipeline")
+      ],
+      accounts: [
+        {
+          providerAccountId: accountId,
+          providerFamily: "aws",
+          displayName: "123456789012",
+          providerImmutableId: "123456789012",
+          revision: 1,
+          resources: [
+            {
+              followedResourceId: repositoryId,
+              providerId: "codecommit",
+              displayName: "payments",
+              providerImmutableId: "eu-west-1:payments",
+              isEnabled: true
+            },
+            {
+              followedResourceId: pipelineId,
+              providerId: "codepipeline",
+              displayName: "payments-release",
+              providerImmutableId: "arn:aws:codepipeline:eu-west-1:123456789012:payments-release",
+              isEnabled: true
+            }
+          ]
+        }
+      ]
+    })
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(repositoryConnectionId),
+      overview: () => Promise.resolve(accountOverview),
+      setEnabled: vi.fn(),
+      synchronization: (pluginConnectionId) =>
+        Promise.resolve(
+          pluginConnectionId === repositoryConnectionId
+            ? syncState(pluginConnectionId, "never")
+            : syncState(pluginConnectionId, "source-unavailable", {
+                lastAttemptAt: "2026-07-14T10:02:00.000Z",
+                failure: { failureClass: "authentication", safeMessage: "Credentials were rejected." }
+              })
+        ),
+      synchronize: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    const resources = [...host.querySelectorAll<HTMLDetailsElement>("details")]
+    const repository = resources.find(({ textContent }) => textContent?.includes("eu-west-1:payments"))
+    const pipeline = resources.find(({ textContent }) => textContent?.includes("payments-release"))
+    expect(repository?.open).toBe(true)
+    expect(repository?.querySelector("summary")?.textContent).toContain("Not synced yet")
+    expect(
+      [...(repository?.querySelectorAll("button") ?? [])].some(({ textContent }) => textContent === "Sync now")
+    ).toBe(true)
+    expect(pipeline?.querySelector("summary")?.textContent).toContain("Sync failed")
+    const credentialSentence = "The provider rejected the account's credentials."
+    expect(host.textContent?.split(credentialSentence).length).toBe(2)
+    expect(pipeline?.textContent).not.toContain(credentialSentence)
+  })
+
+  // Check again re-syncs only enabled resources: the server rejects a sync of a disabled one.
+  it("re-syncs only enabled resources from the account's Check again", async () => {
+    const accountId = Schema.decodeSync(ProviderAccountId)("01890f6f-6d6a-7cc0-98d2-000000000211")
+    const resourceIds = [
+      Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000212"),
+      Schema.decodeSync(FollowedResourceId)("01890f6f-6d6a-7cc0-98d2-000000000213")
+    ]
+    const connectionIds = [
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000214"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000215")
+    ]
+    const accountOverview = Schema.decodeUnknownSync(PluginOverviewResponse)({
+      catalog: [
+        catalogEntry("codecommit"),
+        catalogEntry("codepipeline"),
+        catalogEntry("jira"),
+        catalogEntry("confluence"),
+        catalogEntry("clockify")
+      ],
+      connections: connectionIds.map((pluginConnectionId, index) => ({
+        pluginConnectionId,
+        providerAccountId: accountId,
+        followedResourceId: resourceIds[index],
+        providerId: "codecommit",
+        displayName: index === 0 ? "enabled-repo" : "disabled-repo",
+        isEnabled: index === 0,
+        supportsSynchronization: true,
+        health: { _tag: "healthy", checkedAt: "2026-07-14T10:00:00.000Z" },
+        updatedAt: "2026-07-14T10:00:00.000Z"
+      })),
+      accounts: [
+        {
+          providerAccountId: accountId,
+          providerFamily: "aws",
+          displayName: "123456789012",
+          providerImmutableId: "123456789012",
+          revision: 1,
+          resources: resourceIds.map((followedResourceId, index) => ({
+            followedResourceId,
+            providerId: "codecommit",
+            displayName: index === 0 ? "enabled-repo" : "disabled-repo",
+            providerImmutableId: `eu-west-1:repo-${index}`,
+            isEnabled: true
+          }))
+        }
+      ]
+    })
+    const synchronize = vi.fn<NonNullable<ConnectionTestTransport["synchronize"]>>((pluginConnectionId) =>
+      Promise.resolve(syncState(pluginConnectionId, "synchronized"))
+    )
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(connectionIds[0]!),
+      overview: () => Promise.resolve(accountOverview),
+      setEnabled: vi.fn(),
+      synchronization: (pluginConnectionId) =>
+        Promise.resolve(
+          syncState(pluginConnectionId, "source-unavailable", {
+            failure: { failureClass: "authentication", safeMessage: "Credentials were rejected." }
+          })
+        ),
+      synchronize,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const checkAgain = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
+      ({ textContent }) => textContent === "Check again"
+    )
+    await act(async () => checkAgain?.click())
+
+    expect(synchronize.mock.calls.map(([pluginConnectionId]) => pluginConnectionId)).toEqual([connectionIds[0]])
+  })
+
+  // Sync state that hasn't loaded, or failed to load, is not proof of data: never "Healthy".
+  it("doesn't call a resource Healthy while its sync state is loading or unreadable", async () => {
+    const existing = Schema.decodeSync(PluginConnectionSummary)({
+      pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000191",
+      providerAccountId: null,
+      followedResourceId: null,
+      providerId: "codecommit",
+      displayName: "payments-api",
+      isEnabled: true,
+      supportsSynchronization: true,
+      health: { _tag: "healthy", checkedAt: "2026-07-14T10:03:00.000Z" },
+      updatedAt: "2026-07-14T10:03:00.000Z"
+    })
+    let failRead: (() => void) | undefined
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(existing.pluginConnectionId),
+      overview: () => Promise.resolve({ ...awsOverview, connections: [existing] }),
+      setEnabled: vi.fn(),
+      synchronization: () =>
+        new Promise((_, reject) => {
+          failRead = () => reject(new Error("unavailable"))
+        }),
+      synchronize: vi.fn(),
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+    const card = () =>
+      [...host.querySelectorAll<HTMLElement>("article")].find(({ textContent }) =>
+        textContent?.includes("payments-api")
+      )
+    expect(card()?.textContent).not.toContain("Healthy")
+    await act(async () => failRead?.())
+    expect(card()?.textContent).not.toContain("Healthy")
+    expect(card()?.textContent).toContain("Sync state unknown")
+  })
+
+  // Without batch create, one draft can connect and a later one fail: the one that connected still syncs.
+  it("syncs a connected resource even when a later draft in the same setup fails", async () => {
+    const ids = [
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000192"),
+      Schema.decodeSync(PluginConnectionId)("01890f6f-6d6a-7cc0-98d2-000000000193")
+    ]
+    const create = vi
+      .fn<ConnectionTestTransport["create"]>()
+      .mockImplementationOnce((request) => Promise.resolve(created(request, true)))
+      .mockImplementationOnce(() => Promise.reject(new Error("setup failed")))
+    const synchronize = vi.fn<NonNullable<ConnectionTestTransport["synchronize"]>>((pluginConnectionId) =>
+      Promise.resolve(syncState(pluginConnectionId, "synchronized"))
+    )
+    const transport: ConnectionTestTransport = {
+      create,
+      discoverAwsProfiles: () => Promise.resolve([{ profile: "production", region: "eu-west-1" }]),
+      discoverAwsResources: () =>
+        Promise.resolve({
+          accountId: "123456789012",
+          codeCommit: { _tag: "available", names: [], truncated: false },
+          codePipeline: { _tag: "available", names: [], truncated: false }
+        }),
+      overview: () => Promise.resolve(awsOverview),
+      makeConnectionId: vi.fn().mockResolvedValueOnce(ids[0]).mockResolvedValueOnce(ids[1]),
+      setEnabled: vi.fn(),
+      synchronization: (pluginConnectionId) => Promise.resolve(syncState(pluginConnectionId, "never")),
+      synchronize,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport, "/services?enable=codecommit")
+    await act(async () => undefined)
+    const inputs = host.querySelectorAll<HTMLInputElement>("input")
+    if (inputs[0] !== undefined) await setControlValue(inputs[0], "Payments production")
+    if (inputs[1] !== undefined) await setControlValue(inputs[1], "production")
+    const discover = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Test & discover")
+    )
+    await act(async () => discover?.click())
+    const textareas = host.querySelectorAll<HTMLTextAreaElement>("textarea")
+    if (textareas[0] !== undefined) await setControlValue(textareas[0], "payments-api\nrisk-engine")
+    const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(({ textContent }) =>
+      textContent?.includes("Connect AWS account")
+    )
+    await act(async () => submit?.click())
+    await act(async () => undefined)
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(synchronize.mock.calls.map(([pluginConnectionId]) => pluginConnectionId)).toEqual([ids[0]])
+  })
+
+  // Opening Services never syncs anything by itself: only a connect or Sync now does.
+  it("does not sync already connected resources when the page opens, and says they haven't synced", async () => {
+    const existing = Schema.decodeSync(PluginConnectionSummary)({
+      pluginConnectionId: "01890f6f-6d6a-7cc0-98d2-000000000163",
+      providerAccountId: null,
+      followedResourceId: null,
+      providerId: "codecommit",
+      displayName: "payments-api",
+      isEnabled: true,
+      supportsSynchronization: true,
+      health: { _tag: "healthy", checkedAt: "2026-07-14T10:03:00.000Z" },
+      updatedAt: "2026-07-14T10:03:00.000Z"
+    })
+    const synchronize = vi.fn<NonNullable<ConnectionTestTransport["synchronize"]>>()
+    const transport: ConnectionTestTransport = {
+      create: vi.fn(),
+      makeConnectionId: () => Promise.resolve(existing.pluginConnectionId),
+      overview: () => Promise.resolve({ ...awsOverview, connections: [existing] }),
+      setEnabled: vi.fn(),
+      synchronization: (pluginConnectionId) => Promise.resolve(syncState(pluginConnectionId, "never")),
+      synchronize,
+      test: vi.fn()
+    }
+    const host = await renderServices(transport)
+    await act(async () => undefined)
+
+    expect(synchronize).not.toHaveBeenCalled()
+    const card = [...host.querySelectorAll<HTMLElement>("article")].find(({ textContent }) =>
+      textContent?.includes("payments-api")
+    )
+    expect(card?.textContent).toContain("Not synced yet")
+    expect(card?.textContent).not.toContain("Healthy")
   })
 })

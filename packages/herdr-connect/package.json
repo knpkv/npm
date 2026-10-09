@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-connect",
-  "version": "0.5.0",
+  "version": "0.10.0",
   "description": "Fleet Herdr agent directory and authenticated terminal control",
   "license": "MIT",
   "author": "knpkv",
@@ -49,7 +49,7 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force",
-    "check": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.test.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
     "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",
@@ -59,6 +59,7 @@
   "dependencies": {
     "@effect/atom-react": "4.0.0",
     "@effect/platform-browser": "4.0.0",
+    "@knpkv/agent-usage": "workspace:^",
     "@knpkv/bounded-io": "workspace:^",
     "@knpkv/herdr-fleet": "workspace:^",
     "@knpkv/herdr-work": "workspace:^",

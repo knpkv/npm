@@ -1,0 +1,14 @@
+id: no-ghostty-terminal-focus
+snapshots:
+  keyboard.setTerminalFocus(textarea, () => terminal.terminal.focus()):
+    labels:
+      - source: terminal.terminal.focus()
+        style: primary
+        start: 42
+        end: 67
+  terminal.focus():
+    labels:
+      - source: terminal.focus()
+        style: primary
+        start: 0
+        end: 16

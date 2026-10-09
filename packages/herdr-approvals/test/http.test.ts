@@ -1,19 +1,22 @@
 import { NodeServices } from "@effect/platform-node"
-import { describe, expect, it } from "@effect/vitest"
+import { describe, expect, it, vi } from "@effect/vitest"
 import {
   connectAgentPageMaxRecords,
   FleetConnectAgentPage,
+  FleetLimits,
   terminalCommandMaxPayloadBytes,
   type TerminalConnector,
   terminalFrameMaxEncodedBytes,
+  TerminalSelection,
   type TerminalSession
 } from "@knpkv/herdr-connect"
-import { ChatHistory, chatHistoryMaxEntries, ChatStore, type StoredChatTurn } from "@knpkv/herdr-coordinator"
+import { chatHistoryMaxEntries, ChatStore, type StoredChatTurn } from "@knpkv/herdr-coordinator"
 import {
   FleetAuthorizationError,
   FleetOperationError,
   fleetResponseBodyMaxBytes,
   type FleetService,
+  FleetStoreBusyError,
   FleetValidationError,
   type HostConfiguration,
   type HostOperations,
@@ -35,6 +38,7 @@ import {
   WorkStore
 } from "@knpkv/herdr-work"
 import { Data, Deferred, Effect, Fiber, Result, Schema, Stream } from "effect"
+import { HttpClient } from "effect/http"
 import { spawn } from "node:child_process"
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, request as httpRequest } from "node:http"
@@ -62,7 +66,14 @@ import {
   startHttpServer
 } from "../src/http.js"
 import { dashboardDocumentTitle } from "../src/internal/html.js"
-import { relayTerminalCloseCode, terminalBufferCanAccept, terminalBufferLimitBytes } from "../src/internal/websocket.js"
+import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "../src/internal/terminal-selection.js"
+import {
+  isRelayedScrollState,
+  makeLatestSignalSender,
+  relayTerminalCloseCode,
+  terminalBufferCanAccept,
+  terminalBufferLimitBytes
+} from "../src/internal/websocket.js"
 import { commandOutputMaxBytes } from "../src/operations.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
@@ -489,11 +500,12 @@ esac
             approve: (jobId, approval, actor) => {
               if (failApproval) {
                 failApproval = false
+                // The job store is locked once: a retryable 503, and the approval proof must survive it so a retry succeeds.
                 return Effect.fail(
-                  new FleetOperationError({
+                  new FleetStoreBusyError({
                     cause: "transient test failure",
-                    detail: "approval backend temporarily unavailable",
-                    operation: "test.approve"
+                    detail: "database is locked",
+                    operation: "transition"
                   })
                 )
               }
@@ -521,7 +533,7 @@ esac
           if (proofCookie === null) {
             return yield* new FleetValidationError({ detail: "approval proof cookie missing from dashboard" })
           }
-          const proofCookieHeader = proofCookie.split(";", 1)[0]
+          const proofCookieHeader = proofCookie.split(";", 1).join("")
           expect(dashboardResponse.headers.get("cache-control")).toBe("no-store")
           expect(dashboard).toContain("[redacted internal prompt]")
           expect(dashboard).not.toContain("raw terminal prompt")
@@ -584,7 +596,10 @@ esac
             })
           )
           expect(transientFailure.status).toBe(503)
-          yield* Effect.promise(() => transientFailure.text())
+          // Decoding fails the test unless the 503 names the retryable busy store.
+          yield* Schema.decodeUnknownEffect(
+            Schema.fromJsonString(Schema.Struct({ error: Schema.Literal("FleetStoreBusyError") }))
+          )(yield* Effect.promise(() => transientFailure.text()))
 
           const decided = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
@@ -723,7 +738,7 @@ esac
           const headers = { "tailscale-user-login": "andrey@example.com" }
           const origin = new URL(approvalUrl).origin
           const dashboardA = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
-          const cookieA = dashboardA.headers.get("set-cookie")?.split(";", 1)[0]
+          const cookieA = dashboardA.headers.get("set-cookie")?.split(";", 1).join("")
           if (cookieA === undefined) {
             return yield* new FleetValidationError({ detail: "first approval proof cookie missing" })
           }
@@ -737,13 +752,13 @@ esac
             return yield* new FleetValidationError({ detail: "approval continuation missing" })
           }
           const dashboardB = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
-          const cookieB = dashboardB.headers.get("set-cookie")?.split(";", 1)[0]
+          const cookieB = dashboardB.headers.get("set-cookie")?.split(";", 1).join("")
           if (cookieB === undefined || cookieB === cookieA) {
             return yield* new FleetValidationError({ detail: "approval proof sessions were not isolated" })
           }
           yield* Effect.promise(() => dashboardB.text())
           const dashboardC = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
-          const cookieC = dashboardC.headers.get("set-cookie")?.split(";", 1)[0]
+          const cookieC = dashboardC.headers.get("set-cookie")?.split(";", 1).join("")
           if (cookieC === undefined || cookieC === cookieA || cookieC === cookieB) {
             return yield* new FleetValidationError({ detail: "third approval proof session was not isolated" })
           }
@@ -771,7 +786,7 @@ esac
             )
           )
           expect(firstDisclosure.status).toBe(200)
-          const firstCookie = firstDisclosure.headers.get("set-cookie")?.split(";", 1)[0]
+          const firstCookie = firstDisclosure.headers.get("set-cookie")?.split(";", 1).join("")
           if (firstCookie === undefined) {
             return yield* new FleetValidationError({ detail: "initial concurrent proof cookie missing" })
           }
@@ -843,7 +858,7 @@ esac
           const dashboardD = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie: cookieB } })
           )
-          const cookieD = dashboardD.headers.get("set-cookie")?.split(";", 1)[0]
+          const cookieD = dashboardD.headers.get("set-cookie")?.split(";", 1).join("")
           if (cookieD === undefined) {
             return yield* new FleetValidationError({ detail: "new approval proof session missing" })
           }
@@ -1048,7 +1063,7 @@ esac
           const dashboard = yield* Effect.promise(
             () => fetch(`${approvalUrl}/v1/dashboard`, { headers })
           )
-          const cookie = dashboard.headers.get("set-cookie")?.split(";", 1)[0]
+          const cookie = dashboard.headers.get("set-cookie")?.split(";", 1).join("")
           if (cookie === undefined) {
             return yield* new FleetValidationError({ detail: "approval proof cookie missing" })
           }
@@ -1206,7 +1221,7 @@ esac
               () => fetch(`${approvalUrl}/v1/dashboard`, { headers })
             )
             if (attempt === 0) {
-              firstCookie = response.headers.get("set-cookie")?.split(";", 1)[0]
+              firstCookie = response.headers.get("set-cookie")?.split(";", 1).join("")
             }
             if (response.status === 503) {
               capacityResponse = response
@@ -1338,7 +1353,7 @@ esac
           const origin = new URL(approvalUrl).origin
           const initial = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
           expect(initial.status).toBe(200)
-          const retainedCookie = initial.headers.get("set-cookie")?.split(";", 1)[0]
+          const retainedCookie = initial.headers.get("set-cookie")?.split(";", 1).join("")
           if (retainedCookie === undefined) {
             return yield* new FleetValidationError({ detail: "retained approval proof cookie missing" })
           }
@@ -1469,7 +1484,12 @@ esac
           )
           expect(
             yield* notificationCandidates(config(root), fleet).pipe(
-              Effect.provideService(Tailscale, tailscale)
+              Effect.provideService(Tailscale, tailscale),
+              // Discovery fails before any request, so reaching a remote host is a defect.
+              Effect.provideService(
+                HttpClient.HttpClient,
+                HttpClient.make(() => Effect.die("fleet discovery failed, so no remote host is contacted"))
+              )
             )
           ).toEqual({
             candidates: [{ host: "ALPHA", jobId: "job-local" }],
@@ -1490,7 +1510,7 @@ esac
     expect(title).not.toContain("<script")
     expect(title).not.toContain(host)
     expect(title).toBe(
-      "Host activity · SER8&lt;/title&gt;&lt;script data-xss=&quot;true&quot;&gt;alert(1)&lt;/script&gt;"
+      "Host activity on SER8&lt;/title&gt;&lt;script data-xss=&quot;true&quot;&gt;alert(1)&lt;/script&gt;"
     )
   })
 
@@ -1501,7 +1521,8 @@ esac
           canonical: true,
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
-          pushEnabled: true
+          pushEnabled: true,
+          workEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -1579,7 +1600,8 @@ esac
           canonical: true,
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
-          pushEnabled: true
+          pushEnabled: true,
+          workEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -1632,7 +1654,8 @@ esac
           canonical: true,
           canonicalUrl: "https://ser8.example.test:4779/",
           chatEnabled: true,
-          pushEnabled: true
+          pushEnabled: true,
+          workEnabled: false
         },
         approvalsEnabled: true,
         chat: null,
@@ -1718,6 +1741,59 @@ esac
             error: "FleetOperationError",
             detail: "backend unavailable"
           })
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("serves this host's limits on its own listener and keeps the peer route off it", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-limits-"))
+    const report = {
+      v: 1,
+      machine: "ALPHA",
+      observedAt: 1_000,
+      latest: [{
+        agent: "claude",
+        machine: "ALPHA",
+        source: "claude-oauth-usage",
+        label: "*",
+        windowMinutes: null,
+        observedAt: 900,
+        reading: { _tag: "Unknown", reason: "Fetch" }
+      }]
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(
+                {
+                  ...config(root),
+                  agentUsageLimitsCommand: ["sh", "-c", "printf '%s' \"$1\"", "agent-usage", JSON.stringify(report)]
+                },
+                fleet,
+                assets,
+                { terminalConnector: unusedTerminal }
+              )
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits`))
+          expect(response.status).toBe(200)
+          const body = Schema.decodeUnknownSync(FleetLimits)(yield* Effect.promise(() => response.json()))
+          expect(body.failures).toEqual([])
+          expect(body.hosts.map(({ host, reading }) => [host, reading])).toEqual([
+            ["ALPHA", { _tag: "Read", limits: report, skipped: 0 }]
+          ])
+          // Only a peer's tailnet listener answers the hub's per-host question.
+          expect((yield* Effect.promise(() => fetch(`${server.url}/v1/connect/limits/local`))).status).toBe(404)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {
@@ -2319,7 +2395,7 @@ esac
             summary: "Reject the mismatched approval origin"
           }]
         }
-      }
+      } satisfies WorkCheckpointTestPayload
       const invalid = yield* Effect.result(
         recordWorkCheckpointRequest(
           Effect.succeed("local"),
@@ -2359,7 +2435,7 @@ esac
             summary: "Approve the peer handoff"
           }]
         }
-      }
+      } satisfies WorkCheckpointTestPayload
       expect(
         yield* recordWorkCheckpointRequest(
           Effect.succeed("local"),
@@ -2393,7 +2469,8 @@ esac
       if (server.workUrl === null) {
         return yield* Effect.die("Work listener missing")
       }
-      const workListenerUrl = new URL(server.workUrl)
+      const workUrl = server.workUrl
+      const workListenerUrl = new URL(workUrl)
       expect(workListenerUrl.hostname).toBe("127.0.0.2")
 
       const untrustedInterface = yield* Effect.result(
@@ -2412,14 +2489,14 @@ esac
       expect(
         yield* Effect.promise(() =>
           requestStatus(
-            `${server.workUrl}/v1/work`,
+            `${workUrl}/v1/work`,
             `attacker.example:${workListenerUrl.port}`
           )
         )
       ).toBe(403)
 
       const recorded = yield* Effect.promise(() =>
-        fetch(`${server.workUrl}/v1/work/checkpoints`, {
+        fetch(`${workUrl}/v1/work/checkpoints`, {
           body: JSON.stringify(workCheckpoint),
           headers: { "content-type": "application/json" },
           method: "POST"
@@ -2431,7 +2508,7 @@ esac
       )
 
       const replay = yield* Effect.promise(() =>
-        fetch(`${server.workUrl}/v1/work/checkpoints`, {
+        fetch(`${workUrl}/v1/work/checkpoints`, {
           body: JSON.stringify(workCheckpoint),
           headers: { "content-type": "application/json" },
           method: "POST"
@@ -2443,7 +2520,7 @@ esac
       )
 
       const conflict = yield* Effect.promise(() =>
-        fetch(`${server.workUrl}/v1/work/checkpoints`, {
+        fetch(`${workUrl}/v1/work/checkpoints`, {
           body: JSON.stringify({
             ...workCheckpoint,
             goal: { ...workCheckpoint.goal, title: "Changed checkpoint" }
@@ -2458,23 +2535,23 @@ esac
         eventId: workCheckpoint.eventId
       })
 
-      const snapshot = yield* Effect.promise(() => fetch(`${server.workUrl}/v1/work`))
+      const snapshot = yield* Effect.promise(() => fetch(`${workUrl}/v1/work`))
       expect(snapshot.status).toBe(200)
       expect(Schema.decodeUnknownSync(WorkSnapshots)(yield* Effect.promise(() => snapshot.json())).now.goals).toEqual([
         workCheckpoint.goal
       ])
 
       const browserWrite = yield* Effect.promise(() =>
-        fetch(`${server.workUrl}/v1/work/checkpoints`, {
+        fetch(`${workUrl}/v1/work/checkpoints`, {
           body: JSON.stringify(workCheckpoint),
-          headers: { "content-type": "application/json", origin: server.workUrl },
+          headers: { "content-type": "application/json", origin: workUrl },
           method: "POST"
         })
       )
       expect(browserWrite.status).toBe(403)
 
       const genericJob = yield* Effect.promise(() =>
-        fetch(`${server.workUrl}/v1/jobs`, {
+        fetch(`${workUrl}/v1/jobs`, {
           body: JSON.stringify({ payload: { kind: "nix.check" } }),
           headers: { "content-type": "application/json" },
           method: "POST"
@@ -2497,6 +2574,105 @@ esac
     expect(terminalBufferCanAccept(1, terminalBufferLimitBytes)).toBe(false)
     expect(terminalBufferCanAccept(0, terminalBufferLimitBytes + 1)).toBe(true)
     expect(terminalBufferCanAccept(terminalBufferLimitBytes - 1, 1)).toBe(true)
+  })
+
+  it("passes the scroll-state opt-in through the hub only when the client sent it", () => {
+    const decode = Schema.decodeUnknownSync(TerminalSelection)
+    const base = { host: "SER9", agentId: "agent-1", cols: 100, rows: 30 }
+    const browser = new URL("wss://hub.example.test/v1/connect/session?host=SER9&agent=agent-1&cols=100&rows=30")
+    // An older client never asked, so the remote host must stay silent toward it.
+    const legacy = decode(terminalSelectionInput(browser))
+    expect(legacy).toEqual(base)
+    expect(remoteTerminalUrl("wss://ser9.example.test/v1/connect/terminal", legacy).searchParams.has("scrollState"))
+      .toBe(false)
+    browser.searchParams.set("scrollState", "1")
+    const current = decode(terminalSelectionInput(browser))
+    expect(current).toEqual({ ...base, scrollState: true })
+    const remote = remoteTerminalUrl("wss://ser9.example.test/v1/connect/terminal", current)
+    expect(remote.searchParams.get("scrollState")).toBe("1")
+    expect(decode(terminalSelectionInput(remote))).toEqual(current)
+  })
+
+  it("relays scroll states only to a client that opted in, whatever produced them", () => {
+    const relayed: Array<string> = []
+    const base = { host: "SER9", agentId: "agent-1", cols: 100, rows: 30 }
+    relayScrollState(base, "legacy", (payload) => relayed.push(payload))
+    relayScrollState({ ...base, scrollState: false }, "declined", (payload) => relayed.push(payload))
+    relayScrollState({ ...base, scrollState: true }, "opted in", (payload) => relayed.push(payload))
+    expect(relayed).toEqual(["opted in"])
+  })
+
+  it("tells a remote host's scroll states from its frames and other signals", () => {
+    const text = (value: string) => Buffer.from(value)
+    expect(
+      isRelayedScrollState(
+        text(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 3, scrollsForwarded: 0 })),
+        false
+      )
+    )
+      .toBe(true)
+    // The same bytes as a binary frame, other signals, and junk keep the close-on-backpressure rule.
+    expect(
+      isRelayedScrollState(
+        text(JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 3, scrollsForwarded: 0 })),
+        true
+      )
+    )
+      .toBe(false)
+    expect(isRelayedScrollState(text(JSON.stringify({ type: "terminal.ready" })), false)).toBe(false)
+    expect(isRelayedScrollState(text("not json"), false)).toBe(false)
+    expect(
+      isRelayedScrollState([
+        text("{\"type\":\"terminal.scroll_state\","),
+        text("\"offsetFromBottom\":null,\"scrollsForwarded\":2}")
+      ], false)
+    )
+      .toBe(true)
+  })
+
+  it("holds the newest scroll state under backpressure and sends it once the socket drains", () => {
+    vi.useFakeTimers()
+    try {
+      let buffered = terminalBufferLimitBytes
+      const sent: Array<string> = []
+      const signals = makeLatestSignalSender({
+        bufferedAmount: () => buffered,
+        isOpen: () => true,
+        send: (payload) => sent.push(payload)
+      }, 100)
+      signals.offer("offset 7")
+      signals.offer("offset 0")
+      vi.advanceTimersByTime(1_000)
+      expect(sent).toEqual([])
+      buffered = 0
+      vi.advanceTimersByTime(100)
+      expect(sent).toEqual(["offset 0"])
+      signals.offer("offset 3")
+      expect(sent).toEqual(["offset 0", "offset 3"])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("stops retrying a held scroll state once the socket closes", () => {
+    vi.useFakeTimers()
+    try {
+      let buffered = terminalBufferLimitBytes
+      const sent: Array<string> = []
+      const signals = makeLatestSignalSender({
+        bufferedAmount: () => buffered,
+        isOpen: () => true,
+        send: (payload) => sent.push(payload)
+      }, 100)
+      signals.offer("offset 7")
+      signals.dispose()
+      buffered = 0
+      vi.advanceTimersByTime(1_000)
+      expect(sent).toEqual([])
+      expect(vi.getTimerCount()).toBe(0)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it.effect("pages pending approvals below the peer response limit", () => {
@@ -3315,13 +3491,8 @@ esac
           const chatResponse = yield* Effect.promise(() =>
             secureRequestBody(`${server.serveUrl}/v1/chat`, requestHeaders)
           )
-          expect(chatResponse.status).toBe(200)
-          expect(Buffer.byteLength(chatResponse.body)).toBeLessThanOrEqual(
-            fleetResponseBodyMaxBytes
-          )
-          expect(
-            Schema.decodeUnknownSync(ChatHistory)(JSON.parse(chatResponse.body)).entries
-          ).toHaveLength(chatHistoryMaxEntries)
+          // The coordinator chat is gone from the hub: its route no longer exists.
+          expect(chatResponse.status).toBe(404)
           const agentIds: Array<string> = []
           let agentCursor: (typeof FleetConnectAgentPage.Type)["nextCursor"] = null
           do {
@@ -3526,13 +3697,14 @@ esac
           if (server.approvalUrl === null) {
             return yield* Effect.die("approval listener missing")
           }
+          const approvalUrl = server.approvalUrl
           const path = `/v1/jobs/${pending.id}/approve`
           const body = new URLSearchParams({
             hash: pending.hash,
             nonce: pending.approvalNonce ?? ""
           })
           const hostile = yield* Effect.promise(() =>
-            fetch(`${server.approvalUrl}${path}`, {
+            fetch(`${approvalUrl}${path}`, {
               body,
               headers: {
                 "content-type": "application/x-www-form-urlencoded",
@@ -3548,14 +3720,14 @@ esac
           )
 
           const trusted = yield* Effect.promise(() =>
-            fetch(`${server.approvalUrl}${path}`, {
+            fetch(`${approvalUrl}${path}`, {
               body: new URLSearchParams({
                 hash: pending.hash,
                 nonce: pending.approvalNonce ?? ""
               }),
               headers: {
                 "content-type": "application/x-www-form-urlencoded",
-                origin: new URL(server.approvalUrl).origin
+                origin: new URL(approvalUrl).origin
               },
               method: "POST",
               redirect: "manual"
@@ -3623,6 +3795,7 @@ esac
           if (server.approvalUrl === null) {
             return yield* Effect.die("approval listener missing")
           }
+          const approvalUrl = server.approvalUrl
           const segment = encodeURIComponent(pending.id)
           const fetched = yield* Effect.promise(() => fetch(`${server.url}/v1/jobs/${segment}`))
           expect(fetched.status).toBe(200)
@@ -3631,14 +3804,14 @@ esac
           ).toBe(pending.id)
 
           const decided = yield* Effect.promise(() =>
-            fetch(`${server.approvalUrl}/v1/jobs/${segment}/approve`, {
+            fetch(`${approvalUrl}/v1/jobs/${segment}/approve`, {
               body: new URLSearchParams({
                 hash: pending.hash,
                 nonce: pending.approvalNonce ?? ""
               }),
               headers: {
                 "content-type": "application/x-www-form-urlencoded",
-                origin: new URL(server.approvalUrl).origin
+                origin: new URL(approvalUrl).origin
               },
               method: "POST",
               redirect: "manual"
@@ -3963,7 +4136,7 @@ esac
             events: attempt === 2
               ? Stream.empty
               : attempt === 4
-              ? Stream.make({
+              ? Stream.make({ type: "terminal.scroll_state", offsetFromBottom: 42, scrollsForwarded: 0 }, {
                 bytes: Buffer.alloc((terminalFrameMaxEncodedBytes / 4) * 3).toString("base64"),
                 encoding: "ansi",
                 full: true,
@@ -4100,19 +4273,31 @@ esac
             expect(sends).toBe(1)
 
             let maximumFrameBytes = 0
+            const signals: Array<string> = []
+            // This client opted in to scroll states; a legacy one would get none.
+            const optedIn = new URL(url)
+            optedIn.searchParams.set("scrollState", "1")
             const maximumFrameClose = yield* Effect.promise(
               () =>
                 new Promise<number>((resolve, reject) => {
-                  const socket = new WebSocketClient(url)
+                  const socket = new WebSocketClient(optedIn)
                   socket.once("error", reject)
                   socket.on("message", (data, isBinary) => {
-                    if (isBinary) maximumFrameBytes = Buffer.byteLength(data)
+                    if (isBinary) {
+                      maximumFrameBytes = Array.isArray(data)
+                        ? Buffer.concat(data).byteLength
+                        : Buffer.byteLength(data)
+                    } else signals.push(data.toString())
                   })
                   socket.once("close", (code) => resolve(code))
                 })
             )
             expect(maximumFrameClose).toBe(1_000)
             expect(maximumFrameBytes).toBe((terminalFrameMaxEncodedBytes / 4) * 3)
+            // The scroll position is relayed as a signal and does not end the session.
+            expect(signals).toContain(
+              JSON.stringify({ type: "terminal.scroll_state", offsetFromBottom: 42, scrollsForwarded: 0 })
+            )
 
             const held = yield* Effect.promise(
               () =>

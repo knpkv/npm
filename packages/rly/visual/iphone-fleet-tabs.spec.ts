@@ -1,7 +1,7 @@
-import { expect, test } from "@playwright/test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { expect, test } from "./fixtures.ts"
 
 const story =
   "/iframe.html?id=primitives-tabs--fleet-mobile&viewMode=story&globals=theme:dark;forcedColors:auto;reducedMotion:reduce;locale:en;density:comfortable"
@@ -52,7 +52,7 @@ test("393x500 stacked selection has no scrollbar-like line", async ({ page }) =>
   await page.keyboard.press("Tab")
   await expect(selected).toBeFocused()
   await expect(selected).toHaveCSS("outline-style", "solid")
-  await expect(selected).toHaveCSS("outline-width", "3px")
+  await expect(selected).toHaveCSS("outline-width", "2px")
   await expect(page.getByRole("tabpanel", { name: "Connect" })).toContainText("Connected terminal")
 })
 
@@ -173,4 +173,46 @@ test("desktop tabs mark the selection once and size each tab to its label", asyn
   })
   expect(new Set(grows)).toEqual(new Set(["0"]))
   expect(spare).toBeGreaterThan(0)
+})
+
+test("single-row tabs at 1280 don't overflow, and the underline still covers the hairline", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await page.goto(story)
+
+  const list = page.getByRole("tablist", { name: "Fleet applications" })
+  await expect(list.getByRole("tab", { selected: true })).toBeVisible()
+  const measured = await list.evaluate((element) => {
+    const selected = element.querySelector<HTMLElement>("[role=tab][aria-selected=true]")
+    return {
+      clientHeight: element.clientHeight,
+      listBottom: element.getBoundingClientRect().bottom,
+      scrollHeight: element.scrollHeight,
+      // The selected tab's underline sits 1px below the tab, over the list's hairline.
+      underlineBottom: (selected?.getBoundingClientRect().bottom ?? 0) + 1
+    }
+  })
+  expect(measured.scrollHeight).toBeLessThanOrEqual(measured.clientHeight)
+  expect(measured.underlineBottom).toBeCloseTo(measured.listBottom, 1)
+})
+
+test("single-row tabs at 1280 keep a hairline border and no overflow in forced colours", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await page.emulateMedia({ forcedColors: "active" })
+  await page.goto(story.replace("forcedColors:auto", "forcedColors:active"))
+
+  const list = page.getByRole("tablist", { name: "Fleet applications" })
+  await expect(list.getByRole("tab", { selected: true })).toBeVisible()
+  const measured = await list.evaluate((element) => {
+    const styles = getComputedStyle(element)
+    return {
+      backgroundImage: styles.backgroundImage,
+      borderStyle: styles.borderBlockEndStyle,
+      borderWidth: styles.borderBlockEndWidth,
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight
+    }
+  })
+  // The hairline doesn't depend on a gradient surviving forced colours: it's a real border here.
+  expect(measured).toMatchObject({ backgroundImage: "none", borderStyle: "solid", borderWidth: "1px" })
+  expect(measured.scrollHeight).toBeLessThanOrEqual(measured.clientHeight)
 })

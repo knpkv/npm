@@ -502,7 +502,7 @@ export const publishDataRootMarker = Effect.fn("DataRootProtocol.publishMarker")
     yield* Effect.addFinalizer(() =>
       fileSystem.remove(pendingMarker, { force: true }).pipe(
         Effect.andThen(syncDataRootPath(dataRoot)),
-        Effect.ignore
+        Effect.ignore({ log: "Warn", message: "Could not remove the pending data-root marker" })
       )
     )
     yield* mapDataRootConfigurationError(fileSystem.writeFileString(pendingMarker, markerContent, {

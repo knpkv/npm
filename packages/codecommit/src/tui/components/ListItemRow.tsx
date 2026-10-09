@@ -1,4 +1,4 @@
-import { DateUtils, type Domain } from "@knpkv/codecommit-core"
+import { DateUtils, Domain } from "@knpkv/codecommit-core"
 import { calculateHealthScore, getScoreTier, type HealthScore } from "@knpkv/codecommit-core/HealthScore.js"
 import { parseColor } from "@opentui/core"
 import { Option } from "effect"
@@ -110,9 +110,17 @@ function PRItemRow({
     <Badge variant="error" minWidth={12}>
       CONFLICT
     </Badge>
-  ) : pr.isApproved ? (
+  ) : Domain.approvalOf(pr)._tag === "Approved" ? (
     <Badge variant="success" minWidth={12}>
       APPROVED
+    </Badge>
+  ) : Domain.approvalOf(pr)._tag === "NotRequired" ? (
+    <Badge variant="neutral" minWidth={12}>
+      {Domain.approvalNotRequiredLabel.toUpperCase()}
+    </Badge>
+  ) : Domain.approvalOf(pr)._tag === "Unknown" ? (
+    <Badge variant="warning" minWidth={12}>
+      {Domain.approvalUnknownLabel.toUpperCase()}
     </Badge>
   ) : (
     <Badge variant="neutral" minWidth={12}>

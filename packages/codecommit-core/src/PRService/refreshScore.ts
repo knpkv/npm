@@ -3,9 +3,9 @@
  * Phase 5: Calculate and store health scores.
  */
 
-import { Cause, Clock, DateTime, Effect, SubscriptionRef } from "effect"
-import { type CachedPullRequest, PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
-import { scoreTotalOr } from "../HealthScore.js"
+import { Cause, Clock, DateTime, Effect, Option, SubscriptionRef } from "effect"
+import { type CachedPullRequest, PullRequestRepo, versionsOf } from "../CacheService/repos/PullRequestRepo/index.js"
+import { calculateHealthScore } from "../HealthScore.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
 
 export const calculateHealthScores = (
@@ -25,11 +25,15 @@ export const calculateHealthScores = (
     scoredPRs,
     (row) => {
       const pr = decodeCachedPR(row)
-      const score = scoreTotalOr(pr, scoreNow, 0)
-      return prRepo.updateHealthScore(row.awsAccountId, row.id, score, {
+      // Unknown is stored as null, not 0: a red 0 would claim a bad score for a PR that can't be scored.
+      const score = Option.getOrNull(Option.map(calculateHealthScore(pr, scoreNow), (scored) => scored.total))
+      // Computed from both groups, so written only to the row as it was read: any write since (the
+      // approval included) makes the score stale.
+      return prRepo.writeDerived(row.awsAccountId, row.id, versionsOf(row), { healthScore: score }, {
         repositoryName: row.repositoryName,
         accountRegion: row.accountRegion
       }).pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catch(() => Effect.void)
       )
     },

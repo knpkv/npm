@@ -4,7 +4,7 @@
  * @module
  */
 import type { ServerStatus, UsageReport } from "../shared/contracts.js"
-import { formatAge } from "./format.js"
+import { formatAge } from "../limits/format.js"
 
 type Source = NonNullable<ServerStatus["ingest"]>["claude"]
 

@@ -8,7 +8,7 @@
     display: grid;
     max-inline-size: 100%;
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   .header {
@@ -164,8 +164,8 @@
   }
 
   .confirmation input:focus-visible {
-    outline: 2px solid var(--rly-color-focus);
-    outline-offset: var(--rly-space-2);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .confirmationHelp,

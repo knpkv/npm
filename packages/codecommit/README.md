@@ -37,7 +37,7 @@ CLI and TUI for AWS CodeCommit pull requests.
   currently supported on Windows.
 - IAM permissions for CodeCommit (optionally granted per command):
   - `codecommit:ListRepositories`, `codecommit:ListPullRequests`, `codecommit:GetPullRequest`, `codecommit:GetRepository` — list/view and repository account identity
-  - `codecommit:EvaluatePullRequestApprovalRules` — approval state and satisfied rules; without it an account's refresh fails rather than listing every pull request as pending
+  - `codecommit:EvaluatePullRequestApprovalRules` — approval state and satisfied rules; without it pull requests are still listed, marked "approval unknown", never as pending
   - `codecommit:GetPullRequestApprovalStates` — who approved
   - `codecommit:GetDifferences` — exact-revision changed files in TUI and web review workbenches
   - `codecommit:GetBlob` — TUI/web API diff previews, web Relay review, and mandatory exact-line publication validation
@@ -280,8 +280,12 @@ narrower than the hierarchy.
 ### Web Mode
 
 ```bash
-codecommit web [--port 3000] [--hostname 127.0.0.1]
+codecommit web [--port 3000] [--hostname 127.0.0.1] [--no-open]
 ```
+
+The sign-in link is always printed. A browser opens it only for a person at a
+terminal: `--no-open`, `BROWSER=none`, a set `CI`, or stdout that is not a
+terminal (scripts, test harnesses) print the link and say why no browser opened.
 
 `--port` is the starting port: when it is taken, web mode tries the next one,
 up to ten times, and prints the URL it actually bound. During

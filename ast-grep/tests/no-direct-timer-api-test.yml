@@ -1,0 +1,18 @@
+id: no-direct-timer-api
+valid:
+  - |
+    const program = Effect.gen(function* () {
+      const now = yield* Clock.currentTimeMillis
+      yield* Effect.sleep("1 second")
+    })
+  - |
+    const started = Date.now()
+invalid:
+  - |
+    const program = Effect.gen(function* () {
+      const now = Date.now()
+    })
+  - |
+    const program = Effect.gen(function* () {
+      setTimeout(() => {}, 10)
+    })

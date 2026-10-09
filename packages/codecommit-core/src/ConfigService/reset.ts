@@ -23,6 +23,7 @@ export const makeReset = Effect.fn("ConfigService.reset")(function*(
   const configPath = yield* paths.configPath
 
   const exists = yield* fs.exists(configPath).pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(false))
   )
 
@@ -31,6 +32,7 @@ export const makeReset = Effect.fn("ConfigService.reset")(function*(
   }
 
   const detected = yield* detectProfiles.pipe(
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     Effect.catch(() => Effect.succeed(emptyDetectedProfiles()))
   )
 

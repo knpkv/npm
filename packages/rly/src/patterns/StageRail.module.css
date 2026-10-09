@@ -49,6 +49,11 @@
     position: relative;
     z-index: 1;
   }
+  @supports (justify-content: safe center) {
+    .marker {
+      justify-content: safe center;
+    }
+  }
 
   .connector {
     background: var(--rly-color-border-2);

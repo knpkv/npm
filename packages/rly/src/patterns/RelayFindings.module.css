@@ -1,0 +1,163 @@
+@layer rly.components {
+  .root {
+    display: grid;
+    gap: var(--rly-space-16);
+    min-inline-size: 0;
+  }
+  .stale {
+    align-items: center;
+    background: var(--rly-color-held-tint);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-field);
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+    justify-content: space-between;
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+  /* Inline text, so the revisions sit in the sentence rather than becoming separate flex items. */
+  .staleText,
+  .empty {
+    margin: 0;
+  }
+  .staleText svg {
+    margin-inline-end: var(--rly-space-4);
+    vertical-align: -0.15em;
+  }
+  .post {
+    display: grid;
+    gap: var(--rly-space-4);
+    justify-items: start;
+  }
+  .meta,
+  .count,
+  .state,
+  .location {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+  .meta {
+    margin: 0;
+  }
+  .group {
+    display: grid;
+    gap: var(--rly-space-8);
+  }
+  .heading {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    margin: 0;
+    overflow-wrap: break-word;
+  }
+  .list {
+    display: grid;
+    gap: var(--rly-space-8);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .finding {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+    display: grid;
+    gap: var(--rly-space-4);
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+  .severity {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-4);
+    margin: 0;
+  }
+  .state {
+    margin-inline-start: auto;
+  }
+  .title {
+    font: var(--rly-type-label-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    margin: 0;
+  }
+  .title:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .summary {
+    color: var(--rly-color-text-2);
+    margin: 0;
+  }
+  .location {
+    font-family: var(--rly-font-mono);
+    overflow-wrap: break-word;
+  }
+  .open {
+    appearance: none;
+    background: none;
+    border: 0;
+    color: var(--rly-color-text-1);
+    cursor: pointer;
+    font-family: var(--rly-font-mono);
+    font-size: var(--rly-type-meta-size);
+    justify-self: start;
+    overflow-wrap: break-word;
+    padding: 0;
+    text-align: start;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .open:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .details summary {
+    color: var(--rly-color-text-2);
+    cursor: pointer;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+  .details summary:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .evidence {
+    display: grid;
+    gap: var(--rly-space-2);
+    margin: var(--rly-space-4) 0 0;
+  }
+  .evidence dt {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+  .evidence dd {
+    margin: 0 0 var(--rly-space-4);
+    white-space: pre-wrap;
+  }
+  .failed {
+    color: var(--rly-color-blocked-ink);
+    margin: 0;
+  }
+  .actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+  }
+  .finding[data-disposition="Dismissed"] .title,
+  .finding[data-disposition="Dismissed"] .summary {
+    color: var(--rly-color-text-2);
+  }
+  .announcer {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    margin: -1px;
+    min-inline-size: 0;
+    overflow: clip;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+  }
+}

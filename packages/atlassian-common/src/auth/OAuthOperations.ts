@@ -21,6 +21,7 @@
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
 import { HttpClient, HttpClientRequest } from "effect/http"
+import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import { type OAuthConfig, type OAuthToken } from "../config/OAuthSchemas.js"
 import { unsafeCurrentTimeMillis } from "../internal/legacyWallClock.js"
@@ -200,9 +201,11 @@ export const refreshToken = (
       // "your request was malformed", and callers key credential deletion off
       // it. A body that is not JSON, or not shaped like an OAuth error, simply
       // leaves it absent — which callers read as "no verdict", not "rejected".
-      const errorCode = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(TokenErrorSchema))(text).pipe(
-        Effect.map((decoded) => decoded.error),
-        Effect.catch(() => Effect.succeed(undefined))
+      const errorCode = Option.getOrUndefined(
+        Option.map(
+          Schema.decodeUnknownOption(Schema.fromJsonString(TokenErrorSchema))(text),
+          (decoded) => decoded.error
+        )
       )
       return yield* new OAuthError({
         step: "refresh",

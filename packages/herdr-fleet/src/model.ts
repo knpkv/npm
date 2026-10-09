@@ -262,18 +262,18 @@ const workReassignOwnerIdMaxLength = 256
 const workReassignActivityMaxLength = 4_096
 const workReassignActivityText = /^[^\p{Cc}\p{Cs}]+$/u
 
-/** Activity text the Work store records for an approved reassignment. */
+/**
+ * Activity text the Work store records for an approved reassignment: the owners by name and the
+ * reason, written for people. Owner ids and the approval's job id and hash stay structured on the
+ * reassignment record, where they are evidence; in prose they were unreadable hex.
+ */
 export const workReassignActivitySummary = (
   payload: {
     readonly from: { readonly id: string; readonly name: string }
     readonly to: { readonly id: string; readonly name: string }
     readonly reason: string
-  },
-  approvalJobId: string,
-  approvalHash: string
-): string =>
-  `Reassigned from ${payload.from.name} (${payload.from.id}) to ${payload.to.name} (${payload.to.id}): ` +
-  `${payload.reason} (approved Fleet job ${approvalJobId}, hash ${approvalHash})`
+  }
+): string => `Reassigned from ${payload.from.name} to ${payload.to.name}: ${payload.reason}`
 
 /**
  * Accepts a reassignment only when its target owner and its longest possible
@@ -283,9 +283,15 @@ export const workReassignActivitySummary = (
 export const workReassignIsRecordable = (
   payload: Parameters<typeof workReassignActivitySummary>[0]
 ): boolean => {
-  const summary = workReassignActivitySummary(payload, "j".repeat(256), "0".repeat(64))
+  const summary = workReassignActivitySummary(payload)
+  // The ids are no longer in the summary, so check them directly: an id Work cannot store (too
+  // long, a control character or a lone surrogate) must be refused before approval, not fail on
+  // record. The schema only requires them to be non-empty.
   return payload.from.id !== payload.to.id &&
+    payload.from.id.length <= workReassignOwnerIdMaxLength &&
     payload.to.id.length <= workReassignOwnerIdMaxLength &&
+    workReassignActivityText.test(payload.from.id) &&
+    workReassignActivityText.test(payload.to.id) &&
     summary.length <= workReassignActivityMaxLength &&
     workReassignActivityText.test(summary)
 }
@@ -310,12 +316,12 @@ export const WorkReassign = Schema.Struct({
 )
 export type WorkReassign = typeof WorkReassign.Type
 
-/** Activity text the Work store records for an approved abandonment. */
-export const workAbandonActivitySummary = (
-  payload: { readonly reason: string },
-  approvalJobId: string,
-  approvalHash: string
-): string => `Abandoned: ${payload.reason} (approved Fleet job ${approvalJobId}, hash ${approvalHash})`
+/**
+ * Activity text the Work store records for an approved abandonment: the reason, for people. The
+ * approval's job id and hash stay structured on the abandonment record.
+ */
+export const workAbandonActivitySummary = (payload: { readonly reason: string }): string =>
+  `Abandoned: ${payload.reason}`
 
 /**
  * Accepts an abandonment only when its longest possible activity summary fits
@@ -323,7 +329,7 @@ export const workAbandonActivitySummary = (
  * control characters.
  */
 export const workAbandonIsRecordable = (payload: Parameters<typeof workAbandonActivitySummary>[0]): boolean => {
-  const summary = workAbandonActivitySummary(payload, "j".repeat(256), "0".repeat(64))
+  const summary = workAbandonActivitySummary(payload)
   return summary.length <= workReassignActivityMaxLength && workReassignActivityText.test(summary)
 }
 
@@ -555,6 +561,11 @@ export const HostConfiguration = Schema.Struct({
   checkCommand: Command,
   applyCommand: Schema.NullOr(Command),
   browserMcpRecoverCommand: Schema.NullOr(Command),
+  /**
+   * Prints this host's Claude and Codex limits as one JSON line (`agent-usage limits`), shown in
+   * Connect; absent turns limits off for this host.
+   */
+  agentUsageLimitsCommand: Schema.optionalKey(Command),
   coordinatorCommand: Command,
   herdrCommand: Schema.String,
   tailscaleCommand: Schema.String,

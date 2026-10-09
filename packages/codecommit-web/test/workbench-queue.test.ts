@@ -3,10 +3,12 @@ import { PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
 
 import {
+  approvalUnknownSummary,
   type Caller,
   type CallerIdentity,
   formatSpan,
   globMatches,
+  needsYourReview,
   poolEntryMatches,
   ruleProgress,
   workbenchQueue,
@@ -50,6 +52,57 @@ const rule = (
 ) => ({ poolMemberArns, poolMembers, requiredApprovals, ruleName, satisfied })
 
 describe("workbenchQueue", () => {
+  // Approvers that couldn't be read may already include the user: possibly waiting, not certainly.
+  it("puts a PR whose approvers couldn't be read in the pool, not in Needs your review", () => {
+    const queue = workbenchQueue(
+      [make({
+        approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], false)],
+        approversUnknown: true,
+        id: "1"
+      })],
+      byName("andrey"),
+      NOW
+    )
+    expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["1", "pool"]])
+  })
+
+  // The last known list may hold the user's since-revoked approval, so it can't take them out.
+  it("keeps an unknown-approvers PR in the pool when the last known list names the user", () => {
+    const revoked = make({
+      approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], false)],
+      approvedBy: ["andrey"],
+      approvedByArns: ["arn:aws:iam::123456789012:user/andrey"],
+      approversUnknown: true,
+      id: "1"
+    })
+    const byArn: Caller = {
+      identities: {
+        "platform-prod": { _tag: "Resolved", arn: "arn:aws:iam::123456789012:user/andrey", username: "andrey" }
+      },
+      username: "andrey"
+    }
+    for (const caller of [byName("andrey"), byArn]) {
+      expect(workbenchQueue([revoked], caller, NOW).rows.map((row) => [row.group, row.rule])).toEqual([
+        ["pool", undefined]
+      ])
+    }
+  })
+
+  // Approval itself is known, so satisfied rules are settled; only who signed is in doubt.
+  it("leaves an unknown-approvers PR out of the pool when every rule is satisfied", () => {
+    const queue = workbenchQueue(
+      [make({
+        approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], true)],
+        approversUnknown: true,
+        id: "1",
+        isApproved: true
+      })],
+      byName("andrey"),
+      NOW
+    )
+    expect(queue.rows).toEqual([])
+  })
+
   it("puts a PR in Needs your review when the user is in an unsatisfied pool and has not approved", () => {
     const queue = workbenchQueue(
       [make({ approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], false)], id: "1" })],
@@ -119,6 +172,45 @@ describe("workbenchQueue", () => {
     )
     expect(queue.rows.map((row) => row.pullRequest.id)).toEqual(["old", "fresh", "yours"])
     expect(queue.summary._tag === "Waiting" ? formatSpan(queue.summary.oldest.openMs) : "").toBe("3d")
+  })
+
+  it("puts another's PR with unknown approval in the pool, never needing review, even with a last known open rule", () => {
+    const pullRequest = make({
+      approvalRules: [rule("Approvals", 1, ["andrey"], false)],
+      approvalUnknown: { _tag: "NotPermitted" },
+      id: "p"
+    })
+    const queue = workbenchQueue([pullRequest], byName("andrey"), NOW)
+    expect(queue.rows.map((row) => row.group)).toEqual(["pool"])
+    expect(needsYourReview(pullRequest, byName("andrey"))).toBe(false)
+  })
+
+  it("keeps another's PR with unknown approval in view even when its last known rules are satisfied", () => {
+    const pullRequest = make({
+      approvalRules: [rule("Approvals", 1, ["andrey"], true)],
+      approvalUnknown: { _tag: "NotPermitted" },
+      id: "s"
+    })
+    const [row] = workbenchQueue([pullRequest], byName("andrey"), NOW).rows
+    expect(row?.group).toBe("pool")
+    // The last known "1/1 Approvals" must not show: the row says approval is unknown instead.
+    expect(row?.rule).toBeUndefined()
+    expect(row?.stuck).toBe("unverified")
+  })
+
+  it("calls an own PR with unknown approval unverified, never ready, even with last known satisfied rules", () => {
+    const row = workbenchQueue(
+      [make({
+        author: "andrey",
+        approvalRules: [rule("Approvals", 1, ["ana"], true)],
+        approvalUnknown: { _tag: "Throttled" },
+        id: "u",
+        isApproved: true
+      })],
+      byName("andrey"),
+      NOW
+    ).rows[0]
+    expect(row?.stuck).toBe("unverified")
   })
 
   it("names the worst reason an own PR is stuck: conflicts before quiet before approvals", () => {
@@ -510,5 +602,20 @@ describe("workbenchQueue with the caller's resolved identity", () => {
     const pullRequests = [make({ approvalRules: [reviewers], id: "1" })]
     expect(yourReviewCount(pullRequests, resolved)).toBe(1)
     expect(yourReviewCount(pullRequests, byName("andrey"))).toBe(0)
+  })
+})
+
+describe("approvalUnknownSummary", () => {
+  it("counts open pull requests with approval unknown and names the reason only when they share one", () => {
+    const unknown = (id: string, tag: "NotPermitted" | "Throttled", status: "OPEN" | "MERGED" = "OPEN") =>
+      make({ approvalUnknown: { _tag: tag }, id, isApproved: true, status })
+    expect(approvalUnknownSummary([make({ id: "1" })])).toEqual({ count: 0, reason: undefined })
+    expect(approvalUnknownSummary([unknown("1", "Throttled"), unknown("2", "Throttled")])).toEqual({
+      count: 2,
+      reason: { _tag: "Throttled" }
+    })
+    expect(approvalUnknownSummary([unknown("1", "Throttled"), unknown("2", "NotPermitted")]).reason).toBeUndefined()
+    // Closed and merged pull requests wait on no one.
+    expect(approvalUnknownSummary([unknown("1", "Throttled", "MERGED")]).count).toBe(0)
   })
 })

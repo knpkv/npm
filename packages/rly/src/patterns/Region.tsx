@@ -14,8 +14,9 @@ export const RLY_REGION_VARIANTS = defineVariants({
     },
     tray: {
       className: style("tray"),
-      purpose: "A region holding individually actionable cards, one surface step down so the cards stand out",
-      tokens: ["color-surface-2", "color-border-1"]
+      purpose:
+        "A region holding individually actionable cards; its body sits one surface step down so the cards stand out, under the same header as every region",
+      tokens: ["color-surface-1", "color-surface-2", "color-border-1"]
     }
   }
 })

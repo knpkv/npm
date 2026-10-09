@@ -8,7 +8,7 @@
     /* One bounded track: an implicit auto track can't shrink below its content, so it overflowed at 320. */
     grid-template-columns: minmax(var(--rly-space-0), 1fr);
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   /* Heading and count share a row while they fit; the count wraps below in a narrow tree. */
@@ -134,13 +134,15 @@
     text-align: start;
   }
 
-  .directoryButton:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .directoryButton:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .directoryButton:focus-visible {
-    outline: 3px solid var(--rly-color-focus);
-    outline-offset: -3px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
   }
 
   .chevron {
@@ -152,7 +154,6 @@
     /* --rly-diff-tree-turn is 1 in left-to-right text and -1 in right-to-left; see below. */
     transform: rotate(calc(45deg * var(--rly-diff-tree-turn, 1)))
       translate(calc(-1px * var(--rly-diff-tree-turn, 1)), -1px);
-    transition: transform var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 
   .directoryButton[aria-expanded="false"] .chevron {
@@ -202,8 +203,10 @@
     text-align: start;
   }
 
-  .file:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .file:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .file[aria-current="true"] {
@@ -212,8 +215,8 @@
   }
 
   .file:focus-visible {
-    outline: 3px solid var(--rly-color-focus);
-    outline-offset: -3px;
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
   }
 
   .pathBlock {
@@ -254,10 +257,6 @@
     display: block;
   }
 
-  .loadingIcon {
-    animation: rly-diff-file-tree-spin 800ms linear infinite;
-  }
-
   @keyframes rly-diff-file-tree-spin {
     to {
       transform: rotate(360deg);
@@ -274,11 +273,15 @@
     }
   }
 
-  @media (prefers-reduced-motion: reduce) {
-    .chevron,
+  /* Under reduced motion the chevron snaps and the loading icon holds still. */
+  @media (prefers-reduced-motion: no-preference) {
+    .chevron {
+      transition: transform var(--rly-motion-fast-duration) var(--rly-easing-in-out);
+    }
+
+    /* 800ms per turn, derived from a token so the in-app reduced-motion setting stops it too. */
     .loadingIcon {
-      animation: none;
-      transition: none;
+      animation: rly-diff-file-tree-spin calc(var(--rly-motion-standard-duration) * 5) linear infinite;
     }
   }
 }

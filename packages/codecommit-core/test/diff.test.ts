@@ -39,12 +39,12 @@ describe("diffApprovalPools", () => {
     const fresh = [makeRule({ poolMembers: ["alice"] })]
     const result = diffApprovalPools(cached, fresh, "alice", "42", "acc", "Fix bug", "dev")
     expect(result).toHaveLength(1)
-    expect(result[0].type).toBe("approval_requested")
-    expect(result[0].pullRequestId).toBe("42")
-    expect(result[0].awsAccountId).toBe("acc")
-    expect(result[0].title).toBe("Fix bug")
-    expect(result[0].profile).toBe("dev")
-    expect(result[0].message).toContain("#42")
+    expect(result[0]?.type).toBe("approval_requested")
+    expect(result[0]?.pullRequestId).toBe("42")
+    expect(result[0]?.awsAccountId).toBe("acc")
+    expect(result[0]?.title).toBe("Fix bug")
+    expect(result[0]?.profile).toBe("dev")
+    expect(result[0]?.message).toContain("#42")
   })
 
   it("returns approval_changed when user removed from pool", () => {
@@ -52,8 +52,8 @@ describe("diffApprovalPools", () => {
     const fresh = [makeRule({ poolMembers: [] })]
     const result = diffApprovalPools(cached, fresh, "alice", "1", "acc")
     expect(result).toHaveLength(1)
-    expect(result[0].type).toBe("approval_changed")
-    expect(result[0].message).toContain("no longer required")
+    expect(result[0]?.type).toBe("approval_changed")
+    expect(result[0]?.message).toContain("no longer required")
   })
 
   it("returns empty when both cached and fresh are empty", () => {
@@ -68,7 +68,7 @@ describe("diffApprovalPools", () => {
     ]
     const result = diffApprovalPools(cached, fresh, "alice", "1", "acc")
     expect(result).toHaveLength(1)
-    expect(result[0].type).toBe("approval_requested")
+    expect(result[0]?.type).toBe("approval_requested")
   })
 
   it("omits title/profile when not provided", () => {
@@ -76,8 +76,8 @@ describe("diffApprovalPools", () => {
     const fresh = [makeRule({ poolMembers: ["alice"] })]
     const result = diffApprovalPools(cached, fresh, "alice", "1", "acc")
     expect(result).toHaveLength(1)
-    expect(result[0].title).toBeUndefined()
-    expect(result[0].profile).toBeUndefined()
+    expect(result[0]?.title).toBeUndefined()
+    expect(result[0]?.profile).toBeUndefined()
   })
 })
 
@@ -98,8 +98,8 @@ describe("diffPR", () => {
 
   it("normalizes SQLite numeric approval and mergeability flags", () => {
     const notifications = diffPR(
-      makePR({ isApproved: 0, isMergeable: 0 }),
-      makePR({ isApproved: 1, isMergeable: 1 }),
+      makePR({ isApproved: 0, isMergeable: 0, approvalRules: [makeRule()] }),
+      makePR({ isApproved: 1, isMergeable: 1, approvalRules: [makeRule()] }),
       "account"
     )
 
@@ -118,5 +118,76 @@ describe("diffPR", () => {
 
     expect(notifications.some(({ type }) => type === "pr_merged")).toBe(true)
     expect(notifications.some(({ type }) => type === "pr_closed")).toBe(false)
+  })
+})
+
+describe("diffPR approval without rules", () => {
+  const pr = (isApproved: boolean, rules: number): DiffablePR => ({
+    id: "44",
+    title: "Fix",
+    repositoryName: "repo",
+    accountProfile: "dev",
+    status: "OPEN",
+    isApproved,
+    approvalUnknownReason: null,
+    approvalRules: Array.from({ length: rules }, () => makeRule()),
+    isMergeable: true
+  })
+  const approvalChanges = (cached: DiffablePR, fresh: DiffablePR) =>
+    diffPR(cached, fresh, "acc").filter((n) => n.type === "approval_changed")
+
+  // A rule added and satisfied since the last read turns "no approval required" into a real approval.
+  it("announces a grant when a pull request without rules becomes rule-backed and approved", () => {
+    expect(approvalChanges(pr(true, 0), pr(true, 1)).map((n) => n.message)).toEqual([
+      "Approval granted on #44 Fix (repo)"
+    ])
+    // No rules on either side, a pending rule added, or a rule removed: nothing approved or withdrawn.
+    expect([
+      approvalChanges(pr(true, 0), pr(true, 0)),
+      approvalChanges(pr(true, 0), pr(false, 1)),
+      approvalChanges(pr(true, 1), pr(true, 0))
+    ]).toEqual([[], [], []])
+  })
+
+  // With no rules CodeCommit evaluates "approved" though nobody signed off (AWS shows 0 approvals).
+  it("announces no approval for a pull request with no rules, whatever its evaluation flips to", () => {
+    expect(approvalChanges(pr(false, 0), pr(true, 0))).toEqual([])
+    expect(approvalChanges(pr(true, 0), pr(false, 0))).toEqual([])
+  })
+
+  it("still announces a real sign-off on a pull request with rules", () => {
+    expect(approvalChanges(pr(false, 1), pr(true, 1))).toHaveLength(1)
+  })
+})
+
+describe("diffPR approval while unknown", () => {
+  const pr = (isApproved: boolean, approvalUnknownReason: string | null): DiffablePR => ({
+    id: "1",
+    title: "Fix",
+    repositoryName: "repo",
+    accountProfile: "dev",
+    status: "OPEN",
+    isApproved,
+    approvalUnknownReason,
+    approvalRules: [makeRule()],
+    isMergeable: true
+  })
+  const approvalChanges = (cached: DiffablePR, fresh: DiffablePR) =>
+    diffPR(cached, fresh, "acc").filter((n) => n.type === "approval_changed")
+
+  it("reports no transition into an unknown approval", () => {
+    expect(approvalChanges(pr(true, null), pr(false, "NotPermitted"))).toEqual([])
+  })
+
+  // A pull request first seen while its evaluation fails is cached as not approved, a placeholder that
+  // looks like a last known value. Recovery can't tell them apart, so it announces nothing: no false
+  // "Approval granted", at the cost of not announcing a sign-off made while evaluation was failing.
+  it("announces nothing when evaluation recovers, whatever the cached value", () => {
+    expect(approvalChanges(pr(false, "NotPermitted"), pr(true, null))).toEqual([])
+    expect(approvalChanges(pr(true, "NotPermitted"), pr(false, null))).toEqual([])
+  })
+
+  it("still announces a transition between two known evaluations", () => {
+    expect(approvalChanges(pr(false, null), pr(true, null))).toHaveLength(1)
   })
 })

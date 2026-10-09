@@ -36,6 +36,11 @@
     justify-content: center;
     position: relative;
   }
+  @supports (justify-content: safe center) {
+    .tile {
+      justify-content: safe center;
+    }
+  }
 
   .tile + .tile {
     margin-inline-start: calc(var(--rly-space-8) * -1);

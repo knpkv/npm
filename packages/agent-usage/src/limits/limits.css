@@ -1,0 +1,106 @@
+/*
+ * The "Limits now" cards: each agent's windows, their tone word, reset and age, and the balances.
+ * Shared by the agent-usage page and by anything that renders `LimitsSummary` from
+ * `@knpkv/agent-usage/limits` (Connect); it uses Rly tokens only and expects Rly's stylesheet.
+ */
+
+.usage-limits-now {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-12);
+}
+
+.usage-limits-now h2 {
+  margin: 0;
+}
+
+.usage-agent-groups {
+  align-items: start;
+  display: grid;
+  gap: var(--rly-space-12);
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
+}
+
+.usage-agent-groups h3 {
+  margin-block: 0 var(--rly-space-8);
+  margin-inline: 0;
+}
+
+.usage-windows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-12);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.usage-window {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-4);
+}
+
+.usage-window-head,
+.usage-window-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+  justify-content: space-between;
+}
+
+.usage-window-meter {
+  align-items: center;
+  display: flex;
+  gap: var(--rly-space-8);
+}
+
+/* The track takes the row; the value keeps its width beside it. */
+.usage-window-track {
+  flex: 1;
+  min-inline-size: 0;
+}
+
+.usage-window-value {
+  color: var(--rly-color-text-1);
+  font-family: var(--rly-type-card-title-font);
+  font-size: var(--rly-type-card-title-size);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--rly-type-card-title-weight);
+  min-inline-size: 2.4em;
+  text-align: end;
+}
+
+.usage-unnamed {
+  margin-block-start: var(--rly-space-12);
+}
+
+.usage-unnamed summary {
+  color: var(--rly-color-text-2);
+  cursor: pointer;
+  position: relative;
+}
+
+/* A one-line disclosure is shorter than 44px; an invisible layer takes the target there. */
+.usage-unnamed summary::after {
+  content: "";
+  inset: min(0px, (100% - 44px) / 2);
+  position: absolute;
+}
+
+.usage-balances {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-24);
+  margin: 0;
+}
+
+.usage-balances div {
+  display: flex;
+  flex-direction: column;
+}
+
+.usage-balances dd {
+  margin: 0;
+}

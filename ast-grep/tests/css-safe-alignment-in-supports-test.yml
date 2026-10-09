@@ -1,0 +1,22 @@
+id: css-safe-alignment-in-supports
+valid:
+  - |
+    .x { justify-content: center; }
+    @supports (justify-content: safe center) { .x { justify-content: safe center; } }
+  - |
+    @media (width < 40rem) { @supports (align-items: safe center) { .x { align-items: safe center; } } }
+  - |
+    .x { justify-content: center; place-content: space-between; }
+  - |
+    .x { justify-content: unsafe center; }
+invalid:
+  - |
+    .x { justify-content: safe center; }
+  - |
+    .x { place-content: SAFE center; }
+  - |
+    @supports (display: grid) { .x { align-items: safe center; } }
+  - |
+    @supports (justify-content: safe center) { .y { color: red; } } .x { justify-content: safe end; }
+  - |
+    @supports (display: grid) { .x { align-items: safe center; } @supports (justify-content: safe center) { .y { justify-content: safe center; } } }

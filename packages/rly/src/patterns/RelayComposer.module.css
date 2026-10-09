@@ -1,0 +1,120 @@
+@layer rly.components {
+  /* minmax(0, 1fr) tracks: the composer takes the panel's width, never its content's min-content width. */
+  .root {
+    display: grid;
+    gap: var(--rly-space-8);
+    grid-template-columns: minmax(0, 1fr);
+    min-inline-size: 0;
+  }
+  .refs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-4);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .ref {
+    align-items: center;
+    background: var(--rly-color-surface-2);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-tag);
+    display: inline-flex;
+    gap: var(--rly-space-2);
+    max-inline-size: 100%;
+    padding-inline-start: var(--rly-space-8);
+  }
+  .refLabel {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    min-inline-size: 0;
+    overflow-wrap: break-word;
+  }
+  .box {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-field);
+    display: grid;
+    gap: var(--rly-space-8);
+    grid-template-columns: minmax(0, 1fr);
+    padding: var(--rly-space-8);
+  }
+  .box:focus-within {
+    border-color: var(--rly-color-text-2);
+  }
+  /* The textarea's focus ring encloses the whole box (its text and its controls), not the text alone. */
+  .box:has(.input:focus-visible) {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  /* Its own ring would sit inside the box's; .box:has(.input:focus-visible) draws the one ring. */
+  .input:focus {
+    outline: none;
+  }
+  /* Grows with its text (sized in script), then scrolls: at most 12 lines or 40% of the viewport. */
+  .input {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    box-sizing: border-box;
+    color: var(--rly-color-text-1);
+    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
+      var(--rly-type-body-font);
+    inline-size: 100%;
+    max-block-size: min(calc(12 * var(--rly-type-body-line-height)), 40dvh);
+    min-block-size: calc(2 * var(--rly-type-body-line-height));
+    overflow-y: auto;
+    padding: var(--rly-space-4);
+    resize: none;
+  }
+  /* The preset sits at the start; the hint, Stop and Send stay together at the end and wrap as one. */
+  .foot {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+  }
+  /*
+   * The preset shrinks with the panel: a long preset name truncates inside its menu trigger rather than
+   * widening the composer past the panel.
+   */
+  .preset {
+    display: flex;
+    flex: 1 1 12rem;
+    gap: var(--rly-space-8);
+    max-inline-size: 100%;
+    min-inline-size: 0;
+  }
+  .preset > * {
+    max-inline-size: 100%;
+    min-inline-size: 0;
+  }
+  .actions {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-8);
+    margin-inline-start: auto;
+  }
+  .hint,
+  .busy {
+    color: var(--rly-color-text-2);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+  }
+  .hint {
+    white-space: nowrap;
+  }
+  .busy {
+    flex-basis: 100%;
+    order: -1;
+  }
+  @media (forced-colors: active) {
+    .box:focus-within {
+      border-color: Highlight;
+    }
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .box:focus-within {
+    border-color: Highlight;
+  }
+}

@@ -40,7 +40,7 @@
  * @category Domain
  * @module
  */
-import { Data, Effect, Schema, SchemaGetter, SchemaIssue } from "effect"
+import { Data, Effect, Match, Schema, SchemaGetter, SchemaIssue } from "effect"
 import type { IdentityLifecycle } from "./IdentityLifecycle.js"
 
 // ---------------------------------------------------------------------------
@@ -176,6 +176,39 @@ export class ApprovalRule extends Schema.Class<ApprovalRule>("ApprovalRule")({
 }) {}
 
 /**
+ * Why CodeCommit could not say whether a pull request's approval rules are satisfied. Reasons carry
+ * no provider text, which can include account paths; the account's notification keeps that.
+ *
+ * @category Domain
+ */
+export const ApprovalUnknownReason = Schema.TaggedUnion({
+  /** `codecommit:EvaluatePullRequestApprovalRules` is denied, typically a missing IAM grant. */
+  NotPermitted: {},
+  /** AWS was still throttling the evaluation after retries. */
+  Throttled: {},
+  /** Any other failure the provider returned; the provider's error is logged, not stored. */
+  ProviderFailed: {}
+})
+
+/**
+ * @category Domain
+ */
+export type ApprovalUnknownReason = typeof ApprovalUnknownReason.Type
+
+/**
+ * An {@link ApprovalUnknownReason} as its bare tag, for flat representations: the cache column and the
+ * cached-row API response.
+ *
+ * @category Domain
+ */
+export const ApprovalUnknownTag = Schema.Literals(["NotPermitted", "Throttled", "ProviderFailed"])
+
+/**
+ * @category Domain
+ */
+export type ApprovalUnknownTag = typeof ApprovalUnknownTag.Type
+
+/**
  * CodeCommit pull request.
  *
  * @category Domain
@@ -194,12 +227,17 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
   sourceBranch: Schema.String,
   destinationBranch: Schema.String,
   isMergeable: Schema.Boolean,
+  /** The last known approval. Read approval through {@link approvalOf}, which accounts for `approvalUnknown`. */
   isApproved: Schema.Boolean,
+  /** Set when the last evaluation failed: `isApproved` is then only the last known value. */
+  approvalUnknown: Schema.optionalKey(ApprovalUnknownReason),
   commentCount: Schema.optional(Schema.Number),
   healthScore: Schema.optional(Schema.Number),
   fetchedAt: Schema.optional(Schema.Date),
   approvedBy: Schema.Array(Schema.String),
   approvedByArns: Schema.Array(Schema.String).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([]))),
+  /** Set when the last approver read failed: `approvedBy` is then only the last known list. */
+  approversUnknown: Schema.optionalKey(Schema.Literal(true)),
   commentedBy: Schema.Array(Schema.String),
   filesChanged: Schema.optional(Schema.Number),
   approvalRules: Schema.Array(ApprovalRule).pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed([])))
@@ -208,6 +246,93 @@ export class PullRequest extends Schema.Class<PullRequest>("PullRequest")({
     return codecommitConsoleUrl(this.account.region, this.repositoryName, this.id)
   }
 }
+
+/**
+ * A pull request's approval as a reader should treat it: unknown whenever the last evaluation failed,
+ * whatever the last known `isApproved` says.
+ *
+ * @category Domain
+ */
+export type Approval =
+  | { readonly _tag: "Approved" }
+  /** CodeCommit evaluates no approval rules as approved: nothing to satisfy (a sign-off is voluntary). */
+  | { readonly _tag: "NotRequired" }
+  | { readonly _tag: "Pending" }
+  | { readonly _tag: "Unknown"; readonly reason: ApprovalUnknownReason }
+
+/**
+ * The single read path for approval. Works with domain instances, cache rows mapped to them, and plain
+ * wire objects.
+ *
+ * @category Domain
+ */
+export const approvalOf = (
+  pr: {
+    readonly isApproved: boolean
+    readonly approvalRules: ReadonlyArray<unknown>
+    readonly approvalUnknown?: ApprovalUnknownReason | undefined
+  }
+): Approval =>
+  pr.approvalUnknown !== undefined
+    ? { _tag: "Unknown", reason: pr.approvalUnknown }
+    : pr.isApproved && pr.approvalRules.length === 0
+    ? { _tag: "NotRequired" }
+    : pr.isApproved
+    ? { _tag: "Approved" }
+    : { _tag: "Pending" }
+
+/**
+ * The label every surface shows for an {@link Approval} of `NotRequired`.
+ *
+ * @category Domain
+ */
+export const approvalNotRequiredLabel = "No approval required"
+
+/**
+ * The label every surface shows for an {@link Approval} of `Unknown`.
+ *
+ * @category Domain
+ */
+export const approvalUnknownLabel = "Approval unknown"
+
+/**
+ * The label every surface shows while `approversUnknown` is set, instead of a count or names.
+ *
+ * @category Domain
+ */
+export const approversUnknownLabel = "Approvers unknown"
+
+/**
+ * Who approved, as far as is known now: none while the last approver read failed, because the
+ * last known list may name an approval since revoked. Surfaces that mark people as approved read
+ * this, not `approvedBy`.
+ *
+ * @category Domain
+ */
+export const currentApprovers = (
+  pr: { readonly approvedBy: ReadonlyArray<string>; readonly approversUnknown?: true | undefined }
+): ReadonlyArray<string> => pr.approversUnknown === true ? [] : pr.approvedBy
+
+/**
+ * Approver ARNs as far as is known now: none while the last approver read failed, like
+ * {@link currentApprovers}.
+ *
+ * @category Domain
+ */
+export const currentApproverArns = (
+  pr: { readonly approvedByArns: ReadonlyArray<string>; readonly approversUnknown?: true | undefined }
+): ReadonlyArray<string> => pr.approversUnknown === true ? [] : pr.approvedByArns
+
+/**
+ * The sentence every surface shows to explain an unknown approval.
+ *
+ * @category Domain
+ */
+export const approvalUnknownReasonText: (reason: ApprovalUnknownReason) => string = Match.valueTags({
+  NotPermitted: () => "Not allowed to check approval rules (codecommit:EvaluatePullRequestApprovalRules).",
+  Throttled: () => "AWS throttled the approval check; it is retried on the next refresh.",
+  ProviderFailed: () => "AWS could not evaluate the approval rules; refresh to retry. The provider error is in the log."
+})
 
 /**
  * Robust identity comparison for matching a caller against an author or
@@ -249,10 +374,18 @@ export const identityMatches = (callerUsername: string, prAuthor: string): boole
  * forms still match when they refer to the same user.
  */
 export const needsMyReview = (
-  pr: { readonly approvalRules: ReadonlyArray<ApprovalRule>; readonly approvedBy: ReadonlyArray<string> },
+  pr: {
+    readonly approvalRules: ReadonlyArray<ApprovalRule>
+    readonly approvedBy: ReadonlyArray<string>
+    readonly approvalUnknown?: ApprovalUnknownReason | undefined
+    readonly approversUnknown?: true | undefined
+  },
   currentUser: string | undefined
 ): boolean => {
   if (currentUser === undefined || currentUser.length === 0) return false
+  // While approval is unknown, which rules are satisfied is only last known, so review is not certain;
+  // nor while approvers are unknown, since the user may already be one of them.
+  if (pr.approvalUnknown !== undefined || pr.approversUnknown === true) return false
   if (pr.approvedBy.some((approver) => identityMatches(currentUser, approver))) return false
   return pr.approvalRules.some(
     (rule) => !rule.satisfied && rule.poolMembers.some((member) => identityMatches(currentUser, member))

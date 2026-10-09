@@ -36,7 +36,8 @@
 }
 
 .resourceList {
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
   border: 1px solid var(--rly-color-border-2);
   border-radius: var(--rly-radius-control);
 }
@@ -87,8 +88,8 @@
 }
 
 .resourceSummary:focus-visible {
-  outline: 2px solid var(--rly-color-text-1);
-  outline-offset: -2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .resourceStatus {
@@ -177,6 +178,18 @@
 
 .accountEditAction {
   justify-content: flex-end;
+}
+
+/* A credential failure, said once for the whole account: the cause and fix, then one action. */
+.accountFailure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rly-space-8) var(--rly-space-12);
+  padding-block: var(--rly-space-12);
+  border-block: 1px solid var(--rly-color-border-2);
+  color: var(--rly-color-blocked-ink);
 }
 
 .syncActions {

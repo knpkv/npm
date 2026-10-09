@@ -10,14 +10,8 @@
   gap: 1.25rem;
 }
 
-.eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-
 .title {
-  max-inline-size: 12ch;
+  max-inline-size: 8.22em;
 }
 
 .lede {
@@ -52,9 +46,11 @@
   border-inline-end: 0;
 }
 
-.facet:hover {
-  background: var(--rly-color-surface-2);
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .facet:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .facet[aria-pressed="true"] {
@@ -65,8 +61,8 @@
 .facet:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .facetLabel {
@@ -141,7 +137,6 @@
   color: var(--rly-color-text-1);
   font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
     var(--rly-type-body-font);
-  outline: none;
   transition: border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
 }
 
@@ -151,8 +146,8 @@
 
 .searchInput:focus {
   border-color: var(--rly-color-focus);
-  outline: 3px solid color-mix(in srgb, var(--rly-color-focus) 22%, transparent);
-  outline-offset: 0;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .searchInput::-webkit-search-cancel-button {
@@ -180,9 +175,11 @@
   cursor: pointer;
 }
 
-.clearSearch:hover {
-  background: var(--rly-color-surface-2);
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .clearSearch:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .activeFilters {
@@ -205,13 +202,16 @@
   cursor: pointer;
 }
 
+/* text-2: text-3 measured 4.31:1 on the chip's surface-2 in light, below AA. */
 .filterChip span:first-child {
-  color: var(--rly-color-text-3);
+  color: var(--rly-color-text-2);
 }
 
-.filterChip:hover {
-  border-color: var(--rly-color-border-2);
-  background: var(--rly-color-surface-3);
+@media (hover: hover) and (pointer: fine) {
+  .filterChip:hover {
+    border-color: var(--rly-color-border-2);
+    background: var(--rly-color-surface-3);
+  }
 }
 
 .filterChip svg {
@@ -271,10 +271,16 @@
   white-space: nowrap;
 }
 
-.filterTrigger:hover,
 .filterTrigger[data-state="open"] {
   background: var(--rly-color-surface-2);
   color: var(--rly-color-text-1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .filterTrigger:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .filterTrigger[data-active="true"] {
@@ -351,7 +357,8 @@
 }
 
 .queueSurface {
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
 }
 
 .prRow {
@@ -371,15 +378,17 @@
   border-block-end: 0;
 }
 
-.prRow:hover {
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  .prRow:hover {
+    background: var(--rly-color-surface-2);
+  }
 }
 
 .prRow:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .prMain {
@@ -413,24 +422,23 @@
   transition: text-decoration-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
 }
 
-.prRow:hover .prTitle {
-  text-decoration: underline;
-  text-decoration-color: var(--rly-color-action-background);
-  text-underline-offset: 0.28rem;
+@media (hover: hover) and (pointer: fine) {
+  .prRow:hover .prTitle {
+    text-decoration: underline;
+    text-decoration-color: var(--rly-color-action-background);
+    text-underline-offset: 0.28rem;
+  }
 }
 
 .prDescription {
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .prByline {
   gap: 0.45rem;
-}
-
-.metaSeparator {
-  color: var(--rly-color-text-3);
 }
 
 .commentCount {
@@ -462,15 +470,14 @@
 }
 
 .prFact dt {
-  color: var(--rly-color-text-3);
+  color: var(--rly-color-text-2);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .prFact dd {
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
   margin: 0;
   color: var(--rly-color-text-1);
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
@@ -532,8 +539,10 @@
   white-space: nowrap;
 }
 
-.prRow:hover .openReview {
-  background: var(--rly-color-surface-3);
+@media (hover: hover) and (pointer: fine) {
+  .prRow:hover .openReview {
+    background: var(--rly-color-surface-3);
+  }
 }
 
 .openReview svg {
@@ -615,14 +624,17 @@
   text-decoration: none;
 }
 
-.activityMore:hover {
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .activityMore:hover {
+    color: var(--rly-color-text-1);
+  }
 }
 
 .activityList {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(12rem, 100%), 1fr));
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
 }
 
 .activityItem {
@@ -642,15 +654,17 @@
   border-inline-end: 0;
 }
 
-a.activityItem:hover {
-  background: var(--rly-color-surface-2);
+@media (hover: hover) and (pointer: fine) {
+  a.activityItem:hover {
+    background: var(--rly-color-surface-2);
+  }
 }
 
 a.activityItem:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .activityIcon {
@@ -700,7 +714,8 @@ a.activityItem:focus-visible {
 
 .activityItemTitle {
   display: -webkit-box;
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
 }
@@ -709,7 +724,7 @@ a.activityItem:focus-visible {
   position: absolute;
   inline-size: 1px;
   block-size: 1px;
-  overflow: hidden;
+  overflow: clip;
   clip-path: inset(50%);
   white-space: nowrap;
 }
@@ -883,5 +898,35 @@ a.activityItem:focus-visible {
   .prTitle,
   .activityItem {
     transition: none;
+  }
+}
+
+/* Drawn under 44px; the pseudo-element grows the touch target without changing the look. */
+.filterChip,
+.filterTrigger {
+  position: relative;
+}
+
+.filterChip::after,
+.filterTrigger::after {
+  position: absolute;
+  inset: min(0px, (100% - 2.75rem) / 2);
+  content: "";
+}
+
+/* Press feedback; the scale eases only when motion is allowed. */
+.filterChip:active,
+.filterTrigger:active,
+.clearSearch:active {
+  scale: 0.97;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .filterChip,
+  .filterTrigger,
+  .clearSearch {
+    transition-property: scale;
+    transition-duration: var(--rly-motion-fast-duration);
+    transition-timing-function: var(--rly-motion-fast-easing);
   }
 }

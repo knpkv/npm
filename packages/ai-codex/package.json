@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/ai-codex",
-  "version": "0.5.1",
+  "version": "0.5.3",
   "description": "Effect AI language model backed by the local Codex CLI",
   "license": "MIT",
   "author": "knpkv",
@@ -31,7 +31,7 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force && node scripts/validate-dist.mjs",
-    "check": "tsc --noEmit && tsc -p tsconfig.dtslint.json",
+    "check": "tsc --noEmit && tsc -p tsconfig.dtslint.json && tsc -p test/tsconfig.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test,dtslint}/**/*.ts\"",
     "test": "vitest run",

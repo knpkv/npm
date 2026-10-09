@@ -50,10 +50,12 @@ export const resolveStopProject = (params: {
 
     const clockifyAuth = yield* ClockifyAuth
     const clockifyClient = yield* ClockifyApiClient
+    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
     const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
     if (!auth) return undefined
 
     const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       Effect.catch(() => Effect.succeed([]))
     )
     if (projects.length === 0) return undefined
@@ -77,8 +79,12 @@ export const resolveStopProject = (params: {
     })
     if (saveDefault) {
       const cfg = yield* ConfigService
-      yield* cfg.set({ defaultProjectId: selected, defaultProjectName: selectedName })
-      yield* Console.log("Default project saved.")
+      yield* cfg.set({ defaultProjectId: selected, defaultProjectName: selectedName }).pipe(
+        Effect.matchEffect({
+          onFailure: (error) => Console.error(`Default project not saved: ${error.message}`),
+          onSuccess: () => Console.log("Default project saved.")
+        })
+      )
     }
     return selected
   })
@@ -118,8 +124,12 @@ export const resolveStopBillable = (params: {
     })
     if (saveDefault) {
       const cfg = yield* ConfigService
-      yield* cfg.set({ defaultBillable: stopBillable })
-      yield* Console.log("Default billable saved.")
+      yield* cfg.set({ defaultBillable: stopBillable }).pipe(
+        Effect.matchEffect({
+          onFailure: (error) => Console.error(`Default billable not saved: ${error.message}`),
+          onSuccess: () => Console.log("Default billable saved.")
+        })
+      )
     }
     return stopBillable
   })

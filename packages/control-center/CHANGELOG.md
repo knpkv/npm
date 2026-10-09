@@ -1,5 +1,135 @@
 # @knpkv/control-center
 
+## 0.12.1
+
+### Patch Changes
+
+- [#692](https://github.com/knpkv/npm/pull/692) [`db715d9`](https://github.com/knpkv/npm/commit/db715d9213828858d72ea7f961dc87dca155b423) Thanks [@konopkov](https://github.com/konopkov)! - On Active work, the release mark and the service title share a row only while both fit; on a phone the title wraps below the mark instead of being crushed beside it.
+
+- [#695](https://github.com/knpkv/npm/pull/695) [`07c9818`](https://github.com/knpkv/npm/commit/07c9818ab4580360c0346155ebf1e56e0efd3fa8) Thanks [@konopkov](https://github.com/konopkov)! - On phones the page is drawn edge to edge and keeps the header, page and bottom navigation clear of the notch and home indicator; on touch screens the navigation and Confluence toolbar targets are 44px tall, the Back link has a 44px target, and the browser permission select, the Items, Timeline and Open PR fields and the code editors read at 16px, so focusing them no longer zooms the page.
+
+- [#693](https://github.com/knpkv/npm/pull/693) [`9381eb4`](https://github.com/knpkv/npm/commit/9381eb4838102c535179fb2c7023ae3405f2afd5) Thanks [@konopkov](https://github.com/konopkov)! - On a phone, the header keeps Open PR, Search and Relay together: beside the brand when they fit, otherwise on their own row below it, never split across two. The header clears the top edge and the notch.
+
+- [#683](https://github.com/knpkv/npm/pull/683) [`12fe95c`](https://github.com/knpkv/npm/commit/12fe95cc590c1487685589feab0364847f7b585e) Thanks [@konopkov](https://github.com/konopkov)! - Workspace settings fit a 320px phone: page and card padding shrink with the viewport instead of stacking fixed 32px and 48px gutters, the Browsers card wraps its action below its text instead of squeezing the words, and long section titles hyphenate where the browser can.
+
+- [#687](https://github.com/knpkv/npm/pull/687) [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44) Thanks [@konopkov](https://github.com/konopkov)! - Browser builds now target Chrome 123, Edge 123, Firefox 120 and Safari 17.6, the floor the CSS already relies on for `light-dark()` and `safe` alignment. Before, they targeted Vite's default (Chrome 111, Safari 16.4), so Lightning CSS rewrote `light-dark()` into its custom-property polyfill. Built CSS now keeps `light-dark()` native. For `@knpkv/rly` consumers, the published stylesheet assumes those browsers.
+- Updated dependencies [[`faddacc`](https://github.com/knpkv/npm/commit/faddacc829272ec3b580af00ee6e581294be76e7), [`8f49d5b`](https://github.com/knpkv/npm/commit/8f49d5bafad19c7e3163538f7acb2f0f7de4d2d1), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1cecd7c`](https://github.com/knpkv/npm/commit/1cecd7c454fdbdf042f7a3fd25a200805500881f), [`48830f8`](https://github.com/knpkv/npm/commit/48830f89057919d23ca408192cb68ac1893c8e96), [`799414f`](https://github.com/knpkv/npm/commit/799414f37422e7aeaf0a36bb80d8d878d75f5a10), [`2540508`](https://github.com/knpkv/npm/commit/2540508d00dc60c3842817df8ca37ce6c6a6179b), [`0848452`](https://github.com/knpkv/npm/commit/0848452bb7faecbf71c207648b430b895429da32), [`1902d84`](https://github.com/knpkv/npm/commit/1902d84417dc050cd7fe7a2472071275424f1e4f), [`ab6b732`](https://github.com/knpkv/npm/commit/ab6b7329bcc49337a658abaaf708fba2ce9ced44)]:
+  - @knpkv/codecommit-core@0.24.0
+  - @knpkv/rly@0.17.0
+  - @knpkv/review@0.4.7
+  - @knpkv/relay-product@0.3.1
+
+## 0.12.0
+
+### Minor Changes
+
+- [#663](https://github.com/knpkv/npm/pull/663) [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6) Thanks [@konopkov](https://github.com/konopkov)! - Relay opens from one header launcher into one panel, replacing the "Ask Relay" link and the fixed chip. A PR page opens straight into its thread and notes the review panel on the page; elsewhere the panel offers the release conversation (or Relay's full page), which keeps its route and calling page, then the PR locator.
+
+### Patch Changes
+
+- [#672](https://github.com/knpkv/npm/pull/672) [`1ad3453`](https://github.com/knpkv/npm/commit/1ad345324b80b58c00cb7827aaab9f74634ef9e7) Thanks [@konopkov](https://github.com/konopkov)! - Hover styles apply only to a fine pointer, motion runs only when reduced motion is not requested, keyboard focus on page headings and the command search shows the focus ring, and overflow clipping and sizing use clip and logical properties.
+- Updated dependencies [[`1ea00b5`](https://github.com/knpkv/npm/commit/1ea00b527ca09262c38856da6cc143e86c0af6d1), [`000d102`](https://github.com/knpkv/npm/commit/000d1022ea889bed988ec5c93754c2606c501e26), [`26d9de9`](https://github.com/knpkv/npm/commit/26d9de9c64b78da62ab462856cbd09e9137eb40f), [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6), [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327), [`8e2091a`](https://github.com/knpkv/npm/commit/8e2091af22179180f401b7eeb42b578ea785a492), [`aa274d2`](https://github.com/knpkv/npm/commit/aa274d2ef7b40c194acd57d204c158e46992386c), [`69b015c`](https://github.com/knpkv/npm/commit/69b015cb21c15723688acff8a22515fdc4cd09d6), [`67f7ea1`](https://github.com/knpkv/npm/commit/67f7ea1a5e3c0281da1d627fce940975e2db0cf4), [`f5f5fd9`](https://github.com/knpkv/npm/commit/f5f5fd98dcea7b7df1b226043e89ffb6decaffad), [`ce3234a`](https://github.com/knpkv/npm/commit/ce3234a201e3336b17f22219c8215d11eecc3408), [`4a41bf8`](https://github.com/knpkv/npm/commit/4a41bf82e327ec66a5df1202920f08e8e51554a4), [`e584518`](https://github.com/knpkv/npm/commit/e584518c9c98186e331a9962c4c6347c470cb3c5), [`d476bb0`](https://github.com/knpkv/npm/commit/d476bb0b2e2399c72eb2cd7b8c6005d833464598), [`4ed3921`](https://github.com/knpkv/npm/commit/4ed39215d9d61071d6ce040b5a5cac77db963327), [`765e850`](https://github.com/knpkv/npm/commit/765e850895d4edc16a75b3af072f71d527ad0b8c), [`a5a7fcf`](https://github.com/knpkv/npm/commit/a5a7fcf055bfa7d0f6a1c1a0ae2cf4bc2eb8ab81)]:
+  - @knpkv/confluence-to-markdown@2.5.3
+  - @knpkv/codecommit-core@0.23.1
+  - @knpkv/relay-product@0.3.0
+  - @knpkv/review@0.4.6
+  - @knpkv/rly@0.16.0
+  - @knpkv/atlassian-common@1.9.3
+
+## 0.11.0
+
+### Minor Changes
+
+- [#637](https://github.com/knpkv/npm/pull/637) [`2743acd`](https://github.com/knpkv/npm/commit/2743acd2a373b18b744503c63780230429a12583) Thanks [@konopkov](https://github.com/konopkov)! - Connecting a resource now syncs it. Before, nothing synced until someone found **Sync now** behind a resource's collapsed controls, so a first run showed "Healthy" next to empty Items.
+
+  - Connecting a resource whose connection test passes starts its first sync. Opening Services never starts one.
+  - Until it first syncs, a resource reads "Not synced yet", "Syncing…" or "Sync failed", never "Healthy". Inside an account it opens so **Sync now** is visible.
+  - A failed sync says why, as a sentence with its fix. `PluginSynchronizationState` gains `failure` (failure class and safe message, from the failure recorded on the connection's health); an absent field decodes as null, and code that builds the type sets `failure` (null when the sync didn't fail).
+  - Credential failures are stated once on the account card, with **Check again**, not on each resource.
+  - Sync copy uses "sync": "Synced 2 min ago, 19:33" replaces ISO timestamps.
+
+### Patch Changes
+
+- Updated dependencies [[`1118080`](https://github.com/knpkv/npm/commit/1118080aad8616fa9f19c15cbcf5b3f4df0160a1), [`dfa2d94`](https://github.com/knpkv/npm/commit/dfa2d94ea207baeb281ef222c7d28cf98e4962bb), [`5d21796`](https://github.com/knpkv/npm/commit/5d21796fb856fba44a32395e316a6bd95ecdbdd6), [`aa41111`](https://github.com/knpkv/npm/commit/aa411113b76d81637f7af356bf04054246aa30ab), [`3ddf05b`](https://github.com/knpkv/npm/commit/3ddf05baa285beebba1ebe99bd2458434a613015)]:
+  - @knpkv/ai-claude@0.4.3
+  - @knpkv/ai-codex@0.5.3
+  - @knpkv/rly@0.15.0
+  - @knpkv/relay-product@0.2.9
+  - @knpkv/review@0.4.5
+
+## 0.10.5
+
+### Patch Changes
+
+- [#616](https://github.com/knpkv/npm/pull/616) [`02c28c0`](https://github.com/knpkv/npm/commit/02c28c03617bdd3bdb8ead6468eac9a7d7c2ad4b) Thanks [@konopkov](https://github.com/konopkov)! - The AWS account form's manual-name placeholders show two example names on separate lines instead of a literal `\n`.
+
+- [#615](https://github.com/knpkv/npm/pull/615) [`35d159e`](https://github.com/knpkv/npm/commit/35d159e1fbff3220963977119dd2562a4c4a4e7a) Thanks [@konopkov](https://github.com/konopkov)! - Failed cleanup, cache writes, lease reads and rollbacks are now logged instead of silently dropped, and an Atlassian sign-in no longer saves when the pre-save snapshot cannot tell whether an auth file exists.
+
+- [#593](https://github.com/knpkv/npm/pull/593) [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597) Thanks [@konopkov](https://github.com/konopkov)! - Text no longer jumps when Geist loads. rly's font stacks fall back to metric-matched Arial, Liberation Sans or Arimo faces (and Courier New, Liberation Mono or Cousine for mono), sized per weight, so lines break and rows stand the same height before and after the swap wherever glyphs are placed at subpixels (desktop Chrome on Linux as measured, and the usual macOS and Windows defaults); a Linux desktop set to full hinting can still move text slightly. Reading measures and title widths are set in `em` (at the weight each is drawn in) rather than `ch`, whose size follows the font's "0" and changed by 16% on the swap. Product shells preload the Geist file their stylesheet loads, and review's offline guide no longer hides the page until its fonts are ready.
+
+- [#639](https://github.com/knpkv/npm/pull/639) [`c33ead7`](https://github.com/knpkv/npm/commit/c33ead79cfcbcdb16bbb468229e5a35454e05998) Thanks [@konopkov](https://github.com/konopkov)! - The web app preloads Geist Mono as well as Geist, so ids and code text paint in the right face sooner and don't re-wrap a line when the font arrives.
+- Updated dependencies [[`2bc7cfa`](https://github.com/knpkv/npm/commit/2bc7cfa8678e43920eda987d2049d97f7a4ba58f), [`2f2925b`](https://github.com/knpkv/npm/commit/2f2925b42d04686ca9da52c056f6d9a177548e05), [`4ff1f03`](https://github.com/knpkv/npm/commit/4ff1f0386648e41cfee2d0198c7c30c312c60539), [`dd7a33a`](https://github.com/knpkv/npm/commit/dd7a33a7377370f381ba67d4eb4f9e2bb4961597), [`ae23e4d`](https://github.com/knpkv/npm/commit/ae23e4d56302af2916e5655e27736bb954e525ae), [`c15ee76`](https://github.com/knpkv/npm/commit/c15ee763636ef1d8f006ddd31c71df771748f9db)]:
+  - @knpkv/codecommit-core@0.23.0
+  - @knpkv/relay-product@0.2.8
+  - @knpkv/rly@0.14.0
+  - @knpkv/review@0.4.4
+
+## 0.10.4
+
+### Patch Changes
+
+- Updated dependencies [[`26bc385`](https://github.com/knpkv/npm/commit/26bc385b4fafdffaf246cbdfa06995b3ecf66047)]:
+  - @knpkv/rly@0.13.0
+  - @knpkv/relay-product@0.2.7
+  - @knpkv/review@0.4.3
+
+## 0.10.3
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`0938903`](https://github.com/knpkv/npm/commit/0938903a17b6d2bdf13b96947471a1d49f10b42f), [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/codecommit-core@0.22.0
+  - @knpkv/ai-claude@0.4.2
+  - @knpkv/ai-codex@0.5.2
+  - @knpkv/atlassian-common@1.9.2
+  - @knpkv/clockify-api-client@3.0.1
+  - @knpkv/confluence-api-client@2.0.1
+  - @knpkv/confluence-to-markdown@2.5.2
+  - @knpkv/jira-api-client@2.1.1
+  - @knpkv/rly@0.12.1
+
+## 0.10.2
+
+### Patch Changes
+
+- [#575](https://github.com/knpkv/npm/pull/575) [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c) Thanks [@konopkov](https://github.com/konopkov)! - Focus rings match rly's: a solid 2px outline in the focus colour, 2px outside the control, from `--rly-focus-ring-width` and `--rly-focus-ring-offset`. Hand-rolled 1px to 3px rings, rings in agent, service or text colours, tinted halos and box-shadow rings are gone. Rings inside clipped containers pull the ring width inside.
+
+- [#570](https://github.com/knpkv/npm/pull/570) [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9) Thanks [@konopkov](https://github.com/konopkov)! - Executables linked from the repository (`pnpm link --global`, or `node dist/...`) run under plain Node: workspace packages resolve to their build output instead of TypeScript sources. Published `@knpkv/codecommit-core` now serves its `Domain.js`, `CacheService.js` and `SandboxService.js` subpaths; the last two resolved to files that do not exist before.
+- Updated dependencies [[`5509cb8`](https://github.com/knpkv/npm/commit/5509cb87f90641d14211e2d993443e3cfcf40784), [`0a0182c`](https://github.com/knpkv/npm/commit/0a0182c18f237ab420d17d0339f0969d9356c63a), [`655f010`](https://github.com/knpkv/npm/commit/655f010c2bb14b4118d81c60025ac64006b73f1c), [`4965043`](https://github.com/knpkv/npm/commit/4965043541a324f630b847ed4d852b6722f6efe6), [`9c09dd9`](https://github.com/knpkv/npm/commit/9c09dd97535117fc7c698361ddf66ae9d6bc4a0d), [`61c930e`](https://github.com/knpkv/npm/commit/61c930e88f4a9d735522d6c7b052b72d13450a6f), [`442b11d`](https://github.com/knpkv/npm/commit/442b11db369a5af5e85d4d91d00c334d46f8103d), [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9)]:
+  - @knpkv/codecommit-core@0.21.0
+  - @knpkv/review@0.4.2
+  - @knpkv/rly@0.12.0
+  - @knpkv/ai-runtime@0.5.2
+  - @knpkv/confluence-to-markdown@2.5.1
+  - @knpkv/atlassian-common@1.9.1
+  - @knpkv/relay-product@0.2.6
+
+## 0.10.1
+
+### Patch Changes
+
+- [#519](https://github.com/knpkv/npm/pull/519) [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5) Thanks [@konopkov](https://github.com/konopkov)! - `ServiceMark` takes a `name` variant: `visible` (default) prints the provider name, and `hidden` prints the glyph only, where an adjacent title already names the provider. The accessible name is present either way. The mark no longer draws a provider-coloured rail.
+
+  Control Center's Services cards use the hidden name, so the provider is no longer printed twice.
+
+- Updated dependencies [[`fd9d510`](https://github.com/knpkv/npm/commit/fd9d5103e3558561274b16c258023bee73b4b233), [`3a59848`](https://github.com/knpkv/npm/commit/3a598483979960e71bfc880f182c73d499001091), [`0573403`](https://github.com/knpkv/npm/commit/057340343fcc727fd0c56329d840a668170376ad), [`286f23e`](https://github.com/knpkv/npm/commit/286f23ece7fc85b9a7a754b7b5f96b5e65868244), [`6d215b2`](https://github.com/knpkv/npm/commit/6d215b2fa9bb3e98f447efbbddcb299c41a4efc5), [`8f64bdf`](https://github.com/knpkv/npm/commit/8f64bdfee2ab758c53d0555850be42cfe9f3626e)]:
+  - @knpkv/codecommit-core@0.20.0
+  - @knpkv/jira-api-client@2.1.0
+  - @knpkv/rly@0.11.0
+  - @knpkv/relay-product@0.2.5
+  - @knpkv/review@0.4.1
+
 ## 0.10.0
 
 ### Minor Changes

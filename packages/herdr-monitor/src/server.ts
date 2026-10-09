@@ -1,9 +1,14 @@
 import { ByteSize, Clock, Effect, Ref, Schedule, Schema } from "effect"
 import { HttpIncomingMessage, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { failureStatus } from "./failure-status.js"
 import { BoardId, decodeSnapshot, MAX_BYTES, RETENTION_MS, Snapshot, STALE_MS } from "./model.js"
 
+/** The option that failed: a malformed value, or two keys that are the same. Carries no value. */
+export const MonitorSetting = Schema.Literals(["boardId", "origin", "publishToken", "viewToken", "independentTokens"])
+export type MonitorSetting = typeof MonitorSetting.Type
+
 export class MonitorConfigurationError
-  extends Schema.TaggedError<MonitorConfigurationError>()("MonitorConfigurationError", {})
+  extends Schema.TaggedError<MonitorConfigurationError>()("MonitorConfigurationError", { setting: MonitorSetting })
 {}
 
 /** Credentials are board-scoped and credential-bearing. Never serialize or log this configuration. */
@@ -22,16 +27,14 @@ const Origin = Schema.String.check(
   Schema.isMaxLength(256),
   Schema.isPattern(/^https:\/\/[a-z0-9.-]+(?::[0-9]{1,5})?$|^http:\/\/127\.0\.0\.1:[0-9]{1,5}$/)
 )
-const Configuration = Schema.Struct({
-  boardId: BoardId,
-  origin: Origin,
-  publishToken: Schema.String.check(Schema.isPattern(/^publish_[A-Za-z0-9_-]{43}$/)),
-  viewToken: Schema.String.check(Schema.isPattern(/^view_[A-Za-z0-9_-]{43}$/))
-}).check(
-  Schema.makeFilter((value) => value.publishToken.slice(8) !== value.viewToken.slice(5), {
-    expected: "independent credentials"
-  })
-)
+const PublishToken = Schema.String.check(Schema.isPattern(/^publish_[A-Za-z0-9_-]{43}$/))
+const ViewToken = Schema.String.check(Schema.isPattern(/^view_[A-Za-z0-9_-]{43}$/))
+
+/** One option against its schema, failing with the option's name only. */
+const setting = <A>(name: MonitorSetting, schema: Schema.Codec<A, string>, value: string) =>
+  Schema.decodeUnknownEffect(schema)(value).pipe(
+    Effect.mapError(() => new MonitorConfigurationError({ setting: name }))
+  )
 const headers = {
   "cache-control": "no-store",
   "content-security-policy":
@@ -45,13 +48,17 @@ const empty = (status: number) => HttpServerResponse.empty({ status, headers })
 
 /** Owns one in-memory board, its high-water sequence, rate limits and expiry. No upstream services. */
 export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorOptions, assets: WebAssets) {
-  const config = yield* Schema.decodeUnknownEffect(Configuration)(options).pipe(
-    Effect.mapError(() => new MonitorConfigurationError())
-  )
-  const origin = yield* Schema.decodeUnknownEffect(Schema.URLFromString)(config.origin).pipe(
-    Effect.mapError(() => new MonitorConfigurationError())
-  )
-  if (origin.origin !== config.origin) return yield* new MonitorConfigurationError()
+  const config = {
+    boardId: yield* setting("boardId", BoardId, options.boardId),
+    origin: yield* setting("origin", Origin, options.origin),
+    publishToken: yield* setting("publishToken", PublishToken, options.publishToken),
+    viewToken: yield* setting("viewToken", ViewToken, options.viewToken)
+  }
+  if (config.publishToken.slice(8) === config.viewToken.slice(5)) {
+    return yield* new MonitorConfigurationError({ setting: "independentTokens" })
+  }
+  const origin = yield* setting("origin", Schema.URLFromString, config.origin)
+  if (origin.origin !== config.origin) return yield* new MonitorConfigurationError({ setting: "origin" })
   const state = yield* Ref.make<
     { readonly snapshot: Snapshot | null; readonly sequence: number; readonly receivedAt: number }
   >({ snapshot: null, sequence: -1, receivedAt: 0 })
@@ -112,7 +119,11 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
       Effect.flatMap(Schema.decodeUnknownEffect(Schema.fromJsonString(Snapshot), { onExcessProperty: "error" })),
       Effect.result
     )
-    if (decoded._tag === "Failure") return empty(400)
+    if (decoded._tag === "Failure") {
+      // Logged by kind only, never the submitted body.
+      yield* Effect.logWarning(`monitor publish rejected: ${decoded.failure._tag}`)
+      return empty(400)
+    }
     const snapshot = yield* decodeSnapshot(decoded.success)
     if (
       snapshot.boardId !== config.boardId || snapshot.sourceAt > now + 30000 || snapshot.sourceAt < now - 300000 ||
@@ -130,7 +141,11 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
   }).pipe(
     Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_BYTES)),
     Effect.timeout("5 seconds"),
-    Effect.catch(() => Effect.succeed(empty(400)))
+    // Logged by kind only, so a broken or stalling publisher shows in the server log without its
+    // payload: a decode error would otherwise echo the submitted snapshot into the log.
+    Effect.catch((error) =>
+      Effect.logWarning(`monitor request failed: ${error._tag}`).pipe(Effect.as(empty(failureStatus(error))))
+    )
   )
   return { handler }
 })

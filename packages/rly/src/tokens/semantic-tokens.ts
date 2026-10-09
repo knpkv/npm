@@ -90,6 +90,12 @@ export const RLY_MOTION_TOKEN_NAMES = tokenNames([
 ])
 export type RlyMotionToken = (typeof RLY_MOTION_TOKEN_NAMES)[number]
 
+export const RLY_EASING_TOKEN_NAMES = tokenNames([
+  "out",
+  "in-out"
+])
+export type RlyEasingToken = (typeof RLY_EASING_TOKEN_NAMES)[number]
+
 export const RLY_CONTROL_HEIGHT_TOKEN_NAMES = tokenNames([
   "dense",
   "compact",

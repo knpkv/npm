@@ -286,6 +286,7 @@ export const EntityTable = ({
                         <button
                           aria-label={`Sort by ${column.label}, currently ${column.sortDirection}`}
                           className={style("headerSort")}
+                          data-rly-hit-area=""
                           onClick={() => onSortChange(column.id)}
                           type="button"
                         >

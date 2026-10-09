@@ -1,0 +1,7 @@
+id: no-ghostty-terminal-focus
+valid:
+  - "keyboard.setTerminalFocus(textarea, () => focusTerminalInput(textarea))"
+  - "next.focus()"
+invalid:
+  - "keyboard.setTerminalFocus(textarea, () => terminal.terminal.focus())"
+  - "terminal.focus()"

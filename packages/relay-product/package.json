@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/relay-product",
-  "version": "0.2.4",
+  "version": "0.3.1",
   "description": "Shared Relay product dock and typed product adapter",
   "license": "MIT",
   "author": "knpkv",
@@ -40,7 +40,7 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc -p test/tsconfig.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\" vitest.config.ts",
     "prepack": "pnpm build",

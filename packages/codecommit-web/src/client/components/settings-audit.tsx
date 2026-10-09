@@ -46,7 +46,7 @@ export function SettingsAudit() {
   return (
     <div className="space-y-6">
       <div>
-        <h3 className="text-lg font-semibold">Audit Log</h3>
+        <h1 className="text-lg font-semibold">Audit Log</h1>
         <p className="text-sm text-muted-foreground">Record every AWS API call made by the app</p>
       </div>
 
@@ -101,7 +101,8 @@ export function SettingsAudit() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* At narrow widths Clear All Logs drops to its own line instead of squeezing the labels. */}
+      <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-0 rounded-md border w-fit">
           <Button size="sm" disabled={!dirty} onClick={handleSave} className="rounded-r-none border-0">
             Save

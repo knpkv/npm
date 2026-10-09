@@ -32,7 +32,7 @@
 }
 
 .identity h2 {
-  max-inline-size: 13ch;
+  max-inline-size: 8.91em;
   min-inline-size: 0;
   overflow-wrap: break-word;
   text-wrap: balance;
@@ -85,8 +85,8 @@
 }
 
 .footerLink:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 @media (max-width: 30rem) {

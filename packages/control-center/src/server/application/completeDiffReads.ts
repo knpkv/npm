@@ -301,7 +301,11 @@ export const makeCompleteDiffReads = (
     if (content.totalBytes !== bytes.byteLength || bytes.byteLength > MaximumContentBytes) {
       return yield* unavailable()
     }
-    if (persistence !== undefined) yield* rememberContent(persistence, scope, bytes).pipe(Effect.ignore)
+    if (persistence !== undefined) {
+      yield* rememberContent(persistence, scope, bytes).pipe(
+        Effect.ignore({ log: "Warn", message: "Could not cache complete diff content" })
+      )
+    }
     return sliceContent(bytes, scope.offset, scope.length)
   })
 })

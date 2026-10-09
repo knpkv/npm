@@ -1,0 +1,13 @@
+id: no-escaped-newline-in-jsx-string-attribute
+valid:
+  - |
+    <textarea placeholder={"payments-api\nrisk-engine"} />
+  - |
+    <textarea placeholder="payments-api, risk-engine" />
+  - |
+    const hint = "a\nb"
+invalid:
+  - |
+    <textarea placeholder="payments-api\nrisk-engine" />
+  - |
+    <input title="first\nsecond" />

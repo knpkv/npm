@@ -48,6 +48,13 @@
 }
 
 .form input:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
+}
+
+/* Touch keyboards zoom the page into a field whose text is under 16px. */
+@media (pointer: coarse) {
+  .form input {
+    font-size: max(16px, 1rem);
+  }
 }

@@ -3,6 +3,7 @@
  */
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -101,16 +102,25 @@ export const baseUrlFromWorkspace = (
     let dir = pathService.resolve(startDir)
     for (;;) {
       const configPath = pathService.join(dir, ".confluence", "config.json")
-      const exists = yield* fs.exists(configPath).pipe(Effect.orElseSucceed(() => false))
+      const exists = yield* fs.exists(configPath).pipe(
+        Effect.catch((error) => Effect.logDebug(`Could not check ${configPath}`, error).pipe(Effect.as(false)))
+      )
       if (exists) {
-        const raw = yield* fs.readFileString(configPath).pipe(Effect.orElseSucceed(() => ""))
-        const parsed = yield* Effect.try({
-          try: () => Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(raw),
-          catch: () => null
-        }).pipe(Effect.orElseSucceed(() => null))
+        const raw = yield* fs.readFileString(configPath).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning(`Could not read ${configPath}; ignoring its baseUrl`, error).pipe(Effect.as(""))
+          )
+        )
+        const parsed = Option.getOrNull(Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))(raw))
         const candidate = Predicate.isObject(parsed) && "baseUrl" in parsed ? parsed["baseUrl"] : undefined
         if (Predicate.isString(candidate) && candidate.trim().length > 0) {
-          return yield* validateBaseUrl(candidate).pipe(Effect.orElseSucceed(() => undefined))
+          return yield* validateBaseUrl(candidate).pipe(
+            Effect.catch((error) =>
+              Effect.logWarning(`Ignoring the baseUrl in ${configPath}: it is not a valid Confluence URL`, error).pipe(
+                Effect.as(undefined)
+              )
+            )
+          )
         }
         return undefined
       }

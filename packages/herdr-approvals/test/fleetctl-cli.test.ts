@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
 import {
   formatUsageError,
   jobKinds,
@@ -7,6 +8,7 @@ import {
   unknownHostDetail,
   unknownKindDetail,
   usage,
+  workPayload,
   workUsage
 } from "../src/internal/fleetctl-cli.js"
 
@@ -84,4 +86,43 @@ describe("fleetctl invocation", () => {
     if (invocation._tag !== "FleetctlUsageError") throw new Error("expected a usage error")
     expect(formatUsageError(invocation).split("\n\n")[0]).toBe("fleetctl: unknown command \"de; ploy\"")
   })
+})
+
+describe("work.* payloads", () => {
+  const abandon = {
+    goalId: "fix-iphone-live-ui-polish",
+    owner: { id: "agent-codex-owner", name: "Codex owner" },
+    reason: "no PR, no branch, no owner",
+    expectedGoalEventId: "goal-event-7",
+    expectedGoalUpdatedAt: 500
+  }
+
+  // Coord (item 12): a payload without its kind failed "work.abandon payload is invalid", naming nothing.
+  it.effect("takes the kind from the command when the payload leaves it out", () =>
+    Effect.gen(function*() {
+      const payload = yield* workPayload("work.abandon", ["work.abandon", JSON.stringify(abandon)])
+      expect(payload.kind).toBe("work.abandon")
+    }))
+
+  it.effect("names each failing field and what it expected, in one line", () =>
+    Effect.gen(function*() {
+      const { goalId: _goalId, ...withoutGoal } = abandon
+      const error = yield* Effect.flip(
+        workPayload("work.abandon", ["work.abandon", JSON.stringify({ ...withoutGoal, reason: 3 })])
+      )
+      expect(error.detail).toContain("work.abandon payload: ")
+      expect(error.detail).toContain("goalId")
+      expect(error.detail).toContain("reason")
+      expect(error.detail).not.toContain("\n")
+    }))
+
+  it.effect("says when the payload is not a JSON object, and when its kind is another command's", () =>
+    Effect.gen(function*() {
+      const notJson = yield* Effect.flip(workPayload("work.abandon", ["work.abandon", "{nope"]))
+      expect(notJson.detail).toBe("work.abandon payload is not a JSON object")
+      const other = yield* Effect.flip(
+        workPayload("work.abandon", ["work.abandon", JSON.stringify({ ...abandon, kind: "work.admit" })])
+      )
+      expect(other.detail).toContain("work.abandon payload")
+    }))
 })

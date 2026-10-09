@@ -2,7 +2,7 @@
   border: 1px solid var(--rly-color-border-1);
   box-shadow: none;
   min-inline-size: var(--rly-space-0);
-  overflow: hidden;
+  overflow: clip;
 }
 
 .workspaceHeader,
@@ -18,7 +18,8 @@
 
 .workspaceHeader {
   align-items: flex-start;
-  background: color-mix(in srgb, var(--rly-color-service-codecommit) 7%, var(--rly-color-surface-2));
+  /* A flat panel: provider colour marks provenance (the service mark), not a whole header. */
+  background: var(--rly-color-surface-2);
   border-block-end: 1px solid var(--rly-color-border-1);
   gap: var(--rly-space-20);
   justify-content: space-between;
@@ -48,10 +49,12 @@
   justify-content: center;
 }
 
+/* Choices wrap to a second row on a narrow pane rather than scrolling or clipping a label. */
 .focusChoices {
   background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-control);
+  flex-wrap: wrap;
   gap: var(--rly-space-2);
   padding: var(--rly-space-2);
 }
@@ -68,7 +71,16 @@
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
   gap: var(--rly-space-4);
+  min-block-size: 32px;
   padding: var(--rly-space-6) var(--rly-space-8);
+  white-space: nowrap;
+}
+
+@media (pointer: coarse) {
+  .focusChoices button,
+  .diffToolbar button {
+    min-block-size: 44px;
+  }
 }
 
 .focusChoices svg,
@@ -88,8 +100,8 @@
 .findingBody:focus-visible,
 .findingActions button:focus-visible,
 .conversation textarea:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .reviewFailure {
@@ -98,11 +110,50 @@
 }
 
 .workbench {
-  block-size: clamp(40rem, calc(100vh - 8rem), 56rem);
+  block-size: clamp(40rem, calc(100svh - 8rem), 56rem);
   display: grid;
   grid-template-columns: minmax(10rem, 0.2fr) minmax(28rem, 1fr) minmax(31rem, 0.84fr);
   min-block-size: var(--rly-space-0);
   min-inline-size: var(--rly-space-0);
+}
+
+/*
+ * The measured grid width (findings-drawer.tsx) decides the layout above phone widths, so it wins
+ * over the container queries below: three columns, or file tree and diff with Relay in a drawer.
+ */
+.workbench[data-findings="column"] {
+  block-size: clamp(40rem, calc(100svh - 8rem), 56rem);
+  display: grid;
+  grid-template-columns: minmax(10rem, 0.2fr) minmax(28rem, 1fr) minmax(31rem, 0.84fr);
+}
+
+.workbench[data-findings="column"] > .agentPane {
+  block-size: auto;
+  border-block-start: 0;
+  border-inline-start: 1px solid var(--rly-color-border-1);
+  grid-column: auto;
+  min-block-size: var(--rly-space-0);
+}
+
+/*
+ * File tree beside the diff, sized by content: the diff keeps rly's own bounded scroller
+ * (min(70vh, 56rem)) and the tree scrolls at the same cap, so nothing is set to a fixed height
+ * that a long diff could run past.
+ */
+.workbench[data-findings="drawer"] {
+  block-size: auto;
+  display: grid;
+  grid-template-columns: minmax(12rem, 0.28fr) minmax(24rem, 1fr);
+}
+
+.workbench[data-findings="drawer"] .diffViewport {
+  block-size: auto;
+}
+
+.workbench[data-findings="drawer"] > .fileTree {
+  border-block-end: 0;
+  border-inline-end: 1px solid var(--rly-color-border-1);
+  max-block-size: min(70svh, 56rem);
 }
 
 .fileTree {
@@ -112,7 +163,7 @@
   display: flex;
   flex-direction: column;
   min-inline-size: var(--rly-space-0);
-  overflow: hidden;
+  overflow: clip;
 }
 
 .fileTree > ol {
@@ -146,7 +197,7 @@
   font: var(--rly-type-code-weight) var(--rly-type-code-size) / var(--rly-type-code-line-height)
     var(--rly-type-code-font);
   min-inline-size: var(--rly-space-0);
-  overflow: hidden;
+  overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -178,7 +229,8 @@
 
 .lineFinding {
   background: var(--rly-color-held-tint);
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-held-ink);
+  border: 1px solid var(--rly-color-held-ink);
+  border-radius: var(--rly-radius-field);
   color: var(--rly-color-text-1);
   display: grid;
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
@@ -193,7 +245,8 @@
 
 .lineComment {
   background: var(--rly-color-surface-3);
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-action-background);
+  border: 1px solid var(--rly-color-action-background);
+  border-radius: var(--rly-radius-field);
   color: var(--rly-color-text-1);
   display: grid;
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
@@ -203,7 +256,7 @@
 }
 
 .lineComment[data-active="true"] {
-  outline: 2px solid var(--rly-color-focus);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   outline-offset: calc(-1 * var(--rly-space-2));
 }
 
@@ -238,18 +291,18 @@
 }
 
 .lineComment button:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .agentPane {
   background: var(--rly-color-surface-2);
-  border-inline-start: var(--rly-space-4) solid var(--rly-color-border-2);
+  border-inline-start: 1px solid var(--rly-color-border-1);
   display: flex;
   flex-direction: column;
   min-block-size: var(--rly-space-0);
   min-inline-size: var(--rly-space-0);
-  overflow: hidden;
+  overflow: clip;
 }
 
 .agentPane > header {
@@ -276,10 +329,16 @@
 }
 
 .agentTitle > small {
-  color: var(--rly-color-text-3);
+  /* text-2: tertiary ink on the pane's surface-2 header fell below 4.5:1 in light. */
+  color: var(--rly-color-text-2);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
   padding-inline-start: calc(var(--rly-space-16) + var(--rly-space-8));
+}
+
+/* In the drawer the icon-and-title row is dropped, so the subtitle starts at the edge. */
+.agentTitle > small:first-child {
+  padding-inline-start: var(--rly-space-0);
 }
 
 .agentEmpty {
@@ -296,19 +355,15 @@
   inline-size: var(--rly-space-32);
 }
 
-.agentSpinner {
-  animation: agent-spin 850ms linear infinite;
+@media (prefers-reduced-motion: no-preference) {
+  .agentSpinner {
+    animation: agent-spin 850ms linear infinite;
+  }
 }
 
 @keyframes agent-spin {
   to {
     transform: rotate(360deg);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .agentSpinner {
-    animation: none;
   }
 }
 
@@ -326,7 +381,8 @@
   display: -webkit-box;
   line-height: 1.4;
   margin: 0 0 var(--rly-space-8);
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
   padding-block-end: var(--rly-space-8);
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -350,18 +406,18 @@
   inline-size: 100%;
   padding: var(--rly-space-12);
   text-align: start;
-  transition:
-    border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
-    box-shadow var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
 }
 
-.findingCard:hover {
-  border-color: var(--rly-color-border-2);
+@media (hover: hover) and (pointer: fine) {
+  .findingCard:hover {
+    border-color: var(--rly-color-border-2);
+  }
 }
 
+/* Selection is a background and aria-current, never an edge bar. */
 .findingCard[data-selected="true"] {
-  border-color: var(--rly-color-held-ink);
-  box-shadow: inset var(--rly-space-4) 0 var(--rly-color-action-background);
+  background: var(--rly-color-surface-3);
+  border-color: var(--rly-color-border-2);
 }
 
 .findingBody > strong {
@@ -377,7 +433,8 @@
 
 .findingBody > span:not(.findingMeta) {
   display: -webkit-box;
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
@@ -399,8 +456,8 @@
 }
 
 .findingDetails summary:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .findingDetails > div {
@@ -428,15 +485,22 @@
   gap: var(--rly-space-6);
 }
 
-.profileChoice select {
-  background: var(--rly-color-surface-1);
-  border: 1px solid var(--rly-color-border-1);
-  border-radius: var(--rly-radius-control);
+.noProfile {
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+    var(--rly-type-meta-font);
+  margin: 0;
+}
+
+.noProfile a {
   color: var(--rly-color-text-1);
-  min-block-size: var(--rly-space-32);
+  text-decoration: underline;
+  text-decoration-color: var(--rly-color-action-background);
+}
+
+.profileChoice > :last-child {
   flex: 1;
   min-inline-size: var(--rly-space-0);
-  padding-inline: var(--rly-space-8);
 }
 
 .progressRail {
@@ -542,7 +606,8 @@
   display: grid;
   gap: var(--rly-space-8);
   grid-template-rows: auto minmax(var(--rly-space-0), 1fr) auto;
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
   padding: var(--rly-space-12) var(--rly-space-16);
 }
 
@@ -577,7 +642,8 @@
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
     var(--rly-type-meta-font);
   max-inline-size: 22rem;
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -592,8 +658,8 @@
 }
 
 .conversation > header > button:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-2);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .conversation[data-collapsed="true"] {
@@ -624,8 +690,9 @@
   padding: var(--rly-space-8);
 }
 
+/* The reader's own turns sit on the deeper surface; the role label says who spoke. */
 .conversation li[data-role="user"] {
-  border-inline-start: var(--rly-space-2) solid var(--rly-color-action-background);
+  background: var(--rly-color-surface-3);
 }
 
 .conversation form {
@@ -662,7 +729,8 @@
 .findingMeta code {
   color: var(--rly-color-text-3);
   font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height) var(--rly-font-mono);
-  overflow: hidden;
+  min-inline-size: 0;
+  overflow: clip;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -684,10 +752,10 @@
   }
 
   .agentPane {
-    border-block-start: var(--rly-space-4) solid var(--rly-color-border-2);
+    border-block-start: 1px solid var(--rly-color-border-1);
     border-inline-start: 0;
     grid-column: 1 / -1;
-    block-size: min(42rem, 75vh);
+    block-size: min(42rem, 75svh);
     min-block-size: 24rem;
   }
 }
@@ -698,9 +766,10 @@
     flex-direction: column;
   }
 
+  /* Four choices on a phone read as a 2 x 2 grid rather than 3 + 1 with one left alone. */
   .focusChoices {
-    display: flex;
-    overflow-x: auto;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
   }
 
   .relayControls {
@@ -716,7 +785,8 @@
     border-block-end: 1px solid var(--rly-color-border-1);
     border-inline-end: 0;
     max-block-size: 20rem;
-    overflow: hidden;
+    min-inline-size: 0;
+    overflow: clip;
   }
 
   .diffToolbar {
@@ -725,17 +795,20 @@
   }
 
   .diffViewport {
-    block-size: min(36rem, 70vh);
+    block-size: min(36rem, 70svh);
   }
 
+  /* Sized by its content up to the cap, so an idle pane is not a tall empty box. */
   .agentPane {
-    block-size: min(42rem, 75vh);
-    min-block-size: 30rem;
+    block-size: auto;
+    max-block-size: min(42rem, 75svh);
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .findingCard {
-    transition: none;
+    transition:
+      border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      box-shadow var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
   }
 }

@@ -12,6 +12,8 @@ import {
   AgentRelationshipStore,
   ConnectAgentCursor,
   fleetConnectAgents,
+  fleetLimits,
+  hubLimits,
   localConnectAgents,
   makeHerdrTerminalConnector,
   pageFleetConnectAgents,
@@ -21,12 +23,11 @@ import {
   TerminalSelection,
   TerminalServerSignal
 } from "@knpkv/herdr-connect"
-import type { ChatHistoryError } from "@knpkv/herdr-coordinator"
-import { ChatRequest, ChatStore, makeCoordinatorChat } from "@knpkv/herdr-coordinator"
 import type {
   FleetJobConflictError,
   FleetOperationUnavailableError,
   FleetService,
+  FleetStoreBusyError,
   FleetStoreError,
   FleetTransitionConflictError,
   HostConfiguration,
@@ -75,6 +76,7 @@ import {
   Cause,
   Clock,
   Crypto,
+  Duration,
   Effect,
   Equal,
   Exit,
@@ -91,6 +93,7 @@ import {
 } from "effect"
 import type { Redacted } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
+import { ChildProcessSpawner } from "effect/process"
 import type * as SemaphoreModule from "effect/Semaphore"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { createServer as createSecureServer } from "node:https"
@@ -112,11 +115,20 @@ import {
   PendingApprovalSummary,
   type PendingApprovalTarget
 } from "./dashboard-model.js"
-import { DashboardView } from "./dashboard-view.js"
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
-import { dashboardDocumentTitle } from "./internal/html.js"
-import { relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
+import { fontPreloadLink } from "./font-preload.js"
+import { readHostLimits, staleWhileRevalidate } from "./host-limits.js"
+import { dashboardPage } from "./internal/dashboard-page.js"
+import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
+import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
+import {
+  isRelayedScrollState,
+  makeLatestSignalSender,
+  rawText,
+  relayTerminalCloseCode,
+  terminalBufferCanAccept
+} from "./internal/websocket.js"
 import { LanWorkPage, LanWorkPairPage } from "./lan-work-view.js"
 import {
   decodeLanWorkPairRequest,
@@ -232,7 +244,6 @@ export type UiAssets = {
 
 type ApiError =
   | ApprovalAppStoreError
-  | ChatHistoryError
   | ConnectPeerError
   | DashboardResponseBudgetError
   | FleetApprovalError
@@ -241,6 +252,7 @@ type ApiError =
   | FleetJobNotFoundError
   | FleetOperationError
   | FleetOperationUnavailableError
+  | FleetStoreBusyError
   | FleetStoreError
   | FleetTransitionConflictError
   | FleetValidationError
@@ -278,8 +290,6 @@ type Runner = {
   readonly enqueue: (jobId: string) => Promise<boolean>
 }
 
-type ListenerMode = "local" | "tailnet" | "approval" | "serve" | "work" | "lan"
-
 type TlsCredentials = {
   readonly certificate: string
   readonly privateKey: string
@@ -300,6 +310,7 @@ type PeerTarget = {
   readonly approvalUrl: string | null
   readonly pendingUrl: string | null
   readonly connectAgentsUrl: string | null
+  readonly limitsUrl: string | null
   readonly terminalUrl: string | null
 }
 
@@ -367,6 +378,7 @@ const apiError = (error: ApiError): ApiErrorResponse => {
         body: { error: error._tag, host: error.host, reason: error.reason }
       }
     case "FleetOperationError":
+    case "FleetStoreBusyError":
     case "TerminalTransportError":
       return { status: 503, body: { error: error._tag, detail: error.detail } }
     case "LanWorkCryptoError":
@@ -376,7 +388,6 @@ const apiError = (error: ApiError): ApiErrorResponse => {
     case "FleetStoreError":
       return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "ApprovalAppStoreError":
-    case "ChatHistoryError":
     case "WorkProjectionError":
       return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "WorkStoreError":
@@ -665,6 +676,9 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
       connectAgentsUrl: address === undefined
         ? null
         : `http://${address}:${config.port}/v1/connect/agents/local`,
+      limitsUrl: address === undefined
+        ? null
+        : `http://${address}:${config.port}/v1/connect/limits/local`,
       terminalUrl: address === undefined
         ? null
         : `ws://${address}:${config.port}/v1/connect/terminal`
@@ -1169,58 +1183,16 @@ export const notificationCandidates = Effect.fn(
   } satisfies ApprovalNotificationBatch
 })
 
-const dashboardPage = (snapshot: DashboardSnapshot): string => {
-  const markup = snapshot.approvalApp.canonical ? "" : renderToStaticMarkup(
-    createElement(
-      "div",
-      { className: "dashboard-gesture" },
-      createElement(DashboardView, {
-        busyJobId: null,
-        chatBusy: false,
-        notificationState: "loading",
-        onChatSubmit: undefined,
-        onDecision: () => undefined,
-        onDisableNotifications: undefined,
-        onEnableNotifications: undefined,
-        onRefresh: () => undefined,
-        pull: { distance: 0, ready: false, refreshing: false },
-        snapshot
-      })
-    )
-  )
-  const data = JSON.stringify(snapshot).replaceAll("<", "\\u003c")
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#111418">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Approvals">
-<title>${dashboardDocumentTitle(snapshot.host)}</title>
-<link rel="manifest" href="/manifest.webmanifest">
-<link rel="icon" href="/assets/approval-icon.svg" type="image/svg+xml">
-<link rel="stylesheet" href="/assets/index.css">
-</head>
-<body data-rly-root data-rly-theme="dark">
-<div id="fleet-dashboard-root">${markup}</div>
-<script id="fleet-dashboard-data" type="application/json">${data}</script>
-<script src="/assets/approval.js" defer></script>
-</body>
-</html>`
-}
-
-const connectPage = (): string =>
+const connectPage = (fontPreload: string): string =>
   `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0b0d10">
 <title>Fleet connect</title>
-<link rel="stylesheet" href="/assets/index.css">
+${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark" class="connect-body">
 <div id="fleet-connect-root"></div>
@@ -1228,7 +1200,7 @@ const connectPage = (): string =>
 </body>
 </html>`
 
-const lanWorkDocument = (body: string): string =>
+const lanWorkDocument = (body: string, fontPreload: string): string =>
   `<!doctype html>
 <html lang="en">
 <head>
@@ -1237,15 +1209,18 @@ const lanWorkDocument = (body: string): string =>
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#111418">
 <title>Fleet Work</title>
-<link rel="stylesheet" href="/assets/index.css">
+${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark">
 ${body}
 </body>
 </html>`
 
-const lanPairPage = (error: string | undefined): string =>
-  lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPairPage, error === undefined ? {} : { error })))
+const lanPairPage = (error: string | undefined, fontPreload: string): string =>
+  lanWorkDocument(
+    renderToStaticMarkup(createElement(LanWorkPairPage, error === undefined ? {} : { error })),
+    fontPreload
+  )
 
 const lanHtmlSecurityHeaders = {
   "content-security-policy": "frame-ancestors 'none'",
@@ -1275,8 +1250,9 @@ const lanPairErrorMessage = (error: LanPairError): string => {
 
 const lanWorkPage = (
   snapshots: WorkSnapshots,
-  selection: { readonly goalId: string | null; readonly window: WorkSnapshotWindow }
-): string => lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPage, { ...selection, snapshots })))
+  selection: { readonly goalId: string | null; readonly window: WorkSnapshotWindow },
+  fontPreload: string
+): string => lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPage, { ...selection, snapshots })), fontPreload)
 
 const lanWorkSelectionFromUrl = Effect.fn("ApprovalHttp.decodeLanWorkSelection")(
   function*(url: URL) {
@@ -1300,12 +1276,7 @@ const rejectUpgrade = (
 }
 
 const terminalSelectionFromUrl = (url: URL) =>
-  Schema.decodeUnknownEffect(TerminalSelection)({
-    host: url.searchParams.get("host"),
-    agentId: url.searchParams.get("agent"),
-    cols: Number(url.searchParams.get("cols")),
-    rows: Number(url.searchParams.get("rows"))
-  }).pipe(
+  Schema.decodeUnknownEffect(TerminalSelection)(terminalSelectionInput(url)).pipe(
     Effect.mapError(
       (cause) =>
         new FleetValidationError({
@@ -1455,12 +1426,11 @@ export const makeRunner = Effect.fn("HostRunner.make")(function*(
     if (!accepting) return Promise.resolve(false)
     const run = serial.withPermits(1)(
       runJob(jobId).pipe(
-        Effect.tapError((error) =>
+        Effect.catch((error) =>
           Effect.logError("HostRunner.job_failed", error).pipe(
             Effect.annotateLogs({ jobId })
           )
-        ),
-        Effect.ignore
+        )
       )
     )
     return runPromise(Effect.forkIn(run, scope)).then(() => true)
@@ -1492,6 +1462,7 @@ export const startHttpServer = async (
 }> => {
   const isHub = config.crossHost &&
     config.host.toLowerCase() === config.approvalHub.host.toLowerCase()
+  const fontPreload = fontPreloadLink(uiAssets.fonts)
   const workBindAddress = config.workBindAddress ?? "127.0.0.1"
   const approvalTls = config.approvalTls
   if (isHub && approvalTls === null) {
@@ -1531,6 +1502,20 @@ export const startHttpServer = async (
       () => activeRequestControllers.delete(controller)
     )
   }
+  // A read older than 30 seconds is refreshed in the background, so a peer answers the hub's
+  // 1.5-second fetch from its last read even while agent-usage is slow.
+  const spawner = await httpRuntime.runPromise(Effect.service(ChildProcessSpawner.ChildProcessSpawner))
+  // Background refreshes live in this scope; closing the server closes it before the runtime.
+  const limitsScope = await httpRuntime.runPromise(Scope.make())
+  finalizers.unshift(() => httpRuntime.runPromise(Scope.close(limitsScope, Exit.void)))
+  const { read: localLimits } = await httpRuntime.runPromise(
+    staleWhileRevalidate(
+      readHostLimits(config.host, config.agentUsageLimitsCommand).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+      ),
+      Duration.seconds(30)
+    ).pipe(Effect.provideService(Scope.Scope, limitsScope))
+  )
   const shutdown = async (): Promise<void> => {
     if (closed) return
     closed = true
@@ -1620,8 +1605,6 @@ export const startHttpServer = async (
     )
     finalizers.unshift(() => Promise.resolve().then(() => approvalStore.close()))
     const cryptoService = await httpRuntime.runPromise(Crypto.Crypto)
-    const chatStore = await httpRuntime.runPromise(ChatStore.open(statePath))
-    finalizers.unshift(() => Promise.resolve().then(() => chatStore.close()))
     const activityStore = await httpRuntime.runPromise(
       AgentActivityStore.open(statePath)
     )
@@ -1958,16 +1941,13 @@ export const startHttpServer = async (
       })
     }
     let lanWorkPairing: LanWorkPairing | null = null
-    const chat = await httpRuntime.runPromise(makeCoordinatorChat({
-      config,
-      fleet: service,
-      store: chatStore
-    }))
     const runJob = Effect.fn("HostRunner.runJob")(function*(jobId: string) {
       const record = yield* service.get(jobId)
       return yield* record.payload.kind === "agent.delegate" &&
           record.payload.channel === "coordinator_chat"
-        ? chat.run(jobId)
+        // The hub's chat is gone; a chat job queued before the upgrade still runs as a chat, not as
+        // an ordinary delegation, and its reply stays on its job record.
+        ? service.runCoordinatorChat(jobId)
         : service.run(jobId)
     })
     const runner = await Effect.runPromise(makeRunner(runJob))
@@ -2146,6 +2126,12 @@ export const startHttpServer = async (
           closeSocket(socket, 4400, "invalid terminal command")
         }
       })
+      const scrollSignals = makeLatestSignalSender({
+        bufferedAmount: () => socket.bufferedAmount,
+        isOpen: () => socket.readyState === WebSocketClient.OPEN,
+        send: (payload) => socket.send(payload)
+      }, 100)
+      socket.once("close", scrollSignals.dispose)
       const eventLoop = Stream.runForEach(session.events, (event) =>
         Effect.sync(() => {
           if (socket.readyState !== WebSocketClient.OPEN) return
@@ -2156,6 +2142,14 @@ export const startHttpServer = async (
               return
             }
             socket.send(payload, { binary: true })
+          } else if (event.type === "terminal.scroll_state") {
+            // The pane's scroll position as the connector read it. Under backpressure the newest one
+            // waits for the buffer to drain; the connector reports only changes, so none may be lost.
+            relayScrollState(
+              selection,
+              JSON.stringify(Schema.decodeUnknownSync(TerminalServerSignal)(event)),
+              scrollSignals.offer
+            )
           } else {
             const payload = JSON.stringify(
               Schema.decodeUnknownSync(TerminalServerSignal)({
@@ -2193,11 +2187,7 @@ export const startHttpServer = async (
         closeSocket(socket, 4404, "host unavailable")
         return
       }
-      const remoteUrl = new URL(peer.terminalUrl)
-      remoteUrl.searchParams.set("host", selection.host)
-      remoteUrl.searchParams.set("agent", selection.agentId)
-      remoteUrl.searchParams.set("cols", String(selection.cols))
-      remoteUrl.searchParams.set("rows", String(selection.rows))
+      const remoteUrl = remoteTerminalUrl(peer.terminalUrl, selection)
       const remote = new WebSocketClient(remoteUrl, {
         headers: { host: remoteUrl.host },
         maxPayload: terminalFrameMaxPayload,
@@ -2239,7 +2229,18 @@ export const startHttpServer = async (
           }
         })
       })
+      // Scroll states hold the newest value under backpressure, as on a local terminal.
+      const scrollSignals = makeLatestSignalSender({
+        bufferedAmount: () => socket.bufferedAmount,
+        isOpen: () => socket.readyState === WebSocketClient.OPEN,
+        send: (payload) => socket.send(payload)
+      }, 100)
+      socket.once("close", scrollSignals.dispose)
       remote.on("message", (data, isBinary) => {
+        if (isRelayedScrollState(data, isBinary)) {
+          relayScrollState(selection, rawText(data), scrollSignals.offer)
+          return
+        }
         if (socket.readyState === WebSocketClient.OPEN) {
           const payloadBytes = Array.isArray(data)
             ? data.reduce((bytes, part) => bytes + part.byteLength, 0)
@@ -2476,7 +2477,7 @@ export const startHttpServer = async (
                   "content-type": "text/html; charset=utf-8",
                   ...lanHtmlSecurityHeaders
                 })
-                response.end(lanPairPage(lanPairErrorMessage(error)))
+                response.end(lanPairPage(lanPairErrorMessage(error), fontPreload))
               } else {
                 json(response, mapped.status, mapped.body)
               }
@@ -2500,7 +2501,7 @@ export const startHttpServer = async (
                   "content-type": "text/html; charset=utf-8",
                   ...lanHtmlSecurityHeaders
                 })
-                response.end(lanPairPage(undefined))
+                response.end(lanPairPage(undefined, fontPreload))
               }
               return
             }
@@ -2552,7 +2553,7 @@ export const startHttpServer = async (
                   "content-type": "text/html; charset=utf-8",
                   ...lanHtmlSecurityHeaders
                 })
-                response.end(lanWorkPage(result.success, selection.success))
+                response.end(lanWorkPage(result.success, selection.success, fontPreload))
               } else if (
                 result.failure._tag === "LanWorkSessionRequiredError" ||
                 result.failure._tag === "LanWorkSessionRejectedError"
@@ -2678,10 +2679,9 @@ export const startHttpServer = async (
                 approvalApp: {
                   canonical: mode === "serve",
                   canonicalUrl: config.approvalHub.url,
-                  chatEnabled: mode === "serve",
-                  pushEnabled: mode === "serve"
+                  pushEnabled: mode === "serve",
+                  workEnabled: listenerServesWork(mode, config.crossHost)
                 },
-                chat: null,
                 work: null,
                 status: state.status,
                 records: state.history.records,
@@ -2775,7 +2775,7 @@ export const startHttpServer = async (
             return
           }
 
-          const servesWork = mode === "serve" || mode === "work" || (mode === "local" && !config.crossHost)
+          const servesWork = listenerServesWork(mode, config.crossHost)
           if (
             (mode === "serve" || (mode === "local" && !config.crossHost)) &&
             request.method === "GET" &&
@@ -3015,32 +3015,6 @@ export const startHttpServer = async (
           }
 
           if (
-            mode === "serve" &&
-            request.method === "GET" &&
-            url.pathname === "/v1/chat"
-          ) {
-            await respond(response, Effect.andThen(authorized, chat.history()))
-            return
-          }
-
-          if (
-            mode === "serve" &&
-            request.method === "POST" &&
-            url.pathname === "/v1/chat"
-          ) {
-            const effect = Effect.gen(function*() {
-              const who = yield* authorized
-              yield* sameOrigin(request, expectedOrigin())
-              const input = yield* readJson(request, ChatRequest)
-              const submitted = yield* chat.submit(input, who)
-              if (submitted.queued) yield* enqueueJob(submitted.jobId)
-              return submitted.entry
-            })
-            await respond(response, effect, 202)
-            return
-          }
-
-          if (
             approvalSurface &&
             request.method === "GET" &&
             url.pathname === "/v1/dashboard-pending"
@@ -3107,6 +3081,32 @@ export const startHttpServer = async (
                 ).pipe(
                   Effect.provideService(Crypto.Crypto, cryptoService)
                 )
+              )
+            )
+            return
+          }
+
+          // The hub's own question to a peer: only the approval hub's node may ask.
+          if (
+            mode === "tailnet" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/connect/limits/local"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(tailnetActor(request, config, [config.approvalHub.nodeId]), localLimits)
+            )
+            return
+          }
+
+          // Every listener that serves a dashboard serves its limits: on the hub every peer's read,
+          // anywhere else just this host's.
+          if (request.method === "GET" && url.pathname === "/v1/connect/limits") {
+            await respond(
+              response,
+              Effect.andThen(
+                authorized,
+                mode === "serve" ? hubLimits(localLimits, fleetPeers(config)) : fleetLimits(localLimits, [])
               )
             )
             return
@@ -3301,7 +3301,7 @@ export const startHttpServer = async (
                 now()
               )
             })
-            response.end(dashboardPage(result.success))
+            response.end(dashboardPage(result.success, fontPreload))
             return
           }
           if (
@@ -3321,7 +3321,7 @@ export const startHttpServer = async (
               "content-type": "text/html; charset=utf-8",
               "x-frame-options": "DENY"
             })
-            response.end(connectPage())
+            response.end(connectPage(fontPreload))
             return
           }
           json(response, 404, { error: "not_found" })

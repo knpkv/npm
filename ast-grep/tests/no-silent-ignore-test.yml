@@ -1,0 +1,26 @@
+id: no-silent-ignore
+valid:
+  - |
+    yield* cleanup.pipe(Effect.ignore({ log: true }))
+  - |
+    yield* Effect.ignoreCause(release, { log: "Warn", message: "release failed" })
+  - |
+    // best-effort: the temp directory is removed with the scope anyway
+    yield* fs.remove(tmp).pipe(Effect.ignore)
+  - |
+    // best-effort: a stale lock is replaced on the next start
+    const released = unlock.pipe(
+      Effect.ignore
+    )
+invalid:
+  - |
+    yield* fs.remove(tmp).pipe(Effect.ignore)
+  - |
+    yield* Effect.ignore(release)
+  - |
+    // the temp directory goes away anyway
+    yield* fs.remove(tmp).pipe(Effect.ignoreCause)
+  - |
+    const released = unlock.pipe(
+      Effect.ignore
+    )

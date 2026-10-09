@@ -1,10 +1,11 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react"
+import { useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { CheckCircleIcon, CopyIcon, RotateCcwIcon } from "lucide-react"
 import { useCallback, useState } from "react"
 import { configPathQueryAtom, configResetAtom, configValidateQueryAtom, databaseInfoQueryAtom } from "../atoms/app.js"
 import { cn } from "../lib/utils.js"
+import { LoadFailed } from "./load-failed.js"
 import { Button } from "./ui/button.js"
 import { Separator } from "./ui/separator.js"
 
@@ -51,8 +52,10 @@ function PathRow({
 
 export function SettingsConfig() {
   const configPath = useAtomValue(configPathQueryAtom)
+  const retryConfigPath = useAtomRefresh(configPathQueryAtom)
   const validation = useAtomValue(configValidateQueryAtom)
   const databaseInfo = useAtomValue(databaseInfoQueryAtom)
+  const retryDatabaseInfo = useAtomRefresh(databaseInfoQueryAtom)
   const resetConfig = useAtomSet(configResetAtom)
   const [copied, setCopied] = useState<string | null>(null)
   const [resetting, setResetting] = useState(false)
@@ -82,7 +85,7 @@ export function SettingsConfig() {
   return (
     <div className="space-y-4">
       <div>
-        <h2 className="text-lg font-semibold">Configuration</h2>
+        <h1 className="text-lg font-semibold">Configuration</h1>
         <p className="text-sm text-muted-foreground">File locations, validation, and storage</p>
       </div>
       <Separator />
@@ -90,13 +93,19 @@ export function SettingsConfig() {
       <div className="space-y-1">
         {AsyncResult.builder(configPath)
           .onInitialOrWaiting(() => <p className="text-xs text-muted-foreground py-1">Loading config path...</p>)
-          .onError(() => <p className="text-xs text-destructive py-1">Failed to load config path</p>)
-          .onDefect(() => <p className="text-xs text-destructive py-1">Failed to load config path</p>)
+          .onFailure(() => (
+            <LoadFailed
+              description="The CodeCommit server did not say where its config file is."
+              onRetry={retryConfigPath}
+              title="Config file unknown"
+            />
+          ))
           .onSuccess((data) => {
-            const validationDetail = AsyncResult.isSuccess(validation) ? ` · ${validation.value.status}` : ""
+            const validationDetail = AsyncResult.isSuccess(validation) ? `, ${validation.value.status}` : ""
+            // A missing file is the normal first run: defaults apply until a setting is saved.
             const detail = data.exists
               ? `${fmtModified(data.modifiedAt)}${validationDetail}`
-              : `Not created yet${validationDetail}`
+              : "No file yet: using defaults. It's written the first time you save a setting."
             return (
               <PathRow
                 label="Config file"
@@ -108,12 +117,11 @@ export function SettingsConfig() {
               />
             )
           })
-          .render()}
+          .exhaustive()}
 
         {AsyncResult.builder(validation)
           .onInitialOrWaiting(() => null)
-          .onError(() => null)
-          .onDefect(() => null)
+          .onFailure(() => null)
           .onSuccess((v) =>
             v.errors.length > 0 ? (
               <div className="ml-27 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
@@ -123,17 +131,22 @@ export function SettingsConfig() {
               </div>
             ) : null
           )
-          .render()}
+          .exhaustive()}
 
         <Separator />
 
         {AsyncResult.builder(databaseInfo)
           .onInitialOrWaiting(() => <p className="text-xs text-muted-foreground py-1">Loading database info...</p>)
-          .onError(() => <p className="text-xs text-destructive py-1">Failed to load database info</p>)
-          .onDefect(() => <p className="text-xs text-destructive py-1">Failed to load database info</p>)
+          .onFailure(() => (
+            <LoadFailed
+              description="The CodeCommit server did not describe its cache database."
+              onRetry={retryDatabaseInfo}
+              title="Database details unavailable"
+            />
+          ))
           .onSuccess((data) => {
             const detail = data.exists
-              ? `${formatBytes(data.sizeBytes)} · ${fmtModified(data.modifiedAt)}`
+              ? `${formatBytes(data.sizeBytes)}, ${fmtModified(data.modifiedAt)}`
               : "Not created yet"
             return (
               <PathRow
@@ -146,7 +159,7 @@ export function SettingsConfig() {
               />
             )
           })
-          .render()}
+          .exhaustive()}
       </div>
 
       <Separator />

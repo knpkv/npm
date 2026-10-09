@@ -16,7 +16,7 @@
 }
 
 .title {
-  max-inline-size: 10ch;
+  max-inline-size: 6.85em;
   text-wrap: balance;
 }
 
@@ -72,18 +72,17 @@
   line-height: 0.95;
   text-decoration: none;
   text-wrap: balance;
-  transition:
-    background-color 160ms ease,
-    color 160ms ease;
 }
 
 .filter:last-child {
   border-inline-end: 0;
 }
 
-.filter:hover {
-  background: var(--rly-color-surface-2);
-  color: var(--rly-color-text-1);
+@media (hover: hover) and (pointer: fine) {
+  .filter:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
 }
 
 .filter[data-active="true"] {
@@ -94,8 +93,8 @@
 .filter:focus-visible {
   position: relative;
   z-index: 1;
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: -3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: calc(var(--rly-focus-ring-width) * -1);
 }
 
 .filterCount {
@@ -107,7 +106,8 @@
 }
 
 .releaseList {
-  overflow: hidden;
+  overflow: clip;
+  min-inline-size: 0;
   border-block-start: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-group);
   background: var(--rly-color-surface-1);
@@ -148,10 +148,6 @@
   background: var(--rly-color-surface-1);
   color: var(--rly-color-text-1);
   text-decoration: none;
-  transition:
-    border-color 160ms ease,
-    background-color 160ms ease,
-    transform 160ms ease;
 }
 
 .serviceChoice[data-service="codecommit"] {
@@ -174,15 +170,22 @@
   border-block-start-color: var(--rly-color-service-clockify);
 }
 
-.serviceChoice:hover {
-  border-color: var(--rly-color-border-2);
-  background: var(--rly-color-surface-2);
-  transform: translateY(-2px);
+@media (hover: hover) and (pointer: fine) {
+  .serviceChoice:hover {
+    border-color: var(--rly-color-border-2);
+    background: var(--rly-color-surface-2);
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .serviceChoice:hover {
+    transform: translateY(-2px);
+  }
 }
 
 .serviceChoice:focus-visible {
-  outline: 3px solid var(--rly-color-focus);
-  outline-offset: 3px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .serviceAction {
@@ -294,14 +297,12 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
+@media (prefers-reduced-motion: no-preference) {
   .filter,
   .serviceChoice {
-    transition: none;
-  }
-
-  .serviceChoice:hover {
-    transform: none;
+    transition-duration: var(--rly-motion-standard-duration);
+    transition-property: background-color, border-color, color, transform;
+    transition-timing-function: var(--rly-motion-standard-easing);
   }
 }
 

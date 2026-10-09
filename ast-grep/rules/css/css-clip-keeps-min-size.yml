@@ -1,0 +1,55 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/rule.json
+
+id: css-clip-keeps-min-size
+language: css
+severity: error
+message: "overflow: clip needs a stated minimum (min-inline-size or min-width): unlike hidden it gives a grid or flex item no automatic 0"
+
+rule:
+  kind: declaration
+  all:
+    - has:
+        kind: property_name
+        regex: "^overflow(-x|-y|-inline|-block)?$"
+    - has:
+        kind: plain_value
+        regex: "(?i)^clip$"
+  not:
+    any:
+      # The same rule block states the minimum.
+      - inside:
+          kind: block
+          has:
+            kind: declaration
+            has:
+              kind: property_name
+              regex: "^(min-inline-size|min-width)$"
+      # Visually-hidden helpers: clipped to nothing, so they never size anything.
+      - inside:
+          kind: block
+          has:
+            kind: declaration
+            regex: "^clip-path:\\s*inset\\(\\s*50%\\s*\\)"
+      - inside:
+          kind: block
+          all:
+            - has:
+                kind: declaration
+                regex: "^(inline-size|width):\\s*1px\\b"
+            - has:
+                kind: declaration
+                regex: "^(block-size|height):\\s*1px\\b"
+
+files:
+  - "packages/control-center/src/**/*.css"
+  - "packages/codecommit-web/src/**/*.css"
+  - "packages/herdr-approvals/src/**/*.css"
+  - "packages/jcf-web/src/**/*.css"
+
+note: |
+  overflow: hidden makes a scroll container, and a scroll container's automatic minimum size as a
+  flex or grid item is 0. overflow: clip is not a scroll container, so the same item keeps its
+  content-based minimum: an ellipsis or a long hash can no longer shrink, and the page scrolls
+  sideways (control-center's 320px audit failed exactly so after a hidden → clip migration). The
+  trap only bites flex and grid items, but a stylesheet cannot know the parent, so every clip states
+  its minimum: `min-inline-size: 0` (or a token), next to the clip.

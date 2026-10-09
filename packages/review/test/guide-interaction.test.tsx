@@ -307,7 +307,7 @@ it("retains a rendered diagram when diff mode and wrapping change", async () => 
     if (diagram === null) throw new TypeError("Fixture has no Mermaid container")
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
     diagram.replaceChildren(svg)
-    const mode = host.querySelector(".review-controls button")
+    const mode = host.querySelector<HTMLButtonElement>(".review-controls button")
     const wrap = host.querySelector<HTMLInputElement>('.review-controls input[type="checkbox"]')
     if (mode === null || wrap === null) throw new TypeError("Fixture has no diff controls")
     expect(wrap.labels?.[0]?.textContent?.trim()).toBe("Wrap code")
@@ -363,7 +363,8 @@ it("keeps embedded guide styles inside the host document layout", async () => {
     expect(page.getComputedStyle(page.document.body).marginTop).toBe("23px")
     const guide = page.document.querySelector(".review-guide")
     if (guide === null) throw new TypeError("Missing guide fixture")
-    expect(page.getComputedStyle(guide).minHeight).toBe(`${page.innerHeight}px`)
+    // svh, not vh: a phone's collapsing URL bar must not hide the bottom of the guide.
+    expect(page.getComputedStyle(guide).minBlockSize).toBe("100svh")
   } finally {
     await page.happyDOM.close()
   }

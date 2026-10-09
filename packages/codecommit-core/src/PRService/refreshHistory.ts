@@ -45,6 +45,7 @@ export const syncWeek = Effect.fn("syncWeek")(
       const prRepo = yield* PullRequestRepo
       const configService = yield* ConfigService
 
+      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
       const config = yield* configService.load.pipe(Effect.catch(() => Effect.void.pipe(Effect.as(undefined))))
       if (config === undefined) {
         yield* Effect.logWarning("syncWeek: no config found")
@@ -79,15 +80,18 @@ export const syncWeek = Effect.fn("syncWeek")(
             const identity = yield* awsClient
               .getCallerIdentity({ profile: account.profile, region })
               .pipe(
+                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                 Effect.catchIf(() => true, () => Effect.succeed(fallbackIdentity(account.profile)))
               )
             const awsAccountId = identity.accountId
+            // One observation for the listing, before it starts: a later read of the same revision wins.
+            const observation = yield* prRepo.observe()
 
             yield* awsClient
               .getPullRequests({ profile: account.profile, region })
               .pipe(
                 Stream.runForEach((pr) =>
-                  prRepo.upsert(prToUpsertInput(pr, awsAccountId)).pipe(
+                  prRepo.upsert(prToUpsertInput(pr, awsAccountId), observation).pipe(
                     Effect.tap(() =>
                       Ref.updateAndGet(fetchedRef, (n) => n + 1).pipe(
                         Effect.flatMap((n) =>
@@ -98,6 +102,7 @@ export const syncWeek = Effect.fn("syncWeek")(
                         )
                       )
                     ),
+                    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
                     Effect.catchIf(() => true, () => Effect.void)
                   )
                 ),
@@ -117,6 +122,7 @@ export const syncWeek = Effect.fn("syncWeek")(
       }))
 
       const openPRs = yield* prRepo.findStaleOpen("9999-12-31T23:59:59Z").pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catchIf(() => true, () => Effect.succeed([]))
       )
 
@@ -124,42 +130,49 @@ export const syncWeek = Effect.fn("syncWeek")(
       yield* Effect.forEach(
         openPRs,
         (pr) =>
-          awsClient
-            .getPullRequest({
-              account: { profile: pr.accountProfile, region: pr.accountRegion },
-              pullRequestId: pr.id
-            })
-            .pipe(
-              Effect.flatMap((detail) => {
-                if (detail.repositoryName !== pr.repositoryName) return Effect.void
-                if (detail.status !== "OPEN") {
-                  return prRepo
-                    .updateStatusAndClosedAt(
-                      pr.awsAccountId,
-                      pr.id,
-                      detail.status,
-                      detail.lastActivityDate.toISOString(),
-                      detail.mergedBy,
-                      detail.approvedBy,
-                      { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
-                    )
-                    .pipe(
-                      Effect.tap(() =>
-                        Ref.updateAndGet(transitionedRef, (n) => n + 1).pipe(
-                          Effect.flatMap((n) =>
-                            SubscriptionRef.update(state, (s) => ({
-                              ...s,
-                              statusDetail: `syncing ${week} — ${n} status updates`
-                            }))
+          // The observation is taken before the read, so a read that began later wins in the cache.
+          prRepo.observe().pipe(
+            Effect.flatMap((observation) =>
+              awsClient
+                .getPullRequest({
+                  account: { profile: pr.accountProfile, region: pr.accountRegion },
+                  pullRequestId: pr.id
+                })
+                .pipe(
+                  Effect.flatMap((detail) => {
+                    if (detail.repositoryName !== pr.repositoryName) return Effect.void
+                    const coordinates = { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
+                    // The whole re-read reaches the cache, like the refresh's stale pass: status, details and
+                    // evaluation, each group unless the cache holds a newer one.
+                    return prRepo.writeRead(pr.awsAccountId, pr.id, detail, observation, coordinates).pipe(
+                      Effect.tap((written) =>
+                        written.row && detail.status !== "OPEN"
+                          ? Ref.updateAndGet(transitionedRef, (n) => n + 1).pipe(
+                            Effect.flatMap((n) =>
+                              SubscriptionRef.update(state, (s) => ({
+                                ...s,
+                                statusDetail: `syncing ${week} — ${n} status updates`
+                              }))
+                            )
                           )
-                        )
+                          : Effect.void
                       )
                     )
-                }
-                return Effect.void
-              }),
-              Effect.catchIf(() => true, () => Effect.void)
+                  }),
+                  // One pull request's failure doesn't stop the sync, but it is logged: a lost approval write
+                  // leaves the cached approval republished as known.
+                  Effect.catch((error) =>
+                    Effect.logWarning(
+                      `syncWeek ${week}: status check of #${pr.id} (${pr.repositoryName}, ${pr.accountProfile} ${pr.accountRegion}) failed; the cached row is kept`,
+                      error
+                    )
+                  )
+                )
             ),
+            Effect.catch((error) =>
+              Effect.logWarning(`syncWeek ${week}: #${pr.id} not checked, no observation number`, error)
+            )
+          ),
         { concurrency: 5, discard: true }
       )
 
@@ -180,6 +193,7 @@ export const syncWeek = Effect.fn("syncWeek")(
       // provider traffic, and this sync runs forked from the stats route rather
       // than behind the refresh semaphore, so a toggle is not serialized with it.
       const syncedRows = yield* prRepo.findAll().pipe(
+        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
         Effect.catchIf(() => true, () => Effect.succeed([]))
       )
       // After the cache read, so a toggle during a slow read still applies.

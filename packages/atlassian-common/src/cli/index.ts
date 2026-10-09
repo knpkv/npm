@@ -93,7 +93,8 @@ export const verboseRequested = (args: ReadonlyArray<string>): Effect.Effect<boo
     : Effect.gen(function*() {
       const debug = yield* Config.option(Config.String("DEBUG"))
       return Option.getOrUndefined(debug) === "1"
-    }).pipe(Effect.orElseSucceed(() => false))
+    }).pipe(Effect.catchTag("ConfigError", (error) =>
+      Effect.logDebug("DEBUG is unreadable; verbose stays off", error).pipe(Effect.as(false))))
 
 const describe = <E>(error: E): string => {
   if (Predicate.hasProperty(error, "message") && Predicate.isString(error.message) && error.message !== "") {
@@ -122,7 +123,7 @@ export const handleCliError = <E>(cause: Cause.Cause<E>, options: { readonly ver
 const reportFailure = <E>(cause: Cause.Cause<E>): Effect.Effect<void, never, Stdio.Stdio> =>
   Effect.gen(function*() {
     const stdio = yield* Stdio.Stdio
-    const verbose = yield* stdio.args.pipe(Effect.flatMap(verboseRequested), Effect.orElseSucceed(() => false))
+    const verbose = yield* stdio.args.pipe(Effect.flatMap(verboseRequested))
     yield* handleCliError(cause, { verbose })
   })
 

@@ -53,8 +53,11 @@ const makeStartup = Effect.fn("RetentionStartup.make")(function*(
         )
     )
   )
+  // A draining server refuses admission. Any other failure can only ride along with an interruption
+  // the cycle passed on, and is logged so the stop is never silent.
   const firstPollInterval = yield* lifecycle.runBackground(cycle).pipe(
-    Effect.catch(() => Effect.succeed(null))
+    Effect.catchTag("ServerDraining", () => Effect.succeed(null)),
+    Effect.catch((error) => Effect.logError("Workspace retention did not start", error).pipe(Effect.as(null)))
   )
   const supervise = Effect.gen(function*() {
     let nextPollInterval = firstPollInterval
@@ -68,7 +71,8 @@ const makeStartup = Effect.fn("RetentionStartup.make")(function*(
       nextPollInterval = yield* lifecycle.runBackground(cycle)
     }
   }).pipe(
-    Effect.catch(() => Effect.void)
+    Effect.catchTag("ServerDraining", () => Effect.void),
+    Effect.catch((error) => Effect.logError("Workspace retention supervisor stopped", error))
   )
   yield* Effect.forkScoped(supervise)
   return new RetentionRunning({ workspaceId: options.workspaceId })

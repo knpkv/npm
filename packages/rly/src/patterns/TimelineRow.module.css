@@ -62,40 +62,43 @@
   .link {
     border-radius: var(--rly-radius-tag);
     color: inherit;
-    outline-offset: var(--rly-space-2);
+    outline-offset: var(--rly-focus-ring-offset);
     text-decoration-color: var(--rly-color-border-2);
     text-underline-offset: var(--rly-space-4);
   }
 
-  .link:hover {
-    text-decoration-color: currentcolor;
+  @media (hover: hover) and (pointer: fine) {
+    .link:hover {
+      text-decoration-color: currentcolor;
+    }
   }
 
   .link:focus-visible {
-    outline: 2px solid var(--rly-color-focus);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   }
 
+  /* The title leads; detail and provenance sit under it in meta type, one step quieter. */
   .detail {
     color: var(--rly-color-text-2);
-    font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
-      var(--rly-type-body-font);
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
     margin: var(--rly-space-0);
     overflow-wrap: break-word;
     text-wrap: pretty;
   }
 
+  /* Who acted, on one wrapping line: the actor kind as a plain word, the service, then the actor. */
   .meta {
-    align-content: start;
-    display: grid;
-    gap: var(--rly-space-8);
-    justify-items: start;
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-4) var(--rly-space-8);
   }
 
   .actorKind {
     color: var(--rly-color-text-2);
     font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
       var(--rly-type-meta-font);
-    text-transform: uppercase;
   }
 
   .actor {
@@ -126,7 +129,6 @@
     }
 
     .meta {
-      align-items: start;
       grid-column: 2;
       grid-row: 3;
     }

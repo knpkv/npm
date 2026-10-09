@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/codecommit",
-  "version": "0.14.1",
+  "version": "0.17.1",
   "description": "TUI for browsing AWS CodeCommit PRs",
   "type": "module",
   "main": "dist/index.js",
@@ -16,7 +16,7 @@
     "skills"
   ],
   "scripts": {
-    "start": "bun src/bin.ts",
+    "start": "tsc -b ../codecommit-core ../codecommit-web && node ../../scripts/require-built.mjs @knpkv/codecommit-core @knpkv/codecommit-web && bun src/bin.ts",
     "start:web": "bun src/bin.ts web",
     "prebuild": "pnpm --filter @knpkv/browser-pairing build",
     "precheck": "pnpm --filter @knpkv/browser-pairing build",
@@ -44,8 +44,7 @@
     "@opentui/react": "0.5.14",
     "diff": "9.0.0",
     "effect": "4.0.0",
-    "react": "^19.3.0",
-    "tslib": "^2.8.1"
+    "react": "^19.3.0"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0",

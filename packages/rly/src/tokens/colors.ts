@@ -3,47 +3,260 @@ import type { ColorTokenSource, ContrastPairSource } from "./model.js"
 const defineColors = <const Tokens extends ReadonlyArray<ColorTokenSource>>(tokens: Tokens): Tokens => tokens
 const defineContrastPairs = <const Pairs extends ReadonlyArray<ContrastPairSource>>(pairs: Pairs): Pairs => pairs
 
-/** Private palette values. Components consume only the generated semantic variables. */
+/**
+ * Private palette values in OKLCH (neutrals use hue `none`). Components consume only the generated
+ * semantic variables. Each value displays as exactly the sRGB colour it replaced (test/tokens/oklch-parity).
+ */
 export const colorTokenSource = defineColors([
-  { name: "canvas", light: "#F6F6F8", dark: "#101114", forced: "Canvas", purpose: "content" },
-  { name: "surface-1", light: "#FFFFFF", dark: "#17181C", forced: "Canvas", purpose: "content" },
-  { name: "surface-2", light: "#F0F1F4", dark: "#1E2025", forced: "Canvas", purpose: "content" },
-  { name: "surface-3", light: "#E8E9ED", dark: "#282A31", forced: "Canvas", purpose: "content" },
-  { name: "text-1", light: "#17181B", dark: "#F4F4F6", forced: "CanvasText", purpose: "content" },
-  { name: "text-2", light: "#5E6068", dark: "#B7B9C1", forced: "CanvasText", purpose: "content" },
-  { name: "text-3", light: "#6E717A", dark: "#9396A0", forced: "CanvasText", purpose: "content" },
-  { name: "border-1", light: "#DADCE2", dark: "#30323A", forced: "ButtonBorder", purpose: "content" },
-  { name: "border-2", light: "#B9BCC5", dark: "#4C4F5A", forced: "ButtonBorder", purpose: "content" },
-  { name: "action-background", light: "#17181B", dark: "#F4F4F6", forced: "ButtonFace", purpose: "content" },
-  { name: "action-foreground", light: "#FFFFFF", dark: "#17181B", forced: "ButtonText", purpose: "content" },
-  { name: "focus", light: "#006DFF", dark: "#89B7FF", forced: "Highlight", purpose: "content" },
-  { name: "agent", light: "#6741A5", dark: "#BD9CF0", forced: "LinkText", purpose: "content" },
-  { name: "success-ink", light: "#16753A", dark: "#66D38B", forced: "CanvasText", purpose: "state" },
-  { name: "success-tint", light: "#EAF6ED", dark: "#153222", forced: "Canvas", purpose: "state" },
-  { name: "blocked-ink", light: "#B42318", dark: "#FF8B82", forced: "CanvasText", purpose: "state" },
-  { name: "blocked-tint", light: "#FDECEA", dark: "#3A1918", forced: "Canvas", purpose: "state" },
-  { name: "held-ink", light: "#7A5100", dark: "#F0C66A", forced: "CanvasText", purpose: "state" },
-  { name: "held-tint", light: "#FFF5DC", dark: "#33270F", forced: "Canvas", purpose: "state" },
-  { name: "deploying-ink", light: "#075EBC", dark: "#75AEFF", forced: "CanvasText", purpose: "state" },
-  { name: "deploying-tint", light: "#EAF3FF", dark: "#112B49", forced: "Canvas", purpose: "state" },
-  { name: "service-codecommit", light: "#C45500", dark: "#FF9B55", forced: "LinkText", purpose: "provenance" },
-  { name: "service-codepipeline", light: "#8A42C2", dark: "#D69CFF", forced: "LinkText", purpose: "provenance" },
-  { name: "service-jira", light: "#0C66E4", dark: "#75AEFF", forced: "LinkText", purpose: "provenance" },
-  { name: "service-confluence", light: "#4758D6", dark: "#9EA9FF", forced: "LinkText", purpose: "provenance" },
-  { name: "service-clockify", light: "#0087C7", dark: "#64CCF2", forced: "LinkText", purpose: "provenance" },
+  {
+    name: "canvas",
+    light: "oklch(97.37% 0.0026 286.35)",
+    dark: "oklch(17.79% 0.0064 271.04)",
+    forced: "Canvas",
+    purpose: "content"
+  },
+  {
+    name: "surface-1",
+    light: "oklch(100% 0 none)",
+    dark: "oklch(20.97% 0.008 274.53)",
+    forced: "Canvas",
+    purpose: "content"
+  },
+  {
+    name: "surface-2",
+    light: "oklch(95.82% 0.0041 271.37)",
+    dark: "oklch(24.36% 0.01 268.27)",
+    forced: "Canvas",
+    purpose: "content"
+  },
+  {
+    name: "surface-3",
+    light: "oklch(93.44% 0.0055 274.96)",
+    dark: "oklch(28.59% 0.0131 272.91)",
+    forced: "Canvas",
+    purpose: "content"
+  },
+  {
+    name: "text-1",
+    light: "oklch(20.92% 0.0061 271.12)",
+    dark: "oklch(96.77% 0.0027 286.35)",
+    forced: "CanvasText",
+    purpose: "content"
+  },
+  {
+    name: "text-2",
+    light: "oklch(49.01% 0.013 274.7)",
+    dark: "oklch(78.66% 0.0115 274.85)",
+    forced: "CanvasText",
+    purpose: "content"
+  },
+  {
+    name: "text-3",
+    light: "oklch(54.91% 0.0144 271.15)",
+    dark: "oklch(67.38% 0.0151 272.6)",
+    forced: "CanvasText",
+    purpose: "content"
+  },
+  {
+    name: "border-1",
+    light: "oklch(89.47% 0.0085 271.32)",
+    dark: "oklch(31.84% 0.0145 274.43)",
+    forced: "ButtonBorder",
+    purpose: "content"
+  },
+  {
+    name: "border-2",
+    light: "oklch(79.56% 0.0131 271.25)",
+    dark: "oklch(42.9% 0.0186 273.49)",
+    forced: "ButtonBorder",
+    purpose: "content"
+  },
+  {
+    name: "action-background",
+    light: "oklch(20.92% 0.0061 271.12)",
+    dark: "oklch(96.77% 0.0027 286.35)",
+    forced: "ButtonFace",
+    purpose: "content"
+  },
+  {
+    name: "action-foreground",
+    light: "oklch(100% 0 none)",
+    dark: "oklch(20.92% 0.0061 271.12)",
+    forced: "ButtonText",
+    purpose: "content"
+  },
+  {
+    name: "focus",
+    light: "oklch(57.68% 0.2328 259.8)",
+    dark: "oklch(77.5% 0.1149 259.12)",
+    forced: "Highlight",
+    purpose: "content"
+  },
+  {
+    name: "agent",
+    light: "oklch(47.08% 0.1548 297.66)",
+    dark: "oklch(75.36% 0.1225 301.6)",
+    forced: "LinkText",
+    purpose: "content"
+  },
+  {
+    name: "success-ink",
+    light: "oklch(49.55% 0.1249 150.69)",
+    dark: "oklch(78.4% 0.1445 152.74)",
+    forced: "CanvasText",
+    purpose: "state"
+  },
+  {
+    name: "success-tint",
+    light: "oklch(96.17% 0.0174 153.57)",
+    dark: "oklch(28.91% 0.0461 157.59)",
+    forced: "Canvas",
+    purpose: "state"
+  },
+  {
+    name: "blocked-ink",
+    light: "oklch(50.03% 0.1821 29.51)",
+    dark: "oklch(76.13% 0.142 25.57)",
+    forced: "CanvasText",
+    purpose: "state"
+  },
+  {
+    name: "blocked-tint",
+    light: "oklch(95.6% 0.0187 25.6)",
+    dark: "oklch(26.13% 0.0525 23.12)",
+    forced: "Canvas",
+    purpose: "state"
+  },
+  {
+    name: "held-ink",
+    light: "oklch(46.86% 0.0987 75.3)",
+    dark: "oklch(84.49% 0.1205 85.16)",
+    forced: "CanvasText",
+    purpose: "state"
+  },
+  {
+    name: "held-tint",
+    light: "oklch(97.14% 0.0344 88.77)",
+    dark: "oklch(28.06% 0.0417 82.9)",
+    forced: "Canvas",
+    purpose: "state"
+  },
+  {
+    name: "deploying-ink",
+    light: "oklch(49.3% 0.1652 256.17)",
+    dark: "oklch(74.53% 0.1323 257.25)",
+    forced: "CanvasText",
+    purpose: "state"
+  },
+  {
+    name: "deploying-tint",
+    light: "oklch(96.09% 0.0188 255.53)",
+    dark: "oklch(28.58% 0.0639 253.7)",
+    forced: "Canvas",
+    purpose: "state"
+  },
+  {
+    name: "service-codecommit",
+    light: "oklch(58.25% 0.1609 47.1)",
+    dark: "oklch(78.01% 0.1467 53.69)",
+    forced: "LinkText",
+    purpose: "provenance"
+  },
+  {
+    name: "service-codepipeline",
+    light: "oklch(53.23% 0.1942 306.77)",
+    dark: "oklch(78.38% 0.1486 310.24)",
+    forced: "LinkText",
+    purpose: "provenance"
+  },
+  {
+    name: "service-jira",
+    light: "oklch(54.19% 0.2065 259.4)",
+    dark: "oklch(74.53% 0.1323 257.25)",
+    forced: "LinkText",
+    purpose: "provenance"
+  },
+  {
+    name: "service-confluence",
+    light: "oklch(52.21% 0.1926 272.06)",
+    dark: "oklch(76.01% 0.1239 277.45)",
+    forced: "LinkText",
+    purpose: "provenance"
+  },
+  {
+    name: "service-clockify",
+    light: "oklch(59.46% 0.1365 240.15)",
+    dark: "oklch(79.78% 0.11 224.74)",
+    forced: "LinkText",
+    purpose: "provenance"
+  },
   // Chart series in assignment order: neighbours differ in hue and lightness, and orange sits sixth
   // so a small chart does not read as provider provenance. Charts always ship a labelled key and a
   // table equivalent, so colour is never the only carrier; forced colours collapse to CanvasText.
   // Every series keeps 3:1 against the canvas and the first surface in both schemes (see below).
-  { name: "series-1", light: "#2A78D6", dark: "#3987E5", forced: "CanvasText", purpose: "series" },
-  { name: "series-2", light: "#008300", dark: "#2E9E2E", forced: "CanvasText", purpose: "series" },
-  { name: "series-3", light: "#C24F7C", dark: "#D55181", forced: "CanvasText", purpose: "series" },
-  { name: "series-4", light: "#9C6A00", dark: "#C98500", forced: "CanvasText", purpose: "series" },
-  { name: "series-5", light: "#118259", dark: "#199E70", forced: "CanvasText", purpose: "series" },
-  { name: "series-6", light: "#C4501E", dark: "#D95926", forced: "CanvasText", purpose: "series" },
-  { name: "series-7", light: "#4A3AA7", dark: "#9085E9", forced: "CanvasText", purpose: "series" },
-  { name: "series-8", light: "#D23D3C", dark: "#E66767", forced: "CanvasText", purpose: "series" },
-  { name: "series-other", light: "#777672", dark: "#7E7D79", forced: "CanvasText", purpose: "series" }
+  {
+    name: "series-1",
+    light: "oklch(57.53% 0.1626 255.53)",
+    dark: "oklch(62.21% 0.1612 255.05)",
+    forced: "CanvasText",
+    purpose: "series"
+  },
+  {
+    name: "series-2",
+    light: "oklch(52.85% 0.1798 142.5)",
+    dark: "oklch(61.45% 0.1797 143)",
+    forced: "CanvasText",
+    purpose: "series"
+  },
+  {
+    name: "series-3",
+    light: "oklch(59% 0.1537 358.49)",
+    dark: "oklch(62.24% 0.1712 0.84)",
+    forced: "CanvasText",
+    purpose: "series"
+  },
+  {
+    name: "series-4",
+    light: "oklch(56.27% 0.118 76.33)",
+    dark: "oklch(66.99% 0.1425 73.23)",
+    forced: "CanvasText",
+    purpose: "series"
+  },
+  {
+    name: "series-5",
+    light: "oklch(53.81% 0.1139 161.78)",
+    dark: "oklch(62.12% 0.1283 163.11)",
+    forced: "CanvasText",
+    purpose: "series"
+  },
+  {
+    name: "series-6",
+    light: "oklch(57.67% 0.1603 40.99)",
+    dark: "oklch(62.21% 0.1726 40.11)",
+    forced: "CanvasText",
+    purpose: "series"
+  },
+  {
+    name: "series-7",
+    light: "oklch(43.31% 0.1671 283.62)",
+    dark: "oklch(66.96% 0.1452 286.83)",
+    forced: "CanvasText",
+    purpose: "series"
+  },
+  {
+    name: "series-8",
+    light: "oklch(58.03% 0.1863 25.45)",
+    dark: "oklch(66.93% 0.1586 22.31)",
+    forced: "CanvasText",
+    purpose: "series"
+  },
+  {
+    name: "series-other",
+    light: "oklch(56.55% 0.0062 95.16)",
+    dark: "oklch(58.93% 0.0061 95.15)",
+    forced: "CanvasText",
+    purpose: "series"
+  }
 ])
 
 /** Text and non-text contrast invariants for both schemes. */

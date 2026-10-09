@@ -74,6 +74,23 @@ export type {
 } from "./RelationshipChain.js"
 export { RelationshipTable } from "./RelationshipTable.js"
 export type { RelationshipTableProps } from "./RelationshipTable.js"
+export { RelayComposer, useRelayDraft } from "./RelayComposer.js"
+export type {
+  RelayComposerProps,
+  RlyRelayContextRef,
+  RlyRelayDraft,
+  RlyRelayDraftStorage,
+  RlyRelaySubmission,
+  UseRelayDraftOptions
+} from "./RelayComposer.js"
+export { RelayDecision } from "./RelayDecision.js"
+export type {
+  RelayDecisionProps,
+  RlyRelayDecisionCopy,
+  RlyRelayDecisionReceipt,
+  RlyRelayDecisionState,
+  RlyRelayDecisionTarget
+} from "./RelayDecision.js"
 export { RelayDock } from "./RelayDock.js"
 export type {
   RelayDockProps,
@@ -83,6 +100,38 @@ export type {
   RlyRelayDockSelectionControl,
   RlyRelayDockState
 } from "./RelayDock.js"
+export { RelayFindings } from "./RelayFindings.js"
+export type {
+  RelayFindingsProps,
+  RlyRelayFinding,
+  RlyRelayFindingDisposition,
+  RlyRelayFindingLocation,
+  RlyRelayFindingPriority
+} from "./RelayFindings.js"
+export { RelayLauncher, relayShortcut, useRelayShortcut, useRelaySummon } from "./RelayLauncher.js"
+export type { RelayLauncherProps, RlyRelayShortcut, RlyRelaySummon, UseRelaySummonOptions } from "./RelayLauncher.js"
+export { RelayMark, RLY_RELAY_MARK_SIZES, RLY_RELAY_MARK_TILE_SIZES } from "./RelayMark.js"
+export type { RelayMarkProps, RelayMarkTileProps, RlyRelayMarkSize, RlyRelayMarkTileSize } from "./RelayMark.js"
+export { RelayPanel, RLY_RELAY_PANEL_PRESENTATIONS, RLY_RELAY_PANEL_WIDTH, useRelayPresentation } from "./RelayPanel.js"
+export type {
+  RelayPanelProps,
+  RlyRelayPanelPin,
+  RlyRelayPanelPresentation,
+  RlyRelayPanelTab,
+  RlyRelayPresentation,
+  RlyRelayScope,
+  UseRelayPresentationOptions
+} from "./RelayPanel.js"
+export { RelaySetup } from "./RelaySetup.js"
+export type {
+  RelaySetupProps,
+  RlyRelayBackend,
+  RlyRelayBackendCause,
+  RlyRelayBackendStatus,
+  RlyRelaySetupFocus
+} from "./RelaySetup.js"
+export { RelayTranscript } from "./RelayTranscript.js"
+export type { RelayTranscriptProps, RlyRelayCite, RlyRelayTool, RlyRelayTranscriptItem } from "./RelayTranscript.js"
 export { ReleasePreview } from "./ReleasePreview.js"
 export type { ReleasePreviewProps, RlyReleasePreviewPresentation } from "./ReleasePreview.js"
 export {
@@ -107,7 +156,7 @@ export type {
   RlyReleaseTransitionNames
 } from "./ReleaseRow.js"
 export { RLY_SERVICE_MARK_DEFAULT_VARIANTS, RLY_SERVICE_MARK_VARIANTS, ServiceMark } from "./ServiceMark.js"
-export type { RlyService, RlyServiceMarkSize, ServiceMarkProps } from "./ServiceMark.js"
+export type { RlyService, RlyServiceMarkName, RlyServiceMarkSize, ServiceMarkProps } from "./ServiceMark.js"
 export { RLY_STAGE_RAIL_DEFAULT_VARIANTS, RLY_STAGE_RAIL_VARIANTS, StageRail } from "./StageRail.js"
 export type { RlyStage, RlyStageRailSize, StageRailProps } from "./StageRail.js"
 export { TimelineProvenanceKey, TimelineRow } from "./TimelineRow.js"

@@ -18,6 +18,7 @@
  */
 import {
   Account,
+  ApprovalUnknownTag,
   AwsProfileName,
   AwsRegion,
   PRCommentLocationJson,
@@ -56,6 +57,20 @@ export class ForbiddenApiError extends Schema.TaggedError<ForbiddenApiError>()(
   { httpApiStatus: 403 }
 ) {}
 
+/** The route's account is configured but switched off; the browser offers to switch it on. */
+export class AccountSwitchedOffApiError extends Schema.TaggedError<AccountSwitchedOffApiError>()(
+  "AccountSwitchedOffApiError",
+  { message: Schema.String, profile: Schema.String },
+  { httpApiStatus: 409 }
+) {}
+
+/** No configured profile is known to own the route's account. */
+export class AccountUnknownApiError extends Schema.TaggedError<AccountUnknownApiError>()(
+  "AccountUnknownApiError",
+  { message: Schema.String },
+  { httpApiStatus: 404 }
+) {}
+
 /** Process-scoped owner session required by every CodeCommit API endpoint. */
 export class OwnerSessionAuth extends HttpApiMiddleware.Service<OwnerSessionAuth>()(
   "@knpkv/codecommit-web/OwnerSessionAuth",
@@ -84,6 +99,8 @@ export const CachedPullRequestResponse = Schema.Struct({
   destinationBranch: Schema.String,
   isMergeable: Schema.Number,
   isApproved: Schema.Number,
+  /** Set when the last evaluation failed: `isApproved` is then only the last known value. */
+  approvalUnknownReason: Schema.optionalKey(Schema.NullOr(ApprovalUnknownTag)),
   commentCount: Schema.NullOr(Schema.Number),
   link: Schema.String,
   fetchedAt: Schema.String
@@ -400,7 +417,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
       query: PullRequestRefreshCoordinates,
       success: PullRequestRefreshResponse,
-      error: ApiError
+      error: [ApiError, AccountSwitchedOffApiError, AccountUnknownApiError]
     })
   )
   .add(
@@ -610,7 +627,9 @@ const ConfigResponse = Schema.Struct({
 const ConfigPathResponse = Schema.Struct({
   path: Schema.String,
   exists: Schema.Boolean,
-  modifiedAt: Schema.optional(Schema.String)
+  modifiedAt: Schema.optional(Schema.String),
+  /** The files AWS profiles were detected from (AWS_CONFIG_FILE / AWS_SHARED_CREDENTIALS_FILE or ~/.aws). */
+  awsProfileSources: Schema.optional(Schema.Struct({ config: Schema.String, credentials: Schema.String }))
 })
 
 const DatabaseInfoResponse = Schema.Struct({
@@ -922,6 +941,17 @@ export class PermissionsGroup extends HttpApiGroup.make("permissions")
   )
   .add(
     HttpApiEndpoint.post("reset", "/reset", { success: Schema.String })
+  )
+  .add(
+    // One grant for a whole category (first run: every read), so the first account isn't blocked by a modal per call.
+    HttpApiEndpoint.post("updateCategory", "/category", {
+      payload: Schema.Struct({
+        category: Schema.Literals(["read", "write"]),
+        state: PermissionStateSchema
+      }),
+      success: Schema.String,
+      error: ApiError
+    })
   )
   .add(
     HttpApiEndpoint.get("auditSettings", "/audit", {

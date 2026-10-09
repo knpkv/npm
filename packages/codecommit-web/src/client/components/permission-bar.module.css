@@ -1,0 +1,31 @@
+/* Fixed to the bottom edge, inside the page gutter, above page content but below dialogs. */
+.dock {
+  position: fixed;
+  z-index: 30;
+  inset-block-end: 0;
+  inset-inline: var(--rly-space-16);
+  margin-inline: auto;
+  max-inline-size: 72rem;
+  /*
+   * The published height is the bar's whole footprint from the viewport's bottom edge: an 8px clear band
+   * on top, so Relay's panel above keeps a gap, and the 16px gutter below. Neither takes clicks; only the
+   * bar does.
+   */
+  padding-block: var(--rly-space-8) var(--rly-space-16);
+  pointer-events: none;
+}
+
+.dock > * {
+  pointer-events: auto;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+}
+
+.failure {
+  color: var(--rly-color-text-1);
+  font-weight: 600;
+}

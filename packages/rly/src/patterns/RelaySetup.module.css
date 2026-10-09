@@ -1,0 +1,105 @@
+@layer rly.components {
+  .root {
+    display: grid;
+    gap: var(--rly-space-16);
+    min-inline-size: 0;
+  }
+  .step {
+    border: 0;
+    display: grid;
+    gap: var(--rly-space-8);
+    margin: 0;
+    min-inline-size: 0;
+    padding: 0;
+  }
+  .legend {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    margin-block-end: var(--rly-space-8);
+    padding: 0;
+  }
+  .options {
+    display: grid;
+    gap: var(--rly-space-8);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .option {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+    display: grid;
+    gap: var(--rly-space-4);
+    justify-items: start;
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+  .option:has(input:checked) {
+    border-color: var(--rly-color-text-1);
+  }
+  .choice {
+    align-items: center;
+    cursor: pointer;
+    display: flex;
+    gap: var(--rly-space-8);
+    min-block-size: var(--rly-control-height-dense);
+  }
+  .choice:has(input:disabled) {
+    cursor: not-allowed;
+  }
+  .choice input {
+    accent-color: var(--rly-color-text-1);
+    block-size: var(--rly-space-16);
+    inline-size: var(--rly-space-16);
+    margin: 0;
+  }
+  .choice input:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+  .label {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+  }
+  .status,
+  .fix,
+  .reason {
+    align-items: center;
+    color: var(--rly-color-text-2);
+    display: flex;
+    font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height)
+      var(--rly-type-meta-font);
+    gap: var(--rly-space-4);
+    margin: 0;
+  }
+  .fix {
+    color: var(--rly-color-text-1);
+  }
+  .option[data-status="Unavailable"] .status {
+    color: var(--rly-color-blocked-ink);
+  }
+  .start {
+    display: grid;
+    gap: var(--rly-space-4);
+    justify-items: start;
+  }
+  /* Forced colours keep the chosen option's edge in the system text colour. */
+  @media (forced-colors: active) {
+    .option:has(input:checked) {
+      border: 2px solid CanvasText;
+    }
+  }
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .option:has(input:checked) {
+    border: 2px solid CanvasText;
+  }
+  .announcer {
+    block-size: 1px;
+    clip-path: inset(50%);
+    inline-size: 1px;
+    margin: -1px;
+    min-inline-size: 0;
+    overflow: clip;
+    padding: 0;
+    position: absolute;
+    white-space: nowrap;
+  }
+}

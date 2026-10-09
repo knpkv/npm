@@ -730,7 +730,7 @@ describe("Connect public seams", () => {
       .toEqual(["done"])
     const attention = calendarConnectAgents(
       agents,
-      { activity: "attention", host: null, query: "" },
+      { activity: "needs-you", host: null, query: "" },
       { now: 2_000, timeZone: "UTC" }
     )
     expect(attention.flatMap(({ agents }) => agents.map(({ state }) => state)))
@@ -1151,14 +1151,14 @@ describe("Connect public seams", () => {
           reason: "invalid_response"
         })
       }
-    })
+    }).pipe(provideNodeHttpClient)
   })
 
   it.effect("pages a 700-agent three-host forest within the response budget", () => {
     const hosts = ["a".repeat(253), `b${"a".repeat(252)}`, `c${"a".repeat(252)}`]
     const text = "界".repeat(256)
     const agents = Array.from({ length: 700 }, (_, index): ConnectAgent => {
-      const host = hosts[index % hosts.length] ?? hosts[0]
+      const host = hosts[index % hosts.length] ?? "a".repeat(253)
       const hostRootIndex = index % hosts.length
       const idPrefix = `agent-${index.toString().padStart(4, "0")}-`
       const id = `${idPrefix}${"a".repeat(256 - idPrefix.length)}`
@@ -1192,7 +1192,7 @@ describe("Connect public seams", () => {
       let cursor: typeof FleetConnectAgentPage.Type["nextCursor"] = null
       let pageIndex = 0
       do {
-        const page = yield* pageFleetConnectAgents(directory, cursor)
+        const page: typeof FleetConnectAgentPage.Type = yield* pageFleetConnectAgents(directory, cursor)
         expect(page.agents.length).toBeLessThanOrEqual(connectAgentPageMaxRecords)
         expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(
           fleetResponseBodyMaxBytes
@@ -1483,9 +1483,11 @@ describe("Connect public seams", () => {
     const command = join(root, "herdr-test")
     const argumentsPath = join(root, "arguments")
     const inputPath = join(root, "input")
+    const paneReadsPath = join(root, "pane-reads")
     writeFileSync(
       command,
       `#!/bin/sh
+case "$1" in pane) echo "$*" >> '${paneReadsPath}'; printf '%s\\n' '{"result":{"pane":{"scroll":{"offset_from_bottom":0}}}}'; exit 0 ;; esac
 printf '%s\\n' "$@" > '${argumentsPath}'
 dd if=/dev/zero bs=131072 count=1 2>/dev/null >&2
 printf '%s\\n' '{"type":"terminal.frame","seq":1,"encoding":"ansi","width":100,"height":30,"full":true,"bytes":"b2s="}'
@@ -1609,6 +1611,30 @@ done
           expect(readFileSync(inputPath, "utf8")).toContain(
             "{\"type\":\"terminal.release\"}"
           )
+          // The session above did not opt in, so it never read the pane.
+          expect(existsSync(paneReadsPath)).toBe(false)
+
+          // An opted-in session reports the pane's position. The fake herdr never renders the scroll,
+          // so the read waits out the unseen-scroll second before it is taken.
+          const state = yield* Effect.scoped(
+            Effect.gen(function*() {
+              const session = yield* connector.open({
+                agentId,
+                cols: 100,
+                host: config.host,
+                rows: 30,
+                scrollState: true
+              })
+              yield* session.send({ type: "terminal.scroll", direction: "up", lines: 3, source: "wheel", modifiers: 0 })
+              const first = yield* Stream.runHead(
+                Stream.filter(session.events, (event) => event.type === "terminal.scroll_state")
+              ).pipe(Effect.forkChild({ startImmediately: true }))
+              yield* TestClock.adjust("2 seconds")
+              return Option.getOrNull(yield* Fiber.join(first))
+            })
+          )
+          expect(state).toEqual({ type: "terminal.scroll_state", offsetFromBottom: 0, scrollsForwarded: 1 })
+          expect(readFileSync(paneReadsPath, "utf8")).toContain("pane get w1:p1")
 
           if (platform() !== "win32") {
             const forcedReadyPath = join(root, "forced-ready")

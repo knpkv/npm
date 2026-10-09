@@ -65,17 +65,19 @@
   .endpointLink {
     border-radius: var(--rly-radius-tag);
     color: inherit;
-    outline-offset: var(--rly-space-2);
+    outline-offset: var(--rly-focus-ring-offset);
     text-decoration-color: var(--rly-color-border-2);
     text-underline-offset: var(--rly-space-2);
   }
 
-  .endpointLink:hover {
-    text-decoration-color: currentcolor;
+  @media (hover: hover) and (pointer: fine) {
+    .endpointLink:hover {
+      text-decoration-color: currentcolor;
+    }
   }
 
   .endpointLink:focus-visible {
-    outline: 2px solid var(--rly-color-focus);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
   }
 
   .title,
@@ -127,6 +129,11 @@
     flex-wrap: wrap;
     gap: var(--rly-space-4);
     justify-content: center;
+  }
+  @supports (justify-content: safe center) {
+    .direction {
+      justify-content: safe center;
+    }
   }
 
   .arrow {

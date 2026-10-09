@@ -1,5 +1,73 @@
 # @knpkv/jira-clockify
 
+## 1.8.0
+
+### Minor Changes
+
+- [#542](https://github.com/knpkv/npm/pull/542) [`fc2ccc3`](https://github.com/knpkv/npm/commit/fc2ccc38179d3a0a0c89c55b7adf0d6ba6638ecc) Thanks [@konopkov](https://github.com/konopkov)! - The week view says what is missing instead of showing zeros, and a signed-out tab can get back in:
+
+  - A tab without a valid session shows one screen naming `jcf web login`, instead of the whole app with zeros, enabled controls and three red panels. A link pasted into that tab signs it in. An expired link in the address bar no longer signs out a tab whose session is still valid.
+  - `jcf web login` (or `jcf-web login`) asks the running jcf-web for a fresh one-time link, so a second browser or an expired tab no longer needs a restart. jcf-web leaves its address and a control token in `~/.jcf/web.json` (owner-only) while it runs, and removes it on exit.
+  - A system that is not connected reads "— Not connected. Run jcf auth jira token" (or the Clockify command) in the week totals, never "nothing saved". Its saved layer is hidden, and it is never a write target. With nothing connected, the page shows one panel naming both commands.
+  - With no session folder chosen, the empty state says so and names the setting, instead of offering a Scan sessions that cannot find anything. The empty-state copy names only the connected systems.
+  - `pnpm --filter @knpkv/jcf-web start` works in the workspace (it runs the server with `tsx`), and `test:pack` checks it.
+
+## 1.7.0
+
+### Minor Changes
+
+- [#598](https://github.com/knpkv/npm/pull/598) [`0360454`](https://github.com/knpkv/npm/commit/0360454dd4c280b982615173923bb42e93aa2569) Thanks [@konopkov](https://github.com/konopkov)! - jcf no longer reports success for writes that failed, and no longer falls back silently. `ConfigService.set` fails with `ConfigUnreadable` when `~/.jcf/config.json` cannot be read (instead of overwriting it with defaults) and with `ConfigNotSaved` when it cannot be written. `ClockifyAuth.save` fails with `ClockifyKeyNotSaved` when the key cannot be written or made owner-only. A Clockify project or tag that cannot be looked up while starting a timer, an unreadable state, cache or config file, and a Jira identity or search failure keep their fallback but log a warning naming what was dropped and why. Saving defaults during `timer start` or `timer stop` reports a failure without stopping the timer. In jcf-web, a settings save that fails now answers with the reason instead of a generic error.
+
+### Patch Changes
+
+- Updated dependencies [[`a5a7fcf`](https://github.com/knpkv/npm/commit/a5a7fcf055bfa7d0f6a1c1a0ae2cf4bc2eb8ab81)]:
+  - @knpkv/atlassian-common@1.9.3
+  - @knpkv/jira-cli@1.6.4
+
+## 1.6.2
+
+### Patch Changes
+
+- [#581](https://github.com/knpkv/npm/pull/581) [`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa) Thanks [@konopkov](https://github.com/konopkov)! - Mark existing silent fallbacks (failures turned into success without a log) with a follow-up lint suppression. No behaviour change.
+- Updated dependencies [[`c22e8ae`](https://github.com/knpkv/npm/commit/c22e8ae0c55a50e9c1edbd46a1cd18108f62e4fa)]:
+  - @knpkv/ai-claude@0.4.2
+  - @knpkv/ai-codex@0.5.2
+  - @knpkv/atlassian-common@1.9.2
+  - @knpkv/clockify-api-client@3.0.1
+  - @knpkv/jira-api-client@2.1.1
+  - @knpkv/jira-cli@1.6.3
+
+## 1.6.1
+
+### Patch Changes
+
+- [#570](https://github.com/knpkv/npm/pull/570) [`c45b069`](https://github.com/knpkv/npm/commit/c45b069af37c78464332907fcb5cbe5903abf8a9) Thanks [@konopkov](https://github.com/konopkov)! - Executables linked from the repository (`pnpm link --global`, or `node dist/...`) run under plain Node: workspace packages resolve to their build output instead of TypeScript sources. Published `@knpkv/codecommit-core` now serves its `Domain.js`, `CacheService.js` and `SandboxService.js` subpaths; the last two resolved to files that do not exist before.
+- Updated dependencies [[`61c930e`](https://github.com/knpkv/npm/commit/61c930e88f4a9d735522d6c7b052b72d13450a6f)]:
+  - @knpkv/atlassian-common@1.9.1
+  - @knpkv/jira-cli@1.6.2
+
+## 1.6.0
+
+### Minor Changes
+
+- [#540](https://github.com/knpkv/npm/pull/540) [`0573403`](https://github.com/knpkv/npm/commit/057340343fcc727fd0c56329d840a668170376ad) Thanks [@konopkov](https://github.com/konopkov)! - Connect Jira with an API token, and set up each system on its own:
+
+  - `jcf auth jira token` asks for your Jira address, email and an API token, checks them with Jira, and saves them to `~/.jcf/jira.json` (owner-only). The token is never printed. Classic and scoped tokens both work; a scoped token is used through Atlassian's gateway for the site. A failed check says whether the site, the token or the network was wrong. The OAuth app (`create`, `configure`, `login`) stays as the advanced option; when both exist the token is used.
+  - `jcf` with nothing connected asks about Jira and Clockify in turn, and either can be skipped. With one connected it opens straight away. Without a terminal it prints both commands and exits 1.
+  - Commands that need Jira (`issue list`, `timer start`, `sync reconcile`) fail with "Jira is not connected. Run jcf auth jira token to connect it." and exit 1, instead of reporting no issues. `auth clockify setup` takes `--api-key` and fails without a terminal. Failed `timer` and `config set project` steps and a failed reconcile exit non-zero.
+  - `jcf auth status` names the Clockify workspace and the next command for anything not connected. Every command has a help description, and `--version` reports the package version.
+  - `@knpkv/jira-api-client`: a basic-auth credential may carry its `siteUrl`, used as the request host, so a credential re-read per request keeps its site.
+  - `@knpkv/agent-skills`: the jcf skill names `jcf auth jira token` as the way to connect Jira.
+
+- [#563](https://github.com/knpkv/npm/pull/563) [`d76d2d8`](https://github.com/knpkv/npm/commit/d76d2d8af1e266a88414a36e0d41ad27fa143b7d) Thanks [@konopkov](https://github.com/konopkov)! - `jcf sync reconcile --agent --only clockify|jira` reconciles one system without touching the other, and its `--json` report names what was read in `sides`. An agent run with a system not connected stops before planning instead of writing half a plan. `jcf config show` says when there is no config file and marks default values. An unknown command, at any depth, prints one line naming the nearest command instead of the whole help.
+
+### Patch Changes
+
+- Updated dependencies [[`0573403`](https://github.com/knpkv/npm/commit/057340343fcc727fd0c56329d840a668170376ad), [`d76d2d8`](https://github.com/knpkv/npm/commit/d76d2d8af1e266a88414a36e0d41ad27fa143b7d)]:
+  - @knpkv/jira-api-client@2.1.0
+  - @knpkv/agent-skills@0.3.4
+  - @knpkv/jira-cli@1.6.1
+
 ## 1.5.0
 
 ### Minor Changes

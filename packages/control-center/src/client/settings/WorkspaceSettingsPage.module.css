@@ -1,9 +1,13 @@
 .page {
+  --settings-card-padding: clamp(var(--rly-space-16), 6vw - 0.5rem, var(--rly-space-48));
+
   display: grid;
   gap: var(--rly-space-64);
   margin: 0 auto;
-  max-width: 72rem;
-  padding: var(--rly-space-64) var(--rly-space-48) var(--rly-space-96);
+  max-inline-size: 72rem;
+  /* The app shell already gives phones their gutter; this only adds one where there is room. */
+  padding-block: var(--rly-space-64) var(--rly-space-96);
+  padding-inline: clamp(var(--rly-space-0), 8vw - 1.5rem, var(--rly-space-48));
 }
 
 .heading,
@@ -42,7 +46,7 @@
 }
 
 .theme {
-  padding: var(--rly-space-48);
+  padding: var(--settings-card-padding);
 }
 
 .sections {
@@ -55,7 +59,7 @@
   align-content: start;
   display: grid;
   gap: var(--rly-space-40);
-  padding: var(--rly-space-48);
+  padding: var(--settings-card-padding);
 }
 
 .sectionHeading,
@@ -63,6 +67,11 @@
   display: grid;
   gap: var(--rly-space-16);
   min-inline-size: 0;
+}
+
+/* A long title on a phone breaks at a syllable with a hyphen, not mid-word ("Synchronizatio / n"). */
+.sectionHeading h2 {
+  hyphens: auto;
 }
 
 .fields {
@@ -104,8 +113,8 @@
 }
 
 .control:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .control:disabled {
@@ -120,15 +129,11 @@
 }
 
 .checkbox > input {
-  height: 1rem;
-  width: 1rem;
+  block-size: 1rem;
+  inline-size: 1rem;
 }
 
 @media (max-width: 52rem) {
-  .page {
-    padding-inline: var(--rly-space-32);
-  }
-
   .heading,
   .theme {
     align-items: stretch;

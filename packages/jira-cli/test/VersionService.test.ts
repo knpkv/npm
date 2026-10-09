@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
+import * as Logger from "effect/Logger"
 import * as Redacted from "effect/Redacted"
 import { stripEmails } from "../src/commands/version.js"
 import type { Version } from "../src/VersionService.js"
@@ -187,7 +188,7 @@ describe("stripEmails", () => {
     const stripped = stripEmails(versionWithEmails)
     expect(stripped.driver?.displayName).toBe("Dana")
     expect(stripped.contributors.map((c) => c.accountId)).toEqual(["c1", "c2"])
-    expect(stripped.approvers[0].status).toBe("APPROVED")
+    expect(stripped.approvers[0]?.status).toBe("APPROVED")
     expect(stripped.tickets.map((t) => t.key)).toEqual(["PROJ-1", "PROJ-2"])
   })
 
@@ -195,7 +196,7 @@ describe("stripEmails", () => {
     // The command emits the unmodified version when --emails is set; assert the
     // original is untouched (stripEmails returns a copy, never mutating input).
     expect(versionWithEmails.driver?.emailAddress).toBe("dana@example.com")
-    expect(versionWithEmails.tickets[0].assignee?.emailAddress).toBe("tom@example.com")
+    expect(versionWithEmails.tickets[0]?.assignee?.emailAddress).toBe("tom@example.com")
   })
 
   it("handles a null driver and null assignees without throwing", () => {
@@ -249,39 +250,77 @@ const makeJiraLayer = () => {
   )
 }
 
-describe("listProjectVersions filtering", () => {
+// One stateless Jira stub for the block; the layer is built once per block, not per test.
+it.layer(VersionServiceLayer.pipe(Layer.provideMerge(makeJiraLayer())))("listProjectVersions filtering", (it) => {
   it.effect("returns all versions when neither flag is set", () =>
     Effect.gen(function*() {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ")
       expect(list.map((v) => v.id)).toEqual(["1", "2", "3", "4"])
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+    }))
 
   it.effect("keeps only released versions when released=true", () =>
     Effect.gen(function*() {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ", { released: true })
       expect(list.map((v) => v.id)).toEqual(["1", "3"])
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+    }))
 
   it.effect("keeps only unreleased versions when unreleased=true", () =>
     Effect.gen(function*() {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ", { unreleased: true })
       expect(list.map((v) => v.id)).toEqual(["2", "4"])
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+    }))
 
   it.effect("caps the result count at maxResults", () =>
     Effect.gen(function*() {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ", { maxResults: 2 })
       expect(list.map((v) => v.id)).toEqual(["1", "2"])
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+    }))
 
   it.effect("preserves Jira Premium contributors decoded from the generated Version schema", () =>
     Effect.gen(function*() {
       const service = yield* VersionService
       const list = yield* service.listProjectVersions("PROJ", { maxResults: 1 })
       expect(list[0]?.contributors.map((person) => person.accountId)).toEqual(["account-1", "account-2"])
-    }).pipe(Effect.provide(VersionServiceLayer), Effect.provide(makeJiraLayer())))
+    }))
+})
+
+// A user Jira will not return (deleted, or hidden from this account) is shown by account id, with a warning.
+const unreadableUserLayer = () => {
+  const httpClient = HttpClient.make((request) => {
+    const [status, body] = request.url.includes("/project/PROJ/version")
+      ? [200, {
+        values: [{ id: "9", name: "9.0.0", released: false, self: "https://x/version/9", driver: "gone-1" }],
+        isLast: true
+      }]
+      : request.url.includes("/user")
+      ? [404, { errorMessages: ["User does not exist"] }]
+      : [200, { issues: [], isLast: true }]
+    return Effect.succeed(HttpClientResponse.fromWeb(
+      request,
+      new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+    ))
+  })
+  const api = make(httpClient, {
+    baseUrl: "https://jira.test",
+    auth: { type: "basic", email: "test@example.com", apiToken: Redacted.make("token") }
+  })
+  return Layer.succeed(JiraApiClient, JiraApiClient.of({ ...api, uploadAttachment: () => Effect.die("unused") }))
+}
+
+it.layer(VersionServiceLayer.pipe(Layer.provideMerge(unreadableUserLayer())))("unreadable users", (it) => {
+  it.effect("shows the account id and warns, naming the user", () =>
+    Effect.gen(function*() {
+      const messages: Array<unknown> = []
+      const logger = Logger.make<unknown, void>((entry) => {
+        messages.push(entry.message)
+      })
+      const service = yield* VersionService
+      const [version] = yield* service.listProjectVersions("PROJ").pipe(Effect.withLogger(logger))
+      expect(version?.driver).toEqual({ accountId: "gone-1", displayName: "gone-1", emailAddress: null })
+      expect(messages.map(String).join("\n")).toContain("Jira user gone-1 could not be read; showing the account id")
+    }))
 })

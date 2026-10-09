@@ -61,11 +61,13 @@ export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
       destinationBranch: row.destinationBranch,
       isMergeable: row.isMergeable,
       isApproved: row.isApproved,
+      ...(row.approvalUnknownReason != null && { approvalUnknown: { _tag: row.approvalUnknownReason } }),
       commentCount: row.commentCount ?? undefined,
       healthScore: row.healthScore ?? undefined,
       fetchedAt: row.fetchedAt ? new Date(row.fetchedAt) : undefined,
       approvedBy: row.approvedBy,
       approvedByArns: row.approvedByArns,
+      ...(row.approversUnknown && { approversUnknown: true }),
       commentedBy: row.commentedBy,
       approvalRules: row.approvalRules,
       filesChanged: sumFileChanges(row.filesAdded, row.filesModified, row.filesDeleted)
@@ -87,6 +89,14 @@ export const CachedPRToPullRequest = Schema.toType(CachedPullRequest).pipe(
       destinationBranch: pr.destinationBranch,
       isMergeable: pr.isMergeable,
       isApproved: pr.isApproved,
+      approvalUnknownReason: pr.approvalUnknown?._tag ?? null,
+      // A domain pull request carries no baseline: known only when its evaluation succeeded.
+      approvalBaselineKnown: pr.approvalUnknown === undefined,
+      approversUnknown: pr.approversUnknown === true,
+      // A domain pull request carries no observation: the versions of a fresh, unwritten read.
+      observationSeq: 0,
+      approvalVersion: pr.lastModifiedDate,
+      approvalObservationSeq: 0,
       commentCount: pr.commentCount ?? null,
       healthScore: pr.healthScore ?? null,
       link: pr.link,
@@ -128,11 +138,13 @@ export const PullRequestToUpsertInput = UpsertInput.pipe(
       destinationBranch: row.destinationBranch,
       isMergeable: row.isMergeable === 1,
       isApproved: row.isApproved === 1,
+      ...(row.approvalUnknownReason !== null && { approvalUnknown: { _tag: row.approvalUnknownReason } }),
       commentCount: row.commentCount ?? undefined,
       healthScore: undefined,
       fetchedAt: undefined,
       approvedBy: row.approvedBy,
       approvedByArns: row.approvedByArns,
+      ...(row.approversUnknown === true && { approversUnknown: true }),
       approvalRules: row.approvalRules ?? [],
       commentedBy: [],
       filesChanged: undefined
@@ -154,10 +166,12 @@ export const PullRequestToUpsertInput = UpsertInput.pipe(
       destinationBranch: pr.destinationBranch,
       isMergeable: pr.isMergeable ? 1 : 0,
       isApproved: pr.isApproved ? 1 : 0,
+      approvalUnknownReason: pr.approvalUnknown?._tag ?? null,
       commentCount: pr.commentCount ?? null,
       link: pr.link,
       approvedBy: pr.approvedBy,
       approvedByArns: pr.approvedByArns ?? [],
+      approversUnknown: pr.approversUnknown === true,
       approvalRules: (pr.approvalRules ?? []).map((rule) => decodeApprovalRule(rule))
     }))
   })
@@ -171,6 +185,19 @@ export const prToUpsertInput = (pr: PullRequest, awsAccountId: string): UpsertIn
   // Explicit: encodePRToUpsert's Encoded type can omit approvalRules when decoding defaults are used,
   // but UpsertInput.Type requires it. Guarantee it's always present.
   approvalRules: pr.approvalRules
+})
+
+/** A detail read's approver columns for the upsert: the list exactly as read, beside its unknown marker. */
+export const approverColumnsOf = (
+  detail: {
+    readonly approvedBy: ReadonlyArray<string>
+    readonly approvedByArns: ReadonlyArray<string>
+    readonly approversUnknown?: true | undefined
+  }
+): Pick<UpsertInput, "approvedBy" | "approvedByArns" | "approversUnknown"> => ({
+  approvedBy: detail.approvedBy,
+  approvedByArns: detail.approvedByArns,
+  approversUnknown: detail.approversUnknown === true
 })
 
 const countThreadComments = (thread: CommentThread): number =>

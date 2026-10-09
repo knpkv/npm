@@ -1,7 +1,6 @@
 .state {
   display: grid;
   min-block-size: 60dvh;
-  outline: none;
   place-items: center;
 }
 
@@ -43,8 +42,8 @@
 .back:focus-visible,
 .principalAction:focus-visible,
 .releasePath a:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-4);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .principalAction {
@@ -87,14 +86,16 @@
   text-decoration: none;
 }
 
-.secondaryAction:hover {
-  background: var(--rly-color-surface-2);
-  border-color: var(--rly-color-service-confluence);
+@media (hover: hover) and (pointer: fine) {
+  .secondaryAction:hover {
+    background: var(--rly-color-surface-2);
+    border-color: var(--rly-color-service-confluence);
+  }
 }
 
 .secondaryAction:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: var(--rly-space-4);
+  outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+  outline-offset: var(--rly-focus-ring-offset);
 }
 
 .content {
@@ -193,7 +194,7 @@
 
   isolation: isolate;
   min-inline-size: var(--rly-space-0);
-  overflow: hidden;
+  overflow: clip;
   position: relative;
 }
 

@@ -8,7 +8,7 @@
     /* One bounded track: an implicit auto track can't shrink below its content, so it overflowed at 320. */
     grid-template-columns: minmax(var(--rly-space-0), 1fr);
     min-inline-size: var(--rly-space-0);
-    overflow: hidden;
+    overflow: clip;
   }
 
   .header {
@@ -29,6 +29,11 @@
     justify-content: center;
     min-block-size: var(--rly-space-32);
     min-inline-size: var(--rly-space-32);
+  }
+  @supports (justify-content: safe center) {
+    .avatar {
+      justify-content: safe center;
+    }
   }
 
   .human {
@@ -125,13 +130,15 @@
     content: "−";
   }
 
-  .prevention summary:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .prevention summary:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .prevention summary:focus-visible {
-    outline: 3px solid var(--rly-color-focus);
-    outline-offset: calc(-1 * var(--rly-space-4));
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: calc(var(--rly-focus-ring-width) * -1);
   }
 
   .preventionCopy {
@@ -245,13 +252,15 @@
     text-align: start;
   }
 
-  .footer button:hover {
-    background: var(--rly-color-surface-2);
+  @media (hover: hover) and (pointer: fine) {
+    .footer button:hover {
+      background: var(--rly-color-surface-2);
+    }
   }
 
   .footer button:focus-visible {
-    outline: 3px solid var(--rly-color-focus);
-    outline-offset: var(--rly-space-2);
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
   }
 
   .footer button code,

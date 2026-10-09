@@ -2,7 +2,7 @@ import { useAtom, useAtomMount, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { Cause, Effect, Fiber, Result, Schedule, Schema } from "effect"
+import { Cause, Clock, Effect, Fiber, Option, Predicate, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
 import * as HttpClient from "effect/http/HttpClient"
@@ -10,7 +10,7 @@ import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { FitAddon, init, Terminal } from "ghostty-web"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { buildConnectForest } from "./forest.js"
-import { applyTerminalInputIdentity } from "./terminal-input-identity.js"
+import { applyTerminalInputIdentity, focusTerminalInput, trackTerminalInputFocus } from "./terminal-input-identity.js"
 import { clampTerminalDimensions, type TerminalDimensions, terminalResizeCommand } from "./terminal-dimensions.js"
 import {
   type ConnectAgent,
@@ -33,7 +33,15 @@ import {
   type TerminalOutputBoundary,
   writeTerminalOutput
 } from "./terminal-output.js"
-import { AgentDirectory, connectAgentKey, ConnectWorkspace, TerminalKeyRail, type AgentActivityFilter } from "./view.js"
+import {
+  AgentDirectory,
+  connectAgentKey,
+  ConnectSummary,
+  silentHostsSentence,
+  ConnectWorkspace,
+  TerminalKeyRail,
+  type AgentActivityFilter
+} from "./view.js"
 import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
 import { terminalBackground, terminalForeground } from "./terminal-theme.js"
 import { bindTerminalDocumentLock, bindTerminalViewport, terminalViewportBindingActive } from "./terminal-viewport.js"
@@ -52,6 +60,9 @@ import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { ConnectAgentIdentity } from "./work-goal-link-view.js"
 import { resolveConnectWorkGoal, workSnapshotForAssociation, type ConnectWorkGoalResolution } from "./work-goal-link.js"
 import { WorkPollMount } from "./work-poll.js"
+import { FleetLimits } from "./limits.js"
+import { connectLimitsView } from "./limits-model.js"
+import { ConnectLimits } from "./limits-view.js"
 import { makeTerminalWorkerGuard } from "./terminal-worker-guard.js"
 import {
   enterTerminalWorkspaceWithLock,
@@ -78,6 +89,28 @@ class ConnectPreferenceError extends Schema.TaggedError<ConnectPreferenceError>(
   operation: Schema.String,
   cause: Schema.Defect()
 }) {}
+
+/** The clipboard could not be read: no clipboard API here, or the reader refused or failed. */
+class ConnectClipboardError extends Schema.TaggedError<ConnectClipboardError>()("ConnectClipboardError", {
+  reason: Schema.Literals(["unavailable", "refused"]),
+  cause: Schema.Defect()
+}) {}
+
+/**
+ * Start reading the clipboard now, inside the tap that asked: iOS shows its Paste confirmation only
+ * for a read begun within the gesture. The result is awaited later as an Effect.
+ */
+const startClipboardRead = (): Effect.Effect<string, ConnectClipboardError> => {
+  const clipboard = Predicate.hasProperty(window.navigator, "clipboard") ? window.navigator.clipboard : undefined
+  if (clipboard === undefined || !Predicate.isFunction(clipboard.readText)) {
+    return Effect.fail(new ConnectClipboardError({ reason: "unavailable", cause: "navigator.clipboard.readText" }))
+  }
+  const reading = clipboard.readText()
+  return Effect.tryPromise({
+    try: () => reading,
+    catch: (cause) => new ConnectClipboardError({ reason: "refused", cause })
+  })
+}
 
 class ConnectInputQueueError extends Schema.TaggedError<ConnectInputQueueError>()("ConnectInputQueueError", {
   detail: Schema.String
@@ -145,6 +178,36 @@ const storeRememberedAgent = (key: string) =>
       })
     )
   )
+
+/** Whether this device hides the terminal key rail's keys; nothing stored means shown, as before. */
+const TerminalKeysVisibility = Schema.Literals(["shown", "hidden"])
+const terminalKeysStorageKey = "fleet-connect-terminal-keys"
+
+const loadTerminalKeysHidden = Effect.try({
+  try: () => window.localStorage.getItem(terminalKeysStorageKey),
+  catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.read", cause })
+}).pipe(
+  Effect.flatMap((value) =>
+    value === null
+      ? Effect.succeed(false)
+      : Schema.decodeUnknownEffect(TerminalKeysVisibility)(value).pipe(
+          Effect.map((visibility) => visibility === "hidden"),
+          Effect.mapError((cause) => new ConnectPreferenceError({ operation: "local_storage.decode", cause }))
+        )
+  )
+)
+
+const storeTerminalKeysHidden = (hidden: boolean) =>
+  Effect.try({
+    try: () => window.localStorage.setItem(terminalKeysStorageKey, hidden ? "hidden" : "shown"),
+    catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.write", cause })
+  })
+
+/** One line for a failure a person reads: the error's own message, never a stack trace. */
+const causeSummary = (cause: Cause.Cause<unknown>): string => {
+  const error = Cause.squash(cause)
+  return Predicate.hasProperty(error, "message") && Predicate.isString(error.message) ? error.message : String(error)
+}
 
 const loadAgents = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient
@@ -218,11 +281,54 @@ const loadWork = Effect.gen(function* () {
   )
 })
 
+/** The fleet's limits and when this page received them, on this page's clock. */
+interface LoadedLimits {
+  readonly fleet: FleetLimits
+  readonly receivedAt: number
+}
+
+const loadLimits = Effect.gen(function* () {
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client
+    .get("/v1/connect/limits")
+    .pipe(Effect.mapError((cause) => new ConnectNetworkError({ detail: String(cause) })))
+  if (response.status < 200 || response.status >= 300) {
+    return yield* new ConnectStatusError({ status: response.status })
+  }
+  const fleet = yield* decodeBoundedResponseJson(response, FleetLimits).pipe(
+    Effect.mapError((cause) => new ConnectProtocolError({ detail: "invalid limits", cause }))
+  )
+  return { fleet, receivedAt: yield* Clock.currentTimeMillis } satisfies LoadedLimits
+})
+
+/**
+ * The limits view as of the last good load, and why the latest load failed when it did. `now` is
+ * this page's clock, compared only with when the page received the reads.
+ */
+const connectLimitsState = (result: AsyncResult.AsyncResult<LoadedLimits, unknown>, now: number) => {
+  const last = AsyncResult.value(result)
+  return {
+    problem: AsyncResult.isFailure(result) ? "Couldn't load limits. Trying again every minute." : null,
+    view: Option.isSome(last) ? connectLimitsView(last.value.fleet, now - last.value.receivedAt) : null
+  }
+}
+
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
+
+/** The shared agent state language, for hosts that list agents outside Connect (the hub's dashboard). */
+export {
+  type AgentBucket,
+  agentBucketLabel,
+  agentBuckets,
+  AgentStateLabel,
+  type AgentStatePresentation,
+  agentStatePresentation
+} from "./agent-state.js"
 
 export const makeConnectAtoms = () => {
   const agents = browserRuntime.atom(loadAgents)
   const work = browserRuntime.atom(loadWork)
+  const limits = browserRuntime.atom(loadLimits)
   return {
     activityFilter: Atom.make<AgentActivityFilter>("all"),
     agents,
@@ -230,7 +336,11 @@ export const makeConnectAtoms = () => {
     connection: Atom.make<ConnectionState>({ _tag: "idle" }),
     connectionRequest: Atom.make<ConnectionRequest | null>(null),
     hostFilter: Atom.make<string | null>(null),
+    limits,
+    // Each host rereads its limits at most every 30 seconds; a minute keeps the page within two reads.
+    limitsPoll: browserRuntime.atom(Atom.refresh(limits).pipe(Effect.repeat(Schedule.spaced("60 seconds")))),
     preference: Atom.make(loadRememberedAgent),
+    terminalKeysHidden: Atom.make(loadTerminalKeysHidden),
     preferenceError: Atom.make<string | null>(null),
     query: Atom.make(""),
     selectedKey: Atom.make<string | null>(null),
@@ -249,6 +359,7 @@ const socketUrl = (agent: ConnectAgent, dimensions: TerminalDimensions): string 
   url.searchParams.set("agent", agent.id)
   url.searchParams.set("cols", String(cols))
   url.searchParams.set("rows", String(rows))
+  url.searchParams.set("scrollState", "1")
   return url.toString()
 }
 
@@ -260,6 +371,8 @@ type TerminalKeyboardCallbacks = {
   readonly setTerminalFocus: (target: HTMLElement, focus: () => void) => () => void
   readonly reportError: (error: TerminalInputApplication) => void
   readonly setInputSender: (sendInput: (command: TerminalInputCommand) => boolean) => () => void
+  /** Registers the terminal's paste, which brackets the text when the program asked for it. */
+  readonly setPaste: (paste: (text: string) => void) => () => void
   readonly setCursorModeReader: (read: () => TerminalCursorMode) => () => void
   readonly interactionView: TerminalInteractionView
   readonly setInteraction: (interaction: TerminalInteraction) => () => void
@@ -338,7 +451,7 @@ const terminalWorker = (
         })
       }
       applyTerminalInputIdentity(textarea)
-      const releaseTerminalFocus = keyboard.setTerminalFocus(textarea, () => terminal.terminal.focus())
+      const releaseTerminalFocus = keyboard.setTerminalFocus(textarea, () => focusTerminalInput(textarea))
       yield* Effect.addFinalizer(() => Effect.sync(releaseTerminalFocus))
       let ready = false
       let socket: WebSocket | null = null
@@ -359,6 +472,8 @@ const terminalWorker = (
       const sendInput = (text: string): boolean => send({ type: "terminal.input", text })
       const releaseInputSender = keyboard.setInputSender((command) => send(command))
       yield* Effect.addFinalizer(() => Effect.sync(releaseInputSender))
+      const releasePaste = keyboard.setPaste((text) => terminal.terminal.paste(text))
+      yield* Effect.addFinalizer(() => Effect.sync(releasePaste))
       const releaseCursorModeReader = keyboard.setCursorModeReader(() =>
         terminal.terminal.getMode(1) ? "application" : "normal"
       )
@@ -405,9 +520,7 @@ const terminalWorker = (
       const interaction = bindTerminalInteraction(
         terminal.terminal,
         container,
-        (command) => {
-          if (ready) send(command)
-        },
+        (command) => ready && send(command),
         keyboard.interactionView
       )
       const releaseInteraction = keyboard.setInteraction(interaction)
@@ -478,6 +591,10 @@ const terminalWorker = (
               detail: `invalid terminal server message: ${String(decoded.failure)}`
             })
             connectedSocket.close(4400, "invalid terminal server message")
+            return
+          }
+          if (decoded.success.type === "terminal.scroll_state") {
+            interaction.serverScrollState(decoded.success.offsetFromBottom, decoded.success.scrollsForwarded)
             return
           }
           if (decoded.success.type === "terminal.ready") {
@@ -559,11 +676,74 @@ export const ConnectSurface = ({
   const terminalModifierRef = useRef<TerminalModifier | null>(null)
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
+  // Follows the terminal input's real focus, so the Keyboard button matches what iOS shows.
+  const [keyboardOpen, setKeyboardOpen] = useState(false)
+  const terminalPasteRef = useRef<((text: string) => void) | null>(null)
+  const pasteClipboard = (): void => {
+    const paste = terminalPasteRef.current
+    if (paste === null) return
+    Effect.runFork(
+      startClipboardRead().pipe(
+        Effect.tap((text) =>
+          Effect.sync(() => {
+            if (text === "") {
+              setTerminalKeyError("Nothing to paste: the clipboard has no text.")
+              return
+            }
+            // A latched Ctrl or Alt would be applied to the pasted text; pasting releases it.
+            terminalModifierRef.current = null
+            setTerminalModifier(null)
+            setTerminalKeyError(null)
+            paste(text)
+          })
+        ),
+        Effect.catch((error) =>
+          Effect.sync(() =>
+            setTerminalKeyError(
+              error.reason === "unavailable" ? "Paste isn't available in this browser." : "Paste was not allowed."
+            )
+          )
+        )
+      )
+    )
+  }
+  // Synchronous inside the button's click: iOS raises its keyboard only within the gesture.
+  const toggleKeyboard = (open: boolean): void => {
+    const target = terminalFocusTargetRef.current
+    if (target === null) return
+    if (open) terminalFocusRef.current()
+    else target.blur()
+  }
+  // The stored choice seeds it; this session's toggle wins once made. Unreadable storage shows the keys.
+  const storedKeysHidden = useAtomValue(atoms.terminalKeysHidden)
+  const [keysHiddenChoice, setKeysHiddenChoice] = useState<boolean | null>(null)
+  const terminalKeysHidden =
+    keysHiddenChoice ?? (AsyncResult.isSuccess(storedKeysHidden) ? storedKeysHidden.value : false)
+  const changeTerminalKeysHidden = (hidden: boolean): void => {
+    setKeysHiddenChoice(hidden)
+    // A latched Ctrl or Alt would stay applied with no visible indicator or way to cancel it, so a
+    // plain "c" would arrive as Ctrl-C. Hiding the keys releases it.
+    if (hidden) {
+      terminalModifierRef.current = null
+      setTerminalModifier(null)
+    }
+    Effect.runFork(
+      storeTerminalKeysHidden(hidden).pipe(
+        Effect.catch(() =>
+          Effect.sync(() => setTerminalKeyError("Couldn't remember this on this device; it applies until you reload."))
+        )
+      )
+    )
+  }
   const terminalInteractionRef = useRef<TerminalInteraction | null>(null)
   const [terminalLinesBack, setTerminalLinesBack] = useState(0)
+  const [terminalPositionUnconfirmed, setTerminalPositionUnconfirmed] = useState(false)
   const [terminalTextLines, setTerminalTextLines] = useState<ReadonlyArray<string> | null>(null)
   const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
   useAtomMount(atoms.agentsPoll)
+  useAtomMount(atoms.limitsPoll)
+  // A host API at the UI boundary, compared only with this page's own receipt time.
+  const limits = connectLimitsState(useAtomValue(atoms.limits), Date.now())
 
   const copyTerminalText = useCallback((text: string): void => {
     navigator.clipboard.writeText(text).then(
@@ -691,9 +871,15 @@ export const ConnectSurface = ({
           setTerminalFocus: (target, focus) => {
             terminalFocusTargetRef.current = target
             terminalFocusRef.current = focus
+            setKeyboardOpen(target.ownerDocument.activeElement === target)
+            const releaseFocusTracking = trackTerminalInputFocus(target, setKeyboardOpen)
             return () => {
+              releaseFocusTracking()
               if (terminalFocusRef.current === focus) terminalFocusRef.current = () => {}
-              if (terminalFocusTargetRef.current === target) terminalFocusTargetRef.current = null
+              if (terminalFocusTargetRef.current === target) {
+                terminalFocusTargetRef.current = null
+                setKeyboardOpen(false)
+              }
             }
           },
           reportError: () => setTerminalKeyError("That modifier combination is not supported."),
@@ -705,6 +891,12 @@ export const ConnectSurface = ({
               if (terminalInputOwnerRef.current !== owner) return
               terminalInputOwnerRef.current = null
               terminalInputRef.current = () => false
+            }
+          },
+          setPaste: (paste) => {
+            terminalPasteRef.current = paste
+            return () => {
+              if (terminalPasteRef.current === paste) terminalPasteRef.current = null
             }
           },
           setCursorModeReader: (read) => {
@@ -724,6 +916,7 @@ export const ConnectSurface = ({
           },
           interactionView: {
             onLinesBack: setTerminalLinesBack,
+            onPositionUnconfirmed: setTerminalPositionUnconfirmed,
             onSelectText: setTerminalTextLines,
             openUrl: (url) => {
               window.open(url, "_blank", "noopener,noreferrer")
@@ -737,6 +930,7 @@ export const ConnectSurface = ({
               if (terminalInteractionRef.current !== interaction) return
               terminalInteractionRef.current = null
               setTerminalLinesBack(0)
+              setTerminalPositionUnconfirmed(false)
               setTerminalTextLines(null)
             }
           }
@@ -778,6 +972,15 @@ export const ConnectSurface = ({
       ? directory.previousSuccess.value.value
       : null
   const agents = current?.agents ?? []
+  // A failed refresh keeps the last good list; say how old it is rather than presenting it as live.
+  const staleSince =
+    directory._tag === "Failure" && directory.previousSuccess._tag === "Some"
+      ? directory.previousSuccess.value.timestamp
+      : null
+  const offlineHosts = (current?.failures ?? []).map((failure) => failure.host)
+  const silentHosts = silentHostsSentence(current?.failures ?? [])
+  // The directory's own read time: it changes only when a poll lands, so nothing ticks between reads.
+  const updatedAt = AsyncResult.isSuccess(directory) ? directory.timestamp : staleSince
   const selected =
     agents.find((agent) => connectAgentKey(agent) === selectedKey) ??
     (connectionRequest !== null && connectAgentKey(connectionRequest.agent) === selectedKey
@@ -912,31 +1115,20 @@ export const ConnectSurface = ({
     <>
       {embedded ? (
         <header className="connect-embedded-intro">
-          <div>
-            <Text variant="meta" tone="secondary">
-              Live fleet directory
-            </Text>
-            <Text as="h1" variant="page-title">
-              Connect to an agent
-            </Text>
-            <Text tone="secondary">Choose a worker, reviewer, or coordinator to open its exact terminal.</Text>
-          </div>
-          <StateLabel
-            label={current === null ? "Loading" : `${String(agents.length)} agents`}
-            size="compact"
-            tone={current === null ? "neutral" : "positive"}
+          <Text as="h1" variant="card-title">
+            Connect
+          </Text>
+          <ConnectSummary
+            agents={current === null ? null : agents}
+            unavailable={current === null && directory._tag === "Failure"}
           />
+          <ConnectLimits problem={limits.problem} view={limits.view} />
         </header>
       ) : (
         <header className="connect-header">
-          <div>
-            <Text variant="meta" tone="secondary">
-              Herdr fleet
-            </Text>
-            <Text as="h1" variant="page-title">
-              Connect
-            </Text>
-          </div>
+          <Text as="h1" variant="page-title">
+            Connect
+          </Text>
           <nav className="fleet-app-nav" aria-label="Fleet applications">
             <a href="/">Approvals</a>
             <a href="/connect/" aria-current="page">
@@ -945,7 +1137,14 @@ export const ConnectSurface = ({
           </nav>
         </header>
       )}
-      <section className="connect-agents" aria-label="Herdr agents" onKeyDown={moveAgentFocus}>
+      {/* The standalone header is one row; the limits take their own line under it. */}
+      {embedded ? null : <ConnectLimits problem={limits.problem} view={limits.view} />}
+      <section
+        aria-label="Herdr agents"
+        className="connect-agents"
+        data-loading={current === null ? "true" : undefined}
+        onKeyDown={moveAgentFocus}
+      >
         <label className="connect-search">
           <span>Find agent</span>
           <input
@@ -974,12 +1173,29 @@ export const ConnectSurface = ({
             value={query}
           />
         </label>
+        {updatedAt === null ? null : (
+          <small className="connect-updated" data-stale={staleSince === null ? undefined : "true"}>
+            {staleSince === null ? "Updated " : "Stale, last updated "}
+            <time dateTime={new Date(updatedAt).toISOString()}>
+              {new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+            </time>
+          </small>
+        )}
+        {silentHosts === null ? null : (
+          <p className="connect-failures" role="status">
+            {silentHosts}
+          </p>
+        )}
         {current === null ? (
           <Text tone="secondary">
-            {directory._tag === "Failure" ? Cause.pretty(directory.cause) : "Loading fleet agents…"}
+            {directory._tag === "Failure"
+              ? `The fleet directory didn't answer: ${causeSummary(directory.cause)}. Retrying every 5 seconds.`
+              : "Loading fleet agents…"}
           </Text>
         ) : agents.length === 0 ? (
-          <Text tone="secondary">No live agents.</Text>
+          silentHosts === null ? (
+            <Text tone="secondary">No agents running on any host.</Text>
+          ) : null
         ) : (
           <AgentDirectory
             activityFilter={activityFilter}
@@ -990,6 +1206,7 @@ export const ConnectSurface = ({
             onSelect={selectAgent}
             query={query}
             selectedKey={selectedKey}
+            silentHosts={offlineHosts}
           />
         )}
         {connection._tag === "connecting" ? (
@@ -1003,7 +1220,7 @@ export const ConnectSurface = ({
         ) : null}
         {remembered._tag === "Failure" ? (
           <small className="connect-preference-error">
-            Selection memory unavailable: {Cause.pretty(remembered.cause)}
+            Selection memory unavailable: {causeSummary(remembered.cause)}
           </small>
         ) : preferenceError === null ? null : (
           <small className="connect-preference-error">Selection memory unavailable: {preferenceError}</small>
@@ -1013,14 +1230,12 @@ export const ConnectSurface = ({
             Terminal focus transition failed: {workspaceFocusFailure}
           </small>
         )}
-        {(current?.failures.length ?? 0) === 0 ? null : (
-          <div className="connect-failures">
-            {current?.failures.map((failure) => (
-              <small key={failure.host}>
-                {failure.host}: {failure.reason.replaceAll("_", " ")}
-              </small>
-            ))}
-          </div>
+        {staleSince === null || directory._tag !== "Failure" ? null : (
+          <small className="connect-status-message" data-tone="caution">
+            The list is stale. Couldn't refresh the directory: {causeSummary(directory.cause)}. Showing the list from{" "}
+            {new Date(staleSince).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; retrying every 5
+            seconds.
+          </small>
         )}
       </section>
     </>
@@ -1061,12 +1276,18 @@ export const ConnectSurface = ({
         disabled={connection._tag !== "connected"}
         error={terminalKeyError}
         modifier={terminalModifier}
+        keyboardOpen={keyboardOpen}
+        keysHidden={terminalKeysHidden}
         onFocusTerminal={() => terminalFocusRef.current()}
         onKey={sendTerminalRailKey}
+        onKeyboardToggle={toggleKeyboard}
+        onPaste={pasteClipboard}
+        onKeysHiddenChange={changeTerminalKeysHidden}
         onModifierChange={changeTerminalModifier}
         onSelectText={() => terminalInteractionRef.current?.selectText()}
         onJumpToLatest={() => terminalInteractionRef.current?.jumpToLatest()}
         linesBack={terminalLinesBack}
+        positionUnconfirmed={terminalPositionUnconfirmed}
       />
       <div className="terminal-viewport-stage">
         <div

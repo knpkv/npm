@@ -283,7 +283,13 @@ export const layer = Layer.effect(
         !Number.isSafeInteger(namespace) || namespace <= 0
       ) return null
       return lockOwner(pid, namespace)
-    }).pipe(Effect.catch(() => Effect.succeed(null)))
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.logDebug("No verifiable process namespace; a leftover lock needs manual recovery", error).pipe(
+          Effect.as(null)
+        )
+      )
+    )
 
     const acquireLock = Effect.gen(function*() {
       // On hosts without a verifiable process namespace, exclusive creation still works; a

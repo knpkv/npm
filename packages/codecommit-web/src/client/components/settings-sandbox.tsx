@@ -6,6 +6,7 @@ import { BoxIcon, CheckIcon, PlusIcon, TrashIcon, XIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { configQueryAtom, configSaveAtom } from "../atoms/app.js"
 import { COMMAND_PRESETS, MOUNT_PRESETS, type SandboxVolumeMount } from "../sandbox-presets.js"
+import { ConfigUnavailable } from "./load-failed.js"
 import { Button } from "./ui/button.js"
 import { Input } from "./ui/input.js"
 import { Separator } from "./ui/separator.js"
@@ -117,7 +118,7 @@ export function SettingsSandboxView({ config, saveConfig }: SettingsSandboxViewP
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-semibold">Sandbox</h2>
+          <h1 className="text-lg font-semibold">Sandbox</h1>
           <p className="text-sm text-muted-foreground">Docker sandbox defaults for code review environments</p>
         </div>
         {local && (
@@ -142,9 +143,9 @@ export function SettingsSandboxView({ config, saveConfig }: SettingsSandboxViewP
       <Separator />
       {AsyncResult.builder(config)
         .onInitialOrWaiting(() => <p className="text-sm text-muted-foreground">Loading...</p>)
-        .onDefect(() => <p className="text-sm text-destructive">Failed to load config</p>)
+        .onFailure(() => <ConfigUnavailable />)
         .onSuccess(() => local && <SandboxForm settings={local} onChange={update} />)
-        .render()}
+        .exhaustive()}
     </div>
   )
 }

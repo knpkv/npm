@@ -1,4 +1,5 @@
-import { expect, type Page, test } from "@playwright/test"
+import type { Page } from "@playwright/test"
+import { expect, test } from "./fixtures.ts"
 
 const story = (id: string): string =>
   `/iframe.html?id=${id}&viewMode=story&globals=theme:dark;forcedColors:auto;reducedMotion:reduce;locale:en;density:comfortable`
@@ -41,6 +42,37 @@ test("keeps dialog focus, isolation, dismissal, and restoration deterministic", 
   await trigger.click()
   await page.locator("[data-rly-dialog-overlay]").click({ position: { x: 4, y: 4 } })
   await expect(dialog).toHaveCount(0)
+})
+
+// A stretched grid row stretches its item too, so the gaps between rows stay one gap either way; what
+// stretching changes is where the free space goes. Packed rows leave it below the last row.
+test("packs a full-screen phone dialog's rows at the top, one gap apart", async ({ page }) => {
+  await page.setViewportSize({ height: 844, width: 390 })
+  await page.goto(story("primitives-dialog--interaction"))
+  await expect(page.locator("[data-dialog-play-complete=\"true\"]")).toHaveCount(1)
+  await page.getByRole("button", { name: "Review deployment" }).click()
+
+  const layout = await page.getByRole("dialog", { name: "Approve production deployment" }).evaluate((dialog) => {
+    const rows = [...dialog.children].filter((child) => {
+      const position = getComputedStyle(child).position
+      return position !== "absolute" && position !== "fixed" && child.getBoundingClientRect().height > 0
+    })
+    const gaps = rows.slice(1).map((row, index) =>
+      Math.round(row.getBoundingClientRect().top - (rows[index]?.getBoundingClientRect().bottom ?? 0))
+    )
+    const styles = getComputedStyle(dialog)
+    const contentBottom = dialog.getBoundingClientRect().bottom - Number.parseFloat(styles.paddingBlockEnd)
+    return {
+      freeBelow: contentBottom - (rows.at(-1)?.getBoundingClientRect().bottom ?? contentBottom),
+      gap: Number.parseFloat(styles.rowGap),
+      gaps,
+      height: dialog.getBoundingClientRect().height
+    }
+  })
+  expect(Math.round(layout.height)).toBe(844)
+  expect(layout.gaps.length).toBeGreaterThan(0)
+  for (const gap of layout.gaps) expect(gap).toBe(layout.gap)
+  expect(layout.freeBelow).toBeGreaterThan(layout.gap)
 })
 
 test("reflows dialog to a full-screen decision at compact zoom-equivalent width", async ({ page }) => {

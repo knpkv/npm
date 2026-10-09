@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Layer, Predicate, Ref, Schema, Stream, SubscriptionRef } from "effect"
-import { AwsClient, type PullRequestRefreshItem } from "../src/AwsClient/index.js"
+import { Cause, Effect, Exit, Layer, Option, Predicate, Ref, Schema, Stream, SubscriptionRef } from "effect"
+import { AwsClient } from "../src/AwsClient/index.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
 import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../src/CacheService/repos/NotificationRepo.js"
@@ -13,7 +13,6 @@ import { type AppState, PullRequest } from "../src/Domain.js"
 import { makeRefresh } from "../src/PRService/refresh.js"
 
 /** A provider pull request as the refresh stream delivers it. */
-const fetched = (pullRequest: PullRequest): PullRequestRefreshItem => ({ _tag: "Fetched", pullRequest })
 
 /** Stands in for a config read failing mid-write. */
 class ConfigUnreadable extends Schema.TaggedError<ConfigUnreadable>()("ConfigUnreadable", {
@@ -24,9 +23,12 @@ const dependencies = (load: ConfigService["Service"]["load"]) =>
   Layer.mergeAll(
     Layer.mock(AwsClient, {}),
     Layer.mock(EventsHub, {}),
-    Layer.mock(CommentRepo, {}),
+    Layer.mock(CommentRepo, {
+      find: () => Effect.succeed(Option.none())
+    }),
     Layer.mock(NotificationRepo, {}),
     Layer.mock(PullRequestRepo, {
+      observe: () => Effect.succeed(1),
       findAll: () => Effect.succeed([])
     }),
     Layer.mock(SubscriptionRepo, {}),
@@ -99,6 +101,12 @@ describe("PRService.refresh", () => {
         destinationBranch: "main",
         isMergeable: 1,
         isApproved: 0,
+        approvalUnknownReason: null,
+        approvalBaselineKnown: 1,
+        approversUnknown: 0,
+        observationSeq: 0,
+        approvalVersion: "2026-08-02T00:00:00.000Z",
+        approvalObservationSeq: 0,
         commentCount: 0,
         healthScore: null,
         link: "https://example.invalid/pr/35",
@@ -124,24 +132,29 @@ describe("PRService.refresh", () => {
               accountId: "123456789012",
               arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
             }),
-          getPullRequestRefresh: () => Stream.make(fetched(fetchedPR)),
+          getPullRequests: () => Stream.make(fetchedPR),
           getCommentsForPullRequest: () => Effect.succeed([])
         }),
         Layer.mock(EventsHub, {
           batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect
         }),
         Layer.mock(CommentRepo, {
+          find: () => Effect.succeed(Option.none()),
           upsert: () => Effect.void
         }),
         Layer.mock(NotificationRepo, {}),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findAll: () => Ref.get(rows),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           findMissingDiffStats: () => Effect.succeed([]),
-          upsert: () => Ref.set(rows, [cachedPR]),
-          updateCommentCount: () => Effect.void,
+          upsert: () =>
+            Ref.set(rows, [cachedPR]).pipe(
+              Effect.as({ row: true, approval: true, versions: undefined, replaced: Option.none() })
+            ),
+          writeDerived: () => Effect.succeed(true),
           refreshCommentedBy: () => Effect.void,
-          updateHealthScore: () => Effect.void,
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(SubscriptionRepo, {
@@ -313,6 +326,12 @@ describe("PRService.refresh", () => {
           destinationBranch: "main",
           isMergeable: 1,
           isApproved: 0,
+          approvalUnknownReason: null,
+          approvalBaselineKnown: 1,
+          approversUnknown: 0,
+          observationSeq: 0,
+          approvalVersion: "2026-08-02T00:00:00.000Z",
+          approvalObservationSeq: 0,
           commentCount: 0,
           healthScore: null,
           link: `https://example.invalid/pr/${id}`,
@@ -348,22 +367,26 @@ describe("PRService.refresh", () => {
                 arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
               }),
             // Empty provider results: anything in the published state came from cache.
-            getPullRequestRefresh: (options: { readonly profile: string }) =>
+            getPullRequests: (options: { readonly profile: string }) =>
               Stream.fromEffect(Ref.update(queriedProfiles, (seen) => [...seen, options.profile])).pipe(
                 Stream.flatMap(() => Stream.empty)
               ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(EventsHub, { batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect }),
-          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(CommentRepo, {
+            find: () => Effect.succeed(Option.none()),
+            upsert: () => Effect.void
+          }),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(PullRequestRepo, {
+            observe: () => Effect.succeed(1),
             findAll: () => Effect.succeed(rows),
             findStaleOpen: () => Effect.succeed([]),
+            findClosedWithUnknownApprovers: () => Effect.succeed([]),
             findMissingDiffStats: () => Effect.succeed([]),
-            updateCommentCount: () => Effect.void,
+            writeDerived: () => Effect.succeed(true),
             refreshCommentedBy: () => Effect.void,
-            updateHealthScore: () => Effect.void,
             propagateRepoAccountId: () => Effect.void
           }),
           Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),
@@ -411,6 +434,12 @@ describe("PRService.refresh", () => {
           destinationBranch: "main",
           isMergeable: 1,
           isApproved: 0,
+          approvalUnknownReason: null,
+          approvalBaselineKnown: 1,
+          approversUnknown: 0,
+          observationSeq: 0,
+          approvalVersion: "2026-08-02T00:00:00.000Z",
+          approvalObservationSeq: 0,
           commentCount: 0,
           healthScore: null,
           link: "https://example.invalid/pr/11",
@@ -449,19 +478,23 @@ describe("PRService.refresh", () => {
               accountId: "123456789012",
               arn: "arn:aws:sts::123456789012:assumed-role/Viewer/viewer"
             }),
-          getPullRequestRefresh: () => Stream.empty,
+          getPullRequests: () => Stream.empty,
           getCommentsForPullRequest: () => Effect.succeed([])
         }),
         Layer.mock(EventsHub, { batch: <A, E, R>(effect: Effect.Effect<A, E, R>) => effect }),
-        Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+        Layer.mock(CommentRepo, {
+          find: () => Effect.succeed(Option.none()),
+          upsert: () => Effect.void
+        }),
         Layer.mock(NotificationRepo, {}),
         Layer.mock(PullRequestRepo, {
+          observe: () => Effect.succeed(1),
           findAll: () => Effect.succeed(rows),
           findStaleOpen: () => Effect.succeed([]),
+          findClosedWithUnknownApprovers: () => Effect.succeed([]),
           findMissingDiffStats: () => Effect.succeed([]),
-          updateCommentCount: () => Effect.void,
+          writeDerived: () => Effect.succeed(true),
           refreshCommentedBy: () => Effect.void,
-          updateHealthScore: () => Effect.void,
           propagateRepoAccountId: () => Effect.void
         }),
         Layer.mock(SubscriptionRepo, { findAll: () => Effect.succeed([]) }),

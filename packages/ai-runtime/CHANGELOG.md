@@ -1,5 +1,11 @@
 # @knpkv/ai-runtime
 
+## 0.5.2
+
+### Patch Changes
+
+- [#583](https://github.com/knpkv/npm/pull/583) [`9c09dd9`](https://github.com/knpkv/npm/commit/9c09dd97535117fc7c698361ddf66ae9d6bc4a0d) Thanks [@konopkov](https://github.com/konopkov)! - The ai-runtime test suite and its contract fixtures are now typechecked as part of `check`, and the package leaves the test-typecheck allowlist.
+
 ## 0.5.1
 
 ### Patch Changes
