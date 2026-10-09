@@ -245,8 +245,8 @@ export type UiAssets = {
   readonly worker: string
   readonly stylesheet: string
   readonly fonts: ReadonlyMap<string, Uint8Array>
-  /** The PNG icons by file name (`relayIconAssets`). */
-  readonly icons: ReadonlyMap<string, Uint8Array>
+  /** A PNG icon by file name (`relayIconAssets`), read when asked for; null when it is unknown or missing. */
+  readonly icon: (file: string) => Promise<Uint8Array | null>
 }
 
 type ApiError =
@@ -2423,8 +2423,10 @@ export const startHttpServer = async (
             return
           }
           const iconMatch = /^\/assets\/([^/]+\.png)$/.exec(url.pathname)
-          const icon = iconMatch?.[1] === undefined ? undefined : uiAssets.icons.get(iconMatch[1])
-          if (mode !== "lan" && request.method === "GET" && icon !== undefined) {
+          const icon = mode === "lan" || request.method !== "GET" || iconMatch?.[1] === undefined
+            ? null
+            : await uiAssets.icon(iconMatch[1])
+          if (icon !== null) {
             response.writeHead(200, {
               "cache-control": "no-cache, must-revalidate",
               "content-type": "image/png"
