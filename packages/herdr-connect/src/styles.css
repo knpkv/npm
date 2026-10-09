@@ -1198,11 +1198,6 @@
     --connect-creature-tone: var(--rly-color-success-ink);
   }
 
-  .connect-creature-shadow {
-    fill: oklch(0% 0 none / 22%);
-    filter: blur(3px);
-  }
-
   .connect-creature-shine {
     fill: oklch(100% 0 none / 28%);
   }

@@ -9,7 +9,7 @@
  *
  * @module
  */
-import type { CSSProperties, ReactElement } from "react"
+import { type CSSProperties, type ReactElement, useId } from "react"
 
 import { agentStatePresentation } from "./agent-state.js"
 import { agentCharacter } from "./character.js"
@@ -35,7 +35,8 @@ export const Creature = ({ host, id, size, stale = false, state }: CreatureProps
   const [light, mid, deep] = character.hues
   const [eyeWidth, eyeHeight] = character.eye
   const eyes = [50 - character.eyeGap, 50 + character.eyeGap]
-  // Gradient ids are per creature and size: one page draws the same agent in a row and on the stage.
+  // Unique per drawn creature: ids built from host and ID could collide once cleaned (hosts "a.b" and "a_b"),
+  // painting one creature with another's colours.
   // Multiples of the slow motion token; the stylesheet turns them into durations.
   const rhythm: CSSProperties &
     Record<"--connect-creature-blink" | "--connect-creature-pace" | "--connect-creature-phase", string> = {
@@ -43,7 +44,7 @@ export const Creature = ({ host, id, size, stale = false, state }: CreatureProps
     "--connect-creature-pace": String(character.pace),
     "--connect-creature-phase": String(character.phase)
   }
-  const gradient = `connect-creature-${size}-${host}-${id}`.replace(/[^a-zA-Z0-9-]/g, "_")
+  const gradient = `connect-creature-${useId().replace(/[^a-zA-Z0-9]/g, "")}`
   return (
     <svg
       aria-hidden="true"
@@ -63,12 +64,17 @@ export const Creature = ({ host, id, size, stale = false, state }: CreatureProps
           <stop offset="0.55" stopColor={`oklch(0.66 0.17 ${String(light)})`} />
           <stop offset="1" stopColor={`oklch(0.46 0.17 ${String(mid)})`} />
         </radialGradient>
+        {/* A gradient shadow: a blur filter on every row of a long list costs more. */}
+        <radialGradient id={`${gradient}-shadow`}>
+          <stop offset="0" stopColor="black" stopOpacity="0.28" />
+          <stop offset="1" stopColor="black" stopOpacity="0" />
+        </radialGradient>
         <radialGradient id={`${gradient}-core`}>
           <stop offset="0" stopColor={`oklch(0.95 0.1 ${String(deep)})`} stopOpacity="0.95" />
           <stop offset="1" stopColor={`oklch(0.75 0.15 ${String(deep)})`} stopOpacity="0" />
         </radialGradient>
       </defs>
-      <ellipse className="connect-creature-shadow" cx="50" cy="92" rx="26" ry="4" />
+      <ellipse className="connect-creature-shadow" cx="50" cy="92" fill={`url(#${gradient}-shadow)`} rx="30" ry="5" />
       <circle className="connect-creature-halo" cx="50" cy="55" r="46" />
       <circle className="connect-creature-orbit" cx="50" cy="55" pathLength="100" r="46" />
       <g className="connect-creature-lean">

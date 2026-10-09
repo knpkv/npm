@@ -55,6 +55,19 @@ describe("Creature", () => {
     expect(body(working)).toBe(body(done))
   })
 
+  // Ids built from host and ID collide once cleaned ("a.b" and "a_b"), and one creature then wears another's colours.
+  it("gives every creature on a page its own gradients", () => {
+    const markup = renderToStaticMarkup(
+      <>
+        <Creature host="a.b" id="x" size="row" state="working" />
+        <Creature host="a_b" id="x" size="row" state="working" />
+      </>
+    )
+    const ids = [...markup.matchAll(/<radialGradient[^>]* id="([^"]+)"/g)].map((match) => match[1])
+    expect(ids).toHaveLength(6)
+    expect(new Set(ids).size).toBe(6)
+  })
+
   it("draws every row's agent, and marks them all stale when the directory couldn't refresh", () => {
     const agents = [agent("agent-one", "working"), agent("agent-two", "waiting")]
     const fresh = directory(agents, false)
