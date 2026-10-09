@@ -162,6 +162,7 @@ import {
 import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import { type ApprovalNotificationBatch, makePushWorker } from "./push-worker.js"
+import { relayIconSvg } from "./relay-icon.js"
 import { ApprovalAppStore } from "./store.js"
 import { workCheckpointPath, workSnapshotPath } from "./work-checkpoint.js"
 
@@ -244,6 +245,8 @@ export type UiAssets = {
   readonly worker: string
   readonly stylesheet: string
   readonly fonts: ReadonlyMap<string, Uint8Array>
+  /** The PNG icons by file name (`relayIconAssets`). */
+  readonly icons: ReadonlyMap<string, Uint8Array>
 }
 
 type ApiError =
@@ -451,25 +454,24 @@ export const listenerAuthority = (address: string, port: number): string =>
     `http://${address.includes(":") && !address.startsWith("[") ? `[${address}]` : address}:${port}/`
   ).host.toLowerCase()
 
-const approvalIcon =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111418"/><path d="M146 264l72 72 148-160" fill="none" stroke="#a6e3a1" stroke-linecap="round" stroke-linejoin="round" stroke-width="52"/></svg>`
+/** The favicon and the manifest's scalable icon; the PNGs come from the same drawing (`relay-icon.ts`). */
+const relayIcon = relayIconSvg("tile", 512)
 
-const approvalManifest = JSON.stringify({
+/** The installed app is Relay. `id`, `start_url` and `scope` are unchanged, so installs carry over. */
+const relayManifest = JSON.stringify({
   id: "/",
-  name: "Fleet approvals",
-  short_name: "Approvals",
+  name: "Relay",
+  short_name: "Relay",
   start_url: "/",
   scope: "/",
   display: "standalone",
   background_color: "#111418",
   theme_color: "#111418",
   icons: [
-    {
-      src: "/assets/approval-icon.svg",
-      sizes: "any",
-      type: "image/svg+xml",
-      purpose: "any maskable"
-    }
+    { src: "/assets/relay-icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+    { src: "/assets/relay-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+    { src: "/assets/relay-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+    { src: "/assets/relay-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
   ]
 })
 
@@ -1210,7 +1212,8 @@ const connectPage = (fontPreload: string): string =>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0b0d10">
-<title>Fleet connect</title>
+<title>Connect in Relay</title>
+<link rel="icon" href="/assets/relay-icon.svg" type="image/svg+xml">
 ${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark" class="connect-body">
@@ -1227,7 +1230,7 @@ const lanWorkDocument = (body: string, fontPreload: string): string =>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#111418">
-<title>Fleet Work</title>
+<title>Work in Relay</title>
 ${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark">
@@ -2403,19 +2406,30 @@ export const startHttpServer = async (
               "cache-control": "no-cache, must-revalidate",
               "content-type": "application/manifest+json; charset=utf-8"
             })
-            response.end(approvalManifest)
+            response.end(relayManifest)
             return
           }
           if (
             mode !== "lan" &&
             request.method === "GET" &&
-            url.pathname === "/assets/approval-icon.svg"
+            // The old path stays: an install made before the rename keeps asking for it.
+            (url.pathname === "/assets/relay-icon.svg" || url.pathname === "/assets/approval-icon.svg")
           ) {
             response.writeHead(200, {
               "cache-control": "no-cache, must-revalidate",
               "content-type": "image/svg+xml; charset=utf-8"
             })
-            response.end(approvalIcon)
+            response.end(relayIcon)
+            return
+          }
+          const iconMatch = /^\/assets\/([^/]+\.png)$/.exec(url.pathname)
+          const icon = iconMatch?.[1] === undefined ? undefined : uiAssets.icons.get(iconMatch[1])
+          if (mode !== "lan" && request.method === "GET" && icon !== undefined) {
+            response.writeHead(200, {
+              "cache-control": "no-cache, must-revalidate",
+              "content-type": "image/png"
+            })
+            response.end(icon)
             return
           }
           const fontMatch = /^\/assets\/([^/]+\.woff2)$/.exec(url.pathname)

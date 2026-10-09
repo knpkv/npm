@@ -43,10 +43,10 @@ export const showApprovalNotification = async (
       Effect.result(Effect.tryPromise(() => setBadge(pendingCount)))
     )
   await registration.showNotification(`Approval needed on ${payload.host}`, {
-    badge: "/assets/approval-icon.svg",
+    badge: "/assets/relay-badge-96.png",
     body: `Job ${payload.jobId} is waiting for approval.`,
     data: payload,
-    icon: "/assets/approval-icon.svg",
+    icon: "/assets/relay-192.png",
     tag: `approval:${payload.host}:${payload.jobId}`
   })
   if (Result.isFailure(badge)) throw badge.failure

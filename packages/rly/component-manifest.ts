@@ -251,10 +251,12 @@ export const componentManifest = {
       exports: [
         { kind: "value", name: "RelayMark" },
         { kind: "value", name: "RLY_RELAY_MARK_ACTIVITIES" },
+        { kind: "value", name: "RLY_RELAY_MARK_GLYPH" },
         { kind: "value", name: "RLY_RELAY_MARK_SIZES" },
         { kind: "value", name: "RLY_RELAY_MARK_TILE_SIZES" },
         { kind: "type", name: "RelayMarkProps" },
         { kind: "type", name: "RelayMarkTileProps" },
+        { kind: "type", name: "RlyRelayMarkGlyph" },
         { kind: "type", name: "RlyRelayMarkActivity" },
         { kind: "type", name: "RlyRelayMarkSize" },
         { kind: "type", name: "RlyRelayMarkTileSize" }
