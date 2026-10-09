@@ -31,4 +31,14 @@ export {
   type RelayToolRow,
   type RelayTranscriptMessage
 } from "./relay-fold.js"
+export {
+  finishedReplies,
+  nextSeenReplies,
+  RELAY_STATUS_LINE_MAX,
+  type RelaySeenReplies,
+  relaySeenRepliesUnknown,
+  relayStatusOf,
+  type RelayStatusView
+} from "./relay-status.js"
 export { useRelayConversation } from "./use-relay-conversation.js"
+export { useRelayStatus } from "./use-relay-status.js"
