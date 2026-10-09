@@ -11,10 +11,14 @@ import { relayModels, relayProvider } from "../src/piProvider.js"
 
 const pr = ObjectRef.make({ product: "codecommit", kind: "pull-request", id: "acct/repo/42" })
 
-/** A model that calls the named tool once, then answers from its result. Decided from the prompt alone. */
-const toolThenAnswer = (tool: string, args: Record<string, Schema.Json>) =>
+/**
+ * A model that calls the named tool once, then answers from its result. Decided from the prompt alone;
+ * every prompt it sees is appended to `prompts`, so a test can read the tool result the model was given.
+ */
+const toolThenAnswer = (tool: string, args: Record<string, Schema.Json>, prompts: Array<string> = []) =>
   makeDeterministicLanguageModel((request) => {
     const prompt = JSON.stringify(request.prompt.content)
+    prompts.push(prompt)
     const result = /TOOL (RESULT|ERROR) \w+ \(/u.exec(prompt)
     const turn = result !== null
       ? { reply: result[1] === "ERROR" ? "It did not happen." : "The PR has 2 approvals.", toolCalls: [] }
@@ -51,11 +55,48 @@ const postComment = defineCapability({
     })
 })
 
+const hostCalls: Array<string> = []
+const runShell = defineCapability({
+  name: "run_shell",
+  description: "Run a command on the host",
+  input: Schema.Struct({ cmd: Schema.String }),
+  output: Schema.Struct({ ok: Schema.Boolean }),
+  effect: "host",
+  reversible: false,
+  describe: (input) => ({ verb: "run", target: pr, args: { cmd: input.cmd } }),
+  cites: () => [pr],
+  handler: (input) =>
+    Effect.sync(() => {
+      hostCalls.push(input.cmd)
+      return { ok: true }
+    })
+})
+
+/** A write whose input has a check JSON Schema cannot express, so only the capability's decode rejects it. */
+const postNonEmpty = defineCapability({
+  name: "post_non_empty",
+  description: "Post a non-blank comment on a pull request",
+  input: Schema.Struct({
+    pr: Schema.String,
+    body: Schema.String.check(Schema.makeFilter((body: string) => body.trim() !== ""))
+  }),
+  output: Schema.Struct({ posted: Schema.Boolean }),
+  effect: "write",
+  reversible: false,
+  describe: (input) => ({ verb: "post comment", target: pr, args: { body: input.body } }),
+  cites: () => [pr],
+  handler: (input) =>
+    Effect.sync(() => {
+      commentCalls.push(input.body)
+      return { posted: true }
+    })
+})
+
 const harnessLayer = (model: Layer.Layer<LanguageModel.LanguageModel>, storePath: string) =>
   layer({
     storePath,
     instructions: "You are Relay.",
-    capabilities: [register(approvals), register(postComment)],
+    capabilities: [register(approvals), register(postComment), register(runShell), register(postNonEmpty)],
     backends: [{ id: "claude-code", name: "Claude Code", model }]
   })
 
@@ -133,6 +174,66 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         })
         expect(commentCalls).toEqual([])
       }).pipe(Effect.scoped))
+
+    it.effect("runs a write only after the person confirms it", () =>
+      Effect.gen(function*() {
+        commentCalls.length = 0
+        const store = yield* tempStore
+        const model = toolThenAnswer("post_comment", { pr: "42", body: "approved" })
+        const relay = yield* relayIn(harnessLayer(model.layer, store))
+        const atCard: Array<ReadonlyArray<string>> = []
+        yield* sendAndCollect(relay.events(pr), relay.send(pr, "Comment approved", "req-confirm"), (event) =>
+          event._tag === "ConfirmationRequired"
+            ? Effect.sync(() =>
+              atCard.push([...commentCalls])
+            ).pipe(
+              Effect.andThen(relay.decide(event.call, true).pipe(Effect.orDie))
+            )
+            : Effect.void)
+        expect(atCard).toEqual([[]])
+        expect(commentCalls).toEqual(["approved"])
+      }).pipe(Effect.scoped))
+
+    it.effect("refuses a host capability without asking, and tells the model why", () =>
+      Effect.gen(function*() {
+        hostCalls.length = 0
+        const prompts: Array<string> = []
+        const store = yield* tempStore
+        const model = toolThenAnswer("run_shell", { cmd: "rm -rf /" }, prompts)
+        const relay = yield* relayIn(harnessLayer(model.layer, store))
+        const events = yield* sendAndCollect(relay.events(pr), relay.send(pr, "Clean up", "req-host"), (event) =>
+          event._tag === "ConfirmationRequired" ? relay.decide(event.call, true).pipe(Effect.orDie) : Effect.void)
+        expect(events.map((event) =>
+          event._tag
+        )).not.toContain("ConfirmationRequired")
+        expect(events.find((event) =>
+          event._tag === "ToolFinished"
+        )).toMatchObject({ ok: false })
+        expect(prompts.at(-1)).toContain("run_shell needs a herdr Approval")
+        expect(hostCalls).toEqual([])
+      }).pipe(Effect.scoped))
+
+    it.effect(
+      "refuses arguments only the capability's decode rejects, without asking or saying the person declined",
+      () =>
+        Effect.gen(function*() {
+          commentCalls.length = 0
+          const prompts: Array<string> = []
+          const store = yield* tempStore
+          const model = toolThenAnswer("post_non_empty", { pr: "42", body: "  " }, prompts)
+          const relay = yield* relayIn(harnessLayer(model.layer, store))
+          const events = yield* sendAndCollect(
+            relay.events(pr),
+            relay.send(pr, "Comment nothing", "req-invalid"),
+            (event) =>
+              event._tag === "ConfirmationRequired" ? relay.decide(event.call, true).pipe(Effect.orDie) : Effect.void
+          )
+          expect(events.map((event) => event._tag)).not.toContain("ConfirmationRequired")
+          expect(prompts.at(-1)).toContain("post_non_empty got invalid arguments, so nobody was asked")
+          expect(prompts.at(-1)).not.toContain("declined")
+          expect(commentCalls).toEqual([])
+        }).pipe(Effect.scoped)
+    )
 
     it.effect("shows a pending confirmation again to a dock that reconnects", () =>
       Effect.gen(function*() {

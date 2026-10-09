@@ -48,6 +48,10 @@ const replaySafe = { replay: "safe" } satisfies { readonly replay: "safe" }
 
 const declined = (verb: string): string => `The user declined: ${verb}. Do not retry it unless they ask again.`
 
+/** Arguments that passed Pi's JSON Schema but not the capability's own decode; the person is never asked. */
+const invalidArguments = (verb: string, cause: string): string =>
+  `${verb} got invalid arguments, so nobody was asked: ${cause}`
+
 const resultText = (result: CapabilityResult): string => JSON.stringify(result.output)
 
 /** Build the `relay` Pi extension for one product's capabilities. */
@@ -87,23 +91,24 @@ export const relayExtension = <Requirements>(
   const gate = hook(ToolTask, {
     beforeTool: async (call, api, context) => {
       const capability = byName.get(call.name)
-      if (capability === undefined || capability.effect === "read") return undefined
+      // Pi refuses unregistered tools before this hook, but another extension's tools would reach it.
+      if (capability === undefined) return { block: `${call.name} is not a Relay capability.` }
+      if (capability.effect === "read") return undefined
       if (capability.effect === "host") {
         return { block: `${call.name} needs a herdr Approval, which Relay cannot request yet.` }
       }
       const memoKey = `relay.decision.${call.id}`
       const remembered = await api.memo<boolean>(memoKey, context)
-      const decision = remembered ?? await (async () => {
-        const action = await runEffect(capability.describe(call.arguments), context.abortSignal)
-        if (action._tag === "Failure") return false
-        const allowed = await broker.ask({
-          conversationId: String(api.conversationId),
-          callId: call.id,
-          action: action.value,
-          reversible: capability.reversible
-        }, context.abortSignal)
-        return api.memo(memoKey, allowed, context)
-      })()
+      if (remembered !== undefined) return remembered ? undefined : { block: declined(call.name) }
+      const action = await runEffect(capability.describe(call.arguments), context.abortSignal)
+      if (action._tag === "Failure") return { block: invalidArguments(call.name, Cause.pretty(action.cause)) }
+      const allowed = await broker.ask({
+        conversationId: String(api.conversationId),
+        callId: call.id,
+        action: action.value,
+        reversible: capability.reversible
+      }, context.abortSignal)
+      const decision = await api.memo(memoKey, allowed, context)
       return decision ? undefined : { block: declined(call.name) }
     }
   })
