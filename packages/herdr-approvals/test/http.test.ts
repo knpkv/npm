@@ -265,6 +265,18 @@ const listenOn = (server: ReturnType<typeof createServer>, host: string): Promis
     })
   })
 
+/** A hub and peer pair started on the peer's ports, or the hub found one of those ports taken on its address. */
+type PairStart =
+  | {
+    readonly _tag: "Started"
+    readonly approvalPort: number
+    readonly mainServer: StartedHttpServer
+    readonly peerServer: StartedHttpServer
+  }
+  | { readonly _tag: "PortTaken"; readonly cause: unknown }
+
+type StartedHttpServer = Awaited<ReturnType<typeof startHttpServer>>
+
 /** The port a started listener actually bound, read from its URL; a listener that did not start throws. */
 const boundPort = (url: string | null): number => Number(new URL(url ?? "").port)
 
@@ -3010,20 +3022,7 @@ esac
                 operations,
                 store: peerStore
               })
-              const peerServer = yield* Effect.acquireRelease(
-                Effect.promise(() =>
-                  startHttpServer(peerConfig, peerFleet, assets, {
-                    terminalConnector: unusedTerminal
-                  })
-                ),
-                (running) => Effect.promise(running.close)
-              )
-              if (peerServer.tailnetUrl === null || peerServer.approvalUrl === null) {
-                return yield* Effect.die("peer listeners missing")
-              }
-              const peerPort = Number(new URL(peerServer.tailnetUrl).port)
-              const approvalPort = Number(new URL(peerServer.approvalUrl).port)
-              const mainConfig: HostConfiguration = {
+              const mainConfigFor = (peerPort: number, approvalPort: number): HostConfiguration => ({
                 ...config(root),
                 approvalHub: {
                   host: "ALPHA",
@@ -3036,20 +3035,54 @@ esac
                 crossHost: true,
                 port: peerPort,
                 tailscaleCommand: mainTailscale
-              }
+              })
               const mainFleet = yield* makeFleetService({
                 approvalEnabled: true,
-                host: mainConfig.host,
+                host: "ALPHA",
                 operations,
                 store: mainStore
               })
-              const mainServer = yield* Effect.acquireRelease(
-                Effect.promise(() =>
-                  startHttpServer(mainConfig, mainFleet, assets, {
-                    terminalConnector: unusedTerminal
-                  })
+              // The hub reaches the peer on its own ports, so it binds the ports the peer got on 127.0.0.2
+              // again on 127.0.0.1, where nothing reserved them: an outgoing connection from a parallel suite
+              // can already hold one. Only that collision restarts the pair, on fresh peer ports.
+              const { approvalPort, mainServer } = yield* Effect.acquireRelease(
+                Effect.tryPromise({
+                  try: async (): Promise<PairStart> => {
+                    const peerServer = await startHttpServer(peerConfig, peerFleet, assets, {
+                      terminalConnector: unusedTerminal
+                    })
+                    const peerPort = boundPort(peerServer.tailnetUrl)
+                    const approvalPort = boundPort(peerServer.approvalUrl)
+                    try {
+                      const mainServer = await startHttpServer(
+                        mainConfigFor(peerPort, approvalPort),
+                        mainFleet,
+                        assets,
+                        { terminalConnector: unusedTerminal }
+                      )
+                      return { _tag: "Started", approvalPort, mainServer, peerServer }
+                    } catch (cause) {
+                      await peerServer.close()
+                      if (isAddressInUse(cause) && (cause.port === peerPort || cause.port === approvalPort)) {
+                        return { _tag: "PortTaken", cause }
+                      }
+                      throw cause
+                    }
+                  },
+                  catch: (cause) => new ApprovalStartFailed({ cause })
+                }).pipe(
+                  Effect.flatMap((started) =>
+                    started._tag === "PortTaken"
+                      ? Effect.fail(new ApprovalPortTaken({ cause: started.cause }))
+                      : Effect.succeed(started)
+                  ),
+                  Effect.retry({ times: 4, while: (error) => error._tag === "ApprovalPortTaken" })
                 ),
-                (running) => Effect.promise(running.close)
+                ({ mainServer, peerServer }) =>
+                  Effect.promise(async () => {
+                    await mainServer.close()
+                    await peerServer.close()
+                  })
               )
               if (mainServer.serveUrl === null) {
                 return yield* Effect.die("canonical listener missing")
