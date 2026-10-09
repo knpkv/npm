@@ -59,7 +59,11 @@ const lineOf = (summary: string): string | null => {
     : `${points.slice(0, RELAY_STATUS_LINE_MAX - 1).join("").trimEnd()}…`
 }
 
-/** How many of Relay's replies have finished: runs of consecutive relay messages, none still streaming. */
+/**
+ * How many of Relay's replies have finished: runs of consecutive relay messages, none still streaming. The
+ * last turn counts only once no run is in flight: text before a tool call can stop streaming while the run
+ * that will add to the same turn is still going.
+ */
 export const finishedReplies = (state: RelayConversationState): number => {
   let turns = 0
   let open = false
@@ -74,7 +78,7 @@ export const finishedReplies = (state: RelayConversationState): number => {
       streaming = false
     }
   }
-  return open && !streaming ? turns + 1 : turns
+  return open && !streaming && state.runIds.length === 0 ? turns + 1 : turns
 }
 
 /**

@@ -235,6 +235,26 @@ describe("unread", () => {
     expect(finishedReplies(resumed)).toBe(2)
   })
 
+  // The fold may end the streaming message at a tool call while the run goes on; the reader saw the first
+  // half open, closed the panel, and the turn finished: that is a new reply.
+  it("counts a turn only once its run ends, even when its first half stopped streaming", () => {
+    const mid: RelayConversationState = {
+      ...live,
+      messages: [
+        { id: "u1", role: "user", streaming: false, text: "Run the job." },
+        { id: "a1", role: "relay", streaming: false, text: "Let me look." }
+      ],
+      runIds: ["r1"]
+    }
+    const seen = nextSeenReplies(nextSeenReplies(relaySeenRepliesUnknown, live, true), mid, true)
+    const finished: RelayConversationState = {
+      ...mid,
+      messages: [...mid.messages, { id: "a2", role: "relay", streaming: false, text: "Job 7 passed." }],
+      runIds: []
+    }
+    expect(status(finished, false, seen)).toEqual({ activity: "unread", line: null, words: "Relay replied" })
+  })
+
   it("cuts a long summary between code points, never inside a surrogate pair", () => {
     const summary = `Reading ${"😀".repeat(100)}`
     const state = fold([
