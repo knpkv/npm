@@ -3093,8 +3093,16 @@ esac
                     const peerServer = await startHttpServer(peerConfig, peerFleet, assets, {
                       terminalConnector: unusedTerminal
                     })
-                    const peerPort = boundPort(peerServer.tailnetUrl)
-                    const approvalPort = boundPort(peerServer.approvalUrl)
+                    // A peer listener that did not start throws here; close the peer before rethrowing.
+                    const { approvalPort, peerPort } = await Promise.resolve()
+                      .then(() => ({
+                        approvalPort: boundPort(peerServer.approvalUrl),
+                        peerPort: boundPort(peerServer.tailnetUrl)
+                      }))
+                      .catch(async (cause: unknown) => {
+                        await peerServer.close()
+                        throw cause
+                      })
                     try {
                       const mainServer = await startHttpServer(
                         mainConfigFor(peerPort, approvalPort),
