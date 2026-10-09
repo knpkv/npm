@@ -1,5 +1,12 @@
 # @knpkv/herdr-connect
 
+## 0.10.1
+
+### Patch Changes
+
+- Updated dependencies [[`a21684e`](https://github.com/knpkv/npm/commit/a21684e5ede609b9bf2b08d683e9b6c8efc04272)]:
+  - @knpkv/agent-usage@0.7.0
+
 ## 0.10.0
 
 ### Minor Changes
