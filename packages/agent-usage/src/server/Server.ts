@@ -20,13 +20,13 @@ import { liveClaudeUsageDeps } from "../core/ClaudeLimitsLive.js"
 import { databaseLayer } from "../core/Database.js"
 import { type StoreError, UsageStore } from "../core/Store.js"
 import { acliTicketSearch } from "../core/Tickets.js"
-import type { LimitsNow } from "../shared/contracts.js"
 import type { AgentUsageConfig } from "./Config.js"
-import { controlSocket } from "./ControlSocket.js"
+import { type ControlReaders, controlSocket } from "./ControlSocket.js"
 import { application } from "./HttpApplication.js"
 import { readLimitsNow } from "./LimitsNow.js"
 import { mintBootstrapUrl } from "./OwnerSession.js"
 import { backgroundLayer, RuntimeState } from "./Runtime.js"
+import { readUsageNow } from "./UsageNow.js"
 
 const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))
 const LoopbackHostname = Schema.Literals(["127.0.0.1", "localhost", "::1"])
@@ -53,8 +53,8 @@ export const makeServer = (options: AgentUsageServerOptions) =>
       const hostname = yield* Schema.decodeUnknownEffect(LoopbackHostname)(options.hostname ?? "127.0.0.1")
       // Opened once the HTTP listener is up: the control socket mints nothing before then.
       const listening = yield* Deferred.make<void>()
-      // The store opens after the socket (the socket holds its lock), so `limits` waits for it.
-      const limitsReader = yield* Deferred.make<Effect.Effect<LimitsNow, StoreError>>()
+      // The store opens after the socket (the socket holds its lock), so `limits` and `usage` wait for it.
+      const readers = yield* Deferred.make<ControlReaders<StoreError>>()
       // The store's lock and login socket. Everything that touches the store or binds a port waits
       // for it, so a second server on this store stops before reading anything or binding.
       const control = Layer.effectDiscard(
@@ -62,7 +62,11 @@ export const makeServer = (options: AgentUsageServerOptions) =>
           options.config.storeDirectory,
           options.security,
           Deferred.await(listening),
-          Effect.flatten(Deferred.await(limitsReader))
+          {
+            limits: Effect.flatMap(Deferred.await(readers), (ready) => ready.limits),
+            usage: (preset, timeZone) =>
+              Effect.flatMap(Deferred.await(readers), (ready) => ready.usage(preset, timeZone))
+          }
         )
       ).pipe(
         Layer.provide(Reactivity.layer),
@@ -80,7 +84,10 @@ export const makeServer = (options: AgentUsageServerOptions) =>
       const limits = Layer.effectDiscard(Effect.gen(function*() {
         const opened = yield* UsageStore
         const state = yield* RuntimeState
-        yield* Deferred.succeed(limitsReader, readLimitsNow(opened, state.machine))
+        yield* Deferred.succeed(readers, {
+          limits: readLimitsNow(opened, state.machine),
+          usage: (preset, timeZone) => readUsageNow(opened, state.machine, preset, timeZone)
+        })
       }))
       return Layer.mergeAll(HttpRouter.serve(application), background(options.config), limits).pipe(
         Layer.provide(services),

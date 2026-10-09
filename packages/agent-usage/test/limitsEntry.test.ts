@@ -27,11 +27,16 @@ describe.each(entries)("$name entry", ({ name, published, source }) => {
     })
     const imports = Object.values(result.metafile.inputs).flatMap(({ imports }) => imports.map(({ path }) => path))
     expect(imports.filter((path) => path.startsWith("node:"))).toEqual([])
+    // esbuild names inputs relative to the working directory ("src/client/App.tsx"), so match from a
+    // path segment boundary, not from the package name: that never matched, and the checks never failed.
     const sources = Object.keys(result.metafile.inputs)
-    expect(sources.filter((path) => /agent-usage\/src\/(server|core\/(Store|Database|Ingest))/.test(path))).toEqual([])
+    expect(sources.length).toBeGreaterThan(1)
+    expect(sources.filter((path) => /(?:^|\/)src\/(?:server|core\/(?:Store|Database|Ingest))\//.test(path))).toEqual(
+      []
+    )
     // tsc emits src/client/* to dist/client, which `vite build` then empties for the page: a module
     // the published entry reaches there is missing from dist (#704's CI). Keep the whole graph out.
-    expect(sources.filter((path) => /agent-usage\/src\/client\//.test(path))).toEqual([])
+    expect(sources.filter((path) => /(?:^|\/)src\/client\//.test(path))).toEqual([])
   })
 
   it("publishes the entry outside the directory the page build empties", () => {

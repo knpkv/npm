@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { expectTypeOf } from "vitest"
 import type { LimitSnapshot } from "../src/core/Model.js"
 import type { BookingSummary, UsageReport } from "../src/shared/contracts.js"
 import {
@@ -15,6 +16,7 @@ import {
   stackUsage,
   stepPath
 } from "../src/usage/chartModel.js"
+import type { TokenUsageChartProps } from "../src/usage/index.js"
 import { tooltipLeft } from "../src/usage/useTooltipPlacement.js"
 
 const tokens = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 }
@@ -99,6 +101,14 @@ describe("stackSeries", () => {
     const usage = report(10)
     const cells = usage.cells.map((cell) => ({ period: cell.period, id: cell.booking, value: cell.tokens }))
     expect(stackSeries(usage.periods.length, cells, null)).toEqual(stackUsage(usage, "tokens", null))
+  })
+})
+
+// The entry's chart is token-only: a caller cannot choose the page's cost measure, and must name it.
+describe("TokenUsageChart", () => {
+  it("takes no measure and requires an accessible name", () => {
+    expectTypeOf<TokenUsageChartProps>().not.toHaveProperty("measure")
+    expectTypeOf<TokenUsageChartProps["label"]>().toEqualTypeOf<string>()
   })
 })
 

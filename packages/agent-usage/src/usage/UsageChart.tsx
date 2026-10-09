@@ -42,8 +42,8 @@ export const UsageChart = (props: {
   readonly measure: Measure
   readonly slots: ReadonlyMap<string, number>
   readonly labelOf: (id: string) => string
-  /** The chart's accessible name; the page's default says it is stacked by booking. */
-  readonly label?: string
+  /** The chart's accessible name: what a column is per, and what it is stacked by. */
+  readonly label: string
 }) => {
   const [width, container] = useWidth(960)
   // Hover and focus open the breakdown independently; each ends only its own, so moving the pointer
@@ -99,13 +99,7 @@ export const UsageChart = (props: {
 
   return (
     <div className="usage-chart" ref={container}>
-      <svg
-        aria-label={props.label ?? `Usage per ${props.range.bucket}, stacked by booking`}
-        height={HEIGHT}
-        onMouseLeave={() => setHovered(null)}
-        role="group"
-        width={width}
-      >
+      <svg aria-label={props.label} height={HEIGHT} onMouseLeave={() => setHovered(null)} role="group" width={width}>
         {ticks.map((tick) => (
           <g aria-hidden="true" key={tick}>
             <line className="usage-grid" x1={PLOT.left} x2={width - PLOT.right} y1={y(tick)} y2={y(tick)} />

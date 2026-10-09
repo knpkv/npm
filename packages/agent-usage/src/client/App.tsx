@@ -202,6 +202,7 @@ const Dashboard = () => {
                 labelOf={labels}
                 measure={measure}
                 range={usage.value.range}
+                label={`Usage per ${usage.value.range.bucket}, stacked by booking`}
                 periods={usage.value.report.periods}
                 slots={slots}
                 stacked={stacked}

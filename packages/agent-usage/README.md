@@ -92,6 +92,20 @@ stderr and exit nonzero, with nothing on stdout:
 | `older version without limits` | The server predates the `limits` request; restart it on the installed version |
 | `could not read its store`     | The server knows the request but its store failed; the server's log says why  |
 
+### Usage for another program
+
+`agent-usage usage [--range 24h|7d|30d] [--time-zone ZONE]` asks the running server, over the same
+control socket, for this Machine's usage over the range and prints it as one JSON line:
+`{ v: 1, machine, observedAt, range, periods, tokens, limits }`. `tokens` holds the tokens of each
+period, agent and model; `limits` holds the limit series, at most 480 points each (the highest
+reading per slice, so a peak stays). Periods are local to `--time-zone` (default: this Machine's),
+so hosts asked with the same zone answer with the same period keys. The range defaults to `7d`.
+
+Tokens per agent and model only. No cost, balance, Booking (ticket or repo), session, path or
+prompt-key prefix is in the answer, so hostd can carry it to the herdr hub's Usage tab across hosts.
+Failures print one sentence on stderr and exit nonzero, as `limits` does; a zone the server does not
+know is refused by name.
+
 ### Charts for another page
 
 `@knpkv/agent-usage/usage` exports the page's two charts for another browser surface, with

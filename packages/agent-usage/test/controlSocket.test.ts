@@ -5,7 +5,9 @@ import * as Reactivity from "effect/reactivity/Reactivity"
 import { TestClock } from "effect/testing"
 import { spawn } from "node:child_process"
 import { createServer, type Server } from "node:net"
+import { UnknownTimeZone } from "../src/core/Report.js"
 import {
+  type ControlReaders,
   controlSocket,
   LimitsNotSupported,
   LimitsReplyInvalid,
@@ -13,22 +15,30 @@ import {
   LoginReplyInvalid,
   requestLimits,
   requestLoginUrl,
+  requestUsage,
   ServerAlreadyRunning,
   ServerNotRunning,
   SocketPathTooLong,
   SocketPathUnsafe,
-  SocketRefused
+  SocketRefused,
+  UsageNotSupported,
+  UsageReplyInvalid,
+  UsageRequestRefused,
+  UsageUnavailable
 } from "../src/server/ControlSocket.js"
 import { makeOwnerSession } from "../src/server/OwnerSession.js"
-import type { LimitsNow } from "../src/shared/contracts.js"
+import type { LimitsNow, UsageNow } from "../src/shared/contracts.js"
 
 const origin = "http://127.0.0.1:3112"
 
 /** The user id this test runs as, which owns everything it creates. */
 const self = process.geteuid?.() ?? -1
 
-/** For sockets whose tests never ask for limits. */
-const unasked = Effect.die("limits were not asked for in this test")
+/** For sockets whose tests never ask for limits or usage. */
+const unasked: ControlReaders<never> = {
+  limits: Effect.die("limits were not asked for in this test"),
+  usage: () => Effect.die("usage was not asked for in this test")
+}
 
 /** A private store directory, as the database layer would leave it. */
 const store = Effect.gen(function*() {
@@ -73,12 +83,12 @@ describe("control socket", () => {
         const limits: LimitsNow = { v: 1, machine: "host-a", observedAt: 1_000, latest: [] }
         const withLimits = yield* store
         const secrets = yield* makeOwnerSession(origin)
-        yield* controlSocket(withLimits, secrets, Effect.void, Effect.succeed(limits))
+        yield* controlSocket(withLimits, secrets, Effect.void, { ...unasked, limits: Effect.succeed(limits) })
         expect(yield* Effect.flip(requestLimits(withLimits, self + 1))).toBeInstanceOf(SocketPathUnsafe)
         expect(yield* requestLimits(withLimits, self)).toEqual(limits)
         // A store that could not be read: its own error, never empty limits.
         const failing = yield* store
-        yield* controlSocket(failing, secrets, Effect.void, Effect.fail("store unreadable"))
+        yield* controlSocket(failing, secrets, Effect.void, { ...unasked, limits: Effect.fail("store unreadable") })
         expect(yield* Effect.flip(requestLimits(failing, self))).toBeInstanceOf(LimitsUnavailable)
       }))
 
@@ -91,6 +101,63 @@ describe("control socket", () => {
         const garbled = yield* store
         yield* fakeServer(path.join(garbled, "serve.sock"), "{\"latest\":\"nope\"}\n")
         expect(yield* Effect.flip(requestLimits(garbled, self))).toBeInstanceOf(LimitsReplyInvalid)
+      }))
+
+    it.effect("answers usage for a range and zone to the owner, and refuses what it does not know", () =>
+      Effect.gen(function*() {
+        const asked: Array<readonly [string, string]> = []
+        const answer = (preset: UsageNow["range"]["preset"], timeZone: string): UsageNow => ({
+          v: 1,
+          machine: "host-a",
+          observedAt: 1_000,
+          range: { preset, timeZone, from: 0, to: 1_000, bucket: "day" },
+          periods: [],
+          tokens: [],
+          limits: []
+        })
+        const directory = yield* store
+        const secrets = yield* makeOwnerSession(origin)
+        yield* controlSocket(directory, secrets, Effect.void, {
+          ...unasked,
+          usage: (preset, timeZone) =>
+            timeZone === "Mars/Olympus"
+              ? Effect.fail(new UnknownTimeZone({ zone: timeZone }))
+              : Effect.sync(() => {
+                asked.push([preset, timeZone])
+                return answer(preset, timeZone)
+              })
+        })
+        expect(yield* Effect.flip(requestUsage(directory, self + 1, "7d", "UTC"))).toBeInstanceOf(SocketPathUnsafe)
+        expect(yield* requestUsage(directory, self, "30d", "Europe/Amsterdam")).toEqual(
+          answer("30d", "Europe/Amsterdam")
+        )
+        expect(asked).toEqual([["30d", "Europe/Amsterdam"]])
+        expect(yield* Effect.flip(requestUsage(directory, self, "7d", "Mars/Olympus"))).toBeInstanceOf(
+          UsageRequestRefused
+        )
+        // A zone with whitespace would be a different request line: refused before it is sent.
+        expect(yield* Effect.flip(requestUsage(directory, self, "7d", "UTC limits"))).toBeInstanceOf(
+          UsageRequestRefused
+        )
+        expect(asked).toHaveLength(1)
+        // A store that could not be read: its own error, never empty usage.
+        const failing = yield* store
+        yield* controlSocket(failing, secrets, Effect.void, {
+          ...unasked,
+          usage: () => Effect.fail("store unreadable")
+        })
+        expect(yield* Effect.flip(requestUsage(failing, self, "7d", "UTC"))).toBeInstanceOf(UsageUnavailable)
+      }))
+
+    it.effect("tells a server too old for usage from one answering nonsense", () =>
+      Effect.gen(function*() {
+        const path = yield* Path.Path
+        const older = yield* store
+        yield* fakeServer(path.join(older, "serve.sock"), "{\"error\":\"unknown request\"}\n")
+        expect(yield* Effect.flip(requestUsage(older, self, "7d", "UTC"))).toBeInstanceOf(UsageNotSupported)
+        const garbled = yield* store
+        yield* fakeServer(path.join(garbled, "serve.sock"), "{\"tokens\":\"nope\"}\n")
+        expect(yield* Effect.flip(requestUsage(garbled, self, "7d", "UTC"))).toBeInstanceOf(UsageReplyInvalid)
       }))
 
     it.effect("mints nothing until the server is listening", () =>

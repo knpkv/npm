@@ -171,6 +171,36 @@ export const LimitsNow = Schema.Struct({
 })
 export type LimitsNow = typeof LimitsNow.Type
 
+/** The ranges another program may ask {@link UsageNow} for: the page's presets up to a month. */
+export const UsagePreset = Schema.Literals(["24h", "7d", "30d"])
+export type UsagePreset = typeof UsagePreset.Type
+
+/** Tokens one agent's model used in one period: `period` indexes {@link UsageNow}'s `periods`. */
+export const TokenCell = Schema.Struct({
+  period: Count,
+  agent: Agent,
+  model: Schema.String,
+  tokens: Count
+})
+export type TokenCell = typeof TokenCell.Type
+
+/**
+ * This Machine's usage over a range, on the server's clock: what `agent-usage usage` prints, for
+ * another program to chart. Tokens per period, agent and model, and the limit series; nothing else.
+ * No cost, balance, Booking (ticket or repo), session, path or prompt-key prefix is in it, so it may
+ * leave the Machine: the herdr hub carries it across hosts. Versioned like {@link LimitsNow}.
+ */
+export const UsageNow = Schema.Struct({
+  v: Schema.Literal(1),
+  machine: Schema.NonEmptyString,
+  observedAt: Schema.Int,
+  range: Schema.Struct({ preset: UsagePreset, timeZone: Schema.String, from: Millis, to: Millis, bucket: Bucket }),
+  periods: Schema.Array(Period),
+  tokens: Schema.Array(TokenCell),
+  limits: Schema.Array(LimitSeries)
+})
+export type UsageNow = typeof UsageNow.Type
+
 const SkipCounts = Schema.Struct({ unparseableLine: Count, missingTimestamp: Count, oversizedLine: Count })
 
 export const SourceStatus = Schema.Struct({
