@@ -209,9 +209,18 @@ const makeGit = (spawner, cwd) =>
 const nulList = (output) => output.split("\0").filter((entry) => entry !== "")
 
 /**
- * The comparison base: an explicit `--base`, else the pending merge head (a merge's own changes are its
- * resolutions, not everything main brings), else the fork point with origin/main. Only the first two pin the CI
- * checks' bases, which otherwise resolve the fork point themselves.
+ * Untracked files are left out: a stray scratch file would otherwise be rewritten by prettier and eslint --fix.
+ * They are named instead, so a new file nobody added is not skipped silently; `git add -N` puts one in scope.
+ */
+export const untrackedNotice = (untracked) =>
+  untracked.length === 0
+    ? undefined
+    : `[precheck] skipping ${untracked.length} untracked file${untracked.length === 1 ? "" : "s"} (git add -N <file> to check one): ${untracked.join(", ")}`
+
+/**
+ * The comparison base: an explicit `--base`, else the pending merge head, else the fork point with origin/main.
+ * Against the merge head the diff is the whole branch against the new main, so rules main added run on every file
+ * the branch changed. Only the first two pin the CI checks' bases, which otherwise resolve the fork point themselves.
  */
 const resolveBase = Effect.fn("Precheck.resolveBase")(function* (git, fs, explicit) {
   if (explicit !== undefined) {
@@ -275,16 +284,11 @@ const program = Effect.gen(function* () {
   if (problem !== undefined) return yield* new PrecheckSetupError({ reason: problem })
 
   const base = yield* resolveBase(git, fs, options.base)
-  const untracked = nulList(yield* git(["ls-files", "-z", "--others", "--exclude-standard"]))
-  const files = [
-    ...new Set([
-      ...nulList(yield* git(["diff", "-z", "--name-only", "--diff-filter=ACMRT", base.commit])),
-      ...untracked
-    ])
-  ].toSorted()
-  const touched = [
-    ...new Set([...nulList(yield* git(["diff", "-z", "--name-only", "--no-renames", base.commit])), ...untracked])
-  ].toSorted()
+  const untracked = nulList(yield* git(["ls-files", "-z", "--others", "--exclude-standard"])).toSorted()
+  const files = nulList(yield* git(["diff", "-z", "--name-only", "--diff-filter=ACMRT", base.commit])).toSorted()
+  const touched = nulList(yield* git(["diff", "-z", "--name-only", "--no-renames", base.commit])).toSorted()
+  const notice = untrackedNotice(untracked)
+  if (notice !== undefined) yield* Console.log(notice)
   if (touched.length === 0) {
     yield* Console.log(`[precheck] nothing changed against ${base.commit.slice(0, 10)}`)
     return

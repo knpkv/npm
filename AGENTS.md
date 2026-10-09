@@ -51,6 +51,9 @@ pnpm exec effect-tsgo patch --typescript && pnpm exec husky
 test -x .husky/_/pre-commit && test "$(git config core.hooksPath)" = .husky/_ || { echo "hooks not installed" >&2; exit 1; }
 ```
 
+A package's `check` typechecks against its workspace dependencies' built `dist`. Before checking a package in a
+fresh worktree, build those dependencies with `pnpm --filter "<package>^..." build`.
+
 `pnpm check:changed` makes the same check and refuses to run without the hooks. A commit has
 passed the gate only if its output shows `[pre-commit]` lines. Write the commit output to a log rather
 than passing `-q`, and quote those lines when you report a pass. A commit made with `--no-verify` is
@@ -106,6 +109,16 @@ first failure:
    changed.
 3. Each touched package's own `check`, which includes its test tsconfig.
 4. The debt ledger, changed Effect diagnostics, changeset coverage and `lint:stripes`.
+
+Untracked files are left out and named in the output, so a stray scratch file is never reformatted. To check a new
+file, run `git add -N <file>` first.
+
+`check:changed` is a heavy job, not a quick lint:
+
+- Changeset coverage always runs, with a 1.5 GB heap.
+- Every touched package runs its full `check`, and Control Center's is the heaviest.
+
+On a shared machine, run it wherever heavy jobs are queued. Use `--dry-run` to see the steps first.
 
 It is not named `precheck` because pnpm runs a `precheck` script before every `pnpm check`. When you run checks
 by hand instead:
@@ -277,8 +290,11 @@ Update a pushed branch by merging main in. Never rebase or force-push.
 3. Resolve conflicts, and only conflicts.
    - Take main's `docs/debt.baseline.json` and `docs/debt.md` (`git checkout --theirs -- <file>`), then run
      `pnpm debt:update`.
-   - Check that `git diff origin/main -- docs/debt.baseline.json | grep -c '^+ '` is `0`. Never `tail` that output.
-     An added entry means the branch adds debt, so fix the code.
+   - Run `git diff origin/main -- docs/debt.baseline.json | grep '^+ '` and read every line it prints. Never `tail`
+     that output.
+     - A new entry means the branch adds debt, so fix the code.
+     - A changed `file` or `text` on an existing entry is a moved escape. It is fine only when that package's count
+       is unchanged, which `pnpm debt:check` confirms.
    - Stage only the conflicted paths. A fix the merge needs, such as a lint rule main added or an API change, goes
      in its own commit after the merge commit.
 4. Run `pnpm install`, then build the touched packages' workspace dependencies before typechecking
