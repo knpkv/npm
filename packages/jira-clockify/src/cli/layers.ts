@@ -67,13 +67,13 @@ export const ClockifyApiConfigLive = Layer.effect(
   Effect.gen(function*() {
     const auth = yield* ClockifyAuth
     return yield* auth.getConfig.pipe(
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.orElseSucceed(() => ({
-        apiKey: Redacted.make(""),
-        workspaceId: "",
-        userId: "",
-        baseUrl: "https://api.clockify.me/api"
-      }))
+      Effect.catchTag("ClockifyAuthMissingError", () =>
+        Effect.succeed({
+          apiKey: Redacted.make(""),
+          workspaceId: "",
+          userId: "",
+          baseUrl: "https://api.clockify.me/api"
+        }))
     )
   })
 ).pipe(Layer.provide(ClockifyAuthLive))

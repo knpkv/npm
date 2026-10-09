@@ -131,8 +131,9 @@ export const acquire = (options: { readonly intervalSeconds: number }) =>
     const token = yield* Random.nextInt
     const owner = `${now.toString(36)}-${Math.abs(token).toString(36)}`
 
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    yield* fs.makeDirectory(dir, { recursive: true }).pipe(Effect.catch(() => Effect.void))
+    yield* fs.makeDirectory(dir, { recursive: true }).pipe(
+      Effect.catch((error) => Effect.logWarning(`Could not create ${dir}; the watch lease cannot be saved`, error))
+    )
 
     const mine: Lease = {
       owner,
@@ -147,8 +148,14 @@ export const acquire = (options: { readonly intervalSeconds: number }) =>
     // no interruptible work before returning the lease to the caller that installs its finalizer.
     const previous = yield* fs.readFileString(cursorFile).pipe(
       Effect.map(decodeLease),
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.catch(() => Effect.succeed(Option.none<Lease>()))
+      // No cursor yet is the first run. Any other read failure loses the resume point, so it warns and starts from now.
+      Effect.catch((error) =>
+        (error.reason._tag === "NotFound"
+          ? Effect.logDebug(`No watch cursor at ${cursorFile} yet`)
+          : Effect.logWarning(`Could not read the watch cursor at ${cursorFile}; resuming from now`, error)).pipe(
+            Effect.as(Option.none<Lease>())
+          )
+      )
     )
     const resumeFromMs = Option.match(previous, {
       onNone: () => null,
@@ -181,9 +188,15 @@ export const acquire = (options: { readonly intervalSeconds: number }) =>
 
     const existing = yield* fs.readFileString(file).pipe(
       Effect.map(decodeLease),
-      // Unreadable or malformed is not evidence that anybody holds it.
-      // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-      Effect.catch(() => Effect.succeed(Option.none<Lease>()))
+      // Unreadable or malformed is not evidence that anybody holds it. Gone since the create is a race with its
+      // removal; any other read failure is unexpected and warns.
+      Effect.catch((error) =>
+        (error.reason._tag === "NotFound"
+          ? Effect.logDebug(`The watch lease at ${file} was removed while reading it`)
+          : Effect.logWarning(`Could not read the watch lease at ${file}`, error)).pipe(
+            Effect.as(Option.none<Lease>())
+          )
+      )
     )
     const held = Option.getOrUndefined(existing)
     if (held === undefined || held.owner === undefined) {
@@ -273,8 +286,9 @@ export const release = (options: {
       )
     )
     if (!persisted) return
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    yield* fs.remove(options.path).pipe(Effect.catch(() => Effect.void))
+    yield* fs.remove(options.path).pipe(
+      Effect.catch((error) => Effect.logWarning(`Could not remove the watch lease at ${options.path}`, error))
+    )
   })
 
 /** Release a short-lived non-watch writer without publishing a watch resume cursor. */
@@ -283,6 +297,7 @@ export const releaseGuard = (options: { readonly path: string; readonly owner: s
     const fs = yield* FileSystem.FileSystem
     const standing = yield* readStanding(options.path, options.owner)
     if (standing._tag !== "Mine") return
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    yield* fs.remove(options.path).pipe(Effect.catch(() => Effect.void))
+    yield* fs.remove(options.path).pipe(
+      Effect.catch((error) => Effect.logWarning(`Could not remove the watch lease at ${options.path}`, error))
+    )
   })

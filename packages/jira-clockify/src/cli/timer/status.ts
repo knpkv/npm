@@ -93,8 +93,9 @@ export const statusCmd = Command.make(
         if (state.active) {
           const clockifyAuth = yield* ClockifyAuth
           const clockifyClient = yield* ClockifyApiClient
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-          const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
+          const auth = yield* clockifyAuth.getConfig.pipe(
+            Effect.catchTag("ClockifyAuthMissingError", () => Effect.succeed(null))
+          )
           if (auth !== null) {
             let apiReachable = false
             // The bound goes innermost: `apiReachable` gates clearing the state
@@ -109,8 +110,11 @@ export const statusCmd = Command.make(
                   apiReachable = true
                 })
               ),
-              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-              Effect.catch(() => Effect.succeed(null))
+              Effect.catch((error) =>
+                Effect.logWarning("Could not reach Clockify to confirm the timer is still running", error).pipe(
+                  Effect.as(null)
+                )
+              )
             )
             // Only clear if API was reachable and confirmed no running timer
             if (apiReachable && running === null) {
@@ -147,21 +151,29 @@ export const statusCmd = Command.make(
         // Show project/billable from Clockify entry
         const clockifyAuth = yield* ClockifyAuth
         const clockifyClient = yield* ClockifyApiClient
-        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
+        const auth = yield* clockifyAuth.getConfig.pipe(
+          Effect.catchTag("ClockifyAuthMissingError", () => Effect.succeed(null))
+        )
         if (auth !== null && state.clockifyEntryId !== null) {
           const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, state.clockifyEntryId).pipe(
             Effect.timeout(API_TIMEOUT),
-            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-            Effect.catch(() => Effect.succeed(null))
+            Effect.catch((error) =>
+              Effect.logWarning("Could not read the running Clockify entry; project and tags are not shown", error)
+                .pipe(
+                  Effect.as(null)
+                )
+            )
           )
           if (entry !== null) {
             let projectName = "none"
             if (entry.projectId !== null && entry.projectId !== undefined) {
               const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
                 Effect.timeout(API_TIMEOUT),
-                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-                Effect.catch(() => Effect.succeed([]))
+                Effect.catch((error) =>
+                  Effect.logWarning("Clockify projects could not be listed; showing the project id", error).pipe(
+                    Effect.as([])
+                  )
+                )
               )
               projectName = projects.find((p) => p.id === entry.projectId)?.name ?? entry.projectId
             }
@@ -172,8 +184,9 @@ export const statusCmd = Command.make(
             if (entry.tagIds !== null && entry.tagIds !== undefined && entry.tagIds.length > 0) {
               const allTags = yield* clockifyClient.getTags(auth.workspaceId).pipe(
                 Effect.timeout(API_TIMEOUT),
-                // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-                Effect.catch(() => Effect.succeed([]))
+                Effect.catch((error) =>
+                  Effect.logWarning("Clockify tags could not be listed; showing tag ids", error).pipe(Effect.as([]))
+                )
               )
               const tagNames = entry.tagIds
                 .map((id) => allTags.find((t) => t.id === id)?.name ?? id)
