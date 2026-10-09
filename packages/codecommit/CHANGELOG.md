@@ -1,5 +1,14 @@
 # @knpkv/codecommit
 
+## 0.17.2
+
+### Patch Changes
+
+- [#640](https://github.com/knpkv/npm/pull/640) [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442) Thanks [@konopkov](https://github.com/konopkov)! - Relay in CodeCommit web can read a pull request's changed files at its current revision (`get_pull_request_diff`) and post a comment on one line (`post_line_comment`). A line comment is pinned to the revision it was written against: it is refused if the pull request has moved on, or if the line is outside the changes. The person confirms the exact file, side, line, revision and text first.
+- Updated dependencies [[`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`d8fcb1a`](https://github.com/knpkv/npm/commit/d8fcb1a3ab52db1e93464fda034737dca1272fa2)]:
+  - @knpkv/codecommit-core@0.25.0
+  - @knpkv/codecommit-web@0.29.0
+
 ## 0.17.1
 
 ### Patch Changes

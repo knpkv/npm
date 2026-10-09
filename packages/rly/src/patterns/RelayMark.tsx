@@ -14,7 +14,24 @@ export const RLY_RELAY_MARK_TILE_SIZES: readonly [20, 24, 32] = [20, 24, 32]
 /** One supported tile size. */
 export type RlyRelayMarkTileSize = (typeof RLY_RELAY_MARK_TILE_SIZES)[number]
 
+/**
+ * What Relay is doing, as the mark shows it. `idle` holds still; `working` passes the baton between the
+ * hooks while Relay reads or answers; `attention` nudges the hooks together twice, then rests, when Relay
+ * waits on the reader. Motion only: the host still says in words what Relay is doing.
+ */
+export const RLY_RELAY_MARK_ACTIVITIES: readonly ["idle", "working", "attention"] = ["idle", "working", "attention"]
+/** One activity the mark can show. */
+export type RlyRelayMarkActivity = (typeof RLY_RELAY_MARK_ACTIVITIES)[number]
+
 type MarkBaseProps = Omit<ComponentPropsWithRef<"svg">, "children" | "height" | "viewBox" | "width">
+
+/** Motion shared by the bare mark and the tile; every movement waits for the reader's motion preference. */
+interface MarkMotionProps {
+  /** `idle` (still) unless given. */
+  readonly activity?: RlyRelayMarkActivity | undefined
+  /** Plays one short entrance when the mark mounts, for a header that opens with Relay. */
+  readonly entrance?: boolean | undefined
+}
 
 /** The ARIA naming a caller may pass natively instead of `label`. */
 interface NativeNaming {
@@ -44,28 +61,37 @@ const naming = (label: string | undefined, native: NativeNaming, what: string): 
 }
 
 /** Inputs for the bare mark. */
-export type RelayMarkProps = MarkBaseProps & {
-  /** 20px unless given. */
-  readonly size?: RlyRelayMarkSize
-  /** Names the mark for assistive technology; without it the mark is decorative and hidden. */
-  readonly label?: string
-}
+export type RelayMarkProps = MarkBaseProps &
+  MarkMotionProps & {
+    /** 20px unless given. */
+    readonly size?: RlyRelayMarkSize
+    /** Names the mark for assistive technology; without it the mark is decorative and hidden. */
+    readonly label?: string
+  }
 
 /** Inputs for the mark on an agent-coloured tile. */
-export type RelayMarkTileProps = Omit<ComponentPropsWithRef<"span">, "children"> & {
-  /** 24px unless given. */
-  readonly size?: RlyRelayMarkTileSize
-  /** Names the tile for assistive technology; without it the tile is decorative and hidden. */
-  readonly label?: string
-}
+export type RelayMarkTileProps = Omit<ComponentPropsWithRef<"span">, "children"> &
+  MarkMotionProps & {
+    /** 24px unless given. */
+    readonly size?: RlyRelayMarkTileSize
+    /** Names the tile for assistive technology; without it the tile is decorative and hidden. */
+    readonly label?: string
+  }
 
 /**
  * The baton: two open hooks with a diagonal stroke passed between them, on a 24 grid with a 2.75
  * stroke (Relay UX decision, variant D). Round caps and joins keep the 16px bare mark legible.
  */
-const Glyph = ({ size, ...props }: MarkBaseProps & { readonly size: number }): ReactElement => (
+const Glyph = ({
+  activity,
+  entrance,
+  size,
+  ...props
+}: MarkBaseProps & MarkMotionProps & { readonly size: number }): ReactElement => (
   <svg
     {...props}
+    data-rly-relay-activity={activity ?? "idle"}
+    data-rly-relay-entrance={entrance === true ? "" : undefined}
     fill="none"
     focusable="false"
     height={size}
@@ -76,14 +102,14 @@ const Glyph = ({ size, ...props }: MarkBaseProps & { readonly size: number }): R
     viewBox="0 0 24 24"
     width={size}
   >
-    <path d="M4 20V9.5A5.5 5.5 0 0 1 9.5 4H13" />
-    <path d="M20 4v10.5a5.5 5.5 0 0 1-5.5 5.5H11" />
-    <path d="M10 14 14 10" />
+    <path className={style("hookStart")} d="M4 20V9.5A5.5 5.5 0 0 1 9.5 4H13" />
+    <path className={style("hookEnd")} d="M20 4v10.5a5.5 5.5 0 0 1-5.5 5.5H11" />
+    <path className={style("baton")} d="M10 14 14 10" />
   </svg>
 )
 
 /** The mark on an agent-coloured tile; in forced colours the tile becomes an outline in its context's colour. */
-const RelayMarkTile = ({ className, label, size, ...props }: RelayMarkTileProps): ReactElement => {
+const RelayMarkTile = ({ activity, className, entrance, label, size, ...props }: RelayMarkTileProps): ReactElement => {
   const pixels = size ?? 24
   return (
     <span
@@ -92,14 +118,21 @@ const RelayMarkTile = ({ className, label, size, ...props }: RelayMarkTileProps)
       className={classNames(style("tile"), className)}
       data-size={pixels}
     >
-      <Glyph aria-hidden="true" className={style("tileGlyph")} size={pixels / 2} />
+      <Glyph
+        activity={activity}
+        aria-hidden="true"
+        className={style("tileGlyph")}
+        entrance={entrance}
+        size={pixels / 2}
+      />
     </span>
   )
 }
 
 /**
  * Relay's mark, drawn in the current colour, so it follows its host's text in every theme and in
- * forced colours. `RelayMark.Tile` sets it on the agent colour for headers and avatars.
+ * forced colours. `RelayMark.Tile` sets it on the agent colour for headers and avatars. Both move only
+ * when given an `activity` or `entrance`, and only for a reader who has not asked for reduced motion.
  */
 export const RelayMark = Object.assign(
   ({ className, label, size, ...props }: RelayMarkProps): ReactElement => (

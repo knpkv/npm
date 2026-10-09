@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-connect",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Fleet Herdr agent directory and authenticated terminal control",
   "license": "MIT",
   "author": "knpkv",

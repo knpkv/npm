@@ -2,7 +2,13 @@
 
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
-import { RelayMark, RLY_RELAY_MARK_SIZES, RLY_RELAY_MARK_TILE_SIZES } from "../../src/patterns/RelayMark.js"
+import { RelayLauncher, relayShortcut } from "../../src/patterns/RelayLauncher.js"
+import {
+  RelayMark,
+  RLY_RELAY_MARK_ACTIVITIES,
+  RLY_RELAY_MARK_SIZES,
+  RLY_RELAY_MARK_TILE_SIZES
+} from "../../src/patterns/RelayMark.js"
 
 const parse = (markup: string): Element => {
   const host = document.createElement("div")
@@ -53,5 +59,30 @@ describe("RelayMark", () => {
       expect(tile.querySelector("svg")?.getAttribute("width")).toBe(String(size / 2))
     }
     expect(parse(renderToStaticMarkup(<RelayMark.Tile label="Relay" />)).getAttribute("role")).toBe("img")
+  })
+
+  // The stylesheet keys every movement off these attributes; an idle mark carries no entrance.
+  it("marks its activity on the glyph, idle and without an entrance unless given", () => {
+    const still = parse(renderToStaticMarkup(<RelayMark />))
+    expect(still.getAttribute("data-rly-relay-activity")).toBe("idle")
+    expect(still.hasAttribute("data-rly-relay-entrance")).toBe(false)
+    for (const activity of RLY_RELAY_MARK_ACTIVITIES) {
+      expect(
+        parse(renderToStaticMarkup(<RelayMark activity={activity} />)).getAttribute("data-rly-relay-activity")
+      ).toBe(activity)
+      const glyph = parse(renderToStaticMarkup(<RelayMark.Tile activity={activity} entrance />)).querySelector("svg")
+      expect(glyph?.getAttribute("data-rly-relay-activity")).toBe(activity)
+      expect(glyph?.hasAttribute("data-rly-relay-entrance")).toBe(true)
+    }
+    // Only the baton and the two hooks move, each by its own class.
+    expect(still.querySelectorAll("path[class]")).toHaveLength(3)
+  })
+
+  it("shows the launcher's activity on its mark", () => {
+    const launcher = parse(
+      renderToStaticMarkup(<RelayLauncher activity="working" expanded={false} shortcut={relayShortcut(false)} />)
+    )
+    expect(launcher.querySelector("svg")?.getAttribute("data-rly-relay-activity")).toBe("working")
+    expect(launcher.hasAttribute("activity")).toBe(false)
   })
 })

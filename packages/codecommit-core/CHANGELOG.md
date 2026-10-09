@@ -1,5 +1,11 @@
 # @knpkv/codecommit-core
 
+## 0.25.0
+
+### Minor Changes
+
+- [#640](https://github.com/knpkv/npm/pull/640) [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442) Thanks [@konopkov](https://github.com/konopkov)! - Relay capabilities for CodeCommit: read a pull request (with its approval as the queue shows it: Approved, NotRequired, Pending or Unknown), list the queue, and post a confirmed comment pinned to the current revision. A comment the person's permission settings refuse, or a permission prompt nobody answers, fails as `CommentNotPermitted`, which tells the model not to retry.
+
 ## 0.24.0
 
 ### Minor Changes
