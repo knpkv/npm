@@ -1,14 +1,26 @@
 import assert from "node:assert/strict"
 import { matchesGlob } from "node:path"
 import test from "node:test"
+import { fileURLToPath } from "node:url"
+
+import { NodeServices } from "@effect/platform-node"
 
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 import rootManifest from "../package.json" with { type: "json" }
-import { eslintPartition, hooksProblem, parseArguments, planPrecheck, untrackedNotice } from "./precheck.mjs"
+import {
+  chooseBase,
+  eslintPartition,
+  hooksProblem,
+  parseArguments,
+  planPrecheck,
+  untrackedNotice
+} from "./precheck.mjs"
 
 const rootScripts = rootManifest.scripts
+const repositoryRoot = fileURLToPath(new URL("..", import.meta.url))
 const eslintPartitions = ["lint:eslint:control-center", "lint:eslint:workspace"].map((name) =>
   eslintPartition(name, rootScripts[name])
 )
@@ -116,12 +128,74 @@ test("repository checks always close the run, with their bases pinned only when 
 
 // A pinned EFFECT_DIAGNOSTICS_BASE mid-merge became merge-base(HEAD, MERGE_HEAD), the old fork point: #608's merge
 // checked ~380 files of main's delta and failed on main's own diagnostics. The script reads MERGE_HEAD itself.
-test("during a merge only changeset coverage is pinned to the merge head", () => {
+test("during a merge only changeset coverage is pinned, and an inherited diagnostics base is removed", () => {
   const merge = plan({ files: ["README.md"], base: { commit: "merge123", kind: "merge" } })
   const env = (label) => merge.find((step) => step.label === label).env
-  assert.deepEqual(env("changeset coverage"), { CHANGESET_COVERAGE_BASE: "merge123" })
-  assert.deepEqual(env("changed Effect diagnostics"), { CHANGESET_COVERAGE_BASE: "merge123" })
-  assert.equal("EFFECT_DIAGNOSTICS_BASE" in env("changed Effect diagnostics"), false)
+  for (const label of ["changeset coverage", "changed Effect diagnostics"]) {
+    assert.deepEqual(env(label), { CHANGESET_COVERAGE_BASE: "merge123", EFFECT_DIAGNOSTICS_BASE: undefined })
+    assert.equal(Object.hasOwn(env(label), "EFFECT_DIAGNOSTICS_BASE"), true)
+  }
+})
+
+// The old merge-main skill told agents to export EFFECT_DIAGNOSTICS_BASE, so it is live in their shells. Inherited
+// into the step, it widens diagnostics to the old fork point exactly as a pinned one did. Runs the real runStep in a
+// child whose environment carries the leak.
+test("a step during a merge does not see an EFFECT_DIAGNOSTICS_BASE exported by the caller", async () => {
+  const probe = `
+    import { NodeServices } from "@effect/platform-node"
+    import * as Effect from "effect/Effect"
+    import { ChildProcessSpawner } from "effect/process"
+    import { checkBases, runStep } from "./scripts/precheck.mjs"
+    const step = {
+      label: "probe",
+      command: "sh",
+      args: ["-c", process.argv[2]],
+      env: checkBases({ commit: "merge123", kind: process.argv[1] })
+    }
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        yield* runStep(yield* ChildProcessSpawner.ChildProcessSpawner, process.cwd(), step, 1, 1)
+      }).pipe(Effect.provide(NodeServices.layer))
+    )
+  `
+  const run = (kind) =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        return yield* spawner.string(
+          ChildProcess.make(
+            "node",
+            ["--input-type=module", "-e", probe, kind, 'echo "[${EFFECT_DIAGNOSTICS_BASE-unset}]"'],
+            {
+              cwd: repositoryRoot,
+              env: { EFFECT_DIAGNOSTICS_BASE: "leaked" },
+              extendEnv: true
+            }
+          )
+        )
+      }).pipe(Effect.provide(NodeServices.layer))
+    )
+  assert.match(await run("merge"), /^\[unset\]$/mu)
+  // The fork-point base pins nothing, so the caller's value still reaches the step: the probe can see a leak.
+  assert.match(await run("fork"), /^\[leaked\]$/mu)
+})
+
+test("--base is refused during a merge, and a merge needs exactly one head", () => {
+  const fails = (input) => Exit.isFailure(Effect.runSyncExit(chooseBase(input)))
+  assert.equal(fails({ explicit: "origin/main", mergeHeads: ["abc"] }), true)
+  assert.equal(fails({ explicit: undefined, mergeHeads: ["abc", "def"] }), true)
+  assert.deepEqual(Effect.runSync(chooseBase({ explicit: undefined, mergeHeads: ["abc"] })), {
+    kind: "merge",
+    ref: "abc"
+  })
+  assert.deepEqual(Effect.runSync(chooseBase({ explicit: "v1", mergeHeads: undefined })), {
+    kind: "explicit",
+    ref: "v1"
+  })
+  assert.deepEqual(Effect.runSync(chooseBase({ explicit: undefined, mergeHeads: undefined })), {
+    kind: "fork",
+    ref: "origin/main"
+  })
 })
 
 test("rule and script changes run their own tests", () => {
