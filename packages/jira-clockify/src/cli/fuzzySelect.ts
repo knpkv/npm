@@ -124,8 +124,8 @@ export const fuzzySelect = <A>(options: {
 
     let renderedLines = 0
 
-    // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-    const display = (s: string) => terminal.display(s).pipe(Effect.catch(() => Effect.void))
+    const display = (s: string) =>
+      terminal.display(s).pipe(Effect.catch((error) => Effect.logDebug("Terminal write failed while redrawing", error)))
 
     const redraw = Effect.gen(function*() {
       if (renderedLines > 0) {

@@ -4,7 +4,7 @@
  * @module
  */
 import { ClockifyApiClient, type Project } from "@knpkv/clockify-api-client"
-import { Clock, Console, Effect, Option, SubscriptionRef } from "effect"
+import { Cause, Clock, Console, Effect, Option, SubscriptionRef } from "effect"
 import { Argument as Args, Command, Flag as Options, Prompt } from "effect/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
@@ -130,11 +130,18 @@ export const start = Command.make(
             title: `${t.key.padEnd(12)} ${t.summary.slice(0, 45).padEnd(45)} [${t.status}]`,
             value: t.key
           }))
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        }).pipe(Effect.catch(() => Effect.succeed(noSelectedKey())))
+        }).pipe(
+          // Input ending (Ctrl+C, end of input) is the user cancelling; a terminal error still fails the command.
+          Effect.catchIf(Cause.isDone, () =>
+            Effect.logDebug("Ticket selection ended without a choice").pipe(Effect.as(noSelectedKey())))
+        )
 
-        if (!selectedKey) return
-        const found = allTickets.find((t) => t.key === selectedKey)
+        if (selectedKey === null) {
+          return
+        }
+        const found = allTickets.find((t) =>
+          t.key === selectedKey
+        )
         if (!found) return
         ticket = found
       } else {
@@ -162,12 +169,16 @@ export const start = Command.make(
           yield* Console.log(`Using default project: ${config.defaultProjectName ?? config.defaultProjectId}`)
         } else {
           // Prompt: list projects
-          // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-          const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
+          const auth = yield* clockifyAuth.getConfig.pipe(
+            Effect.catchTag("ClockifyAuthMissingError", () => Effect.succeed(null))
+          )
           if (auth) {
             const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-              // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-              Effect.catch(() => Effect.succeed(emptyProjects()))
+              Effect.catch((error) =>
+                Effect.logWarning("Clockify projects could not be listed; no project is set", error).pipe(
+                  Effect.as(emptyProjects())
+                )
+              )
             )
             if (projects.length > 0) {
               const selected = yield* Prompt.Select({
@@ -193,13 +204,17 @@ export const start = Command.make(
 
       // Save defaults if requested
       if (saveDefaults && (projectId || billableVal !== undefined)) {
-        // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-        const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
+        const auth = yield* clockifyAuth.getConfig.pipe(
+          Effect.catchTag("ClockifyAuthMissingError", () => Effect.succeed(null))
+        )
         let projectName: string | null = null
         if (projectId && auth) {
           const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
-            // ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort
-            Effect.catch(() => Effect.succeed(emptyProjects()))
+            Effect.catch((error) =>
+              Effect.logWarning("Clockify projects could not be listed; no project is set", error).pipe(
+                Effect.as(emptyProjects())
+              )
+            )
           )
           projectName = projects.find((p) => p.id === projectId)?.name ?? null
         }

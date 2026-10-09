@@ -54,6 +54,10 @@ const replaySafe = { replay: "safe" } satisfies { readonly replay: "safe" }
 
 const declined = (verb: string): string => `The user declined: ${verb}. Do not retry it unless they ask again.`
 
+/** Arguments that passed Pi's JSON Schema but not the capability's own decode; the person is never asked. */
+const invalidArguments = (verb: string, cause: string): string =>
+  `${verb} got invalid arguments, so nobody was asked: ${cause}`
+
 const resultText = (result: InvocationResult): string => JSON.stringify(result.output)
 
 /** What the model reads when a call fails: the declared reason and fix, never a defect's internals. */
@@ -121,7 +125,9 @@ export const relayExtension = <Requirements>(
   const gate = hook(ToolTask, {
     beforeTool: async (call, api, context) => {
       const capability = byName.get(call.name)
-      const gate = capability?.gate
+      // Pi refuses unregistered tools before this hook, but another extension's tools would reach it.
+      if (capability === undefined) return { block: `${call.name} is not a Relay capability.` }
+      const gate = capability.gate
       if (gate === undefined) return undefined
       if (gate.access === "host") {
         return { block: `${call.name} needs a herdr Approval, which Relay cannot request yet.` }
@@ -132,7 +138,12 @@ export const relayExtension = <Requirements>(
       // Arguments the confirmation can't show are refused with their reason, never asked about or read as a decline.
       const action = await runEffect(gate.describe(call.arguments), context.abortSignal)
       if (action._tag === "Failure") {
-        return { block: modelVisibleFailure(call.name, Cause.findErrorOption(action.cause)) }
+        const failure = Cause.findErrorOption(action.cause)
+        return {
+          block: failure._tag === "Some" && failure.value._tag === "CapabilityInputInvalid"
+            ? invalidArguments(call.name, failure.value.issue)
+            : modelVisibleFailure(call.name, failure)
+        }
       }
       const allowed = await broker.ask({
         conversationId: String(api.conversationId),

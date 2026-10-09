@@ -17,7 +17,7 @@ import type { CacheService, ConfigService, ReadClient } from "@knpkv/codecommit-
 import { Domain, RelayCapabilities } from "@knpkv/codecommit-core"
 import { claudeCodeBackend, codexCliBackend, make, register } from "@knpkv/relay"
 import type { RegisteredCapability, RelayBackend, RelayHarnessService, WriteReceipt } from "@knpkv/relay"
-import { Config, Context, type Crypto, Effect, FileSystem, Layer, Path } from "effect"
+import { Config, Context, type Crypto, Data, Effect, FileSystem, Layer, Path } from "effect"
 import type { ChildProcessSpawner } from "effect/process"
 import { RelayUnavailableError } from "../Api.js"
 import { RelayFindingPublisher } from "../review/RelayFindingPublisher.js"
@@ -69,6 +69,9 @@ type CapabilityServices =
   | RelayFindingPublisher
   | Crypto.Crypto
 
+/** `~/.codecommit/relay` resolves somewhere else, so Relay would write its sessions into a directory it doesn't own. */
+class RelayDirectoryIsLink extends Data.TaggedError("RelayDirectoryIsLink")<{ readonly resolved: string }> {}
+
 const unavailable = (message: string, fix: string) =>
   Effect.succeed(RelayMount.of({ harness: Effect.fail(new RelayUnavailableError({ message, fix })) }))
 
@@ -101,6 +104,12 @@ export const relayMountLayerWith = <R>(backends: RelayBackends<R>) =>
       const home = yield* Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE")))
       const directory = path.join(home, ".codecommit", "relay")
       yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 })
+      // The store restricts its directory with chmod, which follows a link: check the last step is real first.
+      const parent = yield* fs.realPath(path.dirname(directory))
+      const resolved = yield* fs.realPath(directory)
+      if (resolved !== path.join(parent, path.basename(directory))) {
+        return yield* new RelayDirectoryIsLink({ resolved })
+      }
       const available = yield* backends(directory)
       const capabilities = RelayCapabilities.capabilities
       const registered: ReadonlyArray<RegisteredCapability<CapabilityServices>> = [
@@ -123,18 +132,26 @@ export const relayMountLayerWith = <R>(backends: RelayBackends<R>) =>
           unavailable(message, "Another codecommit web owns Relay's sessions. Stop it, then restart this one."),
         RelayStoreFailed: ({ message }) =>
           unavailable(message, "Check that ~/.codecommit/relay is owned by you and writable, then restart."),
-        ConfigError: () => unavailable("HOME is not set.", "Start codecommit web from a login shell.")
+        ConfigError: () => unavailable("HOME is not set.", "Start codecommit web from a login shell."),
+        RelayDirectoryIsLink: (failure) =>
+          Effect.logWarning("Relay refused a linked data directory", failure).pipe(
+            Effect.andThen(
+              unavailable(
+                "~/.codecommit/relay is a link.",
+                "Replace ~/.codecommit/relay with a directory you own, then restart."
+              )
+            )
+          )
       }),
-      Effect.catch((failure) =>
+      Effect.catchTag("PlatformError", (failure) =>
         Effect.logWarning("Relay could not start", failure).pipe(
           Effect.andThen(
             unavailable(
-              "Relay could not create its data directory.",
+              "Relay could not prepare its data directory.",
               "Check that ~/.codecommit is owned by you and writable, then restart."
             )
           )
-        )
-      )
+        ))
     )
   )
 

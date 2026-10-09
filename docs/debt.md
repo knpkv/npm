@@ -610,40 +610,10 @@ Counts ratchet per package and kind: `pnpm debt:check` fails when one rises, and
 
 ## jira-clockify
 
-65 directives (ast-grep 30, effect-diagnostics 35), 21 without a reason.
+35 directives (effect-diagnostics 35), 21 without a reason.
 
 | File | Kind | Directive | Reason |
 | --- | --- | --- | --- |
-| [packages/jira-clockify/src/cli/auth.ts](../packages/jira-clockify/src/cli/auth.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/fuzzySelect.ts](../packages/jira-clockify/src/cli/fuzzySelect.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/layers.ts](../packages/jira-clockify/src/cli/layers.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/reconcile.ts](../packages/jira-clockify/src/cli/reconcile.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/setup.ts](../packages/jira-clockify/src/cli/setup.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/setup.ts](../packages/jira-clockify/src/cli/setup.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/setup.ts](../packages/jira-clockify/src/cli/setup.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/setup.ts](../packages/jira-clockify/src/cli/setup.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/edit.ts](../packages/jira-clockify/src/cli/timer/edit.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/edit.ts](../packages/jira-clockify/src/cli/timer/edit.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/edit.ts](../packages/jira-clockify/src/cli/timer/edit.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/edit.ts](../packages/jira-clockify/src/cli/timer/edit.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/start.ts](../packages/jira-clockify/src/cli/timer/start.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/start.ts](../packages/jira-clockify/src/cli/timer/start.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/start.ts](../packages/jira-clockify/src/cli/timer/start.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/start.ts](../packages/jira-clockify/src/cli/timer/start.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/start.ts](../packages/jira-clockify/src/cli/timer/start.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/status.ts](../packages/jira-clockify/src/cli/timer/status.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/status.ts](../packages/jira-clockify/src/cli/timer/status.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/status.ts](../packages/jira-clockify/src/cli/timer/status.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/status.ts](../packages/jira-clockify/src/cli/timer/status.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/status.ts](../packages/jira-clockify/src/cli/timer/status.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/status.ts](../packages/jira-clockify/src/cli/timer/status.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/stop.ts](../packages/jira-clockify/src/cli/timer/stop.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/timer/stop.ts](../packages/jira-clockify/src/cli/timer/stop.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/watchLease.ts](../packages/jira-clockify/src/cli/watchLease.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/watchLease.ts](../packages/jira-clockify/src/cli/watchLease.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/watchLease.ts](../packages/jira-clockify/src/cli/watchLease.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/watchLease.ts](../packages/jira-clockify/src/cli/watchLease.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
-| [packages/jira-clockify/src/cli/watchLease.ts](../packages/jira-clockify/src/cli/watchLease.ts) | ast-grep | `ast-grep-ignore: no-silent-catch-all -- follow-up: silent fallback; fail with a typed error, log it, or mark it best-effort` | yes |
 | [packages/jira-clockify/src/bin.ts](../packages/jira-clockify/src/bin.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/jira-clockify/src/services/SessionAttributor.ts](../packages/jira-clockify/src/services/SessionAttributor.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |
 | [packages/jira-clockify/src/services/SessionAttributor.ts](../packages/jira-clockify/src/services/SessionAttributor.ts) | effect-diagnostics | `@effect-diagnostics-next-line strictEffectProvide:off` | yes |

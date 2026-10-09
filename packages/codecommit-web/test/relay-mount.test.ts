@@ -55,4 +55,34 @@ layer(NodeServices.layer, { excludeTestServices: true })("Relay mount", (it) => 
         fix: "Another codecommit web owns Relay's sessions. Stop it, then restart this one."
       })
     }).pipe(Effect.scoped))
+
+  it.effect("tightens an existing ~/.codecommit/relay to owner-only", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fs.makeTempDirectoryScoped()
+      const directory = path.join(home, ".codecommit", "relay")
+      yield* fs.makeDirectory(directory, { recursive: true, mode: 0o755 })
+      yield* fs.chmod(directory, 0o755)
+      yield* Effect.flatMap(mounted(home), (mount) => mount.harness)
+      expect((yield* fs.stat(directory)).mode & 0o777).toBe(0o700)
+    }).pipe(Effect.scoped))
+
+  it.effect("refuses a ~/.codecommit/relay that is a symbolic link, and leaves its target alone", () =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const home = yield* fs.makeTempDirectoryScoped()
+      const elsewhere = yield* fs.makeTempDirectoryScoped()
+      yield* fs.chmod(elsewhere, 0o755)
+      yield* fs.makeDirectory(path.join(home, ".codecommit"))
+      yield* fs.symlink(elsewhere, path.join(home, ".codecommit", "relay"))
+      const refused = yield* Effect.flatMap(mounted(home), (mount) => mount.harness).pipe(Effect.flip)
+      expect(refused).toMatchObject({
+        _tag: "RelayUnavailableError",
+        fix: "Replace ~/.codecommit/relay with a directory you own, then restart."
+      })
+      expect((yield* fs.stat(elsewhere)).mode & 0o777).toBe(0o755)
+      expect(yield* fs.exists(path.join(elsewhere, "sessions.sqlite"))).toBe(false)
+    }).pipe(Effect.scoped))
 })
