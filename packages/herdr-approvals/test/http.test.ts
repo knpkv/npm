@@ -41,7 +41,7 @@ import {
 import { Data, Deferred, Effect, Fiber, Result, Schema, Stream } from "effect"
 import { HttpClient } from "effect/http"
 import { spawn } from "node:child_process"
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, request as httpRequest } from "node:http"
 import { request as httpsRequest } from "node:https"
 import { tmpdir } from "node:os"
@@ -68,6 +68,7 @@ import {
 } from "../src/http.js"
 import { dashboardDocumentTitle } from "../src/internal/html.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "../src/internal/terminal-selection.js"
+import { loadUiAssets } from "../src/internal/ui-assets.js"
 import {
   isRelayedScrollState,
   makeLatestSignalSender,
@@ -150,7 +151,7 @@ const relayPng = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
 const assets = {
   connectScript: "",
   fonts: new Map<string, Uint8Array>(),
-  icons: new Map([["relay-192.png", relayPng]]),
+  icon: (file: string) => Promise.resolve(file === "relay-192.png" ? relayPng : null),
   script: "",
   stylesheet: "",
   worker: ""
@@ -1750,6 +1751,47 @@ esac
             error: "FleetOperationError",
             detail: "backend unavailable"
           })
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("starts without its PNG icons, answers 404 for them, and serves one once it is installed", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-missing-icons-"))
+    const install = join(root, "install")
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          // An install with the app's scripts and stylesheet but none of the relay-*.png icons.
+          mkdirSync(install)
+          for (const file of ["index.css", "connect.js", "approval.js", "approval-sw.js"]) {
+            writeFileSync(join(install, file), "")
+          }
+          const installed = yield* loadUiAssets(install)
+          const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(config(root), fleet, installed, { terminalConnector: unusedTerminal })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const get = (path: string) => Effect.promise(() => fetch(`${server.url}${path}`))
+          expect((yield* get("/assets/relay-192.png")).status).toBe(404)
+          expect((yield* get("/manifest.webmanifest")).status).toBe(200)
+          expect((yield* get("/assets/relay-icon.svg")).status).toBe(200)
+          // Repaired in place: the next request reads it, with no restart.
+          writeFileSync(join(install, "relay-192.png"), relayPng)
+          const png = yield* get("/assets/relay-192.png")
+          expect(png.status).toBe(200)
+          expect(new Uint8Array(yield* Effect.promise(() => png.arrayBuffer()))).toEqual(relayPng)
+          // Only the icons the app names are read from the install directory.
+          writeFileSync(join(install, "other.png"), relayPng)
+          expect((yield* get("/assets/other.png")).status).toBe(404)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {

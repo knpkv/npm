@@ -61,7 +61,7 @@ const operations: HostOperations = {
 const assets: UiAssets = {
   connectScript: "",
   fonts: new Map([["test.woff2", new Uint8Array([1])]]),
-  icons: new Map([["relay-192.png", new Uint8Array([0x89])]]),
+  icon: (file: string) => Promise.resolve(file === "relay-192.png" ? new Uint8Array([0x89]) : null),
   script: "",
   stylesheet: "",
   worker: ""

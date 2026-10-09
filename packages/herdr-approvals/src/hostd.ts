@@ -1,13 +1,13 @@
 import type { AgentWorkerIdentity, FleetStoreError, HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { FleetOperationError, JobStore, loadConfiguration, makeFleetService } from "@knpkv/herdr-fleet"
-import { Console, Effect, FileSystem, Path, Redacted, Scope } from "effect"
+import { Console, Effect, Path, Redacted, Scope } from "effect"
 import type { HostdOperationsCompositionError } from "./errors.js"
-import { startHttpServer, type UiAssets } from "./http.js"
+import { startHttpServer } from "./http.js"
 import { fleetConfigPath } from "./internal/config-path.js"
 import { hasOutstandingWorkJob, noJobStore } from "./internal/outstanding-work-job.js"
 import { noStartedWorkerStore, startedWorker } from "./internal/started-worker.js"
+import { loadUiAssets } from "./internal/ui-assets.js"
 import { makeHostOperations } from "./operations.js"
-import { relayIconAssets } from "./relay-icon.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
 export { runWorkAbandon } from "./work-abandon.js"
@@ -42,39 +42,6 @@ export type HostdOperationsComposer = (
 export interface HostdProgramOptions {
   readonly composeOperations?: HostdOperationsComposer
 }
-
-const loadUiAssets = Effect.fn("Hostd.loadUiAssets")(function*(directory: string) {
-  const fileSystem = yield* FileSystem.FileSystem
-  const paths = yield* Path.Path
-  const stylesheet = yield* fileSystem.readFileString(paths.join(directory, "index.css"))
-  const fontNames = new Set(
-    [...stylesheet.matchAll(/url\(["']?\.\/([^"')]+\.woff2)/g)].flatMap((match) =>
-      match[1] === undefined ? [] : [match[1]]
-    )
-  )
-  const fonts = yield* Effect.forEach(
-    [...fontNames],
-    (name) =>
-      fileSystem.readFile(paths.join(directory, name)).pipe(
-        Effect.map((contents): readonly [string, Uint8Array] => [name, contents])
-      )
-  )
-  const icons = yield* Effect.forEach(
-    relayIconAssets,
-    ({ file }) =>
-      fileSystem.readFile(paths.join(directory, file)).pipe(
-        Effect.map((contents): readonly [string, Uint8Array] => [file, contents])
-      )
-  )
-  return {
-    connectScript: yield* fileSystem.readFileString(paths.join(directory, "connect.js")),
-    fonts: new Map(fonts),
-    icons: new Map(icons),
-    script: yield* fileSystem.readFileString(paths.join(directory, "approval.js")),
-    stylesheet,
-    worker: yield* fileSystem.readFileString(paths.join(directory, "approval-sw.js"))
-  } satisfies UiAssets
-})
 
 export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
   config: HostConfiguration,
