@@ -61,6 +61,7 @@ const operations: HostOperations = {
 const assets: UiAssets = {
   connectScript: "",
   fonts: new Map([["test.woff2", new Uint8Array([1])]]),
+  icons: new Map([["relay-192.png", new Uint8Array([0x89])]]),
   script: "",
   stylesheet: "",
   worker: ""
@@ -212,6 +213,9 @@ describe("LAN Work pairing boundary", () => {
       expect(font.status).toBe(200)
       const approvalAsset = yield* Effect.promise(() => fetch(`${lanUrl}/assets/approval.js`))
       expect(approvalAsset.status).toBe(404)
+      // The app's icons belong to the hub, not the LAN Work listener.
+      const icon = yield* Effect.promise(() => fetch(`${lanUrl}/assets/relay-192.png`))
+      expect(icon.status).toBe(404)
       for (
         const forbiddenPath of [
           "/v1/chat",

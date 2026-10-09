@@ -1,5 +1,12 @@
 # @knpkv/jcf-web
 
+## 0.8.1
+
+### Patch Changes
+
+- Updated dependencies [[`7267362`](https://github.com/knpkv/npm/commit/72673622a770d5b40c695fe13b36a82f80e78cf4), [`8af4c75`](https://github.com/knpkv/npm/commit/8af4c7569dc195201e29dbf902b6bb221ec78f84), [`eb2ddfd`](https://github.com/knpkv/npm/commit/eb2ddfd124b3e8805d886fa26c178aa59231f1b4)]:
+  - @knpkv/rly@0.18.0
+
 ## 0.8.0
 
 ### Minor Changes

@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-approvals",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "description": "Authenticated fleet approvals, PWA, coordinator, and hostd runtime",
   "license": "MIT",
   "author": "knpkv",
@@ -57,7 +57,8 @@
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
     "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",
     "test": "vitest run",
-    "test:pack": "tsx scripts/test-packed-packages.ts"
+    "test:pack": "tsx scripts/test-packed-packages.ts",
+    "render:icons": "tsx scripts/render-icons.ts"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0",

@@ -63,8 +63,28 @@ it.layer(NodeServices.layer)("readHostLimits", (it) => {
       expect(unavailable(limits)).toEqual({
         _tag: "Unavailable",
         reason: "failed",
-        detail: "agent-usage: agent-usage is not running on this store."
+        detail: "agent-usage is not running on this host. Start it (or its service)."
       })
+    }))
+
+  // A peer's read crosses the tailnet to the hub: agent-usage's own text may name host paths, so only
+  // a fixed sentence leaves this host (#698 sent stderr verbatim).
+  it.effect("never lets a host path out, from agent-usage's stderr or a command that cannot start", () =>
+    Effect.gen(function*() {
+      const socket = yield* read([
+        "sh",
+        "-c",
+        "echo 'agent-usage: agent-usage refused its control socket at /home/alice/.local/state/agent-usage/serve.sock: it is a symbolic link.' >&2; exit 1"
+      ])
+      expect(unavailable(socket)?.detail).toBe(
+        "agent-usage's control socket on this host could not be used; hostd's log says why."
+      )
+      const missing = yield* read(["/nix/store/does-not-exist/bin/agent-usage", "limits"])
+      expect(unavailable(missing)?.reason).toBe("failed")
+      const garbled = yield* read(printing(JSON.stringify({ ...answer, machine: "/home/alice/secret", latest: "x" })))
+      for (const limits of [socket, missing, garbled]) {
+        expect(JSON.stringify(limits)).not.toMatch(/\/(?:home|nix|Users)\//u)
+      }
     }))
 
   it.effect("rejects output that is not agent-usage's answer", () =>

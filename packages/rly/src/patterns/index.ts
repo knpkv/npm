@@ -110,11 +110,18 @@ export type {
 } from "./RelayFindings.js"
 export { RelayLauncher, relayShortcut, useRelayShortcut, useRelaySummon } from "./RelayLauncher.js"
 export type { RelayLauncherProps, RlyRelayShortcut, RlyRelaySummon, UseRelaySummonOptions } from "./RelayLauncher.js"
-export { RelayMark, RLY_RELAY_MARK_ACTIVITIES, RLY_RELAY_MARK_SIZES, RLY_RELAY_MARK_TILE_SIZES } from "./RelayMark.js"
+export {
+  RelayMark,
+  RLY_RELAY_MARK_ACTIVITIES,
+  RLY_RELAY_MARK_GLYPH,
+  RLY_RELAY_MARK_SIZES,
+  RLY_RELAY_MARK_TILE_SIZES
+} from "./RelayMark.js"
 export type {
   RelayMarkProps,
   RelayMarkTileProps,
   RlyRelayMarkActivity,
+  RlyRelayMarkGlyph,
   RlyRelayMarkSize,
   RlyRelayMarkTileSize
 } from "./RelayMark.js"

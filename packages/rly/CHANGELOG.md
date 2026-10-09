@@ -1,5 +1,17 @@
 # @knpkv/rly
 
+## 0.18.0
+
+### Minor Changes
+
+- [#717](https://github.com/knpkv/npm/pull/717) [`8af4c75`](https://github.com/knpkv/npm/commit/8af4c7569dc195201e29dbf902b6bb221ec78f84) Thanks [@konopkov](https://github.com/konopkov)! - Exports `RLY_RELAY_MARK_GLYPH`, the Relay mark's viewBox, stroke width and paths, so a host can draw the mark outside React (an app icon or a notification badge) without copying it; `RelayMark` now renders from it.
+
+- [#713](https://github.com/knpkv/npm/pull/713) [`eb2ddfd`](https://github.com/knpkv/npm/commit/eb2ddfd124b3e8805d886fa26c178aa59231f1b4) Thanks [@konopkov](https://github.com/konopkov)! - RelayMark moves with Relay: `activity` (`idle`, `working`, `attention`) on the mark, its tile, `RelayLauncher`, `RelayPanel` and `RelayDock`, plus a one-shot `entrance` that `RelayPanel` plays as it opens. Motion is opt-in: still under a system or in-app reduced-motion setting.
+
+### Patch Changes
+
+- [#715](https://github.com/knpkv/npm/pull/715) [`7267362`](https://github.com/knpkv/npm/commit/72673622a770d5b40c695fe13b36a82f80e78cf4) Thanks [@konopkov](https://github.com/konopkov)! - Relay's mark shows when Relay is working in the products. relay-product marks the launcher, panel and dock as working while a continuation sent from Relay waits on its answer, or while the product reports its own run through the registration's new `working` field; codecommit-web reports a running PR review. RelayMark's entrance now moves each stroke instead of the whole svg, and a mark that opens already working starts its loop as the entrance ends.
+
 ## 0.17.0
 
 ### Minor Changes

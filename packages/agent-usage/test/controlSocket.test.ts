@@ -65,15 +65,16 @@ const fakeServer = (socketPath: string, reply: string | undefined, accepted?: De
     (server) => Effect.promise(() => new Promise<void>((resolve) => server.close(() => resolve())))
   )
 
-/** Sends one raw line to the socket at `socketPath` and answers the reply line, trimmed. */
+/** Sends one raw line to the socket at `socketPath` and answers the reply line, trimmed; a socket error fails it. */
 const rawExchange = (socketPath: string, line: string) =>
   Effect.promise(() =>
-    new Promise<string>((resolve) => {
+    new Promise<string>((resolve, reject) => {
       let reply = ""
       const connection = createConnection(socketPath, () => connection.write(`${line}\n`))
       connection.on("data", (chunk) => {
         reply += chunk.toString()
       })
+      connection.on("error", reject)
       connection.on("close", () => resolve(reply.trim()))
     })
   )

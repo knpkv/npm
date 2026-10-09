@@ -13,7 +13,9 @@ import {
   ConnectAgentCursor,
   fleetConnectAgents,
   fleetLimits,
+  fleetUsage,
   hubLimits,
+  hubUsage,
   localConnectAgents,
   makeHerdrTerminalConnector,
   pageFleetConnectAgents,
@@ -21,7 +23,8 @@ import {
   terminalCommandMaxPayloadBytes,
   terminalFrameMaxEncodedBytes,
   TerminalSelection,
-  TerminalServerSignal
+  TerminalServerSignal,
+  UsageQuery
 } from "@knpkv/herdr-connect"
 import type {
   FleetJobConflictError,
@@ -119,6 +122,7 @@ import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { fontPreloadLink } from "./font-preload.js"
 import { readHostLimits, staleWhileRevalidate } from "./host-limits.js"
+import { readHostUsage, usageCache } from "./host-usage.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
@@ -158,6 +162,7 @@ import {
 import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import { type ApprovalNotificationBatch, makePushWorker } from "./push-worker.js"
+import { relayIconSvg } from "./relay-icon.js"
 import { ApprovalAppStore } from "./store.js"
 import { workCheckpointPath, workSnapshotPath } from "./work-checkpoint.js"
 
@@ -240,6 +245,8 @@ export type UiAssets = {
   readonly worker: string
   readonly stylesheet: string
   readonly fonts: ReadonlyMap<string, Uint8Array>
+  /** The PNG icons by file name (`relayIconAssets`). */
+  readonly icons: ReadonlyMap<string, Uint8Array>
 }
 
 type ApiError =
@@ -311,6 +318,7 @@ type PeerTarget = {
   readonly pendingUrl: string | null
   readonly connectAgentsUrl: string | null
   readonly limitsUrl: string | null
+  readonly usageUrl: string | null
   readonly terminalUrl: string | null
 }
 
@@ -446,25 +454,24 @@ export const listenerAuthority = (address: string, port: number): string =>
     `http://${address.includes(":") && !address.startsWith("[") ? `[${address}]` : address}:${port}/`
   ).host.toLowerCase()
 
-const approvalIcon =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111418"/><path d="M146 264l72 72 148-160" fill="none" stroke="#a6e3a1" stroke-linecap="round" stroke-linejoin="round" stroke-width="52"/></svg>`
+/** The favicon and the manifest's scalable icon; the PNGs come from the same drawing (`relay-icon.ts`). */
+const relayIcon = relayIconSvg("tile", 512)
 
-const approvalManifest = JSON.stringify({
+/** The installed app is Relay. `id`, `start_url` and `scope` are unchanged, so installs carry over. */
+const relayManifest = JSON.stringify({
   id: "/",
-  name: "Fleet approvals",
-  short_name: "Approvals",
+  name: "Relay",
+  short_name: "Relay",
   start_url: "/",
   scope: "/",
   display: "standalone",
   background_color: "#111418",
   theme_color: "#111418",
   icons: [
-    {
-      src: "/assets/approval-icon.svg",
-      sizes: "any",
-      type: "image/svg+xml",
-      purpose: "any maskable"
-    }
+    { src: "/assets/relay-icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+    { src: "/assets/relay-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+    { src: "/assets/relay-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+    { src: "/assets/relay-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" }
   ]
 })
 
@@ -679,11 +686,25 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
       limitsUrl: address === undefined
         ? null
         : `http://${address}:${config.port}/v1/connect/limits/local`,
+      usageUrl: address === undefined
+        ? null
+        : `http://${address}:${config.port}/v1/connect/usage/local`,
       terminalUrl: address === undefined
         ? null
         : `ws://${address}:${config.port}/v1/connect/terminal`
     } satisfies PeerTarget
   })
+})
+
+const decodeUsageQuery = Effect.fn("HostHttp.decodeUsageQuery")(function*(url: URL) {
+  return yield* Schema.decodeUnknownEffect(UsageQuery)({
+    range: url.searchParams.get("range") ?? "7d",
+    timeZone: url.searchParams.get("timeZone")
+  }).pipe(
+    Effect.mapError(
+      () => new FleetValidationError({ detail: "usage needs range 24h, 7d or 30d and an IANA timeZone" })
+    )
+  )
 })
 
 const pendingApproval = (record: JobRecord): PendingApproval => {
@@ -1191,7 +1212,8 @@ const connectPage = (fontPreload: string): string =>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#0b0d10">
-<title>Fleet connect</title>
+<title>Connect in Relay</title>
+<link rel="icon" href="/assets/relay-icon.svg" type="image/svg+xml">
 ${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark" class="connect-body">
@@ -1208,7 +1230,7 @@ const lanWorkDocument = (body: string, fontPreload: string): string =>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#111418">
-<title>Fleet Work</title>
+<title>Work in Relay</title>
 ${fontPreload}<link rel="stylesheet" href="/assets/index.css">
 </head>
 <body data-rly-root data-rly-theme="dark">
@@ -1514,6 +1536,14 @@ export const startHttpServer = async (
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
       ),
       Duration.seconds(30)
+    ).pipe(Effect.provideService(Scope.Scope, limitsScope))
+  )
+  // Usage is read per range and zone, each refreshed in the background after five minutes.
+  const localUsage = await httpRuntime.runPromise(
+    usageCache((query) =>
+      readHostUsage(config.host, config.agentUsageLimitsCommand, query).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+      )
     ).pipe(Effect.provideService(Scope.Scope, limitsScope))
   )
   const shutdown = async (): Promise<void> => {
@@ -2376,19 +2406,30 @@ export const startHttpServer = async (
               "cache-control": "no-cache, must-revalidate",
               "content-type": "application/manifest+json; charset=utf-8"
             })
-            response.end(approvalManifest)
+            response.end(relayManifest)
             return
           }
           if (
             mode !== "lan" &&
             request.method === "GET" &&
-            url.pathname === "/assets/approval-icon.svg"
+            // The old path stays: an install made before the rename keeps asking for it.
+            (url.pathname === "/assets/relay-icon.svg" || url.pathname === "/assets/approval-icon.svg")
           ) {
             response.writeHead(200, {
               "cache-control": "no-cache, must-revalidate",
               "content-type": "image/svg+xml; charset=utf-8"
             })
-            response.end(approvalIcon)
+            response.end(relayIcon)
+            return
+          }
+          const iconMatch = /^\/assets\/([^/]+\.png)$/.exec(url.pathname)
+          const icon = iconMatch?.[1] === undefined ? undefined : uiAssets.icons.get(iconMatch[1])
+          if (mode !== "lan" && request.method === "GET" && icon !== undefined) {
+            response.writeHead(200, {
+              "cache-control": "no-cache, must-revalidate",
+              "content-type": "image/png"
+            })
+            response.end(icon)
             return
           }
           const fontMatch = /^\/assets\/([^/]+\.woff2)$/.exec(url.pathname)
@@ -3095,6 +3136,37 @@ export const startHttpServer = async (
             await respond(
               response,
               Effect.andThen(tailnetActor(request, config, [config.approvalHub.nodeId]), localLimits)
+            )
+            return
+          }
+
+          // The hub's usage question to a peer, for one range and zone: only the approval hub's node may ask.
+          if (
+            mode === "tailnet" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/connect/usage/local"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(
+                tailnetActor(request, config, [config.approvalHub.nodeId]),
+                Effect.flatMap(decodeUsageQuery(url), localUsage)
+              )
+            )
+            return
+          }
+
+          // The Usage tab: on the hub every peer's read for the range and zone, anywhere else just this host's.
+          if (request.method === "GET" && url.pathname === "/v1/connect/usage") {
+            await respond(
+              response,
+              Effect.andThen(
+                authorized,
+                Effect.flatMap(decodeUsageQuery(url), (query) =>
+                  mode === "serve"
+                    ? hubUsage(query, localUsage(query), fleetPeers(config))
+                    : fleetUsage(query, localUsage(query), []))
+              )
             )
             return
           }
