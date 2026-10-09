@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Ref } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import * as PlatformError from "effect/PlatformError"
 import { MAXIMUM_RELAY_SKILL_PROMPT_BYTES } from "../src/server/review/ReviewPromptBudget.js"
 import {
   discoverReviewSkillsFromRoots,
@@ -220,6 +221,9 @@ describe("Relay review skill catalog", () => {
         { length: MAXIMUM_SKILL_INSPECTED_ENTRIES },
         (_, index) => `ordinary-${String(index).padStart(5, "0")}`
       )
+      // The ordinary entries exist only in the listing, so they are missing without asking the disk: two
+      // thousand real lookups made this test's time scale with machine load, past its timeout under parallel suites.
+      const listed = new Set(ordinary.map((entry) => path.join(canonicalRoot, entry)))
       const discoverWith = (entries: ReadonlyArray<string>) =>
         discoverReviewSkillsFromRoots([{ label: "order", path: root }]).pipe(
           Effect.provideService(
@@ -229,7 +233,16 @@ describe("Relay review skill catalog", () => {
               readDirectory: (directory, options) =>
                 directory === canonicalRoot
                   ? Effect.succeed([...entries])
-                  : fileSystem.readDirectory(directory, options)
+                  : fileSystem.readDirectory(directory, options),
+              realPath: (candidate) =>
+                listed.has(candidate)
+                  ? Effect.fail(PlatformError.systemError({
+                    _tag: "NotFound",
+                    module: "FileSystem",
+                    method: "realPath",
+                    pathOrDescriptor: candidate
+                  }))
+                  : fileSystem.realPath(candidate)
             })
           )
         )
