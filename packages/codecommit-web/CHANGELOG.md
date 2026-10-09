@@ -1,5 +1,32 @@
 # @knpkv/codecommit-web
 
+## 0.29.0
+
+### Minor Changes
+
+- [#640](https://github.com/knpkv/npm/pull/640) [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442) Thanks [@konopkov](https://github.com/konopkov)! - Relay in CodeCommit web can read a pull request's changed files at its current revision (`get_pull_request_diff`) and post a comment on one line (`post_line_comment`). A line comment is pinned to the revision it was written against: it is refused if the pull request has moved on, or if the line is outside the changes. The person confirms the exact file, side, line, revision and text first.
+
+- [#640](https://github.com/knpkv/npm/pull/640) [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442) Thanks [@konopkov](https://github.com/konopkov)! - CodeCommit web mounts the Relay harness under `/api/relay`: an event stream for the dock that re-checks the owner session every 15 seconds, routes to send, cancel and confirm, and backend status. A second server on the same home starts without Relay and says why, and Relay's comments go through the same permission prompt and audit log as review findings. A decision applies only to the session it was raised in, and an event stream that fails ends with `StreamFailed` instead of closing silently.
+
+- [#640](https://github.com/knpkv/npm/pull/640) [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442) Thanks [@konopkov](https://github.com/konopkov)! - Relay's event stream gives the dock what it renders without guessing:
+
+  - `RunStarted` names the run.
+  - Every tool call carries a display-safe summary, and a completed write carries its receipt (CodeCommit: the operation id and the pull request's console link).
+  - `ConfirmationResolved` reports confirmed, declined or expired.
+  - Snapshot messages have ids.
+  - The session says whether its runs can be cancelled.
+
+- [#640](https://github.com/knpkv/npm/pull/640) [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442) Thanks [@konopkov](https://github.com/konopkov)! - A Relay message can carry context the person attached; the model reads it, but the transcript does not show it. CodeCommit web uses it to send the review findings the person is looking at, with the head they were reviewed at.
+
+### Patch Changes
+
+- [#640](https://github.com/knpkv/npm/pull/640) [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442) Thanks [@konopkov](https://github.com/konopkov)! - Relay's mount takes its backends as a parameter, so tests can run the real mount on a scripted model. A new crash test proves it: CodeCommit web killed with SIGKILL in the middle of a confirmed comment resumes without posting it twice.
+
+- [#711](https://github.com/knpkv/npm/pull/711) [`d8fcb1a`](https://github.com/knpkv/npm/commit/d8fcb1a3ab52db1e93464fda034737dca1272fa2) Thanks [@konopkov](https://github.com/konopkov)! - A dangling `~/.codecommit/relay` link now reports Relay as unavailable because the directory is a link, instead of saying it could not prepare its data directory.
+- Updated dependencies [[`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`4c21182`](https://github.com/knpkv/npm/commit/4c211825fc99debbdc85f4cb71ea4d566e51e26f), [`c09fc0f`](https://github.com/knpkv/npm/commit/c09fc0f2e807546f5910a4e9240a7ce848d3e442), [`5a93f2f`](https://github.com/knpkv/npm/commit/5a93f2fe9fdbab1978a7ae68832e46d00c2be693)]:
+  - @knpkv/codecommit-core@0.25.0
+  - @knpkv/relay@0.1.0
+
 ## 0.28.0
 
 ### Minor Changes

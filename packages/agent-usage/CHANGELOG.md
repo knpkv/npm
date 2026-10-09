@@ -1,5 +1,11 @@
 # @knpkv/agent-usage
 
+## 0.7.0
+
+### Minor Changes
+
+- [#712](https://github.com/knpkv/npm/pull/712) [`a21684e`](https://github.com/knpkv/npm/commit/a21684e5ede609b9bf2b08d683e9b6c8efc04272) Thanks [@konopkov](https://github.com/konopkov)! - New `@knpkv/agent-usage/usage` entry, with `@knpkv/agent-usage/usage.css`. It exports the page's two charts, `UsageChart` and `LimitChart`, so another browser surface can draw them. `stackSeries` stacks any named series per period, and `UsageChart` now takes `periods` instead of a whole usage report, so a caller can chart tokens without cost. The entry bundles for a browser without the server, the store or Node modules.
+
 ## 0.6.0
 
 ### Minor Changes
