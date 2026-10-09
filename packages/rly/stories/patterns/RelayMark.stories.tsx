@@ -1,11 +1,44 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import type { CSSProperties, ReactElement } from "react"
 import { expect } from "storybook/test"
-import { RelayMark, RLY_RELAY_MARK_SIZES, RLY_RELAY_MARK_TILE_SIZES } from "../../src/patterns/RelayMark.js"
+import { RelayLauncher, relayShortcut } from "../../src/patterns/RelayLauncher.js"
+import {
+  RelayMark,
+  RLY_RELAY_MARK_ACTIVITIES,
+  RLY_RELAY_MARK_SIZES,
+  RLY_RELAY_MARK_TILE_SIZES
+} from "../../src/patterns/RelayMark.js"
 import { Text } from "../../src/primitives/Text.js"
 import { pageStyle, rowStyle, stackStyle } from "../primitives/storyStyles.js"
 
-const meta = { component: RelayMark, tags: ["autodocs"], title: "Patterns/RelayMark" } satisfies Meta<typeof RelayMark>
+/** The motion spec; this is its source of truth. */
+const motionSpec = `
+**Motion.** The mark moves only when asked to, and never for a reader who asked for less motion.
+
+| Activity | What moves | Timing |
+| --- | --- | --- |
+| \`idle\` (default) | nothing | — |
+| \`working\` | the baton slides along its diagonal, hook to hook and back; opacity .55 → 1 → .55; hooks hold still | 1.2s each way (4 × \`--rly-motion-slow-duration\`), \`--rly-easing-in-out\`, loops while working |
+| \`attention\` | the hooks close on the baton by one grid unit, twice, then rest | 900ms once (3 × slow), \`--rly-easing-in-out\`; replays only when attention is set again |
+| \`entrance\` | the glyph fades and scales in from .85 | 300ms once (slow), \`--rly-easing-out\`; \`RelayPanel\` plays it each time its header opens |
+
+**Gate.** Every animation sits inside \`@media (prefers-reduced-motion: no-preference)\` and is timed by a
+\`--rly-motion-*\` token, so the system preference and the in-app \`data-rly-reduced-motion="reduce"\` setting
+both leave the mark still. Only transform and opacity change, inside a fixed svg box: nothing shifts.
+
+**Words first.** Motion never carries the state alone. The host says in text that Relay is working or waiting
+on the reader; the mark stays decorative (or keeps the name it was given). Forced colours draw it in the
+context's colour, still or moving.
+
+\`RelayLauncher\`, \`RelayPanel\` and \`RelayDock\` take the same \`activity\` and pass it to their mark.
+`
+
+const meta = {
+  component: RelayMark,
+  parameters: { docs: { description: { component: motionSpec } } },
+  tags: ["autodocs"],
+  title: "Patterns/RelayMark"
+} satisfies Meta<typeof RelayMark>
 export default meta
 type Story = StoryObj<typeof meta>
 
@@ -60,4 +93,52 @@ export const ForcedColors: Story = {
     if (tile !== null) await expect(getComputedStyle(tile).borderTopStyle).toBe("solid")
   },
   render: () => <MarkCatalog />
+}
+
+/** Each activity on the bare mark and the tile, with the launcher at work. */
+const ActivityCatalog = (): ReactElement => (
+  <main style={pageStyle}>
+    <div style={stackStyle}>
+      <Text as="h1" variant="section-title">
+        Relay mark activity
+      </Text>
+      {RLY_RELAY_MARK_ACTIVITIES.map((activity) => (
+        <div data-activity={activity} key={activity} style={rowStyle}>
+          <RelayMark activity={activity} size={24} style={textMark} />
+          <RelayMark.Tile activity={activity} size={32} />
+          <Text variant="body">{activity}</Text>
+        </div>
+      ))}
+      <div data-row="entrance" style={rowStyle}>
+        <RelayMark.Tile entrance size={32} />
+        <Text variant="body">entrance</Text>
+      </div>
+      <div style={rowStyle}>
+        <RelayLauncher activity="working" expanded={false} shortcut={relayShortcut(false)} />
+        <Text variant="body">Relay is reading the pull request.</Text>
+      </div>
+    </div>
+  </main>
+)
+
+/** Working loops the baton, attention nudges the hooks twice, idle holds still; see the motion spec above. */
+export const Activity: Story = {
+  play: async ({ canvasElement }) => {
+    const glyphs = (activity: string): ReadonlyArray<SVGSVGElement> => [
+      ...canvasElement.querySelectorAll<SVGSVGElement>(`[data-activity='${activity}'] svg`)
+    ]
+    // Whether the rest move depends on the system preference too; visual/relay-mark-motion.spec.ts pins it.
+    for (const svg of glyphs("idle")) await expect(svg.getAnimations({ subtree: true })).toHaveLength(0)
+    for (const activity of RLY_RELAY_MARK_ACTIVITIES) await expect(glyphs(activity)).toHaveLength(2)
+  },
+  render: () => <ActivityCatalog />
+}
+
+/** In-app reduced motion: every activity holds still. */
+export const ActivityReducedMotion: Story = {
+  globals: { reducedMotion: "reduce" },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.ownerDocument.getAnimations()).toHaveLength(0)
+  },
+  render: () => <ActivityCatalog />
 }

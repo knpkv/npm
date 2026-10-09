@@ -808,6 +808,7 @@
           "packages/rly/src/patterns/RelayMark.module.css"
         ],
         "tests": [
+          "packages/rly/test/patterns/RelayMark.css.test.ts",
           "packages/rly/test/patterns/RelayMark.favicon.test.ts",
           "packages/rly/test/patterns/RelayMark.test.tsx"
         ]
