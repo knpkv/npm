@@ -7,7 +7,15 @@
  * @module
  */
 import { collectBoundedText } from "@knpkv/bounded-io"
-import { decodeLimitsTolerantly, type HostLimits, limitsUnavailable, RawLimits, readingOf } from "@knpkv/herdr-connect"
+import {
+  decodeLimitsTolerantly,
+  type HostLimits,
+  limitsUnavailable,
+  notConfiguredSentences,
+  RawLimits,
+  readingOf,
+  reasonSentences
+} from "@knpkv/herdr-connect"
 import { Clock, Duration, Effect, Ref, Result, Schema, type Scope } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { CommandFailed, reportFailure } from "./agent-usage-failure.js"
@@ -58,15 +66,15 @@ const readReading = (command: ReadonlyArray<string> | undefined): Effect.Effect<
 > => {
   const executable = command?.[0]
   if (command === undefined || executable === undefined) {
-    return Effect.succeed(limitsUnavailable("not_configured", "agentUsageLimitsCommand is not set for this host"))
+    return Effect.succeed(limitsUnavailable("not_configured", notConfiguredSentences.noCommand))
   }
   return runCommand([executable, ...command.slice(1)]).pipe(
     Effect.timeoutOrElse({ duration: hostLimitsTimeout, orElse: () => Effect.succeed(null) }),
     Effect.map((stdout): HostLimits["reading"] => {
-      if (stdout === null) return limitsUnavailable("timeout", `no answer within ${hostLimitsTimeout}`)
+      if (stdout === null) return limitsUnavailable("timeout", reasonSentences.timeout)
       const json = decodeRawLimits(stdout.trim())
       if (Result.isFailure(json)) {
-        return limitsUnavailable("invalid_output", "agent-usage printed something that is not a JSON object")
+        return limitsUnavailable("invalid_output", reasonSentences.invalid_output)
       }
       // A newer agent-usage may add sources or reasons: what this hostd can't read is skipped and counted.
       return readingOf(decodeLimitsTolerantly(json.success))

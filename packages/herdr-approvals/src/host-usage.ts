@@ -14,7 +14,9 @@
 import {
   decodeUsageTolerantly,
   type HostUsage,
+  notConfiguredSentences,
   RawUsage,
+  reasonSentences,
   type UsageQuery,
   usageReadingOf,
   usageResponseMaxBytes,
@@ -55,19 +57,17 @@ const readReading = (
     return Effect.succeed(
       usageUnavailable(
         "not_configured",
-        limitsCommand === undefined
-          ? "agentUsageLimitsCommand is not set for this host"
-          : "agentUsageLimitsCommand does not end in `limits`, so this host has no `agent-usage usage`"
+        limitsCommand === undefined ? notConfiguredSentences.noCommand : notConfiguredSentences.noUsage
       )
     )
   }
   return runCommand([...command, "--range", query.range, "--time-zone", query.timeZone], usageResponseMaxBytes).pipe(
     Effect.timeoutOrElse({ duration: hostUsageTimeout, orElse: () => Effect.succeed(null) }),
     Effect.map((stdout): HostUsage["reading"] => {
-      if (stdout === null) return usageUnavailable("timeout", `no answer within ${hostUsageTimeout}`)
+      if (stdout === null) return usageUnavailable("timeout", reasonSentences.timeout)
       const json = decodeRawUsage(stdout.trim())
       if (Result.isFailure(json)) {
-        return usageUnavailable("invalid_output", "agent-usage printed something that is not a JSON object")
+        return usageUnavailable("invalid_output", reasonSentences.invalid_output)
       }
       return usageReadingOf(decodeUsageTolerantly(json.success))
     }),

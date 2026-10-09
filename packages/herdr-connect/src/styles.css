@@ -1,6 +1,8 @@
 @import "@knpkv/rly/styles.css";
-/* agent-usage's "Limits now" cards, shown in Connect's limits disclosure. */
+/* agent-usage's "Limits now" cards, shown in the hub's Usage tab. */
 @import "@knpkv/agent-usage/limits.css";
+/* agent-usage's charts, shown in the hub's Usage tab. */
+@import "@knpkv/agent-usage/usage.css";
 
 @layer connect {
   html.connect-terminal-document-lock,
@@ -100,7 +102,7 @@
   }
 
   .connect-limits-line,
-  .connect-limits-notes {
+  .usage-tab-notes {
     list-style: none;
     margin: 0;
     padding: 0;
@@ -112,31 +114,119 @@
     gap: var(--rly-space-4) var(--rly-space-16);
   }
 
-  .connect-limits-details > summary {
+  /* The cards and history live in the Usage tab; the line links there. */
+  .connect-limits-link {
     color: var(--rly-color-text-2);
-    cursor: pointer;
     font-size: var(--rly-type-meta-size);
     inline-size: fit-content;
     position: relative;
   }
 
-  /* A one-line disclosure is shorter than 44px; an invisible layer takes the target there. */
-  .connect-limits-details > summary::after {
+  /* A one-line link is shorter than 44px; an invisible layer takes the target there. */
+  .connect-limits-link::after {
     content: "";
     inset: min(0px, (100% - 2.75rem) / 2);
     position: absolute;
   }
 
-  /* Each host's cards are their own region: a clear step between them. */
-  .connect-limits-hosts {
-    display: grid;
-    gap: var(--rly-space-24);
-    padding-block-start: var(--rly-space-12);
+  @media (hover: hover) {
+    .connect-limits-link:hover {
+      color: var(--rly-color-text-1);
+    }
   }
 
-  .connect-limits-notes {
+  /*
+   * The hub's Usage tab: its header (title, range, link out), then each region as its own surface
+   * with a clear step between them, so the cards, the token chart and the limit history never
+   * read as one block.
+   */
+  .usage-tab {
+    display: grid;
+    gap: var(--rly-space-24);
+    inline-size: min(100%, 76rem);
+    justify-self: center;
+    padding: var(--rly-space-20);
+  }
+
+  .usage-tab-header {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-12) var(--rly-space-16);
+  }
+
+  .usage-tab-header h1 {
+    margin: var(--rly-space-0);
+  }
+
+  /* The link out sits at the row's end, and wraps under the switch on a phone. */
+  .usage-tab-full {
+    color: var(--rly-color-text-2);
+    font-size: var(--rly-type-meta-size);
+    margin-inline-start: auto;
+    position: relative;
+  }
+
+  .usage-tab-full::after {
+    content: "";
+    inset: min(0px, (100% - 2.75rem) / 2);
+    position: absolute;
+  }
+
+  @media (hover: hover) {
+    .usage-tab-full:hover {
+      color: var(--rly-color-text-1);
+    }
+  }
+
+  .usage-tab-now {
+    display: grid;
+    gap: var(--rly-space-24);
+  }
+
+  .usage-tab-panel {
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-group);
+    display: grid;
+    gap: var(--rly-space-12);
+    min-inline-size: 0;
+    padding: var(--rly-space-16);
+  }
+
+  .usage-tab-panel h2,
+  .usage-tab-host h3 {
+    margin: var(--rly-space-0);
+  }
+
+  .usage-tab-panel-head {
+    align-items: baseline;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-4) var(--rly-space-12);
+    justify-content: space-between;
+  }
+
+  .usage-tab-host {
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: 0;
+  }
+
+  .usage-tab-host + .usage-tab-host {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    padding-block-start: var(--rly-space-16);
+  }
+
+  .usage-tab-notes {
     display: grid;
     gap: var(--rly-space-4);
+  }
+
+  /* The legends and the readings disclosure read as metadata under their chart, not as body copy. */
+  .usage-tab .usage-legend,
+  .usage-tab .usage-readings summary {
+    font-size: var(--rly-type-meta-size);
   }
 
   .connect-intro-caption {

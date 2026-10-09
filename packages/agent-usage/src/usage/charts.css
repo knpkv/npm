@@ -221,3 +221,14 @@ g[data-active="true"] .usage-segment {
   color: var(--rly-color-text-3);
   margin: 0;
 }
+
+/*
+ * Forced colours keep an SVG fill but drop a background, so the legend's swatches and the unknown
+ * key would vanish while the bars and hatching they name keep their colours: keep them as drawn.
+ */
+@media (forced-colors: active) {
+  .usage-swatch,
+  .usage-key-unknown {
+    forced-color-adjust: none;
+  }
+}

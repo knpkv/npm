@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
 import * as HttpClientResponse from "effect/http/HttpClientResponse"
+import { failureSentences, reasonSentences } from "../src/unavailable-detail.js"
 import { fetchPeerUsage, fleetUsage, hubUsage, peerUsageUrl } from "../src/usage-directory.js"
 import { decodeUsageTolerantly, type HostUsage, type LooseHostUsage, type UsageNow, UsageQuery } from "../src/usage.js"
 
@@ -86,6 +87,26 @@ describe("fleet usage", () => {
         Effect.flip
       )
       expect(error.reason).toBe("invalid_response")
+    }))
+})
+
+// An older peer's hostd sent agent-usage's stderr as is; the hub passes on only sentences it knows.
+describe("a peer's unavailable detail", () => {
+  it.effect("keeps a known sentence and replaces anything else with its reason's", () =>
+    Effect.gen(function*() {
+      const unavailableFrom = (detail: string) =>
+        fetchPeerUsage(query)(peer).pipe(
+          Effect.provideService(
+            HttpClient.HttpClient,
+            answering({ host: "PI", readAt: 0, reading: { _tag: "Unavailable", reason: "failed", detail } })
+          )
+        )
+      const leaked = yield* unavailableFrom(
+        "agent-usage: agent-usage refused its control socket at /home/alice/.local/state/agent-usage/serve.sock"
+      )
+      expect(leaked.reading).toEqual({ _tag: "Unavailable", reason: "failed", detail: reasonSentences.failed })
+      const known = yield* unavailableFrom(failureSentences.notRunning)
+      expect(known.reading).toMatchObject({ detail: failureSentences.notRunning })
     }))
 })
 

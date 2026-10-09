@@ -15,6 +15,7 @@
 import { LimitSeries, TokenCell, UsageNow, UsagePreset } from "@knpkv/agent-usage/usage"
 import { Option, Result, Schema } from "effect"
 import { limitsDetailMaxLength, PeerLimitsFailureReason, RawLimits } from "./limits.js"
+import { reasonSentences } from "./unavailable-detail.js"
 
 export { UsageNow, UsagePreset }
 
@@ -23,6 +24,9 @@ export { UsageNow, UsagePreset }
  * the command line or the control-socket request it is passed into. agent-usage checks it is real.
  */
 export const UsageTimeZone = Schema.String.check(Schema.isPattern(/^[A-Za-z][A-Za-z0-9_+\-/]{0,63}$/u))
+
+/** A month of daily token cells and bounded limit series is well under this; anything larger is not agent-usage. */
+export const usageResponseMaxBytes = 2 * 1024 * 1024
 
 /** What the Usage tab asks for: a range preset and the viewer's zone, so every host's periods line up. */
 export const UsageQuery = Schema.Struct({ range: UsagePreset, timeZone: UsageTimeZone })
@@ -132,9 +136,9 @@ export const usageReadingOf = (read: TolerantUsage, alreadySkipped = 0): HostUsa
     case "Read":
       return { _tag: "Read", usage: read.usage, skipped: alreadySkipped + read.skipped }
     case "UnsupportedVersion":
-      return usageUnavailable("unsupported_version", `usage format v${read.version}; this reader knows v1`)
+      return usageUnavailable("unsupported_version", reasonSentences.unsupported_version)
     case "Invalid":
       // The decode error quotes what was printed, which may name host paths: it never leaves as is.
-      return usageUnavailable("invalid_output", "agent-usage printed usage this version could not read.")
+      return usageUnavailable("invalid_output", reasonSentences.invalid_output)
   }
 }

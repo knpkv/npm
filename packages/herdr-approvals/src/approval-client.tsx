@@ -2,6 +2,7 @@ import { dashboardRefreshView } from "./internal/dashboard-refresh.js"
 import { RegistryProvider, useAtom, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
+import { makeUsageAtoms, UsageSurface } from "@knpkv/herdr-connect/usage"
 import { Cause, Effect, Exit, Option, Result, Schema } from "effect"
 import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Atom from "effect/reactivity/Atom"
@@ -367,6 +368,7 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
     badge: browserRuntime.fn(setApprovalBadge),
     busyJob: Atom.make<string | null>(null),
     connect,
+    usage: makeUsageAtoms(),
     // The served snapshot: what the page shows until a refresh succeeds, and after one fails.
     bootstrap: initial,
     dashboard: browserRuntime.atom(loadDashboard, { initialValue: initial }),
@@ -675,6 +677,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
             connect={<ConnectSurface atoms={atoms.connect} embedded />}
             hostCount={current.directory === null ? 1 : current.directory.links.length + 1}
             notice={refreshNotice}
+            usage={<UsageSurface atoms={atoms.usage} />}
             work={
               <section className="fleet-workspace">
                 <FleetWorkPanel state={workState} />
