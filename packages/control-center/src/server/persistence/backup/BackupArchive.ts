@@ -90,6 +90,39 @@ const copyOfflineSidecars = Effect.fn("BackupArchive.copyOfflineSidecars")(funct
   return true
 })
 
+/** One source file as a capture attempt saw it: absent, or its inode, size and modification time. */
+const offlineFileMark = Effect.fn("BackupArchive.offlineFileMark")(function*(
+  fileSystem: FileSystem.FileSystem,
+  file: string,
+  operation: "inspect-offline-database" | "inspect-offline-sidecar"
+) {
+  const info = yield* fileSystem.stat(file).pipe(Effect.result)
+  if (Result.isFailure(info)) {
+    if (info.failure.reason._tag === "NotFound") return "absent"
+    return yield* new BackupStorageError({ cause: info.failure, operation })
+  }
+  const { ino, mtime, size } = info.success
+  return `${Option.getOrElse(ino, () => -1)}:${size}:${Option.getOrElse(Option.map(mtime, Number), () => -1)}`
+})
+
+/**
+ * The database and its sidecars as one comparable mark. A capture is consistent only when the mark taken
+ * before the database copy equals the one taken after the sidecar copies: a SQLite connection closing in
+ * between (even one only finalized by garbage collection) checkpoints the WAL into the database and deletes
+ * it, which would leave a database copy older than the WAL it no longer has.
+ */
+const offlineSourceMark = Effect.fn("BackupArchive.offlineSourceMark")(function*(
+  fileSystem: FileSystem.FileSystem,
+  databaseFile: string
+) {
+  const marks = yield* Effect.all([
+    offlineFileMark(fileSystem, databaseFile, "inspect-offline-database"),
+    offlineFileMark(fileSystem, `${databaseFile}-wal`, "inspect-offline-sidecar"),
+    offlineFileMark(fileSystem, `${databaseFile}-journal`, "inspect-offline-sidecar")
+  ])
+  return marks.join(" ")
+})
+
 /** Input for a caller-requested backup of the live database. */
 export interface CreateVerifiedBackupInput {
   readonly destination: string
@@ -203,10 +236,14 @@ export const createOfflineVerifiedBackup = Effect.fn("BackupArchive.createOfflin
       let snapshotDatabase: string | undefined
       for (let attempt = 0; attempt < OFFLINE_SNAPSHOT_CAPTURE_ATTEMPTS; attempt += 1) {
         const candidate = path.join(snapshotRoot, `control-center-${attempt}.db`)
+        const before = yield* offlineSourceMark(fileSystem, databaseFile)
         yield* fileSystem.copyFile(databaseFile, candidate).pipe(
           Effect.mapError((cause) => new BackupStorageError({ cause, operation: "copy-offline-database" }))
         )
-        if (yield* copyOfflineSidecars(fileSystem, sourceRootInfo, databaseFile, candidate)) {
+        if (
+          (yield* copyOfflineSidecars(fileSystem, sourceRootInfo, databaseFile, candidate)) &&
+          (yield* offlineSourceMark(fileSystem, databaseFile)) === before
+        ) {
           snapshotDatabase = candidate
           break
         }

@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 import type { FileSystem as FileSystemType } from "effect"
-import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Schema, Stream } from "effect"
+import { Deferred, Effect, Fiber, FileSystem, Option, Path, Ref, Result, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { createServer } from "node:net"
 
@@ -384,8 +384,50 @@ describe("offline backup commands", () => {
       }).pipe(Effect.provideService(FileSystem.FileSystem, closingFileSystem))
 
       assert.strictEqual(published.verification._tag, "Complete")
-      assert.strictEqual(databaseCopies, 2)
+      assert.isFalse(reportClosingSidecar)
+      // At least the one restart this test injects. The fixture's own closed connection can add another: libsql
+      // releases it only at garbage collection, which checkpoints and deletes the real -wal mid-capture.
+      assert.isAtLeast(databaseCopies, 2)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  // A connection closing after the database was copied checkpoints its WAL into the database and deletes it, so
+  // every sidecar check passes while the copy misses what the WAL held. The capture must see the database change.
+  it.layer(NodeServices.layer)((it) => {
+    it.effect("restarts a snapshot when the database changes after it was copied", () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { configured, parent, prepared } = yield* makePreparedRoot("control-center-offline-checkpoint-race-")
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const source = yield* resolvePreparedControlCenterDataRoot(configured)
+        const databaseFile = path.join(prepared.dataRoot, "control-center.db")
+
+        let databaseCopies = 0
+        const checkpointingFileSystem = FileSystem.FileSystem.of({
+          ...fileSystem,
+          copyFile: (sourceFile, destinationFile) => {
+            if (sourceFile === databaseFile) databaseCopies += 1
+            return fileSystem.copyFile(sourceFile, destinationFile)
+          },
+          // From the first copy on, the database reads as rewritten by a checkpoint.
+          stat: (target) =>
+            fileSystem.stat(target).pipe(
+              Effect.map((info) =>
+                target === databaseFile && databaseCopies > 0
+                  ? { ...info, mtime: Option.map(info.mtime, (mtime) => new Date(mtime.getTime() + 1_000)) }
+                  : info
+              )
+            )
+        })
+
+        const published = yield* createOfflineVerifiedBackup({
+          destination: path.join(parent, "archive"),
+          persistenceConfig: source.persistenceConfig
+        }).pipe(Effect.provideService(FileSystem.FileSystem, checkpointingFileSystem))
+
+        assert.strictEqual(published.verification._tag, "Complete")
+        assert.isAtLeast(databaseCopies, 2)
+      })))
+  })
 
   it.effect("fails closed when an offline sidecar keeps changing during snapshot capture", () =>
     Effect.gen(function*() {
