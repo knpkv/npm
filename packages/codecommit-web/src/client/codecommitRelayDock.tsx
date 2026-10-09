@@ -278,7 +278,8 @@ export const makeCodeCommitRelayThreadRegistration = ({
   selection,
   turns
 }: CodeCommitRelayThreadRegistrationInput): RelayPullRequestDockRegistration => {
-  const base = { context, conversation, selection }
+  // A review run is Relay working on this PR whether or not a thread exists yet (the first run starts one).
+  const base = { context, conversation, selection, working: isReviewing }
   if (!available) {
     return {
       ...base,

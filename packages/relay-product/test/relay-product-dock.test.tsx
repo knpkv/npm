@@ -249,6 +249,10 @@ describe("RelayProductDock", () => {
       </RelayProductDock>
     )
     try {
+      // The trigger's mark is still: nothing is running.
+      expect(
+        queryRequired(rendered.container, "[data-rly-relay-dock-trigger] svg").getAttribute("data-rly-relay-activity")
+      ).toBe("idle")
       await click(queryRequired(rendered.container, "[data-rly-relay-dock-trigger]"))
       expect(rendered.portal.textContent).toContain("Check the retry boundary.")
       expect(rendered.portal.textContent).toContain("The retry lacks an idempotency key.")
@@ -258,6 +262,29 @@ describe("RelayProductDock", () => {
       await click(queryRequired(rendered.portal, 'button[type="submit"]'))
 
       expect(continuations).toEqual(["Verify the fix on the current head."])
+    } finally {
+      await disposeDock(rendered)
+    }
+  })
+
+  it("shows Relay working on the trigger's mark while the product reports its own run", async () => {
+    const conversation = await Effect.runPromise(
+      Schema.decodeUnknownEffect(PullRequestConversation)({
+        _tag: "codecommit",
+        route: { accountId: "123456789012", href: "/accounts/123456789012/prs/184", pullRequestId: "184" },
+        selection,
+        thread: { accountId: "123456789012", pullRequestId: "184", region: "eu-west-1", repositoryName: "payments" }
+      })
+    )
+    const rendered = await renderDock(
+      <RelayProductDock host={host}>
+        <RegisteredThread registration={{ context: [], conversation, selection, status: "loading", working: true }} />
+      </RelayProductDock>
+    )
+    try {
+      expect(
+        queryRequired(rendered.container, "[data-rly-relay-dock-trigger] svg").getAttribute("data-rly-relay-activity")
+      ).toBe("working")
     } finally {
       await disposeDock(rendered)
     }

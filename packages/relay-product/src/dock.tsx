@@ -34,8 +34,11 @@ import {
   type RelayProductDockHost,
   type RelayPullRequestDockRegistration,
   RelayProductDockProvider,
+  useRelayProductActivity,
+  useRelayProductAnswering,
   useRelayProductDockRegistration
 } from "./registry.js"
+import { answeringWhile } from "./answering.js"
 import type { RelaySelectorState } from "./model.js"
 
 export class RelayProductDockInvariantViolation extends Data.TaggedError("RelayProductDockInvariantViolation")<{
@@ -300,6 +303,7 @@ const PullRequestContinuation = ({
   const [message, setMessage] = useState("")
   const [validation, setValidation] = useState<string | null>(null)
   const [action, runAction] = useRelayDockAction()
+  const answering = answeringWhile(useRelayProductAnswering())
   const selectionMatchesRegistration = relaySelectionMatchesRegistration(selection, registration)
 
   const submit = (event: FormEvent<HTMLFormElement>): void => {
@@ -319,9 +323,9 @@ const PullRequestContinuation = ({
     }
     setValidation(null)
     runAction(
-      registration
-        .continuePullRequestConversation(decoded.success)
-        .pipe(Effect.tap(() => Effect.sync(() => setMessage(""))))
+      answering(registration.continuePullRequestConversation(decoded.success)).pipe(
+        Effect.tap(() => Effect.sync(() => setMessage("")))
+      )
     )
   }
 
@@ -399,6 +403,7 @@ export const RelayProductDock = ({ children, host }: RelayProductDockProps): Rea
 /** Render the chrome for a registration provider; keep this component lazy at product route boundaries. */
 export const RelayProductDockChrome = ({ host }: { readonly host: RelayProductDockHost }): ReactElement => {
   const registration = useRelayProductDockRegistration()
+  const activity = useRelayProductActivity()
   const activeSelection = registration?.selection ?? host.selection
   const identity = selectionIdentity(registration)
   const activeSelectorRevision = selectorRevision(activeSelection)
@@ -443,6 +448,7 @@ export const RelayProductDockChrome = ({ host }: { readonly host: RelayProductDo
       <RelayProductDockChromeBoundary>
         <Suspense fallback={null}>
           <LazyRelayDock
+            activity={activity}
             context={registration?.context ?? host.context}
             defaultOpen={false}
             footer={

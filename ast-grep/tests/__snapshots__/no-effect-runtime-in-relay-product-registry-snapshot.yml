@@ -1,0 +1,35 @@
+id: no-effect-runtime-in-relay-product-registry
+snapshots:
+  ? |
+    export { Effect } from "effect/Effect"
+  : labels:
+      - source: export { Effect } from "effect/Effect"
+        style: primary
+        start: 0
+        end: 38
+      - source: '"effect/Effect"'
+        style: secondary
+        start: 23
+        end: 38
+  ? |
+    import * as Effect from "effect/Effect"
+  : labels:
+      - source: import * as Effect from "effect/Effect"
+        style: primary
+        start: 0
+        end: 39
+      - source: '"effect/Effect"'
+        style: secondary
+        start: 24
+        end: 39
+  ? |
+    import { Effect } from "effect"
+  : labels:
+      - source: import { Effect } from "effect"
+        style: primary
+        start: 0
+        end: 31
+      - source: '"effect"'
+        style: secondary
+        start: 23
+        end: 31

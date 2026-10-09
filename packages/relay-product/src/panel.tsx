@@ -27,10 +27,13 @@ import {
   type RelayProductDockHost,
   type RelayProductDockMessage,
   type RelayPullRequestDockRegistration,
+  useRelayProductActivity,
+  useRelayProductAnswering,
   useRelayProductDockRegistration,
   useRelayProductOpen,
   useSummonClaim
 } from "./registry.js"
+import { answeringWhile } from "./answering.js"
 
 /**
  * The header button that opens Relay for this product: place it in the app header, before the panel.
@@ -41,6 +44,7 @@ import {
 export const RelayProductLauncher = ({ scope }: { readonly scope?: string | undefined } = {}): ReactElement => {
   const { launcher, open, returnTo, setOpen } = useRelayProductOpen()
   const registration = useRelayProductDockRegistration()
+  const activity = useRelayProductActivity()
   const about = registration === null ? scope : scopeOf(registration.context).label
   const descriptionId = useId()
   return (
@@ -51,6 +55,7 @@ export const RelayProductLauncher = ({ scope }: { readonly scope?: string | unde
         </span>
       )}
       <RelayLauncher
+        activity={activity}
         aria-describedby={about === undefined ? undefined : descriptionId}
         expanded={open}
         onClick={() => {
@@ -161,6 +166,7 @@ const rerunReason = "Rerun Relay with the selected profile or model before conti
  */
 export const RelayProductPanel = ({ host, pin }: RelayProductPanelProps): ReactElement | null => {
   const registration = useRelayProductDockRegistration()
+  const activity = useRelayProductActivity()
   const { launcher, open, pinned, returnTo, setOpen, setPinned } = useRelayProductOpen()
   const available = pin._tag === "Available"
   // An unavailable layout never pins; its width only matters to a pin it cannot offer.
@@ -210,6 +216,7 @@ export const RelayProductPanel = ({ host, pin }: RelayProductPanelProps): ReactE
     )
   return (
     <RelayPanel
+      activity={activity}
       launcher={returnTarget}
       onClose={() => setOpen(false)}
       options={
@@ -347,6 +354,7 @@ const Continuation = ({
   const [selection, setSelection] = useState(registration.selection)
   const [failure, setFailure] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const answering = answeringWhile(useRelayProductAnswering())
   // Decided once when the panel opens, so the preset never turns into two selects mid-thread.
   const coupled = useRef(isCoupled(registration.selection)).current
   const revision = selectorRevision(registration.selection)
@@ -383,13 +391,15 @@ const Continuation = ({
     }
     setFailure(null)
     setSending(true)
-    void Effect.runPromiseExit(registration.continuePullRequestConversation(decoded.success)).then((exit) => {
-      setSending(false)
-      if (Exit.isSuccess(exit)) {
-        draft.accepted(submission.requestId)
-        draftAbout.current.set(thread, aboutId)
-      } else setFailure(`${failureFromCause(exit.cause)} Your message is kept.`)
-    })
+    void Effect.runPromiseExit(answering(registration.continuePullRequestConversation(decoded.success))).then(
+      (exit) => {
+        setSending(false)
+        if (Exit.isSuccess(exit)) {
+          draft.accepted(submission.requestId)
+          draftAbout.current.set(thread, aboutId)
+        } else setFailure(`${failureFromCause(exit.cause)} Your message is kept.`)
+      }
+    )
   }
 
   // Options carry the branded ids; a choice is taken from the option, never from the raw string.

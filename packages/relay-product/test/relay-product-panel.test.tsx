@@ -255,6 +255,56 @@ describe("RelayProductPanel", () => {
     }
   })
 
+  // The mark on the launcher and panel header says Relay is working for as long as an answer is owed,
+  // and goes still however the continuation ends.
+  it("shows Relay working on its marks while a continuation waits, and idle once it ends", async () => {
+    const marks = (): ReadonlyArray<string | null> =>
+      [...document.querySelectorAll("svg[data-rly-relay-activity]")].map((svg) =>
+        svg.getAttribute("data-rly-relay-activity")
+      )
+    let answer: (succeeded: boolean) => void = () => undefined
+    const pending = vi.fn(() =>
+      Effect.promise(() => new Promise<boolean>((resolve) => (answer = resolve))).pipe(
+        Effect.flatMap((succeeded) => (succeeded ? Effect.void : Effect.die("transport")))
+      )
+    )
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <RelayProductPanel host={host} pin={{ _tag: "Available", minHostWidth: 960 }} />
+        <Registered registration={ready(coupled, pending)} />
+      </RelayProductDockProvider>
+    )
+    try {
+      await open()
+      expect(marks().length).toBeGreaterThanOrEqual(2)
+      expect(new Set(marks())).toEqual(new Set(["idle"]))
+      for (const succeeded of [true, false]) {
+        await setText("Check the stacked view too.")
+        await act(async () => button("Send")?.click())
+        expect(new Set(marks())).toEqual(new Set(["working"]))
+        await act(async () => answer(succeeded))
+        expect(new Set(marks())).toEqual(new Set(["idle"]))
+      }
+    } finally {
+      await unmount()
+    }
+  })
+
+  it("shows Relay working while the product reports its own run", async () => {
+    await mount(
+      <RelayProductDockProvider>
+        <RelayProductLauncher />
+        <Registered registration={{ ...ready(coupled, () => Effect.void), working: true }} />
+      </RelayProductDockProvider>
+    )
+    try {
+      expect(launcher()?.querySelector("svg")?.getAttribute("data-rly-relay-activity")).toBe("working")
+    } finally {
+      await unmount()
+    }
+  })
+
   it("refuses a second panel under one provider, so Ctrl/⌘+J is bound once", async () => {
     await mount(
       <RelayProductDockProvider>
