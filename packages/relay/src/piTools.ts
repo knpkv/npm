@@ -19,10 +19,16 @@ import type { Context as ChordContext } from "@earendil-works/chord"
 import { Type } from "@earendil-works/pi-ai"
 import { defineExtension, defineTool, hook, ToolTask } from "@earendil-works/pi-durable"
 import type { Extension } from "@earendil-works/pi-durable"
-import { Cause, Data, Schema } from "effect"
-import type { Effect, Exit } from "effect"
-import type { PendingAction } from "./model.js"
-import type { CapabilityResult, RegisteredCapability } from "./registry.js"
+import type {
+  CapabilityEncodingFailed,
+  CapabilityFailed,
+  CapabilityInputInvalid,
+  InvocationResult,
+  PendingAction
+} from "@knpkv/capability"
+import { Cause, Data, Effect, Schema } from "effect"
+import type { Exit, Option } from "effect"
+import type { RegisteredCapability } from "./registry.js"
 
 /** Runs an Effect from inside Pi with the harness's services. */
 export type EffectRunner<Requirements> = <A, E>(
@@ -52,7 +58,23 @@ const declined = (verb: string): string => `The user declined: ${verb}. Do not r
 const invalidArguments = (verb: string, cause: string): string =>
   `${verb} got invalid arguments, so nobody was asked: ${cause}`
 
-const resultText = (result: CapabilityResult): string => JSON.stringify(result.output)
+const resultText = (result: InvocationResult): string => JSON.stringify(result.output)
+
+/** What the model reads when a call fails: the declared reason and fix, never a defect's internals. */
+const modelVisibleFailure = (
+  name: string,
+  failure: Option.Option<CapabilityFailed | CapabilityInputInvalid | CapabilityEncodingFailed>
+): string => {
+  if (failure._tag === "None") return `${name} failed unexpectedly. Tell the user it did not complete.`
+  switch (failure.value._tag) {
+    case "CapabilityFailed":
+      return `${failure.value.reason} — ${failure.value.fix}`
+    case "CapabilityInputInvalid":
+      return `${name} got invalid arguments: ${failure.value.issue}`
+    case "CapabilityEncodingFailed":
+      return `${name} failed unexpectedly. Tell the user it did not complete.`
+  }
+}
 
 /** Build the `relay` Pi extension for one product's capabilities. */
 export const relayExtension = <Requirements>(
@@ -66,7 +88,7 @@ export const relayExtension = <Requirements>(
       name: capability.name,
       description: capability.description,
       parameters: Type.Unsafe(capability.parameters),
-      ...(capability.effect === "read" && replaySafe),
+      ...(capability.gate === undefined && replaySafe),
       execute: async (args, api, context: ChordContext) => {
         // Pi validated `args` against the capability's JSON Schema; decode it to JSON for the capability.
         const json = decodeJson(args)
@@ -78,12 +100,24 @@ export const relayExtension = <Requirements>(
         }
         const exit = await runEffect(capability.run(json.value), context.abortSignal)
         if (exit._tag === "Failure") {
+          const failure = Cause.findErrorOption(exit.cause)
+          if (failure._tag === "None") {
+            // A defect or an undeclared error: logged here, never shown to the model.
+            await runEffect(
+              Effect.logError(`Relay capability ${capability.name} failed unexpectedly`, exit.cause),
+              undefined
+            )
+          }
           throw new RelayToolFailure({
             capability: capability.name,
-            message: `${capability.name} failed: ${Cause.pretty(exit.cause)}`
+            message: modelVisibleFailure(capability.name, failure)
           })
         }
-        await api.details({ cites: exit.value.cites.map((ref) => ({ ...ref })) }, context)
+        const receipt = capability.receipt(exit.value)
+        await api.details({
+          cites: exit.value.cites.map((ref) => ({ ...ref })),
+          ...(receipt !== undefined && { receipt: { ...receipt } })
+        }, context)
         return { content: [{ type: "text", text: resultText(exit.value) }] }
       }
     })
@@ -93,20 +127,29 @@ export const relayExtension = <Requirements>(
       const capability = byName.get(call.name)
       // Pi refuses unregistered tools before this hook, but another extension's tools would reach it.
       if (capability === undefined) return { block: `${call.name} is not a Relay capability.` }
-      if (capability.effect === "read") return undefined
-      if (capability.effect === "host") {
+      const gate = capability.gate
+      if (gate === undefined) return undefined
+      if (gate.access === "host") {
         return { block: `${call.name} needs a herdr Approval, which Relay cannot request yet.` }
       }
       const memoKey = `relay.decision.${call.id}`
       const remembered = await api.memo<boolean>(memoKey, context)
       if (remembered !== undefined) return remembered ? undefined : { block: declined(call.name) }
-      const action = await runEffect(capability.describe(call.arguments), context.abortSignal)
-      if (action._tag === "Failure") return { block: invalidArguments(call.name, Cause.pretty(action.cause)) }
+      // Arguments the confirmation can't show are refused with their reason, never asked about or read as a decline.
+      const action = await runEffect(gate.describe(call.arguments), context.abortSignal)
+      if (action._tag === "Failure") {
+        const failure = Cause.findErrorOption(action.cause)
+        return {
+          block: failure._tag === "Some" && failure.value._tag === "CapabilityInputInvalid"
+            ? invalidArguments(call.name, failure.value.issue)
+            : modelVisibleFailure(call.name, failure)
+        }
+      }
       const allowed = await broker.ask({
         conversationId: String(api.conversationId),
         callId: call.id,
         action: action.value,
-        reversible: capability.reversible
+        reversible: gate.reversible
       }, context.abortSignal)
       const decision = await api.memo(memoKey, allowed, context)
       return decision ? undefined : { block: declined(call.name) }

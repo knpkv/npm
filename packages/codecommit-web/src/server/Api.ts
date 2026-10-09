@@ -29,8 +29,16 @@ import {
 } from "@knpkv/codecommit-core/Domain.js"
 import { ReviewKind, ReviewProfileConfig, reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
 import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
+import { BackendStatus, DecisionState, RelayBackendId, SessionInfo } from "@knpkv/relay"
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/http-api"
+import {
+  HttpApi,
+  HttpApiEndpoint,
+  HttpApiGroup,
+  HttpApiMiddleware,
+  HttpApiSchema,
+  HttpApiSecurity
+} from "effect/http-api"
 import {
   MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
   MAXIMUM_RELAY_REVIEW_MESSAGE_JSON_BYTES,
@@ -1017,6 +1025,83 @@ export class AuditGroup extends HttpApiGroup.make("audit")
   .prefix("/api/audit")
 {}
 
+// Relay: the assistant dock's conversation about one CodeCommit object.
+const RelayName = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200))
+
+/** The CodeCommit object a Relay session is about. This server only holds CodeCommit sessions. */
+export const RelayRef = Schema.Struct({ product: Schema.Literal("codecommit"), kind: RelayName, id: RelayName })
+export type RelayRef = typeof RelayRef.Type
+
+/**
+ * Review findings the person is looking at, attached to a message so Relay can discuss them. Findings
+ * live in the browser's review session in H1, so the dock sends the set with the head it was reviewed at.
+ */
+export const RelayReviewFindingsContext = Schema.TaggedStruct("ReviewFindings", {
+  reviewedHead: Schema.Struct({ revisionId: Schema.String, baseCommit: Schema.String, headCommit: Schema.String }),
+  findings: Schema.Array(RelayReviewFinding).check(Schema.isMaxLength(100))
+})
+export type RelayReviewFindingsContext = typeof RelayReviewFindingsContext.Type
+
+/** Relay could not start in this process: another one owns its store, or the store is unreadable. */
+export class RelayUnavailableError extends Schema.TaggedError<RelayUnavailableError>()(
+  "RelayUnavailableError",
+  { message: Schema.String, fix: Schema.String },
+  { httpApiStatus: 503 }
+) {}
+
+/** A run or confirmation is no longer in the state the request assumed; `state` says which it is in. */
+export class RelayConflictError extends Schema.TaggedError<RelayConflictError>()(
+  "RelayConflictError",
+  { state: Schema.Union([DecisionState, Schema.TaggedStruct("NotRunning", {})]) },
+  { httpApiStatus: 409 }
+) {}
+
+/** The request named a backend this server does not offer. */
+export class RelayBadRequestError extends Schema.TaggedError<RelayBadRequestError>()(
+  "RelayBadRequestError",
+  { message: Schema.String },
+  { httpApiStatus: 400 }
+) {}
+
+const relayErrors = [RelayUnavailableError, ApiError]
+
+export class RelayGroup extends HttpApiGroup.make("relay")
+  // Server-sent events: a Snapshot first, then live events; `: hb` every 15s re-checks the session and
+  // ends the stream with an `Unauthorized` event once it has expired.
+  .add(HttpApiEndpoint.get("events", "/events", { query: RelayRef, success: Schema.String, error: relayErrors }))
+  .add(
+    HttpApiEndpoint.post("messages", "/messages", {
+      payload: Schema.Struct({
+        ref: RelayRef,
+        text: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(20_000)),
+        requestId: RelayName,
+        backend: Schema.optionalKey(RelayBackendId),
+        // At most one findings set per message.
+        context: Schema.optionalKey(Schema.Array(RelayReviewFindingsContext).check(Schema.isMaxLength(1)))
+      }),
+      success: Schema.Struct({ runId: Schema.String }).pipe(HttpApiSchema.status(202)),
+      error: [...relayErrors, RelayBadRequestError]
+    })
+  )
+  .add(
+    HttpApiEndpoint.post("cancel", "/cancel", {
+      payload: Schema.Struct({ ref: RelayRef, runId: RelayName }),
+      success: HttpApiSchema.NoContent,
+      error: [...relayErrors, RelayConflictError]
+    })
+  )
+  .add(
+    HttpApiEndpoint.post("decisions", "/decisions", {
+      payload: Schema.Struct({ ref: RelayRef, callId: RelayName, allow: Schema.Boolean }),
+      success: HttpApiSchema.NoContent,
+      error: [...relayErrors, RelayConflictError]
+    })
+  )
+  .add(HttpApiEndpoint.get("session", "/session", { query: RelayRef, success: SessionInfo, error: relayErrors }))
+  .add(HttpApiEndpoint.get("backends", "/backends", { success: Schema.Array(BackendStatus), error: relayErrors }))
+  .prefix("/api/relay")
+{}
+
 // Combined API
 export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(PrsGroup)
@@ -1029,5 +1114,6 @@ export class CodeCommitApi extends HttpApi.make("CodeCommitApi")
   .add(StatsGroup)
   .add(PermissionsGroup)
   .add(AuditGroup)
+  .add(RelayGroup)
   .middleware(OwnerSessionAuth)
 {}

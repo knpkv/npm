@@ -12,14 +12,26 @@
  * - **One process owns a store.** The SQLite connection runs in exclusive locking mode, so a second
  *   process fails to open the same store with {@link RelayStoreLocked}, and the OS releases the lock if
  *   the owner dies, even on `kill -9`.
+ * - **A run is named by the `requestId`s it answers.** `send` takes the dock's `requestId`; events that
+ *   end a run, and the Snapshot of a run in flight, list them, and `cancel` stops a run only by one of them.
+ * - **Backend status is observed, not assumed.** A backend starts `Unverified` when its CLI answers
+ *   `--version`, turns `Ready` when a turn answers, and `Unavailable` with `SignedOut` when the CLI refuses
+ *   the login. Nothing about it is persisted.
  *
  * @module
  */
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context"
 import type { Message } from "@earendil-works/pi-ai"
 import { createRegistry, defineDoc, Harness, watchEvents } from "@earendil-works/pi-durable"
-import type { AgentEvent, Conversation, ConversationId, SubmissionId } from "@earendil-works/pi-durable"
+import type {
+  AgentEvent,
+  Conversation,
+  ConversationId,
+  SubmissionId,
+  SubmissionRecord
+} from "@earendil-works/pi-durable"
 import { SqliteStorage } from "@earendil-works/pi-durable/storage/sqlite"
+import * as Capability from "@knpkv/capability"
 import { createClient } from "@libsql/client"
 import {
   Clock,
@@ -27,21 +39,24 @@ import {
   Crypto,
   Deferred,
   Effect,
+  Exit,
   FileSystem,
   Layer,
   Path,
   Predicate,
   PubSub,
   Queue,
+  Ref,
   Schema,
   Semaphore,
   Stream
 } from "effect"
+import { AiError } from "effect/ai"
 import type { LanguageModel } from "effect/ai"
 import type { PlatformError } from "effect/PlatformError"
 import { libsqlDatabase } from "./libsqlDatabase.js"
-import { ObjectRef, objectRefKey } from "./model.js"
-import type { RelayBackendId, RelayEvent, SessionTool } from "./model.js"
+import { BackendUnavailableCause, DecisionState, objectRefKey, RelayBackendId, WriteReceipt } from "./model.js"
+import type { BackendStatus, ObjectRef, RelayEvent, SessionInfo, SessionTool } from "./model.js"
 import { relayModels, relayProvider } from "./piProvider.js"
 import type { TurnRunner } from "./piProvider.js"
 import { relayExtension } from "./piTools.js"
@@ -70,10 +85,27 @@ export class RelayStoreFailed extends Schema.TaggedError<RelayStoreFailed>()("Re
   message: Schema.String
 }) {}
 
-/** No confirmation is waiting for this call: it was already decided, or belongs to another session. */
+/** No confirmation is waiting for this call; `state` says whether it was answered, withdrawn, or never asked. */
 export class RelayDecisionNotPending extends Schema.TaggedError<RelayDecisionNotPending>()(
   "RelayDecisionNotPending",
-  { callId: Schema.String }
+  { callId: Schema.String, state: DecisionState }
+) {}
+
+/** No run of this session answers `runId`: it finished, or never started. */
+export class RelayRunNotActive extends Schema.TaggedError<RelayRunNotActive>()("RelayRunNotActive", {
+  runId: Schema.String
+}) {}
+
+/** The session asked for a backend this product did not configure. */
+export class RelayBackendNotConfigured extends Schema.TaggedError<RelayBackendNotConfigured>()(
+  "RelayBackendNotConfigured",
+  { backend: RelayBackendId }
+) {}
+
+/** A backend's CLI can't be used. `fix` is the one action that makes it usable. */
+export class RelayBackendUnavailable extends Schema.TaggedError<RelayBackendUnavailable>()(
+  "RelayBackendUnavailable",
+  { cause: BackendUnavailableCause, fix: Schema.String }
 ) {}
 
 /** One backend the harness can run turns on, with the `LanguageModel` that reaches it. */
@@ -81,6 +113,10 @@ export interface RelayBackend {
   readonly id: RelayBackendId
   readonly name: string
   readonly model: Layer.Layer<LanguageModel.LanguageModel>
+  /** The CLI's version, read without a model call; fails when it is missing or unusable. */
+  readonly probe: Effect.Effect<string, RelayBackendUnavailable>
+  /** The one line that signs the CLI back in, shown when a turn is refused for its login. */
+  readonly signInFix: string
 }
 
 export interface RelayHarnessOptions<Requirements> {
@@ -93,19 +129,53 @@ export interface RelayHarnessOptions<Requirements> {
   readonly backends: readonly [RelayBackend, ...ReadonlyArray<RelayBackend>]
 }
 
+/**
+ * Context the person attached to one message, as the product renders it for the model: `label` names
+ * what it is, `body` is the text the model reads. It reaches the model's context, never the transcript.
+ */
+export interface MessageContext {
+  readonly label: string
+  readonly body: string
+}
+
+export interface SendOptions {
+  /** Switch the session to this backend from its next turn on. */
+  readonly backend?: RelayBackendId | undefined
+  /** Attached context, placed just before the message. */
+  readonly context?: ReadonlyArray<MessageContext> | undefined
+}
+
 export interface RelayHarnessService {
-  /** Send a message to the session about `ref`. `requestId` makes a retried send land once. */
+  /**
+   * Send a message to the session about `ref`. `requestId` makes a retried send land once and names the run
+   * that answers it. `backend` switches the session to that backend from its next turn on.
+   */
   readonly send: (
     ref: ObjectRef,
     text: string,
-    requestId: string
-  ) => Effect.Effect<void, RelayStoreFailed>
+    requestId: string,
+    options?: SendOptions
+  ) => Effect.Effect<void, RelayStoreFailed | RelayBackendNotConfigured>
   /** The session's events: a `Snapshot` first, then every change. Ends when the scope closes. */
   readonly events: (ref: ObjectRef) => Stream.Stream<RelayEvent, RelayStoreFailed>
-  /** Answer a pending confirmation. */
-  readonly decide: (callId: string, allow: boolean) => Effect.Effect<void, RelayDecisionNotPending>
-  /** Stop the session's current run. Queued inputs are withdrawn; nothing already committed is undone. */
-  readonly cancel: (ref: ObjectRef) => Effect.Effect<void, RelayStoreFailed>
+  /**
+   * Answer a confirmation pending in `ref`'s session. A call raised in another session is `Unknown` here and
+   * stays pending. Outcomes are remembered for the harness's lifetime, not across restarts.
+   */
+  readonly decide: (
+    ref: ObjectRef,
+    callId: string,
+    allow: boolean
+  ) => Effect.Effect<void, RelayDecisionNotPending | RelayStoreFailed>
+  /**
+   * Stop the run answering `runId`. A message still queued is withdrawn alone; a run in flight stops whole,
+   * with every message it took. Nothing already committed is undone.
+   */
+  readonly cancel: (ref: ObjectRef, runId: string) => Effect.Effect<void, RelayStoreFailed | RelayRunNotActive>
+  /** The tools the dock lists for a session, and the backend its next turn runs on. */
+  readonly session: (ref: ObjectRef) => Effect.Effect<SessionInfo, RelayStoreFailed>
+  /** Every configured backend's status, in configuration order. */
+  readonly backends: Effect.Effect<ReadonlyArray<BackendStatus>>
   /** The tools the dock lists for a session. */
   readonly tools: ReadonlyArray<SessionTool>
 }
@@ -217,6 +287,62 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
   // live clock on every call, never a cached value.
   const clockService = yield* Clock.Clock
   const now = () => clockService.currentTimeMillisUnsafe()
+
+  const probed = (backend: RelayBackend): Effect.Effect<BackendStatus> =>
+    backend.probe.pipe(
+      Effect.match({
+        onSuccess: (version): BackendStatus => ({
+          _tag: "Unverified",
+          backend: backend.id,
+          label: backend.name,
+          version
+        }),
+        onFailure: (failure): BackendStatus => ({
+          _tag: "Unavailable",
+          backend: backend.id,
+          label: backend.name,
+          cause: failure.cause,
+          fix: failure.fix
+        })
+      })
+    )
+  const statuses = yield* Ref.make<ReadonlyArray<BackendStatus>>(
+    yield* Effect.forEach(options.backends, probed, { concurrency: "unbounded" })
+  )
+  const setStatus = (status: BackendStatus) =>
+    Ref.update(statuses, (all) => all.map((current) => (current.backend === status.backend ? status : current)))
+  const statusOf = (backend: RelayBackend) =>
+    Effect.map(Ref.get(statuses), (all) => all.find((status) => status.backend === backend.id))
+  // A turn that answered proves the CLI works. One refused for its login is the only failure that says
+  // something about the backend rather than the request; the rest stay on the run.
+  const observed = (backend: RelayBackend, exit: Exit.Exit<unknown, unknown>) =>
+    Effect.gen(function*() {
+      const current = yield* statusOf(backend)
+      const version = current?.version
+      if (Exit.isSuccess(exit)) {
+        if (version !== undefined) {
+          return yield* setStatus({ _tag: "Ready", backend: backend.id, label: backend.name, version })
+        }
+        const reprobed = yield* probed(backend)
+        return yield* setStatus(
+          reprobed._tag === "Unverified" ? { ...reprobed, _tag: "Ready" } : reprobed
+        )
+      }
+      const error = Exit.findErrorOption(exit)
+      if (
+        error._tag === "Some" && AiError.isAiError(error.value) && error.value.reason._tag === "AuthenticationError"
+      ) {
+        yield* setStatus({
+          _tag: "Unavailable",
+          backend: backend.id,
+          label: backend.name,
+          ...(version !== undefined && { version }),
+          cause: "SignedOut",
+          fix: backend.signInFix
+        })
+      }
+    })
+
   // Each backend's model is built once, with the harness, and reused by every turn.
   const providers = yield* Effect.forEach(
     options.backends,
@@ -228,7 +354,7 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
               const turn = yield* runTurn(request).pipe(Effect.provideContext(modelContext))
               const callIds = yield* Effect.forEach(turn.toolCalls, () => cryptoService.randomUUIDv4)
               return { turn, callIds }
-            }),
+            }).pipe(Effect.onExit((exit) => observed(backend, exit))),
             signal === undefined ? undefined : { signal }
           )
         return relayProvider(backend.id, backend.name, runner, now)
@@ -239,6 +365,8 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
   // Confirmations waiting for a person, with the event that shows them, so a dock that reconnects
   // mid-confirmation sees the card again after its Snapshot.
   const pending = new Map<string, { readonly decision: Deferred.Deferred<boolean>; readonly event: Unsequenced }>()
+  // How each confirmation this process asked for ended, so a late or repeated answer learns why it is refused.
+  const outcomes = new Map<string, DecisionState>()
   const pendingFor = (session: string): ReadonlyArray<Unsequenced> =>
     [...pending.values()].flatMap(({ event }) => (event.session === session ? [event] : []))
   const confirmations = yield* PubSub.unbounded<{ readonly conversationId: string; readonly event: Unsequenced }>()
@@ -258,8 +386,20 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
           yield* PubSub.publish(confirmations, { conversationId: request.conversationId, event })
           return yield* Deferred.await(decision)
         }).pipe(
-          // A cancelled run aborts the call: the card goes away with it, answered or not.
-          Effect.ensuring(Effect.sync(() => pending.delete(request.callId)))
+          // A cancelled run aborts the call: the card goes away with it, answered or not, and the dock
+          // hears how it ended.
+          Effect.ensuring(Effect.suspend(() => {
+            pending.delete(request.callId)
+            const outcome = outcomes.get(request.callId) ?? { _tag: "Expired" }
+            outcomes.set(request.callId, outcome)
+            const event: Unsequenced = {
+              _tag: "ConfirmationResolved",
+              session: request.conversationId,
+              call: request.callId,
+              decision: outcome._tag === "Decided" ? (outcome.allow ? "confirmed" : "declined") : "expired"
+            }
+            return PubSub.publish(confirmations, { conversationId: request.conversationId, event })
+          }))
         ),
         signal === undefined ? undefined : { signal }
       )
@@ -305,35 +445,97 @@ export const make = Effect.fn("RelayHarness.make")(function*<Requirements>(optio
       return created
     }))
 
+  // The session an object already has, without creating one: deciding never opens a session.
+  const existingSession = (ref: ObjectRef): Effect.Effect<ConversationId | undefined, RelayStoreFailed> =>
+    promise("find the session", async () => {
+      const index = await harness.snapshot(SessionIndex, root.id, BACKGROUND_CONTEXT)
+      return index?.sessions[objectRefKey(ref)]
+    })
+
+  const byName = new Map(options.capabilities.map((capability) => [capability.name, capability]))
+  const display: Display = (capability) => byName.get(capability)
+  const tools = options.capabilities.map((capability): SessionTool => ({
+    name: capability.name,
+    access: capability.gate?.access ?? "read",
+    available: true
+  }))
+
   return RelayHarness.of({
-    tools: options.capabilities.map((capability) => ({
-      name: capability.name,
-      effect: capability.effect,
-      available: true
-    })),
-    send: (ref, text, requestId) =>
+    tools,
+    send: (ref, text, requestId, { backend, context = [] } = {}) =>
       Effect.gen(function*() {
+        if (backend !== undefined && !options.backends.some((configured) => configured.id === backend)) {
+          return yield* new RelayBackendNotConfigured({ backend })
+        }
         const conversation = yield* conversationFor(ref)
+        if (backend !== undefined) {
+          yield* promise("switch the backend", () =>
+            conversation.configure({ model: { provider: backend, modelId: "default" } }, BACKGROUND_CONTEXT))
+        }
+        // Context goes in as its own entry: the model reads it, the transcript and Snapshot do not. Each entry
+        // is keyed by the message's requestId, so a retried send places it once.
+        yield* Effect.forEach(context, (item, index) =>
+          promise("attach the context", () =>
+            conversation.submit({
+              type: "write",
+              requestId: `${requestId}#context-${index}`,
+              entry: {
+                kind: "relay.context",
+                model: [{
+                  role: "user",
+                  content: `Context the person attached to their next message: ${item.label}\n${item.body}`,
+                  timestamp: now()
+                }]
+              }
+            }, BACKGROUND_CONTEXT)))
         yield* promise("send the message", () =>
           conversation.submit({ type: "input", content: text, requestId }, BACKGROUND_CONTEXT))
       }),
     events: (ref) =>
       Stream.unwrap(
         Effect.map(conversationFor(ref), (conversation) =>
-          sessionEvents(harness, conversation, confirmations, pendingFor))
+          sessionEvents(harness, conversation, confirmations, pendingFor, display))
       ),
-    decide: (callId, allow) =>
+    decide: (ref, callId, allow) =>
       Effect.gen(function*() {
+        const session = yield* existingSession(ref)
         const waiting = pending.get(callId)
-        if (waiting === undefined) return yield* new RelayDecisionNotPending({ callId })
+        if (waiting === undefined || session === undefined || waiting.event.session !== String(session)) {
+          const outcome = waiting === undefined ? outcomes.get(callId) : undefined
+          return yield* new RelayDecisionNotPending({ callId, state: outcome ?? { _tag: "Unknown" } })
+        }
+        outcomes.set(callId, { _tag: "Decided", allow })
         pending.delete(callId)
         yield* Deferred.succeed(waiting.decision, allow)
       }),
-    cancel: (ref) =>
-      Effect.flatMap(
-        conversationFor(ref),
-        (conversation) => promise("cancel the run", () => conversation.abort(BACKGROUND_CONTEXT))
-      )
+    cancel: (ref, runId) =>
+      Effect.gen(function*() {
+        const conversation = yield* conversationFor(ref)
+        const submission = yield* promise(
+          "find the run",
+          () => storage.submissionByRequest(conversation.id, runId, BACKGROUND_CONTEXT)
+        )
+        if (submission?.type !== "input") return yield* new RelayRunNotActive({ runId })
+        if (submission.status === "queued") {
+          const withdrawn = yield* promise(
+            "withdraw the message",
+            () => harness.abortSubmission(submission.id, BACKGROUND_CONTEXT, conversation.id)
+          )
+          // Placed between the read and the withdrawal: it is the run in flight now.
+          if (withdrawn !== "already_placed") return
+        } else if (submission.status !== "placed") {
+          return yield* new RelayRunNotActive({ runId })
+        }
+        yield* promise("cancel the run", () => conversation.abort(BACKGROUND_CONTEXT))
+      }),
+    session: (ref) =>
+      Effect.gen(function*() {
+        const conversation = yield* conversationFor(ref)
+        const agent = yield* promise("read the session", () => conversation.agent(BACKGROUND_CONTEXT))
+        const backend = Schema.decodeUnknownOption(RelayBackendId)(agent.model?.provider)
+        return { tools, backend: backend._tag === "Some" ? backend.value : defaultBackend, cancel: true }
+      }),
+    backends: Ref.get(statuses)
   })
 })
 
@@ -354,7 +556,13 @@ const entryText = (messages: ReadonlyArray<Message> | undefined): string =>
     .join("\n")
 
 /** The citations a capability call records in its Pi tool details. */
-const decodeCites = Schema.decodeUnknownOption(Schema.Struct({ cites: Schema.Array(ObjectRef) }))
+/** What a capability call records in its Pi tool details: citations, and a write's receipt. */
+const decodeDetails = Schema.decodeUnknownOption(
+  Schema.Struct({ cites: Schema.Array(Capability.ObjectRef), receipt: Schema.optionalKey(WriteReceipt) })
+)
+
+/** How the dock shows one capability's calls. */
+type Display = (capability: string) => Pick<RegisteredCapability<unknown>, "label" | "summarize"> | undefined
 
 /** A Relay event before the stream numbers it. */
 type Unsequenced = RelayEvent extends infer Event ? Event extends RelayEvent ? Omit<Event, "seq"> : never : never
@@ -363,8 +571,11 @@ const sessionEvents = (
   harness: Harness,
   conversation: Conversation,
   confirmations: PubSub.PubSub<{ readonly conversationId: string; readonly event: Unsequenced }>,
-  pendingFor: (session: string) => ReadonlyArray<Unsequenced>
+  pendingFor: (session: string) => ReadonlyArray<Unsequenced>,
+  display: Display
 ): Stream.Stream<RelayEvent, RelayStoreFailed> => {
+  const summarize = (capability: string, args: Schema.Json) => display(capability)?.summarize(args) ?? capability
+  const labelOf = (capability: string) => display(capability)?.label ?? capability
   const session = String(conversation.id)
   const fromPi = Stream.callback<AgentEvent, RelayStoreFailed>((queue) =>
     Effect.acquireRelease(
@@ -379,7 +590,10 @@ const sessionEvents = (
       (watch) => Effect.promise(() => watch.stop())
     )
   )
-  const cites = new Map<string, ReadonlyArray<ObjectRef>>()
+  const details = new Map<
+    string,
+    { readonly cites: ReadonlyArray<Capability.ObjectRef>; readonly receipt?: WriteReceipt }
+  >()
   // Text already shown per content block of the in-flight message, so each change emits only what's new.
   const sent = new Map<number, string>()
   const textFrom = (index: number, full: string): ReadonlyArray<Unsequenced> => {
@@ -411,25 +625,27 @@ const sessionEvents = (
           session,
           call: slot.callId,
           capability: slot.name,
+          summary: summarize(slot.name, calls.get(slot.callId) ?? {}),
           input: calls.get(slot.callId) ?? {}
         }]
     )
     return [...partial, ...running]
   }
-  const toRelay = (event: AgentEvent): ReadonlyArray<Unsequenced> => {
+  const toRelay = (event: AgentEvent, runIds: ReadonlyArray<string>): ReadonlyArray<Unsequenced> => {
     switch (event.type) {
       case "snapshot":
         return [
           {
             _tag: "Snapshot",
             session,
+            runIds,
             messages: event.entries.flatMap((
               entry
-            ): ReadonlyArray<{ readonly role: "user" | "relay"; readonly text: string }> =>
+            ): ReadonlyArray<{ readonly id: string; readonly role: "user" | "relay"; readonly text: string }> =>
               entry.kind === "pi.user"
-                ? [{ role: "user", text: entryText(entry.model) }]
+                ? [{ id: String(entry.id), role: "user", text: entryText(entry.model) }]
                 : entry.kind === "pi.assistant"
-                ? [{ role: "relay", text: entryText(entry.model) }]
+                ? [{ id: String(entry.id), role: "relay", text: entryText(entry.model) }]
                 : []
             )
           },
@@ -462,15 +678,22 @@ const sessionEvents = (
           return []
         })
       case "tool_execution_start":
-        return [{ _tag: "ToolStarted", session, call: event.toolCallId, capability: event.toolName, input: event.args }]
+        return [{
+          _tag: "ToolStarted",
+          session,
+          call: event.toolCallId,
+          capability: event.toolName,
+          summary: summarize(event.toolName, event.args),
+          input: event.args
+        }]
       case "tool_execution_update": {
-        const decoded = decodeCites(event.details)
-        if (decoded._tag === "Some") cites.set(event.toolCallId, decoded.value.cites)
+        const decoded = decodeDetails(event.details)
+        if (decoded._tag === "Some") details.set(event.toolCallId, decoded.value)
         return []
       }
       case "tool_execution_end": {
-        const cited = cites.get(event.toolCallId) ?? []
-        cites.delete(event.toolCallId)
+        const recorded = details.get(event.toolCallId)
+        details.delete(event.toolCallId)
         // Pi writes a result entry for blocked, declined, failed and interrupted calls too; only a result
         // that is not an error is a success.
         const failed = (event.entry?.model ?? []).some((message) =>
@@ -481,13 +704,16 @@ const sessionEvents = (
           session,
           call: event.toolCallId,
           ok: event.entry !== undefined && !failed,
-          cites: cited
+          summary: recorded?.receipt?.summary ?? labelOf(event.toolName),
+          cites: recorded?.cites ?? [],
+          ...(recorded?.receipt !== undefined && { receipt: recorded.receipt })
         }]
       }
       case "task_failed":
         return [{
           _tag: "RunFailed",
           session,
+          runIds,
           cause: "The run stopped on an error",
           fix: "Retry the message; if it fails again, check the backend in setup."
         }]
@@ -495,20 +721,37 @@ const sessionEvents = (
         return []
     }
   }
+  const records = (inputs: ReadonlyArray<SubmissionId>) =>
+    Promise.all(
+      inputs.map(async (id) => (await harness.submission(id, BACKGROUND_CONTEXT))?.status(BACKGROUND_CONTEXT))
+    )
+  // Every input Relay submits carries the dock's requestId; an id is the fallback for one that doesn't.
+  const runIdsOf = (inputs: ReadonlyArray<SubmissionId>, read: ReadonlyArray<SubmissionRecord | undefined>) =>
+    inputs.map((id, index) => read[index]?.requestId ?? String(id))
+  // The run in flight as this subscription last saw it: the Snapshot names it, so a cancel can address it.
+  let active: ReadonlyArray<string> = []
+  const track = (inputs: ReadonlyArray<SubmissionId>): Effect.Effect<ReadonlyArray<string>, RelayStoreFailed> =>
+    (inputs.length === 0
+      ? Effect.succeed([])
+      : promise("read the run in flight", async () => runIdsOf(inputs, await records(inputs)))).pipe(
+        Effect.tap((runIds) => Effect.sync(() => (active = runIds)))
+      )
   // A run's end says only which inputs it ran; each input's submission record says how it ended.
   const runEnded = (inputs: ReadonlyArray<SubmissionId>): Effect.Effect<Unsequenced, RelayStoreFailed> =>
     promise("read how the run ended", async () => {
-      const records = await Promise.all(
-        inputs.map(async (id) => (await harness.submission(id, BACKGROUND_CONTEXT))?.status(BACKGROUND_CONTEXT))
-      )
-      const unanswered = records.find((record) => record?.status === "unanswered")
-      if (unanswered === undefined || unanswered.status !== "unanswered") return { _tag: "RunFinished", session }
+      const read = await records(inputs)
+      const runIds = runIdsOf(inputs, read)
+      const unanswered = read.find((record) => record?.status === "unanswered")
+      if (unanswered === undefined || unanswered.status !== "unanswered") {
+        return { _tag: "RunFinished", session, runIds }
+      }
       // An abort is the person's cancellation; any other reason is a failure the dock must explain.
       return /abort/iu.test(unanswered.reason)
-        ? { _tag: "Cancelled", session }
+        ? { _tag: "Cancelled", session, runIds }
         : {
           _tag: "RunFailed",
           session,
+          runIds,
           // `reason` is Pi's code (`model_error`); `detail` carries the backend's own message when there is one.
           cause: Predicate.isString(unanswered.detail) ? unanswered.detail : unanswered.reason,
           fix: "Check the backend in Relay setup (installed and signed in), then send the message again."
@@ -522,7 +765,17 @@ const sessionEvents = (
   const relayed = Stream.flatMap(
     fromPi,
     (event) =>
-      event.type === "run_end" ? Stream.fromEffect(runEnded(event.inputs)) : Stream.fromIterable(toRelay(event))
+      event.type === "run_end"
+        ? Stream.fromEffect(runEnded(event.inputs).pipe(Effect.tap(() => Effect.sync(() => (active = [])))))
+        : event.type === "run_start"
+        ? Stream.fromEffect(track(event.inputs)).pipe(
+          Stream.map((runIds): Unsequenced => ({ _tag: "RunStarted", session, runIds }))
+        )
+        : event.type === "snapshot"
+        ? Stream.fromEffect(track(event.run?.inputs ?? [])).pipe(
+          Stream.flatMap((runIds) => Stream.fromIterable(toRelay(event, runIds)))
+        )
+        : Stream.fromIterable(toRelay(event, active))
   )
   return Stream.merge(relayed, gate).pipe(
     Stream.map((event): RelayEvent => ({ ...event, seq: seq++ }))

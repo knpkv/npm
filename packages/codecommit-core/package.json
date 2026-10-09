@@ -30,6 +30,10 @@
       "types": "./src/ReviewClient/index.ts",
       "default": "./dist/ReviewClient/index.js"
     },
+    "./RelayCapabilities.js": {
+      "types": "./src/RelayCapabilities/index.ts",
+      "default": "./dist/RelayCapabilities/index.js"
+    },
     "./SandboxService.js": {
       "types": "./src/SandboxService/index.ts",
       "default": "./dist/SandboxService/index.js"
@@ -50,6 +54,7 @@
       "./ConfigService.js": "./dist/ConfigService/index.js",
       "./ReadClient.js": "./dist/ReadClient/index.js",
       "./ReviewClient.js": "./dist/ReviewClient/index.js",
+      "./RelayCapabilities.js": "./dist/RelayCapabilities/index.js",
       "./SandboxService.js": "./dist/SandboxService/index.js",
       "./*.js": "./dist/*.js"
     }
@@ -70,6 +75,7 @@
     "@aws-sdk/credential-providers": "^3.1145.0",
     "@distilled.cloud/aws": "1.0.0-rc.13",
     "@effect/sql-libsql": "4.0.0",
+    "@knpkv/capability": "workspace:^",
     "@libsql/client": "^0.18.0",
     "@smithy/core": "^3.35.1",
     "effect": "4.0.0"

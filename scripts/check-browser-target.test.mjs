@@ -13,6 +13,8 @@ import { BROWSER_TARGET } from "../browser-target.ts"
 
 // Every browser build takes its target from browser-target.ts: each Vite build config and each esbuild
 // script sets `target: BROWSER_TARGET` imported from there, and none names browsers or an ES level itself.
+// Scripts that bundle only for Node emit no browser code; each is named here and must say `platform: "node"`.
+const nodeBundles = ["packages/relay/scripts/bundle.mjs"]
 
 const root = fileURLToPath(new URL("..", import.meta.url))
 const runtime = ManagedRuntime.make(NodeServices.layer)
@@ -35,7 +37,8 @@ const sources = await runtime.runPromise(
 )
 
 const viteBuildConfig = /(?:^|\/)vite(?:\.[\w-]+)?\.config\.[cm]?[jt]s$/u
-const esbuildScript = ({ file, text }) => /^packages\/[^/]+\/scripts\//u.test(file) && /from "esbuild"/u.test(text)
+const esbuildScript = ({ file, text }) =>
+  /^packages\/[^/]+\/scripts\//u.test(file) && /from "esbuild"/u.test(text) && !nodeBundles.includes(file)
 const builds = sources.filter(({ file, text }) => viteBuildConfig.test(file) || esbuildScript({ file, text }))
 const importsTarget = /import \{ BROWSER_TARGET \} from "(?:\.\.\/)+browser-target\.ts"/u
 // A target written out in place: a browser list or an ES level, quoted or in an array.
@@ -47,6 +50,15 @@ test("every Vite build and esbuild asset script takes its target from browser-ta
     assert.match(text, importsTarget, `${file} must import BROWSER_TARGET from browser-target.ts`)
     assert.match(text, /target: BROWSER_TARGET\b/u, `${file} must set target: BROWSER_TARGET`)
     assert.doesNotMatch(text, inlineTarget, `${file} must not name a target of its own`)
+  }
+})
+
+test("each Node-only bundle exempt from the browser target builds for Node", () => {
+  for (const file of nodeBundles) {
+    const source = sources.find((entry) => entry.file === file)
+    assert.ok(source !== undefined, `${file} is listed as a Node bundle but is not tracked`)
+    assert.match(source.text, /platform: "node"/u, `${file} must set platform: "node"`)
+    assert.doesNotMatch(source.text, /platform: "browser"/u, `${file} must not also build for the browser`)
   }
 })
 

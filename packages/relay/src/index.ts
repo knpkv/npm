@@ -8,26 +8,29 @@ export type { CliBackendOptions } from "./backends.js"
 export {
   layer,
   make,
+  RelayBackendNotConfigured,
+  RelayBackendUnavailable,
   RelayDecisionNotPending,
   RelayHarness,
+  RelayRunNotActive,
   RelayStoreFailed,
   RelayStoreLinked,
   RelayStoreLocked
 } from "./harness.js"
-export type { RelayBackend, RelayHarnessOptions, RelayHarnessService } from "./harness.js"
+export type { MessageContext, RelayBackend, RelayHarnessOptions, RelayHarnessService, SendOptions } from "./harness.js"
 export {
   BackendStatus,
   BackendUnavailableCause,
-  CapabilityEffect,
-  defineCapability,
+  CapabilityAccess,
+  DecisionState,
   ObjectRef,
   objectRefKey,
-  PendingAction,
   RelayBackendId,
   RelayEvent,
   RelayProduct,
-  SessionTool
+  SessionInfo,
+  SessionTool,
+  WriteReceipt
 } from "./model.js"
-export type { Capability } from "./model.js"
-export { CapabilityFailed, CapabilityInputInvalid, CapabilityOutputInvalid, register } from "./registry.js"
-export type { CapabilityResult, RegisteredCapability } from "./registry.js"
+export { register } from "./registry.js"
+export type { DisplayOptions, Gate, RegisteredCapability } from "./registry.js"

@@ -3,11 +3,12 @@
  * SIGKILL); `resume` reopens the store and prints the session once the interrupted run settles.
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { defineContract, implement } from "@knpkv/capability"
 import { Console, Effect, FileSystem, Layer, Schedule, Schema, Stdio, Stream } from "effect"
 import { LanguageModel } from "effect/ai"
 import type { Response } from "effect/ai"
 import { layer, RelayHarness } from "../../src/harness.ts"
-import { defineCapability, ObjectRef } from "../../src/model.ts"
+import { ObjectRef } from "../../src/model.ts"
 import { register } from "../../src/registry.ts"
 
 const Arguments = Schema.Tuple([Schema.Literals(["run", "resume"]), Schema.String, Schema.String])
@@ -30,25 +31,31 @@ const model = Layer.effect(
   })
 )
 
+const postCommentContract = defineContract({
+  name: "post_comment",
+  description: "Post a comment",
+  access: "write",
+  reversible: false,
+  describe: (input: { readonly pr: string; readonly body: string }) => ({
+    verb: "post comment",
+    target: pr,
+    args: { body: input.body }
+  }),
+  input: Schema.Struct({ pr: Schema.String, body: Schema.String }),
+  output: Schema.Struct({ posted: Schema.Boolean }),
+  failure: Schema.Never,
+  cites: () => [pr]
+})
+
 const postCommentTo = (markerPath: string) =>
-  defineCapability({
-    name: "post_comment",
-    description: "Post a comment",
-    input: Schema.Struct({ pr: Schema.String, body: Schema.String }),
-    output: Schema.Struct({ posted: Schema.Boolean }),
-    effect: "write",
-    reversible: false,
-    describe: (input) => ({ verb: "post comment", target: pr, args: { body: input.body } }),
-    cites: () => [pr],
-    handler: (input) =>
-      Effect.gen(function*() {
-        const fs = yield* FileSystem.FileSystem
-        yield* fs.writeFileString(markerPath, `posted ${input.body}\n`, { flag: "a" })
-        // The parent kills this process here.
-        yield* Effect.sleep("30 seconds")
-        return { posted: true }
-      }).pipe(Effect.orDie)
-  })
+  implement(postCommentContract, (input) =>
+    Effect.gen(function*() {
+      const fs = yield* FileSystem.FileSystem
+      yield* fs.writeFileString(markerPath, `posted ${input.body}\n`, { flag: "a" })
+      // The parent kills this process here.
+      yield* Effect.sleep("30 seconds")
+      return { posted: true }
+    }).pipe(Effect.orDie))
 
 const program = (phase: "run" | "resume") =>
   Effect.gen(function*() {
@@ -56,7 +63,7 @@ const program = (phase: "run" | "resume") =>
     const events = relay.events(pr).pipe(
       Stream.tap((
         event
-      ) => (event._tag === "ConfirmationRequired" ? Effect.orDie(relay.decide(event.call, true)) : Effect.void)),
+      ) => (event._tag === "ConfirmationRequired" ? Effect.orDie(relay.decide(pr, event.call, true)) : Effect.void)),
       Stream.tap((event) => Console.log(JSON.stringify(event)))
     )
     if (phase === "run") {
@@ -89,7 +96,7 @@ const main = Effect.gen(function*() {
     storePath,
     instructions: "You are Relay.",
     capabilities: [register(postCommentTo(markerPath))],
-    backends: [{ id: "claude-code", name: "Claude Code", model }]
+    backends: [{ id: "claude-code", name: "Claude Code", model, probe: Effect.succeed("test"), signInFix: "Sign in." }]
   })
   const context = yield* Layer.build(harness)
   return yield* Effect.provide(program(phase), context)

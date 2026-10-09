@@ -12,8 +12,10 @@ gate, and one event stream for the dock.
   SQLite (`@libsql/client`, so Node and Bun both work). Every input, model turn and tool call is committed
   before it is shown. A process killed mid-run continues from its last checkpoint when the store is next
   opened, and a `write` that was interrupted is never run twice; the model is told it was interrupted.
-- **Capabilities are the only way in.** A product declares each action as a `Capability`: Schema input,
-  output and failure, plus a permission class.
+- **Capabilities are the only way in.** A product declares each action once as a `@knpkv/capability`
+  contract (Schema input, output and declared failures, plus its access) and binds a handler with
+  `implement`; `register` hands it to Relay. The model sees a declared failure's reason and fix, never a
+  defect's internals.
   - `read` runs when the model calls it, and reruns after a crash.
   - `write` waits for the person to confirm the exact action (`ConfirmationRequired` carries verb, target,
     arguments and whether it is reversible). The decision is remembered per call, so a restart neither asks
@@ -42,9 +44,28 @@ const RelayLive = Layer.unwrap(
 )
 ```
 
-`RelayHarness` then offers `send(ref, text, requestId)`, `events(ref)` (a `Snapshot` first, then
-`TextDelta`, `ToolStarted`/`ToolFinished` with citations, `ConfirmationRequired`, `RunFinished`/`RunFailed`),
-`decide(callId, allow)`, `cancel(ref)` and `tools`.
+`RelayHarness` then offers:
+
+- `send(ref, text, requestId, { backend?, context? })`: `requestId` makes a retried send land once and names
+  the run that answers it. `backend` switches the session from its next turn on (`RelayBackendNotConfigured`
+  otherwise). `context` is what the person attached, as the product renders it (`{ label, body }`): it is
+  placed just before the message for the model, and never appears in the transcript or the Snapshot.
+- `events(ref)`: a `Snapshot` first, with each message's `id` and the `runIds` of a run in flight. Then:
+  - `RunStarted { runIds }` and `TextDelta`.
+  - `ToolStarted` and `ToolFinished`, each with a server-built, display-safe `summary`. A finished call carries
+    its citations, and a write whose product projects one carries a `receipt { summary, providerId, link? }`
+    (`register(capability, { receipt })`).
+  - `ConfirmationRequired`, then `ConfirmationResolved { decision: confirmed | declined | expired }`. A card
+    turns to past tense only on the latter.
+  - `RunFinished`, `RunFailed` or `Cancelled`, with the `runIds` the run answered.
+- `decide(callId, allow)`: `RelayDecisionNotPending` says why an answer can't apply: `Decided`, `Expired` (the run
+  ended first) or `Unknown`. Kept for the process's lifetime.
+- `cancel(ref, runId)`: withdraws a queued message alone, or stops the run in flight; `RelayRunNotActive` when no
+  run answers `runId`.
+- `session(ref)`: the session's tools and the backend its next turn runs on.
+- `backends`: `Unverified` (the CLI answered `--version`), `Ready` (a turn answered), or `Unavailable` with
+  `NotInstalled`, `SignedOut`, `Misconfigured` or `NoCapability` and a one-line fix. Observed, never persisted.
+  `SignedOut` comes from an `AuthenticationError` turn failure.
 
 ## Security boundaries
 
@@ -59,7 +80,12 @@ const RelayLive = Layer.unwrap(
 
 ## Dependency note
 
-pi-ai depends on the Anthropic, OpenAI, Google GenAI and Bedrock SDKs (about 57 MB installed). Relay
-registers none of their providers and none of them load at runtime; removing them from the install is an
-exit criterion of the Relay host phase (H3), through pi-ai subpath or peer dependencies upstream, or an
-Effect-native provider layer.
+Relay bundles the Pi modules it uses (pi-durable, chord, and pi-ai's core) into `dist/index.js`. Their MIT
+notice ships in `LICENSE-THIRD-PARTY.md`. Pi's packages declare the Anthropic, OpenAI, Google and Bedrock SDKs
+and esbuild as hard dependencies, but nothing Relay loads imports them. Bundling keeps all of that out of
+every product that mounts Relay. The installed dependencies are `typebox`, `@libsql/client`, `effect` and
+Relay's sibling `@knpkv` packages.
+
+`pnpm test:pack` holds the package to that: the bundle may import only declared dependencies and Node
+built-ins, and a dynamic import may reach nothing but a Node built-in. The bundle is temporary, until upstream
+makes those dependencies optional (ADR-0009, amendment of 2026-10-07).

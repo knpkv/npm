@@ -55,3 +55,48 @@ to the owner it describes, over the owner-cookie-authenticated stream. It is nev
 logged, never served on unauthenticated routes, and the browser keeps it only in
 its in-memory snapshot. Reasons carry no provider message; the account's
 notification explains the failure.
+
+## Relay routes
+
+`/api/relay` serves the Relay assistant dock, behind the same owner cookie and CSRF policy as every
+other route. A session is keyed by a `RelayRef` (`{ product: "codecommit", kind, id }`). For a pull
+request the `id` is `accountId/region/repositoryName/pullRequestId`. That is a client-visible
+identifier: it crosses authenticated HTTP and the event stream, and it is never served on
+unauthenticated routes. Profiles, credentials and provider ARNs never cross into it.
+
+- `GET /events?product&kind&id`: server-sent events, a `Snapshot` first, then `RelayEvent` frames.
+  Every 15 seconds `: hb` re-checks the owner session. Once the session no longer holds, the stream
+  sends `data: {"_tag":"Unauthorized"}` and ends. If Relay can't read the session's events, the stream
+  sends `data: {"_tag":"StreamFailed"}` and ends, so the dock can tell Relay failing from a dropped
+  connection. The cause stays in the server log.
+- `POST /messages {ref, text, requestId, backend?, context?}`: 202 `{runId}`, the `requestId` that the
+  run's events list in `runIds`. An unknown `backend` is 400. `context` holds at most one
+  `ReviewFindings { reviewedHead, findings }`: the findings the person is looking at. Findings live in
+  the browser's review session, not on the server. Relay is told which head they were reviewed at, so it
+  can say when they come from an older head.
+- `POST /cancel {ref, runId}` and `POST /decisions {ref, callId, allow}`: 204, or 409 with the state
+  found: `NotRunning`, `Decided {allow}`, `Expired` or `Unknown`.
+- `GET /session?product&kind&id`: the session's tools, its current backend, and `cancel` (offer Stop
+  only when true). A posted comment's `ToolFinished.receipt` carries CodeCommit's operation id and the
+  pull request's console link.
+  `GET /backends`: `Unverified`, `Ready` or `Unavailable` with a one-line fix.
+
+Sessions hold conversation content. They live in `~/.codecommit/relay/sessions.sqlite`, with an
+owner-only directory (`0700`) and database (`0600`). One server process owns them. A second
+`codecommit web` on the same home keeps serving the queue, and answers 503 `RelayUnavailableError`
+with the fix on `/api/relay`. Turns run on the user's own Claude Code or Codex CLI login, with every
+CLI tool withheld.
+
+Relay's tools here:
+
+- `get_pull_request`, `list_pull_requests`: from the local cache.
+- `get_pull_request_diff`: the changed files at the current revision, with that revision's ids.
+- `post_comment`: a top-level comment.
+- `post_line_comment`: one line, on the before or after side, pinned to the revision it was written
+  against. It is refused with `ReviewHeadMoved` if the pull request has moved since, and with
+  `CommentLineOutsidePatch` if the line is outside the changes, so it never lands on a different line.
+
+Both comment tools post through the same permission rules, prompt and audit log as review findings
+(`postPullRequestComment`). IAM: `codecommit:PostCommentForPullRequest`. The diff and line comments also
+read `codecommit:GetPullRequest`, `codecommit:GetDifferences` and `codecommit:GetBlob`, as the review
+workbench does.

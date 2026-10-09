@@ -40,7 +40,7 @@ CLI and TUI for AWS CodeCommit pull requests.
   - `codecommit:EvaluatePullRequestApprovalRules` — approval state and satisfied rules; without it pull requests are still listed, marked "approval unknown", never as pending
   - `codecommit:GetPullRequestApprovalStates` — who approved
   - `codecommit:GetDifferences` — exact-revision changed files in TUI and web review workbenches
-  - `codecommit:GetBlob` — TUI/web API diff previews, web Relay review, and mandatory exact-line publication validation
+  - `codecommit:GetBlob` — TUI/web API diff previews, web Relay review, Relay `post_line_comment`, and mandatory exact-line publication validation
   - `codecommit:GitPull` — explicit exact-head local diffs, detached worktrees, and TUI Relay review
   - `codecommit:CreatePullRequest` — create
   - `codecommit:UpdatePullRequestTitle`, `codecommit:UpdatePullRequestDescription` — update

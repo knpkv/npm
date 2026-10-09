@@ -34,6 +34,7 @@ import {
   NotificationsLive,
   PermissionsLive,
   PrsLive,
+  RelayLive,
   SandboxLive,
   StatsLive,
   SubscriptionsLive
@@ -45,6 +46,7 @@ import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./interna
 import { updatePortOnConflict } from "./internal/PortRetry.js"
 import { resolveCodeCommitPublicOriginForBind } from "./internal/PublicOrigin.js"
 import { staticClient } from "./internal/StaticClient.js"
+import { commentPosterLayer, relayMountLayer } from "./relay/RelayMount.js"
 import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
 
 export { loopbackOrigin, requireLoopbackHostname } from "@knpkv/browser-pairing/owner-session"
@@ -61,7 +63,8 @@ const HandlersLive = Layer.mergeAll(
   SandboxLive,
   StatsLive,
   PermissionsLive,
-  AuditLive
+  AuditLive,
+  RelayLive
 ).pipe(Layer.provideMerge(BackgroundScopeLive))
 
 // Platform dependencies
@@ -174,6 +177,9 @@ const RelayFindingPublisherLive = Layer.effect(
   Layer.provide(PermissionGateLive_)
 )
 
+// Relay's comments use the same gated publisher as review findings.
+const RelayMountLive = relayMountLayer.pipe(Layer.provide(commentPosterLayer))
+
 // Sandbox services — DockerService uses the `docker` CLI, no HttpClient needed
 // SandboxService reads ConfigService at runtime for sandbox settings
 const SandboxServicesLive = Layer.mergeAll(
@@ -219,7 +225,7 @@ const AuditPrune = Layer.effectDiscard(
 // API router with handlers — AutoRefresh shares AllServicesLive with handlers
 const ApiLive = Layer.mergeAll(
   HttpApiBuilder.layer(CodeCommitApi).pipe(
-    Layer.provide(HandlersLive.pipe(Layer.provide(RelayFindingPublisherLive)))
+    Layer.provide(HandlersLive.pipe(Layer.provide(RelayMountLive), Layer.provide(RelayFindingPublisherLive)))
   ),
   autoRefreshLayer,
   AuditPrune,

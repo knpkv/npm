@@ -1,12 +1,13 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, layer as testLayer } from "@effect/vitest"
 import { makeDeterministicLanguageModel } from "@knpkv/ai-runtime"
+import { defineContract, implement } from "@knpkv/capability"
 import { Context, Deferred, Effect, Fiber, FileSystem, Layer, Path, Predicate, Schedule, Schema, Stream } from "effect"
 import { AiError } from "effect/ai"
 import type { LanguageModel } from "effect/ai"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { defineCapability, layer, ObjectRef, objectRefKey, register, RelayHarness } from "../src/index.js"
-import type { RelayEvent } from "../src/index.js"
+import { layer, ObjectRef, objectRefKey, register, RelayBackendUnavailable, RelayHarness } from "../src/index.js"
+import type { RelayBackend, RelayEvent } from "../src/index.js"
 import { relayModels, relayProvider } from "../src/piProvider.js"
 
 const pr = ObjectRef.make({ product: "codecommit", kind: "pull-request", id: "acct/repo/42" })
@@ -26,78 +27,106 @@ const toolThenAnswer = (tool: string, args: Record<string, Schema.Json>, prompts
     return { _tag: "response", parts: [{ type: "text", text: JSON.stringify(turn) }] }
   })
 
-const approvals = defineCapability({
+const getApprovals = defineContract({
   name: "get_approvals",
   description: "Approval count of a pull request",
+  access: "read",
   input: Schema.Struct({ pr: Schema.String }),
   output: Schema.Struct({ approvals: Schema.Number }),
-  effect: "read",
-  reversible: true,
-  describe: () => ({ verb: "read approvals", target: pr, args: {} }),
-  cites: () => [pr],
-  handler: () => Effect.succeed({ approvals: 2 })
+  failure: Schema.Never,
+  cites: () => [pr]
 })
+const approvals = implement(getApprovals, () => Effect.succeed({ approvals: 2 }))
 
 const commentCalls: Array<string> = []
-const postComment = defineCapability({
-  name: "post_comment",
-  description: "Post a comment on a pull request",
-  input: Schema.Struct({ pr: Schema.String, body: Schema.String }),
-  output: Schema.Struct({ posted: Schema.Boolean }),
-  effect: "write",
-  reversible: false,
-  describe: (input) => ({ verb: "post comment", target: pr, args: { body: input.body } }),
-  cites: () => [pr],
-  handler: (input) =>
+const postComment = implement(
+  defineContract({
+    name: "post_comment",
+    description: "Post a comment on a pull request",
+    access: "write",
+    reversible: false,
+    describe: (input: { readonly pr: string; readonly body: string }) => ({
+      verb: "post comment",
+      target: pr,
+      args: { body: input.body }
+    }),
+    input: Schema.Struct({ pr: Schema.String, body: Schema.String }),
+    output: Schema.Struct({ posted: Schema.Boolean }),
+    failure: Schema.Never,
+    cites: () => [pr]
+  }),
+  (input) =>
     Effect.sync(() => {
       commentCalls.push(input.body)
       return { posted: true }
     })
+)
+
+/** A Claude Code backend over a test model, installed at a fixed version unless `probe` says otherwise. */
+const claude = (
+  model: Layer.Layer<LanguageModel.LanguageModel>,
+  probe: RelayBackend["probe"] = Effect.succeed("2.1.0 (Claude Code)")
+): RelayBackend => ({
+  id: "claude-code",
+  name: "Claude Code",
+  model,
+  probe,
+  signInFix: "Run claude and sign in with /login."
 })
 
 const hostCalls: Array<string> = []
-const runShell = defineCapability({
-  name: "run_shell",
-  description: "Run a command on the host",
-  input: Schema.Struct({ cmd: Schema.String }),
-  output: Schema.Struct({ ok: Schema.Boolean }),
-  effect: "host",
-  reversible: false,
-  describe: (input) => ({ verb: "run", target: pr, args: { cmd: input.cmd } }),
-  cites: () => [pr],
-  handler: (input) =>
+const runShell = implement(
+  defineContract({
+    name: "run_shell",
+    description: "Run a command on the host",
+    access: "host",
+    reversible: false,
+    describe: (input: { readonly cmd: string }) => ({ verb: "run", target: pr, args: { cmd: input.cmd } }),
+    input: Schema.Struct({ cmd: Schema.String }),
+    output: Schema.Struct({ ok: Schema.Boolean }),
+    failure: Schema.Never,
+    cites: () => [pr]
+  }),
+  (input) =>
     Effect.sync(() => {
       hostCalls.push(input.cmd)
       return { ok: true }
     })
-})
+)
 
 /** A write whose input has a check JSON Schema cannot express, so only the capability's decode rejects it. */
-const postNonEmpty = defineCapability({
-  name: "post_non_empty",
-  description: "Post a non-blank comment on a pull request",
-  input: Schema.Struct({
-    pr: Schema.String,
-    body: Schema.String.check(Schema.makeFilter((body: string) => body.trim() !== ""))
+const postNonEmpty = implement(
+  defineContract({
+    name: "post_non_empty",
+    description: "Post a non-blank comment on a pull request",
+    access: "write",
+    reversible: false,
+    describe: (input: { readonly pr: string; readonly body: string }) => ({
+      verb: "post comment",
+      target: pr,
+      args: { body: input.body }
+    }),
+    input: Schema.Struct({
+      pr: Schema.String,
+      body: Schema.String.check(Schema.makeFilter((body: string) => body.trim() !== ""))
+    }),
+    output: Schema.Struct({ posted: Schema.Boolean }),
+    failure: Schema.Never,
+    cites: () => [pr]
   }),
-  output: Schema.Struct({ posted: Schema.Boolean }),
-  effect: "write",
-  reversible: false,
-  describe: (input) => ({ verb: "post comment", target: pr, args: { body: input.body } }),
-  cites: () => [pr],
-  handler: (input) =>
+  (input) =>
     Effect.sync(() => {
       commentCalls.push(input.body)
       return { posted: true }
     })
-})
+)
 
 const harnessLayer = (model: Layer.Layer<LanguageModel.LanguageModel>, storePath: string) =>
   layer({
     storePath,
     instructions: "You are Relay.",
     capabilities: [register(approvals), register(postComment), register(runShell), register(postNonEmpty)],
-    backends: [{ id: "claude-code", name: "Claude Code", model }]
+    backends: [claude(model)]
   })
 
 const tempStore = Effect.gen(function*() {
@@ -148,7 +177,13 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         expect(tags[0]).toBe("Snapshot")
         expect(tags).toContain("ToolStarted")
         expect(tags).not.toContain("ConfirmationRequired")
-        expect(events.find((event) => event._tag === "ToolFinished")).toMatchObject({ ok: true, cites: [pr] })
+        expect(events.find((event) => event._tag === "ToolStarted")).toMatchObject({ summary: "get approvals" })
+        expect(events.find((event) => event._tag === "ToolFinished")).toMatchObject({
+          ok: true,
+          summary: "get approvals",
+          cites: [pr]
+        })
+        expect(events.find((event) => event._tag === "ToolFinished")).not.toHaveProperty("receipt")
         expect(events.flatMap((event) => (event._tag === "TextDelta" ? [event.text] : [])).join("")).toContain(
           "2 approvals"
         )
@@ -165,13 +200,15 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
           relay.events(pr),
           relay.send(pr, "Comment LGTM", "req-2"),
           (event) =>
-            event._tag === "ConfirmationRequired" ? relay.decide(event.call, false).pipe(Effect.orDie) : Effect.void
+            event._tag === "ConfirmationRequired" ? relay.decide(pr, event.call, false).pipe(Effect.orDie) : Effect.void
         )
         const confirmation = events.find((event) => event._tag === "ConfirmationRequired")
         expect(confirmation).toMatchObject({
           action: { verb: "post comment", args: { body: "LGTM" } },
           reversible: false
         })
+        // The card turns to past tense only on the server's outcome.
+        expect(events.find((event) => event._tag === "ConfirmationResolved")).toMatchObject({ decision: "declined" })
         expect(commentCalls).toEqual([])
       }).pipe(Effect.scoped))
 
@@ -187,7 +224,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
             ? Effect.sync(() =>
               atCard.push([...commentCalls])
             ).pipe(
-              Effect.andThen(relay.decide(event.call, true).pipe(Effect.orDie))
+              Effect.andThen(relay.decide(pr, event.call, true).pipe(Effect.orDie))
             )
             : Effect.void)
         expect(atCard).toEqual([[]])
@@ -202,7 +239,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         const model = toolThenAnswer("run_shell", { cmd: "rm -rf /" }, prompts)
         const relay = yield* relayIn(harnessLayer(model.layer, store))
         const events = yield* sendAndCollect(relay.events(pr), relay.send(pr, "Clean up", "req-host"), (event) =>
-          event._tag === "ConfirmationRequired" ? relay.decide(event.call, true).pipe(Effect.orDie) : Effect.void)
+          event._tag === "ConfirmationRequired" ? relay.decide(pr, event.call, true).pipe(Effect.orDie) : Effect.void)
         expect(events.map((event) =>
           event._tag
         )).not.toContain("ConfirmationRequired")
@@ -226,7 +263,9 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
             relay.events(pr),
             relay.send(pr, "Comment nothing", "req-invalid"),
             (event) =>
-              event._tag === "ConfirmationRequired" ? relay.decide(event.call, true).pipe(Effect.orDie) : Effect.void
+              event._tag === "ConfirmationRequired"
+                ? relay.decide(pr, event.call, true).pipe(Effect.orDie)
+                : Effect.void
           )
           expect(events.map((event) => event._tag)).not.toContain("ConfirmationRequired")
           expect(prompts.at(-1)).toContain("post_non_empty got invalid arguments, so nobody was asked")
@@ -251,7 +290,7 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         // Second dock: its Snapshot is followed by the same confirmation; answering it finishes the run.
         const second = yield* relay.events(pr).pipe(
           Stream.tap((event) =>
-            event._tag === "ConfirmationRequired" ? relay.decide(event.call, true).pipe(Effect.orDie) : Effect.void
+            event._tag === "ConfirmationRequired" ? relay.decide(pr, event.call, true).pipe(Effect.orDie) : Effect.void
           ),
           Stream.takeUntil((event) => event._tag === "RunFinished"),
           Stream.runCollect
@@ -386,11 +425,23 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
   })
 
   /** A model whose turns come from `script`, in order; a string is an error with that text. */
-  const scripted = (script: ReadonlyArray<string | { readonly reply: string }>) => {
+  const scripted = (
+    script: ReadonlyArray<string | { readonly reply: string } | { readonly refused: string }>
+  ) => {
     let calls = 0
     const model = makeDeterministicLanguageModel(() => {
       const step = script[Math.min(calls, script.length - 1)] ?? "script is empty"
       calls += 1
+      if (!Predicate.isString(step) && "refused" in step) {
+        return {
+          _tag: "failure",
+          failure: AiError.make({
+            method: "generateText",
+            module: "test",
+            reason: new AiError.AuthenticationError({ kind: "InvalidKey", description: step.refused })
+          })
+        }
+      }
       return Predicate.isString(step)
         ? {
           _tag: "failure",
@@ -438,10 +489,20 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         const events = yield* sendAndCollect(
           relay.events(pr),
           relay.send(pr, "Comment never", "req-cancel"),
-          (event) => event._tag === "ConfirmationRequired" ? relay.cancel(pr).pipe(Effect.orDie) : Effect.void
+          (event) =>
+            event._tag === "ConfirmationRequired" ? relay.cancel(pr, "req-cancel").pipe(Effect.orDie) : Effect.void
         ).pipe(Effect.timeout("10 seconds"))
-        expect(events.at(-1)?._tag).toBe("Cancelled")
+        expect(events.at(-1)).toMatchObject({ _tag: "Cancelled", runIds: ["req-cancel"] })
+        expect(events.find((event) => event._tag === "ConfirmationResolved")).toMatchObject({ decision: "expired" })
         expect(commentCalls).toEqual([])
+        // The card went away with its run: a late answer learns it expired, and a finished run can't be cancelled.
+        const card = events.find((event) => event._tag === "ConfirmationRequired")
+        const late = yield* relay.decide(pr, card?._tag === "ConfirmationRequired" ? card.call : "", true).pipe(
+          Effect.flip
+        )
+        expect(late).toMatchObject({ _tag: "RelayDecisionNotPending", state: { _tag: "Expired" } })
+        const again = yield* relay.cancel(pr, "req-cancel").pipe(Effect.flip)
+        expect(again).toMatchObject({ _tag: "RelayRunNotActive", runId: "req-cancel" })
         const reconnect = yield* relay.events(pr).pipe(Stream.take(1), Stream.runCollect)
         expect(reconnect.map((event) => event._tag)).toEqual(["Snapshot"])
         const after = yield* relay.events(pr).pipe(
@@ -452,18 +513,245 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
       }).pipe(Effect.scoped))
   })
 
-  describe("tool results", () => {
-    const broken = defineCapability({
-      name: "get_approvals",
-      description: "Approval count of a pull request",
-      input: Schema.Struct({ pr: Schema.String }),
-      output: Schema.Struct({ approvals: Schema.Number }),
-      effect: "read",
-      reversible: true,
-      describe: () => ({ verb: "read approvals", target: pr, args: {} }),
-      cites: () => [pr],
-      handler: () => Effect.fail({ _tag: "AwsDenied", message: "AccessDenied" })
+  describe("runs and decisions", () => {
+    it.effect("names a run by its requestId, in flight and when it ends", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const slow = implement(getApprovals, () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as({ approvals: 2 })
+          ))
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        const relay = yield* relayIn(layer({
+          storePath: store,
+          instructions: "You are Relay.",
+          capabilities: [register(slow)],
+          backends: [claude(model.layer)]
+        }))
+        yield* relay.send(pr, "Approvals?", "req-named")
+        yield* Deferred.await(started)
+        const notThisOne = yield* relay.cancel(pr, "req-other").pipe(Effect.flip)
+        expect(notThisOne._tag).toBe("RelayRunNotActive")
+        const attached = yield* Deferred.make<void>()
+        const late = yield* Effect.forkChild(
+          relay.events(pr).pipe(
+            Stream.tap((event) => (event._tag === "Snapshot" ? Deferred.succeed(attached, undefined) : Effect.void)),
+            Stream.takeUntil((event) => event._tag === "RunFinished"),
+            Stream.runCollect
+          )
+        )
+        yield* Deferred.await(attached)
+        yield* Deferred.succeed(release, undefined)
+        const events = yield* Fiber.join(late)
+        expect(events[0]).toMatchObject({ _tag: "Snapshot", runIds: ["req-named"] })
+        expect(events.at(-1)).toMatchObject({ _tag: "RunFinished", runIds: ["req-named"] })
+      }).pipe(Effect.scoped))
+
+    it.effect("announces the run, labels reads, and shows a confirmed write's receipt", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const model = toolThenAnswer("post_comment", { pr: "42", body: "Ship it" })
+        const relay = yield* relayIn(layer({
+          storePath: store,
+          instructions: "You are Relay.",
+          capabilities: [
+            register(approvals),
+            register(postComment, {
+              receipt: () => ({
+                summary: "Comment posted",
+                providerId: "comment-7",
+                link: "https://example.invalid/42"
+              })
+            })
+          ],
+          backends: [claude(model.layer)]
+        }))
+        expect(yield* relay.session(pr)).toMatchObject({ cancel: true })
+        const events = yield* sendAndCollect(
+          relay.events(pr),
+          relay.send(pr, "Comment Ship it", "req-receipt"),
+          (event) =>
+            event._tag === "ConfirmationRequired" ? relay.decide(pr, event.call, true).pipe(Effect.orDie) : Effect.void
+        )
+        expect(events.find((event) => event._tag === "RunStarted")).toMatchObject({ runIds: ["req-receipt"] })
+        expect(events.find((event) => event._tag === "ConfirmationResolved")).toMatchObject({ decision: "confirmed" })
+        expect(events.find((event) => event._tag === "ToolStarted")).toMatchObject({ summary: "post comment" })
+        expect(events.find((event) => event._tag === "ToolFinished")).toMatchObject({
+          ok: true,
+          summary: "Comment posted",
+          receipt: { summary: "Comment posted", providerId: "comment-7", link: "https://example.invalid/42" }
+        })
+        // A reconnecting dock's Snapshot names each message, so it can key what it renders.
+        const reconnect = yield* relay.events(pr).pipe(Stream.take(1), Stream.runCollect)
+        expect(reconnect[0]).toMatchObject({
+          _tag: "Snapshot",
+          messages: expect.arrayContaining([
+            expect.objectContaining({ id: expect.any(String), role: "user", text: "Comment Ship it" })
+          ])
+        })
+      }).pipe(Effect.scoped))
+
+    it.effect("gives attached context to the model and keeps it out of the transcript", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        const relay = yield* relayIn(harnessLayer(model.layer, store))
+        yield* sendAndCollect(
+          relay.events(pr),
+          relay.send(pr, "Is P1 real?", "req-context", {
+            context: [{ label: "3 review findings at head bbbbbbb", body: "P1: unchecked null in patch-reader.ts" }]
+          })
+        )
+        const firstPrompt = JSON.stringify(model.requests[0]?.prompt.content)
+        expect(firstPrompt).toContain("3 review findings at head bbbbbbb")
+        expect(firstPrompt).toContain("P1: unchecked null in patch-reader.ts")
+        expect(firstPrompt.indexOf("unchecked null")).toBeLessThan(firstPrompt.indexOf("Is P1 real?"))
+        const reconnect = yield* relay.events(pr).pipe(Stream.take(1), Stream.runCollect)
+        const shown = reconnect[0]?._tag === "Snapshot" ? reconnect[0].messages.map((message) => message.text) : []
+        expect(shown).toContain("Is P1 real?")
+        expect(shown.join("\n")).not.toContain("unchecked null")
+      }).pipe(Effect.scoped))
+
+    it.effect("tells a repeated or unknown answer why it can't be applied", () =>
+      Effect.gen(function*() {
+        commentCalls.length = 0
+        const store = yield* tempStore
+        const model = toolThenAnswer("post_comment", { pr: "42", body: "LGTM" })
+        const relay = yield* relayIn(harnessLayer(model.layer, store))
+        const answered: Array<string> = []
+        yield* sendAndCollect(
+          relay.events(pr),
+          relay.send(pr, "Comment LGTM", "req-decide"),
+          (event) =>
+            event._tag === "ConfirmationRequired"
+              ? Effect.sync(() => answered.push(event.call)).pipe(
+                Effect.andThen(relay.decide(pr, event.call, false)),
+                Effect.orDie
+              )
+              : Effect.void
+        )
+        const repeated = yield* relay.decide(pr, answered[0] ?? "", true).pipe(Effect.flip)
+        expect(repeated).toMatchObject({ _tag: "RelayDecisionNotPending", state: { _tag: "Decided", allow: false } })
+        const unknown = yield* relay.decide(pr, "never-asked", true).pipe(Effect.flip)
+        expect(unknown).toMatchObject({ _tag: "RelayDecisionNotPending", state: { _tag: "Unknown" } })
+        expect(commentCalls).toEqual([])
+      }).pipe(Effect.scoped))
+
+    it.effect("answers a confirmation only from the session that raised it", () =>
+      Effect.gen(function*() {
+        commentCalls.length = 0
+        const store = yield* tempStore
+        const model = toolThenAnswer("post_comment", { pr: "42", body: "LGTM" })
+        const relay = yield* relayIn(harnessLayer(model.layer, store))
+        const otherPr = ObjectRef.make({ product: "codecommit", kind: "pull-request", id: "acct/repo/43" })
+        const fromOther: Array<unknown> = []
+        yield* sendAndCollect(
+          relay.events(pr),
+          relay.send(pr, "Comment LGTM", "req-scoped"),
+          (event) =>
+            event._tag === "ConfirmationRequired"
+              ? relay.decide(otherPr, event.call, true).pipe(
+                Effect.flip,
+                Effect.tap((refused) => Effect.sync(() => fromOther.push(refused))),
+                Effect.andThen(relay.decide(pr, event.call, false)),
+                Effect.orDie
+              )
+              : Effect.void
+        )
+        expect(fromOther).toMatchObject([{ _tag: "RelayDecisionNotPending", state: { _tag: "Unknown" } }])
+        expect(commentCalls).toEqual([])
+      }).pipe(Effect.scoped))
+  })
+
+  describe("backends", () => {
+    const codex = (model: Layer.Layer<LanguageModel.LanguageModel>): RelayBackend => ({
+      id: "codex-cli",
+      name: "Codex",
+      model,
+      probe: Effect.fail(new RelayBackendUnavailable({ cause: "NotInstalled", fix: "Install Codex." })),
+      signInFix: "Run codex login."
     })
+
+    it.effect("starts unverified, turns ready when a turn answers, and says when the CLI is missing", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const model = scripted([{ reply: "Hi." }])
+        const relay = yield* relayIn(layer<never>({
+          storePath: store,
+          instructions: "You are Relay.",
+          capabilities: [],
+          backends: [claude(model.layer), codex(model.layer)]
+        }))
+        expect(yield* relay.backends).toEqual([
+          { _tag: "Unverified", backend: "claude-code", label: "Claude Code", version: "2.1.0 (Claude Code)" },
+          { _tag: "Unavailable", backend: "codex-cli", label: "Codex", cause: "NotInstalled", fix: "Install Codex." }
+        ])
+        yield* sendAndCollect(relay.events(pr), relay.send(pr, "Hi", "req-ready"))
+        expect((yield* relay.backends)[0]).toMatchObject({ _tag: "Ready", version: "2.1.0 (Claude Code)" })
+      }).pipe(Effect.scoped))
+
+    it.effect("marks a backend signed out when the CLI refuses its login", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const model = scripted([{ refused: "Not logged in" }])
+        const relay = yield* relayIn(harnessLayer(model.layer, store))
+        yield* sendAndCollect(relay.events(pr), relay.send(pr, "Hi", "req-signed-out")).pipe(
+          Effect.timeout("20 seconds")
+        )
+        expect((yield* relay.backends)[0]).toEqual({
+          _tag: "Unavailable",
+          backend: "claude-code",
+          label: "Claude Code",
+          version: "2.1.0 (Claude Code)",
+          cause: "SignedOut",
+          fix: "Run claude and sign in with /login."
+        })
+      }).pipe(Effect.scoped), 30_000)
+
+    it.effect("switches a session's backend from its next turn, and only to a configured one", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const claudeModel = scripted([{ reply: "From Claude." }])
+        const codexModel = scripted([{ reply: "From Codex." }])
+        const relay = yield* relayIn(layer<never>({
+          storePath: store,
+          instructions: "You are Relay.",
+          capabilities: [],
+          backends: [claude(claudeModel.layer), codex(codexModel.layer)]
+        }))
+        expect((yield* relay.session(pr)).backend).toBe("claude-code")
+        yield* sendAndCollect(relay.events(pr), relay.send(pr, "Hi", "req-codex", { backend: "codex-cli" }))
+        expect((yield* relay.session(pr)).backend).toBe("codex-cli")
+        expect([claudeModel.calls(), codexModel.calls()]).toEqual([0, 1])
+      }).pipe(Effect.scoped))
+
+    it.effect("refuses a backend the product didn't configure", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const relay = yield* relayIn(harnessLayer(scripted([{ reply: "Hi." }]).layer, store))
+        const refused = yield* relay.send(pr, "Hi", "req-unconfigured", { backend: "codex-cli" }).pipe(Effect.flip)
+        expect(refused).toMatchObject({ _tag: "RelayBackendNotConfigured", backend: "codex-cli" })
+        expect((yield* relay.session(pr)).backend).toBe("claude-code")
+      }).pipe(Effect.scoped))
+  })
+
+  describe("tool results", () => {
+    const AwsDenied = Schema.TaggedStruct("AwsDenied", { message: Schema.String, fix: Schema.String })
+    const broken = implement(
+      defineContract({
+        name: "get_approvals",
+        description: "Approval count of a pull request",
+        access: "read",
+        input: Schema.Struct({ pr: Schema.String }),
+        output: Schema.Struct({ approvals: Schema.Number }),
+        failure: AwsDenied,
+        cites: () => [pr]
+      }),
+      () => Effect.fail(AwsDenied.make({ message: "AccessDenied", fix: "Grant codecommit:GetPullRequest" }))
+    )
 
     it.effect("reports a failed or declined call as ok: false", () =>
       Effect.gen(function*() {
@@ -473,10 +761,30 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
           storePath: store,
           instructions: "You are Relay.",
           capabilities: [register(broken)],
-          backends: [{ id: "claude-code", name: "Claude Code", model: model.layer }]
+          backends: [claude(model.layer)]
         }))
         const events = yield* sendAndCollect(relay.events(pr), relay.send(pr, "Approvals?", "req-broken"))
         expect(events.find((event) => event._tag === "ToolFinished")).toMatchObject({ ok: false })
+        // The model reads the declared reason and fix, as the capability wrote them.
+        const lastPrompt = JSON.stringify(model.requests.at(-1)?.prompt.content)
+        expect(lastPrompt).toContain("AccessDenied — Grant codecommit:GetPullRequest")
+      }).pipe(Effect.scoped))
+
+    it.effect("never shows the model a defect's internals", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        const crashing = implement(getApprovals, () => Effect.die(new Error("secret stack detail")))
+        const relay = yield* relayIn(layer({
+          storePath: store,
+          instructions: "You are Relay.",
+          capabilities: [register(crashing)],
+          backends: [claude(model.layer)]
+        }))
+        yield* sendAndCollect(relay.events(pr), relay.send(pr, "Approvals?", "req-defect"))
+        const lastPrompt = JSON.stringify(model.requests.at(-1)?.prompt.content)
+        expect(lastPrompt).toContain("get_approvals failed unexpectedly")
+        expect(lastPrompt).not.toContain("secret stack detail")
       }).pipe(Effect.scoped))
 
     it.effect("replays a call still running to a dock that attaches mid-run", () =>
@@ -484,27 +792,17 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         const store = yield* tempStore
         const started = yield* Deferred.make<void>()
         const release = yield* Deferred.make<void>()
-        const slow = defineCapability({
-          name: "get_approvals",
-          description: "Approval count of a pull request",
-          input: Schema.Struct({ pr: Schema.String }),
-          output: Schema.Struct({ approvals: Schema.Number }),
-          effect: "read",
-          reversible: true,
-          describe: () => ({ verb: "read approvals", target: pr, args: {} }),
-          cites: () => [pr],
-          handler: () =>
-            Deferred.succeed(started, undefined).pipe(
-              Effect.andThen(Deferred.await(release)),
-              Effect.as({ approvals: 2 })
-            )
-        })
+        const slow = implement(getApprovals, () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as({ approvals: 2 })
+          ))
         const model = toolThenAnswer("get_approvals", { pr: "42" })
         const relay = yield* relayIn(layer({
           storePath: store,
           instructions: "You are Relay.",
           capabilities: [register(slow)],
-          backends: [{ id: "claude-code", name: "Claude Code", model: model.layer }]
+          backends: [claude(model.layer)]
         }))
         yield* relay.send(pr, "Approvals?", "req-slow")
         yield* Deferred.await(started)
