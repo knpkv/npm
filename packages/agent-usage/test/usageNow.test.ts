@@ -3,6 +3,8 @@ import { Effect, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import type { LimitSnapshot } from "../src/core/Model.js"
 import { type MachineRange, type UsageGroup, UsageStore } from "../src/core/Store.js"
+import { UsageRequestRefused } from "../src/server/ControlSocket.js"
+import { describeUsageFailure } from "../src/server/Usage.js"
 import { MAX_LIMIT_POINTS, readUsageNow, thinPoints } from "../src/server/UsageNow.js"
 import { type LimitSeries, UsageNow } from "../src/shared/contracts.js"
 
@@ -139,5 +141,16 @@ describe("thinPoints", () => {
   it("bounds a month of five-minute polls", () => {
     const month = Array.from({ length: 30 * 288 }, (_, index) => point(index * 300_000, index % 100))
     expect(thinPoints(month, { from: 0, to: 30 * 86_400_000 }).length).toBeLessThanOrEqual(MAX_LIMIT_POINTS)
+  })
+})
+
+// With the hub asking peers on several versions, a refusal must name what the peer did not know.
+describe("describeUsageFailure", () => {
+  it("names the range, the zone or the malformed request it refused", () => {
+    const refused = (refused: "range" | "time zone" | "malformed") =>
+      describeUsageFailure(new UsageRequestRefused({ refused, preset: "90d", timeZone: "Mars/Olympus" }))
+    expect(refused("range")).toContain("does not offer the range \"90d\"")
+    expect(refused("time zone")).toContain("does not know the time zone \"Mars/Olympus\"")
+    expect(refused("malformed")).toContain("malformed")
   })
 })

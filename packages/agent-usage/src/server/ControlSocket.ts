@@ -121,8 +121,12 @@ export class UsageUnavailable extends Schema.TaggedError<UsageUnavailable>()("Us
   path: Schema.String
 }) {}
 
-/** The server refused the range or the time zone it was asked for. */
+/**
+ * The usage request was refused: a range or a time zone the server does not know, or a line that is
+ * not `usage <range> <zone>` (an empty zone, or one with whitespace, is refused before it is sent).
+ */
 export class UsageRequestRefused extends Schema.TaggedError<UsageRequestRefused>()("UsageRequestRefused", {
+  refused: Schema.Literals(["range", "time zone", "malformed"]),
   preset: Schema.String,
   timeZone: Schema.String
 }) {}
@@ -168,10 +172,21 @@ const UNKNOWN_REQUEST = "unknown request"
 const LIMITS_UNAVAILABLE = "limits unavailable"
 const USAGE_UNAVAILABLE = "usage unavailable"
 const BAD_REQUEST = "bad request"
+const UNKNOWN_RANGE = "unknown range"
+const UNKNOWN_TIME_ZONE = "unknown time zone"
 const errorLine = (error: string): string => `${JSON.stringify({ error })}\n`
 const decodeErrorLine = Schema.decodeUnknownOption(
   Schema.fromJsonString(
-    Schema.Struct({ error: Schema.Literals([UNKNOWN_REQUEST, LIMITS_UNAVAILABLE, USAGE_UNAVAILABLE, BAD_REQUEST]) })
+    Schema.Struct({
+      error: Schema.Literals([
+        UNKNOWN_REQUEST,
+        LIMITS_UNAVAILABLE,
+        USAGE_UNAVAILABLE,
+        BAD_REQUEST,
+        UNKNOWN_RANGE,
+        UNKNOWN_TIME_ZONE
+      ])
+    })
   )
 )
 
@@ -181,10 +196,16 @@ export interface ControlReaders<E> {
   readonly usage: (preset: UsagePreset, timeZone: string) => Effect.Effect<UsageNow, E | UnknownTimeZone>
 }
 
-/** A `usage` request line: the word, a preset and an IANA zone, separated by single spaces. */
-const usageRequest = (request: string): { readonly preset: string; readonly timeZone: string } | undefined => {
+/**
+ * A `usage` request line: the word, a preset and an IANA zone, separated by single spaces. Any other
+ * line starting with `usage` is `malformed`, so a mistake is never answered as an unknown request.
+ */
+const usageRequest = (
+  request: string
+): { readonly preset: string; readonly timeZone: string } | "malformed" | undefined => {
   const [word, preset, timeZone, ...rest] = request.split(" ")
-  if (word !== "usage" || preset === undefined || timeZone === undefined || rest.length > 0) return undefined
+  if (word !== "usage") return undefined
+  if (preset === undefined || timeZone === undefined || timeZone === "" || rest.length > 0) return "malformed"
   return { preset, timeZone }
 }
 
@@ -274,11 +295,12 @@ const answer = <E>(
       return yield* write.write(errorLine(LIMITS_UNAVAILABLE))
     }
     const usage = usageRequest(request)
+    if (usage === "malformed") return yield* write.write(errorLine(BAD_REQUEST))
     if (usage !== undefined) {
-      if (!isUsagePreset(usage.preset)) return yield* write.write(errorLine(BAD_REQUEST))
+      if (!isUsagePreset(usage.preset)) return yield* write.write(errorLine(UNKNOWN_RANGE))
       const read = yield* Effect.result(readers.usage(usage.preset, usage.timeZone))
       if (read._tag === "Success") return yield* write.write(`${encodeUsage(read.success)}\n`)
-      if (Predicate.isTagged(read.failure, "UnknownTimeZone")) return yield* write.write(errorLine(BAD_REQUEST))
+      if (Predicate.isTagged(read.failure, "UnknownTimeZone")) return yield* write.write(errorLine(UNKNOWN_TIME_ZONE))
       yield* Effect.logWarning("agent-usage control socket: reading usage failed", read.failure)
       return yield* write.write(errorLine(USAGE_UNAVAILABLE))
     }
@@ -437,8 +459,8 @@ export const requestLimits = Effect.fn("ControlSocket.requestLimits")(function*(
 /**
  * Asks the server running on this store for this Machine's usage over `preset`, in periods local to
  * `timeZone`, with the same trust and failures as {@link requestLoginUrl}; {@link UsageNotSupported}
- * when the server is a version without the request, {@link UsageRequestRefused} when it does not
- * know the range or the zone, {@link UsageUnavailable} when it could not read its store, and
+ * when the server is a version without the request, {@link UsageRequestRefused} (naming what) when
+ * it does not know the range or the zone or the request is malformed, {@link UsageUnavailable} when it could not read its store, and
  * {@link UsageReplyInvalid} for any other answer.
  */
 export const requestUsage = Effect.fn("ControlSocket.requestUsage")(function*(
@@ -447,8 +469,10 @@ export const requestUsage = Effect.fn("ControlSocket.requestUsage")(function*(
   preset: UsagePreset,
   timeZone: string
 ) {
-  // One line, three words: a zone with a space or newline in it could only be a different request.
-  if (/\s/u.test(timeZone)) return yield* new UsageRequestRefused({ preset, timeZone })
+  // One line, three words: an empty zone, or one with a space or newline, could only be a different request.
+  if (timeZone === "" || /\s/u.test(timeZone)) {
+    return yield* new UsageRequestRefused({ refused: "malformed", preset, timeZone })
+  }
   const { reply, socketPath } = yield* exchange(directory, self, `usage ${preset} ${timeZone}`)
   const decoded = decodeUsage(reply)
   if (Option.isSome(decoded)) return decoded.value
@@ -458,7 +482,11 @@ export const requestUsage = Effect.fn("ControlSocket.requestUsage")(function*(
       case UNKNOWN_REQUEST:
         return yield* new UsageNotSupported({ path: socketPath })
       case BAD_REQUEST:
-        return yield* new UsageRequestRefused({ preset, timeZone })
+        return yield* new UsageRequestRefused({ refused: "malformed", preset, timeZone })
+      case UNKNOWN_RANGE:
+        return yield* new UsageRequestRefused({ refused: "range", preset, timeZone })
+      case UNKNOWN_TIME_ZONE:
+        return yield* new UsageRequestRefused({ refused: "time zone", preset, timeZone })
       default:
         return yield* new UsageUnavailable({ path: socketPath })
     }
