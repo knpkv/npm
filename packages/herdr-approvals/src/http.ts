@@ -13,7 +13,9 @@ import {
   ConnectAgentCursor,
   fleetConnectAgents,
   fleetLimits,
+  fleetUsage,
   hubLimits,
+  hubUsage,
   localConnectAgents,
   makeHerdrTerminalConnector,
   pageFleetConnectAgents,
@@ -21,7 +23,8 @@ import {
   terminalCommandMaxPayloadBytes,
   terminalFrameMaxEncodedBytes,
   TerminalSelection,
-  TerminalServerSignal
+  TerminalServerSignal,
+  UsageQuery
 } from "@knpkv/herdr-connect"
 import type {
   FleetJobConflictError,
@@ -119,6 +122,7 @@ import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { fontPreloadLink } from "./font-preload.js"
 import { readHostLimits, staleWhileRevalidate } from "./host-limits.js"
+import { readHostUsage, usageCache } from "./host-usage.js"
 import { dashboardPage } from "./internal/dashboard-page.js"
 import { type ListenerMode, listenerServesWork } from "./internal/listener.js"
 import { relayScrollState, remoteTerminalUrl, terminalSelectionInput } from "./internal/terminal-selection.js"
@@ -311,6 +315,7 @@ type PeerTarget = {
   readonly pendingUrl: string | null
   readonly connectAgentsUrl: string | null
   readonly limitsUrl: string | null
+  readonly usageUrl: string | null
   readonly terminalUrl: string | null
 }
 
@@ -679,11 +684,25 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
       limitsUrl: address === undefined
         ? null
         : `http://${address}:${config.port}/v1/connect/limits/local`,
+      usageUrl: address === undefined
+        ? null
+        : `http://${address}:${config.port}/v1/connect/usage/local`,
       terminalUrl: address === undefined
         ? null
         : `ws://${address}:${config.port}/v1/connect/terminal`
     } satisfies PeerTarget
   })
+})
+
+const decodeUsageQuery = Effect.fn("HostHttp.decodeUsageQuery")(function*(url: URL) {
+  return yield* Schema.decodeUnknownEffect(UsageQuery)({
+    range: url.searchParams.get("range") ?? "7d",
+    timeZone: url.searchParams.get("timeZone")
+  }).pipe(
+    Effect.mapError(
+      () => new FleetValidationError({ detail: "usage needs range 24h, 7d or 30d and an IANA timeZone" })
+    )
+  )
 })
 
 const pendingApproval = (record: JobRecord): PendingApproval => {
@@ -1514,6 +1533,14 @@ export const startHttpServer = async (
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
       ),
       Duration.seconds(30)
+    ).pipe(Effect.provideService(Scope.Scope, limitsScope))
+  )
+  // Usage is read per range and zone, each refreshed in the background after five minutes.
+  const localUsage = await httpRuntime.runPromise(
+    usageCache((query) =>
+      readHostUsage(config.host, config.agentUsageLimitsCommand, query).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)
+      )
     ).pipe(Effect.provideService(Scope.Scope, limitsScope))
   )
   const shutdown = async (): Promise<void> => {
@@ -3095,6 +3122,37 @@ export const startHttpServer = async (
             await respond(
               response,
               Effect.andThen(tailnetActor(request, config, [config.approvalHub.nodeId]), localLimits)
+            )
+            return
+          }
+
+          // The hub's usage question to a peer, for one range and zone: only the approval hub's node may ask.
+          if (
+            mode === "tailnet" &&
+            request.method === "GET" &&
+            url.pathname === "/v1/connect/usage/local"
+          ) {
+            await respond(
+              response,
+              Effect.andThen(
+                tailnetActor(request, config, [config.approvalHub.nodeId]),
+                Effect.flatMap(decodeUsageQuery(url), localUsage)
+              )
+            )
+            return
+          }
+
+          // The Usage tab: on the hub every peer's read for the range and zone, anywhere else just this host's.
+          if (request.method === "GET" && url.pathname === "/v1/connect/usage") {
+            await respond(
+              response,
+              Effect.andThen(
+                authorized,
+                Effect.flatMap(decodeUsageQuery(url), (query) =>
+                  mode === "serve"
+                    ? hubUsage(query, localUsage(query), fleetPeers(config))
+                    : fleetUsage(query, localUsage(query), []))
+              )
             )
             return
           }

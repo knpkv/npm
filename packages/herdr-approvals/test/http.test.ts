@@ -4,6 +4,7 @@ import {
   connectAgentPageMaxRecords,
   FleetConnectAgentPage,
   FleetLimits,
+  FleetUsage,
   terminalCommandMaxPayloadBytes,
   type TerminalConnector,
   terminalFrameMaxEncodedBytes,
@@ -1741,6 +1742,64 @@ esac
             error: "FleetOperationError",
             detail: "backend unavailable"
           })
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("serves this host's usage for the asked range and zone, and refuses a query it cannot pass on", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-usage-"))
+    const usage = {
+      v: 1,
+      machine: "ALPHA",
+      observedAt: 1_000,
+      range: { preset: "30d", timeZone: "Europe/Amsterdam", from: 0, to: 1_000, bucket: "day" },
+      periods: [{ key: "2026-10-08", start: 0 }],
+      tokens: [{ period: 0, agent: "claude", model: "claude-opus-5", tokens: 900 }],
+      limits: []
+    }
+    // agent-usage stand-in: answers only `usage --range 30d --time-zone Europe/Amsterdam`.
+    const script = `if [ "$*" = "usage --range 30d --time-zone Europe/Amsterdam" ]; then printf '%s' '${
+      JSON.stringify(usage)
+    }'; else echo "got: $*" >&2; exit 2; fi`
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(
+                { ...config(root), agentUsageLimitsCommand: ["sh", "-c", script, "agent-usage", "limits"] },
+                fleet,
+                assets,
+                { terminalConnector: unusedTerminal }
+              )
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const response = yield* Effect.promise(() =>
+            fetch(`${server.url}/v1/connect/usage?range=30d&timeZone=Europe%2FAmsterdam`)
+          )
+          expect(response.status).toBe(200)
+          const body = Schema.decodeUnknownSync(FleetUsage)(yield* Effect.promise(() => response.json()))
+          expect(body.hosts.map(({ host, reading }) => [host, reading])).toEqual([
+            ["ALPHA", { _tag: "Read", usage, skipped: 0 }]
+          ])
+          // A zone that could split the command line, or a range agent-usage does not offer, never reaches it.
+          for (const query of ["range=30d&timeZone=UTC%20limits", "range=90d&timeZone=UTC", "range=7d"]) {
+            const refused = yield* Effect.promise(() => fetch(`${server.url}/v1/connect/usage?${query}`))
+            expect(refused.status, query).toBe(400)
+          }
+          // Only a peer's tailnet listener answers the hub's per-host question.
+          expect(
+            (yield* Effect.promise(() => fetch(`${server.url}/v1/connect/usage/local?range=7d&timeZone=UTC`))).status
+          )
+            .toBe(404)
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {

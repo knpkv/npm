@@ -6,8 +6,9 @@
  * @module
  */
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet"
-import { Effect, Result, Schema } from "effect"
+import { Effect, Schema } from "effect"
 import * as HttpClient from "effect/http/HttpClient"
+import { collectFleet, collectHub } from "./internal/fleet-reads.js"
 import {
   decodeLimitsTolerantly,
   type FleetLimits,
@@ -70,38 +71,18 @@ export const fetchPeerLimits = Effect.fn("ConnectLimits.fetchPeer")(
 )
 
 /** This host's read first, then every peer's; an unreachable peer is listed, not dropped. */
-export const fleetLimits = Effect.fn("ConnectLimits.fleet")(function*(
+export const fleetLimits = (
   local: Effect.Effect<HostLimits>,
   peers: ReadonlyArray<PeerLimitsTarget>
-) {
-  const own = yield* local
-  const results = yield* Effect.all(
-    peers.map((peer) => Effect.result(fetchPeerLimits(peer)).pipe(Effect.map((result) => ({ peer, result })))),
-    { concurrency: 4 }
-  )
-  const hosts: Array<HostLimits> = [own]
-  const failures: Array<FleetLimits["failures"][number]> = []
-  for (const { peer, result } of results) {
-    if (Result.isSuccess(result)) hosts.push(result.success)
-    else failures.push({ host: peer.host, reason: result.failure.reason })
-  }
-  return { hosts, failures, peersListed: true } satisfies FleetLimits
-})
+): Effect.Effect<FleetLimits, never, HttpClient.HttpClient> => collectFleet(local, peers, fetchPeerLimits)
 
 /**
  * The hub's view: its own read plus every peer it can list. When listing the fleet fails (for
  * example `tailscale status`), it logs why and still answers with its own read and
  * `peersListed: false`.
  */
-export const hubLimits = Effect.fn("ConnectLimits.hub")(function*<E, R>(
+export const hubLimits = <E, R>(
   local: Effect.Effect<HostLimits>,
   peers: Effect.Effect<ReadonlyArray<PeerLimitsTarget>, E, R>
-) {
-  const listed = yield* Effect.result(peers)
-  if (Result.isSuccess(listed)) return yield* fleetLimits(local, listed.success)
-  yield* Effect.logWarning(
-    "Connect limits: the fleet could not be listed; answering with this host only",
-    listed.failure
-  )
-  return { hosts: [yield* local], failures: [], peersListed: false } satisfies FleetLimits
-})
+): Effect.Effect<FleetLimits, never, HttpClient.HttpClient | R> =>
+  collectHub("Connect limits", local, peers, fetchPeerLimits)

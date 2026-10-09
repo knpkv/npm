@@ -15,11 +15,16 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 export const hostLimitsOutputMaxBytes = 256 * 1024
 export const hostLimitsTimeout = "10 seconds"
 
-class CommandFailed extends Schema.TaggedError<CommandFailed>()("CommandFailed", { detail: Schema.String }) {}
+/** agent-usage exited nonzero, or printed more than the reader allows; `detail` is its stderr or why. */
+export class CommandFailed extends Schema.TaggedError<CommandFailed>()("CommandFailed", { detail: Schema.String }) {}
 
 const decodeRawLimits = Schema.decodeUnknownResult(Schema.fromJsonString(RawLimits))
 
-const runCommand = Effect.fn("HostLimits.run")(function*(command: readonly [string, ...Array<string>]) {
+/** Runs an agent-usage command and answers its stdout, failing with its stderr when it exits nonzero. */
+export const runCommand = Effect.fn("HostLimits.run")(function*(
+  command: readonly [string, ...Array<string>],
+  maxBytes: number = hostLimitsOutputMaxBytes
+) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   return yield* Effect.scoped(
     Effect.gen(function*() {
@@ -27,7 +32,7 @@ const runCommand = Effect.fn("HostLimits.run")(function*(command: readonly [stri
       const { exitCode, stderr, stdout } = yield* Effect.all({
         exitCode: handle.exitCode,
         stderr: collectBoundedText(handle.stderr, hostLimitsOutputMaxBytes),
-        stdout: collectBoundedText(handle.stdout, hostLimitsOutputMaxBytes)
+        stdout: collectBoundedText(handle.stdout, maxBytes)
       }, { concurrency: "unbounded" })
       if (Number(exitCode) !== 0) {
         return yield* new CommandFailed({
