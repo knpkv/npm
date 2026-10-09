@@ -71,6 +71,7 @@ describe("useRelayStatus", () => {
       })
       expect(shown()).toBe("idle")
       await act(async () => {
+        emit({ _tag: "MessagePlaced", ...at, id: "2", requestId: "r1", text: "Check the stacked view." })
         emit({ _tag: "RunStarted", ...at, runIds: ["r1"] })
       })
       expect(shown()).toBe("working")

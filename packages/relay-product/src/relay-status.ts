@@ -7,13 +7,15 @@
  *   {@link RelayConversationState}, so a late reader or a reconnect shows the current status with no
  *   one-shot replays: a Snapshot that restores a finished run is not a new reply.
  * - **Words are fixed; the only free text is a tool's own summary.** The status line is a phase word
- *   ("Reading…", "Answering…", "Relay needs you", "Relay replied") or the running tool's server-built,
+ *   ("Reading…", "Answering…", "Working…", "Sending…", "Relay needs you", "Relay replied") or the running tool's server-built,
  *   display-safe summary, capped at {@link RELAY_STATUS_LINE_MAX}. Reply text, queued or sent message
  *   text, failure detail and the confirmation's action never reach it.
  * - **Unread is the reader's fact, not Relay's.** A reply is unread when more replies have finished than
- *   the reader could see the last time the panel was open. It counts replies rather than naming one,
- *   because a reply streamed live and the same reply restored by a reconnect's Snapshot carry different
- *   ids. The count starts from the first live state, so history loaded on mount is never unread.
+ *   the reader could see the last time the panel was open. A reply is a turn: a run of consecutive relay
+ *   messages. Live, the client joins a turn's text into one message; a reconnect's Snapshot lists one per
+ *   stored entry, so text split by a tool call or a dropped stream is two. Counting turns makes both agree,
+ *   and counting rather than naming one ignores that the two carry different ids. The count starts from
+ *   the first live state, so history loaded on mount is never unread.
  *
  * @module
  */
@@ -48,15 +50,32 @@ const said = (activity: RlyRelayMarkActivity, words: string, line: string | null
   words
 })
 
+/** The summary on one line, cut by code points (never inside a surrogate pair) with an ellipsis. */
 const lineOf = (summary: string): string | null => {
-  const text = summary.trim().replace(/\s+/gu, " ")
-  if (text === "") return null
-  return text.length <= RELAY_STATUS_LINE_MAX ? text : `${text.slice(0, RELAY_STATUS_LINE_MAX - 1).trimEnd()}…`
+  const points = Array.from(summary.trim().replace(/\s+/gu, " "))
+  if (points.length === 0) return null
+  return points.length <= RELAY_STATUS_LINE_MAX
+    ? points.join("")
+    : `${points.slice(0, RELAY_STATUS_LINE_MAX - 1).join("").trimEnd()}…`
 }
 
-/** How many of Relay's replies have finished streaming. */
-export const finishedReplies = (state: RelayConversationState): number =>
-  state.messages.filter((message) => message.role === "relay" && !message.streaming).length
+/** How many of Relay's replies have finished: runs of consecutive relay messages, none still streaming. */
+export const finishedReplies = (state: RelayConversationState): number => {
+  let turns = 0
+  let open = false
+  let streaming = false
+  for (const message of state.messages) {
+    if (message.role === "relay") {
+      open = true
+      streaming ||= message.streaming
+    } else {
+      if (open && !streaming) turns += 1
+      open = false
+      streaming = false
+    }
+  }
+  return open && !streaming ? turns + 1 : turns
+}
 
 /**
  * The replies the reader could see after this state: every finished reply while the panel is open, the
@@ -93,9 +112,12 @@ export const relayStatusOf = (
     const tool = [...state.tools].reverse().find((row) => row.state === "running")
     if (tool !== undefined) return said("working", "Reading…", lineOf(tool.summary))
     if (state.messages.at(-1)?.streaming === true) return said("working", "Answering…")
-    return said("working", "Reading…")
+    // A run with no tool and no text yet: Relay is working on it, not reading anything named.
+    return said("working", "Working…")
   }
-  if (state.outbox.length > 0 || state.queued.length > 0) return said("working", "Sending…")
+  // Queued only: the outbox keeps a send whose request failed so a retry has its text, and one never retried
+  // must not read as Relay working forever.
+  if (state.queued.length > 0) return said("working", "Sending…")
   if (state.failure !== null) {
     const backend = state.backend
     return backend?._tag === "Unavailable" && backend.cause === "SignedOut"
