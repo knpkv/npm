@@ -1174,6 +1174,7 @@ export const ConnectSurface = ({
             query={query}
             selectedKey={selectedKey}
             silentHosts={offlineHosts}
+            stale={staleSince !== null}
           />
         )}
         {connection._tag === "connecting" ? (
