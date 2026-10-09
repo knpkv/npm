@@ -19,7 +19,8 @@ const motionSpec = `
 | --- | --- | --- |
 | \`idle\` (default) | nothing | — |
 | \`working\` | from rest, the baton slides along its diagonal to one hook, back through rest to the other, and home; opacity 1 at rest, .55 at either end; hooks hold still | 2.4s a cycle, 1.2s each way (8 × \`--rly-motion-slow-duration\`), sine-sampled keyframes run linear, loops while working |
-| \`attention\` | the hooks close on the baton by one grid unit, twice, then rest | 900ms once (3 × slow), \`--rly-easing-in-out\`; replays only when attention is set again |
+| \`attention\` | the hooks close on the baton by one grid unit, twice, then rest; again every 3.6s | 3.6s a cycle (12 × slow), \`--rly-easing-in-out\`, loops while Relay waits on a decision |
+| \`unread\` | the hooks hold three quarters of a unit closed on the baton: a pose, shown under reduced motion too; they settle into it once | 300ms settle (slow), \`--rly-easing-out\`; held until the reply is read |
 | \`entrance\` | each stroke fades and scales in from .85 about its own centre; the tile and svg hold still | 300ms once (slow), \`--rly-easing-out\`; \`RelayPanel\` plays it each time its header opens. A mark that opens already working or waiting starts its loop or nudge as the entrance ends |
 
 **Gate.** Every animation sits inside \`@media (prefers-reduced-motion: no-preference)\` and is timed by a
@@ -31,6 +32,14 @@ on the reader; the mark stays decorative (or keeps the name it was given). Force
 context's colour, still or moving.
 
 \`RelayLauncher\`, \`RelayPanel\` and \`RelayDock\` take the same \`activity\` and pass it to their mark.
+
+**Pausing.** \`working\` and \`attention\` loop for as long as the state lasts, which can exceed five seconds. The
+reader's reduced-motion setting is their pause: the system preference, or the in-app setting
+(\`data-rly-reduced-motion="reduce"\`), stops every loop and leaves the mark still (WCAG 2.2.2).
+
+**Words to pair with each** (the host's status line): \`working\` "Reading…" (with the tool's own summary) or
+"Answering…"; \`attention\` "Relay needs you"; \`unread\` "Relay replied". Never "listening" or "speaking":
+Relay has no voice.
 `
 
 const meta = {

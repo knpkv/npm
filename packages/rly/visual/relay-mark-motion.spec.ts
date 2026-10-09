@@ -106,4 +106,53 @@ test.describe("RelayMark motion", () => {
       "rly-relay-mark-pass"
     ])
   })
+
+  test("keeps calling while Relay waits on a decision", async ({ page }) => {
+    await open(page, "no-preference", "no-preference")
+    const iterations = await page
+      .locator("[data-activity='attention'] svg")
+      .first()
+      .evaluate((svg) =>
+        svg.getAnimations({ subtree: true }).map((animation) => animation.effect?.getComputedTiming().iterations)
+      )
+    expect(iterations).toEqual([Infinity, Infinity])
+  })
+
+  test("holds the unread pose without motion", async ({ page }) => {
+    // The system preference, then the in-app setting.
+    const stillSettings: ReadonlyArray<readonly [Motion, Motion]> = [
+      ["reduce", "no-preference"],
+      ["no-preference", "reduce"]
+    ]
+    for (const [system, inApp] of stillSettings) {
+      await open(page, system, inApp)
+      const held = await page
+        .locator("[data-activity='unread'] svg")
+        .first()
+        .evaluate((svg) => ({
+          hook: getComputedStyle(svg.querySelector("path") ?? svg).transform,
+          running: svg.getAnimations({ subtree: true }).filter((animation) => animation.playState === "running").length
+        }))
+      // The pose shows with no movement at all.
+      expect(held.running).toBe(0)
+      expect(held.hook).not.toBe("none")
+    }
+  })
+
+  test("eases back from the unread pose instead of snapping", async ({ page }) => {
+    await open(page, "no-preference", "no-preference")
+    const easing = await page
+      .locator("[data-activity='unread'] svg")
+      .first()
+      .evaluate(async (svg) => {
+        // Settled into the pose first, as a reply that waited unread would be.
+        await Promise.all(svg.getAnimations({ subtree: true }).map((animation) => animation.finished))
+        svg.setAttribute("data-rly-relay-activity", "idle")
+        return svg
+          .getAnimations({ subtree: true })
+          .map((animation) => ("transitionProperty" in animation ? String(animation.transitionProperty) : "?"))
+      })
+    // Both hooks transition their transform back to rest.
+    expect(easing).toEqual(["transform", "transform"])
+  })
 })
