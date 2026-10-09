@@ -28,6 +28,67 @@
   .tileGlyph {
     display: block;
   }
+  /* Each stroke moves about its own box, in the mark's 24-unit grid; the svg keeps its size, so nothing shifts. */
+  .hookStart,
+  .hookEnd,
+  .baton {
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+  /*
+   * Motion waits for the reader: none under a system reduced-motion preference, and every duration is a
+   * motion token, which the in-app reduced-motion setting sets to 0ms.
+   */
+  @media (prefers-reduced-motion: no-preference) {
+    /* One entrance as the header opens: the glyph settles in, 300ms. */
+    [data-rly-relay-entrance] {
+      animation: rly-relay-mark-enter var(--rly-motion-slow-duration) var(--rly-easing-out) backwards;
+    }
+    /* Working: the baton travels hook to hook and back, 1.2s each way. Hooks hold still. */
+    [data-rly-relay-activity="working"] > .baton {
+      animation: rly-relay-mark-pass calc(var(--rly-motion-slow-duration) * 4) var(--rly-easing-in-out) infinite
+        alternate;
+    }
+    /* Attention: the hooks close on the baton twice, then rest; it replays only when attention is set again. */
+    [data-rly-relay-activity="attention"] > .hookStart {
+      animation: rly-relay-mark-nudge-start calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out);
+    }
+    [data-rly-relay-activity="attention"] > .hookEnd {
+      animation: rly-relay-mark-nudge-end calc(var(--rly-motion-slow-duration) * 3) var(--rly-easing-in-out);
+    }
+  }
+  @keyframes rly-relay-mark-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.85);
+    }
+  }
+  /* Along the baton's own diagonal, never past the hooks' ends. */
+  @keyframes rly-relay-mark-pass {
+    from {
+      opacity: 0.55;
+      transform: translate(-1.5px, 1.5px);
+    }
+    50% {
+      opacity: 1;
+    }
+    to {
+      opacity: 0.55;
+      transform: translate(1.5px, -1.5px);
+    }
+  }
+  @keyframes rly-relay-mark-nudge-start {
+    25%,
+    75% {
+      transform: translate(1px, 1px);
+    }
+  }
+  @keyframes rly-relay-mark-nudge-end {
+    25%,
+    75% {
+      transform: translate(-1px, -1px);
+    }
+  }
   /*
    * The agent fill is dropped by the system; an outline keeps the tile's shape. It takes its context's
    * colour: LinkText in a link, ButtonText in a button, CanvasText in running text.

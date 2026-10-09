@@ -15,6 +15,7 @@ import { IconButton } from "../primitives/IconButton.js"
 import { Tabs } from "../primitives/Tabs.js"
 import styles from "./RelayPanel.module.css"
 import { RelayMark } from "./RelayMark.js"
+import type { RlyRelayMarkActivity } from "./RelayMark.js"
 
 const style = (name: string): string => cssClass(styles, name)
 
@@ -51,6 +52,8 @@ export interface RlyRelayPanelPin {
 }
 
 interface RelayPanelBaseProps {
+  /** What Relay is doing, shown on the header mark; `idle` (still) unless given. Say it in words too. */
+  readonly activity?: RlyRelayMarkActivity
   /** Status line under the header (freshness of what Relay read); not a live region. */
   readonly freshness?: ReactNode
   /** Kept on screen under the body: the composer. */
@@ -241,7 +244,8 @@ const PanelChrome = (
   return (
     <>
       <header className={style("header")}>
-        <RelayMark.Tile size={24} />
+        {/* The header mounts as the panel opens, so its mark plays the entrance once per opening. */}
+        <RelayMark.Tile activity={props.activity} entrance size={24} />
         <div className={style("heading")}>
           {heading}
           <p className={style("scope")}>

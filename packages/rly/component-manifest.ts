@@ -250,10 +250,12 @@ export const componentManifest = {
       category: "pattern",
       exports: [
         { kind: "value", name: "RelayMark" },
+        { kind: "value", name: "RLY_RELAY_MARK_ACTIVITIES" },
         { kind: "value", name: "RLY_RELAY_MARK_SIZES" },
         { kind: "value", name: "RLY_RELAY_MARK_TILE_SIZES" },
         { kind: "type", name: "RelayMarkProps" },
         { kind: "type", name: "RelayMarkTileProps" },
+        { kind: "type", name: "RlyRelayMarkActivity" },
         { kind: "type", name: "RlyRelayMarkSize" },
         { kind: "type", name: "RlyRelayMarkTileSize" }
       ],
@@ -267,7 +269,11 @@ export const componentManifest = {
       visual: {
         story: "stories/patterns/RelayMark.stories.tsx",
         storyId: "patterns-relaymark--sizes",
-        tests: ["test/patterns/RelayMark.test.tsx", "test/patterns/RelayMark.favicon.test.ts"]
+        tests: [
+          "test/patterns/RelayMark.test.tsx",
+          "test/patterns/RelayMark.css.test.ts",
+          "test/patterns/RelayMark.favicon.test.ts"
+        ]
       }
     },
     {

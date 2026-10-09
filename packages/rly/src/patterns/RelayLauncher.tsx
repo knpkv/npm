@@ -5,6 +5,7 @@ import { focusRestoreTarget, isWithinComposedElement } from "../internal/compose
 import { hasNestedLayer, isImeKey, matchesShortcutKeys, relaySummonTransition } from "../internal/relaySummon.js"
 import styles from "./RelayLauncher.module.css"
 import { RelayMark } from "./RelayMark.js"
+import type { RlyRelayMarkActivity } from "./RelayMark.js"
 
 const style = (name: string): string => cssClass(styles, name)
 
@@ -195,6 +196,8 @@ const focusOutside = (region: HTMLElement | null, owner: Document): HTMLElement 
 
 /** Inputs for the launcher. */
 export type RelayLauncherProps = Omit<ComponentPropsWithRef<"button">, "children" | "type"> & {
+  /** What Relay is doing, shown on the mark; `idle` (still) unless given. Say it in words too. */
+  readonly activity?: RlyRelayMarkActivity
   /** Whether Relay is open; announced as the button's expanded state. */
   readonly expanded: boolean
   /** The visible name, "Relay" unless the host names its Relay more specifically. */
@@ -213,6 +216,7 @@ export type RelayLauncherProps = Omit<ComponentPropsWithRef<"button">, "children
  * screens, and the button stays 32px tall (44px for a coarse pointer).
  */
 export const RelayLauncher = ({
+  activity,
   className,
   expanded,
   label = "Relay",
@@ -228,7 +232,7 @@ export const RelayLauncher = ({
       data-rly-relay-launcher=""
       type="button"
     >
-      <RelayMark className={style("mark")} size={20} />
+      <RelayMark activity={activity} className={style("mark")} size={20} />
       <span className={style("label")}>{requireText(label, "RelayLauncher label")}</span>
       {shortcut === null ? null : (
         // The hint repeats aria-keyshortcuts for sighted users, so assistive technology hears it once.

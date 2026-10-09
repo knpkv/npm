@@ -40,6 +40,7 @@ import { Select, type RlySelectOption } from "../primitives/Select.js"
 import { StatePanel } from "../primitives/StatePanel.js"
 import styles from "./RelayDock.module.css"
 import { RelayMark } from "./RelayMark.js"
+import type { RlyRelayMarkActivity } from "./RelayMark.js"
 
 const style = (name: string): string => cssClass(styles, name)
 const compactViewportQuery = "(max-width: 40rem), (max-height: 40rem) and (pointer: coarse)"
@@ -451,6 +452,8 @@ export type RlyRelayDockState =
 export type RlyRelayDockDesktopPresentation = "overlay" | "rail"
 
 interface RelayDockBaseProps extends Omit<ComponentPropsWithRef<"div">, "children" | "title"> {
+  /** What Relay is doing, shown on the trigger's mark; `idle` (still) unless given. Say it in words too. */
+  readonly activity?: RlyRelayMarkActivity
   readonly context: ReadonlyArray<RlyRelayDockContextChip>
   readonly description?: string
   readonly desktopPresentation?: RlyRelayDockDesktopPresentation
@@ -840,6 +843,7 @@ const DockLayer = ({
  */
 export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
   const {
+    activity,
     className,
     context,
     defaultOpen = false,
@@ -913,7 +917,7 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
         ref={triggerRef}
         type="button"
       >
-        <RelayMark.Tile size={32} />
+        <RelayMark.Tile activity={activity} size={32} />
         <span>{visibleTriggerLabel}</span>
       </button>
       {!resolvedOpen ? null : (

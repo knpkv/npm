@@ -4066,11 +4066,19 @@
         },
         {
           "kind": "value",
+          "name": "RLY_RELAY_MARK_ACTIVITIES"
+        },
+        {
+          "kind": "value",
           "name": "RLY_RELAY_MARK_SIZES"
         },
         {
           "kind": "value",
           "name": "RLY_RELAY_MARK_TILE_SIZES"
+        },
+        {
+          "kind": "type",
+          "name": "RlyRelayMarkActivity"
         },
         {
           "kind": "type",
@@ -4088,6 +4096,7 @@
           "src/patterns/RelayMark.module.css"
         ],
         "tests": [
+          "test/patterns/RelayMark.css.test.ts",
           "test/patterns/RelayMark.favicon.test.ts",
           "test/patterns/RelayMark.test.tsx"
         ]
