@@ -1,12 +1,15 @@
 // @vitest-environment happy-dom
 
-import { afterEach, describe, expect, it, vi } from "@effect/vitest"
+import { describe, expect, it, vi } from "@effect/vitest"
 import { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import type {
   PullRequestRelayReviewResponse,
   RelayReviewStreamEvent,
   RelayReviewStreamRequest
 } from "../src/server/Api.js"
+// Imported once at collection: a per-test dynamic import made the first test pay the cold module load
+// inside its own 5s timeout, which a loaded machine exceeded.
+import { runRelayReviewStream } from "../src/client/relay-review-stream.js"
 
 const request: RelayReviewStreamRequest = {
   revisionId: "revision-1",
@@ -33,10 +36,6 @@ const completedReview: PullRequestRelayReviewResponse = {
   result: { findings: [], verdict: "No findings." }
 }
 
-afterEach(() => {
-  vi.resetModules()
-})
-
 describe("Relay review NDJSON transport", () => {
   it("emits progress before a split terminal frame completes", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
@@ -56,7 +55,6 @@ describe("Relay review NDJSON transport", () => {
     const firstEvent = Promise.withResolvers<void>()
     const encoder = new TextEncoder()
     try {
-      const { runRelayReviewStream } = await import("../src/client/relay-review-stream.js")
       const running = runRelayReviewStream("/review", request, (event) => {
         events.push(event)
         firstEvent.resolve()
@@ -94,7 +92,6 @@ describe("Relay review NDJSON transport", () => {
       )
     )
     try {
-      const { runRelayReviewStream } = await import("../src/client/relay-review-stream.js")
       await expect(runRelayReviewStream("/review", request, () => undefined)).rejects.toMatchObject({
         _tag: "RelayReviewTransportError",
         message: "Relay progress stream ended before a terminal event"
@@ -122,7 +119,6 @@ describe("Relay review NDJSON transport", () => {
       )
     )
     try {
-      const { runRelayReviewStream } = await import("../src/client/relay-review-stream.js")
       await expect(runRelayReviewStream("/review", request, () => undefined)).rejects.toMatchObject({
         _tag: "RelayReviewTransportError",
         message: "Relay returned frames after the terminal event"
