@@ -33,6 +33,10 @@ context's colour, still or moving.
 
 \`RelayLauncher\`, \`RelayPanel\` and \`RelayDock\` take the same \`activity\` and pass it to their mark.
 
+**Pausing.** \`working\` and \`attention\` loop for as long as the state lasts, which can exceed five seconds. The
+reader's reduced-motion setting is their pause: the system preference, or the in-app setting
+(\`data-rly-reduced-motion="reduce"\`), stops every loop and leaves the mark still (WCAG 2.2.2).
+
 **Words to pair with each** (the host's status line): \`working\` "Reading…" (with the tool's own summary) or
 "Answering…"; \`attention\` "Relay needs you"; \`unread\` "Relay replied". Never "listening" or "speaking":
 Relay has no voice.

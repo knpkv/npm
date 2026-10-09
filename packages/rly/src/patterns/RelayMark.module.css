@@ -51,6 +51,11 @@
     [data-rly-relay-activity="attention"] > .hookEnd {
       animation: rly-relay-mark-nudge-end calc(var(--rly-motion-slow-duration) * 12) var(--rly-easing-in-out) infinite;
     }
+    /* Leaving the unread pose eases back instead of snapping. */
+    .hookStart,
+    .hookEnd {
+      transition: transform var(--rly-motion-slow-duration) var(--rly-easing-out);
+    }
     /* Unread: the hooks settle onto their held pose once, 300ms. */
     [data-rly-relay-activity="unread"] > .hookStart {
       animation: rly-relay-mark-hold-start var(--rly-motion-slow-duration) var(--rly-easing-out) backwards;
@@ -132,7 +137,7 @@
     }
     to {
       opacity: 1;
-      transform: translate(-0px, 0px);
+      transform: translate(0, 0);
     }
   }
   /* Two beats in the first quarter of the cycle, then rest: a call, not a pulse. */

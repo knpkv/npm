@@ -138,4 +138,21 @@ test.describe("RelayMark motion", () => {
       expect(held.hook).not.toBe("none")
     }
   })
+
+  test("eases back from the unread pose instead of snapping", async ({ page }) => {
+    await open(page, "no-preference", "no-preference")
+    const easing = await page
+      .locator("[data-activity='unread'] svg")
+      .first()
+      .evaluate(async (svg) => {
+        // Settled into the pose first, as a reply that waited unread would be.
+        await Promise.all(svg.getAnimations({ subtree: true }).map((animation) => animation.finished))
+        svg.setAttribute("data-rly-relay-activity", "idle")
+        return svg
+          .getAnimations({ subtree: true })
+          .map((animation) => ("transitionProperty" in animation ? String(animation.transitionProperty) : "?"))
+      })
+    // Both hooks transition their transform back to rest.
+    expect(easing).toEqual(["transform", "transform"])
+  })
 })
