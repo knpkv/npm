@@ -1,5 +1,11 @@
 # @knpkv/codecommit-web
 
+## 0.30.0
+
+### Minor Changes
+
+- [#715](https://github.com/knpkv/npm/pull/715) [`7267362`](https://github.com/knpkv/npm/commit/72673622a770d5b40c695fe13b36a82f80e78cf4) Thanks [@konopkov](https://github.com/konopkov)! - Relay's mark shows when Relay is working in the products. relay-product marks the launcher, panel and dock as working while a continuation sent from Relay waits on its answer, or while the product reports its own run through the registration's new `working` field; codecommit-web reports a running PR review. RelayMark's entrance now moves each stroke instead of the whole svg, and a mark that opens already working starts its loop as the entrance ends.
+
 ## 0.29.0
 
 ### Minor Changes

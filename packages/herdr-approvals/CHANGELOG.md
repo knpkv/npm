@@ -1,5 +1,18 @@
 # @knpkv/herdr-approvals
 
+## 0.16.0
+
+### Minor Changes
+
+- [#717](https://github.com/knpkv/npm/pull/717) [`8af4c75`](https://github.com/knpkv/npm/commit/8af4c7569dc195201e29dbf902b6bb221ec78f84) Thanks [@konopkov](https://github.com/konopkov)! - The hub is Relay: it installs as "Relay", its masthead and per-host header carry the Relay mark, its pages are titled "Relay", "Connect in Relay", "Work in Relay" and "{host} on Relay", and it serves PNG install, maskable, apple-touch and notification-badge icons drawn from rly's mark. Notifications use the new icon and a monochrome badge. Installed apps keep working: the manifest's `id`, `start_url` and `scope` are unchanged and the old icon path still answers.
+
+### Patch Changes
+
+- Updated dependencies [[`7267362`](https://github.com/knpkv/npm/commit/72673622a770d5b40c695fe13b36a82f80e78cf4), [`8af4c75`](https://github.com/knpkv/npm/commit/8af4c7569dc195201e29dbf902b6bb221ec78f84), [`eb2ddfd`](https://github.com/knpkv/npm/commit/eb2ddfd124b3e8805d886fa26c178aa59231f1b4)]:
+  - @knpkv/rly@0.18.0
+  - @knpkv/herdr-connect@0.10.2
+  - @knpkv/herdr-work@0.9.5
+
 ## 0.15.0
 
 ### Minor Changes
