@@ -13,6 +13,7 @@ import { BROWSER_TARGET } from "../browser-target.ts"
 
 // Every browser build takes its target from browser-target.ts: each Vite build config and each esbuild
 // script sets `target: BROWSER_TARGET` imported from there, and none names browsers or an ES level itself.
+// An esbuild script that bundles for Node (`platform: "node"`, Relay's Pi bundle) emits no browser code.
 
 const root = fileURLToPath(new URL("..", import.meta.url))
 const runtime = ManagedRuntime.make(NodeServices.layer)
@@ -35,7 +36,8 @@ const sources = await runtime.runPromise(
 )
 
 const viteBuildConfig = /(?:^|\/)vite(?:\.[\w-]+)?\.config\.[cm]?[jt]s$/u
-const esbuildScript = ({ file, text }) => /^packages\/[^/]+\/scripts\//u.test(file) && /from "esbuild"/u.test(text)
+const esbuildScript = ({ file, text }) =>
+  /^packages\/[^/]+\/scripts\//u.test(file) && /from "esbuild"/u.test(text) && !/platform:\s*"node"/u.test(text)
 const builds = sources.filter(({ file, text }) => viteBuildConfig.test(file) || esbuildScript({ file, text }))
 const importsTarget = /import \{ BROWSER_TARGET \} from "(?:\.\.\/)+browser-target\.ts"/u
 // A target written out in place: a browser list or an ES level, quoted or in an array.
