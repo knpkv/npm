@@ -297,6 +297,35 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         expect(yield* fs.readDirectory(elsewhere)).toEqual([])
       }).pipe(Effect.scoped))
 
+    it.effect("refuses a store directory link that points at nothing yet, without creating its target", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fs.makeTempDirectoryScoped()
+        const nowhere = path.join(root, "nowhere")
+        const linked = path.join(root, "relay")
+        yield* fs.symlink(nowhere, linked)
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        const failure = yield* relayIn(harnessLayer(model.layer, path.join(linked, "relay.sqlite"))).pipe(Effect.flip)
+        expect(failure).toMatchObject({ _tag: "RelayStoreLinked", path: linked })
+        expect(yield* fs.exists(nowhere)).toBe(false)
+      }).pipe(Effect.scoped))
+
+    it.effect("refuses a planted link at SQLite's write-ahead log", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fs.makeTempDirectoryScoped()
+        const store = path.join(root, "relay", "relay.sqlite")
+        const target = path.join(root, "target-wal")
+        yield* fs.makeDirectory(path.dirname(store), { mode: 0o700 })
+        yield* fs.symlink(target, `${store}-wal`)
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        const failure = yield* relayIn(harnessLayer(model.layer, store)).pipe(Effect.flip)
+        expect(failure).toMatchObject({ _tag: "RelayStoreLinked", path: `${store}-wal` })
+        expect(yield* fs.exists(target)).toBe(false)
+      }).pipe(Effect.scoped))
+
     it.effect("refuses a database that is a link, even one pointing at nothing yet", () =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
