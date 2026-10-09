@@ -385,9 +385,11 @@ describe("offline backup commands", () => {
 
       assert.strictEqual(published.verification._tag, "Complete")
       assert.isFalse(reportClosingSidecar)
-      // At least the one restart this test injects. The fixture's own closed connection can add another: libsql
-      // releases it only at garbage collection, which checkpoints and deletes the real -wal mid-capture.
+      // At least the one restart this test injects, within the three-attempt bound. Not exactly two: the fixture's
+      // own closed connection is released by libsql only at garbage collection, which checkpoints and deletes the
+      // real -wal whenever it runs, so a restart for that is correct and not under the test's control.
       assert.isAtLeast(databaseCopies, 2)
+      assert.isAtMost(databaseCopies, 3)
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 
   // A connection closing after the database was copied checkpoints its WAL into the database and deletes it, so
@@ -426,6 +428,57 @@ describe("offline backup commands", () => {
 
         assert.strictEqual(published.verification._tag, "Complete")
         assert.isAtLeast(databaseCopies, 2)
+        assert.isAtMost(databaseCopies, 3)
+      })))
+
+    it.effect("fails closed, naming the database, when it changes under every attempt", () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { configured, parent, prepared } = yield* makePreparedRoot("control-center-offline-database-churn-")
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const source = yield* resolvePreparedControlCenterDataRoot(configured)
+        const databaseFile = path.join(prepared.dataRoot, "control-center.db")
+        const archiveRoot = path.join(parent, "archive")
+
+        let databaseCopies = 0
+        const churningFileSystem = FileSystem.FileSystem.of({
+          ...fileSystem,
+          copyFile: (sourceFile, destinationFile) => {
+            if (sourceFile === databaseFile) databaseCopies += 1
+            return fileSystem.copyFile(sourceFile, destinationFile)
+          },
+          // Every copy finds the database rewritten again since the mark taken before it.
+          stat: (target) =>
+            fileSystem.stat(target).pipe(
+              Effect.map((info) =>
+                target === databaseFile
+                  ? {
+                    ...info,
+                    mtime: Option.map(info.mtime, (mtime) => new Date(mtime.getTime() + databaseCopies * 1_000))
+                  }
+                  : info
+              )
+            )
+        })
+
+        const published = yield* createOfflineVerifiedBackup({
+          destination: archiveRoot,
+          persistenceConfig: source.persistenceConfig
+        }).pipe(Effect.provideService(FileSystem.FileSystem, churningFileSystem), Effect.result)
+
+        assert.isTrue(Result.isFailure(published))
+        if (Result.isFailure(published)) {
+          assert.strictEqual(published.failure._tag, "BackupStorageError")
+          if (published.failure._tag === "BackupStorageError") {
+            assert.strictEqual(published.failure.operation, "copy-offline-database")
+            assert.deepStrictEqual(published.failure.cause, {
+              _tag: "BackupInvariant",
+              reason: "database-kept-changing-during-snapshot"
+            })
+          }
+        }
+        assert.strictEqual(databaseCopies, 3)
+        assert.isFalse(yield* fileSystem.exists(archiveRoot))
       })))
   })
 

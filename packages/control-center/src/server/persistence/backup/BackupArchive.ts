@@ -234,25 +234,35 @@ export const createOfflineVerifiedBackup = Effect.fn("BackupArchive.createOfflin
         Effect.mapError((cause) => new BackupStorageError({ cause, operation: "create-offline-snapshot" }))
       )
       let snapshotDatabase: string | undefined
+      // What changed under the last attempt, so running out of attempts names it.
+      let unsettled: "sidecar" | "database" = "sidecar"
       for (let attempt = 0; attempt < OFFLINE_SNAPSHOT_CAPTURE_ATTEMPTS; attempt += 1) {
         const candidate = path.join(snapshotRoot, `control-center-${attempt}.db`)
         const before = yield* offlineSourceMark(fileSystem, databaseFile)
         yield* fileSystem.copyFile(databaseFile, candidate).pipe(
           Effect.mapError((cause) => new BackupStorageError({ cause, operation: "copy-offline-database" }))
         )
-        if (
-          (yield* copyOfflineSidecars(fileSystem, sourceRootInfo, databaseFile, candidate)) &&
-          (yield* offlineSourceMark(fileSystem, databaseFile)) === before
-        ) {
-          snapshotDatabase = candidate
-          break
+        if (!(yield* copyOfflineSidecars(fileSystem, sourceRootInfo, databaseFile, candidate))) {
+          unsettled = "sidecar"
+          continue
         }
+        if ((yield* offlineSourceMark(fileSystem, databaseFile)) !== before) {
+          unsettled = "database"
+          continue
+        }
+        snapshotDatabase = candidate
+        break
       }
       if (snapshotDatabase === undefined) {
-        return yield* new BackupStorageError({
-          cause: offlineInvariant("sidecar-kept-changing-during-snapshot"),
-          operation: "copy-offline-sidecar"
-        })
+        return yield* unsettled === "database"
+          ? new BackupStorageError({
+            cause: offlineInvariant("database-kept-changing-during-snapshot"),
+            operation: "copy-offline-database"
+          })
+          : new BackupStorageError({
+            cause: offlineInvariant("sidecar-kept-changing-during-snapshot"),
+            operation: "copy-offline-sidecar"
+          })
       }
 
       const clientConfig: LocalLibsqlConfig = {
