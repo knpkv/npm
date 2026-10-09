@@ -9,6 +9,9 @@
  *
  * Runs after `tsc`: the bundle replaces `dist/index.js`, and the per-module `.js` files tsc wrote are
  * removed so no published file imports Pi. Declarations stay as tsc wrote them.
+ *
+ * `dist/wire.js` (`@knpkv/relay/wire`) is a second, browser bundle of the wire contract: it may import only
+ * `effect` and `@knpkv/capability`, so a page that decodes Relay's events never loads the harness.
  */
 import { build } from "esbuild"
 import console from "node:console"
@@ -50,12 +53,37 @@ if (unexpected.length > 0) {
   throw new Error(`Relay's bundle took in undeclared packages: ${unexpected.join(", ")}. Declare them or drop them.`)
 }
 
+const wire = await build({
+  entryPoints: ["dist/wire.js"],
+  outfile: "dist/wire.js",
+  allowOverwrite: true,
+  bundle: true,
+  format: "esm",
+  // Servers and pages both load it; a page's own bundler applies the browser target.
+  platform: "neutral",
+  target: "es2022",
+  sourcemap: "linked",
+  metafile: true,
+  external: ["effect", "effect/*", "@knpkv/capability", "@knpkv/capability/*"],
+  logLevel: "warning"
+})
+const wireImports = wire.metafile.outputs["dist/wire.js"].imports.map(({ path }) => path)
+const wireForeign = wireImports.filter((path) => !/^(effect|@knpkv\/capability)(\/|$)/u.test(path))
+if (wireForeign.length > 0) {
+  throw new Error(`@knpkv/relay/wire must stay browser-safe, but it imports: ${wireForeign.join(", ")}`)
+}
+const wireInputs = Object.keys(wire.metafile.outputs["dist/wire.js"].inputs)
+const wireServer = wireInputs.filter((path) => !/^dist\/(wire|model)\.js$/u.test(path))
+if (wireServer.length > 0) {
+  throw new Error(`@knpkv/relay/wire took in modules beyond the wire contract: ${wireServer.join(", ")}`)
+}
+
 // tsc's per-module output: the JavaScript is in the bundle now, and the declarations of Pi-facing internals
 // (not reachable from index.d.ts) would name Pi's packages.
 const piFacing = ["libsqlDatabase", "piProvider", "piTools"]
 for (const file of await readdir("dist")) {
   const module = file.replace(/\.(d\.ts|js)(\.map)?$/u, "")
-  const isJs = /\.js(\.map)?$/u.test(file) && module !== "index"
+  const isJs = /\.js(\.map)?$/u.test(file) && module !== "index" && module !== "wire"
   if (isJs || piFacing.includes(module)) await rm(join("dist", file))
 }
 console.log(`Relay bundle: ${[...bundled].sort().join(", ")} inlined`)

@@ -550,6 +550,68 @@ testLayer(NodeServices.layer, { excludeTestServices: true })("relay", (it) => {
         expect(events.at(-1)).toMatchObject({ _tag: "RunFinished", runIds: ["req-named"] })
       }).pipe(Effect.scoped))
 
+    it.effect("streams each message as queued, placed or withdrawn, and a Snapshot lists the queued ones", () =>
+      Effect.gen(function*() {
+        const store = yield* tempStore
+        const started = yield* Deferred.make<void>()
+        const release = yield* Deferred.make<void>()
+        const slow = implement(getApprovals, () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Deferred.await(release)),
+            Effect.as({ approvals: 2 })
+          ))
+        const model = toolThenAnswer("get_approvals", { pr: "42" })
+        const relay = yield* relayIn(layer({
+          storePath: store,
+          instructions: "You are Relay.",
+          capabilities: [register(slow)],
+          backends: [claude(model.layer)]
+        }))
+        const attached = yield* Deferred.make<void>()
+        const watching = yield* Effect.forkChild(
+          relay.events(pr).pipe(
+            Stream.tap((event) => (event._tag === "Snapshot" ? Deferred.succeed(attached, undefined) : Effect.void)),
+            Stream.takeUntil((event) => event._tag === "RunFinished" && event.runIds.includes("req-second")),
+            Stream.runCollect
+          )
+        )
+        yield* Deferred.await(attached)
+        yield* relay.send(pr, "First", "req-first")
+        yield* Deferred.await(started)
+        yield* relay.send(pr, "Second", "req-second")
+        yield* relay.send(pr, "Never mind", "req-third")
+        const late = yield* relay.events(pr).pipe(Stream.take(1), Stream.runCollect)
+        expect(late[0]).toMatchObject({ _tag: "Snapshot", runIds: ["req-first"], queued: ["req-second", "req-third"] })
+        yield* relay.cancel(pr, "req-third")
+        yield* Deferred.succeed(release, undefined)
+        const events = yield* Fiber.join(watching)
+        const messages = events.flatMap((event) =>
+          event._tag === "MessageQueued" || event._tag === "MessageWithdrawn" || event._tag === "MessagePlaced"
+            ? [`${event._tag} ${event.requestId}`]
+            : event._tag === "RunStarted" || event._tag === "RunFinished"
+            ? [`${event._tag} ${event.runIds.join(",")}`]
+            : []
+        )
+        expect(messages).toEqual([
+          "MessagePlaced req-first",
+          "RunStarted req-first",
+          "MessageQueued req-second",
+          "MessageQueued req-third",
+          "MessageWithdrawn req-third",
+          "RunFinished req-first",
+          "MessagePlaced req-second",
+          "RunStarted req-second",
+          "RunFinished req-second"
+        ])
+        // The placed message carries its transcript id and text, as a later Snapshot names it.
+        const placed = events.find((event) => event._tag === "MessagePlaced" && event.requestId === "req-second")
+        const after = yield* relay.events(pr).pipe(Stream.take(1), Stream.runCollect)
+        expect(after[0]).toMatchObject({ _tag: "Snapshot", queued: [] })
+        expect(after[0]?._tag === "Snapshot" ? after[0].messages : []).toContainEqual(
+          placed?._tag === "MessagePlaced" ? { id: placed.id, role: "user", text: "Second" } : null
+        )
+      }).pipe(Effect.scoped))
+
     it.effect("announces the run, labels reads, and shows a confirmed write's receipt", () =>
       Effect.gen(function*() {
         const store = yield* tempStore

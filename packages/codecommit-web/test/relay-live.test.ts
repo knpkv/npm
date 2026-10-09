@@ -25,7 +25,7 @@ const transport = Layer.mergeAll(
   Layer.succeed(OwnerSessionAuth, { ownerCookie: (httpEffect) => httpEffect })
 ).pipe(Layer.provideMerge(FileSystem.layerNoop({})))
 
-const snapshot: RelayEvent = { _tag: "Snapshot", session: "s-1", seq: 0, messages: [], runIds: [] }
+const snapshot: RelayEvent = { _tag: "Snapshot", session: "s-1", seq: 0, messages: [], runIds: [], queued: [] }
 
 /** A harness that records what the routes asked of it and answers from fixed outcomes. */
 const fakeHarness = (sent: Ref.Ref<ReadonlyArray<string>>): RelayHarnessService => ({

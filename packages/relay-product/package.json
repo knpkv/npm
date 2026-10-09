@@ -29,6 +29,10 @@
     "./model": {
       "types": "./dist/model.d.ts",
       "import": "./dist/model.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
     }
   },
   "files": [
@@ -51,7 +55,8 @@
   },
   "peerDependencies": {
     "effect": "4.0.0",
-    "react": "^19.2.8"
+    "react": "^19.2.8",
+    "@knpkv/relay": "workspace:^"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0",
@@ -64,6 +69,12 @@
     "react-dom": "^19.3.0",
     "rimraf": "^6.1.3",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@knpkv/relay": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@knpkv/relay": {
+      "optional": true
+    }
   }
 }

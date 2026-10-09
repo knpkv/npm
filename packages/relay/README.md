@@ -50,7 +50,10 @@ const RelayLive = Layer.unwrap(
   the run that answers it. `backend` switches the session from its next turn on (`RelayBackendNotConfigured`
   otherwise). `context` is what the person attached, as the product renders it (`{ label, body }`): it is
   placed just before the message for the model, and never appears in the transcript or the Snapshot.
-- `events(ref)`: a `Snapshot` first, with each message's `id` and the `runIds` of a run in flight. Then:
+- `events(ref)`: a `Snapshot` first, with each message's `id`, the `runIds` of a run in flight and the
+  requestIds still `queued`. Then:
+  - `MessageQueued { requestId }`, then `MessagePlaced { id, requestId, text }` when a run takes it, or
+    `MessageWithdrawn { requestId }` when it is cancelled first.
   - `RunStarted { runIds }` and `TextDelta`.
   - `ToolStarted` and `ToolFinished`, each with a server-built, display-safe `summary`. A finished call carries
     its citations, and a write whose product projects one carries a `receipt { summary, providerId, link? }`
@@ -66,6 +69,20 @@ const RelayLive = Layer.unwrap(
 - `backends`: `Unverified` (the CLI answered `--version`), `Ready` (a turn answered), or `Unavailable` with
   `NotInstalled`, `SignedOut`, `Misconfigured` or `NoCapability` and a one-line fix. Observed, never persisted.
   `SignedOut` comes from an `AuthenticationError` turn failure.
+
+## In the browser: `@knpkv/relay/wire`
+
+The contract a product's `/…/relay` routes speak, as a separate browser bundle that imports only
+`effect` and `@knpkv/capability`. It holds the harness's event and session schemas, plus:
+
+- `RelayStreamFrame`: one `data:` frame of `GET events`, a `RelayEvent`, `Unauthorized` or `StreamFailed`;
+- `RelayMessageRequest`, `RelayCancelRequest` and `RelayDecisionRequest`, the write bodies, and `RelayMessageAccepted`;
+- the typed refusals: `RelayUnavailableError` (503, with the fix), `RelayConflictError` (409, with the
+  `RelayConflictState` found) and `RelayBadRequestError` (400).
+
+A product narrows `ref` to its own objects and may add a typed `context` to a message. The build fails if
+the bundle reaches anything else, and `pnpm test:pack` checks the packed `dist/wire.js` again.
+`@knpkv/relay-product/client` reads a conversation through it.
 
 ## Security boundaries
 
