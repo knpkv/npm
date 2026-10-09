@@ -11,9 +11,9 @@
  *   a message on its own guess, so a Snapshot can't race a send. The only thing the page adds is the text of
  *   its own sends (`Sending`), because the stream names a queued message by its request id alone.
  * - **The stream's order is the transcript's.** A reply's text joins the reply streaming at the end of the
- *   transcript; a tool call or a message placed after it ends it, and the next text starts a new reply. So
- *   the live transcript has the rows a reconnect's Snapshot will show: Pi stores the text before and after a
- *   tool call as separate replies.
+ *   transcript. A tool call ends it (its start, or its finish when it never started), as does a message
+ *   placed after it, and the next text starts a new reply. So the live transcript has the rows a reconnect's
+ *   Snapshot will show: Pi stores the text before and after a tool call as separate replies.
  * - **Connection state is a fact, not a guess.** `Disconnected` means a retry is coming; `Unauthorized` and
  *   `StreamFailed` mean it isn't. Nothing here ever reads as working while the stream is down.
  *
@@ -173,8 +173,10 @@ export const foldRelayConversation = (
           }]
         }
     case "ToolFinished":
+      // A blocked or unoffered call finishes without having started; it still splits the reply.
       return {
         ...state,
+        messages: endStreaming(state.messages),
         tools: withTool(state.tools, event.call, (row) => ({
           ...row,
           receipt: event.receipt ?? null,

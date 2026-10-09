@@ -142,6 +142,17 @@ describe("foldRelayConversation", () => {
     expect(rows(live)).toEqual(rows(reconnected))
   })
 
+  it("splits a reply at a tool that finishes without starting, as a blocked call does", () => {
+    const live = fold([
+      snapshot([]),
+      { _tag: "RunStarted", ...at, runIds: ["r1"] },
+      { _tag: "TextDelta", ...at, seq: 2, text: "Let me try." },
+      { _tag: "ToolFinished", ...at, call: "t9", ok: false, summary: "run shell", cites: [] },
+      { _tag: "TextDelta", ...at, seq: 4, text: "It is unavailable." }
+    ])
+    expect(live.messages.map(({ text }) => text)).toEqual(["Let me try.", "It is unavailable."])
+  })
+
   it("leaves out a turn that only called tools", () => {
     const state = fold([snapshot([{ id: "1", role: "user", text: "Hi" }, { id: "2", role: "relay", text: "" }])])
     expect(state.messages.map(({ id }) => id)).toEqual(["1"])
