@@ -16,7 +16,15 @@
  * @module
  */
 import { Data, Effect, Option } from "effect"
-import type { BookingSummary, LimitSeries, LimitsReport, Period, UsageCell, UsageReport } from "../shared/contracts.js"
+import type {
+  BookingSummary,
+  LimitSeries,
+  LimitsReport,
+  Period,
+  TokenCell,
+  UsageCell,
+  UsageReport
+} from "../shared/contracts.js"
 import { attribute, bookingId, projectOf } from "./Attribution.js"
 import type { Agent, LimitSnapshot, TicketTitleValue, Tokens } from "./Model.js"
 import { failureCovers, totalTokens } from "./Model.js"
@@ -125,6 +133,31 @@ interface MutableBooking {
   readonly summary: Omit<BookingSummary, "agents" | "unpricedModels">
   readonly agents: Set<Agent>
   readonly unpricedModels: Set<string>
+}
+
+/**
+ * Tokens per period, agent and model, for {@link UsageNow}: no cost, no Booking. `end` bounds the
+ * last period like {@link buildUsageReport}'s; cells come out by period, then agent, then model.
+ */
+export const tokensByModel = (
+  groups: ReadonlyArray<UsageGroup>,
+  periods: ReadonlyArray<Period>,
+  end: number = Number.POSITIVE_INFINITY
+): ReadonlyArray<TokenCell> => {
+  const cells = new Map<string, { period: number; agent: TokenCell["agent"]; model: string; tokens: number }>()
+  for (const group of groups) {
+    const period = periodIndex(periods, group.bucketStart, end)
+    if (period === null) continue
+    const key = JSON.stringify([period, group.agent, group.model])
+    const cell = cells.get(key) ?? { period, agent: group.agent, model: group.model, tokens: 0 }
+    cell.tokens += totalTokens(group.tokens)
+    cells.set(key, cell)
+  }
+  return [...cells.values()]
+    .filter((cell) => cell.tokens > 0)
+    .sort((left, right) =>
+      left.period - right.period || left.agent.localeCompare(right.agent) || left.model.localeCompare(right.model)
+    )
 }
 
 /**

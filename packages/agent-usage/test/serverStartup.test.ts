@@ -19,7 +19,10 @@ describe("server startup", () => {
         yield* fs.chmod(directory, 0o700)
         const secrets = yield* makeOwnerSession(origin)
         // The running server: it holds the store's lock.
-        yield* controlSocket(directory, secrets, Effect.void, Effect.die("limits were not asked for in this test"))
+        yield* controlSocket(directory, secrets, Effect.void, {
+          limits: Effect.die("limits were not asked for in this test"),
+          usage: () => Effect.die("usage was not asked for in this test")
+        })
         // Not a database: opening or migrating it would fail with a store error, or rewrite it.
         const database = path.join(directory, "usage.db")
         yield* fs.writeFileString(database, "sentinel")

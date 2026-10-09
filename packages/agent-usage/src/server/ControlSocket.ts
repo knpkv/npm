@@ -18,7 +18,9 @@
  * - **One question, one answer.** The client sends `mint`; once the HTTP listener is up, the server
  *   mints a link through the same path as the startup link (one use, one minute) and replies with it
  *   as one JSON line. Or it sends `limits`, and the server replies with this Machine's latest limits
- *   ({@link LimitsNow}) once its store is open. Both sides give up after {@link EXCHANGE_DEADLINE}.
+ *   ({@link LimitsNow}) once its store is open; or `usage <preset> <time zone>`, and it replies with
+ *   this Machine's usage over that range ({@link UsageNow}). Both sides give up after
+ *   {@link EXCHANGE_DEADLINE}.
  *
  * @module
  */
@@ -30,7 +32,8 @@ import { Duration, Effect, FileSystem, Option, Path, Predicate, Schema } from "e
 import type { PlatformError } from "effect/PlatformError"
 import type { Socket, SocketServer } from "effect/socket"
 import { prepareStoreDirectory } from "../core/Database.js"
-import { LimitsNow } from "../shared/contracts.js"
+import type { UnknownTimeZone } from "../core/Report.js"
+import { LimitsNow, UsageNow, UsagePreset } from "../shared/contracts.js"
 import { mintBootstrapUrl } from "./OwnerSession.js"
 
 export const SOCKET_FILE = "serve.sock"
@@ -108,6 +111,31 @@ export class LimitsReplyInvalid extends Schema.TaggedError<LimitsReplyInvalid>()
   reply: Schema.String
 }) {}
 
+/** The server is a version without the `usage` request: upgrade or restart it. */
+export class UsageNotSupported extends Schema.TaggedError<UsageNotSupported>()("UsageNotSupported", {
+  path: Schema.String
+}) {}
+
+/** The server knows the request but could not read its store; its log says why. */
+export class UsageUnavailable extends Schema.TaggedError<UsageUnavailable>()("UsageUnavailable", {
+  path: Schema.String
+}) {}
+
+/**
+ * The usage request was refused: a range or a time zone the server does not know, or a line that is
+ * not `usage <range> <zone>` (an empty zone, or one with whitespace, is refused before it is sent).
+ */
+export class UsageRequestRefused extends Schema.TaggedError<UsageRequestRefused>()("UsageRequestRefused", {
+  refused: Schema.Literals(["range", "time zone", "malformed"]),
+  preset: Schema.String,
+  timeZone: Schema.String
+}) {}
+
+/** The server answered with something that is neither usage nor one of its error lines. */
+export class UsageReplyInvalid extends Schema.TaggedError<UsageReplyInvalid>()("UsageReplyInvalid", {
+  reply: Schema.String
+}) {}
+
 /** The server answered with something that is not a link. */
 export class LoginReplyInvalid extends Schema.TaggedError<LoginReplyInvalid>()("LoginReplyInvalid", {
   reply: Schema.String
@@ -136,12 +164,50 @@ const decodeReply = Schema.decodeUnknownOption(LoginReply)
 const LimitsReply = Schema.fromJsonString(LimitsNow)
 const encodeLimits = Schema.encodeSync(LimitsReply)
 const decodeLimits = Schema.decodeUnknownOption(LimitsReply)
+const UsageReply = Schema.fromJsonString(UsageNow)
+const encodeUsage = Schema.encodeSync(UsageReply)
+const decodeUsage = Schema.decodeUnknownOption(UsageReply)
+const isUsagePreset = Schema.is(UsagePreset)
 const UNKNOWN_REQUEST = "unknown request"
 const LIMITS_UNAVAILABLE = "limits unavailable"
+const USAGE_UNAVAILABLE = "usage unavailable"
+const BAD_REQUEST = "bad request"
+const UNKNOWN_RANGE = "unknown range"
+const UNKNOWN_TIME_ZONE = "unknown time zone"
 const errorLine = (error: string): string => `${JSON.stringify({ error })}\n`
 const decodeErrorLine = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Struct({ error: Schema.Literals([UNKNOWN_REQUEST, LIMITS_UNAVAILABLE]) }))
+  Schema.fromJsonString(
+    Schema.Struct({
+      error: Schema.Literals([
+        UNKNOWN_REQUEST,
+        LIMITS_UNAVAILABLE,
+        USAGE_UNAVAILABLE,
+        BAD_REQUEST,
+        UNKNOWN_RANGE,
+        UNKNOWN_TIME_ZONE
+      ])
+    })
+  )
 )
+
+/** What the socket answers from the store, once it is open. */
+export interface ControlReaders<E> {
+  readonly limits: Effect.Effect<LimitsNow, E>
+  readonly usage: (preset: UsagePreset, timeZone: string) => Effect.Effect<UsageNow, E | UnknownTimeZone>
+}
+
+/**
+ * A `usage` request line: the word, a preset and an IANA zone, separated by single spaces. Any other
+ * line starting with `usage` is `malformed`, so a mistake is never answered as an unknown request.
+ */
+const usageRequest = (
+  request: string
+): { readonly preset: string; readonly timeZone: string } | "malformed" | undefined => {
+  const [word, preset, timeZone, ...rest] = request.split(" ")
+  if (word !== "usage") return undefined
+  if (preset === undefined || timeZone === undefined || timeZone === "" || rest.length > 0) return "malformed"
+  return { preset, timeZone }
+}
 
 /** A Node system error, as far as this module reads one. */
 const Errno = Schema.Struct({ code: Schema.String })
@@ -208,12 +274,13 @@ const readLine = (reader: Socket.Reader) =>
 
 /**
  * One connection: `mint` answered with a fresh link, `limits` with this Machine's latest limits,
- * anything else with an error. A limits read that fails is answered with an error line.
+ * `usage` with its usage over a range, anything else with an error. A read that fails is answered
+ * with an error line; a range or zone the server does not know, with `bad request`.
  */
 const answer = <E>(
   secrets: OwnerSessionService,
   listening: Effect.Effect<void>,
-  limits: Effect.Effect<LimitsNow, E>
+  readers: ControlReaders<E>
 ) =>
 (socket: Socket.Socket) =>
   Effect.scoped(Effect.gen(function*() {
@@ -221,11 +288,21 @@ const answer = <E>(
     const write = yield* socket.writer
     const request = (yield* readLine(reader)).trim()
     if (request === "limits") {
-      const read = yield* Effect.result(limits)
+      const read = yield* Effect.result(readers.limits)
       if (read._tag === "Success") return yield* write.write(`${encodeLimits(read.success)}\n`)
       // The client only learns that the read failed; why stays in this server's log.
       yield* Effect.logWarning("agent-usage control socket: reading limits failed", read.failure)
       return yield* write.write(errorLine(LIMITS_UNAVAILABLE))
+    }
+    const usage = usageRequest(request)
+    if (usage === "malformed") return yield* write.write(errorLine(BAD_REQUEST))
+    if (usage !== undefined) {
+      if (!isUsagePreset(usage.preset)) return yield* write.write(errorLine(UNKNOWN_RANGE))
+      const read = yield* Effect.result(readers.usage(usage.preset, usage.timeZone))
+      if (read._tag === "Success") return yield* write.write(`${encodeUsage(read.success)}\n`)
+      if (Predicate.isTagged(read.failure, "UnknownTimeZone")) return yield* write.write(errorLine(UNKNOWN_TIME_ZONE))
+      yield* Effect.logWarning("agent-usage control socket: reading usage failed", read.failure)
+      return yield* write.write(errorLine(USAGE_UNAVAILABLE))
     }
     if (request !== "mint") return yield* write.write(errorLine(UNKNOWN_REQUEST))
     // Never before the HTTP listener is up: a code minted earlier would be one nobody could spend.
@@ -276,7 +353,8 @@ const holdStoreLock = Effect.fnUntraced(function*(directory: string) {
 /**
  * Holds the store's lock and listens on `<directory>/serve.sock` for the life of the scope; returns
  * the socket path, or nothing (and logs why) when the path is too long for a Unix socket. Requests
- * wait for `listening` before a link is minted; a `limits` request runs `limits`. Fails with {@link ServerAlreadyRunning} when another
+ * wait for `listening` before a link is minted; `limits` and `usage` requests run their `readers`.
+ * Fails with {@link ServerAlreadyRunning} when another
  * server runs on this store and {@link SocketPathUnsafe} when the path holds anything but this
  * user's socket.
  */
@@ -284,7 +362,7 @@ export const controlSocket = Effect.fn("ControlSocket.listen")(function*<E>(
   directory: string,
   secrets: OwnerSessionService,
   listening: Effect.Effect<void>,
-  limits: Effect.Effect<LimitsNow, E>
+  readers: ControlReaders<E>
 ) {
   const fs = yield* FileSystem.FileSystem
   // The directory must be the store's, checked, before its lock is taken inside it.
@@ -314,12 +392,12 @@ export const controlSocket = Effect.fn("ControlSocket.listen")(function*<E>(
   if ((yield* inspect(directory, socketPath, self)) === undefined) {
     return yield* new SocketPathUnsafe({ path: socketPath, reason: "it vanished after binding" })
   }
-  yield* Effect.forkScoped(server.run(answer(secrets, listening, limits)))
+  yield* Effect.forkScoped(server.run(answer(secrets, listening, readers)))
   return socketPath
 })
 
 /** Sends one request line to the server on this store and returns its socket path and one reply line, trimmed. */
-const exchange = Effect.fnUntraced(function*(directory: string, self: number, request: "mint" | "limits") {
+const exchange = Effect.fnUntraced(function*(directory: string, self: number, request: string) {
   const socketPath = yield* socketPathFor(directory)
   const found = yield* inspect(directory, socketPath, self)
   if (found === undefined) return yield* new ServerNotRunning({ path: socketPath })
@@ -376,4 +454,42 @@ export const requestLimits = Effect.fn("ControlSocket.requestLimits")(function*(
       : new LimitsUnavailable({ path: socketPath })
   }
   return yield* new LimitsReplyInvalid({ reply: reply.slice(0, 200) })
+})
+
+/**
+ * Asks the server running on this store for this Machine's usage over `preset`, in periods local to
+ * `timeZone`, with the same trust and failures as {@link requestLoginUrl}; {@link UsageNotSupported}
+ * when the server is a version without the request, {@link UsageRequestRefused} (naming what) when
+ * it does not know the range or the zone or the request is malformed, {@link UsageUnavailable} when it could not read its store, and
+ * {@link UsageReplyInvalid} for any other answer.
+ */
+export const requestUsage = Effect.fn("ControlSocket.requestUsage")(function*(
+  directory: string,
+  self: number,
+  preset: UsagePreset,
+  timeZone: string
+) {
+  // One line, three words: an empty zone, or one with a space or newline, could only be a different request.
+  if (timeZone === "" || /\s/u.test(timeZone)) {
+    return yield* new UsageRequestRefused({ refused: "malformed", preset, timeZone })
+  }
+  const { reply, socketPath } = yield* exchange(directory, self, `usage ${preset} ${timeZone}`)
+  const decoded = decodeUsage(reply)
+  if (Option.isSome(decoded)) return decoded.value
+  const error = decodeErrorLine(reply)
+  if (Option.isSome(error)) {
+    switch (error.value.error) {
+      case UNKNOWN_REQUEST:
+        return yield* new UsageNotSupported({ path: socketPath })
+      case BAD_REQUEST:
+        return yield* new UsageRequestRefused({ refused: "malformed", preset, timeZone })
+      case UNKNOWN_RANGE:
+        return yield* new UsageRequestRefused({ refused: "range", preset, timeZone })
+      case UNKNOWN_TIME_ZONE:
+        return yield* new UsageRequestRefused({ refused: "time zone", preset, timeZone })
+      default:
+        return yield* new UsageUnavailable({ path: socketPath })
+    }
+  }
+  return yield* new UsageReplyInvalid({ reply: reply.slice(0, 200) })
 })

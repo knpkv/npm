@@ -7,6 +7,8 @@
  * - `agent-usage login [--open]` asks the running server for a fresh one-time link and prints it.
  * - `agent-usage ingest [--json]` runs one ingest pass and reports what it found.
  * - `agent-usage limits` asks the running server for this Machine's latest limits, as one JSON line.
+ * - `agent-usage usage [--range 24h|7d|30d] [--time-zone ZONE]` asks it for this Machine's tokens per
+ *   period, agent and model, and its limit series over the range, as one JSON line.
  *
  * @module
  */
@@ -27,7 +29,8 @@ import { limits as requestLimits } from "./server/Limits.js"
 import { login as requestLogin } from "./server/Login.js"
 import { makeOwnerSession } from "./server/OwnerSession.js"
 import { makeServer, Port, PublicOrigin } from "./server/Server.js"
-import { IngestStatus as IngestStatusSchema } from "./shared/contracts.js"
+import { usage as requestUsage } from "./server/Usage.js"
+import { IngestStatus as IngestStatusSchema, type UsagePreset } from "./shared/contracts.js"
 
 /** The operating system's name for the user; Claude Code's own fallback when it cannot ask. */
 const osUserName = (): string => {
@@ -96,9 +99,34 @@ const limits = Command.make(
   () => requestLimits(config, process.geteuid?.() ?? -1)
 ).pipe(Command.withDescription("Print this Machine's latest limits from the running server, as JSON"))
 
+/** A week by day: the Usage tab's default too. */
+const defaultUsageRange: UsagePreset = "7d"
+
+const usage = Command.make(
+  "usage",
+  {
+    range: Flag.Literals("range", ["24h", "7d", "30d"]).pipe(
+      Flag.withDescription("The last 24 hours by hour, or the last 7 or 30 local days by day"),
+      Flag.withDefault(defaultUsageRange)
+    ),
+    timeZone: Flag.String("time-zone").pipe(
+      Flag.withDescription("The IANA zone the periods are local to; defaults to this Machine's"),
+      Flag.optional
+    )
+  },
+  // The same owner check as `login`; periods are local to the asker's zone, else this Machine's.
+  ({ range, timeZone }) =>
+    requestUsage(
+      config,
+      process.geteuid?.() ?? -1,
+      range,
+      Option.getOrElse(timeZone, () => Intl.DateTimeFormat().resolvedOptions().timeZone)
+    )
+).pipe(Command.withDescription("Print this Machine's tokens per model and limit series over a range, as JSON"))
+
 const cli = Command.make("agent-usage").pipe(
   Command.withDescription("Claude and Codex subscription usage over time, per ticket and against limits"),
-  Command.withSubcommands([serve, login, ingest, limits]),
+  Command.withSubcommands([serve, login, ingest, limits, usage]),
   Command.run({ version: pkg.version })
 )
 

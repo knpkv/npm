@@ -92,6 +92,7 @@ export const UsageByBooking: Story = {
           labelOf={view.labelOf}
           measure="cost"
           range={view.range}
+          label={`Usage per ${view.range.bucket}, stacked by booking`}
           periods={view.week.usage.periods}
           slots={view.slots}
           stacked={view.stacked}
