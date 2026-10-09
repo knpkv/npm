@@ -1,5 +1,7 @@
 /**
- * Chart 1: usage per period, stacked by Booking, in API-equivalent dollars or tokens.
+ * Chart 1: usage per period, stacked by series, in API-equivalent dollars or tokens. On the
+ * agent-usage page a series is a Booking; elsewhere (the herdr hub) it is whatever the caller stacked,
+ * such as an agent's model, in tokens only.
  *
  * Each period's column is one target for pointer, touch and keyboard alike: hovering, tapping or
  * focusing it shows the same breakdown, and arrow keys, Home and End move between columns with a
@@ -8,7 +10,7 @@
  * @module
  */
 import { type KeyboardEvent, useMemo, useRef, useState } from "react"
-import type { UsageReport } from "../shared/contracts.js"
+import type { Period } from "../shared/contracts.js"
 import { niceTicks, PLOT, timeAxis } from "./axis.js"
 import { type Column, formatAxis, type Measure, OTHER, type StackedUsage } from "./chartModel.js"
 import { formatPeriod, formatTokens, formatUsd } from "../limits/format.js"
@@ -33,12 +35,15 @@ const describeColumn = (column: Column, label: string, measure: Measure, labelOf
 }
 
 export const UsageChart = (props: {
-  readonly report: UsageReport
+  /** The range's periods, oldest first: one column each. */
+  readonly periods: ReadonlyArray<Period>
   readonly stacked: StackedUsage
   readonly range: ViewRange
   readonly measure: Measure
   readonly slots: ReadonlyMap<string, number>
   readonly labelOf: (id: string) => string
+  /** The chart's accessible name; the page's default says it is stacked by booking. */
+  readonly label?: string
 }) => {
   const [width, container] = useWidth(960)
   // Hover and focus open the breakdown independently; each ends only its own, so moving the pointer
@@ -53,7 +58,7 @@ export const UsageChart = (props: {
   const top = ticks.at(-1) ?? 0
   const plotHeight = HEIGHT - PLOT.top - PLOT.bottom
   const y = (value: number) => PLOT.top + plotHeight - (top === 0 ? 0 : (value / top) * plotHeight)
-  const { periods } = props.report
+  const { periods } = props
   const { columns } = props.stacked
   // Space labels by how wide they are, so "Mon, Sep 28" never runs into its neighbour on a phone.
   const columnWidth = Math.max(1, (width - PLOT.left - PLOT.right) / Math.max(1, periods.length))
@@ -95,7 +100,7 @@ export const UsageChart = (props: {
   return (
     <div className="usage-chart" ref={container}>
       <svg
-        aria-label={`Usage per ${props.range.bucket}, stacked by booking`}
+        aria-label={props.label ?? `Usage per ${props.range.bucket}, stacked by booking`}
         height={HEIGHT}
         onMouseLeave={() => setHovered(null)}
         role="group"

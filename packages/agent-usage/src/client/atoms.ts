@@ -10,9 +10,9 @@
 import { Clock, Effect } from "effect"
 import { Atom } from "effect/reactivity"
 import type { AgentFilter } from "../shared/contracts.js"
+import type { Measure } from "../usage/chartModel.js"
+import { type Preset, rangeOf } from "../usage/range.js"
 import { fetchLimits, fetchStatus, fetchUsage } from "./api.js"
-import type { Measure } from "./chartModel.js"
-import { type Preset, rangeOf } from "./range.js"
 
 export const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 

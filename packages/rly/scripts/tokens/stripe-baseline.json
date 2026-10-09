@@ -1,7 +1,7 @@
 [
   {
     "declaration": "overflow-wrap: anywhere",
-    "path": "packages/agent-usage/src/client/usage.css"
+    "path": "packages/agent-usage/src/usage/charts.css"
   },
   {
     "declaration": "overflow-wrap: anywhere",

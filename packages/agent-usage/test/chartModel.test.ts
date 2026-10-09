@@ -1,4 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
+import type { LimitSnapshot } from "../src/core/Model.js"
+import type { BookingSummary, UsageReport } from "../src/shared/contracts.js"
 import {
   assignSlots,
   bookingLabel,
@@ -9,12 +11,11 @@ import {
   rangeTotal,
   readingAt,
   seriesIdentity,
+  stackSeries,
   stackUsage,
   stepPath
-} from "../src/client/chartModel.js"
-import { tooltipLeft } from "../src/client/useTooltipPlacement.js"
-import type { LimitSnapshot } from "../src/core/Model.js"
-import type { BookingSummary, UsageReport } from "../src/shared/contracts.js"
+} from "../src/usage/chartModel.js"
+import { tooltipLeft } from "../src/usage/useTooltipPlacement.js"
 
 const tokens = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 }
 
@@ -70,6 +71,34 @@ describe("stackUsage", () => {
     const stacked = stackUsage(report(10), "tokens", "T-9")
     expect(stacked.series.map((series) => series.id)).toEqual(["T-9"])
     expect(stacked.columns[0]?.segments).toEqual([{ id: "T-9", value: 100, from: 0 }])
+  })
+})
+
+// The hub stacks tokens per agent and model, with no Booking or cost in its cells.
+describe("stackSeries", () => {
+  it("stacks any named series per period, oldest column first, with empty periods kept", () => {
+    const stacked = stackSeries(
+      3,
+      [
+        { period: 0, id: "claude:opus", value: 30 },
+        { period: 0, id: "codex:gpt", value: 10 },
+        { period: 2, id: "claude:opus", value: 5 }
+      ],
+      null
+    )
+    expect(stacked.series.map((series) => series.id)).toEqual(["claude:opus", "codex:gpt"])
+    expect(stacked.columns.map((column) => column.total)).toEqual([40, 0, 5])
+    expect(stacked.columns[0]?.segments).toEqual([
+      { id: "claude:opus", value: 30, from: 0 },
+      { id: "codex:gpt", value: 10, from: 30 }
+    ])
+    expect(stacked.max).toBe(40)
+  })
+
+  it("is what stackUsage draws for a report, in the chosen measure", () => {
+    const usage = report(10)
+    const cells = usage.cells.map((cell) => ({ period: cell.period, id: cell.booking, value: cell.tokens }))
+    expect(stackSeries(usage.periods.length, cells, null)).toEqual(stackUsage(usage, "tokens", null))
   })
 })
 
