@@ -107,23 +107,50 @@ const scriptTestFor = (file, scriptTests) => {
 }
 
 /**
- * The ordered steps for a change. Pure: `files` exist in the worktree, `touched` also holds deletions (they still
- * make a package's check run), `packages` maps a `packages/<dir>` prefix to its manifest name and whether it has a
- * `check` script, and `base` is the comparison base with how it was chosen (see `checkBases`).
- */
-/**
- * The base environment for the two CI checks that diff against a base.
+ * The base environment for the two CI checks that diff against a base. The steps inherit the caller's environment,
+ * so a key mapped to `undefined` is removed from the child, not left to the shell.
  * - An explicit `--base` pins both.
  * - During a merge only changeset coverage is pinned, to the merge head. Changed Effect diagnostics reads MERGE_HEAD
  *   itself, and a pinned base would make it diff from merge-base(HEAD, MERGE_HEAD): the old fork point, so every file
- *   main changed since then.
+ *   main changed since then. An `EFFECT_DIAGNOSTICS_BASE` exported in the shell would do the same, so it is removed.
  * - Against the fork point neither is pinned; both resolve it themselves.
  */
 export const checkBases = (base) => {
   if (base.kind === "explicit") return { CHANGESET_COVERAGE_BASE: base.commit, EFFECT_DIAGNOSTICS_BASE: base.commit }
-  if (base.kind === "merge") return { CHANGESET_COVERAGE_BASE: base.commit }
+  if (base.kind === "merge") return { CHANGESET_COVERAGE_BASE: base.commit, EFFECT_DIAGNOSTICS_BASE: undefined }
   return {}
 }
+
+/**
+ * How the comparison base is chosen: an explicit `--base`, else the pending merge head, else the fork point. `--base`
+ * during a merge is refused: the merge head is the only base whose diff is this branch's own change, and an explicit
+ * base would pin diagnostics to the old fork point again.
+ */
+export const chooseBase = ({ explicit, mergeHeads }) => {
+  if (mergeHeads !== undefined && explicit !== undefined) {
+    return Effect.fail(
+      new PrecheckUsageError({
+        reason: "--base is not allowed during a merge: check:changed already compares against MERGE_HEAD"
+      })
+    )
+  }
+  if (mergeHeads !== undefined) {
+    if (mergeHeads.length !== 1) {
+      return Effect.fail(
+        new PrecheckUsageError({ reason: `precheck needs one pending merge head, found ${mergeHeads.length}` })
+      )
+    }
+    return Effect.succeed({ kind: "merge", ref: mergeHeads[0] })
+  }
+  if (explicit !== undefined) return Effect.succeed({ kind: "explicit", ref: explicit })
+  return Effect.succeed({ kind: "fork", ref: "origin/main" })
+}
+
+/**
+ * The ordered steps for a change. Pure: `files` exist in the worktree, `touched` also holds deletions (they still
+ * make a package's check run), `packages` maps a `packages/<dir>` prefix to its manifest name and whether it has a
+ * `check` script, and `base` is the comparison base with how it was chosen (see `checkBases`).
+ */
 
 export const planPrecheck = ({ base, eslintPartitions, files, matchesGlob, packages, scriptTests, touched }) => {
   const pinned = checkBases(base)
@@ -232,23 +259,22 @@ export const untrackedNotice = (untracked) =>
     : `[precheck] skipping ${untracked.length} untracked file${untracked.length === 1 ? "" : "s"} (git add -N <file> to check one): ${untracked.join(", ")}`
 
 /**
- * The comparison base: an explicit `--base`, else the pending merge head, else the fork point with origin/main.
- * Against the merge head the diff is the whole branch against the new main, so rules main added run on every file
- * the branch changed. `kind` says which, for `checkBases`.
+ * The comparison base `chooseBase` picks, resolved to a commit. Against the merge head the diff is the whole branch
+ * against the new main, so rules main added run on every file the branch changed. `kind` is kept for `checkBases`.
  */
 const resolveBase = Effect.fn("Precheck.resolveBase")(function* (git, fs, explicit) {
-  if (explicit !== undefined) {
-    return { commit: (yield* git(["rev-parse", "--verify", `${explicit}^{commit}`])).trim(), kind: "explicit" }
-  }
   const mergeHeadPath = (yield* git(["rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD"])).trim()
-  if (yield* fs.exists(mergeHeadPath)) {
-    const heads = (yield* fs.readFileString(mergeHeadPath)).split("\n").filter((line) => line.trim() !== "")
-    if (heads.length !== 1) {
-      return yield* new PrecheckUsageError({ reason: `precheck needs one pending merge head, found ${heads.length}` })
-    }
-    return { commit: heads[0].trim(), kind: "merge" }
+  const mergeHeads = (yield* fs.exists(mergeHeadPath))
+    ? (yield* fs.readFileString(mergeHeadPath))
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line !== "")
+    : undefined
+  const chosen = yield* chooseBase({ explicit, mergeHeads })
+  if (chosen.kind === "fork") {
+    return { commit: (yield* git(["merge-base", "HEAD", chosen.ref])).trim(), kind: "fork" }
   }
-  return { commit: (yield* git(["merge-base", "HEAD", "origin/main"])).trim(), kind: "fork" }
+  return { commit: (yield* git(["rev-parse", "--verify", `${chosen.ref}^{commit}`])).trim(), kind: chosen.kind }
 })
 
 const readPackages = Effect.fn("Precheck.readPackages")(function* (fs, path, root, prefixes) {
@@ -264,7 +290,7 @@ const readPackages = Effect.fn("Precheck.readPackages")(function* (fs, path, roo
   return packages
 })
 
-const runStep = Effect.fn("Precheck.runStep")(function* (spawner, root, step, index, total) {
+export const runStep = Effect.fn("Precheck.runStep")(function* (spawner, root, step, index, total) {
   yield* Console.log(`[precheck] ${index}/${total} ${step.label}`)
   const exitCode = yield* spawner.exitCode(
     ChildProcess.make(step.command, step.args, {
@@ -335,8 +361,12 @@ const program = Effect.gen(function* () {
   )
   if (options.dryRun) {
     for (const [index, step] of steps.entries()) {
-      const env = Object.entries(step.env ?? {}).map(([key, value]) => `${key}=${value} `)
-      yield* Console.log(`${index + 1}. ${step.label}\n   ${env.join("")}${step.command} ${step.args.join(" ")}`)
+      const env = Object.entries(step.env ?? {}).map(([key, value]) =>
+        value === undefined ? `-u ${key} ` : `${key}=${value} `
+      )
+      yield* Console.log(
+        `${index + 1}. ${step.label}\n   ${env.length > 0 ? `env ${env.join("")}` : ""}${step.command} ${step.args.join(" ")}`
+      )
     }
     return
   }
