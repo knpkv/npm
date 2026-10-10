@@ -1,5 +1,20 @@
 # @knpkv/herdr-work
 
+## 0.10.0
+
+### Minor Changes
+
+- [#733](https://github.com/knpkv/npm/pull/733) [`e7b8f1a`](https://github.com/knpkv/npm/commit/e7b8f1ab3d85fa47821246c4d034247150ab43ce) Thanks [@konopkov](https://github.com/konopkov)! - Recording work never fails because the board has grown. The snapshot-size and goal-count checks on writes are gone; the snapshot bounds itself instead, leaving out finished goals first (least recently updated first) and counting them per window in the new optional `goalsOmitted`. Older readers ignore the key.
+
+- [#741](https://github.com/knpkv/npm/pull/741) [`c951532`](https://github.com/knpkv/npm/commit/c951532eef3faa2d756339060be2ce774f904c03) Thanks [@konopkov](https://github.com/konopkov)! - The Work board shows what needs triage. A finished goal leaves a window a day after it finished, counted in `finishedOmitted` ("N finished goals not shown"), and each goal carries its 8 most recent activities, with `activityOmitted` counting the rest ("8 most recent of N"). Stored history is unchanged. `fleetctl work snapshot` names finished goals left out on stderr, too.
+
+- [#737](https://github.com/knpkv/npm/pull/737) [`6fddeab`](https://github.com/knpkv/npm/commit/6fddeab63340c81223691a3a1e96f53e2dbabcd1) Thanks [@konopkov](https://github.com/konopkov)! - A large Work board never hides goals silently. The Work tab says "N older goals not shown" for a window the board cut, and `fleetctl work snapshot` prints the same per window on stderr, keeping stdout the snapshot alone. Snapshots now carry `version: 1`. Readers accept any version and ignore keys they don't know; when a newer format no longer decodes, fleetctl says "upgrade fleetctl with the hub" and the hub page says "reload the page" instead of reporting a malformed snapshot. A fleetctl from before this release still decodes strictly and fails against a hub that cut its board, so upgrade fleetctl with the hub; hosts updated together through nix are unaffected.
+
+### Patch Changes
+
+- Updated dependencies [[`ea0c0ed`](https://github.com/knpkv/npm/commit/ea0c0ed700cb69dd86e56fba425dd16d9869a577)]:
+  - @knpkv/rly@0.19.0
+
 ## 0.9.5
 
 ### Patch Changes

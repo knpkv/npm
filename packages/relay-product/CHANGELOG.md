@@ -1,5 +1,32 @@
 # @knpkv/relay-product
 
+## 0.5.0
+
+### Minor Changes
+
+- [#723](https://github.com/knpkv/npm/pull/723) [`94d8fdd`](https://github.com/knpkv/npm/commit/94d8fdd38022e2aa68f8bf4dd87924a542e9a7ea) Thanks [@konopkov](https://github.com/konopkov)! - Adds `@knpkv/relay-product/client`, a Relay conversation in the browser for any `ObjectRef`.
+
+  - One stream per conversation, read as server-sent events, reconnecting from a fresh Snapshot.
+  - 401/403 stops it with `Unauthorized`; an unreadable frame stops it with `StreamFailed`.
+  - A shared store folds the events, so a late reader gets the current state, open cards included.
+  - A person's message shows when the stream reports it queued or placed, never on the send's answer.
+  - `send` takes the composer's request id (`newRequestId`), so a retry after a lost answer lands once; `send`, `cancel` and `decide` return typed refusals.
+  - `retry` reopens a stream that ended with `Unauthorized` or `StreamFailed`.
+  - The session backend's status is read beside the stream, the newest read winning, after each Snapshot, run end and send.
+
+  `@knpkv/relay` is an optional peer, used only by this entry.
+
+- [#742](https://github.com/knpkv/npm/pull/742) [`116c0c2`](https://github.com/knpkv/npm/commit/116c0c2d47b6f739f33b47473b03b4874d961e31) Thanks [@konopkov](https://github.com/konopkov)! - Adds `RelayConversationPanel` to `@knpkv/relay-product/client`: one Relay conversation in rly's panel for any `ObjectRef`, with its transcript, confirmation cards and composer. The host owns opening and the summon. `relayTranscriptItems` lays a conversation out in the order it happened: tool work after the message it followed, and every run's end (finished, cancelled, failed) as its own item, so each is announced once. The fold now records where each tool call happened and how each run ended (`RelayToolRow.after`, `RelayConversationState.outcomes`), and a call that finishes without starting gets a row too.
+
+- [#730](https://github.com/knpkv/npm/pull/730) [`5f0ec77`](https://github.com/knpkv/npm/commit/5f0ec779cffd2bbb3a9b8b2ce4bb00cbfc814db6) Thanks [@konopkov](https://github.com/konopkov)! - `@knpkv/relay-product/client` gains Relay's status for a conversation: `useRelayStatus(conversations, ref, panelOpen)` and the pure `relayStatusOf` give the mark's activity (idle, working, attention, unread) and fixed status words ("Reading…" with the running tool's own summary, "Answering…", "Sending…", "Relay needs you", "Relay replied", "Sign in to Codex", "Relay hit an error", "Relay status unknown"). It reads the client's folded state, so a reconnect restores the status without replaying anything, and it never shows reply, message, failure or action text.
+
+### Patch Changes
+
+- [#731](https://github.com/knpkv/npm/pull/731) [`e6fd46d`](https://github.com/knpkv/npm/commit/e6fd46d85a2f109da9b80ff4aa96cee4ae4f5bf5) Thanks [@konopkov](https://github.com/konopkov)! - A tool call ends the reply streaming before it, so text before and after the call are separate replies. That is how Pi stores them, so a reconnect's Snapshot no longer regroups the transcript or counts a reply the reader already saw as new.
+- Updated dependencies [[`0728c72`](https://github.com/knpkv/npm/commit/0728c72870f6c648626da0493cc00d8c65c47d60), [`f925ee2`](https://github.com/knpkv/npm/commit/f925ee27ba3689acb941187cce4ee808301f5f95), [`94d8fdd`](https://github.com/knpkv/npm/commit/94d8fdd38022e2aa68f8bf4dd87924a542e9a7ea), [`ea0c0ed`](https://github.com/knpkv/npm/commit/ea0c0ed700cb69dd86e56fba425dd16d9869a577)]:
+  - @knpkv/relay@0.2.0
+  - @knpkv/rly@0.19.0
+
 ## 0.4.0
 
 ### Minor Changes

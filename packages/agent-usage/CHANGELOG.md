@@ -1,5 +1,13 @@
 # @knpkv/agent-usage
 
+## 0.8.1
+
+### Patch Changes
+
+- [#722](https://github.com/knpkv/npm/pull/722) [`202ec0d`](https://github.com/knpkv/npm/commit/202ec0d1161718d8cb0974c50194241097aab88a) Thanks [@konopkov](https://github.com/konopkov)! - In forced colours, the usage chart's legend swatches and the "could not be read" key stay as drawn, matching the bars and hatching they name. Before, they vanished while the chart kept its colours.
+- Updated dependencies [[`ea0c0ed`](https://github.com/knpkv/npm/commit/ea0c0ed700cb69dd86e56fba425dd16d9869a577)]:
+  - @knpkv/rly@0.19.0
+
 ## 0.8.0
 
 ### Minor Changes
