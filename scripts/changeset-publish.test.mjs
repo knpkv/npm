@@ -1,7 +1,14 @@
 import assert from "node:assert/strict"
-import test from "node:test"
+import test, { after } from "node:test"
 
-import { readPublishOutput } from "./changeset-publish.mjs"
+import { fileURLToPath, URL } from "node:url"
+
+import { NodeServices } from "@effect/platform-node"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as ManagedRuntime from "effect/ManagedRuntime"
+
+import { publishEnv, publishLifecycleViolation, readPublishOutput } from "./changeset-publish.mjs"
 
 const staged = (name, version) =>
   `└ E409: 409 Conflict - PUT https://registry.npmjs.org/${name.replace("/", "%2f")} - ` +
@@ -90,4 +97,56 @@ test("a tag step that fails after the failure block fails the run", () => {
   )
   assert.deepEqual(readPublishOutput(tagFailure), { staged: null })
   assert.deepEqual(readPublishOutput(rlyStaged.replace("\n🦋 Exited with code 1", "")), { staged: null })
+})
+
+test("publishing runs no package's lifecycle scripts, for pnpm 11 and earlier", () => {
+  // The workspace is built before publishing; a concurrent prepack rebuild deleted a dist another package read.
+  assert.deepEqual(publishEnv, { npm_config_ignore_scripts: "true", pnpm_config_ignore_scripts: "true" })
+})
+
+const runtime = ManagedRuntime.make(NodeServices.layer)
+after(() => runtime.dispose())
+
+/** Every non-private package manifest under packages/. */
+const publishedManifests = runtime.runPromise(
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem
+    const packagesDir = fileURLToPath(new URL("../packages/", import.meta.url))
+    const manifests = []
+    for (const entry of yield* fileSystem.readDirectory(packagesDir)) {
+      if ((yield* fileSystem.stat(`${packagesDir}${entry}`)).type !== "Directory") continue
+      const file = `${packagesDir}${entry}/package.json`
+      if (!(yield* fileSystem.exists(file))) continue
+      manifests.push(JSON.parse(yield* fileSystem.readFileString(file)))
+    }
+    return manifests.filter((manifest) => manifest.private !== true)
+  })
+)
+
+test("a published package's lifecycle scripts only repeat the build that runs before publishing", async () => {
+  const published = await publishedManifests
+  assert.ok(published.length > 20)
+  assert.deepEqual(
+    published.flatMap((manifest) => publishLifecycleViolation(manifest.name, manifest.scripts ?? {}) ?? []),
+    []
+  )
+})
+
+test("lifecycle work beyond the build, or any prepare, is refused by name", () => {
+  const build = "tsc -b && vite build"
+  assert.equal(publishLifecycleViolation("a", { build, prepack: "pnpm build" }), null)
+  assert.equal(publishLifecycleViolation("a", { build, prepack: build }), null)
+  assert.equal(
+    publishLifecycleViolation("a", { build, prepack: `pnpm --filter @knpkv/browser-pairing build && ${build}` }),
+    null
+  )
+  assert.match(
+    publishLifecycleViolation("a", { build, prepack: "pnpm build && node scripts/gen-schema.mjs" }) ?? "",
+    /a: "prepack": .* move this work into build/
+  )
+  assert.match(publishLifecycleViolation("a", { build, prepare: "pnpm build" }) ?? "", /"prepare"/)
+  assert.match(
+    publishLifecycleViolation("a", { build, prepack: "pnpm --filter @knpkv/x build && node gen.mjs" }) ?? "",
+    /"prepack"/
+  )
 })
