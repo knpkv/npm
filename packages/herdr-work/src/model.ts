@@ -1082,6 +1082,18 @@ export const WorkSnapshot = Schema.Struct({
    */
   goalsOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
   /**
+   * How many finished goals (completed, deployed, abandoned) left this window because they finished more than
+   * `workSnapshotFinishedRetentionMs` before its `asOf`. The window is a triage view; the count keeps the cut visible.
+   */
+  finishedOmitted: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
+  /**
+   * Per goal, how many older activities this window left out: it carries the `workSnapshotActivityMax` most recent.
+   * Stored history keeps them all.
+   */
+  activityOmitted: Schema.optionalKey(
+    Schema.Record(WorkGoalId, Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)))
+  ),
+  /**
    * Observed facts per goal, merged at read time; only the `now` window
    * carries them, and only for goals something was observed about.
    */
@@ -1148,6 +1160,20 @@ export interface WorkSnapshot extends Schema.Schema.Type<typeof WorkSnapshot> {}
  * {@link WorkSnapshotsNewerVersion} and asks for an upgrade instead of reporting a malformed snapshot.
  */
 export const workSnapshotsVersion = 1
+
+/** How long a finished goal stays in a window after it finished, relative to the window's `asOf`. */
+export const workSnapshotFinishedRetentionMs = 24 * 60 * 60 * 1_000
+
+/** The most recent activities a snapshot carries per goal. */
+export const workSnapshotActivityMax = 8
+
+/** The Work tab's line for finished goals a window left out. */
+export const finishedNotShown = (count: number): string =>
+  count === 1 ? "1 finished goal not shown" : `${String(count)} finished goals not shown`
+
+/** The detail pane's note when a goal's older activity was left out of the snapshot. */
+export const activityShownOf = (shown: number, omitted: number): string =>
+  `${String(shown)} most recent of ${String(shown + omitted)}`
 
 /** A snapshot written in a newer format than this version reads, recognised by its `version` alone. */
 export const WorkSnapshotsNewerVersion = Schema.Struct({

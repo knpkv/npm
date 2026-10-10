@@ -231,9 +231,13 @@ describe("fleetctl work commands", () => {
     expect(workSnapshotNotes(snapshot)).toEqual([])
     expect(workSnapshotNotes({
       ...snapshot,
-      now: { ...snapshot.now, goalsOmitted: 12 },
+      now: { ...snapshot.now, finishedOmitted: 3, goalsOmitted: 12 },
       month: { ...snapshot.month, goalsOmitted: 1 }
-    })).toEqual(["now: 12 older goals not shown", "month: 1 older goal not shown"])
+    })).toEqual([
+      "now: 3 finished goals not shown",
+      "now: 12 older goals not shown",
+      "month: 1 older goal not shown"
+    ])
   })
 
   it.effect("names a newer hub format instead of calling the snapshot malformed", () =>
