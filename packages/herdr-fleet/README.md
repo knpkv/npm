@@ -33,7 +33,7 @@ The coordinator's orchestrator database (`@effect/sql-sqlite-node`) keeps its ow
 
 `HostConfiguration.machines` stores `{ host, nodeId }` for every fleet machine. Both fields must be unique. Tailscale adapters use the stable node ID as authority and treat the hostname only as a consistency check.
 
-`HostConfiguration.workBindAddress` is the explicit IPv4 address for the local-only Work listener. It defaults to loopback; wildcard addresses are invalid. The Work and local listeners must use distinct ports when `crossHost` is disabled.
+`HostConfiguration.workBindAddress` is the explicit IPv4 loopback address (`127.0.0.0/8`) for the local-only Work listener. It defaults to `127.0.0.1`. That listener has no authentication of its own, so wildcard and non-loopback addresses are invalid; use `lanWork` for paired LAN access. The Work and local listeners must use distinct ports when `crossHost` is disabled.
 
 `HostConfiguration.lanWork` is an opt-in LAN Work listener configuration with an explicit bind `address`, browser `host`, and TCP `port`. Its port must not collide with the local, Work, or approval listeners. The approvals runtime exposes only the read-only Work pairing boundary on this listener; it prints a five-minute single-use code after startup, accepts pairing only from the exact configured origin, and keeps approvals, Connect, chat, secrets, agent control, and job submission unavailable. LAN Work uses plain HTTP and therefore requires a trusted LAN or an authenticated TLS boundary before credentials cross an untrusted link.
 

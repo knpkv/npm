@@ -522,14 +522,15 @@ const WorkBindAddress = Schema.String.check(
     (address) => {
       const octets = address.split(".")
       const values = octets.map(Number)
+      // The Work listener has no authentication of its own, so only loopback may reach it.
       return (
-        values.some((octet) => octet !== 0) &&
+        values[0] === 127 &&
         values.every(
           (octet, index) => String(octet) === octets[index] && octet >= 0 && octet <= 255
         )
       )
     },
-    { expected: "a specific IPv4 Work listener address, not a wildcard" }
+    { expected: "a specific IPv4 loopback address (127.0.0.0/8) for the unauthenticated Work listener" }
   )
 )
 
