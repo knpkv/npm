@@ -188,7 +188,8 @@ const revalidateSession = (
   token: Redacted.Redacted<SessionToken>,
   expected: CurrentSession["Service"]
 ): Effect.Effect<boolean> =>
-  auth.authenticate(token).pipe(
+  // A held-open stream is not user activity: re-check validity without sliding idle expiry.
+  auth.validateSession(token).pipe(
     Effect.result,
     Effect.map(
       (authenticated) =>

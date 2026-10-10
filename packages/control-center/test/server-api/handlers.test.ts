@@ -483,6 +483,7 @@ const liveEventsLayer = Layer.succeed(LiveEvents, liveEvents)
 
 const streamAuthentication = Auth.of({
   authenticate: () => Effect.succeed(session),
+  validateSession: () => Effect.succeed(session),
   authorizeMutation: () => Effect.die("not used"),
   bootstrapOwnerPairing: () => Effect.die("not used"),
   consumePairingCode: () => Effect.die("not used"),
@@ -3971,7 +3972,7 @@ describe("Control Center API handlers", () => {
       const closed = yield* Deferred.make<void>()
       const revokedAuthentication = Auth.of({
         ...streamAuthentication,
-        authenticate: () => Effect.fail(new CredentialRejectedError())
+        validateSession: () => Effect.fail(new CredentialRejectedError())
       })
       const trackedLiveEvents = LiveEvents.of({
         open: () =>
@@ -4004,6 +4005,57 @@ describe("Control Center API handlers", () => {
         yield* Deferred.await(closed)
 
         assert.strictEqual(yield* Ref.get(activeSubscriptions), 0)
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionMiddlewareLayer,
+          trackedHandler
+        ])
+      )
+    }))
+
+  it.effect("re-checks a held-open live stream without recording session activity", () =>
+    Effect.gen(function*() {
+      const activeSubscriptions = yield* Ref.make(0)
+      const validations = yield* Ref.make(0)
+      const trackedHandler = liveEventHandlersLayer.pipe(
+        Layer.provide(sessionMiddlewareLayer),
+        Layer.provide(Layer.succeed(
+          Auth,
+          Auth.of({
+            ...streamAuthentication,
+            authenticate: () => Effect.die("periodic re-checks must not record session activity"),
+            validateSession: () => Ref.update(validations, (count) => count + 1).pipe(Effect.as(session))
+          })
+        )),
+        Layer.provide(LiveStreamAdmission.layer),
+        Layer.provide(ServerLifecycle.layer),
+        Layer.provide(Layer.succeed(
+          LiveEvents,
+          LiveEvents.of({
+            open: () =>
+              Ref.update(activeSubscriptions, (count) => count + 1).pipe(
+                Effect.as(Stream.never.pipe(
+                  Stream.ensuring(Ref.update(activeSubscriptions, (count) => count - 1))
+                ))
+              )
+          })
+        ))
+      )
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["liveEvents"])
+        const eventStream = yield* client.liveEvents.stream({ headers: {}, query: {} })
+        const drained = yield* Stream.runDrain(eventStream).pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        assert.strictEqual(yield* Ref.get(activeSubscriptions), 1)
+
+        yield* TestClock.adjust(Duration.seconds(25))
+        yield* TestClock.adjust(Duration.seconds(25))
+
+        assert.strictEqual(yield* Ref.get(validations), 2)
+        assert.strictEqual(yield* Ref.get(activeSubscriptions), 1)
+        yield* Fiber.interrupt(drained)
       }).pipe(
         Effect.provide([
           NodeHttpServer.layerHttpServices,
@@ -4128,7 +4180,8 @@ describe("Control Center API handlers", () => {
         authenticate: () =>
           Ref.getAndUpdate(authenticationCalls, (count) => count + 1).pipe(
             Effect.flatMap((count) => (count === 0 ? Effect.succeed(session) : Effect.die(secretCanary)))
-          )
+          ),
+        validateSession: () => Effect.die(secretCanary)
       })
       const trackedLiveEvents = LiveEvents.of({
         open: () =>
@@ -4215,6 +4268,7 @@ describe("Control Center API handlers", () => {
     const recoveredCsrf = "ef".repeat(32)
     const authentication = Auth.of({
       authenticate: () => Effect.succeed(session),
+      validateSession: () => Effect.succeed(session),
       authorizeMutation: () => Effect.die("not used"),
       bootstrapOwnerPairing: () => Effect.die("not used"),
       consumePairingCode: () => Effect.die("not used"),
@@ -4419,6 +4473,7 @@ describe("Control Center API handlers", () => {
     const recoveredCsrf = "ef".repeat(32)
     const authentication = Auth.of({
       authenticate: () => Effect.succeed(session),
+      validateSession: () => Effect.succeed(session),
       authorizeMutation: () => Effect.die("blocked insecure-LAN mutation reached CSRF verification"),
       bootstrapOwnerPairing: () => Effect.die("not used"),
       consumePairingCode: () => Effect.die("blocked insecure-LAN pairing reached its handler"),
@@ -4582,6 +4637,7 @@ describe("Control Center API handlers", () => {
   it("rejects a non-owner plugin configuration mutation through the real auth middleware", async () => {
     const authentication = Auth.of({
       authenticate: () => Effect.succeed(watcherSession),
+      validateSession: () => Effect.succeed(watcherSession),
       authorizeMutation: () => Effect.succeed(watcherSession),
       bootstrapOwnerPairing: () => Effect.die("not used"),
       consumePairingCode: () => Effect.die("not used"),
