@@ -34,7 +34,7 @@ import {
   writeTerminalOutput
 } from "./terminal-output.js"
 import { agentBucketsOf, type AgentBuckets, arrivalsBetween, nextAgentBuckets } from "./arrivals.js"
-import { AgentCast, AgentStage } from "./stage.js"
+import { AgentCast, AgentStage, PinnedAgent } from "./stage.js"
 import {
   AgentDirectory,
   connectAgentKey,
@@ -180,6 +180,31 @@ const storeRememberedAgent = (key: string) =>
     )
   )
 
+/** The agent this device keeps pinned, by `connectAgentKey`; nothing stored means none. */
+const pinnedAgentStorageKey = "fleet-connect-pinned"
+
+const loadPinnedAgent = Effect.try({
+  try: () => window.localStorage.getItem(pinnedAgentStorageKey),
+  catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.read", cause })
+}).pipe(
+  Effect.flatMap((value) =>
+    value === null
+      ? Effect.succeed(null)
+      : Schema.decodeUnknownEffect(RememberedAgentKey)(value).pipe(
+          Effect.mapError((cause) => new ConnectPreferenceError({ operation: "local_storage.decode", cause }))
+        )
+  )
+)
+
+const storePinnedAgent = (key: string | null) =>
+  Effect.try({
+    try: () =>
+      key === null
+        ? window.localStorage.removeItem(pinnedAgentStorageKey)
+        : window.localStorage.setItem(pinnedAgentStorageKey, key),
+    catch: (cause) => new ConnectPreferenceError({ operation: "local_storage.write", cause })
+  })
+
 /** Whether this device hides the terminal key rail's keys; nothing stored means shown, as before. */
 const TerminalKeysVisibility = Schema.Literals(["shown", "hidden"])
 const terminalKeysStorageKey = "fleet-connect-terminal-keys"
@@ -319,6 +344,7 @@ export const makeConnectAtoms = () => {
     limitsPoll: browserRuntime.atom(Atom.refresh(limits).pipe(Effect.repeat(Schedule.spaced("60 seconds")))),
     preference: Atom.make(loadRememberedAgent),
     terminalKeysHidden: Atom.make(loadTerminalKeysHidden),
+    pinned: Atom.make(loadPinnedAgent),
     preferenceError: Atom.make<string | null>(null),
     query: Atom.make(""),
     selectedKey: Atom.make<string | null>(null),
@@ -990,6 +1016,24 @@ export const ConnectSurface = ({
     const silent = new Set(current.failures.map((failure) => failure.host))
     previousBuckets.current = nextAgentBuckets(previousBuckets.current, buckets, silent)
   }, [current])
+  // The stored pin seeds it; this session's choice wins once made. Unreadable storage pins nothing.
+  const storedPin = useAtomValue(atoms.pinned)
+  const [pinChoice, setPinChoice] = useState<{ readonly key: string | null } | null>(null)
+  // An explicit unpin is a choice too: only "no choice yet" falls back to what was stored.
+  const pinnedKey = pinChoice !== null ? pinChoice.key : AsyncResult.isSuccess(storedPin) ? storedPin.value : null
+  const pinnedAgent = pinnedKey === null ? null : (agents.find((agent) => connectAgentKey(agent) === pinnedKey) ?? null)
+  const [pinError, setPinError] = useState<string | null>(null)
+  const changePin = (key: string | null): void => {
+    setPinChoice({ key })
+    setPinError(null)
+    Effect.runFork(
+      storePinnedAgent(key).pipe(
+        Effect.catch(() =>
+          Effect.sync(() => setPinError("Couldn't remember the pin on this device; it applies until you reload."))
+        )
+      )
+    )
+  }
   const stageCrew =
     stageAgent === null
       ? []
@@ -1223,12 +1267,27 @@ export const ConnectSurface = ({
               crew={stageCrew}
               onClose={() => setStageKey(null)}
               onOpen={(agent) => setStageKey(connectAgentKey(agent))}
+              onPinChange={(pinned) => changePin(pinned && stageAgent !== null ? connectAgentKey(stageAgent) : null)}
+              pinned={stageAgent !== null && connectAgentKey(stageAgent) === pinnedKey}
               onOpenTerminal={(agent) => {
                 setStageKey(null)
                 selectAgent(agent)
               }}
               stale={staleSince !== null}
             />
+            {pinnedAgent === null || stageKey === pinnedKey ? null : (
+              <PinnedAgent
+                agent={pinnedAgent}
+                onOpen={() => setStageKey(pinnedKey)}
+                placement="float"
+                stale={staleSince !== null}
+              />
+            )}
+            {pinError === null ? null : (
+              <small className="connect-status-message" data-tone="caution" role="status">
+                {pinError}
+              </small>
+            )}
           </>
         )}
         {connection._tag === "connecting" ? (
@@ -1288,6 +1347,18 @@ export const ConnectSurface = ({
           tone={connection._tag === "connected" ? "positive" : connection._tag === "failed" ? "critical" : "neutral"}
           size="compact"
         />
+        {/* In the terminal the pin sits in this bar, never over the output or the key rail. */}
+        {pinnedAgent === null || pinnedKey === selectedKey ? null : (
+          <PinnedAgent
+            agent={pinnedAgent}
+            onOpen={() => {
+              disconnect()
+              setStageKey(pinnedKey)
+            }}
+            placement="bar"
+            stale={staleSince !== null}
+          />
+        )}
       </div>
       {workspaceFocusFailure === "focus_rejected" ? (
         <small className="connect-status-message" data-tone="critical" role="alert">

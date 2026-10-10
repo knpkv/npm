@@ -45,6 +45,8 @@ describe("AgentStage crew", () => {
             onClose={() => undefined}
             onOpen={opened}
             onOpenTerminal={() => undefined}
+            onPinChange={() => undefined}
+            pinned={false}
             stale={false}
           />
         )
