@@ -1809,4 +1809,89 @@
     background: Canvas;
     border-color: CanvasText;
   }
+
+  /* The pinned agent: one character kept to hand. */
+  .connect-pin {
+    align-items: center;
+    background: var(--rly-color-surface-1);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: 999px;
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    gap: var(--rly-space-8);
+    min-block-size: 44px;
+    padding: var(--rly-space-4) var(--rly-space-16) var(--rly-space-4) var(--rly-space-4);
+  }
+
+  .connect-pin .connect-creature {
+    block-size: auto;
+    inline-size: 32px;
+  }
+
+  .connect-pin-name {
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+    max-inline-size: 10em;
+    overflow: clip;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Over the directory: the end corner, clear of the safe area. */
+  .connect-pin[data-placement="float"] {
+    backdrop-filter: blur(16px) saturate(1.4);
+    background: color-mix(in oklch, var(--rly-color-surface-1) 82%, transparent);
+    box-shadow: 0 16px 40px -18px oklch(0% 0 none / 50%);
+    inset-block-end: calc(var(--rly-space-16) + env(safe-area-inset-bottom, 0px));
+    /* Both sides' insets: inline-end is the left edge in right-to-left text. */
+    inset-inline-end: calc(var(--rly-space-16) + max(env(safe-area-inset-left, 0px), env(safe-area-inset-right, 0px)));
+    position: fixed;
+    z-index: 2;
+  }
+
+  /* Room at the end of the directory, so the last row can scroll clear of the floating pin. */
+  .connect-agents[data-pinned] {
+    padding-block-end: calc(var(--rly-space-80) + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* In the terminal's bar: compact, the state's word carries it. */
+  .connect-pin[data-placement="bar"] {
+    margin-inline-start: auto;
+    min-inline-size: 0;
+  }
+
+  .connect-pin[data-placement="bar"] .connect-pin-name {
+    max-inline-size: 7em;
+  }
+
+  .connect-pin:focus-visible {
+    outline: var(--rly-focus-ring-width) solid var(--rly-color-focus);
+    outline-offset: var(--rly-focus-ring-offset);
+  }
+
+  @media (hover: hover) and (pointer: fine) {
+    .connect-pin:hover {
+      background: var(--rly-color-surface-2);
+    }
+  }
+
+  @media (max-width: 24rem) {
+    .connect-pin[data-placement="bar"] .connect-pin-name {
+      display: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .connect-pin {
+      backdrop-filter: none;
+      border-color: CanvasText;
+    }
+  }
+
+  :where([data-forced-colors="active"], [data-rly-forced-colors="active"]) .connect-pin {
+    backdrop-filter: none;
+    border-color: CanvasText;
+  }
 }

@@ -104,9 +104,14 @@ export const AgentStage = ({
   onClose,
   onOpen,
   onOpenTerminal,
+  onPinChange,
+  pinned,
   stale
 }: {
   readonly agent: ConnectAgent | null
+  /** Whether this agent is the one this device keeps pinned. */
+  readonly pinned: boolean
+  readonly onPinChange: (pinned: boolean) => void
   /** The agents it started, each a way to its own stage. */
   readonly crew: ReadonlyArray<ConnectAgent>
   readonly onClose: () => void
@@ -178,6 +183,10 @@ export const AgentStage = ({
               <Button onClick={() => onOpenTerminal(agent)} variant="primary">
                 Open terminal
               </Button>
+              {/* The label says the action; no aria-pressed as well, or it reads "Unpin, pressed". */}
+              <Button onClick={() => onPinChange(!pinned)} variant="secondary">
+                {pinned ? "Unpin" : "Pin"}
+              </Button>
             </Sheet.Footer>
           </Sheet.Content>
         )}
@@ -185,3 +194,32 @@ export const AgentStage = ({
     </PortalProvider>
   )
 }
+
+/**
+ * The agent this device keeps pinned, small and always to hand: its character, name and state, opening its
+ * stage. It floats over the directory's corner, and sits inside the terminal's bar there, never over the
+ * output or the key rail.
+ */
+export const PinnedAgent = ({
+  agent,
+  onOpen,
+  placement,
+  stale
+}: {
+  readonly agent: ConnectAgent
+  readonly onOpen: () => void
+  readonly placement: "bar" | "float"
+  readonly stale: boolean
+}): ReactElement => (
+  <button
+    aria-label={`Pinned: ${agent.name}, ${agentStatePresentation(agent.state).word}`}
+    className="connect-pin"
+    data-placement={placement}
+    onClick={onOpen}
+    type="button"
+  >
+    <Creature host={agent.host} id={String(agent.id)} size="row" stale={stale} state={agent.state} />
+    <span className="connect-pin-name">{agent.name}</span>
+    <AgentStateLabel state={agent.state} />
+  </button>
+)
