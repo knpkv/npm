@@ -109,7 +109,8 @@ const OrchestratorSolEscalationCommand = Schema.Struct({
     repository: AgentDelegate.fields.repository,
     prompt: AgentDelegate.fields.prompt,
     mode: Schema.Literals(["review", "work"]),
-    channel: Schema.optionalKey(Schema.Undefined)
+    channel: Schema.optionalKey(Schema.Undefined),
+    newWork: AgentDelegate.fields.newWork
   })
 })
 
