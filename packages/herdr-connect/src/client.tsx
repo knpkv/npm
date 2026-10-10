@@ -364,6 +364,11 @@ const loadWork = Effect.gen(function* () {
 
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
+export { Creature, type CreatureProps } from "./creature.js"
+export { ConnectLimits } from "./limits-view.js"
+export { AgentCast, AgentStage, PinnedAgents } from "./stage.js"
+export { UsageTab, type UsageTabProps } from "./usage-view.js"
+
 /** The shared agent state language, for hosts that list agents outside Connect (the hub's dashboard). */
 export {
   type AgentBucket,
