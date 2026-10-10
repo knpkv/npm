@@ -169,6 +169,8 @@ This project adheres to a strict set of development standards to ensure code qua
 
 ### Testing
 
+Use synthetic role-based identities in tests, e2e, stories, and mock scenarios; never a real person's name or address.
+
 - **Comprehensive Tests**: All packages are expected to have comprehensive tests written with `@effect/vitest`.
 - **Test-Driven Development**: While not explicitly stated, the emphasis on testing suggests that TDD is a recommended practice.
 

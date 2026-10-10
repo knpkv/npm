@@ -29,7 +29,7 @@ import { HostdOperationsCompositionError } from "../src/errors.js"
 import { type HostdOperationsComposer, makeHostdOperations } from "../src/hostd.js"
 
 const config = (repository: string): HostConfiguration => ({
-  allowedUsers: ["andrey@example.com"],
+  allowedUsers: ["owner@example.com"],
   applyCommand: null,
   applyMachines: ["SER8"],
   approvalHub: {
@@ -50,7 +50,7 @@ const config = (repository: string): HostConfiguration => ({
   machines: [{ host: "SER8", nodeId: "node-ser8" }],
   port: 4778,
   pushAllowedOrigins: ["https://push.example.test"],
-  pushSubject: "mailto:andrey@example.com",
+  pushSubject: "mailto:owner@example.com",
   repository,
   stateDirectory: repository,
   tailscaleCommand: "tailscale"
@@ -306,7 +306,7 @@ describe("hostd runtime operations injection", () => {
               prompt: "try the bounded task",
               repository: "/repo"
             }
-          }, "andrey")
+          }, "owner")
           const acceptedLunaJob = yield* fleet.run(lunaJob.id)
           expect(acceptedLunaJob.status).toBe("running")
           const luna = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(OrchestratorReceipt))(
@@ -336,7 +336,7 @@ describe("hostd runtime operations injection", () => {
               prompt: "summarize the completed transition",
               repository: "/repo"
             }
-          }, "andrey")
+          }, "owner")
           const acceptedTransitionSummary = yield* fleet.run(transitionSummaryJob.id)
           const transitionSummary = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(OrchestratorReceipt))(
             acceptedTransitionSummary.result
@@ -395,11 +395,11 @@ describe("hostd runtime operations injection", () => {
               prompt: "finish the escalated task",
               repository: "/repo"
             }
-          }, "andrey")
+          }, "owner")
           yield* fleet.approve(
             solJob.id,
             { hash: solJob.hash, nonce: "sol-approval-nonce" },
-            "andrey"
+            "owner"
           )
           const acceptedSolJob = yield* fleet.run(solJob.id)
           expect(acceptedSolJob.status).toBe("running")
@@ -409,7 +409,7 @@ describe("hostd runtime operations injection", () => {
           const acceptedSol = yield* orchestrator.request(sol.dispatchRequestId)
           expect(acceptedSol.status).toBe("accepted")
           expect(acceptedSol.route?.linkedRequestId).toBe(luna.dispatchRequestId)
-          expect(acceptedSol.command.actor).toBe("andrey")
+          expect(acceptedSol.command.actor).toBe("owner")
 
           yield* Queue.offer(releases, undefined)
           const solCompletion = yield* Queue.take(completions)
@@ -455,7 +455,7 @@ describe("hostd runtime operations injection", () => {
           const terminalObserved = yield* Deferred.make<void>()
           const durableCommand = {
             kind: "fleet.job",
-            actor: "andrey",
+            actor: "owner",
             activityIdempotencyKey: `activity:${fleetJobId}`,
             payload
           } satisfies OrchestratorCommand
@@ -480,7 +480,7 @@ describe("hostd runtime operations injection", () => {
             id: fleetJobId,
             createdAt: 3_000,
             updatedAt: 3_000,
-            actor: "andrey",
+            actor: "owner",
             hash: "b".repeat(64),
             approvalNonce: null,
             approvalExpiresAt: null,

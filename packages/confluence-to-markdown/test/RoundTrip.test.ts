@@ -3586,7 +3586,7 @@ describe("MarkdownConverter round-trip", () => {
 
   it.effect("preserves a mention's accountId through round-trip", () =>
     Effect.gen(function*() {
-      const md = yield* roundTrip(`[@Andrey Konopkov](confluence-mention://557057%3Aabc-123)\n`)
-      expect(md).toContain("[@Andrey Konopkov](confluence-mention://557057%3Aabc-123)")
+      const md = yield* roundTrip(`[@Owner User](confluence-mention://557057%3Aabc-123)\n`)
+      expect(md).toContain("[@Owner User](confluence-mention://557057%3Aabc-123)")
     }).pipe(Effect.provide(TestLayer)))
 })

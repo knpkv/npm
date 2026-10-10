@@ -286,7 +286,7 @@ describe("saved entries", () => {
           content: [
             { type: "text", text: "  Discussed " },
             { type: "text", text: "with ", marks: [{ type: "strong" }] },
-            { type: "mention", attrs: { id: "account", text: "@Andrey" } },
+            { type: "mention", attrs: { id: "account", text: "@Owner" } },
             { type: "emoji", attrs: { shortName: ":thumbsup:", text: "👍" } },
             { type: "hardBreak" },
             { type: "emoji", attrs: { id: "custom", shortName: ":shipit:" } },
@@ -301,7 +301,7 @@ describe("saved entries", () => {
         }
       ]
     }
-    const description = "  Discussed with @Andrey👍\n:shipit:  \n\n  Done  \n[mention][emoji]"
+    const description = "  Discussed with @Owner👍\n:shipit:  \n\n  Done  \n[mention][emoji]"
     const fake = makeFakeHeadless({
       jiraWorklogs: {
         "PROJ-1": [{

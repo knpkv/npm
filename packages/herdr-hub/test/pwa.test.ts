@@ -21,7 +21,7 @@ import {
 /** A pending job as the dashboard receives it: the sanitized projection of the host's record. */
 const approvalRecord = (id: string): SanitizedJobRecord =>
   sanitizeJobRecord({
-    actor: "andrey@example.com",
+    actor: "owner@example.com",
     approvalNonce: `nonce-${id}`,
     approvedBy: null,
     createdAt: 1,
@@ -108,22 +108,22 @@ describe("approval PWA", () => {
       expect(
         yield* authorize(
           { login: undefined, remoteAddress: "127.0.0.1" },
-          ["andrey@example.com"],
+          ["owner@example.com"],
           true
         )
       ).toBe("local")
       const forwarded = yield* Effect.result(
         authorize(
-          { login: "andrey@example.com", remoteAddress: undefined },
-          ["andrey@example.com"],
+          { login: "owner@example.com", remoteAddress: undefined },
+          ["owner@example.com"],
           false
         )
       )
       expect(Result.isFailure(forwarded)).toBe(true)
       const spoofed = yield* Effect.result(
         authorize(
-          { login: "andrey@example.com", remoteAddress: "100.64.0.2" },
-          ["andrey@example.com"],
+          { login: "owner@example.com", remoteAddress: "100.64.0.2" },
+          ["owner@example.com"],
           false
         )
       )

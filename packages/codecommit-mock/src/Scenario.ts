@@ -73,7 +73,7 @@ export const makeGitFixtureScenario = (
   Schema.decodeUnknownSync(CodeCommitMockScenario)({
     accountId: "123456789012",
     region: "eu-west-1",
-    callerArn: "arn:aws:sts::123456789012:assumed-role/Reviewer/andrey",
+    callerArn: "arn:aws:sts::123456789012:assumed-role/Reviewer/owner",
     repositories: [{
       repositoryName: "payments-api",
       repositoryId: "11111111-1111-4111-8111-111111111111",
@@ -125,7 +125,7 @@ export const makeGitFixtureScenario = (
 export const defaultScenario = Schema.decodeUnknownSync(CodeCommitMockScenario)({
   accountId: "123456789012",
   region: "eu-west-1",
-  callerArn: "arn:aws:sts::123456789012:assumed-role/Reviewer/andrey",
+  callerArn: "arn:aws:sts::123456789012:assumed-role/Reviewer/owner",
   repositories: [{
     repositoryName: "payments-api",
     repositoryId: "11111111-1111-4111-8111-111111111111",

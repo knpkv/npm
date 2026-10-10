@@ -15,7 +15,7 @@ import {
 /** A pending job as the dashboard receives it: the sanitized projection of the host's record. */
 const record = (id: string): SanitizedJobRecord =>
   sanitizeJobRecord({
-    actor: "andrey@example.com",
+    actor: "owner@example.com",
     approvalNonce: `nonce-${id}`,
     approvedBy: null,
     createdAt: 1,
@@ -30,7 +30,7 @@ const record = (id: string): SanitizedJobRecord =>
 
 /** A remote host's pending approval as its summary endpoint reports it. */
 const pendingApproval = (id: string): PendingApproval => ({
-  actor: "andrey@example.com",
+  actor: "owner@example.com",
   approvalExpiresAt: null,
   createdAt: 1,
   id,

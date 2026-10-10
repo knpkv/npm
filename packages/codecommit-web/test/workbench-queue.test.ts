@@ -56,11 +56,11 @@ describe("workbenchQueue", () => {
   it("puts a PR whose approvers couldn't be read in the pool, not in Needs your review", () => {
     const queue = workbenchQueue(
       [make({
-        approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], false)],
+        approvalRules: [rule("Two maintainers", 2, ["owner", "jonas"], false)],
         approversUnknown: true,
         id: "1"
       })],
-      byName("andrey"),
+      byName("owner"),
       NOW
     )
     expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["1", "pool"]])
@@ -69,19 +69,19 @@ describe("workbenchQueue", () => {
   // The last known list may hold the user's since-revoked approval, so it can't take them out.
   it("keeps an unknown-approvers PR in the pool when the last known list names the user", () => {
     const revoked = make({
-      approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], false)],
-      approvedBy: ["andrey"],
-      approvedByArns: ["arn:aws:iam::123456789012:user/andrey"],
+      approvalRules: [rule("Two maintainers", 2, ["owner", "jonas"], false)],
+      approvedBy: ["owner"],
+      approvedByArns: ["arn:aws:iam::123456789012:user/owner"],
       approversUnknown: true,
       id: "1"
     })
     const byArn: Caller = {
       identities: {
-        "platform-prod": { _tag: "Resolved", arn: "arn:aws:iam::123456789012:user/andrey", username: "andrey" }
+        "platform-prod": { _tag: "Resolved", arn: "arn:aws:iam::123456789012:user/owner", username: "owner" }
       },
-      username: "andrey"
+      username: "owner"
     }
-    for (const caller of [byName("andrey"), byArn]) {
+    for (const caller of [byName("owner"), byArn]) {
       expect(workbenchQueue([revoked], caller, NOW).rows.map((row) => [row.group, row.rule])).toEqual([
         ["pool", undefined]
       ])
@@ -92,12 +92,12 @@ describe("workbenchQueue", () => {
   it("leaves an unknown-approvers PR out of the pool when every rule is satisfied", () => {
     const queue = workbenchQueue(
       [make({
-        approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], true)],
+        approvalRules: [rule("Two maintainers", 2, ["owner", "jonas"], true)],
         approversUnknown: true,
         id: "1",
         isApproved: true
       })],
-      byName("andrey"),
+      byName("owner"),
       NOW
     )
     expect(queue.rows).toEqual([])
@@ -105,8 +105,8 @@ describe("workbenchQueue", () => {
 
   it("puts a PR in Needs your review when the user is in an unsatisfied pool and has not approved", () => {
     const queue = workbenchQueue(
-      [make({ approvalRules: [rule("Two maintainers", 2, ["andrey", "jonas"], false)], id: "1" })],
-      byName("andrey"),
+      [make({ approvalRules: [rule("Two maintainers", 2, ["owner", "jonas"], false)], id: "1" })],
+      byName("owner"),
       NOW
     )
     expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["1", "review"]])
@@ -116,12 +116,12 @@ describe("workbenchQueue", () => {
   it("groups own PRs as Yours and commented PRs as Watching, and drops unrelated or closed ones", () => {
     const queue = workbenchQueue(
       [
-        make({ author: "andrey", id: "own" }),
-        make({ commentedBy: ["andrey"], id: "watched" }),
+        make({ author: "owner", id: "own" }),
+        make({ commentedBy: ["owner"], id: "watched" }),
         make({ id: "unrelated" }),
-        make({ author: "andrey", id: "merged", status: "MERGED" })
+        make({ author: "owner", id: "merged", status: "MERGED" })
       ],
-      byName("andrey"),
+      byName("owner"),
       NOW
     )
     expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([
@@ -137,9 +137,9 @@ describe("workbenchQueue", () => {
   })
 
   it("never presents an unknown identity's pull requests as needing review", () => {
-    const pool = [rule("Approvals", 1, ["andrey"], false)]
+    const pool = [rule("Approvals", 1, ["owner"], false)]
     const queue = workbenchQueue(
-      [make({ approvalRules: pool, id: "1" }), make({ author: "andrey", id: "2" })],
+      [make({ approvalRules: pool, id: "1" }), make({ author: "owner", id: "2" })],
       byName(""),
       NOW
     )
@@ -149,10 +149,10 @@ describe("workbenchQueue", () => {
   it("is Clear when nothing waits on the user, naming the user's oldest own PR next", () => {
     const queue = workbenchQueue(
       [
-        make({ author: "andrey", creationDate: new Date(NOW.getTime() - 2 * DAY), id: "older" }),
-        make({ author: "andrey", id: "newer" })
+        make({ author: "owner", creationDate: new Date(NOW.getTime() - 2 * DAY), id: "older" }),
+        make({ author: "owner", id: "newer" })
       ],
-      byName("andrey"),
+      byName("owner"),
       NOW
     )
     expect(queue.summary._tag).toBe("Clear")
@@ -160,14 +160,14 @@ describe("workbenchQueue", () => {
   })
 
   it("orders by group, then longest open first", () => {
-    const pool = [rule("Approvals", 1, ["andrey"], false)]
+    const pool = [rule("Approvals", 1, ["owner"], false)]
     const queue = workbenchQueue(
       [
-        make({ author: "andrey", id: "yours" }),
+        make({ author: "owner", id: "yours" }),
         make({ approvalRules: pool, creationDate: new Date(NOW.getTime() - HOUR), id: "fresh" }),
         make({ approvalRules: pool, creationDate: new Date(NOW.getTime() - 3 * DAY), id: "old" })
       ],
-      byName("andrey"),
+      byName("owner"),
       NOW
     )
     expect(queue.rows.map((row) => row.pullRequest.id)).toEqual(["old", "fresh", "yours"])
@@ -176,22 +176,22 @@ describe("workbenchQueue", () => {
 
   it("puts another's PR with unknown approval in the pool, never needing review, even with a last known open rule", () => {
     const pullRequest = make({
-      approvalRules: [rule("Approvals", 1, ["andrey"], false)],
+      approvalRules: [rule("Approvals", 1, ["owner"], false)],
       approvalUnknown: { _tag: "NotPermitted" },
       id: "p"
     })
-    const queue = workbenchQueue([pullRequest], byName("andrey"), NOW)
+    const queue = workbenchQueue([pullRequest], byName("owner"), NOW)
     expect(queue.rows.map((row) => row.group)).toEqual(["pool"])
-    expect(needsYourReview(pullRequest, byName("andrey"))).toBe(false)
+    expect(needsYourReview(pullRequest, byName("owner"))).toBe(false)
   })
 
   it("keeps another's PR with unknown approval in view even when its last known rules are satisfied", () => {
     const pullRequest = make({
-      approvalRules: [rule("Approvals", 1, ["andrey"], true)],
+      approvalRules: [rule("Approvals", 1, ["owner"], true)],
       approvalUnknown: { _tag: "NotPermitted" },
       id: "s"
     })
-    const [row] = workbenchQueue([pullRequest], byName("andrey"), NOW).rows
+    const [row] = workbenchQueue([pullRequest], byName("owner"), NOW).rows
     expect(row?.group).toBe("pool")
     // The last known "1/1 Approvals" must not show: the row says approval is unknown instead.
     expect(row?.rule).toBeUndefined()
@@ -201,13 +201,13 @@ describe("workbenchQueue", () => {
   it("calls an own PR with unknown approval unverified, never ready, even with last known satisfied rules", () => {
     const row = workbenchQueue(
       [make({
-        author: "andrey",
+        author: "owner",
         approvalRules: [rule("Approvals", 1, ["ana"], true)],
         approvalUnknown: { _tag: "Throttled" },
         id: "u",
         isApproved: true
       })],
-      byName("andrey"),
+      byName("owner"),
       NOW
     ).rows[0]
     expect(row?.stuck).toBe("unverified")
@@ -215,7 +215,7 @@ describe("workbenchQueue", () => {
 
   it("names the worst reason an own PR is stuck: conflicts before quiet before approvals", () => {
     const stuck = (overrides: Parameters<typeof make>[0]) =>
-      workbenchQueue([make({ author: "andrey", ...overrides })], byName("andrey"), NOW).rows[0]?.stuck
+      workbenchQueue([make({ author: "owner", ...overrides })], byName("owner"), NOW).rows[0]?.stuck
     expect(stuck({ id: "c", isMergeable: false, lastModifiedDate: new Date(NOW.getTime() - 9 * DAY) })).toBe(
       "conflicts"
     )
@@ -227,8 +227,8 @@ describe("workbenchQueue", () => {
 
   it("does not claim missing approvals when every rule is satisfied but approval was not evaluated", () => {
     const row = workbenchQueue(
-      [make({ approvalRules: [rule("Approvals", 1, ["ana"], true)], author: "andrey", id: "u", isApproved: false })],
-      byName("andrey"),
+      [make({ approvalRules: [rule("Approvals", 1, ["ana"], true)], author: "owner", id: "u", isApproved: false })],
+      byName("owner"),
       NOW
     ).rows[0]
     expect(row?.stuck).toBe("unverified")
@@ -240,7 +240,7 @@ describe("ruleProgress", () => {
     const pullRequest = make({
       approvalRules: [
         rule("Security", 1, ["sec-review"], true),
-        rule("Two maintainers", 2, ["andrey", "jonas", "mira"], false)
+        rule("Two maintainers", 2, ["owner", "jonas", "mira"], false)
       ],
       approvedBy: ["sec-review", "mira"],
       id: "1"
@@ -252,7 +252,7 @@ describe("ruleProgress", () => {
     const pullRequest = make({
       approvalRules: [
         rule("Security", 1, ["sec-review"], false),
-        rule("Two maintainers", 2, ["andrey", "jonas"], false)
+        rule("Two maintainers", 2, ["owner", "jonas"], false)
       ],
       id: "1"
     })
@@ -388,7 +388,7 @@ describe("workbenchQueue with role pools", () => {
   const reviewers = rule("Reviewers", 1, ["*"], false, ["arn:aws:sts::111122223333:assumed-role/Reviewers/*"])
 
   it("lists a PR waiting on a wildcard pool as open to a role pool, and does not report Clear as empty", () => {
-    const queue = workbenchQueue([make({ approvalRules: [reviewers], id: "1" })], byName("andrey"), NOW)
+    const queue = workbenchQueue([make({ approvalRules: [reviewers], id: "1" })], byName("owner"), NOW)
     expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([["1", "pool"]])
     expect(queue.summary).toMatchObject({ _tag: "Clear", pooled: 1 })
   })
@@ -396,30 +396,30 @@ describe("workbenchQueue with role pools", () => {
   it("leaves it out once the user approved, the rule is satisfied, or the user wrote it", () => {
     const queue = workbenchQueue(
       [
-        make({ approvalRules: [reviewers], approvedBy: ["andrey"], id: "approved" }),
+        make({ approvalRules: [reviewers], approvedBy: ["owner"], id: "approved" }),
         make({ approvalRules: [{ ...reviewers, satisfied: true }], id: "satisfied" })
       ],
-      byName("andrey"),
+      byName("owner"),
       NOW
     )
     expect(queue.rows).toEqual([])
     const own = workbenchQueue(
-      [make({ approvalRules: [reviewers], author: "andrey", id: "own" })],
-      byName("andrey"),
+      [make({ approvalRules: [reviewers], author: "owner", id: "own" })],
+      byName("owner"),
       NOW
     )
     expect(own.rows.map((row) => row.group)).toEqual(["yours"])
   })
 
   it("treats a role wildcard ending in the user's name as a maybe, not a certain membership", () => {
-    const roleWildcard = rule("Reviewers", 1, ["andrey"], false, [
-      "arn:aws:sts::111122223333:assumed-role/Review*/andrey"
+    const roleWildcard = rule("Reviewers", 1, ["owner"], false, [
+      "arn:aws:sts::111122223333:assumed-role/Review*/owner"
     ])
-    const queue = workbenchQueue([make({ approvalRules: [roleWildcard], id: "1" })], byName("andrey"), NOW)
+    const queue = workbenchQueue([make({ approvalRules: [roleWildcard], id: "1" })], byName("owner"), NOW)
     expect(queue.rows.map((row) => row.group)).toEqual(["pool"])
     expect(queue.summary).toMatchObject({ _tag: "Clear", pooled: 1 })
-    const named = rule("Maintainers", 1, ["andrey"], false, ["CodeCommitApprovers:111122223333:andrey"])
-    const both = workbenchQueue([make({ approvalRules: [roleWildcard, named], id: "2" })], byName("andrey"), NOW)
+    const named = rule("Maintainers", 1, ["owner"], false, ["CodeCommitApprovers:111122223333:owner"])
+    const both = workbenchQueue([make({ approvalRules: [roleWildcard, named], id: "2" })], byName("owner"), NOW)
     expect(both.rows.map((row) => row.group)).toEqual(["review"])
   })
 
@@ -470,10 +470,10 @@ describe("workbenchQueue with role pools", () => {
       [
         make({ approvalRules: [rule("Any one", 1, [], false)], id: "open" }),
         make({ approvalRules: [rule("Any one", 1, [], true)], id: "met" }),
-        make({ approvalRules: [rule("Any one", 1, [], false)], approvedBy: ["andrey"], id: "approved" }),
-        make({ approvalRules: [rule("Any one", 1, [], false)], author: "andrey", id: "own" })
+        make({ approvalRules: [rule("Any one", 1, [], false)], approvedBy: ["owner"], id: "approved" }),
+        make({ approvalRules: [rule("Any one", 1, [], false)], author: "owner", id: "own" })
       ],
-      byName("andrey"),
+      byName("owner"),
       NOW
     )
     expect(queue.rows.map((row) => [row.pullRequest.id, row.group])).toEqual([
@@ -487,9 +487,9 @@ describe("workbenchQueue with role pools", () => {
     const queue = workbenchQueue(
       [
         make({ approvalRules: [reviewers], id: "pooled" }),
-        make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], id: "named" })
+        make({ approvalRules: [rule("Maintainers", 1, ["owner"], false)], id: "named" })
       ],
-      byName("andrey"),
+      byName("owner"),
       NOW
     )
     expect(queue.rows.map((row) => row.group)).toEqual(["review", "pool"])
@@ -508,43 +508,43 @@ describe("formatSpan", () => {
 describe("yourReviewCount", () => {
   it("counts exactly what the rail lists under Needs your review, so the header badge agrees", () => {
     const prs = [
-      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], id: "named" }),
+      make({ approvalRules: [rule("Maintainers", 1, ["owner"], false)], id: "named" }),
       make({ approvalRules: [rule("Any one", 1, [], false)], id: "open-rule" }),
       make({
         approvalRules: [rule("Reviewers", 1, ["*"], false, ["arn:aws:sts::111122223333:assumed-role/Reviewers/*"])],
         id: "role-pool"
       }),
-      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], approvedBy: ["andrey"], id: "approved" }),
-      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], id: "merged", status: "MERGED" }),
-      make({ approvalRules: [rule("Maintainers", 1, ["andrey"], false)], author: "andrey", id: "own" })
+      make({ approvalRules: [rule("Maintainers", 1, ["owner"], false)], approvedBy: ["owner"], id: "approved" }),
+      make({ approvalRules: [rule("Maintainers", 1, ["owner"], false)], id: "merged", status: "MERGED" }),
+      make({ approvalRules: [rule("Maintainers", 1, ["owner"], false)], author: "owner", id: "own" })
     ]
-    const queue = workbenchQueue(prs, byName("andrey"), NOW)
+    const queue = workbenchQueue(prs, byName("owner"), NOW)
     expect(queue.summary).toMatchObject({ _tag: "Waiting", count: 2 })
-    expect(yourReviewCount(prs, byName("andrey"))).toBe(2)
+    expect(yourReviewCount(prs, byName("owner"))).toBe(2)
     expect(yourReviewCount(prs, byName(undefined))).toBe(0)
   })
 })
 
 describe("workbenchQueue with the caller's resolved identity", () => {
-  const me = "arn:aws:sts::111122223333:assumed-role/Reviewers/andrey"
+  const me = "arn:aws:sts::111122223333:assumed-role/Reviewers/owner"
   const reviewers = rule("Reviewers", 1, ["*"], false, ["arn:aws:sts::111122223333:assumed-role/Reviewers/*"])
   const caller = (identity: CallerIdentity | undefined): Caller => ({
     identities: identity === undefined ? {} : { "platform-prod": identity },
-    username: "andrey"
+    username: "owner"
   })
   const groups = (pullRequests: ReadonlyArray<ReturnType<typeof make>>, who: Caller) =>
     workbenchQueue(pullRequests, who, NOW).rows.map((row) => [row.pullRequest.id, row.group])
 
   it("decides a wildcard pool exactly once the account's identity resolved", () => {
     const pr = make({ approvalRules: [reviewers], id: "1" })
-    expect(groups([pr], caller({ _tag: "Resolved", arn: me, username: "andrey" }))).toEqual([["1", "review"]])
-    const operator = "arn:aws:sts::111122223333:assumed-role/Operations/andrey"
-    expect(groups([pr], caller({ _tag: "Resolved", arn: operator, username: "andrey" }))).toEqual([])
+    expect(groups([pr], caller({ _tag: "Resolved", arn: me, username: "owner" }))).toEqual([["1", "review"]])
+    const operator = "arn:aws:sts::111122223333:assumed-role/Operations/owner"
+    expect(groups([pr], caller({ _tag: "Resolved", arn: operator, username: "owner" }))).toEqual([])
   })
 
   it("keeps the name fallback, never out, while the identity is absent, missing or unresolved", () => {
     const pr = make({ approvalRules: [reviewers], id: "1" })
-    expect(groups([pr], byName("andrey"))).toEqual([["1", "pool"]])
+    expect(groups([pr], byName("owner"))).toEqual([["1", "pool"]])
     expect(groups([pr], caller(undefined))).toEqual([["1", "pool"]])
     expect(groups([pr], caller({ _tag: "Unresolved" }))).toEqual([["1", "pool"]])
   })
@@ -552,10 +552,10 @@ describe("workbenchQueue with the caller's resolved identity", () => {
   it("decides each account on its own identity", () => {
     const who: Caller = {
       identities: {
-        "platform-prod": { _tag: "Resolved", arn: me, username: "andrey" },
+        "platform-prod": { _tag: "Resolved", arn: me, username: "owner" },
         staging: { _tag: "Unresolved" }
       },
-      username: "andrey"
+      username: "owner"
     }
     const prod = make({ approvalRules: [reviewers], id: "prod" })
     const staging = make({
@@ -568,18 +568,18 @@ describe("workbenchQueue with the caller's resolved identity", () => {
 
   it("does not count another session of the same role as the caller's approval", () => {
     const two = { ...reviewers, requiredApprovals: 2 }
-    const other = "arn:aws:sts::111122223333:assumed-role/Reviewers/andrey-ci"
-    const resolved = caller({ _tag: "Resolved", arn: me, username: "andrey" })
-    const byOther = make({ approvalRules: [two], approvedBy: ["andrey-ci"], approvedByArns: [other], id: "1" })
+    const other = "arn:aws:sts::111122223333:assumed-role/Reviewers/owner-ci"
+    const resolved = caller({ _tag: "Resolved", arn: me, username: "owner" })
+    const byOther = make({ approvalRules: [two], approvedBy: ["owner-ci"], approvedByArns: [other], id: "1" })
     expect(groups([byOther], resolved)).toEqual([["1", "review"]])
-    const byMe = make({ approvalRules: [two], approvedBy: ["andrey"], approvedByArns: [me], id: "2" })
+    const byMe = make({ approvalRules: [two], approvedBy: ["owner"], approvedByArns: [me], id: "2" })
     expect(groups([byMe], resolved)).toEqual([])
   })
 
   it("decides by a resolved identity even without an app-wide user name", () => {
     const nameless: Caller = {
       identities: {
-        "platform-prod": { _tag: "Resolved", arn: me, username: "andrey" },
+        "platform-prod": { _tag: "Resolved", arn: me, username: "owner" },
         staging: { _tag: "Unresolved" }
       },
       username: undefined
@@ -598,10 +598,10 @@ describe("workbenchQueue with the caller's resolved identity", () => {
   })
 
   it("counts the badge with the same identity as the queue", () => {
-    const resolved = caller({ _tag: "Resolved", arn: me, username: "andrey" })
+    const resolved = caller({ _tag: "Resolved", arn: me, username: "owner" })
     const pullRequests = [make({ approvalRules: [reviewers], id: "1" })]
     expect(yourReviewCount(pullRequests, resolved)).toBe(1)
-    expect(yourReviewCount(pullRequests, byName("andrey"))).toBe(0)
+    expect(yourReviewCount(pullRequests, byName("owner"))).toBe(0)
   })
 })
 

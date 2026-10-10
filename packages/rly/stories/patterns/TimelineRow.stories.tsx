@@ -160,7 +160,7 @@ const provenanceEvents: ReadonlyArray<{
     title: "Owner gone for over 24h",
     time: "2h ago"
   },
-  { kind: "approved", label: "Approved by andrey (phone)", title: "Admitted the goal", time: "9h ago" }
+  { kind: "approved", label: "Approved by owner (phone)", title: "Admitted the goal", time: "9h ago" }
 ]
 
 /** Provenance by shape and words: automatic, approved, waiting, couldn't read, and flag only. */
