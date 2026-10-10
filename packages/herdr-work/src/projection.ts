@@ -9,6 +9,8 @@ import {
   type WorkGoalFamilyGroup,
   workHistoryMaxEvents,
   type WorkSnapshot,
+  workSnapshotActivityMax,
+  workSnapshotFinishedRetentionMs,
   workSnapshotMaxGoals,
   WorkSnapshots,
   workSnapshotsVersion,
@@ -92,15 +94,62 @@ const familiesFor = (latest: ReadonlyMap<string, WorkGoal>): ReadonlyArray<WorkG
   )
 }
 
+/** A goal as a snapshot carries it: only its most recent activities, and how many older ones it left out. */
+interface RecentActivity {
+  readonly goal: WorkGoal
+  readonly omitted: number
+}
+
+/** The goal with only its `workSnapshotActivityMax` most recent activities, and how many it lost. */
+const recentActivity = (goal: WorkGoal): RecentActivity => {
+  const activity = goal.activity
+  if (activity === undefined || activity.length <= workSnapshotActivityMax) return { goal, omitted: 0 }
+  const kept = new Set(
+    activity
+      .toSorted((left, right) => right.occurredAt - left.occurredAt || compareString(right.id, left.id))
+      .slice(0, workSnapshotActivityMax)
+      .map(({ id }) => id)
+  )
+  return {
+    goal: { ...goal, activity: activity.filter(({ id }) => kept.has(id)) },
+    omitted: activity.length - workSnapshotActivityMax
+  }
+}
+
 const snapshotAt = (
   events: ReadonlyArray<WorkGoalCheckpoint>,
   observedAt: number,
   window: WorkSnapshotWindow
 ): WorkSnapshot => {
   const asOf = Math.max(0, observedAt - windowOffset[window])
-  const latest = new Map<string, WorkGoal>()
+  const recorded = new Map<string, WorkGoal>()
   for (const event of events.toSorted((left, right) => left.occurredAt - right.occurredAt)) {
-    if (event.occurredAt <= asOf) latest.set(event.goal.id, event.goal)
+    if (event.occurredAt <= asOf) recorded.set(event.goal.id, event.goal)
+  }
+  // A goal that finished more than a day before this window's time has left it; the window counts it. A family
+  // leaves only as a whole: a canonical goal stays, with its group, while any goal it superseded is still open or
+  // recently finished, so no open goal leaves with it. A family that leaves counts once, as its canonical goal.
+  const doneLongAgo = (goal: WorkGoal): boolean =>
+    isTerminalWorkState(goal.state) && asOf - goal.updatedAt > workSnapshotFinishedRetentionMs
+  const familiesStillOpen = new Set(
+    [...recorded.values()].flatMap((goal) =>
+      goal.goalFamily?.role === "superseded" && !doneLongAgo(goal) ? [goal.goalFamily.canonicalGoalId] : []
+    )
+  )
+  const finishedLongAgo = (goal: WorkGoal): boolean =>
+    goal.goalFamily?.role !== "superseded" && doneLongAgo(goal) && !familiesStillOpen.has(goal.id)
+  // Activity is trimmed here, before families are built, so a group's canonical stays equal to its listed goal.
+  const latest = new Map<string, WorkGoal>()
+  const activityOmitted = new Map<string, number>()
+  let finishedOmitted = 0
+  for (const [id, goal] of recorded) {
+    if (finishedLongAgo(goal)) {
+      finishedOmitted += 1
+      continue
+    }
+    const recent = recentActivity(goal)
+    latest.set(id, recent.goal)
+    if (recent.omitted > 0) activityOmitted.set(id, recent.omitted)
   }
   const families = familiesFor(latest)
   const goals = [...latest.values()]
@@ -111,21 +160,10 @@ const snapshotAt = (
         compareString(left.title, right.title) ||
         compareString(left.id, right.id)
     )
-  if (families.length > 0) {
-    return {
-      window,
-      observedAt,
-      asOf,
-      goals,
-      families
-    }
-  }
-  return {
-    window,
-    observedAt,
-    asOf,
-    goals
-  }
+  const listed: WorkSnapshot = { window, observedAt, asOf, goals }
+  const grouped: WorkSnapshot = families.length > 0 ? { ...listed, families } : listed
+  const counted: WorkSnapshot = finishedOmitted > 0 ? { ...grouped, finishedOmitted } : grouped
+  return activityOmitted.size > 0 ? { ...counted, activityOmitted: Object.fromEntries(activityOmitted) } : counted
 }
 
 /**
@@ -182,13 +220,22 @@ export const boundWorkSnapshotWindows = (projected: Windows, budgetBytes: number
     )
   const without = (omitted: ReadonlySet<string>): Windows => {
     const bound = (snapshot: WorkSnapshot): WorkSnapshot => {
-      const { families, goalsOmitted: _previous, ...rest } = snapshot
+      const { activityOmitted, families, goalsOmitted: _previous, ...rest } = snapshot
       const goals = snapshot.goals.filter(({ id }) => !omitted.has(id))
       const kept = (families ?? []).filter(({ canonicalGoalId }) => !omitted.has(canonicalGoalId))
       const lost = snapshot.goals.length - goals.length
+      // A goal that left takes its activity count with it, and so does a group that left with its canonical goal.
+      const present = new Set([
+        ...goals.map(({ id }) => id),
+        ...kept.flatMap(({ superseded }) => superseded.map(({ id }) => id))
+      ])
+      const counts = Object.entries(activityOmitted ?? {}).filter(([id]) => present.has(id))
       const base: WorkSnapshot = { ...rest, goals }
       const grouped: WorkSnapshot = kept.length > 0 ? { ...base, families: kept } : base
-      return lost > 0 ? { ...grouped, goalsOmitted: lost } : grouped
+      const trimmed: WorkSnapshot = counts.length > 0
+        ? { ...grouped, activityOmitted: Object.fromEntries(counts) }
+        : grouped
+      return lost > 0 ? { ...trimmed, goalsOmitted: lost } : trimmed
     }
     return {
       now: bound(projected.now),

@@ -71,7 +71,7 @@ const merged = (goalId: string, closedAt: number): WorkGoalObservedEntry => ({
 
 const snapshotOf = (
   goals: ReadonlyArray<WorkGoal>,
-  overlay: Pick<WorkSnapshot, "goalsOmitted" | "observed" | "observedOmitted">
+  overlay: Pick<WorkSnapshot, "activityOmitted" | "finishedOmitted" | "goalsOmitted" | "observed" | "observedOmitted">
 ): WorkSnapshots => {
   const window = (name: WorkSnapshot["window"]): WorkSnapshot => ({ asOf: NOW, goals, observedAt: NOW, window: name })
   return {
@@ -141,6 +141,18 @@ describe("Work board with the observed overlay", () => {
       expect(header).toContain("12 older goals not shown.")
       expect(header).not.toContain("..")
     }
+  })
+
+  it("says how many finished goals left the window, and how much older activity a goal's timeline leaves out", async () => {
+    expect((await mount(snapshotOf([goal("g1")], { finishedOmitted: 5, observed: [] }))).textContent).toContain(
+      "5 finished goals not shown."
+    )
+    const withActivity: WorkGoal = {
+      ...goal("g1"),
+      activity: [{ id: "a1", kind: "note", occurredAt: NOW - HOUR, summary: "Latest note" }]
+    }
+    const host = await mount(snapshotOf([withActivity], { activityOmitted: { g1: 11 }, observed: [] }), "g1")
+    expect(host.textContent).toContain("1 most recent of 12")
   })
 
   it("shows the observed state on the row and names the recorded one in the detail", async () => {

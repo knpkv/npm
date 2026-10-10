@@ -27,7 +27,7 @@ import type {
   WorkSnapshotWindow,
   WorkBlocker
 } from "./model.js"
-import { goalsNotShown } from "./model.js"
+import { activityShownOf, finishedNotShown, goalsNotShown } from "./model.js"
 import { decodeWorkBoardNavigationGoal, encodeWorkBoardNavigationGoal } from "./navigation.js"
 import { workRequestClockText, workRequestDecidability, type WorkRequestDecisions } from "./request-decision.js"
 import { displayStateOf, observedFor } from "./display-state.js"
@@ -578,6 +578,11 @@ const GoalDetail = ({
         <h3 className="work-group-title" id="work-activity-title">
           Activity
         </h3>
+        {activityOmittedFor(snapshot, goal) === 0 ? null : (
+          <Text tone="secondary" variant="meta">
+            {activityShownOf(goal.activity?.length ?? 0, activityOmittedFor(snapshot, goal))}
+          </Text>
+        )}
         {activity.length === 0 ? (
           <Text tone="secondary">{goal.activity === undefined ? "No activity recorded." : "Activity is clear."}</Text>
         ) : (
@@ -659,9 +664,12 @@ const activityKindLabel = {
 
 const snapshotFor = (snapshots: WorkSnapshots, window: WorkSnapshotWindow): WorkSnapshot => snapshots[window]
 
+/** How many older activities the snapshot left out of this goal's timeline. */
+const activityOmittedFor = (snapshot: WorkSnapshot, goal: WorkGoal): number => snapshot.activityOmitted?.[goal.id] ?? 0
+
 /**
  * The board header's line, as whole sentences joined by a space, so each piece ends in exactly one period:
- * the window and its time, then what the live window could not show, then any goals the board left out.
+ * the window and its time, then what the live window could not show, then any finished or older goals it left out.
  */
 const headerSentences = (window: WorkSnapshotWindow, snapshot: WorkSnapshot): ReadonlyArray<string> => {
   const when = `${window === "now" ? "Live" : windowLabel[window]}, as of ${formatTimestamp(snapshot.asOf)}.`
@@ -676,8 +684,9 @@ const headerSentences = (window: WorkSnapshotWindow, snapshot: WorkSnapshot): Re
         : snapshot.observedOmitted === undefined
           ? []
           : [`Live state shown for the most recently updated goals; ${String(snapshot.observedOmitted)} left out.`]
+  const finished = snapshot.finishedOmitted === undefined ? [] : [`${finishedNotShown(snapshot.finishedOmitted)}.`]
   const cut = snapshot.goalsOmitted === undefined ? [] : [`${goalsNotShown(snapshot.goalsOmitted)}.`]
-  return [when, ...live, ...cut]
+  return [when, ...live, ...finished, ...cut]
 }
 
 const familyForGoal = (snapshot: WorkSnapshot, goalId: string): WorkGoalFamilyGroup | null =>

@@ -1,5 +1,6 @@
 import { FleetValidationError, type HostConfiguration } from "@knpkv/herdr-fleet"
 import {
+  finishedNotShown,
   goalsNotShown,
   WorkGoalCheckpoint,
   WorkGoalId,
@@ -65,13 +66,16 @@ export const workSnapshotFromJson = Effect.fn("Fleetctl.workSnapshotFromJson")(f
 })
 
 /**
- * The lines `fleetctl work snapshot` adds on stderr, one per window a large board cut: stdout stays the
- * snapshot alone, and an open goal leaving the view is never silent.
+ * The lines `fleetctl work snapshot` adds on stderr for each window that left goals out (finished a day ago, or
+ * cut from a large board): stdout stays the snapshot alone, and no goal leaves the view silently.
  */
 export const workSnapshotNotes = (snapshot: WorkSnapshots): ReadonlyArray<string> =>
   workSnapshotWindows.flatMap((window) => {
-    const omitted = snapshot[window].goalsOmitted
-    return omitted === undefined ? [] : [`${window}: ${goalsNotShown(omitted)}`]
+    const { finishedOmitted, goalsOmitted } = snapshot[window]
+    return [
+      ...(finishedOmitted === undefined ? [] : [`${window}: ${finishedNotShown(finishedOmitted)}`]),
+      ...(goalsOmitted === undefined ? [] : [`${window}: ${goalsNotShown(goalsOmitted)}`])
+    ]
   })
 
 const workLocalBaseUrl = Effect.fn("Fleetctl.workLocalBaseUrl")(function*(

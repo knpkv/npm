@@ -108,6 +108,10 @@ const record = (work: Effect.Success<typeof fixture>["work"], eventId: string, v
 const currentGoal = (work: Effect.Success<typeof fixture>["work"]) =>
   Effect.map(work.snapshots(100_000), (snapshots) => snapshots.now.goals.find(({ id }) => id === "goal-pr7"))
 
+/** The goal as stored, every activity included; a snapshot carries only the most recent few. */
+const storedGoal = (store: Effect.Success<typeof fixture>["store"]) =>
+  Effect.map(store.list(), (events) => events.filter(({ goal }) => goal.id === "goal-pr7").at(-1)?.goal)
+
 /** Confirms every stored fact, as a pass that has just re-read them all would, then reconciles. */
 const reconcileConfirmed = (
   store: Effect.Success<typeof fixture>["store"],
@@ -646,7 +650,7 @@ describe("terminal reconcile", () => {
       yield* record(work, "goal-pr7.1", goal({ activity }))
       yield* work.observe([{ observation: pullRequest({ closedAt: 5_000, state: "merged" }), observedAt: 6_000 }])
       expect((yield* reconcileConfirmed(store, work))[0]?._tag).toBe("applied")
-      const completed = yield* currentGoal(work)
+      const completed = yield* storedGoal(store)
       expect(completed?.state).toBe("completed")
       expect(completed?.activity?.map(({ id }) => id)).toEqual(activity.map(({ id }) => id))
     })))
