@@ -33,7 +33,7 @@ import {
   type TerminalOutputBoundary,
   writeTerminalOutput
 } from "./terminal-output.js"
-import { agentBucketsOf, type AgentBuckets, arrivalsBetween } from "./arrivals.js"
+import { agentBucketsOf, type AgentBuckets, arrivalsBetween, nextAgentBuckets } from "./arrivals.js"
 import { AgentCast, AgentStage } from "./stage.js"
 import {
   AgentDirectory,
@@ -977,7 +977,9 @@ export const ConnectSurface = ({
     if (current === null) return
     const buckets = agentBucketsOf(current.agents)
     setArrivals(arrivalsBetween(previousBuckets.current, buckets))
-    previousBuckets.current = buckets
+    // A host that missed this poll keeps what it last reported, so its waiting agents don't arrive again.
+    const silent = new Set(current.failures.map((failure) => failure.host))
+    previousBuckets.current = nextAgentBuckets(previousBuckets.current, buckets, silent)
   }, [current])
   const stageCrew =
     stageAgent === null
